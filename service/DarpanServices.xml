@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="compare" noun="SampleOrderIds" type="script"
+            location="component://darpan/src/compareSampleOrderIds.groovy">
+        <description>Compare OMS vs Shopify bulk JSON files and return order IDs missing from either side.</description>
+        <in-parameters>
+            <parameter name="omsLocation" default-value="component://darpan/data/sample/omsBulkData.json"/>
+            <parameter name="shopifyLocation" default-value="component://darpan/data/sample/shopifyBulkData.json"/>
+            <parameter name="omsOrderIdField" default-value="EXTERNAL_ID"/>
+            <parameter name="shopifyOrderIdField" default-value="legacyResourceId"/>
+            <parameter name="orderIdField" default-value="shopify_order_id"/>
+            <parameter name="logInputCounts" type="Boolean" default-value="true"/>
+            <parameter name="sparkMaster" default-value="local[*]"/>
+            <parameter name="sparkAppName" default-value="DarpanSampleOrderCompare"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="onlyInOms"><parameter name="orderId"/></parameter>
+            <parameter name="onlyInShopify"><parameter name="orderId"/></parameter>
+            <parameter name="onlyInOmsCount" type="Integer"/>
+            <parameter name="onlyInShopifyCount" type="Integer"/>
+        </out-parameters>
+    </service>
+</services>

@@ -22,4 +22,21 @@
             <parameter name="onlyInShopifyCount" type="Integer"/>
         </out-parameters>
     </service>
+    <service verb="test" noun="SampleOrderIdsDb" type="script"
+            location="component://darpan/src/testSampleOrderIdsDb.groovy">
+        <description>Test Spark JDBC connectivity using SystemMessageRemote and list order IDs from order_header.</description>
+        <in-parameters>
+            <parameter name="systemMessageRemoteId" required="true"/>
+            <parameter name="dbTable" default-value="order_header"/>
+            <parameter name="orderIdColumn" default-value="order_id"/>
+            <parameter name="limit" type="Integer" default-value="10"/>
+            <parameter name="dbDriver" default-value="com.mysql.cj.jdbc.Driver"/>
+            <parameter name="sparkMaster" default-value="local[*]"/>
+            <parameter name="sparkAppName" default-value="DarpanSampleOrderDbRead"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderIds"><parameter name="orderId"/></parameter>
+            <parameter name="orderIdCount" type="Integer"/>
+        </out-parameters>
+    </service>
 </services>

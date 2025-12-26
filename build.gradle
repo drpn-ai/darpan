@@ -32,6 +32,7 @@ tasks.withType(GroovyCompile) { options.compilerArgs << "-proc:none" }
 dependencies {
     implementation project(':framework')
     implementation 'org.apache.spark:spark-sql_2.12:3.5.1'
+    runtimeOnly 'com.mysql:mysql-connector-j:8.3.0'
 }
 
 // by default the Java plugin runs test on build, change to not do that (only run test if explicit task)

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- No copyright or license for configuration file, details here are not considered a creative work. -->
+<entity-facade-xml type="seed">
+    <moqui.security.ArtifactGroup artifactGroupId="DARPAN_APP" description="Darpan App (via root screen)"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
+            artifactName="component://darpan/screen/.*" artifactTypeEnumId="AT_XML_SCREEN" nameIsPattern="Y" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
+            artifactName="DarpanServices.compare#CsvFiles" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
+            artifactName="DarpanServices.run#CsvCompare" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_APP_ADMIN" userGroupId="ADMIN"
+            artifactGroupId="DARPAN_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+</entity-facade-xml>

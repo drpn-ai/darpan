@@ -132,4 +132,31 @@
         <relationship type="one" related="darpan.reconciliation.RuleSet">
             <key-map field-name="ruleSetId"/></relationship>
     </entity>
+
+    <!-- ========================================================= -->
+    <!-- darpan.mapping -->
+    <!-- ========================================================= -->
+
+    <entity entity-name="ReconciliationMapping" package="darpan.mapping" use="configuration">
+        <description>Named mapping definition for source field values by system.</description>
+        <field name="reconciliationMappingId" type="id" is-pk="true"/>
+        <field name="mappingName" type="text-short" not-null="true"/>
+        <field name="description" type="text-medium"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="lastUpdatedDate" type="date-time"/>
+    </entity>
+
+    <entity entity-name="ReconciliationMappingMember" package="darpan.mapping" use="configuration">
+        <description>Mapping entry that binds a source field/value to a system.</description>
+        <field name="mappingMemberId" type="id" is-pk="true"/>
+        <field name="reconciliationMappingId" type="id" not-null="true"/>
+        <field name="systemEnumId" type="id" not-null="true"/>
+        <field name="systemFieldName" type="text-medium" not-null="true"/>
+        <field name="createdDate" type="date-time"/>
+
+        <relationship type="one" related="darpan.mapping.ReconciliationMapping" fk-name="MAPMEM_MAPDEF">
+            <key-map field-name="reconciliationMappingId"/></relationship>
+        <relationship type="one" related="moqui.basic.Enumeration" fk-name="MAPMEM_SYS_ENUM">
+            <key-map field-name="systemEnumId" related-field-name="enumId"/></relationship>
+    </entity>
 </entities>

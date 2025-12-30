@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+        default-menu-title="Mapping Builder"
+        require-authentication="false">
+
+    <transition name="createMapping" begin-transaction="true">
+        <parameter name="mappingName"/>
+        <parameter name="system1EnumId"/>
+        <parameter name="system1FieldName"/>
+        <parameter name="system2EnumId"/>
+        <parameter name="system2FieldName"/>
+        <actions>
+            <set field="mappingName" from="mappingName?.trim()"/>
+            <set field="system1EnumId" from="system1EnumId?.trim()"/>
+            <set field="system2EnumId" from="system2EnumId?.trim()"/>
+            <set field="system1FieldName" from="system1FieldName?.trim()"/>
+            <set field="system2FieldName" from="system2FieldName?.trim()"/>
+
+            <if condition="!mappingName">
+                <return error="true" message="Mapping name is required"/>
+            </if>
+            <if condition="!system1EnumId || !system2EnumId">
+                <return error="true" message="Both systems are required"/>
+            </if>
+            <if condition="system1EnumId == system2EnumId">
+                <return error="true" message="Please select two different systems"/>
+            </if>
+            <if condition="!system1FieldName || !system2FieldName">
+                <return error="true" message="Column names are required for both systems"/>
+            </if>
+
+            <set field="mappingIdBase" from="mappingName.replaceAll('[^A-Za-z0-9]', '')"/>
+            <if condition="!mappingIdBase">
+                <set field="mappingIdBase" value="Mapping"/>
+            </if>
+            <if condition="mappingIdBase.length() > 38">
+                <set field="mappingIdBase" from="mappingIdBase.substring(0, 38)"/>
+            </if>
+            <set field="mappingId" from="mappingIdBase"/>
+            <entity-find-one entity-name="darpan.mapping.ReconciliationMapping" value-field="existingMapping" cache="false">
+                <field-map field-name="reconciliationMappingId" from="mappingId"/>
+            </entity-find-one>
+            <if condition="existingMapping != null">
+                <set field="idSuffix" from="ec.l10n.format(ec.user.nowTimestamp, 'yyMMddHHmmss')"/>
+                <set field="baseMax" from="38 - idSuffix.length() - 1"/>
+                <set field="mappingId"
+                        from="(mappingIdBase.length() > baseMax ? mappingIdBase.substring(0, baseMax) : mappingIdBase) + '-' + idSuffix"/>
+            </if>
+
+            <set field="nowTs" from="ec.user.nowTimestamp"/>
+            <set field="mappingValue" from="ec.entity.makeValue('darpan.mapping.ReconciliationMapping')"/>
+            <set field="mappingValue.reconciliationMappingId" from="mappingId"/>
+            <set field="mappingValue.mappingName" from="mappingName"/>
+            <set field="mappingValue.createdDate" from="nowTs"/>
+            <set field="mappingValue.lastUpdatedDate" from="nowTs"/>
+            <entity-create value-field="mappingValue"/>
+
+            <set field="member1" from="ec.entity.makeValue('darpan.mapping.ReconciliationMappingMember')"/>
+            <set field="member1.mappingMemberId" from="mappingId + '-1'"/>
+            <set field="member1.reconciliationMappingId" from="mappingId"/>
+            <set field="member1.systemEnumId" from="system1EnumId"/>
+            <set field="member1.systemFieldName" from="system1FieldName"/>
+            <set field="member1.createdDate" from="nowTs"/>
+            <entity-create value-field="member1"/>
+
+            <set field="member2" from="ec.entity.makeValue('darpan.mapping.ReconciliationMappingMember')"/>
+            <set field="member2.mappingMemberId" from="mappingId + '-2'"/>
+            <set field="member2.reconciliationMappingId" from="mappingId"/>
+            <set field="member2.systemEnumId" from="system2EnumId"/>
+            <set field="member2.systemFieldName" from="system2FieldName"/>
+            <set field="member2.createdDate" from="nowTs"/>
+            <entity-create value-field="member2"/>
+
+            <message>Mapping ${mappingName} created.</message>
+        </actions>
+        <default-response url=".">
+            <parameter name="createdMappingId" from="mappingId"/>
+            <parameter name="createdMappingName" from="mappingName"/>
+        </default-response>
+    </transition>
+
+    <pre-actions>
+        <entity-find entity-name="moqui.basic.Enumeration" list="systemEnumList" cache="false">
+            <econdition field-name="enumTypeId" value="DarpanSystemSource"/>
+            <order-by field-name="sequenceNum,description"/>
+        </entity-find>
+    </pre-actions>
+
+    <widgets>
+        <render-mode>
+            <text type="html" location="component://darpan/template/reconciliation/MappingSetup.ftl"/>
+        </render-mode>
+    </widgets>
+</screen>

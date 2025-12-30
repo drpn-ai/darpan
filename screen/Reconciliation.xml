@@ -6,6 +6,8 @@
         <conditional-default item="CsvReconciliation" condition="true"/>
         <subscreens-item name="CsvReconciliation" menu-title="CSV Reconciliation"
                 location="component://darpan/screen/Reconciliation/CsvReconciliation.xml"/>
+        <subscreens-item name="MappingSetup" menu-title="Mapping Builder"
+                location="component://darpan/screen/Reconciliation/MappingSetup.xml"/>
     </subscreens>
     <widgets>
         <subscreens-panel id="reconciliation-app" type="popup"/>

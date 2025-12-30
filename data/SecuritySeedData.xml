@@ -12,6 +12,8 @@
             artifactName="moqui.basic.Enumeration" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
             artifactName="darpan.mapping.ReconciliationMapping" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
+            artifactName="darpan.mapping.ReconciliationMappingMember" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_APP_ADMIN" userGroupId="ALL_USERS"
             artifactGroupId="DARPAN_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
 </entity-facade-xml>

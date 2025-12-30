@@ -2,29 +2,9 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="compare" noun="SampleOrderIds" type="script"
-            location="component://darpan/src/compareSampleOrderIds.groovy">
-        <description>Compare OMS vs Shopify bulk JSON files and return order IDs missing from either side.</description>
-        <in-parameters>
-            <parameter name="omsLocation" default-value="component://darpan/data/sample/omsBulkData.json"/>
-            <parameter name="shopifyLocation" default-value="component://darpan/data/sample/shopifyBulkData.json"/>
-            <parameter name="omsOrderIdField" default-value="EXTERNAL_ID"/>
-            <parameter name="shopifyOrderIdField" default-value="legacyResourceId"/>
-            <parameter name="orderIdField" default-value="shopify_order_id"/>
-            <parameter name="logInputCounts" type="Boolean" default-value="true"/>
-            <parameter name="sparkMaster" default-value="local[*]"/>
-            <parameter name="sparkAppName" default-value="DarpanSampleOrderCompare"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="onlyInOms"><parameter name="orderId"/></parameter>
-            <parameter name="onlyInShopify"><parameter name="orderId"/></parameter>
-            <parameter name="onlyInOmsCount" type="Integer"/>
-            <parameter name="onlyInShopifyCount" type="Integer"/>
-        </out-parameters>
-    </service>
     <service verb="compare" noun="CsvFiles" type="script"
-            location="component://darpan/src/compareCsvFiles.groovy">
-        <description>Compare two CSV files by mapped ID field and generate a diff CSV.</description>
+            location="component://darpan/src/reconciliation/csv/reconcileCsvFiles.groovy">
+        <description>Reconcile two CSV files by mapped ID field and generate a diff CSV.</description>
         <in-parameters>
             <parameter name="csv1Location" required="true"/>
             <parameter name="csv2Location" required="true"/>
@@ -35,11 +15,11 @@
             <parameter name="csv1IdField"/>
             <parameter name="csv2IdField"/>
             <parameter name="hasHeader" type="Boolean" default-value="true"/>
-            <parameter name="outputLocation" default-value="tmp/darpan/csv-diff/output"/>
+            <parameter name="outputLocation" default-value="tmp/reconciliation/csv-diff/output"/>
             <parameter name="outputFileName"/>
             <parameter name="logInputCounts" type="Boolean" default-value="true"/>
             <parameter name="sparkMaster" default-value="local[*]"/>
-            <parameter name="sparkAppName" default-value="DarpanCsvCompare"/>
+            <parameter name="sparkAppName" default-value="ReconciliationCsvCompare"/>
         </in-parameters>
         <out-parameters>
             <parameter name="onlyInCsv1"><parameter name="compareId"/></parameter>
@@ -51,8 +31,8 @@
             <parameter name="diffRowCount" type="Integer"/>
         </out-parameters>
     </service>
-    <service verb="run" noun="CsvCompare">
-        <description>Save uploaded CSVs and run compare#CsvFiles using mapping inputs.</description>
+    <service verb="run" noun="CsvReconciliation">
+        <description>Save uploaded CSVs and run CSV reconciliation using mapping inputs.</description>
         <in-parameters>
             <parameter name="csv1File" type="org.apache.commons.fileupload.FileItem"/>
             <parameter name="csv2File" type="org.apache.commons.fileupload.FileItem"/>
@@ -64,7 +44,7 @@
             <parameter name="csv2IdField"/>
             <parameter name="hasHeader" type="Boolean" default-value="true"/>
             <parameter name="sparkMaster" default-value="local[*]"/>
-            <parameter name="sparkAppName" default-value="DarpanCsvCompare"/>
+            <parameter name="sparkAppName" default-value="ReconciliationCsvCompare"/>
         </in-parameters>
         <out-parameters>
             <parameter name="diffLocation"/>
@@ -78,7 +58,7 @@
                 <return error="true" message="Both CSV 1 and CSV 2 files are required"/>
             </if>
 
-            <set field="baseDirRef" from="ec.resource.getLocationReference('runtime://tmp/darpan/csv-diff')"/>
+            <set field="baseDirRef" from="ec.resource.getLocationReference('runtime://tmp/reconciliation/csv-diff')"/>
             <set field="inputDirRef" from="baseDirRef.makeDirectory('input')"/>
             <set field="outputDirRef" from="baseDirRef.makeDirectory('output')"/>
 
@@ -92,11 +72,11 @@
             <set field="ignoreCsv1Write" from="csv1FileRef.putStream(csv1File.getInputStream())"/>
             <set field="ignoreCsv2Write" from="csv2FileRef.putStream(csv2File.getInputStream())"/>
 
-            <service-call name="DarpanServices.compare#CsvFiles"
+            <service-call name="ReconciliationCsvServices.compare#CsvFiles"
                     in-map="[csv1Location:csv1FileRef.getLocation(), csv2Location:csv2FileRef.getLocation(),
                     reconciliationMappingId:reconciliationMappingId, csv1SystemEnumId:csv1SystemEnumId, csv2SystemEnumId:csv2SystemEnumId,
                     idField:idField, csv1IdField:csv1IdField, csv2IdField:csv2IdField,
-                    hasHeader:hasHeader, outputLocation:'runtime://tmp/darpan/csv-diff/output', 
+                    hasHeader:hasHeader, outputLocation:'runtime://tmp/reconciliation/csv-diff/output', 
                     sparkMaster:sparkMaster, sparkAppName:sparkAppName]"
                     out-map="compareOut"/>
             <set field="diffLocation" from="compareOut.diffLocation"/>
@@ -105,22 +85,5 @@
             <set field="onlyInCsv1Count" from="compareOut.onlyInCsv1Count"/>
             <set field="onlyInCsv2Count" from="compareOut.onlyInCsv2Count"/>
         </actions>
-    </service>
-    <service verb="test" noun="SampleOrderIdsDb" type="script"
-            location="component://darpan/src/testSampleOrderIdsDb.groovy">
-        <description>Test Spark JDBC connectivity using SystemMessageRemote and list order IDs from order_header.</description>
-        <in-parameters>
-            <parameter name="systemMessageRemoteId" required="true"/>
-            <parameter name="dbTable" default-value="order_header"/>
-            <parameter name="orderIdColumn" default-value="order_id"/>
-            <parameter name="limit" type="Integer" default-value="10"/>
-            <parameter name="dbDriver" default-value="com.mysql.cj.jdbc.Driver"/>
-            <parameter name="sparkMaster" default-value="local[*]"/>
-            <parameter name="sparkAppName" default-value="DarpanSampleOrderDbRead"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="orderIds"><parameter name="orderId"/></parameter>
-            <parameter name="orderIdCount" type="Integer"/>
-        </out-parameters>
     </service>
 </services>

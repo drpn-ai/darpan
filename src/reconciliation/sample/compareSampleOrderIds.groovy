@@ -2,7 +2,7 @@ import org.apache.spark.sql.SparkSession
 import static org.apache.spark.sql.functions.lit
 import org.slf4j.LoggerFactory
 
-def logger = LoggerFactory.getLogger("darpan.SampleOrderIds")
+def logger = LoggerFactory.getLogger("reconciliation.sample.SampleOrderIds")
 def toMb = { long bytes -> (bytes / (1024L * 1024L)) }
 def toPercent = { val ->
     if (val == null) return "n/a"
@@ -46,7 +46,7 @@ logStatus("compare bulk orders: before Spark session")
 SparkSession spark = null
 try {
     spark = SparkSession.builder()
-            .appName(sparkAppName ?: "DarpanSampleOrderCompare")
+            .appName(sparkAppName ?: "ReconciliationSampleOrderCompare")
             .master(sparkMaster ?: "local[*]")
             .getOrCreate()
 

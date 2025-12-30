@@ -3,49 +3,6 @@
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
 
     <!-- ========================================================= -->
-    <!-- darpan.party -->
-    <!-- ========================================================= -->
-
-    <entity entity-name="PartyType" package="darpan.party" use="configuration">
-        <description>Defines the type of party (person, organization, etc).</description>
-        <field name="partyTypeId" type="id" is-pk="true"/>
-        <field name="description" type="text-medium"/>
-    </entity>
-
-    <entity entity-name="Party" package="darpan.party" use="configuration">
-        <description>Base party record for a person or organization.</description>
-        <field name="partyId" type="id" is-pk="true"/>
-        <field name="partyTypeId" type="id"/>
-        <field name="partyName" type="text-medium"/>
-
-        <relationship type="one" related="darpan.party.PartyType">
-            <key-map field-name="partyTypeId"/></relationship>
-        <relationship type="one" related="darpan.party.Person" short-alias="person">
-            <key-map field-name="partyId"/></relationship>
-        <relationship type="one" related="darpan.party.Organization" short-alias="organization">
-            <key-map field-name="partyId"/></relationship>
-    </entity>
-
-    <entity entity-name="Person" package="darpan.party" use="configuration">
-        <description>Person-specific details for a party.</description>
-        <field name="partyId" type="id" is-pk="true"/>
-        <field name="firstName" type="text-medium"/>
-        <field name="lastName" type="text-medium"/>
-
-        <relationship type="one" related="darpan.party.Party">
-            <key-map field-name="partyId"/></relationship>
-    </entity>
-
-    <entity entity-name="Organization" package="darpan.party" use="configuration">
-        <description>Organization-specific details for a party.</description>
-        <field name="partyId" type="id" is-pk="true"/>
-        <field name="organizationName" type="text-medium"/>
-
-        <relationship type="one" related="darpan.party.Party">
-            <key-map field-name="partyId"/></relationship>
-    </entity>
-
-    <!-- ========================================================= -->
     <!-- darpan.reconciliation -->
     <!-- ========================================================= -->
 
@@ -131,32 +88,5 @@
 
         <relationship type="one" related="darpan.reconciliation.RuleSet">
             <key-map field-name="ruleSetId"/></relationship>
-    </entity>
-
-    <!-- ========================================================= -->
-    <!-- darpan.mapping -->
-    <!-- ========================================================= -->
-
-    <entity entity-name="ReconciliationMapping" package="darpan.mapping" use="configuration">
-        <description>Named mapping definition for source field values by system.</description>
-        <field name="reconciliationMappingId" type="id" is-pk="true"/>
-        <field name="mappingName" type="text-short" not-null="true"/>
-        <field name="description" type="text-medium"/>
-        <field name="createdDate" type="date-time"/>
-        <field name="lastUpdatedDate" type="date-time"/>
-    </entity>
-
-    <entity entity-name="ReconciliationMappingMember" package="darpan.mapping" use="configuration">
-        <description>Mapping entry that binds a source field/value to a system.</description>
-        <field name="mappingMemberId" type="id" is-pk="true"/>
-        <field name="reconciliationMappingId" type="id" not-null="true"/>
-        <field name="systemEnumId" type="id" not-null="true"/>
-        <field name="systemFieldName" type="text-medium" not-null="true"/>
-        <field name="createdDate" type="date-time"/>
-
-        <relationship type="one" related="darpan.mapping.ReconciliationMapping" fk-name="MAPMEM_MAPDEF">
-            <key-map field-name="reconciliationMappingId"/></relationship>
-        <relationship type="one" related="moqui.basic.Enumeration" fk-name="MAPMEM_SYS_ENUM">
-            <key-map field-name="systemEnumId" related-field-name="enumId"/></relationship>
     </entity>
 </entities>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+        include-child-content="true" menu-image="fa fa-exchange" menu-image-type="icon" default-menu-title="Reconciliation"
+        require-authentication="false">
+    <subscreens default-item="CsvReconciliation">
+        <conditional-default item="CsvReconciliation" condition="true"/>
+        <subscreens-item name="CsvReconciliation" menu-title="CSV Reconciliation"
+                location="component://darpan/screen/Reconciliation/CsvReconciliation.xml"/>
+    </subscreens>
+    <widgets>
+        <subscreens-panel id="reconciliation-app" type="popup"/>
+    </widgets>
+</screen>

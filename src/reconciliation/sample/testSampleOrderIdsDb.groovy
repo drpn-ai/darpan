@@ -1,7 +1,7 @@
 import org.apache.spark.sql.SparkSession
 import org.slf4j.LoggerFactory
 
-def logger = LoggerFactory.getLogger("darpan.SampleOrderIdsDb")
+def logger = LoggerFactory.getLogger("reconciliation.sample.SampleOrderIdsDb")
 def toMb = { long bytes -> (bytes / (1024L * 1024L)) }
 def toPercent = { val ->
     if (val == null) return "n/a"
@@ -68,7 +68,7 @@ logStatus("spark db read: before Spark session")
 SparkSession spark = null
 try {
     spark = SparkSession.builder()
-            .appName(sparkAppName ?: "DarpanSampleOrderDbRead")
+            .appName(sparkAppName ?: "ReconciliationSampleOrderDbRead")
             .master(sparkMaster ?: "local[*]")
             .getOrCreate()
 

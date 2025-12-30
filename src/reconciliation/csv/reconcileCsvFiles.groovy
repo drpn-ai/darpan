@@ -1,7 +1,7 @@
 import org.apache.spark.sql.SparkSession
 import org.slf4j.LoggerFactory
 
-def logger = LoggerFactory.getLogger("darpan.CsvFilesCompare")
+def logger = LoggerFactory.getLogger("reconciliation.csv.CsvReconciliation")
 def toMb = { long bytes -> (bytes / (1024L * 1024L)) }
 def toPercent = { val ->
     if (val == null) return "n/a"
@@ -108,7 +108,7 @@ boolean includeHeader = normalizeBool(hasHeader, true)
 String csv1Path = resolvePath(csv1Location)
 String csv2Path = resolvePath(csv2Location)
 
-String outputBaseLocation = outputLocation ?: "tmp/darpan/csv-diff/output"
+String outputBaseLocation = outputLocation ?: "tmp/reconciliation/csv-diff/output"
 def outputLocationRef = ec.resource.getLocationReference(outputBaseLocation)
 File outputDir = outputLocationRef?.getFile()
 if (outputDir == null) {
@@ -119,7 +119,8 @@ if (outputDir == null) {
 if (!outputDir.exists()) outputDir.mkdirs()
 
 String timestamp = ec.l10n.format(ec.user.nowTimestamp, "yyyyMMdd-HHmmss")
-String baseFileName = outputFileName ?: "csv-diff-${timestamp}.csv"
+String mappingSlug = (mappingId ?: "csv").toString().replaceAll("[^A-Za-z0-9._-]", "_")
+String baseFileName = outputFileName ?: "${mappingSlug}-diff-${timestamp}.csv"
 if (!baseFileName.endsWith(".csv")) baseFileName = baseFileName + ".csv"
 String diffFileName = baseFileName
 String nameRoot = baseFileName.endsWith(".csv") ? baseFileName[0..-5] : baseFileName
@@ -135,11 +136,11 @@ def outputLocationBase = outputBaseLocation.endsWith("/") ? outputBaseLocation[0
 
 diffLocation = "${outputLocationBase}/${diffFileName}"
 
-logStatus("compare csv: before Spark session")
+logStatus("reconcile csv: before Spark session")
 SparkSession spark = null
 try {
     spark = SparkSession.builder()
-            .appName(sparkAppName ?: "DarpanCsvCompare")
+            .appName(sparkAppName ?: "ReconciliationCsvCompare")
             .master(sparkMaster ?: "local[*]")
             .getOrCreate()
 
@@ -153,17 +154,17 @@ try {
     }
 
     def csv1Df = loadCsv(csv1Path, csv1Field, "CSV 1")
-    logStatus("compare csv: after load CSV 1")
+    logStatus("reconcile csv: after load CSV 1")
     def csv2Df = loadCsv(csv2Path, csv2Field, "CSV 2")
 
     if (logInputCounts) {
         logger.info("loaded CSV id sets: csv1UniqueIds=${csv1Df.count()} csv2UniqueIds=${csv2Df.count()}")
     }
-    logStatus("compare csv: after load + dedupe")
+    logStatus("reconcile csv: after load + dedupe")
 
     def onlyInCsv1Df = csv1Df.join(csv2Df, "compare_id", "left_anti").select("compare_id")
     def onlyInCsv2Df = csv2Df.join(csv1Df, "compare_id", "left_anti").select("compare_id")
-    logStatus("compare csv: after anti-joins")
+    logStatus("reconcile csv: after anti-joins")
 
     onlyInCsv1 = collectIds(onlyInCsv1Df)
     onlyInCsv2 = collectIds(onlyInCsv2Df)
@@ -172,17 +173,22 @@ try {
     onlyInCsv2Count = onlyInCsv2.size()
     diffRowCount = onlyInCsv1Count + onlyInCsv2Count
 
+    String csv1SystemLabel = csv1SystemEnumId?.toString()?.trim()
+    String csv2SystemLabel = csv2SystemEnumId?.toString()?.trim()
+    String csv1SideLabel = csv1SystemLabel ? "Only in ${csv1SystemLabel}" : "Only in CSV 1"
+    String csv2SideLabel = csv2SystemLabel ? "Only in ${csv2SystemLabel}" : "Only in CSV 2"
+
     outputFile.withWriter("UTF-8") { writer ->
-        writer.write("side,${outputField}\n")
-        onlyInCsv1.each { id -> writer.write("csv1_only,\"${safeCsv(id)}\"\n") }
-        onlyInCsv2.each { id -> writer.write("csv2_only,\"${safeCsv(id)}\"\n") }
+        writer.write("source,${outputField}\n")
+        onlyInCsv1.each { id -> writer.write("\"${csv1SideLabel}\",\"${safeCsv(id)}\"\n") }
+        onlyInCsv2.each { id -> writer.write("\"${csv2SideLabel}\",\"${safeCsv(id)}\"\n") }
     }
 
     logger.info("comparison results: onlyInCsv1=${onlyInCsv1Count} onlyInCsv2=${onlyInCsv2Count} diffFile=${diffFileName}")
-    logStatus("compare csv: after write diff")
+    logStatus("reconcile csv: after write diff")
 } finally {
     if (spark != null) {
         spark.stop()
-        logger.info("compare csv: Spark session stopped")
+        logger.info("reconcile csv: Spark session stopped")
     }
 }

@@ -1,4 +1,3 @@
-<#assign headerValue = (hasHeader!true)?string>
 <#macro csvUploadRow index fileField systemField selectedSystem="">
     <div class="form-group">
         <label for="${fileField}" class="col-sm-2 control-label">CSV ${index}</label>
@@ -22,12 +21,13 @@
 </#macro>
 <div class="container">
     <div class="page-header">
-        <h2>CSV Compare</h2>
-        <p class="text-muted">Upload two CSV files, choose the system sources and mapping, and generate a diff file listing IDs that only appear in one file.</p>
+        <h2>CSV Reconciliation</h2>
+        <p class="text-muted">Upload two CSV files, choose the system sources and mapping, and generate a reconciliation diff listing IDs that only appear in one file.</p>
     </div>
 
-    <form method="post" action="${sri.buildUrl('runCompare').url}" enctype="multipart/form-data" class="form-horizontal">
+    <form method="post" action="${sri.buildUrl('runCsvReconciliation').url}" enctype="multipart/form-data" class="form-horizontal">
         <input type="hidden" name="moquiSessionToken" value="${ec.web.sessionToken}">
+        <input type="hidden" name="hasHeader" value="true">
 
         <@csvUploadRow index=1 fileField="csv1File" systemField="csv1SystemEnumId" selectedSystem=csv1SystemEnumId />
         <@csvUploadRow index=2 fileField="csv2File" systemField="csv2SystemEnumId" selectedSystem=csv2SystemEnumId />
@@ -53,27 +53,15 @@
         </div>
 
         <div class="form-group">
-            <label class="col-sm-2 control-label">Header Row</label>
-            <div class="col-sm-6">
-                <label class="radio-inline">
-                    <input type="radio" name="hasHeader" value="true" <#if headerValue == "true">checked</#if>> Yes
-                </label>
-                <label class="radio-inline">
-                    <input type="radio" name="hasHeader" value="false" <#if headerValue == "false">checked</#if>> No
-                </label>
-            </div>
-        </div>
-
-        <div class="form-group">
             <div class="col-sm-offset-2 col-sm-6">
-                <button type="submit" class="btn btn-primary">Generate Diff CSV</button>
+                <button type="submit" class="btn btn-primary">Reconcile</button>
             </div>
         </div>
     </form>
 
     <hr/>
 
-    <h4>Available Diff Files</h4>
+    <h4>Available Reconciliation Outputs</h4>
     <#if latestFile?has_content>
         <p>
             <a class="btn btn-success btn-sm" href="${sri.buildUrl('downloadDiff').addParameter('filename', latestFile).urlWithParams}" target="_blank" rel="noopener" download="${latestFile?html}">
@@ -116,8 +104,8 @@
             </tbody>
         </table>
     <#else>
-        <p class="text-muted">No diff files generated yet.</p>
+        <p class="text-muted">No reconciliation outputs generated yet.</p>
     </#if>
 
-    <p class="text-muted">Diff CSV columns: <strong>side</strong> (csv1_only/csv2_only) and the mapped field.</p>
+    <p class="text-muted">Output CSV columns: <strong>source</strong> (Only in &lt;system&gt;) and the mapped field.</p>
 </div>

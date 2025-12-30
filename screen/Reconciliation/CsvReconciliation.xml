@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
-        default-menu-title="CSV Compare">
+        default-menu-title="CSV Reconciliation"
+        require-authentication="false">
 
-    <transition name="runCompare" begin-transaction="false">
+    <transition name="runCsvReconciliation" begin-transaction="false">
         <actions>
-            <service-call name="DarpanServices.run#CsvCompare"
+            <service-call name="ReconciliationCsvServices.run#CsvReconciliation"
                     in-map="[csv1File:csv1File, csv2File:csv2File, reconciliationMappingId:reconciliationMappingId, csv1SystemEnumId:csv1SystemEnumId, csv2SystemEnumId:csv2SystemEnumId, hasHeader:hasHeader, sparkMaster:sparkMaster, sparkAppName:sparkAppName]"
                     out-map="context"/>
             <if condition="diffFileName"><then>
@@ -25,7 +26,7 @@
             <if condition="filename.contains('..') || filename.contains('/') || filename.contains('\\')">
                 <return error="true" message="Invalid filename"/>
             </if>
-            <set field="outputDirRef" from="ec.resource.getLocationReference('runtime://tmp/darpan/csv-diff/output')"/>
+            <set field="outputDirRef" from="ec.resource.getLocationReference('runtime://tmp/reconciliation/csv-diff/output')"/>
             <set field="fileRef" from="outputDirRef != null ? outputDirRef.getChild(filename) : null"/>
             <if condition="fileRef == null || !fileRef.getExists()">
                 <return error="true" message="Diff file not found"/>
@@ -36,22 +37,23 @@
         <default-response type="none"/>
     </transition>
 
-    <actions>
-        <entity-find entity-name="moqui.basic.Enumeration" list="systemEnumList" cache="true">
+
+    <pre-actions>
+        <entity-find entity-name="moqui.basic.Enumeration" list="systemEnumList" cache="false">
             <econdition field-name="enumTypeId" value="DarpanSystemSource"/>
             <order-by field-name="sequenceNum,description"/>
         </entity-find>
-        <entity-find entity-name="darpan.mapping.ReconciliationMapping" list="mappingList" cache="true">
+        <entity-find entity-name="darpan.mapping.ReconciliationMapping" list="mappingList" cache="false">
             <order-by field-name="mappingName"/>
         </entity-find>
-        <set field="diffDirRef" from="ec.resource.getLocationReference('runtime://tmp/darpan/csv-diff/output')"/>
+        <set field="diffDirRef" from="ec.resource.getLocationReference('runtime://tmp/reconciliation/csv-diff/output')"/>
         <set field="diffFiles"
                 from="diffDirRef != null &amp;&amp; diffDirRef.getExists() ? (diffDirRef.getDirectoryEntries() ?: []).findAll{ it.isFile() &amp;&amp; it.getFileName() != null &amp;&amp; it.getFileName().endsWith('.csv') &amp;&amp; it.getSize() > 0 }.sort{ a, b -> b.getLastModified() &lt;=&gt; a.getLastModified() }.collect{ [fileName: it.getFileName(), fileLastModified: it.getLastModified(), fileSize: it.getSize()] } : []"/>
-    </actions>
+    </pre-actions>
 
     <widgets>
         <render-mode>
-            <text type="html" location="component://darpan/screen/Darpan/CompareCsv.ftl"/>
+             <text type="html" location="component://darpan/template/reconciliation/CsvReconciliation.ftl"/>
         </render-mode>
     </widgets>
 </screen>

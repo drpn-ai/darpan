@@ -41,7 +41,7 @@ RUN chmod +x entrypoint.sh
 RUN jar -xvf /moqui-framework/moqui-plus-runtime.war
 
 ENV DB_LOAD="./gradlew loadProduction -Ptypes=seed,seed-initial,install,ext-seed,ext -Praw"
-ENV JAVA_OPTS="-Xms512m -Xmx4096m"
+ENV JAVA_OPTS="-Xms512m -Xmx4096m --add-exports=java.base/sun.nio.ch=ALL-UNNAMED"
 ENV CONF_FILE="/moqui-framework/runtime/conf/MoquiProductionConf.xml"
 ENV SLEEP="sleep 2"
 ENV JWT_KEY=

@@ -88,8 +88,60 @@
     </pre-actions>
 
     <widgets>
-        <render-mode>
-            <text type="html" location="component://darpan/template/reconciliation/MappingSetup.ftl"/>
-        </render-mode>
+        <container style="container">
+            <container style="page-header">
+                <label text="Mapping Builder" type="h2"/>
+                <label text="Define a mapping between two systems by naming the mapping and the column to compare in each system."
+                        type="p" style="text-muted"/>
+                <label text="Saved mapping ${createdMappingName}. It is now available in CSV Reconciliation."
+                        type="p" style="text-success" condition="createdMappingId"/>
+            </container>
+
+            <form-single name="MappingSetupForm" transition="createMapping">
+                <field name="mappingName" from="mappingName">
+                    <default-field title="Mapping name"
+                            tooltip="This name appears in the reconciliation mapping list.">
+                        <text-line size="40"/>
+                    </default-field>
+                </field>
+
+                <field name="system1EnumId" from="system1EnumId">
+                    <default-field title="System 1">
+                        <drop-down>
+                            <option key="" text="Select system"/>
+                            <list-options list="systemEnumList" key="${enumId}" text="${description ?: enumId}"/>
+                        </drop-down>
+                    </default-field>
+                </field>
+                <field name="system1FieldName" from="system1FieldName">
+                    <default-field title="System 1 Column">
+                        <text-line size="30"/>
+                    </default-field>
+                </field>
+
+                <field name="system2EnumId" from="system2EnumId">
+                    <default-field title="System 2">
+                        <drop-down>
+                            <option key="" text="Select system"/>
+                            <list-options list="systemEnumList" key="${enumId}" text="${description ?: enumId}"/>
+                        </drop-down>
+                    </default-field>
+                </field>
+                <field name="system2FieldName" from="system2FieldName">
+                    <default-field title="System 2 Column">
+                        <text-line size="30"/>
+                    </default-field>
+                </field>
+
+                <field name="submitButton"><default-field title="Save Mapping"><submit/></default-field></field>
+
+                <field-layout>
+                    <field-row-big><field-ref name="mappingName"/></field-row-big>
+                    <field-row><field-ref name="system1EnumId"/><field-ref name="system1FieldName"/></field-row>
+                    <field-row><field-ref name="system2EnumId"/><field-ref name="system2FieldName"/></field-row>
+                    <field-row-big><field-ref name="submitButton"/></field-row-big>
+                </field-layout>
+            </form-single>
+        </container>
     </widgets>
 </screen>

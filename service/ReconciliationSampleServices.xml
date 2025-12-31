@@ -12,6 +12,13 @@
             <parameter name="shopifyOrderIdField" default-value="legacyResourceId"/>
             <parameter name="orderIdField" default-value="shopify_order_id"/>
             <parameter name="logInputCounts" type="Boolean" default-value="true"/>
+            <parameter name="logShopifySampleRows" type="Boolean" default-value="false"/>
+            <parameter name="logShopifyExplodedRows" type="Boolean" default-value="false"/>
+            <parameter name="shopifyExplodedRowLimit" type="Integer" default-value="5"/>
+            <parameter name="logShopifyNodeRows" type="Boolean" default-value="false"/>
+            <parameter name="shopifyNodeRowLimit" type="Integer" default-value="5"/>
+            <parameter name="logShopifyPriceSetRows" type="Boolean" default-value="false"/>
+            <parameter name="shopifyPriceSetRowLimit" type="Integer" default-value="5"/>
             <parameter name="sparkMaster" default-value="local[*]"/>
             <parameter name="sparkAppName" default-value="ReconciliationSampleOrderCompare"/>
         </in-parameters>

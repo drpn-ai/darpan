@@ -52,8 +52,111 @@
     </pre-actions>
 
     <widgets>
-        <render-mode>
-             <text type="html" location="component://darpan/template/reconciliation/CsvReconciliation.ftl"/>
-        </render-mode>
+        <container style="container">
+            <container style="page-header">
+                <label text="CSV Reconciliation" type="h2"/>
+                <label text="Upload two CSV files, choose the system sources and mapping, and generate a reconciliation diff listing IDs that only appear in one file."
+                        type="p" style="text-muted"/>
+            </container>
+
+            <form-single name="CsvReconciliationForm" transition="runCsvReconciliation">
+                <field name="hasHeader"><default-field><hidden default-value="true"/></default-field></field>
+
+                <field name="csv1File">
+                    <default-field title="CSV 1"><file size="40" accept=".csv,text/csv"/></default-field>
+                </field>
+                <field name="csv1SystemEnumId" from="csv1SystemEnumId">
+                    <default-field title="CSV 1 System">
+                        <drop-down>
+                            <option key="" text="Select system"/>
+                            <list-options list="systemEnumList" key="${enumId}" text="${description ?: enumId}"/>
+                        </drop-down>
+                    </default-field>
+                </field>
+
+                <field name="csv2File">
+                    <default-field title="CSV 2"><file size="40" accept=".csv,text/csv"/></default-field>
+                </field>
+                <field name="csv2SystemEnumId" from="csv2SystemEnumId">
+                    <default-field title="CSV 2 System">
+                        <drop-down>
+                            <option key="" text="Select system"/>
+                            <list-options list="systemEnumList" key="${enumId}" text="${description ?: enumId}"/>
+                        </drop-down>
+                    </default-field>
+                </field>
+
+                <field name="reconciliationMappingId" from="reconciliationMappingId">
+                    <default-field title="Mapping">
+                        <drop-down>
+                            <option key="" text="Select mapping"/>
+                            <list-options list="mappingList" key="${reconciliationMappingId}"
+                                    text="${(mappingName ?: reconciliationMappingId) + (description ? ' - ' + description : '')}"/>
+                        </drop-down>
+                    </default-field>
+                </field>
+
+                <field name="submitButton"><default-field title="Reconcile"><submit/></default-field></field>
+
+                <field-layout>
+                    <field-row><field-ref name="csv1File"/><field-ref name="csv1SystemEnumId"/></field-row>
+                    <field-row><field-ref name="csv2File"/><field-ref name="csv2SystemEnumId"/></field-row>
+                    <field-row-big><field-ref name="reconciliationMappingId"/></field-row-big>
+                    <field-row-big><field-ref name="submitButton"/></field-row-big>
+                </field-layout>
+            </form-single>
+
+            <section name="NoMappingsNotice" condition="!mappingList">
+                <widgets>
+                    <label text="No mappings configured yet." type="p" style="text-danger"/>
+                </widgets>
+            </section>
+
+            <container type="hr"/>
+
+            <label text="Available Reconciliation Outputs" type="h4"/>
+            <link url="downloadDiff" text="Download Latest (${latestFile})" condition="latestFile"
+                    link-type="anchor-button" target-window="_blank" btn-type="success">
+                <parameter name="filename" from="latestFile"/>
+            </link>
+
+            <section name="DiffFilesSection" condition="diffFiles">
+                <widgets>
+                    <form-list name="DiffFiles" list="diffFiles" skip-form="true" paginate="false"
+                            style="table table-striped table-condensed">
+                        <field name="fileName">
+                            <header-field title="File"/>
+                            <default-field><display/></default-field>
+                        </field>
+                        <field name="fileLastModifiedDisplay"
+                                from="fileLastModified ? ec.l10n.format(new java.sql.Timestamp(fileLastModified), null) : ''">
+                            <header-field title="Last Modified"/>
+                            <default-field><display/></default-field>
+                        </field>
+                        <field name="fileSizeMiB" from="ec.l10n.format((fileSize ?: 0) / (1024 * 1024), '#,##0.00')">
+                            <header-field title="Size (MiB)"/>
+                            <default-field><display/></default-field>
+                        </field>
+                        <field name="downloadLink">
+                            <header-field title=""/>
+                            <default-field>
+                                <link url="downloadDiff" text="Download" link-type="anchor-button" target-window="_blank"
+                                        btn-type="default" style="btn-xs" condition="fileName">
+                                    <parameter name="filename" from="fileName"/>
+                                </link>
+                            </default-field>
+                        </field>
+                    </form-list>
+                </widgets>
+            </section>
+
+            <section name="NoDiffFilesSection" condition="!diffFiles">
+                <widgets>
+                    <label text="No reconciliation outputs generated yet." type="p" style="text-muted"/>
+                </widgets>
+            </section>
+
+            <label text="Output CSV columns: source (Only in &lt;system&gt;) and the mapped field." type="p" style="text-muted"/>
+        </container>
     </widgets>
 </screen>

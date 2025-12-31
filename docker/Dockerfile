@@ -22,8 +22,6 @@ WORKDIR /moqui-framework/runtime/component
 RUN git clone --depth 1 -b "build-gradle-file" https://github.com/dixitdeepak/moqui-atomikos.git
 RUN git clone --depth 1 -b "main" https://github.com/hotwax/darpan.git
 
-COPY runtime/component/darpan/docker/ /moqui-framework/runtime/component/darpan/docker/
-
 RUN rm -rf /root/.netrc
 
 WORKDIR /moqui-framework

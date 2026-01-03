@@ -1,7 +1,7 @@
 # Darpan AGENTS.md
 
 ## Focus: best practices and coding guidelines
-Note: keep this file updated as we work. When I provide feedback on completed tasks, incorporate new tips or working-style changes here.
+Component-generic guidance lives here; user-specific preferences are in `AGENTS.md` at the repo root.
 
 ### Where to implement changes
 - Put business logic in `runtime/component/darpan/src/**` and expose it through service definitions in `runtime/component/darpan/service/*.xml`.

@@ -1,5 +1,6 @@
 import org.apache.spark.sql.SparkSession
 import org.slf4j.LoggerFactory
+import static org.apache.spark.sql.functions.*
 
 def logger = LoggerFactory.getLogger("reconciliation.csv.CsvReconciliation")
 def toMb = { long bytes -> (bytes / (1024L * 1024L)) }
@@ -56,11 +57,7 @@ def resolveMappingField = { String mappingId, String systemId, String label ->
     return member.systemFieldName
 }
 
-def collectIds = { df ->
-    return df.collect().collect { row -> row.get(0)?.toString() }
-            .findAll { it != null && it.trim() }
-            .sort()
-}
+
 
 if (!csv1Location || !csv2Location) {
     throw new IllegalArgumentException("csv1Location and csv2Location are required")
@@ -142,6 +139,10 @@ try {
     spark = SparkSession.builder()
             .appName(sparkAppName ?: "ReconciliationCsvCompare")
             .master(sparkMaster ?: "local[*]")
+            .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+            .config("spark.sql.adaptive.enabled", "true")
+            .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
+            .config("spark.sql.files.maxPartitionBytes", "134217728")
             .getOrCreate()
 
     def reader = spark.read().option("header", includeHeader.toString()).option("multiLine", "true")
@@ -153,9 +154,9 @@ try {
                 .dropDuplicates()
     }
 
-    def csv1Df = loadCsv(csv1Path, csv1Field, "CSV 1")
+    def csv1Df = loadCsv(csv1Path, csv1Field, "CSV 1").cache()
     logStatus("reconcile csv: after load CSV 1")
-    def csv2Df = loadCsv(csv2Path, csv2Field, "CSV 2")
+    def csv2Df = loadCsv(csv2Path, csv2Field, "CSV 2").cache()
 
     if (logInputCounts) {
         logger.info("loaded CSV id sets: csv1UniqueIds=${csv1Df.count()} csv2UniqueIds=${csv2Df.count()}")
@@ -166,11 +167,9 @@ try {
     def onlyInCsv2Df = csv2Df.join(csv1Df, "compare_id", "left_anti").select("compare_id")
     logStatus("reconcile csv: after anti-joins")
 
-    onlyInCsv1 = collectIds(onlyInCsv1Df)
-    onlyInCsv2 = collectIds(onlyInCsv2Df)
-
-    onlyInCsv1Count = onlyInCsv1.size()
-    onlyInCsv2Count = onlyInCsv2.size()
+    // Get counts only - don't collect actual data
+    onlyInCsv1Count = onlyInCsv1Df.count()
+    onlyInCsv2Count = onlyInCsv2Df.count()
     diffRowCount = onlyInCsv1Count + onlyInCsv2Count
 
     String csv1SystemLabel = csv1SystemEnumId?.toString()?.trim()
@@ -178,17 +177,49 @@ try {
     String csv1SideLabel = csv1SystemLabel ? "Only in ${csv1SystemLabel}" : "Only in CSV 1"
     String csv2SideLabel = csv2SystemLabel ? "Only in ${csv2SystemLabel}" : "Only in CSV 2"
 
-    outputFile.withWriter("UTF-8") { writer ->
-        writer.write("source,${outputField}\n")
-        onlyInCsv1.each { id -> writer.write("\"${csv1SideLabel}\",\"${safeCsv(id)}\"\n") }
-        onlyInCsv2.each { id -> writer.write("\"${csv2SideLabel}\",\"${safeCsv(id)}\"\n") }
+    // Use Spark distributed write instead of collecting to memory
+    // Add source labels as columns
+    def csv1WithSource = onlyInCsv1Df
+            .withColumnRenamed("compare_id", outputField)
+            .withColumn("source", lit(csv1SideLabel))
+            .select("source", outputField)
+
+    def csv2WithSource = onlyInCsv2Df
+            .withColumnRenamed("compare_id", outputField)
+            .withColumn("source", lit(csv2SideLabel))
+            .select("source", outputField)
+
+    // Union and write in distributed fashion to temp directory
+    String tempOutputPath = "${outputDir.absolutePath}/_temp_${timestamp}"
+    csv1WithSource.union(csv2WithSource)
+            .coalesce(1)  // Single output file
+            .write()
+            .mode("overwrite")
+            .option("header", "true")
+            .csv(tempOutputPath)
+
+    // Move the part file to final location
+    def tempDir = new File(tempOutputPath)
+    def partFiles = tempDir.listFiles()?.findAll { it.name.startsWith("part-") && it.name.endsWith(".csv") }
+    if (partFiles && partFiles.size() > 0) {
+        partFiles[0].renameTo(outputFile)
+        logger.info("Moved output file to ${outputFile.absolutePath}")
+    } else {
+        logger.warn("No part files found in temp directory, output may be empty")
     }
+    
+    // Clean up temp directory
+    tempDir.deleteDir()
+
+    // Unpersist cached DataFrames
+    csv1Df.unpersist()
+    csv2Df.unpersist()
 
     logger.info("comparison results: onlyInCsv1=${onlyInCsv1Count} onlyInCsv2=${onlyInCsv2Count} diffFile=${diffFileName}")
-    logStatus("reconcile csv: after write diff")
-} finally {
-    if (spark != null) {
-        spark.stop()
-        logger.info("reconcile csv: Spark session stopped")
-    }
+    logStatus("reconcile csv: after write diff + cleanup")
+} catch (Exception e) {
+    logger.error("CSV reconciliation failed", e)
+    throw e
 }
+// DON'T call spark.stop() - keep session alive for reuse
+logger.info("reconcile csv: Spark session preserved for reuse (not stopped)")

@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="create" noun="JsonSchemaFromJson" type="script"
+            location="component://darpan/src/jsonschema/createJsonSchemaFromJson.groovy">
+        <description>Create a JSON schema from an uploaded JSON file and save it to the filesystem.</description>
+        <in-parameters>
+            <parameter name="jsonFile" type="org.apache.commons.fileupload.FileItem" required="true"/>
+            <parameter name="schemaName"/>
+            <parameter name="overwrite" type="Boolean" default-value="false"/>
+            <parameter name="strict" type="Boolean" default-value="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="schemaFileName"/>
+            <parameter name="schemaLocation"/>
+        </out-parameters>
+    </service>
+
+    <service verb="save" noun="JsonSchema" type="script"
+            location="component://darpan/src/jsonschema/saveJsonSchema.groovy">
+        <description>Save an uploaded JSON schema file to the filesystem.</description>
+        <in-parameters>
+            <parameter name="schemaFile" type="org.apache.commons.fileupload.FileItem" required="true"/>
+            <parameter name="schemaName"/>
+            <parameter name="overwrite" type="Boolean" default-value="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="schemaFileName"/>
+            <parameter name="schemaLocation"/>
+        </out-parameters>
+    </service>
+
+    <service verb="validate" noun="JsonFileAgainstSchema" type="script"
+            location="component://darpan/src/jsonschema/validateJsonFileAgainstSchema.groovy">
+        <description>Validate an uploaded JSON file against a saved JSON schema.</description>
+        <in-parameters>
+            <parameter name="jsonFile" type="org.apache.commons.fileupload.FileItem" required="true"/>
+            <parameter name="schemaFileName" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="valid" type="Boolean"/>
+            <parameter name="errorCount" type="Integer"/>
+            <parameter name="errorMessages"><parameter name="errorMessage"/></parameter>
+        </out-parameters>
+    </service>
+    
+    <service verb="validate" noun="JsonLocationAgainstSchema" type="script"
+            location="component://darpan/src/jsonschema/validateJsonLocationAgainstSchema.groovy">
+        <description>Validate a JSON file location against a saved JSON schema.</description>
+        <in-parameters>
+            <parameter name="jsonLocation" required="true"/>
+            <parameter name="schemaFileName" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="valid" type="Boolean"/>
+            <parameter name="errorCount" type="Integer"/>
+            <parameter name="errorMessages"><parameter name="errorMessage"/></parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="resolve" noun="JsonPathForKey" type="script"
+            location="component://darpan/src/jsonschema/resolveJsonPathForKey.groovy">
+        <description>Resolve a JSONPath from a key using a saved JSON schema.</description>
+        <in-parameters>
+            <parameter name="schemaFileName" required="true"/>
+            <parameter name="key" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resolvedJsonPath"/>
+            <parameter name="matchingPaths"><parameter name="jsonPath"/></parameter>
+            <parameter name="found" type="Boolean"/>
+        </out-parameters>
+    </service>
+</services>

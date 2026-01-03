@@ -2,10 +2,14 @@
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         include-child-content="true" menu-image="fa fa-exchange" menu-image-type="icon" default-menu-title="Reconciliation"
         require-authentication="false">
-    <subscreens default-item="CsvReconciliation">
-        <conditional-default item="CsvReconciliation" condition="true"/>
-        <subscreens-item name="CsvReconciliation" menu-title="CSV Reconciliation"
+    <subscreens default-item="GenericReconciliation">
+        <conditional-default item="GenericReconciliation" condition="true"/>
+        <subscreens-item name="GenericReconciliation" menu-title="File Reconciliation"
+                location="component://darpan/screen/Reconciliation/GenericReconciliation.xml"/>
+        <subscreens-item name="CsvReconciliation" menu-title="CSV Only (Legacy)"
                 location="component://darpan/screen/Reconciliation/CsvReconciliation.xml"/>
+        <subscreens-item name="JsonSchemaManager" menu-title="JSON Schemas"
+                location="component://darpan/screen/Reconciliation/JsonSchemaManager.xml"/>
         <subscreens-item name="MappingSetup" menu-title="Mapping Builder"
                 location="component://darpan/screen/Reconciliation/MappingSetup.xml"/>
     </subscreens>

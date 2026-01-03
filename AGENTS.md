@@ -54,6 +54,7 @@ Component-generic guidance lives here; user-specific preferences are in `AGENTS.
 ### Testing and verification
 - Tests are not run by default; run `./gradlew test` or targeted tasks explicitly.
 - Use `runtime/component/darpan/data/test/test-json-reconciliation.groovy` and schemas in `runtime/schemas/json/` for quick validation.
+- When writing or editing XML (entities, services, screens), run an XML verification step every time (e.g., lint/validate or load in Moqui) and fix any schema or syntax errors immediately.
 
 ### System design tips
 - Keep responsibilities separated: ingest -> normalize -> reconcile -> report; avoid mixing IO and compare logic.

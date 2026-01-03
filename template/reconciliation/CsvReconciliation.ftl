@@ -61,7 +61,7 @@
 
     <hr/>
 
-    <h4>Available Reconciliation Outputs</h4>
+    <h4>Generated Reconciliation Files</h4>
     <#if latestFile?has_content>
         <p>
             <a class="btn btn-success btn-sm" href="${sri.buildUrl('downloadDiff').addParameter('filename', latestFile).urlWithParams}" target="_blank" rel="noopener" download="${latestFile?html}">
@@ -75,7 +75,7 @@
                 <tr>
                     <th>File</th>
                     <th>Last Modified</th>
-                    <th>Size (MiB)</th>
+                    <th>Size (Kb)</th>
                     <th></th>
                 </tr>
             </thead>
@@ -93,7 +93,7 @@
                     <tr>
                         <td>${fileName?html}</td>
                         <td>${ec.l10n.format(fileLastModified?number_to_datetime, null)}</td>
-                        <td>${ec.l10n.format((fileSizeBytes?number) / (1024 * 1024), '#,##0.00')}</td>
+                        <td>${ec.l10n.format((fileSizeBytes?number) / 1024, '#,##0.00')}</td>
                         <td>
                             <#if fileName?has_content>
                                 <a class="btn btn-default btn-xs" href="${sri.buildUrl('downloadDiff').addParameter('filename', fileName).urlWithParams}" target="_blank" rel="noopener" download="${fileName?html}">Download</a>

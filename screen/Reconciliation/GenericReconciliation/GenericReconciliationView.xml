@@ -84,10 +84,10 @@
             viewOrderCount = 0
             viewOrdersLimited = false
             viewOrderLimit = null
-            viewMissingJson1Title = null
-            viewMissingJson2Title = null
             viewMetaJson1Label = "JSON 1"
             viewMetaJson2Label = "JSON 2"
+            viewMissingJson1Title = "Missing from ${viewMetaJson1Label ?: 'JSON 1'}"
+            viewMissingJson2Title = "Missing from ${viewMetaJson2Label ?: 'JSON 2'}"
             viewMaxInMemoryBytes = 5 * 1024 * 1024
 
             def parseIntSafe = { val ->
@@ -310,7 +310,7 @@
                                         </dynamic-container>
                                     </widgets>
                                 </section>
-                                <section name="NoDiffOrdersMissingJson1Section" condition="(viewOnlyInJson2Count != null) and (viewOnlyInJson2Count == 0)">
+                                <section name="NoDiffOrdersMissingJson1Section" condition="(viewOnlyInJson2Count != null) && (viewOnlyInJson2Count == 0)">
                                     <widgets>
                                         <label text="No records missing in ${viewMetaJson1Label ?: 'JSON 1'}." type="p" style="text-muted"/>
                                     </widgets>
@@ -328,7 +328,7 @@
                                         </dynamic-container>
                                     </widgets>
                                 </section>
-                                <section name="NoDiffOrdersMissingJson2Section" condition="(viewOnlyInJson1Count != null) and (viewOnlyInJson1Count == 0)">
+                                <section name="NoDiffOrdersMissingJson2Section" condition="(viewOnlyInJson1Count != null) && (viewOnlyInJson1Count == 0)">
                                     <widgets>
                                         <label text="No records missing in ${viewMetaJson2Label ?: 'JSON 2'}." type="p" style="text-muted"/>
                                     </widgets>

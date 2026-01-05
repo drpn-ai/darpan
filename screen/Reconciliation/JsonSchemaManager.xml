@@ -9,7 +9,7 @@
             <service-call name="JsonSchemaServices.create#JsonSchemaFromJson"
                     in-map="[jsonFile:jsonFile, schemaName:schemaName, overwrite:overwrite, strict:strict]"
                     out-map="context"/>
-            <message>✓ Generated schema: ${schemaFileName}</message>
+            <message>Generated schema: ${schemaFileName}</message>
         </actions>
         <default-response url="."><parameter name="activeTab" value="generate"/></default-response>
     </transition>
@@ -19,7 +19,7 @@
             <service-call name="JsonSchemaServices.save#JsonSchema"
                     in-map="[schemaFile:schemaFile, schemaName:schemaName, overwrite:overwrite]"
                     out-map="context"/>
-            <message>✓ Uploaded schema: ${schemaFileName}</message>
+            <message>Uploaded schema: ${schemaFileName}</message>
         </actions>
         <default-response url="."><parameter name="activeTab" value="upload"/></default-response>
     </transition>
@@ -30,11 +30,11 @@
                     in-map="[jsonFile:jsonFile, schemaFileName:schemaFileName]"
                     out-map="context"/>
             <if condition="valid">
-                <message>✓ JSON is valid for schema ${schemaFileName}</message>
+                <message>JSON is valid for schema ${schemaFileName}</message>
             </if>
             <if condition="!valid">
                 <set field="errorSummary" from="errorMessages ? errorMessages.take(5).join('; ') : ''"/>
-                <message error="true">✗ Validation failed! ${errorCount} errors found. ${errorSummary}${errorCount > 5 ? '...' : ''}</message>
+                <message error="true">Validation failed! ${errorCount} errors found. ${errorSummary}${errorCount > 5 ? '...' : ''}</message>
             </if>
         </actions>
         <default-response url="."><parameter name="activeTab" value="validate"/></default-response>
@@ -88,22 +88,22 @@
                 <ul class="nav nav-tabs" role="tablist" style="margin-bottom: 20px;">
                     <li role="presentation" class="${activeTab == 'generate' ? 'active' : ''}">
                         <a href="#generate" aria-controls="generate" role="tab" data-toggle="tab">
-                            <i class="fa fa-magic"></i> Generate Schema
+                            Generate Schema
                         </a>
                     </li>
                     <li role="presentation" class="${activeTab == 'upload' ? 'active' : ''}">
                         <a href="#upload" aria-controls="upload" role="tab" data-toggle="tab">
-                            <i class="fa fa-upload"></i> Upload Schema
+                            Upload Schema
                         </a>
                     </li>
                     <li role="presentation" class="${activeTab == 'validate' ? 'active' : ''}">
                         <a href="#validate" aria-controls="validate" role="tab" data-toggle="tab">
-                            <i class="fa fa-check-circle"></i> Validate JSON
+                            Validate JSON
                         </a>
                     </li>
                     <li role="presentation" class="${activeTab == 'browse' ? 'active' : ''}">
                         <a href="#browse" aria-controls="browse" role="tab" data-toggle="tab">
-                            <i class="fa fa-list"></i> Browse Schemas (${schemaFiles?.size() ?: 0})
+                            Browse Schemas (${schemaFiles?.size() ?: 0})
                         </a>
                     </li>
                 </ul>
@@ -148,7 +148,7 @@
                     
                     <field name="submitCreate">
                         <default-field title="Generate Schema">
-                            <submit icon="fa fa-magic"/>
+                            <submit/>
                         </default-field>
                     </field>
 
@@ -162,8 +162,12 @@
                 </form-single>
                 
                 <container style="alert alert-info" style-margin-top="15px">
-                    <label text="💡 Tip: " style="font-weight: bold;"/>
-                    <label text="Upload a representative JSON file with all expected fields populated. The generated schema will validate future JSON files against this structure."/>
+                    <render-mode><text type="html"><![CDATA[
+                        <p style="font-weight: bold; margin: 0 0 5px;">
+                            Tip:
+                        </p>
+                        <p style="margin: 0;">Upload a representative JSON file with all expected fields populated. The generated schema will validate future JSON files against this structure.</p>
+                    ]]></text></render-mode>
                 </container>
             </container>
             
@@ -203,7 +207,7 @@
                     
                     <field name="submitUpload">
                         <default-field title="Upload Schema">
-                            <submit icon="fa fa-upload"/>
+                            <submit/>
                         </default-field>
                     </field>
 
@@ -248,7 +252,7 @@
                     
                     <field name="submitValidate">
                         <default-field title="Validate">
-                            <submit icon="fa fa-check-circle"/>
+                            <submit/>
                         </default-field>
                     </field>
 
@@ -262,7 +266,9 @@
                 <section name="NoSchemasNotice" condition="!schemaFiles">
                     <widgets>
                         <container style="alert alert-warning">
-                            <label text="⚠ No schemas available yet. Generate or upload a schema first!" type="p"/>
+                            <render-mode><text type="html"><![CDATA[
+                                <p style="margin: 0;">No schemas available yet. Generate or upload a schema first!</p>
+                            ]]></text></render-mode>
                         </container>
                     </widgets>
                 </section>
@@ -287,7 +293,7 @@
                             <field name="fileName">
                                 <header-field title="Schema File" show-order-by="true"/>
                                 <default-field>
-                                    <display><![CDATA[<i class="fa fa-file-code-o"></i> ${fileName}]]></display>
+                                    <display/>
                                 </default-field>
                             </field>
                             <field name="fileLastModifiedDisplay"
@@ -316,8 +322,10 @@
                 <section name="NoSchemaFilesSection" condition="!schemaFiles">
                     <widgets>
                         <container style="alert alert-info">
-                            <label text="📁 No schemas found yet." type="h5"/>
-                            <label text="Get started by generating a schema from a sample JSON file or uploading an existing schema." type="p"/>
+                            <render-mode><text type="html"><![CDATA[
+                                <h5 style="margin-top: 0;">No schemas found yet.</h5>
+                                <p style="margin-bottom: 0;">Get started by generating a schema from a sample JSON file or uploading an existing schema.</p>
+                            ]]></text></render-mode>
                         </container>
                     </widgets>
                 </section>
@@ -332,7 +340,9 @@
             <container type="hr"/>
             <container style="panel panel-info">
                 <container style="panel-heading">
-                    <label text="📖 JSON Schema Quick Guide" type="h5"/>
+                    <render-mode><text type="html"><![CDATA[
+                        <h5 style="margin: 0;">JSON Schema Quick Guide</h5>
+                    ]]></text></render-mode>
                 </container>
                 <container style="panel-body">
                     <container type="dl" style="dl-horizontal">

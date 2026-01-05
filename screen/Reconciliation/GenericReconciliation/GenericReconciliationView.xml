@@ -310,7 +310,7 @@
                                         </dynamic-container>
                                     </widgets>
                                 </section>
-                                <section name="NoDiffOrdersMissingJson1Section" condition="(viewOnlyInJson2Count != null) && (viewOnlyInJson2Count == 0)">
+                                <section name="NoDiffOrdersMissingJson1Section" condition="(viewOnlyInJson2Count != null) &amp;&amp; (viewOnlyInJson2Count == 0)">
                                     <widgets>
                                         <label text="No records missing in ${viewMetaJson1Label ?: 'JSON 1'}." type="p" style="text-muted"/>
                                     </widgets>
@@ -328,7 +328,7 @@
                                         </dynamic-container>
                                     </widgets>
                                 </section>
-                                <section name="NoDiffOrdersMissingJson2Section" condition="(viewOnlyInJson1Count != null) && (viewOnlyInJson1Count == 0)">
+                                <section name="NoDiffOrdersMissingJson2Section" condition="(viewOnlyInJson1Count != null) &amp;&amp; (viewOnlyInJson1Count == 0)">
                                     <widgets>
                                         <label text="No records missing in ${viewMetaJson2Label ?: 'JSON 2'}." type="p" style="text-muted"/>
                                     </widgets>

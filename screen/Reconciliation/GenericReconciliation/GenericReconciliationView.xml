@@ -1,0 +1,353 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+        default-menu-title="Diff View"
+        default-menu-include="false"
+        require-authentication="false"
+        allow-extra-path="true">
+
+    <parameter name="viewFile"/>
+    <parameter name="viewLimit"/>
+
+    <transition name="list" read-only="true" begin-transaction="false">
+        <default-response url=".."/>
+    </transition>
+
+    <transition name="downloadDiff" read-only="true" begin-transaction="false">
+        <parameter name="filename"/>
+        <actions>
+            <set field="filename" from="filename?.trim()"/>
+            <if condition="!filename"><return/></if>
+            <if condition="filename.contains('..') || filename.contains('/') || filename.contains('\\')">
+                <return error="true" message="Invalid filename"/>
+            </if>
+            <set field="outputDirRef" from="ec.resource.getLocationReference('runtime://tmp/reconciliation/generic/output')"/>
+            <set field="fileRef" from="outputDirRef != null ? outputDirRef.getChild(filename) : null"/>
+            <if condition="fileRef == null || !fileRef.getExists()">
+                <return error="true" message="Diff file not found"/>
+            </if>
+            <set field="sendResponse" from="ec.web.sendResourceResponse(fileRef.getLocation())"/>
+            <return/>
+        </actions>
+        <default-response type="none"/>
+    </transition>
+
+    <pre-actions>
+        <script><![CDATA[
+            def requestUri = ec.web?.request?.getRequestURI() ?: ''
+            def isMenuDataRequest = requestUri.contains('/menuData')
+            def logger = org.slf4j.LoggerFactory.getLogger("darpan.reconciliation.view.GenericReconciliationView")
+            def viewParams = [
+                viewFile: ec.web?.parameters?.get("viewFile"),
+                filename: ec.web?.parameters?.get("filename"),
+                viewLimit: ec.web?.parameters?.get("viewLimit")
+            ]
+            logger.info("GenericReconciliationView load requestUri=${requestUri} menuData=${isMenuDataRequest} params=${viewParams}")
+
+            def viewFileName = null
+            def extraPathList = sri?.screenUrlInfo?.extraPathNameList
+            if (extraPathList && extraPathList.size() > 0) {
+                viewFileName = extraPathList[0]?.toString()?.trim()
+            }
+            if (!viewFileName) {
+                viewFileName = viewFile?.toString()?.trim()
+            }
+            if (!viewFileName) {
+                logger.info("GenericReconciliationView no viewFileName from extraPathList=${extraPathList}")
+            } else {
+                logger.info("GenericReconciliationView resolved viewFileName=${viewFileName} extraPathList=${extraPathList}")
+            }
+            if (!viewFileName) {
+                viewFileName = ec.web?.parameters?.get("viewFile")?.toString()?.trim()
+            }
+            if (!viewFileName) {
+                viewFileName = ec.web?.parameters?.get("filename")?.toString()?.trim()
+            }
+            if (!viewFileName) {
+                viewFileName = ec.web?.requestParameters?.get("viewFile")?.toString()?.trim()
+            }
+            if (!viewFileName) {
+                viewFileName = ec.web?.requestParameters?.get("filename")?.toString()?.trim()
+            }
+            if (viewFileName) {
+                viewFile = viewFileName
+            } else {
+                viewFile = null
+            }
+            logger.info("GenericReconciliationView final viewFile=${viewFile}")
+
+            viewError = null
+            viewOrderTotalCount = 0
+            viewTotalDifferences = 0
+            viewOnlyInJson1Count = null
+            viewOnlyInJson2Count = null
+            viewOrderCount = 0
+            viewOrdersLimited = false
+            viewOrderLimit = null
+            viewMissingJson1Title = null
+            viewMissingJson2Title = null
+            viewMetaJson1Label = "JSON 1"
+            viewMetaJson2Label = "JSON 2"
+            viewMaxInMemoryBytes = 5 * 1024 * 1024
+
+            def parseIntSafe = { val ->
+                if (val == null) return null
+                try {
+                    return Integer.parseInt(val.toString().trim())
+                } catch (Exception ignored) {
+                    return null
+                }
+            }
+            try {
+                def limitValue = parseIntSafe(viewLimit)
+                if (limitValue != null) viewOrderLimit = limitValue
+            } catch (Exception ignored) {
+                viewOrderLimit = null
+            }
+            if (viewOrderLimit != null && viewOrderLimit < 1) viewOrderLimit = null
+
+            def normalizeTypeLabel = { label ->
+                def normalized = label?.toString()?.trim()
+                if (!normalized) return null
+                normalized = normalized.replaceAll(/\s+/, '_')
+                normalized = normalized.replaceAll(/[^A-Za-z0-9_]/, "")
+                return normalized ?: null
+            }
+            def applySummaryMap = { summary ->
+                if (summary == null) return
+                def totalDiffs = summary?.totalDifferences
+                if (totalDiffs != null) {
+                    viewOrderTotalCount = totalDiffs
+                    viewTotalDifferences = totalDiffs
+                }
+                def json1TypeLabel = normalizeTypeLabel(viewMetaJson1Label) ?: "json1"
+                def json2TypeLabel = normalizeTypeLabel(viewMetaJson2Label) ?: "json2"
+                def onlyInJson1 = summary?.onlyInJson1Count
+                def onlyInJson2 = summary?.onlyInJson2Count
+                if (onlyInJson1 == null) {
+                    onlyInJson1 = summary?.get("onlyIn${json1TypeLabel}Count")
+                }
+                if (onlyInJson2 == null) {
+                    onlyInJson2 = summary?.get("onlyIn${json2TypeLabel}Count")
+                }
+                if (onlyInJson1 != null) viewOnlyInJson1Count = onlyInJson1
+                if (onlyInJson2 != null) viewOnlyInJson2Count = onlyInJson2
+            }
+
+            if (!viewFileName) {
+                viewError = "No diff file selected"
+                logger.warn("GenericReconciliationView error=${viewError}")
+            } else if (!isMenuDataRequest) {
+                if (viewFileName.contains('..') || viewFileName.contains('/') || viewFileName.contains('\\')) {
+                    viewError = "Invalid filename"
+                    logger.warn("GenericReconciliationView error=${viewError} viewFile=${viewFileName}")
+                } else if (!viewFileName.toLowerCase().endsWith('.json')) {
+                    viewError = "Only JSON diff files can be viewed"
+                    logger.warn("GenericReconciliationView error=${viewError} viewFile=${viewFileName}")
+                } else {
+                    def outputDirRef = ec.resource.getLocationReference('runtime://tmp/reconciliation/generic/output')
+                    def fileRef = outputDirRef != null ? outputDirRef.getChild(viewFileName) : null
+                    if (fileRef == null || !fileRef.getExists()) {
+                        viewError = "Diff file not found"
+                        logger.warn("GenericReconciliationView error=${viewError} viewFile=${viewFileName} outputDir=${outputDirRef?.getLocation()}")
+                    } else {
+                        def fileSize = fileRef.getSize() ?: 0
+                        def useStreaming = fileSize > viewMaxInMemoryBytes
+                        try {
+                            if (!useStreaming) {
+                                def jsonData = fileRef.openStream().withCloseable { stream ->
+                                    new groovy.json.JsonSlurper().parse(stream)
+                                }
+                                def metadata = jsonData?.metadata ?: [:]
+                                viewMetaJson1Label = metadata?.json1Label ?: viewMetaJson1Label
+                                viewMetaJson2Label = metadata?.json2Label ?: viewMetaJson2Label
+                                def summary = jsonData?.summary ?: [:]
+                                applySummaryMap(summary)
+                            } else {
+                                def mapper = new com.fasterxml.jackson.databind.ObjectMapper()
+                                def summaryOnlyInJson1Key = "onlyInJson1Count"
+                                def summaryOnlyInJson2Key = "onlyInJson2Count"
+                                def updateSummaryKeys = {
+                                    def json1TypeLabel = normalizeTypeLabel(viewMetaJson1Label) ?: "json1"
+                                    def json2TypeLabel = normalizeTypeLabel(viewMetaJson2Label) ?: "json2"
+                                    summaryOnlyInJson1Key = "onlyIn${json1TypeLabel}Count"
+                                    summaryOnlyInJson2Key = "onlyIn${json2TypeLabel}Count"
+                                }
+                                def readSummaryCount = { node, key ->
+                                    def valueNode = node?.get(key)
+                                    if (valueNode == null || valueNode.isNull()) return null
+                                    if (valueNode.isNumber()) return valueNode.longValue()
+                                    def valueText = valueNode.asText()
+                                    if (valueText) {
+                                        try {
+                                            return Long.parseLong(valueText)
+                                        } catch (Exception ignored) {
+                                            return null
+                                        }
+                                    }
+                                    return null
+                                }
+                                def applySummaryNode = { node ->
+                                    if (node == null || !node.isObject()) return
+                                    def totalDiffs = readSummaryCount(node, "totalDifferences")
+                                    if (totalDiffs != null) {
+                                        viewOrderTotalCount = totalDiffs
+                                        viewTotalDifferences = totalDiffs
+                                    }
+                                    def onlyInJson1 = readSummaryCount(node, "onlyInJson1Count")
+                                    def onlyInJson2 = readSummaryCount(node, "onlyInJson2Count")
+                                    if (onlyInJson1 == null && summaryOnlyInJson1Key) {
+                                        onlyInJson1 = readSummaryCount(node, summaryOnlyInJson1Key)
+                                    }
+                                    if (onlyInJson2 == null && summaryOnlyInJson2Key) {
+                                        onlyInJson2 = readSummaryCount(node, summaryOnlyInJson2Key)
+                                    }
+                                    if (onlyInJson1 != null) viewOnlyInJson1Count = onlyInJson1
+                                    if (onlyInJson2 != null) viewOnlyInJson2Count = onlyInJson2
+                                }
+                                updateSummaryKeys()
+                                def summaryNode = null
+
+                                fileRef.openStream().withCloseable { stream ->
+                                    def parser = mapper.getFactory().createParser(stream)
+                                    try {
+                                        if (parser.nextToken() != com.fasterxml.jackson.core.JsonToken.START_OBJECT) {
+                                            throw new IllegalArgumentException("Invalid diff JSON format")
+                                        }
+                                        while (parser.nextToken() != com.fasterxml.jackson.core.JsonToken.END_OBJECT) {
+                                            def fieldName = parser.getCurrentName()
+                                            parser.nextToken()
+                                            if ("metadata".equals(fieldName)) {
+                                                def metadataNode = mapper.readTree(parser)
+                                                if (metadataNode != null && metadataNode.isObject()) {
+                                                    viewMetaJson1Label = metadataNode.get("json1Label")?.asText() ?: viewMetaJson1Label
+                                                    viewMetaJson2Label = metadataNode.get("json2Label")?.asText() ?: viewMetaJson2Label
+                                                    updateSummaryKeys()
+                                                    if (summaryNode != null) applySummaryNode(summaryNode)
+                                                }
+                                            } else if ("summary".equals(fieldName)) {
+                                                summaryNode = mapper.readTree(parser)
+                                                applySummaryNode(summaryNode)
+                                            } else {
+                                                parser.skipChildren()
+                                            }
+                                        }
+                                    } finally {
+                                        parser.close()
+                                    }
+                                }
+                            }
+                            if (viewOrderTotalCount == null) viewOrderTotalCount = 0
+                            if (viewTotalDifferences == null) viewTotalDifferences = viewOrderTotalCount
+                            viewOrdersLimited = (viewOrderLimit != null && viewOrderTotalCount > viewOrderLimit)
+                            viewOrderCount = viewOrdersLimited ? viewOrderLimit : viewOrderTotalCount
+                            viewMissingJson1Title = "Missing from ${viewMetaJson1Label ?: 'JSON 1'}"
+                            viewMissingJson2Title = "Missing from ${viewMetaJson2Label ?: 'JSON 2'}"
+                            logger.info("GenericReconciliationView loaded summary total=${viewOrderTotalCount}")
+                        } catch (Exception e) {
+                            viewError = "Unable to parse diff JSON: ${e.message}"
+                            logger.warn("GenericReconciliationView error=${viewError} viewFile=${viewFileName}", e)
+                        }
+                    }
+                }
+            }
+        ]]></script>
+    </pre-actions>
+
+    <widgets>
+        <container style="container">
+            <container style="page-header">
+                <label text="Diff Details" type="h2"/>
+                <container>
+                    <link url="list" text="Back to File Reconciliation"
+                            link-type="anchor-button" btn-type="default" style="btn-sm"/>
+                    <link url="downloadDiff" text="Download" link-type="anchor-button" target-window="_blank"
+                            btn-type="success" style="btn-sm" condition="viewFile">
+                        <parameter name="filename" from="viewFile"/>
+                    </link>
+                </container>
+            </container>
+
+            <section name="DiffDetailsErrorSection" condition="viewError">
+                <widgets>
+                    <label text="${viewError}" type="p" style="text-danger"/>
+                </widgets>
+            </section>
+
+            <section name="DiffDetailsBodySection" condition="!viewError">
+                <widgets>
+                    <label text="Summary" type="h5"/>
+                    <container style="row">
+                        <container style="col-sm-4">
+                            <label text="Total Differences" type="p" style="text-muted"/>
+                            <label text="${viewTotalDifferences ?: 0}" type="h3"/>
+                        </container>
+                        <container style="col-sm-4">
+                            <label text="Missing from ${viewMetaJson2Label ?: 'JSON 2'}" type="p" style="text-muted"/>
+                            <label text="${viewOnlyInJson1Count ?: 0}" type="h3"/>
+                        </container>
+                        <container style="col-sm-4">
+                            <label text="Missing from ${viewMetaJson1Label ?: 'JSON 1'}" type="p" style="text-muted"/>
+                            <label text="${viewOnlyInJson2Count ?: 0}" type="h3"/>
+                        </container>
+                    </container>
+
+                    <section name="DiffOrdersLimitedNotice" condition="viewOrdersLimited">
+                        <widgets>
+                            <label text="Showing first ${viewOrderCount} of ${viewOrderTotalCount} differences. Download the file for the full list."
+                                    type="p" style="text-warning"/>
+                        </widgets>
+                    </section>
+                    <form-single name="DiffMissingAccordionForm" skip-start="true" skip-end="true">
+                        <field name="missingJson1Section">
+                            <default-field>
+                                <section name="DiffOrdersMissingJson1Section" condition="(viewOnlyInJson2Count == null) || (viewOnlyInJson2Count > 0)">
+                                    <widgets>
+                                        <dynamic-container id="MissingJson1ListContainer" transition="MissingJsonList">
+                                            <parameter name="viewFile" from="viewFile"/>
+                                            <parameter name="viewLimit" from="viewLimit"/>
+                                            <parameter name="missingKey" value="json1"/>
+                                        </dynamic-container>
+                                    </widgets>
+                                </section>
+                                <section name="NoDiffOrdersMissingJson1Section" condition="(viewOnlyInJson2Count != null) and (viewOnlyInJson2Count == 0)">
+                                    <widgets>
+                                        <label text="No records missing in ${viewMetaJson1Label ?: 'JSON 1'}." type="p" style="text-muted"/>
+                                    </widgets>
+                                </section>
+                            </default-field>
+                        </field>
+                        <field name="missingJson2Section">
+                            <default-field>
+                                <section name="DiffOrdersMissingJson2Section" condition="(viewOnlyInJson1Count == null) || (viewOnlyInJson1Count > 0)">
+                                    <widgets>
+                                        <dynamic-container id="MissingJson2ListContainer" transition="MissingJsonList">
+                                            <parameter name="viewFile" from="viewFile"/>
+                                            <parameter name="viewLimit" from="viewLimit"/>
+                                            <parameter name="missingKey" value="json2"/>
+                                        </dynamic-container>
+                                    </widgets>
+                                </section>
+                                <section name="NoDiffOrdersMissingJson2Section" condition="(viewOnlyInJson1Count != null) and (viewOnlyInJson1Count == 0)">
+                                    <widgets>
+                                        <label text="No records missing in ${viewMetaJson2Label ?: 'JSON 2'}." type="p" style="text-muted"/>
+                                    </widgets>
+                                </section>
+                            </default-field>
+                        </field>
+                        <field-layout>
+                            <field-accordion>
+                                <field-group title="${viewMissingJson1Title}">
+                                    <field-ref name="missingJson1Section"/>
+                                </field-group>
+                                <field-group title="${viewMissingJson2Title}">
+                                    <field-ref name="missingJson2Section"/>
+                                </field-group>
+                            </field-accordion>
+                        </field-layout>
+                    </form-single>
+                </widgets>
+            </section>
+        </container>
+    </widgets>
+</screen>

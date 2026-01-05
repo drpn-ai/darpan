@@ -4,7 +4,7 @@
 
     <service verb="compare" noun="CsvFiles" type="script"
             location="component://darpan/src/reconciliation/csv/reconcileCsvFiles.groovy">
-        <description>Reconcile two CSV files by mapped ID field and generate a diff CSV.</description>
+        <description>Reconcile two CSV files by mapped ID field and generate a diff JSON.</description>
         <in-parameters>
             <parameter name="csv1Location" required="true"/>
             <parameter name="csv2Location" required="true"/>

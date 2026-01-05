@@ -109,14 +109,7 @@ collectPaths = { Object node, String currentPath ->
     }
 }
 
-def rootForSearch = rootSchema
-if (rootSchema instanceof Map && rootSchema.items != null) {
-    def rootType = rootSchema.type?.toString()
-    if (rootType == "array") {
-        rootForSearch = rootSchema.items
-    }
-}
-collectPaths(rootForSearch, "\$")
+collectPaths(rootSchema, "\$")
 
 matchingPaths = matching
 found = !matching.isEmpty()

@@ -295,8 +295,9 @@
                                 <header-field title="Last Modified" show-order-by="true"/>
                                 <default-field><display/></default-field>
                             </field>
-                            <field name="fileSizeKb" from="ec.l10n.format((fileSize ?: 0) / 1024, '#,##0.0')">
-                                <header-field title="Size (KB)" show-order-by="true"/>
+                            <field name="fileSizeKb"
+                                    from="(fileSize ?: 0) >= 1048576 ? (ec.l10n.format((fileSize ?: 0) / 1048576, '#,##0.##') + ' Mb') : (ec.l10n.format((fileSize ?: 0) / 1024, '#,##0.##') + ' Kb')">
+                                <header-field title="Size" show-order-by="true"/>
                                 <default-field><display/></default-field>
                             </field>
                             <field name="actions">

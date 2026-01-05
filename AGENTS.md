@@ -7,6 +7,14 @@ Component-generic guidance lives here; user-specific preferences are in `AGENTS.
 - Put business logic in `runtime/component/darpan/src/**` and expose it through service definitions in `runtime/component/darpan/service/*.xml`.
 - Keep entity changes in `runtime/component/darpan/entity/*.xml` and update docs alongside code when behavior changes.
 
+### Documentation updates
+- After code changes, update `runtime/component/darpan/docs/**` in the same PR to keep documentation aligned.
+- Update the closest feature doc first (e.g., `docs/reconciliation/**`, `docs/reconciliation/json-reconciliation.md`).
+- Add/refresh service signatures, input/output parameters, and defaults when service XML changes.
+- Include one concrete example (sample inputs, JSONPath, or service call) when behavior changes.
+- Note operational impacts: output locations, schema names, or required parameters.
+- If a change is user-facing, add a brief “what changed” note in the relevant doc section.
+
 ### Moqui service conventions
 - Define clear `in-parameters` and `out-parameters` with types, defaults, and descriptions.
 - Prefer `component://` and `runtime://` locations in services and scripts; avoid absolute filesystem paths.
@@ -39,9 +47,14 @@ Component-generic guidance lives here; user-specific preferences are in `AGENTS.
 - Resolve simple JSON keys to JSONPath via `JsonSchemaServices.resolve#JsonPathForKey`; default to `$.id` only with `processingWarnings`.
 - Prefer streamed output writes: Spark `coalesce(1)` + temp dir rename for CSV, `toLocalIterator()` + `withWriter("UTF-8")` for JSON.
 
+### UI screens
+- Use Moqui’s built-in pagination widgets/styling; avoid custom HTML pagination unless there’s no alternative.
+- For multiple paginated lists on one screen, prefer standalone list screens in dynamic containers so each list keeps its own pageIndex.
+
 ### JSON schema handling
 - Store schemas in `runtime/schemas/json/*.schema.json` and reference by filename.
 - Keep JSONPath expressions stable and documented in `runtime/component/darpan/docs/**`.
+- Prefer library-backed schema parsing/validation (Jackson + json-schema-validator) over bespoke implementations; only hand-roll inference when no library exists.
 
 ### Logging, errors, and safety
 - Use structured, readable logs with context (service name, file labels, counts).

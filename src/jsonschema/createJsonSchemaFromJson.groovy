@@ -1,17 +1,22 @@
-import groovy.json.JsonOutput
-import groovy.json.JsonSlurper
+import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
 import org.slf4j.LoggerFactory
 
 def logger = LoggerFactory.getLogger("darpan.jsonschema.CreateFromJson")
 
-def normalizeBool = { val, boolean defaultValue ->
+def normalizeBool = { Object val, boolean defaultValue ->
     if (val == null) return defaultValue
-    return val.toString().equalsIgnoreCase("true")
+    return val.toString().trim().equalsIgnoreCase("true")
 }
 
-def normalizeBaseName = { String rawName ->
-    if (!rawName) return null
-    def name = rawName.trim()
+def normalizeString = { Object val ->
+    def text = val?.toString()?.trim()
+    return text ?: null
+}
+
+def normalizeBaseName = { Object rawName ->
+    def name = normalizeString(rawName)
     if (!name) return null
     name = name.replaceAll("[^A-Za-z0-9._-]", "_")
     name = name.replaceAll("(?i)\\.schema\\.json\$", "")
@@ -20,14 +25,110 @@ def normalizeBaseName = { String rawName ->
     return name ?: null
 }
 
+def schemaTypeList = { Map schema ->
+    if (!(schema instanceof Map)) return []
+    def typeVal = schema.type
+    def types = []
+    if (typeVal instanceof Collection) {
+        types = typeVal.collect { it?.toString() }.findAll { it }
+    } else if (typeVal != null) {
+        types = [typeVal.toString()]
+    }
+    if (!types) {
+        if (schema.properties instanceof Map) types = ["object"]
+        else if (schema.items != null) types = ["array"]
+    }
+    return types
+}
+
+def mergeTypeLists = { List types ->
+    def normalized = types.collect { it?.toString() }.findAll { it }
+    def ordered = new LinkedHashSet(normalized)
+    if (ordered.contains("number") && ordered.contains("integer")) {
+        ordered.remove("integer")
+    }
+    return ordered as List
+}
+
+def primitiveTypes = ["string", "integer", "number", "boolean", "null"]
+def isObjectOnly = { Map schema ->
+    def types = schemaTypeList(schema)
+    if (types) {
+        def allowed = ["object", "null"]
+        return types.every { allowed.contains(it) }
+    }
+    return schema?.properties instanceof Map
+}
+def isArrayOnly = { Map schema ->
+    def types = schemaTypeList(schema)
+    if (types) {
+        def allowed = ["array", "null"]
+        return types.every { allowed.contains(it) }
+    }
+    return schema?.items != null
+}
+def isPrimitiveOnly = { Map schema ->
+    def types = schemaTypeList(schema)
+    if (!types) return false
+    return types.every { primitiveTypes.contains(it) }
+}
+
+def mergeSchemaList
+mergeSchemaList = { List schemas ->
+    def flattened = []
+    schemas.findAll { it != null }.each { schema ->
+        if (schema instanceof Map && schema.anyOf instanceof List) {
+            flattened.addAll(schema.anyOf)
+        } else {
+            flattened.add(schema)
+        }
+    }
+    if (!flattened) return null
+
+    if (flattened.every { it instanceof Map && isObjectOnly(it) }) {
+        Map mergedProps = [:]
+        flattened.each { schema ->
+            def props = schema.properties instanceof Map ? schema.properties : [:]
+            props.each { k, v ->
+                if (k == null || v == null) return
+                def key = k.toString()
+                def merged = mergeSchemaList([mergedProps[key], v].findAll { it != null })
+                mergedProps[key] = merged ?: v
+            }
+        }
+        def mergedTypes = mergeTypeLists(flattened.collectMany { schemaTypeList(it) } + ["object"])
+        def typeVal = mergedTypes.size() == 1 ? mergedTypes[0] : mergedTypes
+        return [type: typeVal, properties: mergedProps]
+    }
+
+    if (flattened.every { it instanceof Map && isArrayOnly(it) }) {
+        def itemSchemas = flattened.collect { it.items }.findAll { it != null }
+        def mergedItems = mergeSchemaList(itemSchemas)
+        def mergedTypes = mergeTypeLists(flattened.collectMany { schemaTypeList(it) } + ["array"])
+        def typeVal = mergedTypes.size() == 1 ? mergedTypes[0] : mergedTypes
+        return [type: typeVal, items: mergedItems ?: [:]]
+    }
+
+    if (flattened.every { it instanceof Map && isPrimitiveOnly(it) }) {
+        def mergedTypes = mergeTypeLists(flattened.collectMany { schemaTypeList(it) })
+        def typeVal = mergedTypes.size() == 1 ? mergedTypes[0] : mergedTypes
+        return [type: typeVal]
+    }
+
+    def uniqueSchemas = flattened.unique()
+    if (uniqueSchemas.size() == 1) return uniqueSchemas[0]
+    return [anyOf: uniqueSchemas]
+}
+
 def buildSchema
-buildSchema = { Object value, boolean strictMode ->
-    if (value == null) return [type: "null"]
-    if (value instanceof Map) {
+buildSchema = { JsonNode node, boolean strictMode ->
+    if (node == null || node.isNull()) return [type: "null"]
+    if (node.isObject()) {
         Map properties = [:]
-        value.each { k, v ->
-            if (k == null) return
-            properties[k.toString()] = buildSchema(v, strictMode)
+        def fields = node.fields()
+        while (fields.hasNext()) {
+            def entry = fields.next()
+            properties[entry.getKey()] = buildSchema(entry.getValue(), strictMode)
         }
         Map schema = [type: "object", properties: properties]
         if (strictMode && properties) {
@@ -36,21 +137,29 @@ buildSchema = { Object value, boolean strictMode ->
         }
         return schema
     }
-    if (value instanceof Collection) {
-        List itemSchemas = value.collect { buildSchema(it, strictMode) }
+    if (node.isArray()) {
+        List itemSchemas = []
+        def elements = node.elements()
+        while (elements.hasNext()) {
+            itemSchemas << buildSchema(elements.next(), strictMode)
+        }
         itemSchemas = itemSchemas.findAll { it != null }
         if (itemSchemas.isEmpty()) {
             return [type: "array", items: [:]]
+        }
+        if (!strictMode) {
+            def mergedItemsSchema = mergeSchemaList(itemSchemas)
+            if (mergedItemsSchema != null) {
+                return [type: "array", items: mergedItemsSchema]
+            }
         }
         List uniqueSchemas = itemSchemas.unique()
         Map itemsSchema = uniqueSchemas.size() == 1 ? uniqueSchemas[0] : [anyOf: uniqueSchemas]
         return [type: "array", items: itemsSchema]
     }
-    if (value instanceof Boolean) return [type: "boolean"]
-    if (value instanceof Integer || value instanceof Long || value instanceof BigInteger || value instanceof Short) {
-        return [type: "integer"]
-    }
-    if (value instanceof Number) return [type: "number"]
+    if (node.isBoolean()) return [type: "boolean"]
+    if (node.isIntegralNumber()) return [type: "integer"]
+    if (node.isNumber()) return [type: "number"]
     return [type: "string"]
 }
 
@@ -61,15 +170,21 @@ if (!jsonFile) {
 boolean overwriteMode = normalizeBool(overwrite, false)
 boolean strictMode = normalizeBool(strict, false)
 
+def mapper = new ObjectMapper()
+mapper.configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
 def jsonData = jsonFile.getInputStream().withCloseable { stream ->
-    new JsonSlurper().parse(stream)
+    mapper.readTree(stream)
+}
+if (jsonData == null) {
+    throw new IllegalArgumentException("jsonFile is empty")
 }
 
 Map schemaMap = buildSchema(jsonData, strictMode)
 schemaMap["\$schema"] = "http://json-schema.org/draft-07/schema#"
-if (schemaName?.toString()?.trim()) schemaMap.title = schemaName.toString().trim()
+def schemaTitle = normalizeString(schemaName)
+if (schemaTitle) schemaMap.title = schemaTitle
 
-String baseName = normalizeBaseName(schemaName?.toString())
+String baseName = normalizeBaseName(schemaTitle)
 if (!baseName) baseName = normalizeBaseName(jsonFile.getName())
 if (!baseName) baseName = "schema"
 
@@ -92,7 +207,7 @@ if (!overwriteMode) {
 }
 
 def schemaFileRef = schemaDirRef.makeFile(fileName)
-String schemaJson = JsonOutput.prettyPrint(JsonOutput.toJson(schemaMap))
+String schemaJson = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(schemaMap)
 schemaFileRef.putText(schemaJson)
 
 schemaFileName = fileName

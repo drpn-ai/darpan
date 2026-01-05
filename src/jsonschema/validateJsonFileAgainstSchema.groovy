@@ -1,7 +1,6 @@
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.networknt.schema.JsonSchemaFactory
 import com.networknt.schema.SpecVersion
-import groovy.json.JsonSlurper
 import org.slf4j.LoggerFactory
 
 def logger = LoggerFactory.getLogger("darpan.jsonschema.Validate")
@@ -35,14 +34,12 @@ if (schemaFileRef == null || !schemaFileRef.getExists()) {
 }
 
 def mapper = new ObjectMapper()
-def schemaData = schemaFileRef.openStream().withCloseable { stream ->
-    new JsonSlurper().parse(stream)
+def schemaNode = schemaFileRef.openStream().withCloseable { stream ->
+    mapper.readTree(stream)
 }
-def jsonData = jsonFile.getInputStream().withCloseable { stream ->
-    new JsonSlurper().parse(stream)
+def jsonNode = jsonFile.getInputStream().withCloseable { stream ->
+    mapper.readTree(stream)
 }
-def schemaNode = mapper.valueToTree(schemaData)
-def jsonNode = mapper.valueToTree(jsonData)
 
 def schemaFactory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V7)
 def schema = schemaFactory.getSchema(schemaNode)

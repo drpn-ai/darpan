@@ -75,7 +75,7 @@
                 <tr>
                     <th>File</th>
                     <th>Last Modified</th>
-                    <th>Size (Kb)</th>
+                    <th>Size</th>
                     <th></th>
                 </tr>
             </thead>
@@ -93,7 +93,14 @@
                     <tr>
                         <td>${fileName?html}</td>
                         <td>${ec.l10n.format(fileLastModified?number_to_datetime, null)}</td>
-                        <td>${ec.l10n.format((fileSizeBytes?number) / 1024, '#,##0.00')}</td>
+                        <#assign fileSizeBytesNum = fileSizeBytes?number>
+                        <#assign fileSizeUnit = "Kb">
+                        <#assign fileSizeValue = fileSizeBytesNum / 1024>
+                        <#if fileSizeBytesNum >= 1048576>
+                            <#assign fileSizeValue = fileSizeBytesNum / 1048576>
+                            <#assign fileSizeUnit = "Mb">
+                        </#if>
+                        <td>${ec.l10n.format(fileSizeValue, '#,##0.##')} ${fileSizeUnit}</td>
                         <td>
                             <#if fileName?has_content>
                                 <a class="btn btn-default btn-xs" href="${sri.buildUrl('downloadDiff').addParameter('filename', fileName).urlWithParams}" target="_blank" rel="noopener" download="${fileName?html}">Download</a>

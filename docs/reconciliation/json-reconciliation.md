@@ -63,6 +63,8 @@ Same as `reconcile#JsonFiles`
 
 The `compareJsonPath` parameter uses JSONPath syntax to extract ID values from your JSON structure.
 
+When a schema is provided and you pass a simple key (like `id` or `$.id`), the resolver expands it to the full JSONPath. For array-root schemas this becomes `$[*].id`.
+
 ### Examples
 
 **Simple ID field at root:**
@@ -146,6 +148,7 @@ The reconciliation output is a JSON file with the following structure:
 4. Optionally provide labels for the files
 5. Submit to run reconciliation
 6. Download the results JSON file
+7. Use **View** next to a JSON result to see the summary and separate lists for records missing in each JSON file (with full order JSON payloads)
 
 ## Testing
 
@@ -164,7 +167,13 @@ Schema: `runtime://schemas/json/test-orders.schema.json`
 ## Notes
 
 - Schema validation is performed first; reconciliation continues even if validation fails
-- For large JSON arrays, validation samples the first element only to reduce memory usage
+- For JSON array roots, validation reads the full array for small files and samples the first element for large payloads to reduce memory usage
 - The reconciliation uses ID-based comparison (like CSV reconciliation)
 - Full objects are preserved in the output for data analysis
 - JSONPath library (`com.jayway.jsonpath:json-path:2.8.0`) is required
+- Schema parsing for validation/generation uses Jackson ObjectMapper to avoid ad-hoc JSON handling
+- Diff detail view streams large diff files and paginates missing-record lists independently (default 20 per page) using Moqui controls to keep previews responsive
+- Schema generation requires non-empty JSON input files; empty uploads are rejected
+- What changed: Diff View is hidden from the navigation menu and is accessed from the generated file list under File Reconciliation (direct `/Reconciliation/GenericReconciliationView` access removed)
+- What changed: Simple ID keys are resolved against array-root schemas (e.g., `id` -> `$[*].id`) and small array payloads are fully validated before sampling large ones
+- What changed: Schema generation in non-strict mode merges array item shapes to keep schemas compact instead of emitting large `anyOf` lists

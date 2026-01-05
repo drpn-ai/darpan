@@ -66,6 +66,7 @@ def schemaNode = schemaFileRef.openStream().withCloseable { stream ->
     mapper.readTree(stream)
 }
 
+long maxFullArrayValidationBytes = 5L * 1024L * 1024L
 def isSchemaArray = {
     def typeNode = schemaNode?.get("type")
     if (typeNode?.isTextual() && typeNode.asText() == "array") return true
@@ -81,13 +82,17 @@ def jsonNode = jsonFile.withInputStream { stream ->
         def token = parser.nextToken()
         if (token == null) return null
         if (token == JsonToken.START_ARRAY) {
+            if (isSchemaArray() && jsonFile.length() <= maxFullArrayValidationBytes) {
+                logger.info("Validating full JSON array (size=${jsonFile.length()} bytes)")
+                return mapper.readTree(parser)
+            }
             def nextToken = parser.nextToken()
             def arrayNode = mapper.createArrayNode()
             if (nextToken != null && nextToken != JsonToken.END_ARRAY) {
                 arrayNode.add(mapper.readTree(parser))
             }
             if (isSchemaArray()) {
-                logger.info("Validating JSON sample: array root detected, using first element only")
+                logger.info("Validating JSON sample: array root detected, using first element only (size=${jsonFile.length()} bytes)")
             }
             return arrayNode
         }

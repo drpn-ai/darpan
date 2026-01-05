@@ -1,6 +1,9 @@
 import org.slf4j.LoggerFactory
 import groovy.json.JsonSlurper
-import com.jayway.jsonpath.JsonPath
+import groovy.json.JsonOutput
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.storage.StorageLevel
+import static org.apache.spark.sql.functions.*
 
 def logger = LoggerFactory.getLogger("darpan.reconciliation.generic.GenericReconciliation")
 
@@ -38,8 +41,15 @@ mappingMembers.each { member ->
 // Look up system descriptions for labels
 def system1Enum = ec.entity.find("moqui.basic.Enumeration").condition("enumId", file1SystemEnumId).one()
 def system2Enum = ec.entity.find("moqui.basic.Enumeration").condition("enumId", file2SystemEnumId).one()
-def file1Label = system1Enum?.description ?: file1SystemEnumId
-def file2Label = system2Enum?.description ?: file2SystemEnumId
+def resolveEnumLabel = { enumValue, fallbackId ->
+    def code = enumValue?.enumCode?.toString()?.trim()
+    if (code) return code
+    def description = enumValue?.description?.toString()?.trim()
+    if (description) return description
+    return fallbackId
+}
+def file1Label = resolveEnumLabel(system1Enum, file1SystemEnumId)
+def file2Label = resolveEnumLabel(system2Enum, file2SystemEnumId)
 
 // Get configs for selected systems
 def file1Config = configBySystem[file1SystemEnumId] ?: [:]
@@ -62,6 +72,90 @@ def schemaFileName2 = file2Schema
 def schemaFileName = schemaFileName1 ?: schemaFileName2
 
 logger.info("Loaded mapping config: file1=[${file1Config}], file2=[${file2Config}]")
+
+def normalizeJsonPathForJson = { rawPath, schemaName, jsonData ->
+    if (!rawPath) return rawPath
+    def pathText = rawPath.toString().trim()
+    if (!pathText) return pathText
+
+    def keyName = null
+    if (pathText.startsWith("\$")) {
+        def simpleKey = pathText.startsWith("\$.") ? pathText.substring(2) : null
+        if (simpleKey && !simpleKey.contains(".") && !simpleKey.contains("[")) {
+            keyName = simpleKey
+        } else {
+            return pathText
+        }
+    } else {
+        keyName = pathText
+    }
+
+    def schemaToUse = schemaName?.toString()?.trim()
+    if (schemaToUse && keyName) {
+        try {
+            def resolveOut = ec.service.sync().name("JsonSchemaServices.resolve#JsonPathForKey")
+                    .parameters([schemaFileName: schemaToUse, key: keyName]).call()
+            def matches = resolveOut?.matchingPaths ?: []
+            if (matches.size() == 1) {
+                logger.info("Resolved JSONPath ${pathText} to ${resolveOut.resolvedJsonPath} using schema ${schemaToUse}")
+                return resolveOut.resolvedJsonPath
+            }
+            if (matches.size() > 1) {
+                logger.warn("JSONPath ${pathText} is ambiguous in schema ${schemaToUse}; using fallback path resolution")
+            }
+        } catch (Exception e) {
+            logger.warn("Unable to resolve JSONPath ${pathText} using schema ${schemaToUse}: ${e.message}")
+        }
+    }
+
+    if (jsonData instanceof List) {
+        if (pathText.startsWith("\$.") && !pathText.startsWith("\$[*].")) {
+            return pathText.replaceFirst(/^\$\./, "\$[*].")
+        }
+        return keyName ? "\$[*].${keyName}" : pathText
+    }
+    return keyName ? "\$.${keyName}" : pathText
+}
+
+def resolvePath = { String location ->
+    def rr = ec.resource.getLocationReference(location)
+    if (rr != null && rr.supportsUrl()) {
+        def url = rr.getUrl()
+        if (url != null) {
+            if ("file".equalsIgnoreCase(url.protocol)) {
+                try {
+                    return new File(url.toURI()).getAbsolutePath()
+                } catch (Exception e) {
+                    return url.getPath()
+                }
+            }
+            return url.toString()
+        }
+    }
+    return location
+}
+
+def normalizeBool = { val, boolean defaultValue ->
+    if (val == null) return defaultValue
+    return val.toString().equalsIgnoreCase("true")
+}
+
+def normalizeCsvIdField = { rawField ->
+    if (!rawField) return rawField
+    def fieldText = rawField.toString().trim()
+    if (!fieldText) return fieldText
+    if (!fieldText.startsWith("\$")) return fieldText
+
+    def normalized = fieldText
+    normalized = normalized.replaceFirst(/^\$\[\*\]\./, "")
+    normalized = normalized.replaceFirst(/^\$\./, "")
+    if (normalized.contains(".")) {
+        normalized = normalized.tokenize(".")[-1]
+    }
+    normalized = normalized.replaceAll(/\[.*\]$/, "")
+    normalized = normalized?.trim()
+    return normalized ?: null
+}
 
 // Helper to detect file type based on name and content (with override from mapping)
 def detectFileType = { fileItem, systemEnumId ->
@@ -231,99 +325,317 @@ if (reconType == "CSV_CSV") {
     // Mixed type: CSV + JSON
     reconciliationType = "MIXED"
     logger.info("Mixed file types detected: ${reconType}")
-    processingWarnings.add([warningMessage: "Mixed file types (CSV + JSON). Converting to CSV for comparison."])
+    processingWarnings.add([warningMessage: "Mixed file types (CSV + JSON). Comparing IDs and preserving full data."])
     
-    // Strategy: Convert JSON to CSV (simpler approach)
+    // Strategy: Use Spark to compare IDs and preserve full data from both files
     // Identify which is CSV and which is JSON
     def csvLocation
-    def csvSystemEnumId
     def jsonLocation
-    def jsonLabel
     def isFile1Csv = (file1Type == 'CSV')
     
     if (isFile1Csv) {
         csvLocation = file1Ref.getLocation()
-        csvSystemEnumId = file1SystemEnumId
         jsonLocation = file2Ref.getFile()?.getAbsolutePath() ?: file2Ref.getLocation()
-        jsonLabel = file2Label ?: "File 2 (JSON)"
     } else {
         csvLocation = file2Ref.getLocation()
-        csvSystemEnumId = file2SystemEnumId
         jsonLocation = file1Ref.getFile()?.getAbsolutePath() ?: file1Ref.getLocation()
-        jsonLabel = file1Label ?: "File 1 (JSON)"
     }
     
-    // Extract IDs from JSON and create temp CSV
+    def csvIdFieldRaw = isFile1Csv ? file1IdField : file2IdField
+    def csvIdField = normalizeCsvIdField(csvIdFieldRaw)
+    if (!csvIdField) {
+        csvIdField = "id"
+        def warnMessage = "CSV id field '${csvIdFieldRaw}' looks like a JSONPath; using default: ${csvIdField}"
+        processingWarnings.add([warningMessage: warnMessage])
+        logger.warn(warnMessage)
+    } else if (csvIdFieldRaw?.toString()?.trim()?.startsWith("\$")) {
+        def warnMessage = "CSV id field '${csvIdFieldRaw}' looks like a JSONPath; using column '${csvIdField}'"
+        processingWarnings.add([warningMessage: warnMessage])
+        logger.warn(warnMessage)
+    }
+
+    // Prepare JSON path for Spark extraction
     def jsonIdField = isFile1Csv ? file2IdField : file1IdField
+    def jsonSchemaFileName = isFile1Csv ? file2Schema : file1Schema
     def compareJsonPathForJson = jsonIdField?.startsWith('$') ? jsonIdField : "\$.${jsonIdField}"
     if (!compareJsonPathForJson) {
         compareJsonPathForJson = '$.id'
         processingWarnings.add([warningMessage: "No JSONPath specified for JSON file, using default: \$.id"])
     }
     
-    logger.info("Converting JSON to CSV using JSONPath: ${compareJsonPathForJson}")
-    
-    // Use a simple groovy script to extract IDs from JSON and create CSV
-    def tempCsvRef = inputDirRef.makeFile(timestamp + '-converted-from-json.csv')
-    def slurper = new JsonSlurper()
-    def jsonFilePath = jsonLocation?.startsWith('file:') ? jsonLocation.replaceFirst('^file:', '') : jsonLocation
-    def jsonFile = new File(jsonFilePath)
-    def jsonData = jsonFile.withInputStream { stream -> slurper.parse(stream) }
-    
-    // Extract IDs using JSONPath
-    def ids = JsonPath.read(jsonData, compareJsonPathForJson)
-    def idList = []
-    if (ids instanceof List) {
-        idList = ids.collect { it?.toString() }.findAll { it != null && it.trim() }
-    } else if (ids != null) {
-        idList = [ids.toString()]
+    def jsonPathResolved = resolvePath(jsonLocation)
+    def jsonData = null
+    try {
+        def slurper = new JsonSlurper()
+        jsonData = new File(jsonPathResolved).withInputStream { stream -> slurper.parse(stream) }
+    } catch (Exception e) {
+        logger.warn("Unable to read JSON file for path normalization: ${e.message}")
     }
-    
-    logger.info("Extracted ${idList.size()} IDs from JSON file")
-    
-    // Write to temp CSV
-    tempCsvRef.getFile().withWriter('UTF-8') { writer ->
-        writer.write("${idField ?: 'id'}\\n")
-        idList.each { id -> writer.write("${id}\\n") }
+    if (jsonData != null) {
+        compareJsonPathForJson = normalizeJsonPathForJson(compareJsonPathForJson, jsonSchemaFileName, jsonData)
     }
-    
-    logger.info("Created temporary CSV from JSON: ${tempCsvRef.getLocation()}")
-    
-    // Now do CSV comparison
-    def csv1Loc, csv2Loc, csv1Sys, csv2Sys
-    if (isFile1Csv) {
-        csv1Loc = csvLocation
-        csv2Loc = tempCsvRef.getLocation()
-        csv1Sys = csvSystemEnumId
-        csv2Sys = "JSON_CONVERTED"
-    } else {
-        csv1Loc = tempCsvRef.getLocation()
-        csv2Loc = csvLocation
-        csv1Sys = "JSON_CONVERTED"
-        csv2Sys = csvSystemEnumId
+    logger.info("Mixed reconciliation using JSONPath: ${compareJsonPathForJson} and CSV id field: ${csvIdField}")
+
+    boolean includeHeader = normalizeBool(hasHeader, true)
+    SparkSession spark = SparkSession.builder()
+            .appName(sparkAppName ?: "ReconciliationMixedCompare")
+            .master(sparkMaster ?: "local[*]")
+            .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+            .config("spark.sql.adaptive.enabled", "true")
+            .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
+            .config("spark.sql.files.maxPartitionBytes", "134217728")
+            .getOrCreate()
+
+    def normalizeSparkPath = { String jsonPath ->
+        if (!jsonPath) return jsonPath
+        def path = jsonPath.toString().trim()
+        path = path.replaceFirst(/^\$\[\*\]/, "")
+        path = path.replaceFirst(/^\$\./, "")
+        if (path.startsWith(".")) path = path.substring(1)
+        return path
     }
-    
-    result = ec.service.sync()
-            .name("ReconciliationCsvServices.compare#CsvFiles")
-            .parameters([
-                csv1Location: csv1Loc,
-                csv2Location: csv2Loc,
-                csv1SystemEnumId: csv1Sys,
-                csv2SystemEnumId: csv2Sys,
-                idField: idField,
-                hasHeader: hasHeader,
-                outputLocation: 'runtime://tmp/reconciliation/generic/output',
-                outputFileName: "mixed-reconciliation-${timestamp}.csv",
-                sparkMaster: sparkMaster,
-                sparkAppName: sparkAppName
-            ])
-            .call()
-    
-    diffLocation = result.diffLocation
-    diffFileName = result.diffFileName
-    onlyInFile1Count = result.onlyInCsv1Count
-    onlyInFile2Count = result.onlyInCsv2Count
-    differenceCount = result.diffRowCount
+    def convertJsonPathToSparkSql = { String jsonPath ->
+        def path = normalizeSparkPath(jsonPath)
+        if (!path) {
+            throw new IllegalArgumentException("JSONPath ${jsonPath} resolves to an empty field path.")
+        }
+        if (path.contains("[*]")) {
+            def parts = path.split(/\[\*\]/)
+            if (parts.length == 2) {
+                def arrayPath = parts[0]
+                def afterArray = parts[1].replaceFirst(/^\./, "")
+                return [needsExplode: true, arrayPath: arrayPath, fieldPath: afterArray]
+            }
+        }
+        return [needsExplode: false, path: path]
+    }
+    def assertRootFieldExists = { df, rootField, pathLabel ->
+        def rootFields = (df.columns() ?: []) as List
+        if (!rootFields.contains(rootField)) {
+            throw new IllegalArgumentException("JSONPath ${pathLabel} does not match root fields. Available root fields: ${rootFields.join(', ')}")
+        }
+    }
+    def quoteField = { String name ->
+        def safe = name?.replace("`", "``")
+        return safe ? "`" + safe + "`" : null
+    }
+    def buildCsvIdDf = { rawDf, fieldName ->
+        def fieldExpr = quoteField(fieldName)
+        if (!fieldExpr) {
+            throw new IllegalArgumentException("CSV id field is required")
+        }
+        return rawDf
+                .selectExpr("${fieldExpr} as compare_id")
+                .filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0")
+                .withColumn("compare_id", col("compare_id").cast("string"))
+                .dropDuplicates()
+    }
+    def buildCsvDataDf = { rawDf, fieldName ->
+        def fieldExpr = quoteField(fieldName)
+        if (!fieldExpr) {
+            throw new IllegalArgumentException("CSV id field is required")
+        }
+        return rawDf
+                .selectExpr("${fieldExpr} as compare_id", "struct(*) as data")
+                .filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0")
+                .withColumn("compare_id", col("compare_id").cast("string"))
+    }
+    def buildJsonIdDf = { rawDf, pathInfo, pathLabel ->
+        if (pathInfo.needsExplode) {
+            def arrayPath = normalizeSparkPath(pathInfo.arrayPath)
+            def fieldPath = normalizeSparkPath(pathInfo.fieldPath)
+            if (!arrayPath || !fieldPath) {
+                throw new IllegalArgumentException("JSONPath ${pathLabel} resolves to an empty array or field path after normalization.")
+            }
+            def rootField = arrayPath?.split(/\./)[0]
+            if (rootField) assertRootFieldExists(rawDf, rootField, pathLabel)
+            return rawDf
+                    .selectExpr("explode(${arrayPath}) as exploded_item")
+                    .selectExpr("exploded_item.${fieldPath} as compare_id")
+                    .filter("compare_id IS NOT NULL AND length(trim(cast(compare_id as string))) > 0")
+                    .withColumn("compare_id", col("compare_id").cast("string"))
+                    .distinct()
+        }
+        def safePath = normalizeSparkPath(pathInfo.path)
+        if (!safePath) {
+            throw new IllegalArgumentException("JSONPath ${pathLabel} resolves to an empty field path after normalization.")
+        }
+        def rootField = safePath?.split(/\./)[0]
+        if (rootField) assertRootFieldExists(rawDf, rootField, pathLabel)
+        return rawDf
+                .selectExpr("${safePath} as compare_id")
+                .filter("compare_id IS NOT NULL AND length(trim(cast(compare_id as string))) > 0")
+                .withColumn("compare_id", col("compare_id").cast("string"))
+                .distinct()
+    }
+    def buildJsonDataDf = { rawDf, pathInfo, pathLabel ->
+        if (pathInfo.needsExplode) {
+            def arrayPath = normalizeSparkPath(pathInfo.arrayPath)
+            def fieldPath = normalizeSparkPath(pathInfo.fieldPath)
+            if (!arrayPath || !fieldPath) {
+                throw new IllegalArgumentException("JSONPath ${pathLabel} resolves to an empty array or field path after normalization.")
+            }
+            def rootField = arrayPath?.split(/\./)[0]
+            if (rootField) assertRootFieldExists(rawDf, rootField, pathLabel)
+            return rawDf
+                    .selectExpr("explode(${arrayPath}) as exploded_item")
+                    .selectExpr("exploded_item.${fieldPath} as compare_id", "exploded_item as data")
+                    .filter("compare_id IS NOT NULL AND length(trim(cast(compare_id as string))) > 0")
+                    .withColumn("compare_id", col("compare_id").cast("string"))
+        }
+        def safePath = normalizeSparkPath(pathInfo.path)
+        if (!safePath) {
+            throw new IllegalArgumentException("JSONPath ${pathLabel} resolves to an empty field path after normalization.")
+        }
+        def rootField = safePath?.split(/\./)[0]
+        if (rootField) assertRootFieldExists(rawDf, rootField, pathLabel)
+        return rawDf
+                .selectExpr("${safePath} as compare_id", "struct(*) as data")
+                .filter("compare_id IS NOT NULL AND length(trim(cast(compare_id as string))) > 0")
+                .withColumn("compare_id", col("compare_id").cast("string"))
+    }
+
+    String csvPath = resolvePath(csvLocation)
+    String jsonPath = resolvePath(jsonLocation)
+    def csvRawDf = spark.read().option("header", includeHeader.toString()).option("multiLine", "true").csv(csvPath)
+    def jsonRawDf = spark.read().option("multiLine", "true").json(jsonPath)
+
+    def jsonPathInfo = convertJsonPathToSparkSql(compareJsonPathForJson)
+    def csvIdDf = buildCsvIdDf(csvRawDf, csvIdField).persist(StorageLevel.DISK_ONLY())
+    def jsonIdDf = buildJsonIdDf(jsonRawDf, jsonPathInfo, compareJsonPathForJson).persist(StorageLevel.DISK_ONLY())
+    def csvDataDf = buildCsvDataDf(csvRawDf, csvIdField)
+    def jsonDataDf = buildJsonDataDf(jsonRawDf, jsonPathInfo, compareJsonPathForJson)
+
+    def file1IdDf = isFile1Csv ? csvIdDf : jsonIdDf
+    def file2IdDf = isFile1Csv ? jsonIdDf : csvIdDf
+    def file1DataDf = isFile1Csv ? csvDataDf : jsonDataDf
+    def file2DataDf = isFile1Csv ? jsonDataDf : csvDataDf
+
+    def onlyInFile1Df = file1IdDf.join(file2IdDf, "compare_id", "left_anti").select("compare_id")
+    def onlyInFile2Df = file2IdDf.join(file1IdDf, "compare_id", "left_anti").select("compare_id")
+    onlyInFile1Df = onlyInFile1Df.persist(StorageLevel.DISK_ONLY())
+    onlyInFile2Df = onlyInFile2Df.persist(StorageLevel.DISK_ONLY())
+
+    onlyInFile1Count = onlyInFile1Df.count()
+    onlyInFile2Count = onlyInFile2Df.count()
+    differenceCount = onlyInFile1Count + onlyInFile2Count
+
+    def normalizeTypeLabel = { label ->
+        def normalized = label?.toString()?.trim()
+        if (!normalized) return null
+        normalized = normalized.replaceAll(/\s+/, "_")
+        normalized = normalized.replaceAll(/[^A-Za-z0-9_]/, "")
+        return normalized ?: null
+    }
+    def file1TypeLabel = normalizeTypeLabel(file1Label) ?: "json1"
+    def file2TypeLabel = normalizeTypeLabel(file2Label) ?: "json2"
+    def missingInFile1Type = "missing_in_" + file1TypeLabel
+    def missingInFile2Type = "missing_in_" + file2TypeLabel
+
+    def diffFile1Note = "Present in ${file1Label}, missing in ${file2Label}".toString()
+    def diffFile2Note = "Present in ${file2Label}, missing in ${file1Label}".toString()
+    def differenceDfs = []
+    if (onlyInFile1Count > 0) {
+        def onlyInFile1ObjDf = file1DataDf.join(onlyInFile1Df, "compare_id", "inner")
+                .dropDuplicates(["compare_id"] as String[])
+        def diffFile1Df = onlyInFile1ObjDf.select(
+                lit(missingInFile2Type).alias("type"),
+                col("compare_id").alias("id"),
+                lit(file1Label).alias("presentIn"),
+                lit(file2Label).alias("missingIn"),
+                col("data").alias("data"),
+                lit(diffFile1Note).alias("note")
+        )
+        differenceDfs.add(diffFile1Df)
+    }
+    if (onlyInFile2Count > 0) {
+        def onlyInFile2ObjDf = file2DataDf.join(onlyInFile2Df, "compare_id", "inner")
+                .dropDuplicates(["compare_id"] as String[])
+        def diffFile2Df = onlyInFile2ObjDf.select(
+                lit(missingInFile1Type).alias("type"),
+                col("compare_id").alias("id"),
+                lit(file2Label).alias("presentIn"),
+                lit(file1Label).alias("missingIn"),
+                col("data").alias("data"),
+                lit(diffFile2Note).alias("note")
+        )
+        differenceDfs.add(diffFile2Df)
+    }
+
+    String outputBaseLocation = "runtime://tmp/reconciliation/generic/output"
+    def outputLocationRef = ec.resource.getLocationReference(outputBaseLocation)
+    File outputDir = outputLocationRef?.getFile()
+    if (outputDir == null) {
+        outputDir = outputBaseLocation.startsWith("/") ?
+                new File(outputBaseLocation) :
+                new File((String) ec.factory.getRuntimePath(), outputBaseLocation)
+    }
+    if (!outputDir.exists()) outputDir.mkdirs()
+
+    String baseFileName = "mixed-reconciliation-${timestamp}.json"
+    if (!baseFileName.endsWith(".json")) baseFileName = baseFileName + ".json"
+    String diffFileNameStr = baseFileName
+    String nameRoot = baseFileName.endsWith(".json") ? baseFileName[0..-6] : baseFileName
+    File outputFile = new File(outputDir, diffFileNameStr)
+    int suffix = 1
+    while (outputFile.exists()) {
+        diffFileNameStr = "${nameRoot}-${suffix}.json"
+        outputFile = new File(outputDir, diffFileNameStr)
+        suffix++
+    }
+
+    def outputLocationBase = outputBaseLocation.endsWith("/") ? outputBaseLocation[0..-2] : outputBaseLocation
+    diffLocation = "${outputLocationBase}/${diffFileNameStr}"
+    diffFileName = diffFileNameStr
+
+    def timestampIso = null
+    try {
+        timestampIso = ec.user.nowTimestamp?.toInstant()?.toString()
+    } catch (Exception e) {
+        timestampIso = ec.user.nowTimestamp?.toString()
+    }
+    def outputMetadata = [
+            timestamp: timestampIso,
+            json1Label: file1Label,
+            json2Label: file2Label,
+            compareField: csvIdField,
+            compareJsonPath: compareJsonPathForJson,
+            file1Type: file1Type,
+            file2Type: file2Type
+    ]
+    def outputSummary = [
+            totalDifferences: differenceCount
+    ]
+    outputSummary["onlyIn${file1TypeLabel}Count"] = onlyInFile1Count
+    outputSummary["onlyIn${file2TypeLabel}Count"] = onlyInFile2Count
+    def outputErrors = []
+
+    outputFile.withWriter("UTF-8") { writer ->
+        writer << "{\n"
+        writer << "\"metadata\":" + JsonOutput.toJson(outputMetadata) + ",\n"
+        writer << "\"summary\":" + JsonOutput.toJson(outputSummary) + ",\n"
+        writer << "\"validationErrors\":" + JsonOutput.toJson(outputErrors) + ",\n"
+        writer << "\"differences\":["
+        boolean first = true
+        if (differenceCount > 0 && differenceDfs) {
+            differenceDfs.each { df ->
+                def iter = df.toJSON().toLocalIterator()
+                while (iter.hasNext()) {
+                    def rowJson = iter.next()
+                    if (!first) writer << ","
+                    writer << "\n" << rowJson
+                    first = false
+                }
+            }
+        }
+        if (!first) writer << "\n"
+        writer << "]\n}"
+    }
+
+    csvIdDf.unpersist()
+    jsonIdDf.unpersist()
+    onlyInFile1Df.unpersist()
+    onlyInFile2Df.unpersist()
 }
 
 logger.info("Generic reconciliation complete: type=${reconciliationType}, differences=${differenceCount}, file=${diffFileName}")

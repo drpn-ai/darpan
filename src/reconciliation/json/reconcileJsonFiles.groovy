@@ -184,10 +184,20 @@ try {
             .getOrCreate()
     
     // Helper to convert JSONPath to Spark SQL expression
-    def convertJsonPathToSparkSql = { String jsonPath ->
-        // Remove leading $[*]. or $. if present (Spark reads root arrays as rows)
-        def path = jsonPath.replaceFirst(/^\$\[\*\]\./, "")
+    def normalizeSparkPath = { String jsonPath ->
+        if (!jsonPath) return jsonPath
+        def path = jsonPath.toString().trim()
+        path = path.replaceFirst(/^\$\[\*\]/, "")
         path = path.replaceFirst(/^\$\./, "")
+        if (path.startsWith(".")) path = path.substring(1)
+        return path
+    }
+    def convertJsonPathToSparkSql = { String jsonPath ->
+        // Spark reads root arrays as rows, so strip JSONPath root/array markers
+        def path = normalizeSparkPath(jsonPath)
+        if (!path) {
+            throw new IllegalArgumentException("JSONPath ${jsonPath} resolves to an empty field path. Provide a field like \$.id or \$[*].id.")
+        }
         
         // Handle array wildcards: edges[*].node -> explode(edges).node
         // For complex paths, we need to handle nested explosions
@@ -227,26 +237,38 @@ try {
 
     def buildIdDf = { rawDf, pathInfo, pathLabel ->
         if (pathInfo.needsExplode) {
-            def rootField = pathInfo.arrayPath?.split(/\./)[0]
+            def arrayPath = normalizeSparkPath(pathInfo.arrayPath)
+            def fieldPath = normalizeSparkPath(pathInfo.fieldPath)
+            if (!arrayPath) {
+                throw new IllegalArgumentException("JSONPath ${pathLabel} resolves to an empty array path after normalization.")
+            }
+            if (!fieldPath) {
+                throw new IllegalArgumentException("JSONPath ${pathLabel} resolves to an empty field path after normalization.")
+            }
+            def rootField = arrayPath?.split(/\./)[0]
             if (rootField) {
                 assertRootFieldExists(rawDf, rootField, pathLabel)
             }
-            logger.info("Using explode for JSONPath with arrays: path=${pathLabel} arrayPath=${pathInfo.arrayPath}, fieldPath=${pathInfo.fieldPath}")
+            logger.info("Using explode for JSONPath with arrays: path=${pathLabel} arrayPath=${arrayPath}, fieldPath=${fieldPath}")
             return rawDf
-                    .selectExpr("explode(${pathInfo.arrayPath}) as exploded_item")
-                    .selectExpr("exploded_item.${pathInfo.fieldPath} as compare_id")
+                    .selectExpr("explode(${arrayPath}) as exploded_item")
+                    .selectExpr("exploded_item.${fieldPath} as compare_id")
                     .filter("compare_id IS NOT NULL AND length(trim(cast(compare_id as string))) > 0")
                     .withColumn("compare_id", col("compare_id").cast("string"))
                     .distinct()
         }
 
-        def rootField = pathInfo.path?.split(/\./)[0]
+        def safePath = normalizeSparkPath(pathInfo.path)
+        if (!safePath) {
+            throw new IllegalArgumentException("JSONPath ${pathLabel} resolves to an empty field path after normalization.")
+        }
+        def rootField = safePath?.split(/\./)[0]
         if (rootField) {
             assertRootFieldExists(rawDf, rootField, pathLabel)
         }
-        logger.info("Using simple path extraction: path=${pathInfo.path}")
+        logger.info("Using simple path extraction: path=${safePath}")
         return rawDf
-                .selectExpr("${pathInfo.path} as compare_id")
+                .selectExpr("${safePath} as compare_id")
                 .filter("compare_id IS NOT NULL AND length(trim(cast(compare_id as string))) > 0")
                 .withColumn("compare_id", col("compare_id").cast("string"))
                 .distinct()
@@ -290,20 +312,43 @@ try {
     // Build output structure with full objects (streamed to file)
     String json1LabelStr = json1Label?.toString() ?: "JSON 1"
     String json2LabelStr = json2Label?.toString() ?: "JSON 2"
+    def normalizeTypeLabel = { label ->
+        def normalized = label?.toString()?.trim()
+        if (!normalized) return null
+        normalized = normalized.replaceAll(/\s+/, "_")
+        normalized = normalized.replaceAll(/[^A-Za-z0-9_]/, "")
+        return normalized ?: null
+    }
+    def json1TypeLabel = normalizeTypeLabel(json1LabelStr) ?: "json1"
+    def json2TypeLabel = normalizeTypeLabel(json2LabelStr) ?: "json2"
+    def missingInJson1Type = "missing_in_" + json1TypeLabel
+    def missingInJson2Type = "missing_in_" + json2TypeLabel
 
     def differenceDfs = []
     if (differenceCount > 0) {
         def buildDiffObjects = { rawDf, diffIdsDf, pathInfo ->
             def baseDf
             if (pathInfo.needsExplode) {
+                def arrayPath = normalizeSparkPath(pathInfo.arrayPath)
+                def fieldPath = normalizeSparkPath(pathInfo.fieldPath)
+                if (!arrayPath) {
+                    throw new IllegalArgumentException("JSONPath resolves to an empty array path after normalization.")
+                }
+                if (!fieldPath) {
+                    throw new IllegalArgumentException("JSONPath resolves to an empty field path after normalization.")
+                }
                 baseDf = rawDf
-                        .selectExpr("explode(${pathInfo.arrayPath}) as exploded_item")
-                        .selectExpr("exploded_item.${pathInfo.fieldPath} as compare_id", "exploded_item as data")
+                        .selectExpr("explode(${arrayPath}) as exploded_item")
+                        .selectExpr("exploded_item.${fieldPath} as compare_id", "exploded_item as data")
                         .filter("compare_id IS NOT NULL AND length(trim(cast(compare_id as string))) > 0")
                         .withColumn("compare_id", col("compare_id").cast("string"))
             } else {
+                def safePath = normalizeSparkPath(pathInfo.path)
+                if (!safePath) {
+                    throw new IllegalArgumentException("JSONPath resolves to an empty field path after normalization.")
+                }
                 baseDf = rawDf
-                        .selectExpr("${pathInfo.path} as compare_id", "struct(*) as data")
+                        .selectExpr("${safePath} as compare_id", "struct(*) as data")
                         .filter("compare_id IS NOT NULL AND length(trim(cast(compare_id as string))) > 0")
                         .withColumn("compare_id", col("compare_id").cast("string"))
             }
@@ -316,8 +361,8 @@ try {
 
         if (onlyInJson1Count > 0) {
             def onlyInJson1ObjDf = buildDiffObjects(json1RawDf, onlyInJson1Df, pathInfo1)
-            def diffJson1Df = onlyInJson1ObjDf.select(
-                    lit("missing_in_json2").alias("type"),
+        def diffJson1Df = onlyInJson1ObjDf.select(
+                    lit(missingInJson2Type).alias("type"),
                     col("compare_id").alias("id"),
                     lit(json1LabelStr).alias("presentIn"),
                     lit(json2LabelStr).alias("missingIn"),
@@ -329,8 +374,8 @@ try {
 
         if (onlyInJson2Count > 0) {
             def onlyInJson2ObjDf = buildDiffObjects(json2RawDf, onlyInJson2Df, pathInfo2)
-            def diffJson2Df = onlyInJson2ObjDf.select(
-                    lit("missing_in_json1").alias("type"),
+        def diffJson2Df = onlyInJson2ObjDf.select(
+                    lit(missingInJson1Type).alias("type"),
                     col("compare_id").alias("id"),
                     lit(json2LabelStr).alias("presentIn"),
                     lit(json1LabelStr).alias("missingIn"),
@@ -391,10 +436,10 @@ try {
         outputMetadata.compareJsonPath2 = compareJsonPath2Value
     }
     def outputSummary = [
-            totalDifferences: differenceCount,
-            onlyInJson1Count: onlyInJson1Count,
-            onlyInJson2Count: onlyInJson2Count
+            totalDifferences: differenceCount
     ]
+    outputSummary["onlyIn${json1TypeLabel}Count"] = onlyInJson1Count
+    outputSummary["onlyIn${json2TypeLabel}Count"] = onlyInJson2Count
     def outputErrors = validationErrors ?: []
 
     outputFile.withWriter("UTF-8") { writer ->

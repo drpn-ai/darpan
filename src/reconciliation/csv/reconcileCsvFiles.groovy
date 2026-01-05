@@ -1,4 +1,5 @@
 import org.apache.spark.sql.SparkSession
+import groovy.json.JsonOutput
 import org.slf4j.LoggerFactory
 import static org.apache.spark.sql.functions.*
 
@@ -57,6 +58,23 @@ def resolveMappingField = { String mappingId, String systemId, String label ->
     return member.systemFieldName
 }
 
+def resolveSystemLabel = { String enumId, String defaultLabel ->
+    def normalized = enumId?.toString()?.trim()
+    if (!normalized) return defaultLabel
+    def enumValue = ec.entity.find("moqui.basic.Enumeration")
+            .condition("enumId", normalized)
+            .one()
+    def code = enumValue?.enumCode?.toString()?.trim()
+    if (code) return code
+    def description = enumValue?.description?.toString()?.trim()
+    if (description) return description
+    return normalized
+}
+
+def quoteField = { String name ->
+    def safe = name?.replace("`", "``")
+    return safe ? "`" + safe + "`" : null
+}
 
 
 if (!csv1Location || !csv2Location) {
@@ -117,14 +135,19 @@ if (!outputDir.exists()) outputDir.mkdirs()
 
 String timestamp = ec.l10n.format(ec.user.nowTimestamp, "yyyyMMdd-HHmmss")
 String mappingSlug = (mappingId ?: "csv").toString().replaceAll("[^A-Za-z0-9._-]", "_")
-String baseFileName = outputFileName ?: "${mappingSlug}-diff-${timestamp}.csv"
-if (!baseFileName.endsWith(".csv")) baseFileName = baseFileName + ".csv"
+String baseFileName = outputFileName ?: "${mappingSlug}-diff-${timestamp}.json"
+def baseFileNameLower = baseFileName.toLowerCase()
+if (baseFileNameLower.endsWith(".csv")) {
+    baseFileName = baseFileName[0..-5] + ".json"
+} else if (!baseFileNameLower.endsWith(".json")) {
+    baseFileName = baseFileName + ".json"
+}
 String diffFileName = baseFileName
-String nameRoot = baseFileName.endsWith(".csv") ? baseFileName[0..-5] : baseFileName
+String nameRoot = baseFileName.toLowerCase().endsWith(".json") ? baseFileName[0..-6] : baseFileName
 File outputFile = new File(outputDir, diffFileName)
 int suffix = 1
 while (outputFile.exists()) {
-    diffFileName = "${nameRoot}-${suffix}.csv"
+    diffFileName = "${nameRoot}-${suffix}.json"
     outputFile = new File(outputDir, diffFileName)
     suffix++
 }
@@ -149,14 +172,27 @@ try {
     def loadCsv = { String path, String fieldName, String label ->
         logger.info("loading ${label} from ${path} using ${compareLabel} field '${fieldName}'")
         def raw = reader.csv(path)
-        return raw.selectExpr("${fieldName} as compare_id")
+        def fieldExpr = quoteField(fieldName)
+        if (!fieldExpr) {
+            throw new IllegalArgumentException("CSV compare field is required for ${label}")
+        }
+        def idDf = raw.selectExpr("${fieldExpr} as compare_id")
                 .filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0")
+                .withColumn("compare_id", col("compare_id").cast("string"))
                 .dropDuplicates()
+        def dataDf = raw.selectExpr("${fieldExpr} as compare_id", "struct(*) as data")
+                .filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0")
+                .withColumn("compare_id", col("compare_id").cast("string"))
+        return [id: idDf, data: dataDf]
     }
 
-    def csv1Df = loadCsv(csv1Path, csv1Field, "CSV 1").cache()
+    def csv1Load = loadCsv(csv1Path, csv1Field, "CSV 1")
+    def csv1Df = csv1Load.id.cache()
+    def csv1DataDf = csv1Load.data
     logStatus("reconcile csv: after load CSV 1")
-    def csv2Df = loadCsv(csv2Path, csv2Field, "CSV 2").cache()
+    def csv2Load = loadCsv(csv2Path, csv2Field, "CSV 2")
+    def csv2Df = csv2Load.id.cache()
+    def csv2DataDf = csv2Load.data
 
     if (logInputCounts) {
         logger.info("loaded CSV id sets: csv1UniqueIds=${csv1Df.count()} csv2UniqueIds=${csv2Df.count()}")
@@ -172,44 +208,90 @@ try {
     onlyInCsv2Count = onlyInCsv2Df.count()
     diffRowCount = onlyInCsv1Count + onlyInCsv2Count
 
-    String csv1SystemLabel = csv1SystemEnumId?.toString()?.trim()
-    String csv2SystemLabel = csv2SystemEnumId?.toString()?.trim()
-    String csv1SideLabel = csv1SystemLabel ? "Only in ${csv1SystemLabel}" : "Only in CSV 1"
-    String csv2SideLabel = csv2SystemLabel ? "Only in ${csv2SystemLabel}" : "Only in CSV 2"
-
-    // Use Spark distributed write instead of collecting to memory
-    // Add source labels as columns
-    def csv1WithSource = onlyInCsv1Df
-            .withColumnRenamed("compare_id", outputField)
-            .withColumn("source", lit(csv1SideLabel))
-            .select("source", outputField)
-
-    def csv2WithSource = onlyInCsv2Df
-            .withColumnRenamed("compare_id", outputField)
-            .withColumn("source", lit(csv2SideLabel))
-            .select("source", outputField)
-
-    // Union and write in distributed fashion to temp directory
-    String tempOutputPath = "${outputDir.absolutePath}/_temp_${timestamp}"
-    csv1WithSource.union(csv2WithSource)
-            .coalesce(1)  // Single output file
-            .write()
-            .mode("overwrite")
-            .option("header", "true")
-            .csv(tempOutputPath)
-
-    // Move the part file to final location
-    def tempDir = new File(tempOutputPath)
-    def partFiles = tempDir.listFiles()?.findAll { it.name.startsWith("part-") && it.name.endsWith(".csv") }
-    if (partFiles && partFiles.size() > 0) {
-        partFiles[0].renameTo(outputFile)
-        logger.info("Moved output file to ${outputFile.absolutePath}")
-    } else {
-        logger.warn("No part files found in temp directory, output may be empty")
+    String csv1LabelStr = resolveSystemLabel(csv1SystemEnumId, "CSV 1")
+    String csv2LabelStr = resolveSystemLabel(csv2SystemEnumId, "CSV 2")
+    def normalizeTypeLabel = { label ->
+        def normalized = label?.toString()?.trim()
+        if (!normalized) return null
+        normalized = normalized.replaceAll(/\s+/, "_")
+        normalized = normalized.replaceAll(/[^A-Za-z0-9_]/, "")
+        return normalized ?: null
     }
-    
-    // Clean up temp directory
-    tempDir.deleteDir()
+    def csv1TypeLabel = normalizeTypeLabel(csv1LabelStr) ?: "csv1"
+    def csv2TypeLabel = normalizeTypeLabel(csv2LabelStr) ?: "csv2"
+    def missingInCsv1Type = "missing_in_" + csv1TypeLabel
+    def missingInCsv2Type = "missing_in_" + csv2TypeLabel
+    String outputFieldName = outputField ?: "id"
+
+    def differenceDfs = []
+    if (onlyInCsv1Count > 0) {
+        def onlyInCsv1ObjDf = csv1DataDf.join(onlyInCsv1Df, "compare_id", "inner")
+                .dropDuplicates(["compare_id"] as String[])
+        def diffCsv1Df = onlyInCsv1ObjDf.select(
+                lit(missingInCsv2Type).alias("type"),
+                col("compare_id").alias("id"),
+                lit(csv1LabelStr).alias("presentIn"),
+                lit(csv2LabelStr).alias("missingIn"),
+                col("data").alias("data")
+        )
+        differenceDfs.add(diffCsv1Df)
+    }
+    if (onlyInCsv2Count > 0) {
+        def onlyInCsv2ObjDf = csv2DataDf.join(onlyInCsv2Df, "compare_id", "inner")
+                .dropDuplicates(["compare_id"] as String[])
+        def diffCsv2Df = onlyInCsv2ObjDf.select(
+                lit(missingInCsv1Type).alias("type"),
+                col("compare_id").alias("id"),
+                lit(csv2LabelStr).alias("presentIn"),
+                lit(csv1LabelStr).alias("missingIn"),
+                col("data").alias("data")
+        )
+        differenceDfs.add(diffCsv2Df)
+    }
+
+    def timestampIso = null
+    try {
+        timestampIso = ec.user.nowTimestamp?.toInstant()?.toString()
+    } catch (Exception e) {
+        timestampIso = ec.user.nowTimestamp?.toString()
+    }
+
+    def outputMetadata = [
+            timestamp: timestampIso,
+            json1Label: csv1LabelStr,
+            json2Label: csv2LabelStr,
+            compareField: outputFieldName,
+            reconciliationMappingId: mappingId,
+            csv1SystemEnumId: csv1SystemEnumId,
+            csv2SystemEnumId: csv2SystemEnumId
+    ]
+    def outputSummary = [
+            totalDifferences: diffRowCount
+    ]
+    outputSummary["onlyIn${csv1TypeLabel}Count"] = onlyInCsv1Count
+    outputSummary["onlyIn${csv2TypeLabel}Count"] = onlyInCsv2Count
+
+    outputFile.withWriter("UTF-8") { writer ->
+        writer << "{\n"
+        writer << "\"metadata\":" + JsonOutput.toJson(outputMetadata) + ",\n"
+        writer << "\"summary\":" + JsonOutput.toJson(outputSummary) + ",\n"
+        writer << "\"validationErrors\":[],\n"
+        writer << "\"differences\":["
+        boolean first = true
+        if (diffRowCount > 0 && differenceDfs) {
+            differenceDfs.each { df ->
+                def iter = df.toJSON().toLocalIterator()
+                while (iter.hasNext()) {
+                    def rowJson = iter.next()
+                    if (!first) writer << ","
+                    writer << "\n" << rowJson
+                    first = false
+                }
+            }
+        }
+        if (!first) writer << "\n"
+        writer << "]\n}"
+    }
 
     // Unpersist cached DataFrames
     csv1Df.unpersist()

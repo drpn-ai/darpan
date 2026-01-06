@@ -35,9 +35,11 @@ String baseName = normalizeBaseName(schemaName?.toString())
 if (!baseName) baseName = normalizeBaseName(schemaFile.getName())
 if (!baseName) baseName = "schema"
 
-def baseDirRef = ec.resource.getLocationReference("runtime://schemas")
+// Externalize path
+def schemaBaseLocation = ec.resource.properties['reconciliation.schema.location'] ?: "runtime://schemas"
+def baseDirRef = ec.resource.getLocationReference(schemaBaseLocation)
 if (baseDirRef == null) {
-    throw new IllegalStateException("Unable to resolve schema base directory")
+    throw new IllegalStateException("Unable to resolve schema base directory from ${schemaBaseLocation}")
 }
 def schemaDirRef = baseDirRef.makeDirectory("json")
 

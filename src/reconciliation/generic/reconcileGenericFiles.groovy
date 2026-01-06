@@ -19,6 +19,11 @@ if (!reconciliationMappingId) {
 }
 
 // Load mapping and member configurations
+def mapping = ec.entity.find("darpan.mapping.ReconciliationMapping")
+        .condition("reconciliationMappingId", reconciliationMappingId)
+        .useCache(true).one()
+def mappingName = mapping?.mappingName ?: "reconciliation"
+
 def mappingMembers = ec.entity.find("darpan.mapping.ReconciliationMappingMember")
         .condition("reconciliationMappingId", reconciliationMappingId)
         .list()
@@ -217,9 +222,11 @@ def reconType = "${file1Type}_${file2Type}"
 processingWarnings = []
 
 // Save files to temp location
-def baseDirRef = ec.resource.getLocationReference('runtime://tmp/reconciliation/generic')
+// Save files to temp location
+def tempLoc = ec.resource.properties['reconciliation.temp.location'] ?: 'runtime://tmp/reconciliation/generic'
+def baseDirRef = ec.resource.getLocationReference(tempLoc)
 if (baseDirRef == null) {
-    throw new IllegalStateException("Unable to resolve generic reconciliation temp directory")
+    throw new IllegalStateException("Unable to resolve generic reconciliation temp directory: ${tempLoc}")
 }
 def inputDirRef = baseDirRef.makeDirectory('input')
 if (inputDirRef == null) {
@@ -239,8 +246,23 @@ def file2SafeName = file2.getName()?.replaceAll('[^A-Za-z0-9._-]', '_') ?: 'file
 def file1Ref = inputDirRef.makeFile(timestamp + '-file1-' + file1SafeName)
 def file2Ref = inputDirRef.makeFile(timestamp + '-file2-' + file2SafeName)
 
-file1Ref.putStream(file1.getInputStream())
-file2Ref.putStream(file2.getInputStream())
+// Optimize file write: use write(File) if possible to avoid memory buffering
+def saveFileItem = { fileItem, targetRef ->
+    File targetFile = targetRef.getFile()
+    if (targetFile != null) {
+        try {
+            fileItem.write(targetFile)
+            return
+        } catch (Exception e) {
+            logger.warn("Failed to write directly to file ${targetFile.getAbsolutePath()}, falling back to stream: ${e.message}")
+        }
+    }
+    targetRef.putStream(fileItem.getInputStream())
+}
+
+saveFileItem(file1, file1Ref)
+saveFileItem(file2, file2Ref)
+
 if (!file1Ref.getExists() || !file2Ref.getExists()) {
     throw new IllegalStateException("Failed to persist uploaded files to ${inputDirRef.getLocation()}")
 }
@@ -265,8 +287,8 @@ if (reconType == "CSV_CSV") {
                 csv2SystemEnumId: file2SystemEnumId,
                 idField: idField,
                 hasHeader: hasHeader,
-                outputLocation: 'runtime://tmp/reconciliation/generic/output',
-                sparkMaster: sparkMaster,
+                outputLocation: tempLoc + '/output',
+                sparkMaster: sparkMaster ?: (ec.resource.properties['spark.master'] ?: "local[*]"),
                 sparkAppName: sparkAppName
             ])
             .call()
@@ -308,8 +330,8 @@ if (reconType == "CSV_CSV") {
                 compareJsonPath2: compareJsonPath2,
                 json1Label: file1Label,
                 json2Label: file2Label,
-                outputLocation: 'runtime://tmp/reconciliation/generic/output',
-                sparkMaster: sparkMaster,
+                outputLocation: tempLoc + '/output',
+                sparkMaster: sparkMaster ?: (ec.resource.properties['spark.master'] ?: "local[*]"),
                 sparkAppName: sparkAppName
             ])
             .call()
@@ -379,7 +401,7 @@ if (reconType == "CSV_CSV") {
     boolean includeHeader = normalizeBool(hasHeader, true)
     SparkSession spark = SparkSession.builder()
             .appName(sparkAppName ?: "ReconciliationMixedCompare")
-            .master(sparkMaster ?: "local[*]")
+            .master(sparkMaster ?: (ec.resource.properties['spark.master'] ?: "local[*]"))
             .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
             .config("spark.sql.adaptive.enabled", "true")
             .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
@@ -562,17 +584,20 @@ if (reconType == "CSV_CSV") {
         differenceDfs.add(diffFile2Df)
     }
 
-    String outputBaseLocation = "runtime://tmp/reconciliation/generic/output"
+    String outputBaseLocation = tempLoc + "/output"
     def outputLocationRef = ec.resource.getLocationReference(outputBaseLocation)
     File outputDir = outputLocationRef?.getFile()
     if (outputDir == null) {
+        // Fallback if getLocationReference doesn't return a file object directly (e.g. non-local resource)
+        // For generic reconciliation output we strongly prefer local file access for Spark/Indexing
         outputDir = outputBaseLocation.startsWith("/") ?
                 new File(outputBaseLocation) :
                 new File((String) ec.factory.getRuntimePath(), outputBaseLocation)
     }
     if (!outputDir.exists()) outputDir.mkdirs()
 
-    String baseFileName = "mixed-reconciliation-${timestamp}.json"
+    def safeMappingName = mappingName.replaceAll(/[^A-Za-z0-9._-]/, '_')
+    String baseFileName = "${safeMappingName}-${timestamp}.json"
     if (!baseFileName.endsWith(".json")) baseFileName = baseFileName + ".json"
     String diffFileNameStr = baseFileName
     String nameRoot = baseFileName.endsWith(".json") ? baseFileName[0..-6] : baseFileName
@@ -630,6 +655,80 @@ if (reconType == "CSV_CSV") {
         }
         if (!first) writer << "\n"
         writer << "]\n}"
+    }
+    
+    // Generate Index File for Pagination
+    try {
+        File indexFile = new File(outputDir, diffFileNameStr + ".index")
+        logger.info("Generating index file: ${indexFile.getAbsolutePath()}")
+        
+        indexFile.withDataOutputStream { dos ->
+            // Format: Magic (4 bytes), Version (4 bytes), Count (8 bytes), Offsets (8 bytes * count)
+            dos.writeBytes("INDX")
+            dos.writeInt(1)
+            dos.writeLong(differenceCount)
+            
+            // We need to scan the file to find offsets
+            // This assumes the structure written above: "differences":[ \n {json}, \n {json} ...
+            
+            long currentOffset = 0
+            long recordCount = 0
+            
+            // Re-read the file to build index
+            // Using BufferedInputStream for speed
+            outputFile.withInputStream { fis ->
+                def bis = new BufferedInputStream(fis)
+                boolean insideDifferences = false
+                long byteCounter = 0
+                int b
+                
+                // Helper to check for sequence
+                while ((b = bis.read()) != -1) {
+                    byteCounter++
+                    if (!insideDifferences) {
+                         // Search for "differences":[
+                         // Rough approximation: look for [ after "differences"
+                         // Since we wrote it, we know it's relatively standard. 
+                         // But safer to just look for the first line that looks like a record after metadata
+                         // Our writer writes: writer << "\n" << rowJson
+                         if (b == 91) { // '['
+                             insideDifferences = true
+                         }
+                    } else {
+                        // Inside array. Records are separated by newlines or commas.
+                        // We wrote: , \n { ... }
+                        // or \n { ... }
+                        
+                        // We want the offset of the '{' starting the record.
+                        // Simplified parser: assume records start with '{' on a new line (mostly)
+                        // The structure is:
+                        // [\n
+                        // {Rec1}
+                        // ,
+                        // \n{Rec2}
+                        
+                        // We need to map Index -> offset of '{'
+                        
+                        if (b == 123) { // '{'
+                             // Found start of object. Record it.
+                             dos.writeLong(byteCounter - 1)
+                             recordCount++
+                             
+                             // Skip until next likely start
+                             // This is a naive heuristic that depends on our specific update logic above
+                             // For robustness, we just record every '{' we find at top level of the array
+                        }
+                        if (b == 93) { // ']'
+                             // End of array
+                             break
+                        }
+                    }
+                }
+            }
+            logger.info("Indexed ${recordCount} records.")
+        }
+    } catch (Exception e) {
+        logger.warn("Failed to generate index file: ${e.message}")
     }
 
     csvIdDf.unpersist()

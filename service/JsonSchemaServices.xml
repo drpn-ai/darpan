@@ -31,6 +31,44 @@
         </out-parameters>
     </service>
 
+    <service verb="update" noun="JsonSchemaText" type="script"
+            location="component://darpan/src/jsonschema/updateJsonSchemaText.groovy">
+        <description>Update an existing JSON schema file from text content.</description>
+        <in-parameters>
+            <parameter name="schemaName" required="true"/>
+            <parameter name="jsonText" required="true" allow-html="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="schemaFileName"/>
+            <parameter name="schemaLocation"/>
+        </out-parameters>
+    </service>
+
+
+    <service verb="infer" noun="JsonSchema" type="script"
+            location="component://darpan/src/jsonschema/inferJsonSchema.groovy">
+        <description>Infer a flattened schema structure from a JSON file for the Creation Wizard.</description>
+        <in-parameters>
+            <parameter name="jsonFile" required="true" type="org.apache.commons.fileupload.FileItem"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resultList" type="List"/>
+            <parameter name="jsonSchemaString"/>
+        </out-parameters>
+    </service>
+
+    <service verb="save" noun="RefinedSchema" type="script"
+            location="component://darpan/src/jsonschema/saveRefinedSchema.groovy">
+        <description>Save a schema from the refined field list.</description>
+        <in-parameters>
+            <parameter name="schemaName" required="true"/>
+            <parameter name="fieldList" required="true" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="schemaFileName"/>
+        </out-parameters>
+    </service>
+
     <service verb="validate" noun="JsonFileAgainstSchema" type="script"
             location="component://darpan/src/jsonschema/validateJsonFileAgainstSchema.groovy">
         <description>Validate an uploaded JSON file against a saved JSON schema.</description>
@@ -72,4 +110,25 @@
             <parameter name="found" type="Boolean"/>
         </out-parameters>
     </service>
+    <service verb="delete" noun="JsonSchema" type="script"
+            location="component://darpan/src/jsonschema/deleteJsonSchema.groovy">
+        <description>Delete a JSON schema file from the filesystem.</description>
+        <in-parameters>
+            <parameter name="schemaFileName" required="true"/>
+        </in-parameters>
+    </service>
+
+    <service verb="flatten" noun="JsonSchema" type="script" authenticate="false"
+            location="component://darpan/src/jsonschema/flattenJsonSchema.groovy">
+        <description>Read a JSON schema file and flatten it into a list of fields for the Wizard.</description>
+        <in-parameters>
+            <parameter name="schemaFileName"/>
+            <parameter name="schemaFile" type="org.apache.commons.fileupload.FileItem"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="fieldList" type="List"/>
+            <parameter name="jsonSchemaString"/>
+        </out-parameters>
+    </service>
+
 </services>

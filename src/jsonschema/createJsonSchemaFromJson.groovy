@@ -120,15 +120,26 @@ mergeSchemaList = { List schemas ->
     return [anyOf: uniqueSchemas]
 }
 
+// -----------------------------------------------------
+// Helper to recursively build schema
+// -----------------------------------------------------
+final int MAX_DEPTH = 50
+
 def buildSchema
-buildSchema = { JsonNode node, boolean strictMode ->
+buildSchema = { JsonNode node, boolean strictMode, int depth = 0 ->
+    if (depth > MAX_DEPTH) {
+        // Return a generic fallback or null when max depth is reached to prevent stack overflow
+        return [type: "object", description: "Max depth of ${MAX_DEPTH} reached, schema truncated"] 
+        // Or strictly: return [type: "string", description: "Depth limit reached"]
+    }
+
     if (node == null || node.isNull()) return [type: "null"]
     if (node.isObject()) {
         Map properties = [:]
         def fields = node.fields()
         while (fields.hasNext()) {
             def entry = fields.next()
-            properties[entry.getKey()] = buildSchema(entry.getValue(), strictMode)
+            properties[entry.getKey()] = buildSchema(entry.getValue(), strictMode, depth + 1)
         }
         Map schema = [type: "object", properties: properties]
         if (strictMode && properties) {
@@ -141,7 +152,7 @@ buildSchema = { JsonNode node, boolean strictMode ->
         List itemSchemas = []
         def elements = node.elements()
         while (elements.hasNext()) {
-            itemSchemas << buildSchema(elements.next(), strictMode)
+            itemSchemas << buildSchema(elements.next(), strictMode, depth + 1)
         }
         itemSchemas = itemSchemas.findAll { it != null }
         if (itemSchemas.isEmpty()) {
@@ -179,7 +190,7 @@ if (jsonData == null) {
     throw new IllegalArgumentException("jsonFile is empty")
 }
 
-Map schemaMap = buildSchema(jsonData, strictMode)
+Map schemaMap = buildSchema(jsonData, strictMode, 0)
 schemaMap["\$schema"] = "http://json-schema.org/draft-07/schema#"
 def schemaTitle = normalizeString(schemaName)
 if (schemaTitle) schemaMap.title = schemaTitle

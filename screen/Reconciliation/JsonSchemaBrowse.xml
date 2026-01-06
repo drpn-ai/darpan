@@ -1,0 +1,323 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+        default-menu-title="Browse Schemas"
+        default-menu-include="false"
+        require-authentication="false">
+
+    <transition name="deleteSchema" begin-transaction="false">
+        <parameter name="filename"/>
+        <actions>
+            <service-call name="JsonSchemaServices.delete#JsonSchema"
+                    in-map="[schemaFileName:filename]"
+                    out-map="context"/>
+        </actions>
+        <default-response url="."/>
+    </transition>
+
+    <transition name="saveSchema" begin-transaction="false">
+        <actions>
+            <service-call name="JsonSchemaServices.save#JsonSchema"
+                    in-map="[schemaFile:schemaFile, schemaName:schemaName, overwrite:overwrite]"
+                    out-map="context"/>
+            <message>Uploaded schema: ${schemaFileName}</message>
+        </actions>
+        <default-response url="."><parameter name="activeTab" value="upload"/></default-response>
+    </transition>
+
+
+    <transition name="validateJson" begin-transaction="false">
+        <actions>
+            <service-call name="JsonSchemaServices.validate#JsonFileAgainstSchema"
+                    in-map="[jsonFile:jsonFile, schemaFileName:schemaFileName]"
+                    out-map="context"/>
+            <if condition="valid">
+                <message>JSON is valid for schema ${schemaFileName}</message>
+            </if>
+            <if condition="!valid">
+                <set field="errorSummary" from="errorMessages ? errorMessages.take(5).join('; ') : ''"/>
+                <message error="true">Validation failed! ${errorCount} errors found. ${errorSummary}${errorCount > 5 ? '...' : ''}</message>
+            </if>
+        </actions>
+        <default-response url="."><parameter name="activeTab" value="validate"/></default-response>
+    </transition>
+
+
+
+    <transition name="downloadSchema" read-only="true" begin-transaction="false">
+        <parameter name="filename"/>
+        <actions>
+            <set field="filename" from="filename?.trim()"/>
+            <if condition="!filename"><return/></if>
+            <if condition="filename.contains('..') || filename.contains('/') || filename.contains('\\')">
+                <return error="true" message="Invalid filename"/>
+            </if>
+            <set field="schemaBaseDirRef" from="ec.resource.getLocationReference('runtime://schemas')"/>
+            <set field="schemaDirRef" from="schemaBaseDirRef != null ? schemaBaseDirRef.makeDirectory('json') : null"/>
+            <set field="fileRef" from="schemaDirRef != null ? schemaDirRef.getChild(filename) : null"/>
+            <if condition="fileRef == null || !fileRef.getExists()">
+                <return error="true" message="Schema file not found"/>
+            </if>
+            <set field="sendResponse" from="ec.web.sendResourceResponse(fileRef.getLocation())"/>
+            <return/>
+        </actions>
+        <default-response type="none"/>
+    </transition>
+
+    <pre-actions>
+        <script><![CDATA[
+            def schemaBaseDirRef = ec.resource.getLocationReference('runtime://schemas')
+            def schemaDirRef = schemaBaseDirRef != null ? schemaBaseDirRef.makeDirectory('json') : null
+            schemaFiles = []
+            if (schemaDirRef != null && schemaDirRef.getExists()) {
+                def entries = schemaDirRef.getDirectoryEntries() ?: []
+                entries.findAll { it.isFile() && it.getFileName().endsWith('.json') && it.getSize() > 0 }
+                       .sort { a, b -> b.getLastModified() <=> a.getLastModified() }
+                       .each { schemaFiles.add([fileName: it.getFileName(), fileLastModified: it.getLastModified(), fileSize: it.getSize()]) }
+            }
+            
+            
+            
+
+
+            activeTab = activeTab ?: 'browse'
+        ]]></script>
+    </pre-actions>
+
+    <widgets>
+        <container style="container">
+            <container style="page-header">
+                <label text="JSON Schemas" type="h2"/>
+                <label text="Generate schemas from JSON, upload existing schemas, and validate JSON files"
+                        type="p" style="text-muted"/>
+                <link url="../Wizard" text="Create New Schema" btn-type="success" icon="fa fa-magic"/>
+            </container>
+
+            <!-- Tab navigation -->
+            <render-mode><text type="html"><![CDATA[
+                <ul class="nav nav-tabs" role="tablist" style="margin-bottom: 20px;">
+                    <li role="presentation" class="${activeTab == 'browse' ? 'active' : ''}">
+                        <a href="#browse" aria-controls="browse" role="tab" data-toggle="tab">
+                            Browse Schemas (${schemaFiles?.size() ?: 0})
+                        </a>
+                    </li>
+                    <li role="presentation" class="${activeTab == 'upload' ? 'active' : ''}">
+                        <a href="#upload" aria-controls="upload" role="tab" data-toggle="tab">
+                            Upload Schema
+                        </a>
+                    </li>
+                    <li role="presentation" class="${activeTab == 'validate' ? 'active' : ''}">
+                        <a href="#validate" aria-controls="validate" role="tab" data-toggle="tab">
+                            Validate JSON
+                        </a>
+                    </li>
+
+                </ul>
+                <div class="tab-content">
+            ]]></text></render-mode>
+
+            <!-- Tab 1: Browse Schemas (Default) -->
+            <render-mode><text type="html"><![CDATA[
+                <div role="tabpanel" class="tab-pane ${activeTab == 'browse' ? 'active' : ''}" id="browse">
+            ]]></text></render-mode>
+            
+            <container style="well">
+                <container style="row">
+                    <container style="col-md-12">
+                         <label text="Saved JSON Schemas" type="h4"/>
+                    </container>
+                </container>
+                
+                <section name="SchemaFilesSection" condition="schemaFiles">
+                    <widgets>
+                        <form-list name="SchemaFiles" list="schemaFiles" skip-form="true" paginate="true" paginate-size="20"
+                                style="table table-striped table-hover">
+                            <field name="fileName">
+                                <header-field title="Schema File" show-order-by="true"/>
+                                <default-field>
+                                    <display/>
+                                </default-field>
+                            </field>
+                            <field name="fileLastModifiedDisplay"
+                                    from="fileLastModified ? ec.l10n.format(new java.sql.Timestamp(fileLastModified), 'yyyy-MM-dd HH:mm') : ''">
+                                <header-field title="Last Modified" show-order-by="true"/>
+                                <default-field><display/></default-field>
+                            </field>
+                            <field name="fileSizeKb"
+                                    from="(fileSize ?: 0) >= 1048576 ? (ec.l10n.format((fileSize ?: 0) / 1048576, '#,##0.##') + ' Mb') : (ec.l10n.format((fileSize ?: 0) / 1024, '#,##0.##') + ' Kb')">
+                                <header-field title="Size" show-order-by="true"/>
+                                <default-field><display/></default-field>
+                            </field>
+                            <field name="actions">
+                                <header-field title="Actions"/>
+                                <default-field>
+                                    <link url="downloadSchema" text="Download" link-type="anchor-button" 
+                                            target-window="_blank" btn-type="info" style="btn-xs" condition="fileName">
+                                        <parameter name="filename" from="fileName"/>
+                                    </link>
+                                    <link url="../Wizard" text="Edit" btn-type="default" style="btn-xs" condition="fileName">
+                                        <parameter name="filename" from="fileName"/>
+                                    </link>
+                                    <link url="deleteSchema" text="Delete" btn-type="danger" style="btn-xs" condition="fileName"
+                                          confirmation="Are you sure you want to delete schema ${fileName}?">
+                                        <parameter name="filename" from="fileName"/>
+                                    </link>
+                                </default-field>
+                            </field>
+                        </form-list>
+                    </widgets>
+                </section>
+                
+                <render-mode><text type="html"><![CDATA[
+                    </div>
+                ]]></text></render-mode>
+                
+                <!-- Tab 2: Upload Schema -->
+                <render-mode><text type="html"><![CDATA[
+                    <div role="tabpanel" class="tab-pane ${activeTab == 'upload' ? 'active' : ''}" id="upload">
+                ]]></text></render-mode>
+
+            
+            <container style="well">
+                <label text="Upload Existing JSON Schema" type="h4"/>
+                <label text="Upload a manually created or pre-existing JSON Schema file"
+                        type="p" style="text-muted"/>
+                
+                <form-single name="SaveSchemaForm" transition="saveSchema">
+                    <field name="schemaFile">
+                        <default-field title="Schema File">
+                            <file size="50" accept=".json,.schema.json,application/schema+json"/>
+                        </default-field>
+                    </field>
+                    
+                    <field name="schemaName">
+                        <default-field title="Schema Name (Optional)"
+                                tooltip="Leave empty to use the uploaded filename">
+                            <text-line size="50" placeholder="e.g., my-schema.schema.json"/>
+                        </default-field>
+                    </field>
+                    
+                    <field name="overwrite">
+                        <default-field>
+                            <check><option key="true" text="Overwrite if schema already exists"/></check>
+                        </default-field>
+                    </field>
+                    
+                    <field name="submitUpload">
+                        <default-field title="Upload Schema">
+                            <submit/>
+                        </default-field>
+                    </field>
+
+                    <field-layout>
+                        <field-row-big><field-ref name="schemaFile"/></field-row-big>
+                        <field-row-big><field-ref name="schemaName"/></field-row-big>
+                        <field-row-big><field-ref name="overwrite"/></field-row-big>
+                        <field-row-big><field-ref name="submitUpload"/></field-row-big>
+                    </field-layout>
+                </form-single>
+            </container>
+            
+            <render-mode><text type="html"><![CDATA[
+                </div>
+            ]]></text></render-mode>
+
+            <!-- Tab 3: Validate JSON -->
+            <render-mode><text type="html"><![CDATA[
+                <div role="tabpanel" class="tab-pane ${activeTab == 'validate' ? 'active' : ''}" id="validate">
+            ]]></text></render-mode>
+            
+            <container style="well">
+                <label text="Validate JSON File" type="h4"/>
+                <label text="Test if a JSON file conforms to a saved schema"
+                        type="p" style="text-muted"/>
+                
+                <form-single name="ValidateJsonForm" transition="validateJson">
+                    <field name="schemaFileName">
+                        <default-field title="Select Schema">
+                            <drop-down>
+                                <option key="" text="-- Choose schema --"/>
+                                <list-options list="schemaFiles" key="${fileName}" text="${fileName}"/>
+                            </drop-down>
+                        </default-field>
+                    </field>
+                    
+                    <field name="jsonFile">
+                        <default-field title="JSON File to Validate">
+                            <file size="50" accept=".json,application/json"/>
+                        </default-field>
+                    </field>
+                    
+                    <field name="submitValidate">
+                        <default-field title="Validate">
+                            <submit/>
+                        </default-field>
+                    </field>
+
+                    <field-layout>
+                        <field-row-big><field-ref name="schemaFileName"/></field-row-big>
+                        <field-row-big><field-ref name="jsonFile"/></field-row-big>
+                        <field-row-big><field-ref name="submitValidate"/></field-row-big>
+                    </field-layout>
+                </form-single>
+                
+                <section name="NoSchemasNotice" condition="!schemaFiles">
+                    <widgets>
+                        <container style="alert alert-warning">
+                            <render-mode><text type="html"><![CDATA[
+                                <p style="margin: 0;">No schemas available yet. Generate or upload a schema first!</p>
+                            ]]></text></render-mode>
+                        </container>
+                    </widgets>
+                </section>
+            </container>
+            
+            <render-mode><text type="html"><![CDATA[
+                </div>
+            ]]></text></render-mode>
+
+
+
+                <section name="NoSchemaFilesSection" condition="!schemaFiles">
+                    <widgets>
+                        <container style="alert alert-info">
+                            <render-mode><text type="html"><![CDATA[
+                                <h5 style="margin-top: 0;">No schemas found yet.</h5>
+                                <p style="margin-bottom: 0;">Get started by generating a schema from a sample JSON file or uploading an existing schema.</p>
+                            ]]></text></render-mode>
+                        </container>
+                    </widgets>
+                </section>
+            </container>
+            
+            <render-mode><text type="html"><![CDATA[
+                </div>
+                </div>
+            ]]></text></render-mode>
+
+            <!-- Help section -->
+            <container type="hr"/>
+            <container style="panel panel-info">
+                <container style="panel-heading">
+                    <render-mode><text type="html"><![CDATA[
+                        <h5 style="margin: 0;">JSON Schema Quick Guide</h5>
+                    ]]></text></render-mode>
+                </container>
+                <container style="panel-body">
+                    <container type="dl" style="dl-horizontal">
+                        <label text="What is a JSON Schema?" type="dt"/>
+                        <label text="A JSON Schema defines the structure, data types, and validation rules for JSON files." type="dd"/>
+                        
+                        <label text="Why use schemas?" type="dt"/>
+                        <label text="Schemas ensure data consistency, catch errors early, and document expected JSON structure." type="dd"/>
+                        
+                        <label text="Workflow" type="dt"/>
+                        <container type="dd">
+                            <label text="1) Generate/Upload a schema → 2) Use it in reconciliation for validation → 3) Browse and download schemas as needed"/>
+                        </container>
+                    </container>
+                </container>
+            </container>
+        </container>
+    </widgets>
+</screen>

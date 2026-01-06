@@ -34,7 +34,8 @@ if (!schemaFileSafeName) {
     throw new IllegalArgumentException("schemaFileName is required")
 }
 
-def baseDirRef = ec.resource.getLocationReference("runtime://schemas")
+def schemaBaseLocation = ec.resource.properties['reconciliation.schema.location'] ?: "runtime://schemas"
+def baseDirRef = ec.resource.getLocationReference(schemaBaseLocation)
 if (baseDirRef == null) {
     throw new IllegalStateException("Unable to resolve schema base directory")
 }

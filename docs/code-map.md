@@ -8,6 +8,7 @@ This wiki lives in `runtime/component/darpan/darpan.wiki`. The Darpan component 
 - Entities (party + reconciliation config): `runtime/component/darpan/entity/PartyEntities.xml`, `runtime/component/darpan/entity/ReconciliationEntities.xml`, `runtime/component/darpan/entity/MappingEntities.xml`
 - Service definitions: `runtime/component/darpan/service/ReconciliationCsvServices.xml`, `runtime/component/darpan/service/ReconciliationSampleServices.xml`, `runtime/component/darpan/service/JsonSchemaServices.xml`
 - Script implementations: `runtime/component/darpan/src/reconciliation/csv/reconcileCsvFiles.groovy`, `runtime/component/darpan/src/reconciliation/sample/compareSampleOrderIds.groovy`, `runtime/component/darpan/src/jsonschema/createJsonSchemaFromJson.groovy`, `runtime/component/darpan/src/jsonschema/saveJsonSchema.groovy`, `runtime/component/darpan/src/jsonschema/validateJsonFileAgainstSchema.groovy`
+- Generic reconciliation diff view actions: `runtime/component/darpan/screen/Reconciliation/GenericReconciliation/GenericReconciliationView/GenericReconciliationViewActions.groovy`, `runtime/component/darpan/screen/Reconciliation/GenericReconciliation/GenericReconciliationView/MissingJsonListActions.groovy`
 - Sample data inputs: `runtime/component/darpan/data/sample/omsBulkData.json`, `runtime/component/darpan/data/sample/shopifyBulkData.json`
 - Build config: `runtime/component/darpan/build.gradle`
 

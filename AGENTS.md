@@ -6,6 +6,7 @@ Component-generic guidance lives here; user-specific preferences are in `AGENTS.
 ### Where to implement changes
 - Put business logic in `runtime/component/darpan/src/**` and expose it through service definitions in `runtime/component/darpan/service/*.xml`.
 - Keep entity changes in `runtime/component/darpan/entity/*.xml` and update docs alongside code when behavior changes.
+- Keep changes within `runtime/component/darpan/**`; avoid framework, `runtime/base-component/**`, and `runtime/template/**` unless explicitly requested.
 
 ### Documentation updates
 - After code changes, update `runtime/component/darpan/docs/**` in the same PR to keep documentation aligned.

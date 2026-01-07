@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
-        default-menu-title="Mapping Builder"
+        default-menu-title="Mappings"
         require-authentication="false">
 
     <subscreens default-item="Builder">
-        <subscreens-item name="Builder" location="component://darpan/screen/Reconciliation/MappingBuilder.xml" menu-include="true"/>
-        <subscreens-item name="Editor" location="component://darpan/screen/Reconciliation/MappingEditor.xml" menu-include="true"/>
+        <subscreens-item name="Builder" location="component://darpan/screen/Reconciliation/Mapping/MappingBuilder.xml" menu-include="true"/>
+        <subscreens-item name="Editor" location="component://darpan/screen/Reconciliation/Mapping/MappingEditor.xml" menu-include="true"/>
     </subscreens>
 
     <widgets>

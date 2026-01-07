@@ -1,17 +1,8 @@
 import groovy.json.JsonSlurper
 import org.slf4j.LoggerFactory
+import jsonschema.common.JsonSchemaUtil
 
 def logger = LoggerFactory.getLogger("darpan.jsonschema.ResolveJsonPath")
-
-def cleanFileName = { String rawName ->
-    if (!rawName) return null
-    def name = rawName.trim()
-    if (!name) return null
-    if (name.contains("..") || name.contains("/") || name.contains("\\")) {
-        throw new IllegalArgumentException("Invalid schema file name")
-    }
-    return name
-}
 
 if (!key) {
     throw new IllegalArgumentException("key is required")
@@ -29,25 +20,14 @@ if (keyName.startsWith('$')) {
     return
 }
 
-String schemaFileSafeName = cleanFileName(schemaFileName?.toString())
-if (!schemaFileSafeName) {
-    throw new IllegalArgumentException("schemaFileName is required")
+// Resolve schema text using Util
+String schemaJsonString = JsonSchemaUtil.loadSchemaText(ec, jsonSchemaId, (filename ?: schemaFileName))
+
+if (!schemaJsonString) {
+    throw new IllegalArgumentException("Schema not found for provided ID or Name")
 }
 
-def schemaBaseLocation = ec.resource.properties['reconciliation.schema.location'] ?: "runtime://schemas"
-def baseDirRef = ec.resource.getLocationReference(schemaBaseLocation)
-if (baseDirRef == null) {
-    throw new IllegalStateException("Unable to resolve schema base directory")
-}
-def schemaDirRef = baseDirRef.makeDirectory("json")
-def schemaFileRef = schemaDirRef.getChild(schemaFileSafeName)
-if (schemaFileRef == null || !schemaFileRef.getExists()) {
-    throw new IllegalArgumentException("Schema file not found: ${schemaFileSafeName}")
-}
-
-def rootSchema = schemaFileRef.openStream().withCloseable { stream ->
-    new JsonSlurper().parse(stream)
-}
+def rootSchema = new JsonSlurper().parseText(schemaJsonString)
 
 def resolveRef = { Object root, String ref ->
     if (!ref || !ref.startsWith("#/")) return null

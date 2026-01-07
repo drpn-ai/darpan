@@ -1,411 +1,247 @@
-import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
-import com.fasterxml.jackson.core.JsonToken
+import groovy.json.JsonOutput
 import com.fasterxml.jackson.databind.ObjectMapper
+import org.slf4j.LoggerFactory
+import java.io.File
 
-def parseIntSafe = { val ->
-    if (val == null) return null
-    try {
-        return Integer.parseInt(val.toString().trim())
-    } catch (Exception ignored) {
-        return null
-    }
+def logger = LoggerFactory.getLogger("darpan.reconciliation.view.MissingJsonList")
+
+// --------------------------------------------------------------------------------
+// Inputs
+// --------------------------------------------------------------------------------
+// outputFile (String): Path to the output file or directory
+// pageIndex (String/Int): Page number (0-based)
+// pageSize (String/Int): Page size
+// missingType (String): Filter type (e.g., "missing_in_json1")
+
+long viewMaxInMemoryBytes = 5 * 1024 * 1024 // 5MB limit for in-memory loading (legacy check)
+
+// Helper: Parse safe int
+def parseIntSafe = { val, defVal ->
+    if (val == null) return defVal
+    if (val instanceof Integer) return val
+    try { return Integer.parseInt(val.toString()) } catch (Exception e) { return defVal }
 }
 
-def trimToNull = { val ->
-    def text = val?.toString()?.trim()
-    return text ? text : null
+def trimToNull = { str ->
+    def s = str?.toString()?.trim()
+    return (s && s.length() > 0) ? s : null
 }
 
-def resolveParamValue = { String name ->
-    def rawValue = ec.web?.parameters?.get(name)
-    if (rawValue == null) rawValue = ec.web?.requestParameters?.get(name)
-    def lastNonBlank = { Iterable items ->
-        def resolved = null
-        items?.each { item ->
-            def candidate = item?.toString()
-            if (candidate != null && candidate.trim()) {
-                resolved = candidate
-            }
-        }
-        return resolved
-    }
-    if (rawValue instanceof Collection) {
-        return lastNonBlank(rawValue)
-    }
-    if (rawValue != null && rawValue.getClass().isArray()) {
-        return lastNonBlank(rawValue as List)
-    }
-    return rawValue
-}
+int index = parseIntSafe(resolveParamValue('pageIndex'), 0)
+int size = parseIntSafe(resolveParamValue('pageSize'), 20)
+String filterType = trimToNull(missingType)
 
-def normalizeLabel = { label ->
-    def normalized = label?.toString()?.trim()
-    if (!normalized) return null
-    normalized = normalized.replaceAll(/\s+/, '_')
-    return normalized
-}
-
-def resolveKeys = { typeValue, presentIn, missingIn ->
-    def typeLower = typeValue?.toString()?.toLowerCase()
-    def systemKey = null
-    if (presentIn) {
-        if (presentIn == viewMetaJson1Label) systemKey = "json1"
-        else if (presentIn == viewMetaJson2Label) systemKey = "json2"
-    }
-    if (!systemKey && missingIn) {
-        if (missingIn == viewMetaJson1Label) systemKey = "json2"
-        else if (missingIn == viewMetaJson2Label) systemKey = "json1"
-    }
-    if (!systemKey && typeLower) {
-        if (typeLower.contains('missing_in_json2') || typeLower.contains('only_in_json1')) {
-            systemKey = "json1"
-        } else if (typeLower.contains('missing_in_json1') || typeLower.contains('only_in_json2')) {
-            systemKey = "json2"
-        }
-    }
-
-    def missingKeyValue = null
-    if (missingIn) {
-        if (missingIn == viewMetaJson1Label) missingKeyValue = "json1"
-        else if (missingIn == viewMetaJson2Label) missingKeyValue = "json2"
-    }
-    if (!missingKeyValue && presentIn) {
-        if (presentIn == viewMetaJson1Label) missingKeyValue = "json2"
-        else if (presentIn == viewMetaJson2Label) missingKeyValue = "json1"
-    }
-    if (!missingKeyValue && typeLower) {
-        if (typeLower.contains('missing_in_json1') || typeLower.contains('only_in_json2')) {
-            missingKeyValue = "json1"
-        } else if (typeLower.contains('missing_in_json2') || typeLower.contains('only_in_json1')) {
-            missingKeyValue = "json2"
-        }
-    }
-    if (!missingKeyValue && systemKey) {
-        missingKeyValue = systemKey == "json1" ? "json2" : systemKey == "json2" ? "json1" : null
-    }
-    return [systemKey: systemKey, missingKey: missingKeyValue]
-}
-
-def resolveTypeText = { typeValue, systemKey, json1LabelNormalized, json2LabelNormalized ->
-    def normalizedLabel = systemKey == 'json1' ? json1LabelNormalized : systemKey == 'json2' ? json2LabelNormalized : null
-    return normalizedLabel ? "only_in_${normalizedLabel}" : typeValue
-}
-
-def setPaginationMetadata = { int totalCount, int pageSize ->
-    if (totalCount <= 0) {
-        ec.context.put("missingRecordsCount", 0)
-        ec.context.put("missingRecordsPageIndex", 0)
-        ec.context.put("missingRecordsPageSize", pageSize)
-        ec.context.put("missingRecordsPageMaxIndex", 0)
-        ec.context.put("missingRecordsPageRangeLow", 0)
-        ec.context.put("missingRecordsPageRangeHigh", 0)
-        return [low: 0, high: 0]
-    }
-    ec.context.remove("missingRecordsCount")
-    org.moqui.util.CollectionUtilities.paginateParameters(totalCount, "missingRecords", ec.context)
-    def rangeLow = (ec.context.get("missingRecordsPageRangeLow") ?: 0) as int
-    def rangeHigh = (ec.context.get("missingRecordsPageRangeHigh") ?: 0) as int
-    return [low: rangeLow, high: rangeHigh]
-}
-
-viewError = null
-missingRecords = []
-missingRecordsCount = 0
-viewMetaJson1Label = "JSON 1"
-viewMetaJson2Label = "JSON 2"
-viewMissingLabel = null
-viewDefaultPageSize = 20
-viewMaxPageSize = 200
-viewMaxInMemoryBytes = 5 * 1024 * 1024
-viewRequestPath = ec.web?.request?.getRequestURI() ?: ""
-
-def viewOrderLimit = parseIntSafe(viewLimit)
-if (viewOrderLimit != null && viewOrderLimit < 1) viewOrderLimit = null
-
-def missingKeyNormalized = trimToNull(missingKey)?.toLowerCase()
-if (!missingKeyNormalized || !(missingKeyNormalized in ["json1", "json2"])) {
-    missingKeyNormalized = "json1"
-}
-
-def pageIndexParamName = missingKeyNormalized == "json1" ? "pageIndexJson1" : "pageIndexJson2"
-def pageSizeParamName = missingKeyNormalized == "json1" ? "pageSizeJson1" : "pageSizeJson2"
-def pageIndexValue = parseIntSafe(resolveParamValue(pageIndexParamName))
-if (pageIndexValue == null) pageIndexValue = parseIntSafe(resolveParamValue("MissingRecordsList_pageIndex"))
-if (pageIndexValue == null) pageIndexValue = parseIntSafe(resolveParamValue("pageIndex"))
-
-def pageSizeValue = parseIntSafe(resolveParamValue(pageSizeParamName))
-if (pageSizeValue == null) pageSizeValue = parseIntSafe(resolveParamValue("MissingRecordsList_pageSize"))
-if (pageSizeValue == null) pageSizeValue = parseIntSafe(resolveParamValue("pageSize"))
-def viewPageIndex = (pageIndexValue != null && pageIndexValue >= 0) ? pageIndexValue : 0
-def viewPageSize = (pageSizeValue != null && pageSizeValue > 0) ?
-        Math.min(pageSizeValue, viewMaxPageSize) : viewDefaultPageSize
-ec.context.put("pageIndex", viewPageIndex)
-ec.context.put("pageSize", viewPageSize)
-ec.context.put("missingRecords_pageIndex", viewPageIndex)
-ec.context.put("missingRecords_pageSize", viewPageSize)
-ec.context.put("missingRecordsPageIndexParam", pageIndexParamName)
-ec.context.put("missingRecordsPageSizeParam", pageSizeParamName)
-
-def viewFileName = trimToNull(viewFile)
-if (!viewFileName) {
-    viewError = "No diff file selected"
-    return
-}
-if (viewFileName.contains('..') || viewFileName.contains('/') || viewFileName.contains('\\')) {
-    viewError = "Invalid filename"
-    return
-}
-if (!viewFileName.toLowerCase().endsWith('.json')) {
-    viewError = "Only JSON diff files can be viewed"
-    return
-}
-def baseDirRef = ec.resource.getLocationReference(ec.resource.properties['reconciliation.schema.location'] ?: "runtime://schemas")
-if (baseDirRef == null) {
-    throw new IllegalStateException("Unable to resolve schema base directory")
-}
-def schemaDirRef = baseDirRef.makeDirectory("json")
-def outputDirRef = ec.resource.getLocationReference('runtime://tmp/reconciliation/generic/output')
-def fileRef = outputDirRef != null ? outputDirRef.getChild(viewFileName) : null
-if (fileRef == null || !fileRef.getExists()) {
-    viewError = "Diff file not found"
+// Validate inputs
+if (!outputFile) {
+    ec.message.addError("No output file specified")
     return
 }
 
-def fileSize = fileRef.getSize() ?: 0
-def useStreaming = fileSize > viewMaxInMemoryBytes
-
-if (!useStreaming) {
-    def jsonData = fileRef.openStream().withCloseable { stream ->
-        new JsonSlurper().parse(stream)
+File targetFile = new File(outputFile)
+if (!targetFile.exists()) {
+    // try relative to runtime
+    String rt = ec.factory.getRuntimePath()
+    targetFile = new File(rt, outputFile)
+    if (!targetFile.exists()) {
+         ec.message.addError("Output file not found: ${outputFile}")
+         return
     }
-    def metadata = jsonData?.metadata ?: [:]
-    viewMetaJson1Label = metadata?.json1Label ?: viewMetaJson1Label
-    viewMetaJson2Label = metadata?.json2Label ?: viewMetaJson2Label
-    viewMissingLabel = missingKeyNormalized == "json1" ? viewMetaJson1Label : viewMetaJson2Label
+}
 
-    def json1LabelNormalized = normalizeLabel(viewMetaJson1Label) ?: "json1"
-    def json2LabelNormalized = normalizeLabel(viewMetaJson2Label) ?: "json2"
-    def diffs = (jsonData?.differences instanceof List) ? jsonData.differences : []
-    if (viewOrderLimit != null && diffs.size() > viewOrderLimit) {
-        diffs = diffs.subList(0, viewOrderLimit)
-    }
+// --------------------------------------------------------------------------------
+// Logic
+// --------------------------------------------------------------------------------
 
-    def missingAll = []
-    int missingIndex = 1
-    diffs.each { diff ->
-        def orderData = diff?.data != null ? diff.data : diff
-        def typeValue = diff?.type
-        def presentIn = diff?.presentIn?.toString()
-        def missingIn = diff?.missingIn?.toString()
-        def keys = resolveKeys(typeValue, presentIn, missingIn)
-        if (keys.missingKey == missingKeyNormalized) {
-            def orderJson = JsonOutput.prettyPrint(JsonOutput.toJson(orderData))
-            missingAll.add([
-                index: missingIndex,
-                id: diff?.id,
-                type: resolveTypeText(typeValue, keys.systemKey, json1LabelNormalized, json2LabelNormalized),
-                json: orderJson
-            ])
-            missingIndex++
+def messagesList = []
+long listCount = 0
+
+// Metadata defaults
+Map metadata = [:]
+Map summary = [:]
+
+// Detect mode: Directory (Spark) vs Single File (Legacy/Small)
+boolean isDirectory = targetFile.isDirectory()
+List<File> dataFiles = []
+
+if (isDirectory) {
+    // Spark Output: Directory of JSONL files
+    // Metadata usually missing or in a specific file. 
+    // We assume the caller knows the context or we try to find a metadata.json if we wrote one?
+    // Our new Mixed service creates a directory but doesn't strictly separate metadata yet unless we check for it.
+    // Actually, Mixed service writes ONE file or directory. 
+    // Spark 'write.json' creates a directory of part-*.json files. 
+    // Any metadata we wrote manually might be lost if we used Spark write directly.
+    // Update: In reconcileMixedFiles.groovy, we decided to iterate and write a SINGLE JSON file manually 
+    // if we wanted metadata wrapping (which avoids Spark directory structure for the final output).
+    // WAIT. My plan changed to "Use Spark ... to write the output directly". 
+    // If I use Spark write, I get a directory. I LOSE the "metadata" wrapper.
+    // So the previous logic (metadata, summary, differences list) is valid for the LEGACY single file usage.
+    // For Spark directory usage, the file content is purely JSONL.
+    
+    // Let's support both.
+    
+    targetFile.eachFile { f ->
+        if ((f.name.startsWith("part-") || f.name.endsWith(".json")) && !f.name.endsWith(".crc") && !f.name.startsWith("_")) {
+            dataFiles.add(f)
         }
-    }
-
-    missingRecordsCount = missingAll.size()
-    def pageRange = setPaginationMetadata(missingRecordsCount, viewPageSize)
-    if (missingRecordsCount > 0 && pageRange.low > 0 && pageRange.low <= pageRange.high) {
-        missingRecords = missingAll.subList(pageRange.low - 1, pageRange.high)
-    } else {
-        missingRecords = []
     }
 } else {
-    def mapper = new ObjectMapper()
-    def json1LabelNormalized = "json1"
-    def json2LabelNormalized = "json2"
-    def updateLabelInfo = {
-        json1LabelNormalized = normalizeLabel(viewMetaJson1Label) ?: "json1"
-        json2LabelNormalized = normalizeLabel(viewMetaJson2Label) ?: "json2"
-    }
-    updateLabelInfo()
-    def pageStart = (viewPageIndex * viewPageSize) + 1
-    def pageEnd = pageStart + viewPageSize - 1
-    int diffIndex = 0
-    int missingTotal = 0
-    def missingPage = []
+    dataFiles.add(targetFile)
+}
 
-    fileRef.openStream().withCloseable { stream ->
-        def parser = mapper.getFactory().createParser(stream)
-        try {
-            if (parser.nextToken() != JsonToken.START_OBJECT) {
-                throw new IllegalArgumentException("Invalid diff JSON format")
-            }
-            while (parser.nextToken() != JsonToken.END_OBJECT) {
-                def fieldName = parser.getCurrentName()
-                parser.nextToken()
-                if ("metadata".equals(fieldName)) {
-                    def metadataNode = mapper.readTree(parser)
-                    if (metadataNode != null && metadataNode.isObject()) {
-                        viewMetaJson1Label = metadataNode.get("json1Label")?.asText() ?: viewMetaJson1Label
-                        viewMetaJson2Label = metadataNode.get("json2Label")?.asText() ?: viewMetaJson2Label
-                        updateLabelInfo()
-                    }
-                } else if ("differences".equals(fieldName)) {
-                    if (parser.currentToken() != JsonToken.START_ARRAY) {
-                        parser.skipChildren()
-                    } else {
-                        while (parser.nextToken() != JsonToken.END_ARRAY) {
-                            diffIndex++
-                            if (viewOrderLimit != null && diffIndex > viewOrderLimit) {
-                                parser.skipChildren()
-                                while (parser.nextToken() != JsonToken.END_ARRAY) {
-                                    parser.skipChildren()
-                                }
-                                break
-                            }
-                            def diffNode = mapper.readTree(parser)
-                            if (diffNode == null || diffNode.isNull()) continue
-                            def typeValue = diffNode.get("type")?.asText()
-                            def presentIn = diffNode.get("presentIn")?.asText()
-                            def missingIn = diffNode.get("missingIn")?.asText()
-                            def keys = resolveKeys(typeValue, presentIn, missingIn)
-                            if (keys.missingKey == missingKeyNormalized) {
-                                missingTotal++
-                                if (missingTotal >= pageStart && missingTotal <= pageEnd) {
-                                    def dataNode = (diffNode.has("data") && !diffNode.get("data").isNull()) ? diffNode.get("data") : diffNode
-                                    def orderJson = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(dataNode)
-                                    missingPage.add([
-                                        index: missingTotal,
-                                        id: diffNode.get("id")?.asText(),
-                                        type: resolveTypeText(typeValue, keys.systemKey, json1LabelNormalized, json2LabelNormalized),
-                                        json: orderJson
-                                    ])
-                                }
-                            }
+// Check format. If single file, is it wrapped (metadata/differences array) or JSONL?
+// Heuristic: Read first char. '{' = Wrapped Object (likely). 
+// If it's a directory, assume JSONL.
+
+boolean isWrappedFormat = !isDirectory
+if (isWrappedFormat) {
+    // It might still be JSONL if it's a single part file renamed.
+    // Check start
+    try {
+        targetFile.withReader { r ->
+             int c = r.read()
+             if (c != 123) isWrappedFormat = false // '{'
+             // If it starts with {, it could be JSON line too. 
+             // But existing code uses { metadata: ... } wrapper.
+        }
+    } catch (Exception e) {}
+}
+
+// If wrapped format, we need the streaming parser from before (re-adding simplified version).
+// If JSONL (Spark directory OR single file), we use line iteration.
+
+if (isWrappedFormat) {
+    // --- WRAPPED SINGLE FILE STRATEGY ---
+    // (Re-using the streaming logic but simplified)
+    // See previous implementation or legacy code.
+    // For now, I will assume that if we refactored to Spark, we prefer JSONL.
+    // But existing outputs might be wrapped.
+    // I'll implement a robust JSON reader that handles both if possible, or branching.
+    
+    // Branch: If it looks like the legacy big file...
+    // To be safe, let's treat the file as a source of "records".
+    // If wrapped, we extract records from 'differences' array.
+    // If JSONL, each line is a record.
+    
+    // NOTE: Parsing a wrapped file as JSONL will fail.
+    // Parsing JSONL as wrapped will fail.
+    
+    // I'll implement the DIRECTORY (JSONL) strategy as primary since that's the refactor goal.
+    // Fallback to legacy viewer for non-directory? 
+    // Actually, the new service writes to a DIRECTORY.
+    
+    if (isDirectory) {
+        // Spark JSONL Mode
+        def objectMapper = new ObjectMapper()
+        long totalMatched = 0
+        int added = 0
+        long skip = (long)index * (long)size
+        
+        dataFiles.each { File f ->
+            f.withReader("UTF-8") { reader ->
+                reader.eachLine { line ->
+                    if (!line.trim()) return
+                    // Optimization: Check type string before parsing
+                    if (!filterType || line.contains("\"type\":\"${filterType}\"")) {
+                        totalMatched++
+                        if (totalMatched > skip && added < size) {
+                             try {
+                                 def row = objectMapper.readValue(line, Map.class)
+                                 messagesList.add(row)
+                                 added++
+                             } catch (Exception e) { }
                         }
                     }
-                } else {
-                    parser.skipChildren()
                 }
             }
-        } finally {
-            parser.close()
+        }
+        listCount = totalMatched
+        
+    } else {
+        // Legacy Wrapped File Mode
+        // Load legacy logic or fail over?
+        // Since we are moving to Spark, new outputs are Directories. 
+        // Old outputs are Files.
+        // We should support old files.
+        try {
+            def objectMapper = new ObjectMapper()
+            // Try reading as full object (small) first
+            if (targetFile.length() < viewMaxInMemoryBytes) {
+                def root = objectMapper.readTree(targetFile)
+                if (root.has("metadata")) metadata = objectMapper.convertValue(root.get("metadata"), Map.class)
+                def diffs = root.get("differences")
+                if (diffs && diffs.isArray()) {
+                    List<Map> all = []
+                    diffs.each { n -> 
+                        Map r = objectMapper.convertValue(n, Map.class)
+                        if (!filterType || r.type == filterType) all.add(r)
+                    }
+                    listCount = all.size()
+                    int start = index * size
+                    int end = Math.min(start + size, (int)listCount)
+                    if (start < listCount) messagesList = all.subList(start, end)
+                }
+            } else {
+                // Large wrapped file? 
+                // We're deprecating this path for new runs. 
+                // Just error or show first chunk?
+                ec.message.addMessage("File too large for legacy viewer. Please re-run reconciliation to get Spark output.")
+            }
+        } catch (Exception e) {
+             logger.error("Failed to read legacy file", e)
         }
     }
 
-    missingRecordsCount = missingTotal
-    setPaginationMetadata(missingRecordsCount, viewPageSize)
-    missingRecords = missingPage
-    viewMissingLabel = missingKeyNormalized == "json1" ? viewMetaJson1Label : viewMetaJson2Label
-}
-
-// Optimized Indexed Reading
-if (useStreaming && missingRecords.isEmpty()) {
-    File indexFile = new File(fileRef.getParentFile(), fileRef.getFileName() + ".index")
-    if (indexFile.exists() && indexFile.length() > 16) {
-        try {
-            long totalRecords = 0
-            indexFile.withDataInputStream { dis ->
-                byte[] magic = new byte[4]
-                dis.readFully(magic)
-                if (new String(magic) == "INDX") {
-                     int version = dis.readInt()
-                     totalRecords = dis.readLong()
-                }
-            }
-            
-            if (totalRecords > 0) {
-                // Determine range to read
-                int startIndex = (viewPageIndex * viewPageSize)
-                if (startIndex < totalRecords) {
-                     long seekOffset = 0
-                     // Read offset from index
-                     RandomAccessFile raf = new RandomAccessFile(indexFile, "r")
-                     try {
-                         long pos = 16 + (startIndex * 8)
-                         if (pos < raf.length()) {
-                             raf.seek(pos)
-                             seekOffset = raf.readLong()
-                         }
-                     } finally {
-                         raf.close()
-                     }
-                     
-                     if (seekOffset > 0) {
-                         FileInputStream fis = fileRef.openStream()
-                         try {
-                             fis.skip(seekOffset)
-                             def parser = mapper.getFactory().createParser(fis)
-                             int recordsRead = 0
-                             while (recordsRead < viewPageSize && parser.nextToken() != null) {
-                                 // Jackson createParser at arbitrary offset might need help?
-                                 // If we point exactly to '{', nextToken should be START_OBJECT
-                                 if (parser.currentToken() == JsonToken.START_OBJECT || parser.currentToken() == null) {
-                                      // If null, it just started, nextToken moves to first token
-                                      if (parser.currentToken() == null) parser.nextToken()
-                                 }
-                                 
-                                 if (parser.currentToken() == JsonToken.START_OBJECT) {
-                                     def diffNode = mapper.readTree(parser)
-                                     if (diffNode != null && !diffNode.isNull()) {
-                                         // Filter logic (replicated from scan)
-                                         def typeValue = diffNode.get("type")?.asText()
-                                         def presentIn = diffNode.get("presentIn")?.asText()
-                                         def missingIn = diffNode.get("missingIn")?.asText()
-                                         def keys = resolveKeys(typeValue, presentIn, missingIn)
-                                         
-                                         // Note: Index includes ALL differences. 
-                                         // If we are filtering by "missingKey", strict indexing by row number of the FILE
-                                         // might not match row number of the FILTERED list.
-                                         // CRITICAL LIMITATION: The index maps file-row -> offset.
-                                         // But the UI requests "Page 3 of Missing-in-JSON1".
-                                         // If the file contains mixed differences, we can't jump to "Product 41 of JSON1 types" easily without an index tailored to that.
-                                         // HOWEVER, the critique/plan implied generic indexing.
-                                         // For now, if we use the index, we assume we are just paging through the file 
-                                         // OR we accept that we might scan more to find matching records.
-                                         // Given "Missing Key" switches tabs, filtering is essential.
-                                         // If the file is huge and sorted (e.g. all Type A then Type B), it works.
-                                         // If mixed, naive indexing fails for filtered pagination.
-                                         // Fallback: If filtering is active, we might still need to scan OR we need smart indexes.
-                                         // Let's stick to the basic index for raw speed viewing, 
-                                         // but for this specific UI which filters, we'll process the node.
-                                         
-                                         if (keys.missingKey == missingKeyNormalized) {
-                                             def dataNode = (diffNode.has("data") && !diffNode.get("data").isNull()) ? diffNode.get("data") : diffNode
-                                             def orderJson = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(dataNode)
-                                             missingRecords.add([
-                                                 index: startIndex + recordsRead + 1, // Approximation
-                                                 id: diffNode.get("id")?.asText(),
-                                                 type: resolveTypeText(typeValue, keys.systemKey, json1LabelNormalized, json2LabelNormalized),
-                                                 json: orderJson
-                                             ])
-                                         }
-                                         // If we didn't match, we essentially skipped a record in the "File Page" 
-                                         // but we are counting against "View Page". 
-                                         // This means "Page 2" of the View might not correspond to "Records 20-40" of the file.
-                                         // This is a known issue with simple file indexing vs filtered views.
-                                         // For pure "View Diff" (no filter), this is perfect.
-                                         // With filter, it's leaky. 
-                                         // Mitigation: We read 'viewPageSize' * 'Oversample' records?
-                                         // Or just display what we find in the file chunk.
-                                     }
-                                     recordsRead++
-                                 }
-                             }
-                             
-                             // Update counts based on Index finding
-                             // Note: Exact count of filtered items is unknown without full scan.
-                             // We set total to the File Total as an upper bound estimate?
-                             // Or disable pagination count for large files?
-                             missingRecordsCount = totalRecords.toInteger() // Approximate
-                             setPaginationMetadata(missingRecordsCount, viewPageSize)
-                         } finally {
-                             fis.close()
-                         }
+} else {
+    // Is directory but marked as not? (Shouldn't happen)
+    // Or is single file JSONL?
+    // Treat as JSONL
+        def objectMapper = new ObjectMapper()
+        long totalMatched = 0
+        int added = 0
+        long skip = (long)index * (long)size
+        
+        dataFiles.each { File f ->
+            f.withReader("UTF-8") { reader ->
+                reader.eachLine { line ->
+                    if (!line.trim()) return
+                    if (!filterType || line.contains("\"type\":\"${filterType}\"")) {
+                        totalMatched++
+                        if (totalMatched > skip && added < size) {
+                             try {
+                                 def row = objectMapper.readValue(line, Map.class)
+                                 messagesList.add(row)
+                                 added++
+                             } catch (Exception e) { }
+                        }
                     }
                 }
             }
-        } catch (Exception e) {
-            ec.logger.warn("Failed to use index file: ${e.message}")
         }
-    }
+        listCount = totalMatched
 }
+
+// --------------------------------------------------------------------------------
+// Output to Context
+// --------------------------------------------------------------------------------
+
+ec.context.put("list", messagesList)
+ec.context.put("listCount", listCount)
+ec.context.put("listPageIndex", index)
+ec.context.put("listPageSize", size)
+ec.context.put("metadata", metadata)
+
+def label1 = metadata?.json1Label ?: "File 1"
+def label2 = metadata?.json2Label ?: "File 2"
+
+if (filterType && filterType.contains("json1")) { // heuristic
+    ec.context.put("missingListTitle", "Missing in ${label1}")
+} else if (filterType && filterType.contains("json2")) {
+    ec.context.put("missingListTitle", "Missing in ${label2}")
+} else {
+    ec.context.put("missingListTitle", "Differences")
+}
+
+ec.context.put("file1Label", label1)
+ec.context.put("file2Label", label2)

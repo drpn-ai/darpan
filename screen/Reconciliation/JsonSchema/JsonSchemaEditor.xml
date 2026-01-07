@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+        default-menu-title="Schema Editor"
+        default-menu-include="false"
+        require-authentication="false">
+
+    <parameter name="schemaName" required="false"/>
+    <parameter name="jsonSchemaId" required="false"/>
+
+    <transition name="saveRefinedSchema" begin-transaction="false">
+        <actions>
+            <script><![CDATA[
+                def fields = []
+                def maxIndex = 1000 // Safety limit
+                for (int i=0; i < maxIndex; i++) {
+                     String pKey = "fieldPath_" + i
+                     if (!context.containsKey(pKey)) break
+                     
+                     fields.add([
+                         fieldPath: context[pKey],
+                         type: context["type_" + i],
+                         required: context["required_" + i]
+                     ])
+                }
+                ec.context.put("fieldList", fields)
+            ]]></script>
+            <service-call name="JsonSchemaServices.save#RefinedSchema"
+                    in-map="[jsonSchemaId:jsonSchemaId, schemaName:schemaName, fieldList:fieldList]"
+                    out-map="context"/>
+            <script><![CDATA[
+                // Clear session data after successful save
+                ec.web.session.removeAttribute("wizardResultList")
+                ec.web.session.removeAttribute("wizardSchemaName")
+                ec.web.session.removeAttribute("wizardSchemaId")
+            ]]></script>
+            <message>Updated Schema ${schemaName}</message>
+        </actions>
+        <!-- Redirect back to the manager browse tab on success -->
+        <default-response url="../Browse">
+            <parameter name="activeTab" value="browse"/>
+        </default-response>
+    </transition>
+
+    <transition name="addFieldToEditor" begin-transaction="false">
+        <actions>
+            <script><![CDATA[
+                List wList = ec.web.session.getAttribute("wizardResultList")
+                if (wList == null) wList = []
+                wList.add([fieldPath:'', type:'string', required:false, depth:0])
+                ec.web.session.setAttribute("wizardResultList", wList)
+            ]]></script>
+        </actions>
+        <default-response url=".">
+            <parameter name="schemaName" from="schemaName"/>
+            <parameter name="jsonSchemaId" from="jsonSchemaId"/>
+        </default-response>
+    </transition>
+
+    <transition name="removeFieldFromEditor" begin-transaction="false">
+        <parameter name="itemIndex"/>
+        <actions>
+            <script><![CDATA[
+                List wList = ec.web.session.getAttribute("wizardResultList")
+                if (wList != null && itemIndex) {
+                    int idx = itemIndex as int
+                    if (idx >= 0 && idx < wList.size()) {
+                        wList.remove(idx)
+                    }
+                    ec.web.session.setAttribute("wizardResultList", wList)
+                }
+            ]]></script>
+        </actions>
+        <default-response url=".">
+            <parameter name="schemaName" from="schemaName"/>
+             <parameter name="jsonSchemaId" from="jsonSchemaId"/>
+        </default-response>
+    </transition>
+
+    <pre-actions>
+        <script><![CDATA[
+            // Handling edit mode via schemaName or jsonSchemaId
+            def currentSessionId = ec.web.session.getAttribute("wizardSchemaId") ?: ec.web.session.getAttribute("wizardSchemaName")
+            def incomingId = jsonSchemaId ?: schemaName
+            
+            // Reload if ID changed or list missing
+            if (incomingId && (currentSessionId != incomingId || !ec.web.session.getAttribute("wizardResultList"))) {
+                // Purge cache first
+                ec.web.session.removeAttribute("wizardResultList")
+                ec.web.session.removeAttribute("wizardSchemaName")
+                ec.web.session.removeAttribute("wizardSchemaId")
+                
+                // If we only have ID, look up schemaName for display
+                if (jsonSchemaId && !schemaName) {
+                    def schema = ec.entity.find("darpan.reconciliation.JsonSchema").condition("jsonSchemaId", jsonSchemaId).one()
+                    if (schema) schemaName = schema.schemaName
+                }
+
+                // Load schema
+                def result = ec.service.sync().name("JsonSchemaServices.flatten#JsonSchema")
+                    .parameter("schemaName", schemaName) 
+                    .parameter("jsonSchemaId", jsonSchemaId)
+                    .call()
+                
+                if (result.fieldList) {
+                    ec.web.session.setAttribute("wizardResultList", result.fieldList)
+                    if (jsonSchemaId) ec.web.session.setAttribute("wizardSchemaId", jsonSchemaId)
+                    if (schemaName) ec.web.session.setAttribute("wizardSchemaName", schemaName)
+                    
+                    context.resultList = result.fieldList
+                    context.schemaName = schemaName 
+                }
+            } else {
+                // Load from session
+                if (ec.web.session.getAttribute("wizardResultList")) {
+                    context.resultList = ec.web.session.getAttribute("wizardResultList")
+                }
+                if (ec.web.session.getAttribute("wizardSchemaName")) {
+                     context.schemaName = ec.web.session.getAttribute("wizardSchemaName")
+                }
+                 if (ec.web.session.getAttribute("wizardSchemaId")) {
+                     context.jsonSchemaId = ec.web.session.getAttribute("wizardSchemaId")
+                }
+            }
+            // Ensure schemaName is available for title if not passed in param but loaded in session
+            if (!schemaName && context.schemaName) schemaName = context.schemaName
+        ]]></script>
+    </pre-actions>
+
+    <widgets>
+        <container style="container">
+            <container style="page-header">
+                <label text="Schema Editor: ${schemaName}" type="h2"/>
+                <label text="Refine JSON schema structure and validation." type="p" style="text-muted"/>
+            </container>
+
+            <container style="well">
+                 <form-list name="EditorForm" list="resultList" transition="saveRefinedSchema">
+                    <field name="jsonSchemaId"><default-field><hidden/></default-field></field>
+                    <field name="schemaName">
+                        <!-- Hidden or read-only since we are editing a file -->
+                        <default-field><hidden/></default-field>
+                    </field>
+                    
+                    <field name="fieldPath">
+                        <header-field title="Field path" show-order-by="true"/>
+                        <default-field>
+                            <text-line size="50"/>
+                        </default-field>
+                    </field>
+                    
+                    <field name="type">
+                        <default-field title="Type">
+                            <drop-down>
+                                <option key="string"/><option key="integer"/>
+                                <option key="number"/><option key="boolean"/>
+                                <option key="object"/><option key="array"/>
+                            </drop-down>
+                        </default-field>
+                    </field>
+                    <field name="required">
+                        <default-field title="Required">
+                            <check><option key="true" text="Yes"/></check>
+                        </default-field>
+                    </field>
+                    
+                    <field name="removeBtn">
+                        <default-field title="">
+                            <link url="removeFieldFromEditor" text="Remove" btn-type="danger" style="btn-xs" icon="fa fa-trash">
+                                <parameter name="itemIndex" from="itemIndex"/>
+                                <parameter name="schemaName" from="schemaName"/>
+                                <parameter name="jsonSchemaId" from="jsonSchemaId"/>
+                            </link>
+                        </default-field>
+                    </field>
+                 </form-list>
+                 
+                 <container style="row">
+                     <container style="col-md-12">
+                         <link url="addFieldToEditor" text="Add Field" btn-type="success" icon="fa fa-plus">
+                             <parameter name="schemaName" from="schemaName"/>
+                             <parameter name="jsonSchemaId" from="jsonSchemaId"/>
+                         </link>
+                         <label text=" "/>
+                         <link url="../Browse" text="Cancel" btn-type="danger" icon="fa fa-times"/>
+                         <label text=" "/>
+                         <link url="#" url-type="plain" text="Save Schema" btn-type="primary" icon="fa fa-save"
+                               parameter-map="[:]"
+                               attributes="[onclick:'''$('#EditorForm').submit(); event.preventDefault(); return false;''']"/>
+                     </container>
+                 </container>
+            </container>
+        </container>
+    </widgets>
+
+</screen>

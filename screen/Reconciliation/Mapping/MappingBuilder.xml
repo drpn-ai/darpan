@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
-        default-menu-title="Create Mapping"
+        default-menu-title="New Mapping"
         default-menu-include="false"
         require-authentication="false">
 
@@ -144,18 +144,10 @@
             <econdition field-name="enumTypeId" value="DarpanFileType"/>
             <order-by field-name="sequenceNum,description"/>
         </entity-find>
-        <script><![CDATA[
-            def schemaDirRef = ec.resource.getLocationReference('runtime://schemas/json')
-            schemaFiles = []
-            if (schemaDirRef != null && schemaDirRef.getExists()) {
-                def entries = schemaDirRef.getDirectoryEntries() ?: []
-                entries.each { entry ->
-                    if (entry.isFile() && entry.getFileName()?.endsWith('.schema.json')) {
-                        schemaFiles.add([schemaName: entry.getFileName()])
-                    }
-                }
-            }
-        ]]></script>
+            <entity-find entity-name="darpan.reconciliation.JsonSchema" list="jsonSchemas">
+                <order-by field-name="schemaName"/>
+            </entity-find>
+            <set field="schemaFiles" from="jsonSchemas"/>
     </pre-actions>
 
     <widgets>

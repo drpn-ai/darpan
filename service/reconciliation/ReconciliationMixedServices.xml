@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="reconcile" noun="MixedFiles" type="script"
+            location="component://darpan/src/reconciliation/mixed/reconcileMixedFiles.groovy">
+        <description>Reconcile a CSV file against a JSON file using Spark.</description>
+        <in-parameters>
+            <parameter name="file1Location" required="true"/>
+            <parameter name="file2Location" required="true"/>
+            <parameter name="file1Type" required="true"/>
+            <parameter name="file2Type" required="true"/>
+            
+            <parameter name="csvIdField"/>
+            <parameter name="jsonIdField"/>
+            <parameter name="jsonSchemaFileName"/>
+            
+            <parameter name="file1Label"/>
+            <parameter name="file2Label"/>
+            
+            <parameter name="hasHeader" type="Boolean" default-value="true"/>
+            
+            <parameter name="outputLocation"/>
+            <parameter name="outputFileName"/>
+            
+            <parameter name="sparkMaster"/>
+            <parameter name="sparkAppName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="diffLocation"/>
+            <parameter name="diffFileName"/>
+            <parameter name="differenceCount" type="Long"/>
+            <parameter name="onlyInFile1Count" type="Long"/>
+            <parameter name="onlyInFile2Count" type="Long"/>
+        </out-parameters>
+    </service>
+
+</services>

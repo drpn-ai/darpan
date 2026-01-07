@@ -1,7 +1,9 @@
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+
 import org.slf4j.LoggerFactory
+import jsonschema.common.JsonSchemaUtil
 
 def logger = LoggerFactory.getLogger("darpan.jsonschema.CreateFromJson")
 
@@ -175,8 +177,10 @@ buildSchema = { JsonNode node, boolean strictMode, int depth = 0 ->
 }
 
 if (!jsonFile) {
+    logger.error("createJsonSchemaFromJson: jsonFile is missing!")
     throw new IllegalArgumentException("jsonFile is required")
 }
+logger.info("createJsonSchemaFromJson called. File: ${jsonFile.getName()}, Size: ${jsonFile.getSize()}")
 
 boolean overwriteMode = normalizeBool(overwrite, false)
 boolean strictMode = normalizeBool(strict, false)
@@ -193,35 +197,53 @@ if (jsonData == null) {
 Map schemaMap = buildSchema(jsonData, strictMode, 0)
 schemaMap["\$schema"] = "http://json-schema.org/draft-07/schema#"
 def schemaTitle = normalizeString(schemaName)
+// Serialize map to JSON string
+import groovy.json.JsonOutput
+String schemaJson = JsonOutput.toJson(schemaMap)
+
 if (schemaTitle) schemaMap.title = schemaTitle
 
-String baseName = normalizeBaseName(schemaTitle)
-if (!baseName) baseName = normalizeBaseName(jsonFile.getName())
-if (!baseName) baseName = "schema"
+// Use provided schemaName directly, fallback to json filename
+String nameToSave = schemaTitle ?: jsonFile.getName()
 
-def baseDirRef = ec.resource.getLocationReference("runtime://schemas")
-if (baseDirRef == null) {
-    throw new IllegalStateException("Unable to resolve schema base directory")
+// --------------------------------------------------------------------------------
+// Unique naming logic centralized in JsonSchemaUtil
+// --------------------------------------------------------------------------------
+String finalName = JsonSchemaUtil.generateUniqueSchemaName(ec, nameToSave, overwriteMode)
+
+// Re-fetch to confirm if we are updating or creating
+existingSchema = ec.entity.find("darpan.reconciliation.JsonSchema")
+    .condition("schemaName", finalName)
+    .one()
+    
+nameToSave = finalName
+
+if (existingSchema) {
+    // Update existing
+    existingSchema.schemaText = schemaJson
+    if (description) existingSchema.description = description
+    existingSchema.lastUpdatedStamp = ec.user.nowTimestamp
+    existingSchema.update()
+    
+    jsonSchemaId = existingSchema.jsonSchemaId
+} else {
+    // Create new
+    def newSchema = ec.entity.makeValue("darpan.reconciliation.JsonSchema")
+    newSchema.schemaName = nameToSave
+    newSchema.schemaText = schemaJson
+    newSchema.description = description
+    newSchema.statusId = "Active"
+    
+    // Create will handle ID generation
+    newSchema.setSequencedIdPrimary()
+    newSchema.create()
+    
+    jsonSchemaId = newSchema.jsonSchemaId
 }
-def schemaDirRef = baseDirRef.makeDirectory("json")
 
-String fileName = "${baseName}.schema.json"
-def candidateRef = schemaDirRef.getChild(fileName)
-if (!overwriteMode) {
-    String nameRoot = baseName
-    int suffix = 1
-    while (candidateRef != null && candidateRef.getExists()) {
-        fileName = "${nameRoot}-${suffix}.schema.json"
-        candidateRef = schemaDirRef.getChild(fileName)
-        suffix++
-    }
-}
+filename = nameToSave // Set output params
+schemaName = nameToSave
 
-def schemaFileRef = schemaDirRef.makeFile(fileName)
-String schemaJson = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(schemaMap)
-schemaFileRef.putText(schemaJson)
 
-schemaFileName = fileName
-schemaLocation = schemaFileRef.getLocation()
+logger.info("Saved generated JSON schema ${filename} to DB with ID ${jsonSchemaId}")
 
-logger.info("Saved JSON schema ${schemaFileName} at ${schemaLocation}")

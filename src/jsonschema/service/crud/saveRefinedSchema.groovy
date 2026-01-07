@@ -138,18 +138,54 @@ cleanup(rootSchema)
 // 2. SAVE LOGIC
 // -----------------------------------------------------
 
-// Externalize path
-def schemaBaseLocation = ec.resource.properties['reconciliation.schema.location'] ?: "runtime://schemas"
-def baseDirRef = ec.resource.getLocationReference(schemaBaseLocation)
-if (baseDirRef == null) {
-    throw new IllegalStateException("Unable to resolve schema base directory")
+// -----------------------------------------------------
+// 2. SAVE LOGIC
+// -----------------------------------------------------
+
+String schemaJson = JsonOutput.toJson(rootSchema)
+
+// Determine name
+String nameToSave = schemaName.trim()
+
+// Check for existing by ID or Schema Name
+def existingSchema = null
+
+if (jsonSchemaId) {
+    existingSchema = ec.entity.find("darpan.reconciliation.JsonSchema")
+        .condition("jsonSchemaId", jsonSchemaId)
+        .one()
+} 
+
+if (!existingSchema && nameToSave) {
+    existingSchema = ec.entity.find("darpan.reconciliation.JsonSchema")
+        .condition("schemaName", nameToSave)
+        .one()
 }
-def schemaDirRef = baseDirRef.makeDirectory("json")
 
-String fileName = schemaName.trim()
-if (!fileName.endsWith(".json")) fileName += ".json"
-def fileRef = schemaDirRef.getChild(fileName)
+if (existingSchema) {
+    // Update
+    existingSchema.schemaText = schemaJson
+    if (description) existingSchema.description = description
+    existingSchema.lastUpdatedStamp = ec.user.nowTimestamp
+    existingSchema.update()
+    
+    jsonSchemaId = existingSchema.jsonSchemaId
+    nameToSave = existingSchema.schemaName
+} else {
+    // Create
+    def newSchema = ec.entity.makeValue("darpan.reconciliation.JsonSchema")
+    newSchema.schemaName = nameToSave
+    newSchema.schemaText = schemaJson
+    newSchema.description = description
+    newSchema.statusId = "Active"
+    
+    newSchema.setSequencedIdPrimary()
+    newSchema.create()
+    
+    jsonSchemaId = newSchema.jsonSchemaId
+}
 
-fileRef.putText(JsonOutput.toJson(rootSchema))
+schemaFileName = nameToSave // keep for backward compat but matches schemaName
+schemaName = nameToSave
 
-schemaFileName = fileName
+

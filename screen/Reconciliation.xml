@@ -9,9 +9,9 @@
         <subscreens-item name="CsvReconciliation" menu-title="CSV Only (Legacy)"
                 location="component://darpan/screen/Reconciliation/CsvReconciliation.xml"/>
         <subscreens-item name="JsonSchemaManager" menu-title="JSON Schemas"
-                location="component://darpan/screen/Reconciliation/JsonSchemaManager.xml"/>
-        <subscreens-item name="MappingSetup" menu-title="Mapping Builder"
-                location="component://darpan/screen/Reconciliation/MappingSetup.xml"/>
+                location="component://darpan/screen/Reconciliation/JsonSchema/JsonSchemaManager.xml"/>
+        <subscreens-item name="MappingSetup" menu-title="Mappings"
+                location="component://darpan/screen/Reconciliation/Mapping/MappingSetup.xml"/>
     </subscreens>
     <widgets>
         <subscreens-panel id="reconciliation-app" type="popup"/>

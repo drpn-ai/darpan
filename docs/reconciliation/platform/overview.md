@@ -1,11 +1,11 @@
 # Reconciliation Platform
 
 ## Implementation Anchors (Current Code)
-
 - Configuration entities: `runtime/component/darpan/entity/ReconciliationEntities.xml`, `runtime/component/darpan/entity/MappingEntities.xml`
-- Sample compare service: `runtime/component/darpan/service/ReconciliationSampleServices.xml` (`compare#SampleOrderIds`)
-- Spark-based compare script: `runtime/component/darpan/src/reconciliation/sample/compareSampleOrderIds.groovy`
-- Sample data inputs: `runtime/component/darpan/data/sample/omsBulkData.json`, `runtime/component/darpan/data/sample/shopifyBulkData.json`
+- **Reconciliation Service**: `runtime/component/darpan/service/reconciliation/ReconciliationGenericServices.xml`
+- **JSON Schema Services**: `runtime/component/darpan/service/jsonschema/JsonSchemaServices.xml`
+- Spark-based compare implementation: `runtime/component/darpan/src/reconciliation`
+- Sample data inputs: `runtime/component/darpan/data/sample/`
 
 ## 1. Purpose
 

@@ -14,6 +14,7 @@ Darpan is a Moqui component focused on data reconciliation workflows, with Spark
 
 - Code map and entry points: `runtime/component/darpan/docs/code-map.md`
 - Reconciliation platform docs: `runtime/component/darpan/docs/reconciliation/platform/overview.md`
+- **JSON Schemas**: `runtime/component/darpan/docs/reconciliation/json-schema-management.md`
 - Java 17 compatibility notes: `runtime/component/darpan/docs/build/java17-compatibility.md`
 
 ## Licensing

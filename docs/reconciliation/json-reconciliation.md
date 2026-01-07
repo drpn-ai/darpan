@@ -13,51 +13,35 @@ The JSON reconciliation feature allows you to compare two JSON files using ID-ba
 
 ## Services
 
-### `ReconciliationJsonServices.reconcile#JsonFiles`
+### `ReconciliationGenericServices.reconcile#GenericFiles`
 
-Core reconciliation service that compares two JSON files.
+This is the primary entry point for all file-based reconciliation. It automatically detects file types (CSV or JSON) and delegates to the appropriate specialized processor.
 
 **Input Parameters:**
-- `json1Location` (required): Location of first JSON file
-- `json2Location` (required): Location of second JSON file
-- `schemaFileName` (required): Name of schema file in `runtime://schemas/json/`
-- `compareJsonPath` (required): JSONPath expression to extract ID field
-- `schemaFileName2` (optional): Schema file for JSON 2 (defaults to `schemaFileName`)
-- `compareJsonPath2` (optional): JSONPath for JSON 2 (defaults to `compareJsonPath`)
-- `json1Label` (optional): Display label for first file (default: "JSON 1")
-- `json2Label` (optional): Display label for second file (default: "JSON 2")
-- `outputLocation` (optional): Output directory (default: `tmp/reconciliation/json-diff/output`)
-- `outputFileName` (optional): Custom output filename
-- `maxIdsReturned` (optional): Max IDs to return in `onlyInJson1`/`onlyInJson2` lists (default: 1000; set 0 to disable)
+- `file1` (FileItem, required): First file (CSV or JSON)
+- `file2` (FileItem, required): Second file (CSV or JSON)
+- `file1SystemEnumId` (required): Identifier for the source system of file 1
+- `file2SystemEnumId` (required): Identifier for the source system of file 2
+- `reconciliationMappingId` (required): Configuration ID that defines schemas and ID paths
 - `sparkMaster` (optional): Spark master URL (default: "local[*]")
-- `sparkAppName` (optional): Spark application name (default: "ReconciliationJsonCompare")
 
-**Output Parameters:**
-- `validationPassed`: Boolean indicating if both files passed schema validation
-- `validationErrors`: List of validation error messages
-- `differenceCount`: Total number of differences found
-- `onlyInJson1Count`: Number of IDs only in first file
-- `onlyInJson2Count`: Number of IDs only in second file
-- `onlyInJson1`: List of IDs only in first file
-- `onlyInJson2`: List of IDs only in second file
-- `diffLocation`: Location of the reconciliation results file
-- `diffFileName`: Name of the reconciliation results file
+**Output:**
+- `reconciliationType`: "CSV", "JSON", or "MIXED"
+- `differenceCount`: Total differences found
+- `diffLocation` / `diffFileName`: Path to the generated results
+- `validationErrors`: Any schema validation errors found
 
-### `ReconciliationJsonServices.run#JsonReconciliation`
+### Service Delegation
+- **JSON-JSON**: Delegates to `ReconciliationJsonServices`
+- **CSV-CSV**: Delegates to `ReconciliationCsvServices`
+- **Mixed**: Uses `ReconciliationMixedServices` (converts CSV to JSON structure for comparison)
 
-Wrapper service for handling file uploads and running reconciliation.
+> **Note**: Direct usage of `ReconciliationJsonServices.reconcile#JsonFiles` is supported but the Generic service is preferred for UI integration.
 
-**Input Parameters:**
-- `json1File` (FileItem): First uploaded JSON file
-- `json2File` (FileItem): Second uploaded JSON file
-- `schemaFileName` (required): Name of schema file
-- `compareJsonPath` (required): JSONPath expression
-- `schemaFileName2` (optional): Schema file for JSON 2 (defaults to `schemaFileName`)
-- `compareJsonPath2` (optional): JSONPath for JSON 2 (defaults to `compareJsonPath`)
-- `json1Label`, `json2Label` (optional): Display labels
+## Schema Management
 
-**Output Parameters:**
-Same as `reconcile#JsonFiles`
+For details on creating and managing schemas used in reconciliation, see [JSON Schema Management](json-schema-management.md).
+
 
 ## JSONPath Expression
 

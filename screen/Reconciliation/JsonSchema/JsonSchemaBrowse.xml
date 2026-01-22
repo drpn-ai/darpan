@@ -62,6 +62,7 @@
 
     <actions>
         <entity-find entity-name="darpan.reconciliation.JsonSchema" list="schemaList_it">
+            <econdition field-name="statusId" value="Active"/>
             <order-by field-name="-lastUpdatedStamp"/>
         </entity-find>
         <script>

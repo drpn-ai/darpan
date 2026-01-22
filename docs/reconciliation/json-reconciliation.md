@@ -15,7 +15,7 @@ The JSON reconciliation feature allows you to compare two JSON files using ID-ba
 
 ### `ReconciliationGenericServices.reconcile#GenericFiles`
 
-This is the primary entry point for all file-based reconciliation. It automatically detects file types (CSV or JSON) and delegates to the appropriate specialized processor.
+Primary entry point for uploads. It stages files, then delegates to the shared router so upload and automation paths stay aligned.
 
 **Input Parameters:**
 - `file1` (FileItem, required): First file (CSV or JSON)
@@ -30,11 +30,23 @@ This is the primary entry point for all file-based reconciliation. It automatica
 - `differenceCount`: Total differences found
 - `diffLocation` / `diffFileName`: Path to the generated results
 - `validationErrors`: Any schema validation errors found
+- `processingWarnings`: Any normalization fallbacks that were applied
 
-### Service Delegation
-- **JSON-JSON**: Delegates to `ReconciliationJsonServices`
-- **CSV-CSV**: Delegates to `ReconciliationCsvServices`
-- **Mixed**: Uses `ReconciliationMixedServices` (converts CSV to JSON structure for comparison)
+### `ReconciliationCoreServices.reconcile#FilesByMapping`
+
+Shared router used by both Generic uploads and SFTP automation. It normalizes staged file locations, resolves mapping metadata (types, schemas, ID fields), and hands everything to the unified comparator.
+
+**Inputs (key):** `reconciliationMappingId`, `file1Location`, `file2Location`, `file1SystemEnumId`, `file2SystemEnumId`, optional `file1Name`/`file2Name`, `file1FileTypeEnumId`/`file2FileTypeEnumId`, `file1SchemaFileName`/`file2SchemaFileName`, `hasHeader`, `outputLocation`, `sparkMaster`, `sparkAppName`.
+
+**Outputs (key):** `file1Type`, `file2Type`, `reconciliationType`, `diffLocation`, `diffFileName`, `differenceCount`, `onlyInFile1Count`, `onlyInFile2Count`, `validationErrors`, `processingWarnings`.
+
+### `ReconciliationCoreServices.reconcile#UnifiedFiles`
+
+Single reconciliation engine for all file type combinations. It converts CSV/JSON inputs into a normalized Spark structure, runs the compare once, and always emits a JSON diff. The legacy CSV/JSON/Mixed services are now wrappers only.
+
+**Inputs (key):** `file1Location`, `file2Location`, `file1Type`, `file2Type`, `file1IdField`/`file2IdField` (or `file1IdExpression`/`file2IdExpression`), `file1SchemaFileName`/`file2SchemaFileName` for JSON sources, `hasHeader`, `outputLocation`, `sparkMaster`, `sparkAppName`.
+
+**Outputs (key):** `reconciliationType`, `diffLocation`, `diffFileName`, `differenceCount`, `onlyInFile1Count`, `onlyInFile2Count`, `validationErrors`, `processingWarnings`.
 
 > **Note**: Direct usage of `ReconciliationJsonServices.reconcile#JsonFiles` is supported but the Generic service is preferred for UI integration.
 
@@ -157,6 +169,7 @@ Schema: `runtime://schemas/json/test-orders.schema.json`
 - JSONPath library (`com.jayway.jsonpath:json-path:2.8.0`) is required
 - Schema parsing for validation/generation uses Jackson ObjectMapper to avoid ad-hoc JSON handling
 - Diff detail view streams large diff files and paginates missing-record lists independently (default 20 per page) using Moqui controls to keep previews responsive
+- Diff detail view includes a Spark-backed record_id search (LIKE-based, full-file filter before pagination; auto-resets to the first page if the current page is beyond the filtered results)
 - Schema generation requires non-empty JSON input files; empty uploads are rejected
 - What changed: Diff View is hidden from the navigation menu and is accessed from the generated file list under File Reconciliation (direct `/Reconciliation/GenericReconciliationView` access removed)
 - What changed: Simple ID keys are resolved against array-root schemas (e.g., `id` -> `$[*].id`) and small array payloads are fully validated before sampling large ones

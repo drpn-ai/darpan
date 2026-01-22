@@ -2,9 +2,8 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="reconcile" noun="JsonFiles" type="script"
-            location="component://darpan/src/reconciliation/json/reconcileJsonFiles.groovy">
-        <description>Reconcile two JSON files using ID-based comparison and generate diff output with full objects.</description>
+    <service verb="reconcile" noun="JsonFiles">
+        <description>Reconcile two JSON files using ID-based comparison and generate diff output with full objects (wrapper to unified comparator).</description>
         <in-parameters>
             <parameter name="json1Location" required="true"/>
             <parameter name="json2Location" required="true"/>
@@ -37,6 +36,47 @@
             <parameter name="validationPassed" type="Boolean"/>
             <parameter name="validationErrors"><parameter name="errorMessage"/></parameter>
         </out-parameters>
+        <actions>
+            <if condition="!json1Location || !json2Location">
+                <return error="true" message="json1Location and json2Location are required"/>
+            </if>
+
+            <script><![CDATA[
+                def normalize = { it?.toString()?.trim() }
+                def jsonPath1 = compareJsonPath
+                def jsonPath2 = compareJsonPath2 ?: compareJsonPath
+                def schema1 = schemaFileName
+                def schema2 = schemaFileName2 ?: schemaFileName
+
+                context.unifiedParams = [
+                        file1Location      : json1Location,
+                        file2Location      : json2Location,
+                        file1Type          : "JSON",
+                        file2Type          : "JSON",
+                        file1IdExpression  : normalize(jsonPath1),
+                        file2IdExpression  : normalize(jsonPath2),
+                        file1SchemaFileName: normalize(schema1),
+                        file2SchemaFileName: normalize(schema2),
+                        file1Label         : json1Label,
+                        file2Label         : json2Label,
+                        outputLocation     : outputLocation,
+                        outputFileName     : outputFileName,
+                        sparkMaster        : sparkMaster,
+                        sparkAppName       : sparkAppName
+                ]
+            ]]></script>
+
+            <service-call name="ReconciliationCoreServices.reconcile#UnifiedFiles"
+                    in-map="unifiedParams" out-map="unifiedOut"/>
+
+            <set field="diffLocation" from="unifiedOut.diffLocation"/>
+            <set field="diffFileName" from="unifiedOut.diffFileName"/>
+            <set field="differenceCount" from="unifiedOut.differenceCount"/>
+            <set field="onlyInJson1Count" from="unifiedOut.onlyInFile1Count"/>
+            <set field="onlyInJson2Count" from="unifiedOut.onlyInFile2Count"/>
+            <set field="validationPassed" from="!(unifiedOut.validationErrors &amp;&amp; !unifiedOut.validationErrors.isEmpty())"/>
+            <set field="validationErrors" from="unifiedOut.validationErrors"/>
+        </actions>
     </service>
 
     <service verb="run" noun="JsonReconciliation">

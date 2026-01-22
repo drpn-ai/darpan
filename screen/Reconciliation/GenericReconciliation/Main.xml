@@ -7,7 +7,7 @@
 
     <transition name="runGenericReconciliation" begin-transaction="false">
         <actions>
-            <service-call name="ReconciliationGenericServices.reconcile#GenericFiles"
+            <service-call name="reconciliation.ReconciliationGenericServices.reconcile#GenericFiles"
                     in-map="[file1:file1, file2:file2, file1SystemEnumId:file1SystemEnumId, file2SystemEnumId:file2SystemEnumId, reconciliationMappingId:reconciliationMappingId]"
                     out-map="context"/>
             <if condition="diffFileName"><then>

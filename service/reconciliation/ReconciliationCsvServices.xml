@@ -2,9 +2,8 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="compare" noun="CsvFiles" type="script"
-            location="component://darpan/src/reconciliation/csv/reconcileCsvFiles.groovy">
-        <description>Reconcile two CSV files by mapped ID field and generate a diff JSON.</description>
+    <service verb="compare" noun="CsvFiles">
+        <description>Reconcile two CSV files by mapped ID field and generate a diff JSON (wrapper to unified comparator).</description>
         <in-parameters>
             <parameter name="csv1Location" required="true"/>
             <parameter name="csv2Location" required="true"/>
@@ -53,6 +52,64 @@
             <parameter name="onlyInCsv1Count" type="Integer"/>
             <parameter name="onlyInCsv2Count" type="Integer"/>
         </out-parameters>
+        <actions>
+            <if condition="!csv1Location || !csv2Location">
+                <return error="true" message="csv1Location and csv2Location are required"/>
+            </if>
+
+            <script><![CDATA[
+                Map<String, Object> params = [
+                        file1Location  : csv1Location,
+                        file2Location  : csv2Location,
+                        file1Type      : "CSV",
+                        file2Type      : "CSV",
+                        file1IdField   : (csv1IdField ?: idField ?: "id"),
+                        file2IdField   : (csv2IdField ?: idField ?: "id"),
+                        hasHeader      : hasHeader,
+                        outputLocation : outputLocation,
+                        outputFileName : outputFileName,
+                        sparkMaster    : sparkMaster,
+                        sparkAppName   : sparkAppName
+                ]
+
+                // If mapping metadata is provided, let FilesByMapping handle overrides and warnings
+                if (reconciliationMappingId && csv1SystemEnumId && csv2SystemEnumId) {
+                    params = [
+                            reconciliationMappingId: reconciliationMappingId,
+                            file1Location          : csv1Location,
+                            file2Location          : csv2Location,
+                            file1SystemEnumId      : csv1SystemEnumId,
+                            file2SystemEnumId      : csv2SystemEnumId,
+                            file1FileTypeEnumId    : "DftCsv",
+                            file2FileTypeEnumId    : "DftCsv",
+                            hasHeader              : hasHeader,
+                            outputLocation         : outputLocation,
+                            sparkMaster            : sparkMaster,
+                            sparkAppName           : sparkAppName
+                    ]
+                    context.useMapping = true
+                } else {
+                    context.useMapping = false
+                }
+
+                context.unifiedParams = params
+            ]]></script>
+
+            <if condition="useMapping">
+                <service-call name="ReconciliationCoreServices.reconcile#FilesByMapping"
+                        in-map="unifiedParams" out-map="unifiedOut"/>
+            </if>
+            <if condition="!useMapping">
+                <service-call name="ReconciliationCoreServices.reconcile#UnifiedFiles"
+                        in-map="unifiedParams" out-map="unifiedOut"/>
+            </if>
+
+            <set field="diffLocation" from="unifiedOut.diffLocation"/>
+            <set field="diffFileName" from="unifiedOut.diffFileName"/>
+            <set field="diffRowCount" from="unifiedOut.differenceCount"/>
+            <set field="onlyInCsv1Count" from="unifiedOut.onlyInFile1Count"/>
+            <set field="onlyInCsv2Count" from="unifiedOut.onlyInFile2Count"/>
+        </actions>
         <actions>
             <if condition="csv1File == null || csv2File == null">
                 <return error="true" message="Both CSV 1 and CSV 2 files are required"/>

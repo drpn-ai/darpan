@@ -30,4 +30,80 @@
             <parameter name="differenceCount" type="Long"/>
         </out-parameters>
     </service>
+
+    <service verb="reconcile" noun="UnifiedFiles" type="script"
+            location="component://darpan/src/reconciliation/core/reconcileUnifiedFiles.groovy">
+        <description>Normalize CSV/JSON file inputs, perform reconciliation, and emit a JSON diff output.</description>
+        <in-parameters>
+            <parameter name="file1Location" required="true"/>
+            <parameter name="file2Location" required="true"/>
+            <parameter name="file1Type" required="true"/>
+            <parameter name="file2Type" required="true"/>
+            <parameter name="file1IdField"/>
+            <parameter name="file2IdField"/>
+            <parameter name="file1IdExpression"/>
+            <parameter name="file2IdExpression"/>
+            <parameter name="file1SchemaFileName"/>
+            <parameter name="file2SchemaFileName"/>
+            <parameter name="file1Label"/>
+            <parameter name="file2Label"/>
+            <parameter name="reconciliationMappingId">
+                <description>Optional mapping ID used for naming outputs.</description>
+            </parameter>
+            <parameter name="reconciliationMappingName">
+                <description>Optional mapping name used for naming outputs.</description>
+            </parameter>
+            <parameter name="hasHeader" type="Boolean" default-value="true"/>
+            <parameter name="outputLocation" default-value="runtime://tmp/reconciliation/unified/output"/>
+            <parameter name="outputFileName"/>
+            <parameter name="sparkMaster" default-value="local[*]"/>
+            <parameter name="sparkAppName" default-value="UnifiedReconciliation"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="reconciliationType"/>
+            <parameter name="diffLocation"/>
+            <parameter name="diffFileName"/>
+            <parameter name="differenceCount" type="Long"/>
+            <parameter name="onlyInFile1Count" type="Long"/>
+            <parameter name="onlyInFile2Count" type="Long"/>
+            <parameter name="validationErrors"><parameter name="errorMessage"/></parameter>
+            <parameter name="processingWarnings"><parameter name="warningMessage"/></parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="reconcile" noun="FilesByMapping" type="script"
+            location="component://darpan/src/reconciliation/core/reconcileFilesByMapping.groovy">
+        <description>Route staged file locations through CSV/JSON/Mixed reconciliation using mapping metadata and optional overrides.</description>
+        <in-parameters>
+            <parameter name="reconciliationMappingId" required="true"/>
+            <parameter name="file1Location" required="true"/>
+            <parameter name="file2Location" required="true"/>
+            <parameter name="file1Name"/>
+            <parameter name="file2Name"/>
+            <parameter name="file1SystemEnumId" required="true"/>
+            <parameter name="file2SystemEnumId" required="true"/>
+            <parameter name="file1FileTypeEnumId"/>
+            <parameter name="file2FileTypeEnumId"/>
+            <parameter name="file1SchemaFileName"/>
+            <parameter name="file2SchemaFileName"/>
+            <parameter name="file1Label"/>
+            <parameter name="file2Label"/>
+            <parameter name="hasHeader" type="Boolean" default-value="true"/>
+            <parameter name="outputLocation" default-value="runtime://tmp/reconciliation/router/output"/>
+            <parameter name="sparkMaster" default-value="local[*]"/>
+            <parameter name="sparkAppName" default-value="ReconciliationRouter"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="file1Type"/>
+            <parameter name="file2Type"/>
+            <parameter name="reconciliationType"/>
+            <parameter name="diffLocation"/>
+            <parameter name="diffFileName"/>
+            <parameter name="differenceCount" type="Long"/>
+            <parameter name="onlyInFile1Count" type="Long"/>
+            <parameter name="onlyInFile2Count" type="Long"/>
+            <parameter name="validationErrors"><parameter name="errorMessage"/></parameter>
+            <parameter name="processingWarnings"><parameter name="warningMessage"/></parameter>
+        </out-parameters>
+    </service>
 </services>

@@ -6,9 +6,10 @@ This wiki lives in `runtime/component/darpan/darpan.wiki`. The Darpan component 
 
 - Component descriptor: `runtime/component/darpan/component.xml`
 - Entities (party + reconciliation config): `runtime/component/darpan/entity/PartyEntities.xml`, `runtime/component/darpan/entity/ReconciliationEntities.xml`, `runtime/component/darpan/entity/MappingEntities.xml`
-- Service definitions: `runtime/component/darpan/service/ReconciliationCsvServices.xml`, `runtime/component/darpan/service/ReconciliationSampleServices.xml`, `runtime/component/darpan/service/JsonSchemaServices.xml`
-- Script implementations: `runtime/component/darpan/src/reconciliation/csv/reconcileCsvFiles.groovy`, `runtime/component/darpan/src/reconciliation/sample/compareSampleOrderIds.groovy`, `runtime/component/darpan/src/jsonschema/createJsonSchemaFromJson.groovy`, `runtime/component/darpan/src/jsonschema/saveJsonSchema.groovy`, `runtime/component/darpan/src/jsonschema/validateJsonFileAgainstSchema.groovy`
+- Service definitions: `runtime/component/darpan/service/ReconciliationCsvServices.xml`, `runtime/component/darpan/service/ReconciliationCoreServices.xml`, `runtime/component/darpan/service/ReconciliationSampleServices.xml`, `runtime/component/darpan/service/JsonSchemaServices.xml`
+- Script implementations: unified reconciliation in `runtime/component/darpan/src/reconciliation/core/reconcileUnifiedFiles.groovy`, mapping router in `runtime/component/darpan/src/reconciliation/core/reconcileFilesByMapping.groovy`, sample compare in `runtime/component/darpan/src/reconciliation/sample/compareSampleOrderIds.groovy`, JSON schema helpers in `runtime/component/darpan/src/jsonschema/createJsonSchemaFromJson.groovy`, `runtime/component/darpan/src/jsonschema/saveJsonSchema.groovy`, `runtime/component/darpan/src/jsonschema/validateJsonFileAgainstSchema.groovy`
 - Generic reconciliation diff view actions: `runtime/component/darpan/screen/Reconciliation/GenericReconciliation/GenericReconciliationView/GenericReconciliationViewActions.groovy`, `runtime/component/darpan/screen/Reconciliation/GenericReconciliation/GenericReconciliationView/MissingJsonListActions.groovy`
+- BOM cycle check: `runtime/component/darpan/service/BomServices.xml`, script `runtime/component/darpan/src/bom/runBomCycleCheck.groovy`, screen `runtime/component/darpan/screen/Reconciliation/BomCycleCheck.xml`
 - Sample data inputs: `runtime/component/darpan/data/sample/omsBulkData.json`, `runtime/component/darpan/data/sample/shopifyBulkData.json`
 - Build config: `runtime/component/darpan/build.gradle`
 

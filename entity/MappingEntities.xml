@@ -1,13 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
 
     <!-- ========================================================= -->
     <!-- darpan.mapping -->
     <!-- ========================================================= -->
 
     <entity entity-name="ReconciliationMapping" package="darpan.mapping" use="configuration">
-        <description>Named mapping definition for source field values by system.</description>
+        <description>(DEPRECATED) Named mapping definition for source field values by system. Use RuleSet instead.</description>
         <field name="reconciliationMappingId" type="id" is-pk="true"/>
         <field name="mappingName" type="text-short" not-null="true"/>
         <field name="description" type="text-medium"/>
@@ -16,7 +15,7 @@
     </entity>
 
     <entity entity-name="ReconciliationMappingMember" package="darpan.mapping" use="configuration">
-        <description>Mapping entry that binds a source field/value to a system.</description>
+        <description>(DEPRECATED) Mapping entry that binds a source field/value to a system.</description>
         <field name="mappingMemberId" type="id" is-pk="true"/>
         <field name="reconciliationMappingId" type="id" not-null="true"/>
         <field name="systemEnumId" type="id" not-null="true"/>
@@ -33,10 +32,13 @@
         <field name="createdDate" type="date-time"/>
 
         <relationship type="one" related="darpan.mapping.ReconciliationMapping" fk-name="MAPMEM_MAPDEF">
-            <key-map field-name="reconciliationMappingId"/></relationship>
+            <key-map field-name="reconciliationMappingId"/>
+        </relationship>
         <relationship type="one" related="moqui.basic.Enumeration" fk-name="MAPMEM_SYS_ENUM">
-            <key-map field-name="systemEnumId" related-field-name="enumId"/></relationship>
+            <key-map field-name="systemEnumId" related-field-name="enumId"/>
+        </relationship>
         <relationship type="one" title="FileType" related="moqui.basic.Enumeration" fk-name="MAPMEM_FTYPE_ENUM">
-            <key-map field-name="fileTypeEnumId" related-field-name="enumId"/></relationship>
+            <key-map field-name="fileTypeEnumId" related-field-name="enumId"/>
+        </relationship>
     </entity>
 </entities>

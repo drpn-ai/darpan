@@ -12,6 +12,7 @@ Platform
 - [overview](reconciliation/platform/overview.md)
 - [security](reconciliation/platform/security.md)
 - [services](reconciliation/platform/services.md)
+- [bom-cycle-check](reconciliation/bom-cycle-check.md)
 
 Data model
 - [entity-model](reconciliation/data-model/entity-model.md)

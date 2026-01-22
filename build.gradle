@@ -23,6 +23,13 @@ def frameworkDir = file(moquiDir.absolutePath + '/framework')
 repositories {
     flatDir name: 'localLib', dirs: frameworkDir.absolutePath + '/lib'
     mavenCentral()
+    maven { url 'https://jitpack.io' }
+}
+
+sourceSets {
+    main {
+        groovy { srcDirs = ['src'] }
+    }
 }
 
 // Log4J has annotation processors, disable to avoid warning
@@ -31,10 +38,21 @@ tasks.withType(GroovyCompile) { options.compilerArgs << "-proc:none" }
 
 dependencies {
     implementation project(':framework')
+    implementation project(':runtime:component:moqui-sftp')
     implementation 'org.apache.spark:spark-sql_2.12:3.5.1'
     implementation 'com.networknt:json-schema-validator:1.0.87'
     implementation 'com.jayway.jsonpath:json-path:2.8.0'
+    implementation 'com.github.saasquatch:json-schema-inferrer:0.1.5'
     runtimeOnly 'com.mysql:mysql-connector-j:8.3.0'
+
+    // Drools
+    implementation 'org.drools:drools-mvel:7.73.0.Final'
+    implementation 'org.drools:drools-compiler:7.73.0.Final'
+    implementation 'org.kie:kie-api:7.73.0.Final'
+
+    // Testing
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.2'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.9.2'
 }
 
 // by default the Java plugin runs test on build, change to not do that (only run test if explicit task)

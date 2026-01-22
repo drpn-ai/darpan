@@ -20,14 +20,14 @@
 
                 if (hasJson) {
                     ec.logger.info("Processing JSON Sample upload")
-                    Map result = ec.service.sync().name("JsonSchemaServices.create#JsonSchemaFromJson")
+                    Map result = ec.service.sync().name("jsonschema.JsonSchemaServices.create#JsonSchemaFromJson")
                         .parameters([jsonFile:jsonFile, schemaName:schemaName, overwrite:overwrite])
                         .call()
                     // Put output in context for response
                     context.putAll(result)
                 } else if (hasSchema) {
                     ec.logger.info("Processing Existing Schema upload")
-                    Map result = ec.service.sync().name("JsonSchemaServices.save#JsonSchema")
+                    Map result = ec.service.sync().name("jsonschema.JsonSchemaServices.save#JsonSchema")
                         .parameters([schemaFile:schemaFile, schemaName:schemaName, overwrite:overwrite])
                         .call()
                     context.putAll(result)
@@ -51,9 +51,13 @@
         </default-response>
     </transition>
 
-
-
     <pre-actions>
+        <script>
+            // Clean up session state from previous wizard/editor runs
+            ec.web.session.removeAttribute("wizardResultList")
+            ec.web.session.removeAttribute("wizardSchemaName")
+            ec.web.session.removeAttribute("wizardSchemaId")
+        </script>
     </pre-actions>
 
     <widgets>

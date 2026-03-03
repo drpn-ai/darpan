@@ -67,5 +67,5 @@ The service returns `dataAvailable=false` when no files are found so the job can
 - Existing jobs for this service are listed with edit/pause/resume actions; editing preloads parameters so you can adjust patterns, paths, or cadence quickly.
 
 ## UI: Settings Screen (SFTP credentials)
-- Navigate to **Reconciliation → Settings** to add/update `SystemMessageRemote` entries used by the automation screen.
-- Store SFTP receive/send URLs, username, and either a password or private key; URLs are masked in the listing to avoid leaking credentials.
+- Navigate to **Settings → SFTP** to add/update `darpan.reconciliation.SftpServer` entries used by the automation screen.
+- Store host, port, username, and either a password or private key; sensitive fields are encrypted and not shown in clear text in the listing.

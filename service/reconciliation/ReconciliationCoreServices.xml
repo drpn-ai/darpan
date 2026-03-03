@@ -1,9 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="reconcile" noun="IdDataFrames" type="script"
-            location="component://darpan/src/reconciliation/core/reconcileIdDataFrames.groovy">
+    <service verb="reconcile" noun="IdDataFrames" engine="java" location="darpan.reconciliation.core.ReconciliationServices" invoke="reconcileIdDataFrames">
         <description>Core Spark-based reconciliation of two ID DataFrames. Returns DataFrame results for memory-efficient streaming.</description>
         <in-parameters>
             <parameter name="df1" type="org.apache.spark.sql.Dataset" required="true">
@@ -31,8 +29,7 @@
         </out-parameters>
     </service>
 
-    <service verb="reconcile" noun="UnifiedFiles" type="script"
-            location="component://darpan/src/reconciliation/core/reconcileUnifiedFiles.groovy">
+    <service verb="reconcile" noun="UnifiedFiles" engine="java" location="darpan.reconciliation.core.ReconciliationServices" invoke="reconcileUnifiedFiles">
         <description>Normalize CSV/JSON file inputs, perform reconciliation, and emit a JSON diff output.</description>
         <in-parameters>
             <parameter name="file1Location" required="true"/>
@@ -66,13 +63,16 @@
             <parameter name="differenceCount" type="Long"/>
             <parameter name="onlyInFile1Count" type="Long"/>
             <parameter name="onlyInFile2Count" type="Long"/>
-            <parameter name="validationErrors"><parameter name="errorMessage"/></parameter>
-            <parameter name="processingWarnings"><parameter name="warningMessage"/></parameter>
+            <parameter name="validationErrors">
+                <parameter name="errorMessage"/>
+            </parameter>
+            <parameter name="processingWarnings">
+                <parameter name="warningMessage"/>
+            </parameter>
         </out-parameters>
     </service>
 
-    <service verb="reconcile" noun="FilesByMapping" type="script"
-            location="component://darpan/src/reconciliation/core/reconcileFilesByMapping.groovy">
+    <service verb="reconcile" noun="FilesByMapping" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/core/reconcileFilesByMapping.groovy">
         <description>Route staged file locations through CSV/JSON/Mixed reconciliation using mapping metadata and optional overrides.</description>
         <in-parameters>
             <parameter name="reconciliationMappingId" required="true"/>
@@ -102,8 +102,12 @@
             <parameter name="differenceCount" type="Long"/>
             <parameter name="onlyInFile1Count" type="Long"/>
             <parameter name="onlyInFile2Count" type="Long"/>
-            <parameter name="validationErrors"><parameter name="errorMessage"/></parameter>
-            <parameter name="processingWarnings"><parameter name="warningMessage"/></parameter>
+            <parameter name="validationErrors">
+                <parameter name="errorMessage"/>
+            </parameter>
+            <parameter name="processingWarnings">
+                <parameter name="warningMessage"/>
+            </parameter>
         </out-parameters>
     </service>
 </services>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd" default-menu-title="Rules" default-menu-index="20">
+
+    <subscreens default-item="FindRule">
+        <subscreens-item name="FindRule" location="component://darpan/screen/Rules/FindRule.xml"/>
+        <subscreens-item name="RuleWorkspace" location="component://darpan/screen/Rules/RuleWorkspace.xml"/>
+        <subscreens-item name="EditRule" location="component://darpan/screen/Rules/EditRule.xml"/>
+    </subscreens>
+
+    <widgets>
+        <subscreens-active/>
+    </widgets>
+</screen>

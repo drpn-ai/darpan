@@ -116,6 +116,29 @@
         </default-response>
     </transition>
 
+    <transition name="deleteMapping" begin-transaction="true">
+        <parameter name="mappingId"/>
+        <actions>
+            <if condition="!mappingId">
+                <return error="true" message="Mapping ID is missing"/>
+            </if>
+            <entity-find-one entity-name="darpan.mapping.ReconciliationMapping" value-field="mappingValueToDelete">
+                <field-map field-name="reconciliationMappingId" from="mappingId"/>
+            </entity-find-one>
+            <if condition="!mappingValueToDelete">
+                <return error="true" message="Mapping ${mappingId} was not found"/>
+            </if>
+
+            <entity-delete-by-condition entity-name="darpan.mapping.ReconciliationMappingMember">
+                <econdition field-name="reconciliationMappingId" from="mappingId"/>
+            </entity-delete-by-condition>
+            <entity-delete value-field="mappingValueToDelete"/>
+
+            <message>Mapping ${mappingValueToDelete.mappingName ?: mappingId} deleted.</message>
+        </actions>
+        <default-response url="."/>
+    </transition>
+
     <pre-actions>
         <entity-find entity-name="moqui.basic.Enumeration" list="systemEnumList" cache="false">
             <econdition field-name="enumTypeId" value="DarpanSystemSource"/>
@@ -277,6 +300,12 @@
                     </field>
 
                     <field name="saveButton"><default-field title="Update Mapping"><submit/></default-field></field>
+                    <field name="deleteButton">
+                        <default-field title="Delete Mapping">
+                            <link url="deleteMapping" text="Delete Mapping" btn-type="danger"
+                                    parameter-map="[mappingId:mappingId]"/>
+                        </default-field>
+                    </field>
 
                     <field-layout>
                         <field-row-big><field-ref name="mappingName"/></field-row-big>
@@ -286,7 +315,7 @@
                         <field-row><field-ref name="system2EnumId"/><field-ref name="system2FileTypeEnumId"/></field-row>
                         <field-row><field-ref name="system2IdExpression"/><field-ref name="system2SchemaFileName"/></field-row>
                         <field-row-big><field-ref name="system2ResolvedJsonPath"/></field-row-big>
-                        <field-row-big><field-ref name="saveButton"/></field-row-big>
+                        <field-row><field-ref name="saveButton"/><field-ref name="deleteButton"/></field-row>
                     </field-layout>
                 </form-single>
             </container>

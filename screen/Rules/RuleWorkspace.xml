@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd" default-menu-title="New Rule Workspace">
+
+    <transition name="generateDrl">
+        <service-call name="darpan.rule.RuleServices.generate#DrlFromPrompt"/>
+        <default-response url=".">
+            <parameter name="drlText"/>
+            <parameter name="explanation"/>
+            <parameter name="warnings"/>
+            <parameter name="prompt"/>
+            <parameter name="ruleContext"/>
+            <parameter name="tenantId"/>
+        </default-response>
+    </transition>
+    <transition name="saveDraft">
+        <service-call name="darpan.rule.RuleServices.save#RuleDraft"/>
+        <default-response url="../EditRule"/>
+        <!-- Go to editor after save -->
+    </transition>
+
+    <actions>
+        <if condition="!tenantId">
+            <set field="tenantId" from="ec.context.tenantId ?: ec.user.context?.tenantId ?: 'DEFAULT'"/>
+        </if>
+        <script><![CDATA[
+            Set<String> allowedProviders = ["OPENAI", "GEMINI"] as Set<String>
+            Map keyEnvByProvider = [OPENAI: "OPENAI_API_KEY", GEMINI: "GEMINI_API_KEY"]
+
+            def activeProviderRec = ec.entity.find("moqui.service.message.SystemMessageRemote")
+                    .condition("systemMessageRemoteId", "RULE_WORKSPACE_LLM_ACTIVE")
+                    .useCache(false)
+                    .one()
+            String provider = activeProviderRec?.username?.toString()?.trim()?.toUpperCase()
+            if (!allowedProviders.contains(provider)) provider = "OPENAI"
+
+            def llmSettings = ec.entity.find("moqui.service.message.SystemMessageRemote")
+                    .condition("systemMessageRemoteId", provider + "_RULE_WORKSPACE")
+                    .useCache(false)
+                    .one()
+
+            String storedKey = llmSettings?.password?.toString()
+            String fallbackKey = System.getenv(keyEnvByProvider[provider])
+            if (!fallbackKey && provider == "OPENAI") fallbackKey = ec.resource.properties["darpan.openai.apiKey"]
+
+            context.llmProvider = provider
+            context.llmKeyEnvName = keyEnvByProvider[provider]
+            context.llmEnabled = (llmSettings?.remoteAttributes ?: "Y") != "N"
+            context.llmConfigured = context.llmEnabled && !!((storedKey ?: fallbackKey)?.toString()?.trim())
+            context.llmConfiguredFromSettings = !!(storedKey?.trim())
+            context.llmUsingEnvFallback = !context.llmConfiguredFromSettings && !!(fallbackKey?.toString()?.trim())
+            if (warnings instanceof Collection) {
+                context.warningText = warnings.findAll { it != null && it.toString().trim() }.collect { it.toString().trim() }.join(" | ")
+            } else {
+                context.warningText = warnings?.toString()
+            }
+        ]]>        </script>
+    </actions>
+
+    <widgets>
+        <container-row>
+            <row-col lg="4">
+                <label text="Active LLM provider: ${llmProvider}" type="p" style="text-info"/>
+                <label text="${llmProvider} generation is disabled in Settings -&gt; LLM. DRL generation will return a template." condition="!llmEnabled" type="p" style="text-warning"/>
+                <label text="${llmProvider} API key is not configured. Set it in Settings -&gt; LLM (or ${llmKeyEnvName} env) to enable live DRL generation." condition="llmEnabled &amp;&amp; !llmConfigured" type="p" style="text-warning"/>
+                <label text="Using ${llmKeyEnvName} environment fallback. Save a key in Settings -&gt; LLM to manage it in-app." condition="llmUsingEnvFallback" type="p" style="text-info"/>
+                <form-single name="PromptForm" transition="generateDrl">
+                    <field name="tenantId">
+                        <default-field>
+                            <hidden/>
+                        </default-field>
+                    </field>
+                    <field name="prompt">
+                        <default-field title="Natural Language Prompt">
+                            <text-area rows="5" cols="40"/>
+                        </default-field>
+                    </field>
+                    <field name="ruleContext">
+                        <default-field title="Context Parameters (JSON)">
+                            <text-area rows="3" cols="40"/>
+                        </default-field>
+                    </field>
+                    <field name="submitBtn">
+                        <default-field title="Generate DRL">
+                            <submit/>
+                        </default-field>
+                    </field>
+                </form-single>
+            </row-col>
+            <row-col lg="8">
+                <container-box>
+                    <box-header title="Generated DRL Preview"/>
+                    <box-body>
+                        <label text="${explanation}" type="p" style="text-info"/>
+                        <form-single name="PreviewForm" transition="saveDraft">
+                            <field name="tenantId">
+                                <default-field>
+                                    <hidden/>
+                                </default-field>
+                            </field>
+                            <field name="prompt">
+                                <default-field>
+                                    <hidden/>
+                                </default-field>
+                            </field>
+                            <field name="drlText">
+                                <default-field title="DRL Content">
+                                    <text-area rows="15" cols="80" read-only="false"/>
+                                </default-field>
+                            </field>
+                            <field name="ruleName">
+                                <default-field title="Rule Name">
+                                    <text-line/>
+                                </default-field>
+                            </field>
+                            <field name="saveBtn">
+                                <default-field title="Save Draft">
+                                    <submit/>
+                                </default-field>
+                            </field>
+                        </form-single>
+                    </box-body>
+                </container-box>
+            </row-col>
+        </container-row>
+
+        <container-row>
+            <row-col lg="12">
+                <label text="Validation Warnings: ${warningText}" condition="warningText" style="text-warning"/>
+            </row-col>
+        </container-row>
+    </widgets>
+</screen>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd" include-child-content="true" menu-image="fa fa-cogs" menu-image-type="icon" default-menu-title="Settings" require-authentication="false">
+    <subscreens default-item="LlmSettings">
+        <conditional-default item="LlmSettings" condition="true"/>
+        <subscreens-item name="LlmSettings" menu-title="LLM" location="component://darpan/screen/Settings/LlmSettings.xml"/>
+        <subscreens-item name="SftpServers" menu-title="SFTP" location="component://darpan/screen/Settings/SftpServers.xml"/>
+        <subscreens-item name="NetSuiteAuth" menu-title="NetSuite Auth" location="component://darpan/screen/Settings/NetSuiteAuth.xml"/>
+        <subscreens-item name="NetSuiteRestlet" menu-title="NetSuite Endpoints" location="component://darpan/screen/Settings/NetSuiteRestlet.xml"/>
+        <subscreens-item name="HcReadDb" menu-title="Read DB" location="component://darpan/screen/Settings/HcReadDb.xml"/>
+    </subscreens>
+    <widgets>
+        <subscreens-panel id="settings-app" type="popup"/>
+    </widgets>
+</screen>

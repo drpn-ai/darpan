@@ -1,0 +1,400 @@
+package darpan.reconciliation.core
+
+import groovy.json.JsonOutput
+import org.apache.spark.sql.Dataset
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.storage.StorageLevel
+import org.moqui.context.ExecutionContext
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+import static org.apache.spark.sql.functions.*
+
+class ReconciliationServices {
+    private static final Logger logger = LoggerFactory.getLogger(ReconciliationServices.class)
+
+    /**
+     * Core Spark-based reconciliation of two ID DataFrames.
+     */
+    static Map<String, Object> reconcileIdDataFrames(ExecutionContext ec, Map<String, Object> context) {
+        Dataset df1 = (Dataset) context.get("df1")
+        Dataset df2 = (Dataset) context.get("df2")
+        String idCol = (String) context.get("idColumnName") ?: "compare_id"
+        String df1LabelStr = (String) context.get("df1Label") ?: "DataFrame 1"
+        String df2LabelStr = (String) context.get("df2Label") ?: "DataFrame 2"
+
+        if (df1 == null || df2 == null) {
+            ec.message.addError("df1 and df2 DataFrames are required")
+            return [:]
+        }
+
+        logger.info("Starting DataFrame reconciliation: df1Label=${df1LabelStr} df2Label=${df2LabelStr} idColumn=${idCol}")
+
+        // Perform anti-joins to find differences
+        Dataset onlyInDf1Temp = df1.join(df2, df1.col(idCol).equalTo(df2.col(idCol)), "left_anti")
+                                   .select(df1.col(idCol).as(idCol))
+                                   .distinct()
+
+        Dataset onlyInDf2Temp = df2.join(df1, df1.col(idCol).equalTo(df2.col(idCol)), "left_anti")
+                                   .select(df2.col(idCol).as(idCol))
+                                   .distinct()
+
+        // Get counts
+        long count1 = onlyInDf1Temp.count()
+        long count2 = onlyInDf2Temp.count()
+        long differenceCount = count1 + count2
+
+        logger.info("DataFrame reconciliation complete: onlyIn${df1LabelStr}=${count1} onlyIn${df2LabelStr}=${count2} total=${differenceCount}")
+
+        Map<String, Object> result = [:]
+        result.put("onlyInDf1", onlyInDf1Temp)
+        result.put("onlyInDf2", onlyInDf2Temp)
+        result.put("onlyInDf1Count", count1)
+        result.put("onlyInDf2Count", count2)
+        result.put("differenceCount", differenceCount)
+        return result
+    }
+
+    /**
+     * Normalize CSV/JSON file inputs, perform reconciliation, and emit a JSON diff output.
+     */
+    static Map<String, Object> reconcileUnifiedFiles(ExecutionContext ec, Map<String, Object> context) {
+        Dataset onlyIn1Df = null
+        Dataset onlyIn2Df = null
+        Dataset idDf1 = null
+        Dataset idDf2 = null
+        
+        try {
+            String file1Location = (String) context.get("file1Location")
+            String file2Location = (String) context.get("file2Location")
+            String file1Type = (String) context.get("file1Type")
+            String file2Type = (String) context.get("file2Type")
+            String file1IdField = (String) context.get("file1IdField")
+            String file2IdField = (String) context.get("file2IdField")
+            String file1IdExpression = (String) context.get("file1IdExpression")
+            String file2IdExpression = (String) context.get("file2IdExpression")
+            String file1SchemaFileName = (String) context.get("file1SchemaFileName")
+            String file2SchemaFileName = (String) context.get("file2SchemaFileName")
+            String file1LabelParam = (String) context.get("file1Label")
+            String file2LabelParam = (String) context.get("file2Label")
+            String reconciliationMappingId = (String) context.get("reconciliationMappingId")
+            String reconciliationMappingName = (String) context.get("reconciliationMappingName")
+            Boolean hasHeader = (Boolean) context.get("hasHeader")
+            String outputLocation = (String) context.get("outputLocation") ?: "runtime://tmp/reconciliation/unified/output"
+            String outputFileName = (String) context.get("outputFileName")
+            String sparkMaster = (String) context.get("sparkMaster") ?: "local[*]"
+            String sparkAppName = (String) context.get("sparkAppName") ?: "UnifiedReconciliation"
+            
+            List<String> processingWarnings = (List<String>) context.get("processingWarnings") ?: []
+            List<String> validationErrors = (List<String>) context.get("validationErrors") ?: []
+
+
+            if (!file1Location || !file2Location || !file1Type || !file2Type) {
+                 ec.message.addError("Required parameters missing: file1Location, file2Location, file1Type, file2Type")
+                 return [:]
+            }
+            
+            String label1 = normalize(file1LabelParam) ?: "File 1"
+            String label2 = normalize(file2LabelParam) ?: "File 2"
+            String type1 = normalize(file1Type)?.toUpperCase()
+            String type2 = normalize(file2Type)?.toUpperCase()
+            
+            String id1Expr = (type1 == "CSV") ? normalizeCsvId(file1IdExpression ?: file1IdField) : normalizeJsonIdExpr(file1IdExpression ?: file1IdField)
+            String id2Expr = (type2 == "CSV") ? normalizeCsvId(file2IdExpression ?: file2IdField) : normalizeJsonIdExpr(file2IdExpression ?: file2IdField)
+            
+            String reconType = "${type1}_${type2}"
+            String reconciliationType = (reconType == "CSV_CSV") ? "CSV" : (reconType == "JSON_JSON" ? "JSON" : "MIXED")
+
+            SparkSession spark = SparkSession.builder()
+                    .appName(sparkAppName)
+                    .master(sparkMaster)
+                    .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+                     .config("spark.sql.adaptive.enabled", "true")
+                    .getOrCreate()
+
+            // Ingestion
+            Map ingest1 = ingestFile(ec, spark, file1Location, type1, id1Expr, hasHeader ?: true, label1, validationErrors, file1SchemaFileName)
+            Map ingest2 = ingestFile(ec, spark, file2Location, type2, id2Expr, hasHeader ?: true, label2, validationErrors, file2SchemaFileName)
+            
+            idDf1 = (Dataset) ingest1.idDf
+            Dataset dataDf1 = (Dataset) ingest1.dataDf
+            idDf2 = (Dataset) ingest2.idDf
+            Dataset dataDf2 = (Dataset) ingest2.dataDf
+
+            idDf1 = idDf1.persist(StorageLevel.DISK_ONLY())
+            idDf2 = idDf2.persist(StorageLevel.DISK_ONLY())
+
+            // Delegation to Core Logic
+            Map<String, Object> coreInput = [
+                df1: idDf1,
+                df2: idDf2,
+                idColumnName: "compare_id",
+                df1Label: label1,
+                df2Label: label2
+            ]
+            Map<String, Object> coreResult = reconcileIdDataFrames(ec, coreInput)
+
+            onlyIn1Df = (Dataset) coreResult.get("onlyInDf1")
+            onlyIn2Df = (Dataset) coreResult.get("onlyInDf2")
+            Long count1 = (Long) coreResult.get("onlyInDf1Count")
+            Long count2 = (Long) coreResult.get("onlyInDf2Count")
+            Long differenceCount = (Long) coreResult.get("differenceCount")
+            
+             // Output Formatting
+             Dataset diffDf = null
+             if (differenceCount > 0) {
+                String label1Norm = label1?.replaceAll(/[^A-Za-z0-9_]/, "") ?: "file1"
+                String label2Norm = label2?.replaceAll(/[^A-Za-z0-9_]/, "") ?: "file2"
+                String missingInTypeForFile1 = "missing_in_${label2Norm}"
+                String missingInTypeForFile2 = "missing_in_${label1Norm}"
+                
+                Dataset diffs1 = null
+                if (count1 > 0) {
+                    Dataset joined1 = dataDf1.join(onlyIn1Df, "compare_id", "inner")
+                    diffs1 = joined1.select(
+                            lit(missingInTypeForFile1).alias("type"),
+                            col("compare_id").alias("id"),
+                            lit(label1).alias("presentIn"),
+                            lit(label2).alias("missingIn"),
+                            to_json(col("data")).alias("data"),
+                            lit("Present in ${label1}, missing in ${label2}").alias("note")
+                    )
+                }
+                Dataset diffs2 = null
+                if (count2 > 0) {
+                    Dataset joined2 = dataDf2.join(onlyIn2Df, "compare_id", "inner")
+                    diffs2 = joined2.select(
+                            lit(missingInTypeForFile2).alias("type"),
+                            col("compare_id").alias("id"),
+                            lit(label2).alias("presentIn"),
+                            lit(label1).alias("missingIn"),
+                            to_json(col("data")).alias("data"),
+                            lit("Present in ${label2}, missing in ${label1}").alias("note")
+                    )
+                }
+                if (diffs1 != null && diffs2 != null) diffDf = diffs1.union(diffs2)
+                else if (diffs1 != null) diffDf = diffs1
+                else diffDf = diffs2
+             }
+
+            // Write Output
+             String diffLocation = null
+             String diffFileName = null
+             
+             String outputBaseLocation = outputLocation
+             def outputRef = ec.resource.getLocationReference(outputBaseLocation)
+             File outputDir = outputRef?.getFile()
+             if (outputDir == null) {
+                  String runtimePath = ec.factory.getRuntimePath()
+                  outputDir = new File(runtimePath, outputBaseLocation.replace("runtime://", ""))
+             }
+             if (!outputDir.exists()) outputDir.mkdirs()
+             
+             String timestamp = ec.l10n.format(ec.user.nowTimestamp, "yyyyMMdd-HHmmss")
+             String mappingSlug = reconciliationMappingName ? reconciliationMappingName.replaceAll(/[^A-Za-z0-9_-]/, "-") : null
+             String basePrefix = (reconciliationType == "CSV") ? "csv" : (reconciliationType == "JSON" ? "json" : "mixed")
+             String defaultBase = mappingSlug ? "${mappingSlug}-diff-${timestamp}.json" : "${basePrefix}-diff-${timestamp}.json"
+             String baseFileName = outputFileName ?: defaultBase
+             if (!baseFileName.toLowerCase().endsWith(".json")) baseFileName = baseFileName + ".json"
+             
+             File outputFile = new File(outputDir, baseFileName)
+             int suffix = 1
+             String nameRoot = baseFileName.indexOf(".") > 0 ? baseFileName.substring(0, baseFileName.lastIndexOf(".")) : baseFileName
+             while (outputFile.exists()) {
+                 outputFile = new File(outputDir, "${nameRoot}-${suffix}.json")
+                 suffix++
+             }
+             baseFileName = outputFile.getName()
+             
+            diffLocation = outputFile.getAbsolutePath()
+            diffFileName = baseFileName
+             
+             // Write JSON
+            Map outputMetadata = [
+                timestamp: ec.user.nowTimestamp?.toString(),
+                file1Label: label1,
+                file2Label: label2,
+                file1Type: type1,
+                file2Type: type2,
+                reconciliation: reconciliationType
+            ]
+            Map outputSummary = [
+                totalDifferences: differenceCount,
+                onlyInFile1Count: count1,
+                onlyInFile2Count: count2
+            ]
+
+            outputFile.withWriter("UTF-8") { writer ->
+                writer << "{\n"
+                writer << "\"metadata\":" + JsonOutput.toJson(outputMetadata) + ",\n"
+                writer << "\"summary\":" + JsonOutput.toJson(outputSummary) + ",\n"
+                writer << "\"validationErrors\":" + JsonOutput.toJson(validationErrors) + ",\n"
+                writer << "\"differences\":["
+                boolean first = true
+                if (differenceCount > 0 && diffDf != null) {
+                    def iter = diffDf.toJSON().toLocalIterator()
+                    while (iter.hasNext()) {
+                        def rowJson = iter.next()
+                        if (!first) writer << ","
+                        writer << "\n" << rowJson
+                        first = false
+                    }
+                }
+                writer << "]\n}"
+            }
+            
+            // Clean up persisted dfs
+            if (onlyIn1Df) onlyIn1Df.unpersist()
+            if (onlyIn2Df) onlyIn2Df.unpersist()
+            if (idDf1) idDf1.unpersist()
+            if (idDf2) idDf2.unpersist()
+
+            Map<String, Object> result = [:]
+            result.put("reconciliationType", reconciliationType)
+            result.put("diffLocation", diffLocation)
+            result.put("diffFileName", diffFileName)
+            result.put("differenceCount", differenceCount)
+            result.put("onlyInFile1Count", count1)
+            result.put("onlyInFile2Count", count2)
+            result.put("validationErrors", validationErrors)
+            result.put("processingWarnings", processingWarnings)
+            return result
+        } catch (Exception e) {
+             logger.error("Unified reconciliation failed", e)
+             ec.message.addError(e.getMessage())
+             return [:]
+        }
+    }
+
+    // --- Private Helpers ---
+
+    private static Map ingestFile(ExecutionContext ec, SparkSession spark, String loc, String type, String idExpr, boolean hasHeader, String label, List validationErrors, String schemaFile) {
+        String path = resolvePath(ec, loc)
+        Dataset df = null
+        Dataset idDf = null
+        Dataset dataDf = null
+        
+        if (type == "JSON") {
+            // Validate if needed
+             if (schemaFile) {
+                try {
+                    def result = ec.service.sync().name("jsonschema.JsonSchemaServices.validate#JsonLocationAgainstSchema")
+                        .parameters([jsonLocation: loc, schemaFileName: schemaFile]).call()
+                    if (!result.valid) {
+                         ((List)result.errorMessages).each { validationErrors.add("${label}: ${it}") }
+                    }
+                } catch (Exception e) { validationErrors.add("${label}: Validation check failed: ${e.message}") }
+             }
+             
+            df = spark.read().option("multiLine", "true").json(path)
+            Map pathInfo = convertJsonPathToSpark(idExpr)
+            idDf = buildJsonIdDf(df, pathInfo, label)
+            dataDf = buildJsonDataDf(df, pathInfo, label)
+        } else {
+             // CSV
+             df = spark.read().option("header", hasHeader.toString()).option("multiLine", "true").csv(path)
+             idDf = buildCsvIdDf(df, idExpr)
+             dataDf = buildCsvDataDf(df, idExpr)
+        }
+        return [idDf: idDf, dataDf: dataDf]
+    }
+    
+    private static String resolvePath(ExecutionContext ec, String location) {
+         def rr = ec.resource.getLocationReference(location)
+         if (rr != null && rr.supportsUrl()) {
+             def url = rr.getUrl()
+             if ("file".equalsIgnoreCase(url.protocol)) {
+                 try { return new File(url.toURI()).getAbsolutePath() } catch (Exception e) { return url.getPath() }
+             }
+             return url.toString()
+         }
+         return location
+    }
+
+    private static String normalize(Object val) { return val?.toString()?.trim() }
+    
+    // JSON & CSV Helpers
+    private static String normalizeCsvId(String expr) {
+        def raw = normalize(expr)
+        if (!raw) return "id"
+        if (raw.startsWith("\$")) {
+            def parts = raw.tokenize(".")
+            return parts ? parts[-1].replaceAll(/\[.*\]/, "") : "id"
+        }
+        return raw
+    }
+     private static String normalizeJsonIdExpr(String expr) {
+        def raw = normalize(expr)
+        if (!raw) return "\$.id"
+        if (raw.startsWith("\$")) return raw
+        if (raw.contains("[") || raw.contains(".")) return raw.startsWith("\$.") ? raw : "\$." + raw
+        return "\$[*].${raw}"
+    }
+
+    private static Map convertJsonPathToSpark(String jsonPath) {
+        def path = normalizeSparkPath(jsonPath)
+        if (!path) throw new IllegalArgumentException("JSONPath ${jsonPath} resolves to an empty field path.")
+        if (path.contains("[*]")) {
+            def parts = path.split(/\[\*\]/)
+            if (parts.length == 2) {
+                return [needsExplode: true, arrayPath: parts[0], fieldPath: parts[1].replaceFirst(/^\./, "")]
+            }
+        }
+        return [needsExplode: false, path: path]
+    }
+     private static String normalizeSparkPath(String jsonPath) {
+        if (!jsonPath) return jsonPath
+        def path = jsonPath.toString().trim()
+        path = path.replaceFirst(/^\$\[\*\]/, "")
+        path = path.replaceFirst(/^\$\./, "")
+        if (path.startsWith(".")) path = path.substring(1)
+        return path
+    }
+    
+    private static Dataset buildJsonIdDf(Dataset rawDf, Map pathInfo, String pathLabel) {
+        if (pathInfo.needsExplode) {
+             String arrayPath = normalizeSparkPath(pathInfo.arrayPath as String)
+             String fieldPath = normalizeSparkPath(pathInfo.fieldPath as String)
+             return rawDf.selectExpr("explode(${arrayPath}) as exploded_item")
+                .selectExpr("exploded_item.${fieldPath} as compare_id")
+                .filter("compare_id IS NOT NULL AND length(trim(cast(compare_id as string))) > 0")
+                .withColumn("compare_id", col("compare_id").cast("string"))
+                .distinct()
+        }
+        String safePath = normalizeSparkPath(pathInfo.path as String)
+        return rawDf.selectExpr("${safePath} as compare_id")
+             .filter("compare_id IS NOT NULL AND length(trim(cast(compare_id as string))) > 0")
+             .withColumn("compare_id", col("compare_id").cast("string"))
+             .distinct()
+    }
+    
+    private static Dataset buildJsonDataDf(Dataset rawDf, Map pathInfo, String pathLabel) {
+         if (pathInfo.needsExplode) {
+             String arrayPath = normalizeSparkPath(pathInfo.arrayPath as String)
+             String fieldPath = normalizeSparkPath(pathInfo.fieldPath as String)
+             return rawDf.selectExpr("explode(${arrayPath}) as exploded_item")
+                 .selectExpr("exploded_item.${fieldPath} as compare_id", "exploded_item as data")
+                 .filter("compare_id IS NOT NULL AND length(trim(cast(compare_id as string))) > 0")
+                 .withColumn("compare_id", col("compare_id").cast("string"))
+         }
+         String safePath = normalizeSparkPath(pathInfo.path as String)
+         return rawDf.selectExpr("${safePath} as compare_id", "struct(*) as data")
+             .filter("compare_id IS NOT NULL AND length(trim(cast(compare_id as string))) > 0")
+             .withColumn("compare_id", col("compare_id").cast("string"))
+    }
+    
+    private static Dataset buildCsvIdDf(Dataset rawDf, String fieldName) {
+         String fieldExpr = (fieldName?.replace("`", "``") ?: "id")
+         fieldExpr = "`" + fieldExpr + "`"
+         return rawDf.selectExpr("${fieldExpr} as compare_id")
+             .filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0")
+             .withColumn("compare_id", col("compare_id").cast("string"))
+             .distinct()
+    }
+     private static Dataset buildCsvDataDf(Dataset rawDf, String fieldName) {
+         String fieldExpr = (fieldName?.replace("`", "``") ?: "id")
+         fieldExpr = "`" + fieldExpr + "`"
+         return rawDf.selectExpr("${fieldExpr} as compare_id", "struct(*) as data")
+             .filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0")
+             .withColumn("compare_id", col("compare_id").cast("string"))
+    }
+}

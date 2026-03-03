@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd" default-menu-title="Edit Rule">
+
+    <parameter name="ruleId" required="true"/>
+
+    <transition name="updateRule">
+        <service-call name="darpan.rule.RuleServices.save#RuleDraft"/>
+        <default-response url="."/>
+    </transition>
+    <transition name="publishRule">
+        <service-call name="darpan.rule.RuleServices.publish#RuleVersion"/>
+        <default-response url="."/>
+    </transition>
+
+    <actions>
+        <entity-find-one entity-name="darpan.rule.RuleHeader" value-field="ruleHeader"/>
+        <entity-find entity-name="darpan.rule.RuleVersion" list="versionList">
+            <econdition field-name="ruleId"/>
+            <order-by field-name="-createdDate"/>
+        </entity-find>
+        <set field="latestVersion" from="versionList ? versionList[0] : null"/>
+    </actions>
+
+    <widgets>
+        <label text="Rule: ${ruleHeader.ruleName} (ID: ${ruleId})" type="h2"/>
+        <label text="Status: ${ruleHeader.statusId} | Owner: ${ruleHeader.ownerUserId}" type="p"/>
+
+        <tab-bar>
+            <tab-bar-tab title="Edit DRL">
+                <form-single name="EditRuleForm" transition="updateRule">
+                    <field name="ruleId">
+                        <default-field>
+                            <hidden/>
+                        </default-field>
+                    </field>
+                    <field name="tenantId" from="ruleHeader.tenantId">
+                        <default-field>
+                            <hidden/>
+                        </default-field>
+                    </field>
+                    <field name="ruleName" from="ruleHeader.ruleName">
+                        <default-field title="Rule Name">
+                            <text-line/>
+                        </default-field>
+                    </field>
+                    <field name="drlText" from="latestVersion?.drlText">
+                        <default-field title="DRL Content">
+                            <text-area rows="20" cols="90"/>
+                        </default-field>
+                    </field>
+                    <field name="prompt" from="latestVersion?.nlPromptText">
+                        <default-field title="Update via Prompt">
+                            <text-area rows="3" cols="90" placeholder="Describe changes to apply..."/>
+                        </default-field>
+                    </field>
+                    <field name="submitBtn">
+                        <default-field title="Save Draft">
+                            <submit/>
+                        </default-field>
+                    </field>
+                    <field name="publishBtn">
+                        <default-field title="Publish Current">
+                            <link url="publishRule" text="Publish" parameter-map="[ruleId:ruleId, ruleVersionId:latestVersion?.ruleVersionId]" confirmation="Are you sure you want to publish this version?" btn-type="success"/>
+                        </default-field>
+                    </field>
+                </form-single>
+            </tab-bar-tab>
+
+            <tab-bar-tab title="History">
+                <form-list name="VersionHistory" list="versionList" skip-form="true">
+                    <field name="ruleVersionId">
+                        <default-field title="Ver ID">
+                            <display/>
+                        </default-field>
+                    </field>
+                    <field name="createdDate">
+                        <default-field title="Created">
+                            <display/>
+                        </default-field>
+                    </field>
+                    <field name="drlText">
+                        <default-field title="Snippet">
+                            <display text-short="true"/>
+                        </default-field>
+                    </field>
+                    <field name="isPublished">
+                        <default-field title="Published">
+                            <display/>
+                        </default-field>
+                    </field>
+                </form-list>
+            </tab-bar-tab>
+
+            <tab-bar-tab title="Access">
+                <form-list name="AccessList" list="accessList" skip-form="true">
+                    <entity-find entity-name="darpan.rule.RuleAccess" list="accessList">
+                        <econdition field-name="ruleId"/>
+                    </entity-find>
+                    <field name="userId">
+                        <default-field title="User">
+                            <display/>
+                        </default-field>
+                    </field>
+                    <field name="userGroupId">
+                        <default-field title="Group">
+                            <display/>
+                        </default-field>
+                    </field>
+                    <field name="permissionEnumId">
+                        <default-field title="Permission">
+                            <display/>
+                        </default-field>
+                    </field>
+                </form-list>
+            </tab-bar-tab>
+        </tab-bar>
+    </widgets>
+</screen>

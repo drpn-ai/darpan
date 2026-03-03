@@ -24,3 +24,6 @@ POC
 Technology
 - [spark](reconciliation/technology/spark.md)
 - [drools](reconciliation/technology/drools.md)
+
+Rules
+- [rule-workspace-llm-generation](reconciliation/rule-workspace-llm-generation.md)

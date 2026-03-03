@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="poll" noun="SftpAndReconcile" type="script" location="component://darpan/src/reconciliation/automation/pollSftpAndRunReconciliation.groovy" authenticate="anonymous-all">
+    <service verb="poll" noun="SftpAndReconcile" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/automation/pollSftpAndRunReconciliation.groovy" authenticate="anonymous-all">
         <description>Check configured SFTP locations for available files and run reconciliation using mapping metadata.</description>
         <in-parameters>
             <parameter name="reconciliationMappingId" required="true">

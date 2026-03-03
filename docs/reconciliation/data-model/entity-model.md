@@ -247,7 +247,85 @@ Associates systems with a reconciliation run.
 - `systemMessageRemoteId`
 - `role`
 
-### RuleSet and Rule (darpan.reconciliation.RuleSet, darpan.reconciliation.Rule)
+### SftpServer (darpan.reconciliation.SftpServer)
+Stores SFTP credentials used by reconciliation automation flows.
+
+**Purpose**
+- Defines reusable SFTP endpoints for file pickup/delivery
+- Keeps credentials in encrypted entity fields
+
+**Key Fields**
+- `sftpServerId`
+- `host`
+- `port`
+- `username`
+- `password` (encrypted)
+- `privateKey` (encrypted)
+- `remoteAttributes`
+
+### NsAuthConfig (darpan.reconciliation.NsAuthConfig)
+Stores reusable NetSuite authentication profiles for endpoint calls.
+
+**Purpose**
+- Provides reusable NS auth settings shared by multiple endpoints
+- Keeps authentication secrets encrypted in entity fields
+
+**Key Fields**
+- `nsAuthConfigId`
+- `authType`
+- `username`
+- `password` (encrypted)
+- `apiToken` (encrypted)
+- `tokenUrl`
+- `clientId`
+- `certId`
+- `privateKeyPem` (encrypted)
+- `scope`
+- `isActive`
+
+### NsRestletConfig (darpan.reconciliation.NsRestletConfig)
+Stores NetSuite Restlet endpoint connectivity for inventory adjustment retrieval.
+
+**Purpose**
+- Provides endpoint URL/method/headers and timeout settings
+- Links each endpoint to an auth profile (`nsAuthConfigId`)
+
+**Key Fields**
+- `nsRestletConfigId`
+- `endpointUrl`
+- `httpMethod`
+- `nsAuthConfigId`
+- `headersJson`
+- `connectTimeoutSeconds`
+- `readTimeoutSeconds`
+- `isActive`
+
+### HcReadDbConfig (darpan.reconciliation.HcReadDbConfig)
+Stores external read-only JDBC settings for inventory adjustment retrieval. Mapped table name: `READ_DB_CONFIG`.
+
+**Purpose**
+- Provides in-app configuration for external read-only database reads
+- Centralizes table/column defaults used by retrieval services
+
+**Key Fields**
+- `hcReadDbConfigId`
+- `displayName`
+- `host`
+- `port`
+- `databaseName`
+- `additionalParameters`
+- `jdbcUrl`
+- `username`
+- `password` (encrypted)
+- `dbDriver`
+- `defaultTableName`
+- `itemIdColumn`
+- `locationIdColumn`
+- `transactionDateColumn`
+- `connectionPropertiesJson`
+- `isActive`
+
+### RuleSet and Rule (darpan.rule.RuleSet, darpan.rule.Rule)
 Defines conclusion logic for reconciliation runs.
 
 **Purpose**
@@ -256,12 +334,15 @@ Defines conclusion logic for reconciliation runs.
 
 **RuleSet Key Fields**
 - `ruleSetId`
-- `name`
+- `ruleSetName`
 - `version`
 
 **Rule Key Fields**
 - `ruleId`
 - `ruleSetId`
+- `ruleText`
+- `ruleLogic`
+- `enabled`
 - `ruleType`
 - `expression`
 - `severity`
@@ -292,6 +373,9 @@ Stores a single mapping entry tied to a mapping and system enum.
 - `systemEnumId` (from `moqui.basic.Enumeration`)
 - `systemFieldName`
 - `createdDate`
+
+**Operational Note**
+- Mapping deletion should remove `ReconciliationMappingMember` rows first, then delete `ReconciliationMapping` to satisfy FK constraints (`MAPMEM_MAPDEF`).
 
 ## What Is Out of Scope (By Design)
 

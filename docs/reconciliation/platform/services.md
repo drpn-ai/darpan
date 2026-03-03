@@ -17,6 +17,7 @@ Move reconciliation out of OMS into a standalone Moqui platform while keeping in
 
 - Configuration entities (Reconciliation, Run, RuleSet, etc): `runtime/component/darpan/entity/ReconciliationEntities.xml`
 - Sample reconciliation compare service: `runtime/component/darpan/service/ReconciliationSampleServices.xml`
+- Inventory retrieval services (NS Restlet + read-only DB): `runtime/component/darpan/service/reconciliation/ReconciliationInventoryServices.xml`
 - Spark-based compare implementation: `runtime/component/darpan/src/reconciliation/sample/compareSampleOrderIds.groovy`
 - Sample input data: `runtime/component/darpan/data/sample/omsBulkData.json`, `runtime/component/darpan/data/sample/shopifyBulkData.json`
 

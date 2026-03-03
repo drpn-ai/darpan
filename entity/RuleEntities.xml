@@ -1,41 +1,77 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
 
-    <!-- ========================================================= -->
-    <!-- darpan.rule -->
-    <!-- ========================================================= -->
-
     <entity entity-name="RuleSet" package="darpan.rule" use="configuration">
-        <description>A set of rules to be executed together.</description>
+        <description>Grouping of executable rules for reconciliation checks.</description>
         <field name="ruleSetId" type="id" is-pk="true"/>
         <field name="ruleSetName" type="text-medium"/>
         <field name="description" type="text-medium"/>
         <field name="version" type="text-short"/>
+        <field name="explosionPath" type="text-medium"/>
+        <field name="primaryKeyPath" type="text-medium"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="lastUpdatedDate" type="date-time"/>
+    </entity>
+
+    <entity entity-name="Rule" package="darpan.rule" use="configuration">
+        <description>Single executable rule within a RuleSet.</description>
+        <field name="ruleId" type="id" is-pk="true"/>
+        <field name="ruleSetId" type="id" not-null="true"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="ruleText" type="text-medium"/>
+        <field name="ruleLogic" type="text-long"/>
+        <field name="enabled" type="text-indicator"/>
+        <field name="ruleType" type="text-short"/>
+        <field name="expression" type="text-long"/>
+        <field name="severity" type="text-short"/>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>
 
-        <relationship type="many" related="darpan.rule.Rule" short-alias="rules">
+        <relationship type="one" related="darpan.rule.RuleSet" fk-name="RULE_RULESET">
             <key-map field-name="ruleSetId"/>
         </relationship>
     </entity>
 
-    <entity entity-name="Rule" package="darpan.rule" use="configuration">
-        <description>A single rule definition within a RuleSet.</description>
+    <entity entity-name="RuleHeader" package="darpan.rule" use="configuration">
+        <description>Master record for a rule with tenant and permission scope.</description>
         <field name="ruleId" type="id" is-pk="true"/>
-        <field name="ruleSetId" type="id" not-null="true"/>
-        <field name="ruleText" type="text-long">
-            <description>Human readable rule definition</description>
-        </field>
-        <field name="ruleLogic" type="text-long">
-            <description>Compiled Drools DRL or expression</description>
-        </field>
-        <field name="sequenceNum" type="number-integer"/>
-        <field name="enabled" type="text-indicator"/>
-        <field name="createdDate" type="date-time"/>
+        <field name="tenantId" type="id"/>
+        <field name="ruleName" type="text-medium"/>
+        <field name="description" type="text-medium"/>
+        <field name="packageName" type="text-medium"/>
+        <field name="statusId" type="id"/>
+        <!-- DRAFT, ACTIVE, ARCHIVED -->
+        <field name="ownerUserId" type="id"/>
+        <field name="scopeType" type="id"/>
+        <!-- PRIVATE, GROUP, TENANT, CUSTOM -->
         <field name="lastUpdatedDate" type="date-time"/>
+    </entity>
 
-        <relationship type="one" related="darpan.rule.RuleSet">
-            <key-map field-name="ruleSetId"/>
+    <entity entity-name="RuleVersion" package="darpan.rule" use="configuration">
+        <description>Versioning for Rule DRL and validation metadata.</description>
+        <field name="ruleId" type="id" is-pk="true"/>
+        <field name="ruleVersionId" type="id" is-pk="true"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="drlText" type="text-long"/>
+        <field name="nlPromptText" type="text-long"/>
+        <field name="generatorMetaJson" type="text-long"/>
+        <field name="isPublished" type="text-indicator"/>
+        <relationship type="one" related="darpan.rule.RuleHeader">
+            <key-map field-name="ruleId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="RuleAccess" package="darpan.rule" use="configuration">
+        <description>Record-level access control for rules.</description>
+        <field name="ruleAccessId" type="id" is-pk="true"/>
+        <field name="ruleId" type="id"/>
+        <field name="userId" type="id"/>
+        <field name="userGroupId" type="id"/>
+        <field name="permissionEnumId" type="id"/>
+        <!-- VIEW, EDIT, ADMIN -->
+        <relationship type="one" related="darpan.rule.RuleHeader">
+            <key-map field-name="ruleId"/>
         </relationship>
     </entity>
 

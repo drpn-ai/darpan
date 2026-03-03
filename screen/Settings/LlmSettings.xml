@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd" default-menu-title="LLM Settings" require-authentication="false">
+
+    <parameter name="llmProvider"/>
+
+    <transition name="saveLlmSettings">
+        <actions>
+            <set field="llmProvider" from="llmProvider?.trim()?.toUpperCase()"/>
+            <set field="llmApiKey" from="llmApiKey?.trim()"/>
+
+            <script><![CDATA[
+                Set<String> allowedProviders = ["OPENAI", "GEMINI"] as Set<String>
+                String provider = allowedProviders.contains(llmProvider) ? llmProvider : "OPENAI"
+
+                Map defaultByProvider = [
+                        OPENAI: [baseUrl: "https://api.openai.com", model: "gpt-4.1-mini", timeout: "45"],
+                        GEMINI: [baseUrl: "https://generativelanguage.googleapis.com", model: "gemini-2.0-flash", timeout: "45"]
+                ]
+
+                def existingProviderRemote = ec.entity.find("moqui.service.message.SystemMessageRemote")
+                        .condition("systemMessageRemoteId", provider + "_RULE_WORKSPACE")
+                        .useCache(false)
+                        .one()
+                Map defaults = defaultByProvider[provider]
+
+                String modelToUse = existingProviderRemote?.username?.toString()?.trim() ?: defaults.model
+                String baseUrlToUse = existingProviderRemote?.sendUrl?.toString()?.trim() ?: defaults.baseUrl
+                String timeoutToUse = existingProviderRemote?.internalAppCode?.toString()?.trim() ?: defaults.timeout
+                if (!(timeoutToUse ==~ /\d+/)) timeoutToUse = defaults.timeout
+
+                Map llmRemoteMap = [
+                        systemMessageRemoteId: provider + "_RULE_WORKSPACE",
+                        description          : provider + " settings for Rule Workspace DRL generation",
+                        sendUrl              : baseUrlToUse,
+                        username             : modelToUse,
+                        internalAppCode      : timeoutToUse,
+                        remoteAttributes     : "Y",
+                        sendServiceName      : provider
+                ]
+                if (llmApiKey) {
+                    llmRemoteMap.password = llmApiKey
+                } else if (existingProviderRemote?.password) {
+                    llmRemoteMap.password = existingProviderRemote.password
+                }
+                context.llmRemoteMap = llmRemoteMap
+
+                context.llmActiveMap = [
+                        systemMessageRemoteId: "RULE_WORKSPACE_LLM_ACTIVE",
+                        description          : "Active provider for Rule Workspace DRL generation",
+                        username             : provider,
+                        remoteAttributes     : "Y"
+                ]
+                context.llmProviderLabel = provider
+            ]]>            </script>
+
+            <service-call name="store#moqui.service.message.SystemMessageRemote" in-map="llmRemoteMap"/>
+            <service-call name="store#moqui.service.message.SystemMessageRemote" in-map="llmActiveMap"/>
+            <message>Saved ${llmProviderLabel} provider and API key.</message>
+        </actions>
+        <default-response url="."/>
+    </transition>
+
+    <pre-actions>
+        <script><![CDATA[
+            Set<String> allowedProviders = ["OPENAI", "GEMINI"] as Set<String>
+            Map defaultByProvider = [
+                    OPENAI: [baseUrl: "https://api.openai.com", model: "gpt-4.1-mini", timeout: "45", keyEnv: "OPENAI_API_KEY", modelEnv: "OPENAI_MODEL", baseUrlEnv: "OPENAI_API_BASE_URL", timeoutEnv: "OPENAI_TIMEOUT_SECONDS"],
+                    GEMINI: [baseUrl: "https://generativelanguage.googleapis.com", model: "gemini-2.0-flash", timeout: "45", keyEnv: "GEMINI_API_KEY", modelEnv: "GEMINI_MODEL", baseUrlEnv: "GEMINI_API_BASE_URL", timeoutEnv: "GEMINI_TIMEOUT_SECONDS"]
+            ]
+
+            String providerFromParam = llmProvider?.toString()?.trim()?.toUpperCase()
+            def activeProviderRec = ec.entity.find("moqui.service.message.SystemMessageRemote")
+                    .condition("systemMessageRemoteId", "RULE_WORKSPACE_LLM_ACTIVE")
+                    .useCache(false)
+                    .one()
+            String activeProvider = activeProviderRec?.username?.toString()?.trim()?.toUpperCase()
+            if (!allowedProviders.contains(activeProvider)) activeProvider = "OPENAI"
+
+            String selectedProvider = allowedProviders.contains(providerFromParam) ? providerFromParam : activeProvider
+            Map defaults = defaultByProvider[selectedProvider]
+
+            def llmRemote = ec.entity.find("moqui.service.message.SystemMessageRemote")
+                    .condition("systemMessageRemoteId", selectedProvider + "_RULE_WORKSPACE")
+                    .useCache(false)
+                    .one()
+
+            String fallbackModel = (System.getenv(defaults.modelEnv) ?: ec.resource.properties["darpan.${selectedProvider.toLowerCase()}.model"] ?: defaults.model)?.toString()
+            String fallbackBaseUrl = (System.getenv(defaults.baseUrlEnv) ?: ec.resource.properties["darpan.${selectedProvider.toLowerCase()}.baseUrl"] ?: defaults.baseUrl)?.toString()
+            String fallbackTimeout = (System.getenv(defaults.timeoutEnv) ?: ec.resource.properties["darpan.${selectedProvider.toLowerCase()}.timeoutSeconds"] ?: defaults.timeout)?.toString()
+            String fallbackKey = System.getenv(defaults.keyEnv)?.toString()
+            if (!fallbackKey && selectedProvider == "OPENAI") fallbackKey = (ec.resource.properties["darpan.openai.apiKey"] ?: "").toString()
+
+            context.activeLlmProvider = activeProvider
+            context.llmProvider = selectedProvider
+            context.llmModel = llmRemote?.username ?: fallbackModel
+            context.llmBaseUrl = llmRemote?.sendUrl ?: fallbackBaseUrl
+            context.llmTimeoutSeconds = (llmRemote?.internalAppCode ?: fallbackTimeout)?.toString()
+            context.llmEnabled = llmRemote?.remoteAttributes ?: "Y"
+            context.hasStoredLlmApiKey = !!(llmRemote?.password?.toString()?.trim())
+            context.hasFallbackLlmApiKey = !!(fallbackKey?.trim()) && !context.hasStoredLlmApiKey
+            context.fallbackLlmKeyEnvName = defaults.keyEnv
+        ]]>        </script>
+    </pre-actions>
+
+    <widgets>
+        <container style="container">
+            <container style="page-header">
+                <label text="LLM Settings" type="h2"/>
+                <label text="Configure provider credentials for Rule Workspace DRL generation." type="p" style="text-muted"/>
+            </container>
+
+            <section name="LlmSettingsSection">
+                <widgets>
+                    <label text="Rule Workspace LLM Settings" type="h4"/>
+                    <label text="Only provider and API key are required. Model, base URL, and timeout use defaults automatically." type="p" style="text-muted"/>
+                    <label text="Active Provider: ${activeLlmProvider}" type="p" style="text-info"/>
+                    <label text="Stored API Key (${llmProvider}): ${hasStoredLlmApiKey ? 'Yes' : 'No'}${hasStoredLlmApiKey ? '' : (hasFallbackLlmApiKey ? ' (environment fallback ' + fallbackLlmKeyEnvName + ' active)' : '')}" type="p" style="text-info"/>
+
+                    <form-single name="LlmSettingsForm" transition="saveLlmSettings">
+                        <field name="llmProvider">
+                            <default-field title="Provider">
+                                <drop-down allow-empty="false">
+                                    <option key="OPENAI" text="OpenAI"/>
+                                    <option key="GEMINI" text="Gemini"/>
+                                </drop-down>
+                            </default-field>
+                        </field>
+                        <field name="llmApiKey">
+                            <default-field title="API Key (leave blank to keep existing)">
+                                <password size="60"/>
+                            </default-field>
+                        </field>
+                        <field name="saveLlmButton">
+                            <default-field title="">
+                                <submit text="Save Provider Settings" btn-type="primary"/>
+                            </default-field>
+                        </field>
+
+                        <field-layout>
+                            <field-row>
+                                <field-ref name="llmProvider"/>
+                            </field-row>
+                            <field-row>
+                                <field-ref name="llmApiKey"/>
+                            </field-row>
+                            <field-row-big>
+                                <field-ref name="saveLlmButton"/>
+                            </field-row-big>
+                        </field-layout>
+                    </form-single>
+                </widgets>
+            </section>
+        </container>
+    </widgets>
+</screen>

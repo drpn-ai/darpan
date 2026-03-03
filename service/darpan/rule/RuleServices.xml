@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="get" noun="AccessibleRules">
+        <in-parameters>
+            <parameter name="ruleName" required="false"/>
+            <parameter name="statusId" required="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ruleList" type="List"/>
+        </out-parameters>
+        <actions>
+            <entity-find entity-name="darpan.rule.RuleHeader" list="ruleList" limit="50">
+                <econdition field-name="tenantId" from="ec.context.tenantId ?: ec.user.context?.tenantId" ignore-if-empty="true"/>
+                <econdition field-name="ruleName" operator="like" value="%${ruleName}%" ignore-if-empty="true"/>
+                <econdition field-name="statusId" ignore-if-empty="true"/>
+                <!-- Add more complex logic for RuleAccess later -->
+                <order-by field-name="-lastUpdatedDate"/>
+            </entity-find>
+        </actions>
+    </service>
+
+    <service verb="generate" noun="DrlFromPrompt" type="script"
+            location="component://darpan/src/main/groovy/darpan/rule/service/generateDrlFromPrompt.groovy">
+        <description>Generate Drools DRL from natural language using an LLM with a safe template fallback.</description>
+        <in-parameters>
+            <parameter name="tenantId" default-value="DEFAULT"/>
+            <parameter name="prompt" required="true"/>
+            <parameter name="ruleContext" required="false"/>
+            <parameter name="ruleId" required="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="drlText"/>
+            <parameter name="explanation"/>
+            <parameter name="warnings" type="List"/>
+        </out-parameters>
+    </service>
+
+    <service verb="validate" noun="Drl">
+        <in-parameters>
+            <parameter name="tenantId" default-value="DEFAULT"/>
+            <parameter name="drlText" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="errors" type="List"/>
+            <parameter name="warnings" type="List"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                // Mock Validation Logic
+                errors = []
+                warnings = []
+                if (drlText &amp;&amp; !drlText.contains("package")) {
+                    errors.add("Missing package declaration")
+                }
+            ]]>            </script>
+        </actions>
+    </service>
+
+    <service verb="save" noun="RuleDraft">
+        <in-parameters>
+            <parameter name="ruleId" required="false"/>
+            <parameter name="tenantId" default-value="DEFAULT"/>
+            <parameter name="ruleName" required="false"/>
+            <parameter name="drlText" required="true"/>
+            <parameter name="prompt" required="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ruleId"/>
+            <parameter name="ruleVersionId"/>
+        </out-parameters>
+        <actions>
+            <if condition="!ruleId">
+                <service-call name="create#darpan.rule.RuleHeader" in-map="[tenantId:tenantId, ruleName:(ruleName ?: 'New Rule'), statusId:'DRAFT', lastUpdatedDate:ec.user.nowTimestamp]" out-map="headerOut"/>
+                <set field="ruleId" from="headerOut.ruleId"/>
+            </if>
+            <service-call name="create#darpan.rule.RuleVersion" in-map="[ruleId:ruleId, drlText:drlText, nlPromptText:prompt, createdDate:ec.user.nowTimestamp, isPublished:'N']" out-map="verOut"/>
+            <set field="ruleVersionId" from="verOut.ruleVersionId"/>
+        </actions>
+    </service>
+
+    <service verb="publish" noun="RuleVersion">
+        <in-parameters>
+            <parameter name="ruleId" required="true"/>
+            <parameter name="ruleVersionId" required="true"/>
+        </in-parameters>
+        <actions>
+            <entity-update entity-name="darpan.rule.RuleVersion">
+                <econdition field-name="ruleId"/>
+                <econdition field-name="ruleVersionId"/>
+                <set field="isPublished" value="Y"/>
+            </entity-update>
+            <entity-update entity-name="darpan.rule.RuleHeader">
+                <econdition field-name="ruleId"/>
+                <set field="statusId" value="ACTIVE"/>
+            </entity-update>
+        </actions>
+    </service>
+
+</services>

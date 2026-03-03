@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="reconcile" noun="IdDataFrames" engine="java" location="darpan.reconciliation.core.ReconciliationServices" invoke="reconcileIdDataFrames">
+    <service verb="reconcile" noun="IdDataFrames" type="java" location="darpan.reconciliation.core.ReconciliationServices" method="reconcileIdDataFrames">
         <description>Core Spark-based reconciliation of two ID DataFrames. Returns DataFrame results for memory-efficient streaming.</description>
         <in-parameters>
             <parameter name="df1" type="org.apache.spark.sql.Dataset" required="true">
@@ -29,7 +29,7 @@
         </out-parameters>
     </service>
 
-    <service verb="reconcile" noun="UnifiedFiles" engine="java" location="darpan.reconciliation.core.ReconciliationServices" invoke="reconcileUnifiedFiles">
+    <service verb="reconcile" noun="UnifiedFiles" type="java" location="darpan.reconciliation.core.ReconciliationServices" method="reconcileUnifiedFiles">
         <description>Normalize CSV/JSON file inputs, perform reconciliation, and emit a JSON diff output.</description>
         <in-parameters>
             <parameter name="file1Location" required="true"/>

@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="fetch" noun="NsInventoryAdjustments" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/inventory/fetchNsInventoryAdjustments.groovy">
+        <description>Fetch inventory adjustment details for one item/location from NetSuite Restlet.</description>
+        <in-parameters>
+            <parameter name="nsRestletConfigId" required="true">
+                <description>Endpoint config ID (darpan.reconciliation.NsRestletConfig), linked to NsAuthConfig.</description>
+            </parameter>
+            <parameter name="itemId" required="true"/>
+            <parameter name="locationId" required="true"/>
+            <parameter name="from" required="true">
+                <description>Start date in yyyy-MM-dd format.</description>
+            </parameter>
+            <parameter name="to" required="true">
+                <description>End date in yyyy-MM-dd format.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusCode" type="Integer"/>
+            <parameter name="recordCount" type="Integer"/>
+            <parameter name="records">
+                <parameter name="record"/>
+            </parameter>
+            <parameter name="responseBody"/>
+            <parameter name="processingWarnings">
+                <parameter name="warningMessage"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="fetch" noun="HcInventoryAdjustments" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/inventory/fetchHcInventoryAdjustments.groovy">
+        <description>Fetch inventory adjustment details for one item/location from configured read-only database.</description>
+        <in-parameters>
+            <parameter name="readDbConfigId"/>
+            <parameter name="hcReadDbConfigId"/>
+            <parameter name="itemId" required="true"/>
+            <parameter name="locationId" required="true"/>
+            <parameter name="from" required="true">
+                <description>Start date in yyyy-MM-dd format.</description>
+            </parameter>
+            <parameter name="to" required="true">
+                <description>End date in yyyy-MM-dd format.</description>
+            </parameter>
+            <parameter name="tableName"/>
+            <parameter name="itemIdColumn"/>
+            <parameter name="locationIdColumn"/>
+            <parameter name="transactionDateColumn"/>
+            <parameter name="inventoryItemTable">
+                <description>Optional join table used when querying inventory_item_detail by product/location (default inventory_item).</description>
+            </parameter>
+            <parameter name="sqlRuleSetId" default-value="INV_ADJ_HC_SQL_RS">
+                <description>Drools RuleSet ID that resolves the HC read SQL template.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="recordCount" type="Integer"/>
+            <parameter name="records">
+                <parameter name="record"/>
+            </parameter>
+            <parameter name="processingWarnings">
+                <parameter name="warningMessage"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="evaluate" noun="InventoryAdjustmentComparisonRules" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/inventory/evaluateInventoryAdjustmentComparisonRules.groovy">
+        <description>Evaluate per-item reconciliation outcomes using a user-configured Drools RuleSet.</description>
+        <in-parameters>
+            <parameter name="ruleSetId" required="true"/>
+            <parameter name="dataList" required="true" type="List"/>
+            <parameter name="returnAllFacts" type="Boolean" default-value="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"/>
+            <parameter name="matchedResults" type="List"/>
+            <parameter name="ruleCount" type="Integer"/>
+            <parameter name="firedRuleCount" type="Integer"/>
+            <parameter name="warnings" type="List"/>
+            <parameter name="error"/>
+        </out-parameters>
+    </service>
+
+    <service verb="retrieve" noun="InventoryAdjustmentsByReference" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/inventory/retrieveInventoryAdjustmentsByReference.groovy">
+        <description>Read item/location pairs from a staged SFTP reference file and fetch matching NetSuite and read-only DB inventory adjustment details.</description>
+        <in-parameters>
+            <parameter name="referenceFileLocation" required="true" default-value="component://darpan/data/sample/inventory_reference_test.csv">
+                <description>Staged file location (runtime://, component://, or absolute path).</description>
+            </parameter>
+            <parameter name="referenceFileType">
+                <description>CSV or JSON. When empty, auto-detected from file extension.</description>
+            </parameter>
+            <parameter name="referenceHasHeader" type="Boolean" default-value="true"/>
+            <parameter name="itemIdField" default-value="itemId"/>
+            <parameter name="locationIdField" default-value="locationId"/>
+            <parameter name="nsItemIdField" default-value="netsuite_product_id">
+                <description>Reference column used for NS itemId. Defaults to itemIdField.</description>
+            </parameter>
+            <parameter name="nsLocationIdField" default-value="facility_id">
+                <description>Reference column used for NS locationId. Defaults to locationIdField.</description>
+            </parameter>
+            <parameter name="readDbItemIdField" default-value="product_id">
+                <description>Reference column used for Read DB itemId. Defaults to itemIdField.</description>
+            </parameter>
+            <parameter name="readDbLocationIdField" default-value="facility_id">
+                <description>Reference column used for Read DB locationId. Defaults to locationIdField.</description>
+            </parameter>
+            <parameter name="hcItemIdField">
+                <description>Backward-compatible alias of readDbItemIdField.</description>
+            </parameter>
+            <parameter name="hcLocationIdField">
+                <description>Backward-compatible alias of readDbLocationIdField.</description>
+            </parameter>
+            <parameter name="from" required="true" default-value="2026-02-23">
+                <description>Start date in yyyy-MM-dd format.</description>
+            </parameter>
+            <parameter name="to" required="true" default-value="2026-03-03">
+                <description>End date in yyyy-MM-dd format.</description>
+            </parameter>
+            <parameter name="nsRestletConfigId" required="true" default-value="NS_INV_MAIN"/>
+            <parameter name="readDbConfigId" default-value="READ_DB_MAIN"/>
+            <parameter name="hcReadDbConfigId"/>
+            <parameter name="tableName"/>
+            <parameter name="itemIdColumn"/>
+            <parameter name="locationIdColumn"/>
+            <parameter name="transactionDateColumn"/>
+            <parameter name="inventoryItemTable">
+                <description>Optional join table passed through to fetch#HcInventoryAdjustments when using detail/item join model.</description>
+            </parameter>
+            <parameter name="sqlRuleSetId" default-value="INV_ADJ_HC_SQL_RS">
+                <description>Drools RuleSet ID used to resolve SQL template for read DB fetch.</description>
+            </parameter>
+            <parameter name="comparisonRuleSetId" required="true" default-value="INV_ADJ_DEFAULT_RS">
+                <description>Drools RuleSet ID used for all comparison logic.</description>
+            </parameter>
+            <parameter name="compareStatusField" default-value="compareStatus">
+                <description>Field name written by rules that stores the comparison status value.</description>
+            </parameter>
+            <parameter name="missingInNsStatus" default-value="MISSING_IN_NS"/>
+            <parameter name="missingInReadDbStatus" default-value="MISSING_IN_READ_DB"/>
+            <parameter name="countMismatchStatus" default-value="COUNT_MISMATCH"/>
+            <parameter name="matchedStatus" default-value="MATCHED_COUNT"/>
+            <parameter name="noRecordStatus" default-value="NO_RECORDS"/>
+            <parameter name="errorStatus" default-value="ERROR"/>
+            <parameter name="maxItems" type="Integer">
+                <description>Optional cap on number of reference rows to process.</description>
+            </parameter>
+            <parameter name="nsDelayMs" type="Integer" default-value="0">
+                <description>Optional delay between NetSuite requests.</description>
+            </parameter>
+            <parameter name="outputLocation" default-value="runtime://tmp/reconciliation/inventory/retrieval"/>
+            <parameter name="outputBaseName" default-value="inventory-adjustments"/>
+            <parameter name="sparkMaster" default-value="local[*]"/>
+            <parameter name="sparkAppName" default-value="InventoryReferenceRetrieval"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="referenceItemCount" type="Integer"/>
+            <parameter name="processedItemCount" type="Integer"/>
+            <parameter name="nsRecordCount" type="Integer"/>
+            <parameter name="hcRecordCount" type="Integer"/>
+            <parameter name="missingInNsCount" type="Integer"/>
+            <parameter name="missingInReadDbCount" type="Integer"/>
+            <parameter name="countMismatchCount" type="Integer"/>
+            <parameter name="matchedCount" type="Integer"/>
+            <parameter name="noRecordCount" type="Integer"/>
+            <parameter name="errorItemCount" type="Integer"/>
+            <parameter name="summaryLocation"/>
+            <parameter name="nsOutputLocation"/>
+            <parameter name="hcOutputLocation"/>
+            <parameter name="itemResults">
+                <parameter name="itemId"/>
+                <parameter name="locationId"/>
+                <parameter name="nsItemId"/>
+                <parameter name="nsLocationId"/>
+                <parameter name="readDbItemId"/>
+                <parameter name="readDbLocationId"/>
+                <parameter name="nsStatus"/>
+                <parameter name="nsRecordCount"/>
+                <parameter name="nsError"/>
+                <parameter name="nsRecords"/>
+                <parameter name="hcStatus"/>
+                <parameter name="hcRecordCount"/>
+                <parameter name="hcError"/>
+                <parameter name="hcRecords"/>
+                <parameter name="compareStatus"/>
+                <parameter name="missingInNs"/>
+                <parameter name="missingInReadDb"/>
+                <parameter name="recordCountDelta"/>
+            </parameter>
+            <parameter name="processingWarnings">
+                <parameter name="warningMessage"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+</services>

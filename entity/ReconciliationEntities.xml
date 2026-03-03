@@ -30,14 +30,14 @@
         <field name="dataDomain" type="text-short"/>
         <field name="purpose" type="text-short"/>
         <field name="defaultTimeWindow" type="text-short"/>
-        <field name="ruleSetId" type="id"/>
+        <field name="ruleId" type="id"/>
         <field name="runSequence" type="number-integer"/>
 
         <relationship type="one" related="darpan.reconciliation.Reconciliation">
             <key-map field-name="reconciliationId"/>
         </relationship>
-        <relationship type="one" related="darpan.rule.RuleSet">
-            <key-map field-name="ruleSetId"/>
+        <relationship type="one" related="darpan.rule.RuleHeader">
+            <key-map field-name="ruleId"/>
         </relationship>
         <relationship type="many" related="darpan.reconciliation.RunDataDocument" short-alias="dataDocuments">
             <key-map field-name="reconciliationRunId"/>
@@ -87,6 +87,71 @@
         <field name="password" type="text-medium" encrypt="true"/>
         <field name="privateKey" type="text-long" encrypt="true"/>
         <field name="remoteAttributes" type="text-indicator" default="Y"/>
+    </entity>
+
+    <entity entity-name="NsAuthConfig" package="darpan.reconciliation" use="configuration">
+        <description>Reusable NetSuite authentication profile shared by one or more endpoint configs.</description>
+        <field name="nsAuthConfigId" type="id" is-pk="true"/>
+        <field name="description" type="text-medium"/>
+        <field name="authType" type="text-short" default="NONE"/>
+        <field name="username" type="text-medium"/>
+        <field name="password" type="text-medium" encrypt="true"/>
+        <field name="apiToken" type="text-long" encrypt="true"/>
+        <field name="tokenUrl" type="text-long"/>
+        <field name="clientId" type="text-medium"/>
+        <field name="certId" type="text-medium"/>
+        <field name="privateKeyPem" type="text-long" encrypt="true"/>
+        <field name="scope" type="text-medium" default="restlets rest_webservices"/>
+        <field name="isActive" type="text-indicator" default="Y"/>
+    </entity>
+
+    <entity entity-name="NsRestletConfig" package="darpan.reconciliation" use="configuration">
+        <description>NetSuite Restlet endpoint settings for inventory reconciliation.</description>
+        <field name="nsRestletConfigId" type="id" is-pk="true"/>
+        <field name="description" type="text-medium"/>
+        <field name="endpointUrl" type="text-long" cannot-be-null="true"/>
+        <field name="httpMethod" type="text-short" default="POST"/>
+        <field name="nsAuthConfigId" type="id"/>
+        <field name="headersJson" type="text-long"/>
+        <field name="connectTimeoutSeconds" type="number-integer" default="30"/>
+        <field name="readTimeoutSeconds" type="number-integer" default="60"/>
+        <field name="isActive" type="text-indicator" default="Y"/>
+
+        <!-- Legacy auth fields retained for backward compatibility with existing rows -->
+        <field name="authType" type="text-short" default="NONE"/>
+        <field name="username" type="text-medium"/>
+        <field name="password" type="text-medium" encrypt="true"/>
+        <field name="apiToken" type="text-long" encrypt="true"/>
+        <field name="tokenUrl" type="text-long"/>
+        <field name="clientId" type="text-medium"/>
+        <field name="certId" type="text-medium"/>
+        <field name="privateKeyPem" type="text-long" encrypt="true"/>
+        <field name="scope" type="text-medium" default="restlets rest_webservices"/>
+
+        <relationship type="one" related="darpan.reconciliation.NsAuthConfig">
+            <key-map field-name="nsAuthConfigId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="HcReadDbConfig" package="darpan.reconciliation" use="configuration" table-name="READ_DB_CONFIG">
+        <description>Read-only external database settings for inventory reconciliation.</description>
+        <field name="hcReadDbConfigId" type="id" is-pk="true"/>
+        <field name="description" type="text-medium"/>
+        <field name="displayName" type="text-medium"/>
+        <field name="host" type="text-medium"/>
+        <field name="port" type="number-integer" default="3306"/>
+        <field name="databaseName" type="text-medium"/>
+        <field name="additionalParameters" type="text-long"/>
+        <field name="jdbcUrl" type="text-long" cannot-be-null="true"/>
+        <field name="username" type="text-medium" cannot-be-null="true"/>
+        <field name="password" type="text-medium" encrypt="true"/>
+        <field name="dbDriver" type="text-medium" default="com.mysql.cj.jdbc.Driver"/>
+        <field name="defaultTableName" type="text-medium" default="inventory_item_detail"/>
+        <field name="itemIdColumn" type="text-short" default="product_id"/>
+        <field name="locationIdColumn" type="text-short" default="facility_id"/>
+        <field name="transactionDateColumn" type="text-short" default="effective_date"/>
+        <field name="connectionPropertiesJson" type="text-long"/>
+        <field name="isActive" type="text-indicator" default="Y"/>
     </entity>
 
 </entities>

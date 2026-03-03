@@ -7,6 +7,7 @@ Component-generic guidance lives here; user-specific preferences are in `AGENTS.
 - Put business logic in `runtime/component/darpan/src/**` and expose it through service definitions in `runtime/component/darpan/service/*.xml`.
 - Keep entity changes in `runtime/component/darpan/entity/*.xml` and update docs alongside code when behavior changes.
 - Keep changes within `runtime/component/darpan/**`; avoid framework, `runtime/base-component/**`, and `runtime/template/**` unless explicitly requested.
+- Use generic, reusable naming in entities/tables/services/screens; avoid client-specific naming in new models and user-facing labels.
 
 ### Documentation updates
 - After code changes, update `runtime/component/darpan/docs/**` in the same PR to keep documentation aligned.
@@ -18,6 +19,7 @@ Component-generic guidance lives here; user-specific preferences are in `AGENTS.
 
 ### Moqui service conventions
 - Define clear `in-parameters` and `out-parameters` with types, defaults, and descriptions.
+- Keep XML `default-value` literals plain (for example `default-value="value"`), not wrapped in extra quotes like `default-value="'value'"`.
 - Prefer `component://` and `runtime://` locations in services and scripts; avoid absolute filesystem paths.
 - For file uploads, accept `org.apache.commons.fileupload.FileItem` and persist to `runtime://tmp/**` with sanitized filenames.
 
@@ -38,6 +40,9 @@ Component-generic guidance lives here; user-specific preferences are in `AGENTS.
 - Validate inputs before compare and return validation errors in outputs; keep reconciliation output consistent even on validation failures.
 - Emit consistent diff files under `runtime://tmp/reconciliation/**` so screens and jobs can find outputs.
 - Preserve IDs and minimal fields in outputs; only include full objects when required by the use case.
+- Prefer Spark for high-volume reconciliation extraction/aggregation and Drools for business-rule classification that is expected to evolve.
+- Keep compare/diff decision logic in configurable rule artifacts (RuleSet/Rule/DRL), not hardcoded service conditionals.
+- For source-specific SQL shape decisions, use configurable Drools RuleSets to resolve SQL templates instead of hardcoded SQL branching.
 
 ### Darpan-specific patterns (from current code)
 - Validate inputs early with explicit `IllegalArgumentException` messages; normalize strings with `?.toString()?.trim()` and booleans via `normalizeBool`.
@@ -60,6 +65,7 @@ Component-generic guidance lives here; user-specific preferences are in `AGENTS.
 ### Logging, errors, and safety
 - Use structured, readable logs with context (service name, file labels, counts).
 - Never log credentials, API tokens, or raw connection strings; mask passwords in URLs.
+- Prefer app-managed encrypted settings entities for external API credentials, with environment variables only as fallback.
 - Treat config files and `mcp.json` as sensitive; do not commit secrets.
 
 ### Java 17 compatibility

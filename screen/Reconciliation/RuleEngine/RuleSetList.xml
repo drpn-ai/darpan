@@ -25,12 +25,13 @@
 
     <widgets>
         <container-box>
-            <box-header title="Manage Rule Sets">
-                <box-toolbar>
-                    <link url="../RuleEngineTest" text="Run Verification Test" btn-type="primary"/>
-                </box-toolbar>
-            </box-header>
+            <box-header title="Manage Rule Sets"/>
             <box-body>
+                <container-row>
+                    <container-col md="12">
+                        <link url="../RuleEngineTest" text="Run Verification Test" btn-type="primary"/>
+                    </container-col>
+                </container-row>
                 <form-list name="RuleSetList" list="ruleSetList" transition="updateRuleSet">
                     <field name="ruleSetId">
                         <header-field show-order-by="true"/>

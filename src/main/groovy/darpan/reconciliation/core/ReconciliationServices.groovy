@@ -15,7 +15,11 @@ class ReconciliationServices {
     /**
      * Core Spark-based reconciliation of two ID DataFrames.
      */
-    static Map<String, Object> reconcileIdDataFrames(ExecutionContext ec, Map<String, Object> context) {
+    static Map<String, Object> reconcileIdDataFrames(ExecutionContext ec) {
+        return reconcileIdDataFramesInternal(ec, (Map<String, Object>) ec.contextStack)
+    }
+
+    private static Map<String, Object> reconcileIdDataFramesInternal(ExecutionContext ec, Map<String, Object> context) {
         Dataset df1 = (Dataset) context.get("df1")
         Dataset df2 = (Dataset) context.get("df2")
         String idCol = (String) context.get("idColumnName") ?: "compare_id"
@@ -57,7 +61,11 @@ class ReconciliationServices {
     /**
      * Normalize CSV/JSON file inputs, perform reconciliation, and emit a JSON diff output.
      */
-    static Map<String, Object> reconcileUnifiedFiles(ExecutionContext ec, Map<String, Object> context) {
+    static Map<String, Object> reconcileUnifiedFiles(ExecutionContext ec) {
+        return reconcileUnifiedFilesInternal(ec, (Map<String, Object>) ec.contextStack)
+    }
+
+    private static Map<String, Object> reconcileUnifiedFilesInternal(ExecutionContext ec, Map<String, Object> context) {
         Dataset onlyIn1Df = null
         Dataset onlyIn2Df = null
         Dataset idDf1 = null
@@ -131,7 +139,7 @@ class ReconciliationServices {
                 df1Label: label1,
                 df2Label: label2
             ]
-            Map<String, Object> coreResult = reconcileIdDataFrames(ec, coreInput)
+            Map<String, Object> coreResult = reconcileIdDataFramesInternal(ec, coreInput)
 
             onlyIn1Df = (Dataset) coreResult.get("onlyInDf1")
             onlyIn2Df = (Dataset) coreResult.get("onlyInDf2")
@@ -144,8 +152,10 @@ class ReconciliationServices {
              if (differenceCount > 0) {
                 String label1Norm = label1?.replaceAll(/[^A-Za-z0-9_]/, "") ?: "file1"
                 String label2Norm = label2?.replaceAll(/[^A-Za-z0-9_]/, "") ?: "file2"
-                String missingInTypeForFile1 = "missing_in_${label2Norm}"
-                String missingInTypeForFile2 = "missing_in_${label1Norm}"
+                String missingInTypeForFile1 = "missing_in_" + label2Norm
+                String missingInTypeForFile2 = "missing_in_" + label1Norm
+                String noteForFile1 = "Present in " + label1 + ", missing in " + label2
+                String noteForFile2 = "Present in " + label2 + ", missing in " + label1
                 
                 Dataset diffs1 = null
                 if (count1 > 0) {
@@ -156,7 +166,7 @@ class ReconciliationServices {
                             lit(label1).alias("presentIn"),
                             lit(label2).alias("missingIn"),
                             to_json(col("data")).alias("data"),
-                            lit("Present in ${label1}, missing in ${label2}").alias("note")
+                            lit(noteForFile1).alias("note")
                     )
                 }
                 Dataset diffs2 = null
@@ -168,7 +178,7 @@ class ReconciliationServices {
                             lit(label2).alias("presentIn"),
                             lit(label1).alias("missingIn"),
                             to_json(col("data")).alias("data"),
-                            lit("Present in ${label2}, missing in ${label1}").alias("note")
+                            lit(noteForFile2).alias("note")
                     )
                 }
                 if (diffs1 != null && diffs2 != null) diffDf = diffs1.union(diffs2)

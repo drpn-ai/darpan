@@ -7,7 +7,7 @@ The automation stages SFTP drops and hands them to the shared router `reconcilia
 This job polls configured SFTP locations, stages the newest matching files locally, and invokes the reconciliation services (CSV/JSON/Mixed) using existing mapping metadata.
 
 ## Prerequisites
-- Install/configure the `moqui-sftp` component (already added to this repo).
+- Install/configure the `moqui-sftp` component. For Docker builds, `runtime/component/darpan/docker/Dockerfile` now clones `https://github.com/hotwax/moqui-sftp.git` before running `addRuntime`.
 - Create `SystemMessageRemote` records with SFTP credentials:
   - `receiveUrl`/`sendUrl`: host (with optional `:port`); can include a path, but prefer providing the path via `fileXRemotePath`.
   - `username` plus either `password` or `privateKey`/`publicKey`.

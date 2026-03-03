@@ -20,6 +20,7 @@ RUN git clone --depth 1 -b "main" https://github.com/hotwax/moqui-runtime.git ru
 
 WORKDIR /moqui-framework/runtime/component
 RUN git clone --depth 1 -b "build-gradle-file" https://github.com/dixitdeepak/moqui-atomikos.git
+RUN git clone --depth 1 -b "main" https://github.com/hotwax/moqui-sftp.git
 RUN git clone --depth 1 -b "main" https://github.com/hotwax/darpan.git
 
 RUN rm -rf /root/.netrc

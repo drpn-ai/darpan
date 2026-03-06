@@ -42,7 +42,7 @@ Shared router used by both Generic uploads and SFTP automation. It normalizes st
 
 ### `ReconciliationCoreServices.reconcile#UnifiedFiles`
 
-Single reconciliation engine for all file type combinations. It converts CSV/JSON inputs into a normalized Spark structure, runs the compare once, and always emits a JSON diff. The legacy CSV/JSON/Mixed services are now wrappers only.
+Single reconciliation engine for all file type combinations. It converts CSV/JSON inputs into a normalized Spark structure, runs the compare once, and always emits a JSON diff. JSON and Mixed legacy service entry points are wrappers only.
 
 **Inputs (key):** `file1Location`, `file2Location`, `file1Type`, `file2Type`, `file1IdField`/`file2IdField` (or `file1IdExpression`/`file2IdExpression`), `file1SchemaFileName`/`file2SchemaFileName` for JSON sources, `hasHeader`, `outputLocation`, `sparkMaster`, `sparkAppName`.
 
@@ -60,6 +60,13 @@ For details on creating and managing schemas used in reconciliation, see [JSON S
 The `compareJsonPath` parameter uses JSONPath syntax to extract ID values from your JSON structure.
 
 When a schema is provided and you pass a simple key (like `id` or `$.id`), the resolver expands it to the full JSONPath. For array-root schemas this becomes `$[*].id`.
+
+When source ID formats differ between systems, configure an ID normalizer per mapping member (`idValueNormalizer`) in Mapping Builder/Editor.
+For backward compatibility, inline syntax with `|NORMALIZER` in `idFieldExpression` is still supported.
+
+Supported normalizers:
+- `SHOPIFY_GID_TAIL`: extracts the numeric tail from Shopify GIDs (for example `gid://shopify/Product/7944971747446` -> `7944971747446`)
+- `TRAILING_DIGITS`: extracts trailing digits from the value when present
 
 ### Examples
 
@@ -81,6 +88,13 @@ $[*].id
 **Deeply nested in array:**
 ```
 $[*].data.orders.edges[*].node.legacyResourceId
+```
+
+**Shopify GID to numeric ID compare (mapping-driven):**
+```text
+System 1 ID expression: $[*].id
+System 1 ID normalizer: SHOPIFY_GID_TAIL
+System 2 ID expression: $[*].shopifyProductId
 ```
 
 ## Output Format
@@ -174,3 +188,4 @@ Schema: `runtime://schemas/json/test-orders.schema.json`
 - What changed: Diff View is hidden from the navigation menu and is accessed from the generated file list under File Reconciliation (direct `/Reconciliation/GenericReconciliationView` access removed)
 - What changed: Simple ID keys are resolved against array-root schemas (e.g., `id` -> `$[*].id`) and small array payloads are fully validated before sampling large ones
 - What changed: Schema generation in non-strict mode merges array item shapes to keep schemas compact instead of emitting large `anyOf` lists
+- What changed: Mapping members now support explicit `idValueNormalizer` so ID transforms (for example Shopify GID tail extraction) can be configured separately from JSONPath/column expressions before comparison

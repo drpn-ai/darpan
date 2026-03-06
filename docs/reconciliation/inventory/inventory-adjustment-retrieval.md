@@ -148,4 +148,5 @@ end
 - `comparisonRuleSetId` is required; comparison/diff decisions come from your configured rules.
 - `INV_ADJ_DEFAULT_RS` is auto-bootstrapped on first use with generic rules based on `nsStatus/nsRecordCount` and `hcStatus/hcRecordCount`.
 - `INV_ADJ_HC_SQL_RS` is auto-bootstrapped on first use and resolves the SQL template for HC reads; users can fully customize SQL template selection in Rule Engine.
+- Backward compatibility: if a saved Read DB config still uses legacy `inventory_adjustment` defaults, HC fetch auto-switches to `inventory_item_detail` + `product_id/facility_id/effective_date`, and legacy hardcoded default SQL rules are refreshed to tokenized templates.
 - `itemResults` contains the rule-mutated facts returned by Drools, including any custom fields added by rules.

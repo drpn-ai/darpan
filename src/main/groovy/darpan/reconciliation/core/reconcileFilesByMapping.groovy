@@ -18,6 +18,32 @@ def detectFileTypeFromName = { String name ->
     if (lower?.endsWith(".json")) return "JSON"
     return null
 }
+def splitIdExpression = { String expr ->
+    def raw = normalize(expr)
+    if (!raw) return [idExpr: null, normalizer: null]
+    int separatorIndex = raw.indexOf("|")
+    if (separatorIndex < 0) return [idExpr: raw, normalizer: null]
+    String idExpr = normalize(raw.substring(0, separatorIndex))
+    String idNormalizer = normalize(raw.substring(separatorIndex + 1))
+    return [idExpr: idExpr, normalizer: idNormalizer]
+}
+def normalizeIdNormalizer = { String rawNormalizer ->
+    def code = normalize(rawNormalizer)
+    if (!code) return null
+    def normalized = code.replace("-", "_").replace(" ", "_").toUpperCase()
+    switch (normalized) {
+        case "SHOPIFY_GID_TAIL":
+        case "SHOPIFY_GID":
+        case "SHOPIFY_GID_NUMERIC":
+        case "GID_TAIL":
+            return "SHOPIFY_GID_TAIL"
+        case "TRAILING_DIGITS":
+        case "DIGITS":
+            return "TRAILING_DIGITS"
+        default:
+            throw new IllegalArgumentException("Unsupported ID normalizer '${rawNormalizer}'. Supported values: SHOPIFY_GID_TAIL, TRAILING_DIGITS")
+    }
+}
 def normalizeJsonPath = { String idExpr ->
     def raw = normalize(idExpr)
     if (!raw) return "\$.id"
@@ -54,6 +80,20 @@ if (!file1SystemEnumId || !file2SystemEnumId) {
     throw new IllegalArgumentException("file1SystemEnumId and file2SystemEnumId are required")
 }
 
+List<String> processingWarnings = (processingWarnings ?: []) as List<String>
+
+def resolveIdFieldForCompare = { Map memberConfig, String systemEnumId ->
+    def parsedExpr = splitIdExpression(memberConfig.idFieldExpression ?: memberConfig.systemFieldName ?: "id")
+    def inlineNormalizer = normalizeIdNormalizer(parsedExpr.normalizer)
+    def memberNormalizer = normalizeIdNormalizer(memberConfig.idValueNormalizer)
+    def finalNormalizer = memberNormalizer ?: inlineNormalizer
+    if (memberNormalizer && inlineNormalizer && memberNormalizer != inlineNormalizer) {
+        processingWarnings.add("Mapping member normalizer ${memberNormalizer} overrides inline normalizer ${inlineNormalizer} for system ${systemEnumId}")
+    }
+    def baseExpr = parsedExpr.idExpr ?: "id"
+    return finalNormalizer ? "${baseExpr}|${finalNormalizer}" : baseExpr
+}
+
 def mappingMembers = ec.entity.find("darpan.mapping.ReconciliationMappingMember")
         .condition("reconciliationMappingId", reconciliationMappingId)
         .useCache(true)
@@ -68,6 +108,7 @@ mappingMembers.each { member ->
             fileTypeEnumId   : member.fileTypeEnumId,
             schemaFileName   : member.schemaFileName,
             idFieldExpression: member.idFieldExpression ?: member.systemFieldName,
+            idValueNormalizer: member.idValueNormalizer,
             systemFieldName  : member.systemFieldName
     ]
 }
@@ -87,8 +128,6 @@ if (file1FileTypeEnumId) configBySystem[file1Key].fileTypeEnumId = file1FileType
 if (file2FileTypeEnumId) configBySystem[file2Key].fileTypeEnumId = file2FileTypeEnumId
 if (file1SchemaFileName) configBySystem[file1Key].schemaFileName = file1SchemaFileName
 if (file2SchemaFileName) configBySystem[file2Key].schemaFileName = file2SchemaFileName
-
-List<String> processingWarnings = (processingWarnings ?: []) as List<String>
 
 def file1SafeName = normalize(file1Name) ?: safeNameFromLocation(file1Location, "file1")
 def file2SafeName = normalize(file2Name) ?: safeNameFromLocation(file2Location, "file2")
@@ -110,8 +149,8 @@ if (!file2Type) {
 file1Type = file1Type.toUpperCase()
 file2Type = file2Type.toUpperCase()
 
-def file1IdField = file1Config.idFieldExpression ?: "id"
-def file2IdField = file2Config.idFieldExpression ?: "id"
+def file1IdField = resolveIdFieldForCompare(file1Config, file1SystemEnumId)
+def file2IdField = resolveIdFieldForCompare(file2Config, file2SystemEnumId)
 def file1Schema = file1Config.schemaFileName
 def file2Schema = file2Config.schemaFileName
 

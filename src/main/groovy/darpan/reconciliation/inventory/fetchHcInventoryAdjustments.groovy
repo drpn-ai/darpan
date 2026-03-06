@@ -72,11 +72,45 @@ int port = (hcConfig.port ?: 3306) as int
 String username = normalize(hcConfig.username)
 String password = hcConfig.password?.toString()
 String dbDriver = normalize(hcConfig.dbDriver) ?: "com.mysql.cj.jdbc.Driver"
-String tableNameToUse = normalize(tableName) ?: normalize(hcConfig.defaultTableName) ?: "inventory_item_detail"
-String itemIdColumnToUse = normalize(itemIdColumn) ?: normalize(hcConfig.itemIdColumn) ?: "product_id"
-String locationIdColumnToUse = normalize(locationIdColumn) ?: normalize(hcConfig.locationIdColumn) ?: "facility_id"
-String txnDateColumnToUse = normalize(transactionDateColumn) ?: normalize(hcConfig.transactionDateColumn) ?: "effective_date"
-String inventoryItemTableToUse = normalize(inventoryItemTable) ?: "inventory_item"
+String requestTableName = normalize(tableName)
+String requestItemIdColumn = normalize(itemIdColumn)
+String requestLocationIdColumn = normalize(locationIdColumn)
+String requestTxnDateColumn = normalize(transactionDateColumn)
+String requestInventoryItemTable = normalize(inventoryItemTable)
+
+String configDefaultTableName = normalize(hcConfig.defaultTableName)
+String configItemIdColumn = normalize(hcConfig.itemIdColumn)
+String configLocationIdColumn = normalize(hcConfig.locationIdColumn)
+String configTxnDateColumn = normalize(hcConfig.transactionDateColumn)
+
+String tableNameToUse = requestTableName ?: configDefaultTableName ?: "inventory_item_detail"
+String itemIdColumnToUse = requestItemIdColumn ?: configItemIdColumn ?: "product_id"
+String locationIdColumnToUse = requestLocationIdColumn ?: configLocationIdColumn ?: "facility_id"
+String txnDateColumnToUse = requestTxnDateColumn ?: configTxnDateColumn ?: "effective_date"
+String inventoryItemTableToUse = requestInventoryItemTable ?: "inventory_item"
+
+if (!requestTableName && "inventory_adjustment".equalsIgnoreCase(configDefaultTableName)) {
+    tableNameToUse = "inventory_item_detail"
+    if (!requestItemIdColumn && (!configItemIdColumn || "item_id".equalsIgnoreCase(configItemIdColumn))) {
+        itemIdColumnToUse = "product_id"
+    }
+    if (!requestLocationIdColumn && (!configLocationIdColumn || "location_id".equalsIgnoreCase(configLocationIdColumn))) {
+        locationIdColumnToUse = "facility_id"
+    }
+    if (!requestTxnDateColumn && (!configTxnDateColumn || "transaction_date".equalsIgnoreCase(configTxnDateColumn))) {
+        txnDateColumnToUse = "effective_date"
+    }
+    if (!requestInventoryItemTable && !"inventory_item".equalsIgnoreCase(inventoryItemTableToUse)) {
+        inventoryItemTableToUse = "inventory_item"
+    }
+    warningList.add("ReadDbConfig ${hcConfigId} uses legacy default table inventory_adjustment; auto-switched to inventory_item_detail defaults.")
+}
+if (!requestTxnDateColumn &&
+        (tableNameToUse?.equalsIgnoreCase("inventory_item_detail") || tableNameToUse?.toLowerCase()?.endsWith(".inventory_item_detail")) &&
+        "adjustment_date".equalsIgnoreCase(configTxnDateColumn)) {
+    txnDateColumnToUse = "effective_date"
+    warningList.add("ReadDbConfig ${hcConfigId} uses legacy date column adjustment_date for inventory_item_detail; auto-switched to effective_date.")
+}
 
 if (!jdbcUrl && host && databaseName) {
     String cleanAdditional = additionalParameters?.replaceFirst(/^\?/, "")
@@ -132,16 +166,25 @@ def ensureDefaultHcSqlRuleSet = { String ruleSetId ->
                         sequenceNum: 10L,
                         ruleText   : "Use JOIN SQL for inventory_item_detail + product_id/facility_id",
                         ruleLogic  : '''rule "INV_ADJ_HC_SQL_JOIN"
+activation-group "INV_ADJ_HC_SQL_TEMPLATE"
 salience 100
 when
     $m : Map(this["sqlStatementTemplate"] == null)
-    eval("inventory_item_detail".equalsIgnoreCase(String.valueOf($m.get("tableName"))) &&
-         "product_id".equalsIgnoreCase(String.valueOf($m.get("itemIdColumn"))) &&
-         "facility_id".equalsIgnoreCase(String.valueOf($m.get("locationIdColumn"))))
+    eval(
+        (String.valueOf($m.get("tableName")) != null &&
+            (
+                "inventory_item_detail".equalsIgnoreCase(String.valueOf($m.get("tableName")).trim()) ||
+                String.valueOf($m.get("tableName")).trim().toLowerCase().endsWith(".inventory_item_detail")
+            )) &&
+        "product_id".equalsIgnoreCase(String.valueOf($m.get("itemIdColumn")).trim()) &&
+        "facility_id".equalsIgnoreCase(String.valueOf($m.get("locationIdColumn")).trim())
+    )
 then
-    $m.put("sqlTemplateName", "JOIN_BY_INVENTORY_ITEM");
-    $m.put("sqlStatementTemplate", "SELECT iid.*, ii.${ITEM_COLUMN} AS _join_${ITEM_COLUMN}, ii.${LOCATION_COLUMN} AS _join_${LOCATION_COLUMN} FROM ${DETAIL_TABLE} iid JOIN ${ITEM_TABLE} ii ON ii.inventory_item_id = iid.inventory_item_id WHERE ii.${ITEM_COLUMN} = ? AND ii.${LOCATION_COLUMN} = ? AND iid.${DATE_COLUMN} >= ? AND iid.${DATE_COLUMN} < ?");
-    if (!results.contains($m)) results.add($m);
+    if ($m.get("sqlStatementTemplate") == null) {
+        $m.put("sqlTemplateName", "JOIN_BY_INVENTORY_ITEM");
+        $m.put("sqlStatementTemplate", "SELECT iid.*, ii.${ITEM_COLUMN} AS _join_${ITEM_COLUMN}, ii.${LOCATION_COLUMN} AS _join_${LOCATION_COLUMN} FROM ${DETAIL_TABLE} iid JOIN ${ITEM_TABLE} ii ON ii.inventory_item_id = iid.inventory_item_id WHERE ii.${ITEM_COLUMN} = ? AND ii.${LOCATION_COLUMN} = ? AND iid.${DATE_COLUMN} >= ? AND iid.${DATE_COLUMN} < ?");
+        if (!results.contains($m)) results.add($m);
+    }
 end'''
                 ],
                 [
@@ -149,13 +192,16 @@ end'''
                         sequenceNum: 20L,
                         ruleText   : "Fallback direct table SQL template",
                         ruleLogic  : '''rule "INV_ADJ_HC_SQL_DIRECT"
+activation-group "INV_ADJ_HC_SQL_TEMPLATE"
 salience 10
 when
     $m : Map(this["sqlStatementTemplate"] == null)
 then
-    $m.put("sqlTemplateName", "DIRECT_TABLE");
-    $m.put("sqlStatementTemplate", "SELECT * FROM ${DETAIL_TABLE} WHERE ${ITEM_COLUMN} = ? AND ${LOCATION_COLUMN} = ? AND ${DATE_COLUMN} >= ? AND ${DATE_COLUMN} < ?");
-    if (!results.contains($m)) results.add($m);
+    if ($m.get("sqlStatementTemplate") == null) {
+        $m.put("sqlTemplateName", "DIRECT_TABLE");
+        $m.put("sqlStatementTemplate", "SELECT * FROM ${DETAIL_TABLE} WHERE ${ITEM_COLUMN} = ? AND ${LOCATION_COLUMN} = ? AND ${DATE_COLUMN} >= ? AND ${DATE_COLUMN} < ?");
+        if (!results.contains($m)) results.add($m);
+    }
 end'''
                 ]
         ]
@@ -175,6 +221,25 @@ end'''
                         .set("enabled", "Y")
                         .set("createdDate", new Timestamp(System.currentTimeMillis()))
                         .create()
+            } else if (ruleSetId == existingRule.ruleSetId) {
+                String existingLogic = normalize(existingRule.ruleLogic) ?: ""
+                boolean hasLegacyHardcodedSql = existingLogic.toLowerCase().contains("inventory_adjustment")
+                boolean hasLegacyColumnPattern = existingLogic.toLowerCase().contains(" item_id = ?") ||
+                        existingLogic.toLowerCase().contains(" location_id = ?") ||
+                        existingLogic.toLowerCase().contains(" transaction_date ")
+                boolean hasStrictDetailTableMatch = existingLogic.contains('"inventory_item_detail".equalsIgnoreCase(String.valueOf($m.get("tableName")))')
+                boolean missingActivationGroup = !existingLogic.contains('activation-group "INV_ADJ_HC_SQL_TEMPLATE"')
+                boolean missingConsequenceGuard = !existingLogic.contains('if ($m.get("sqlStatementTemplate") == null)')
+                boolean shouldRefreshLegacyRule = hasLegacyHardcodedSql || hasLegacyColumnPattern ||
+                        hasStrictDetailTableMatch || missingActivationGroup || missingConsequenceGuard
+                if (shouldRefreshLegacyRule) {
+                    existingRule.set("sequenceNum", defRule.sequenceNum)
+                    existingRule.set("ruleText", defRule.ruleText)
+                    existingRule.set("ruleLogic", defRule.ruleLogic)
+                    if (!normalize(existingRule.enabled)) existingRule.set("enabled", "Y")
+                    existingRule.set("lastUpdatedDate", new Timestamp(System.currentTimeMillis()))
+                    existingRule.update()
+                }
             }
         }
 

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="reconcile" noun="IdDataFrames" type="java" location="darpan.reconciliation.core.ReconciliationServices" method="reconcileIdDataFrames">
+    <service verb="reconcile" noun="IdDataFrames" type="java" transaction="ignore" location="darpan.reconciliation.core.ReconciliationServices" method="reconcileIdDataFrames">
         <description>Core Spark-based reconciliation of two ID DataFrames. Returns DataFrame results for memory-efficient streaming.</description>
         <in-parameters>
             <parameter name="df1" type="org.apache.spark.sql.Dataset" required="true">
@@ -29,17 +29,25 @@
         </out-parameters>
     </service>
 
-    <service verb="reconcile" noun="UnifiedFiles" type="java" location="darpan.reconciliation.core.ReconciliationServices" method="reconcileUnifiedFiles">
+    <service verb="reconcile" noun="UnifiedFiles" type="java" transaction="ignore" location="darpan.reconciliation.core.ReconciliationServices" method="reconcileUnifiedFiles">
         <description>Normalize CSV/JSON file inputs, perform reconciliation, and emit a JSON diff output.</description>
         <in-parameters>
             <parameter name="file1Location" required="true"/>
             <parameter name="file2Location" required="true"/>
             <parameter name="file1Type" required="true"/>
             <parameter name="file2Type" required="true"/>
-            <parameter name="file1IdField"/>
-            <parameter name="file2IdField"/>
-            <parameter name="file1IdExpression"/>
-            <parameter name="file2IdExpression"/>
+            <parameter name="file1IdField">
+                <description>ID field name. Optional normalizer suffix is supported using `|`, for example `id|SHOPIFY_GID_TAIL`.</description>
+            </parameter>
+            <parameter name="file2IdField">
+                <description>ID field name. Optional normalizer suffix is supported using `|`, for example `shopifyProductId|TRAILING_DIGITS`.</description>
+            </parameter>
+            <parameter name="file1IdExpression">
+                <description>CSV column or JSONPath. Optional normalizer suffix is supported using `|`, for example `$.id|SHOPIFY_GID_TAIL`.</description>
+            </parameter>
+            <parameter name="file2IdExpression">
+                <description>CSV column or JSONPath. Optional normalizer suffix is supported using `|`, for example `$.shopifyProductId`.</description>
+            </parameter>
             <parameter name="file1SchemaFileName"/>
             <parameter name="file2SchemaFileName"/>
             <parameter name="file1Label"/>
@@ -72,7 +80,7 @@
         </out-parameters>
     </service>
 
-    <service verb="reconcile" noun="FilesByMapping" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/core/reconcileFilesByMapping.groovy">
+    <service verb="reconcile" noun="FilesByMapping" type="script" transaction="ignore" location="component://darpan/src/main/groovy/darpan/reconciliation/core/reconcileFilesByMapping.groovy">
         <description>Route staged file locations through CSV/JSON/Mixed reconciliation using mapping metadata and optional overrides.</description>
         <in-parameters>
             <parameter name="reconciliationMappingId" required="true"/>

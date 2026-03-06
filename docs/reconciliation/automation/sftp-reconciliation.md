@@ -14,7 +14,7 @@ This job polls configured SFTP locations, stages the newest matching files local
 - Define `ReconciliationMappingMember` rows for each system with:
   - `systemEnumId` matching the inputs passed to the service.
   - `fileTypeEnumId` (`DftCsv` or `DftJson`).
-  - `idFieldExpression` (CSV column or JSONPath/key); JSON runs also require `schemaFileName`.
+  - `idFieldExpression` (CSV column or JSONPath/key), optional `idValueNormalizer` (`SHOPIFY_GID_TAIL` or `TRAILING_DIGITS`); JSON runs also require `schemaFileName`.
 
 ## Inputs (key parameters)
 - `reconciliationMappingId` – required; supplies file type, ID, schema metadata per system.
@@ -38,7 +38,7 @@ This job polls configured SFTP locations, stages the newest matching files local
 - Absolute output locations outside runtime are treated as remote upload targets: the diff is written locally under the default `reconciled` folder, then uploaded to that remote path (or the file 1 base path if none is provided).
 - Diff filenames now include the mapping name/ID slug when a mapping is provided (e.g., `json-sftpTest-diff-yyyymmdd-hhmmss.json`) so outputs are traceable per reconciliation.
 - Stages files locally (filenames sanitized) and delegates to `reconciliation.ReconciliationCoreServices.reconcile#FilesByMapping`, which normalizes inputs and routes to CSV/JSON/Mixed reconciliation without duplicating logic.
-- JSON + Mixed still require `schemaFileName` in the mapping for the JSON side; CSV uses `systemFieldName` when present, otherwise `idFieldExpression` is used directly.
+- JSON + Mixed still require `schemaFileName` in the mapping for the JSON side; CSV uses `systemFieldName` when present, otherwise `idFieldExpression` is used directly. The router applies `idValueNormalizer` before comparison, and still honors legacy inline `idFieldExpression|NORMALIZER` values.
 - Returns diff file path/name and per-side counts; `processingWarnings` include mapping or detection fallbacks.
 
 ## Scheduling Example (service-job)

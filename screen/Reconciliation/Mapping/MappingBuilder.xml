@@ -6,10 +6,12 @@
         <parameter name="system1EnumId"/>
         <parameter name="system1FileTypeEnumId"/>
         <parameter name="system1IdExpression"/>
+        <parameter name="system1IdNormalizer"/>
         <parameter name="system1SchemaFileName"/>
         <parameter name="system2EnumId"/>
         <parameter name="system2FileTypeEnumId"/>
         <parameter name="system2IdExpression"/>
+        <parameter name="system2IdNormalizer"/>
         <parameter name="system2SchemaFileName"/>
         <actions>
             <if condition="saveButton">
@@ -19,6 +21,43 @@
                     <set field="system2EnumId" from="system2EnumId?.trim()"/>
                     <set field="system1IdExpression" from="system1IdExpression?.trim()"/>
                     <set field="system2IdExpression" from="system2IdExpression?.trim()"/>
+                    <set field="system1IdNormalizer" from="system1IdNormalizer?.trim()"/>
+                    <set field="system2IdNormalizer" from="system2IdNormalizer?.trim()"/>
+                    <script><![CDATA[
+                        def splitIdExpression = { String expr ->
+                            String raw = expr?.trim()
+                            if (!raw) return [idExpr: null, normalizer: null]
+                            int separatorIndex = raw.indexOf('|')
+                            if (separatorIndex < 0) return [idExpr: raw, normalizer: null]
+                            return [
+                                idExpr: raw.substring(0, separatorIndex)?.trim(),
+                                normalizer: raw.substring(separatorIndex + 1)?.trim()
+                            ]
+                        }
+                        def normalizeIdNormalizer = { String raw ->
+                            String code = raw?.trim()
+                            if (!code) return null
+                            String normalized = code.replace("-", "_").replace(" ", "_").toUpperCase()
+                            switch (normalized) {
+                                case "SHOPIFY_GID_TAIL":
+                                case "SHOPIFY_GID":
+                                case "SHOPIFY_GID_NUMERIC":
+                                case "GID_TAIL":
+                                    return "SHOPIFY_GID_TAIL"
+                                case "TRAILING_DIGITS":
+                                case "DIGITS":
+                                    return "TRAILING_DIGITS"
+                                default:
+                                    return normalized
+                            }
+                        }
+                        def s1 = splitIdExpression(system1IdExpression as String)
+                        def s2 = splitIdExpression(system2IdExpression as String)
+                        system1IdExpression = s1.idExpr ?: system1IdExpression
+                        system2IdExpression = s2.idExpr ?: system2IdExpression
+                        system1IdNormalizer = normalizeIdNormalizer((system1IdNormalizer ?: s1.normalizer) as String)
+                        system2IdNormalizer = normalizeIdNormalizer((system2IdNormalizer ?: s2.normalizer) as String)
+                    ]]></script>
 
                     <if condition="!mappingName">
                         <return error="true" message="Mapping name is required"/>
@@ -31,6 +70,12 @@
                     </if>
                     <if condition="!system1IdExpression || !system2IdExpression">
                         <return error="true" message="ID expression is required for both systems"/>
+                    </if>
+                    <if condition="system1IdNormalizer &amp;&amp; system1IdNormalizer != 'SHOPIFY_GID_TAIL' &amp;&amp; system1IdNormalizer != 'TRAILING_DIGITS'">
+                        <return error="true" message="Unsupported ID normalizer for System 1: ${system1IdNormalizer}. Supported values: SHOPIFY_GID_TAIL, TRAILING_DIGITS"/>
+                    </if>
+                    <if condition="system2IdNormalizer &amp;&amp; system2IdNormalizer != 'SHOPIFY_GID_TAIL' &amp;&amp; system2IdNormalizer != 'TRAILING_DIGITS'">
+                        <return error="true" message="Unsupported ID normalizer for System 2: ${system2IdNormalizer}. Supported values: SHOPIFY_GID_TAIL, TRAILING_DIGITS"/>
                     </if>
 
                     <if condition="system1FileTypeEnumId == 'DftJson' &amp;&amp; system1IdExpression &amp;&amp; !system1IdExpression.startsWith('$')">
@@ -93,6 +138,7 @@
                     <set field="member1.fileTypeEnumId" from="system1FileTypeEnumId"/>
                     <set field="member1.idFieldExpression" from="system1IdExpression"/>
                     <set field="member1.systemFieldName" from="system1IdExpression"/>
+                    <set field="member1.idValueNormalizer" from="system1IdNormalizer"/>
                     <set field="member1.schemaFileName" from="system1SchemaFileName"/>
                     <set field="member1.createdDate" from="nowTs"/>
                     <entity-create value-field="member1"/>
@@ -104,6 +150,7 @@
                     <set field="member2.fileTypeEnumId" from="system2FileTypeEnumId"/>
                     <set field="member2.idFieldExpression" from="system2IdExpression"/>
                     <set field="member2.systemFieldName" from="system2IdExpression"/>
+                    <set field="member2.idValueNormalizer" from="system2IdNormalizer"/>
                     <set field="member2.schemaFileName" from="system2SchemaFileName"/>
                     <set field="member2.createdDate" from="nowTs"/>
                     <entity-create value-field="member2"/>
@@ -120,10 +167,12 @@
             <parameter name="system1EnumId"/>
             <parameter name="system1FileTypeEnumId"/>
             <parameter name="system1IdExpression"/>
+            <parameter name="system1IdNormalizer"/>
             <parameter name="system1SchemaFileName"/>
             <parameter name="system2EnumId"/>
             <parameter name="system2FileTypeEnumId"/>
             <parameter name="system2IdExpression"/>
+            <parameter name="system2IdNormalizer"/>
             <parameter name="system2SchemaFileName"/>
         </default-response>
     </transition>
@@ -141,6 +190,12 @@
             <order-by field-name="schemaName"/>
         </entity-find>
         <set field="schemaFiles" from="jsonSchemas"/>
+        <script><![CDATA[
+            idNormalizerOptions = [
+                [enumId:'SHOPIFY_GID_TAIL', description:'Shopify GID tail (gid://shopify/Product/123 -> 123)'],
+                [enumId:'TRAILING_DIGITS', description:'Trailing digits']
+            ]
+        ]]></script>
     </pre-actions>
 
     <widgets>
@@ -169,13 +224,23 @@
                 <field name="system1FileTypeEnumId">
                     <default-field title="File Type">
                         <drop-down required-manual-select="true">
-                            <list-options list="fileTypeEnumList" key="${enumId}" text="${description}"/>
+                            <option key="" text="Select file type"/>
+                            <option key="DftCsv" text="CSV"/>
+                            <option key="DftJson" text="JSON"/>
                         </drop-down>
                     </default-field>
                 </field>
                 <field name="system1IdExpression">
-                    <default-field title="ID Field" tooltip="CSV column name (e.g. order_id) or JSONPath attribute">
+                    <default-field title="ID Field" tooltip="CSV column name or JSONPath used to extract comparison IDs (example: id or shopifyProductId).">
                         <text-line size="30"/>
+                    </default-field>
+                </field>
+                <field name="system1IdNormalizer">
+                    <default-field title="ID Normalizer" tooltip="Optional value transform before comparison. Use Shopify GID tail when comparing gid://shopify/... IDs against numeric IDs.">
+                        <drop-down allow-empty="true">
+                            <option key="" text="None"/>
+                            <list-options list="idNormalizerOptions" key="${enumId}" text="${description}"/>
+                        </drop-down>
                     </default-field>
                 </field>
                 <field name="system1ResolvedJsonPath">
@@ -204,13 +269,23 @@
                 <field name="system2FileTypeEnumId">
                     <default-field title="File Type">
                         <drop-down required-manual-select="true">
-                            <list-options list="fileTypeEnumList" key="${enumId}" text="${description}"/>
+                            <option key="" text="Select file type"/>
+                            <option key="DftCsv" text="CSV"/>
+                            <option key="DftJson" text="JSON"/>
                         </drop-down>
                     </default-field>
                 </field>
                 <field name="system2IdExpression">
-                    <default-field title="ID Field" tooltip="CSV column name (e.g. order_id) or JSONPath attribute">
+                    <default-field title="ID Field" tooltip="CSV column name or JSONPath used to extract comparison IDs (example: id or shopifyProductId).">
                         <text-line size="30"/>
+                    </default-field>
+                </field>
+                <field name="system2IdNormalizer">
+                    <default-field title="ID Normalizer" tooltip="Optional value transform before comparison. Use Shopify GID tail when comparing gid://shopify/... IDs against numeric IDs.">
+                        <drop-down allow-empty="true">
+                            <option key="" text="None"/>
+                            <list-options list="idNormalizerOptions" key="${enumId}" text="${description}"/>
+                        </drop-down>
                     </default-field>
                 </field>
                 <field name="system2ResolvedJsonPath">
@@ -244,6 +319,9 @@
                     </field-row>
                     <field-row>
                         <field-ref name="system1IdExpression"/>
+                        <field-ref name="system1IdNormalizer"/>
+                    </field-row>
+                    <field-row>
                         <field-ref name="system1SchemaFileName"/>
                     </field-row>
                     <field-row-big>
@@ -255,6 +333,9 @@
                     </field-row>
                     <field-row>
                         <field-ref name="system2IdExpression"/>
+                        <field-ref name="system2IdNormalizer"/>
+                    </field-row>
+                    <field-row>
                         <field-ref name="system2SchemaFileName"/>
                     </field-row>
                     <field-row-big>

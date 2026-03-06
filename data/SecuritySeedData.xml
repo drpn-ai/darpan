@@ -5,10 +5,6 @@
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
             artifactName="component://darpan/screen/.*" artifactTypeEnumId="AT_XML_SCREEN" nameIsPattern="Y" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
-            artifactName="ReconciliationCsvServices.compare#CsvFiles" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"/>
-    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
-            artifactName="ReconciliationCsvServices.run#CsvReconciliation" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"/>
-    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
             artifactName="moqui.basic.Enumeration" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
             artifactName="darpan.mapping.ReconciliationMapping" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>

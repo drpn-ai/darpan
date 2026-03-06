@@ -1,6 +1,7 @@
 package darpan.reconciliation.core
 
 import groovy.json.JsonOutput
+import org.apache.spark.sql.Column
 import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.storage.StorageLevel
@@ -106,8 +107,8 @@ class ReconciliationServices {
             String type1 = normalize(file1Type)?.toUpperCase()
             String type2 = normalize(file2Type)?.toUpperCase()
             
-            String id1Expr = (type1 == "CSV") ? normalizeCsvId(file1IdExpression ?: file1IdField) : normalizeJsonIdExpr(file1IdExpression ?: file1IdField)
-            String id2Expr = (type2 == "CSV") ? normalizeCsvId(file2IdExpression ?: file2IdField) : normalizeJsonIdExpr(file2IdExpression ?: file2IdField)
+            Map id1Spec = parseIdSpec(file1IdExpression ?: file1IdField, "CSV".equals(type1))
+            Map id2Spec = parseIdSpec(file2IdExpression ?: file2IdField, "CSV".equals(type2))
             
             String reconType = "${type1}_${type2}"
             String reconciliationType = (reconType == "CSV_CSV") ? "CSV" : (reconType == "JSON_JSON" ? "JSON" : "MIXED")
@@ -120,8 +121,8 @@ class ReconciliationServices {
                     .getOrCreate()
 
             // Ingestion
-            Map ingest1 = ingestFile(ec, spark, file1Location, type1, id1Expr, hasHeader ?: true, label1, validationErrors, file1SchemaFileName)
-            Map ingest2 = ingestFile(ec, spark, file2Location, type2, id2Expr, hasHeader ?: true, label2, validationErrors, file2SchemaFileName)
+            Map ingest1 = ingestFile(ec, spark, file1Location, type1, id1Spec, hasHeader ?: true, label1, validationErrors, file1SchemaFileName)
+            Map ingest2 = ingestFile(ec, spark, file2Location, type2, id2Spec, hasHeader ?: true, label2, validationErrors, file2SchemaFileName)
             
             idDf1 = (Dataset) ingest1.idDf
             Dataset dataDf1 = (Dataset) ingest1.dataDf
@@ -277,8 +278,10 @@ class ReconciliationServices {
 
     // --- Private Helpers ---
 
-    private static Map ingestFile(ExecutionContext ec, SparkSession spark, String loc, String type, String idExpr, boolean hasHeader, String label, List validationErrors, String schemaFile) {
+    private static Map ingestFile(ExecutionContext ec, SparkSession spark, String loc, String type, Map idSpec, boolean hasHeader, String label, List validationErrors, String schemaFile) {
         String path = resolvePath(ec, loc)
+        String idExpr = normalize(idSpec?.idExpr)
+        String idNormalizer = normalize(idSpec?.idNormalizer)
         Dataset df = null
         Dataset idDf = null
         Dataset dataDf = null
@@ -297,13 +300,13 @@ class ReconciliationServices {
              
             df = spark.read().option("multiLine", "true").json(path)
             Map pathInfo = convertJsonPathToSpark(idExpr)
-            idDf = buildJsonIdDf(df, pathInfo, label)
-            dataDf = buildJsonDataDf(df, pathInfo, label)
+            idDf = buildJsonIdDf(df, pathInfo, label, idNormalizer)
+            dataDf = buildJsonDataDf(df, pathInfo, label, idNormalizer)
         } else {
              // CSV
              df = spark.read().option("header", hasHeader.toString()).option("multiLine", "true").csv(path)
-             idDf = buildCsvIdDf(df, idExpr)
-             dataDf = buildCsvDataDf(df, idExpr)
+             idDf = buildCsvIdDf(df, idExpr, idNormalizer)
+             dataDf = buildCsvDataDf(df, idExpr, idNormalizer)
         }
         return [idDf: idDf, dataDf: dataDf]
     }
@@ -321,6 +324,43 @@ class ReconciliationServices {
     }
 
     private static String normalize(Object val) { return val?.toString()?.trim() }
+
+    private static Map parseIdSpec(String expr, boolean isCsv) {
+        Map split = splitIdExpression(expr)
+        String baseExpr = (String) split.idExpr
+        String rawNormalizer = (String) split.normalizer
+        String normalizedExpr = isCsv ? normalizeCsvId(baseExpr) : normalizeJsonIdExpr(baseExpr)
+        String normalizedIdNormalizer = resolveIdNormalizer(rawNormalizer)
+        return [idExpr: normalizedExpr, idNormalizer: normalizedIdNormalizer]
+    }
+
+    private static Map splitIdExpression(String expr) {
+        String raw = normalize(expr)
+        if (!raw) return [idExpr: null, normalizer: null]
+        int separatorIndex = raw.indexOf("|")
+        if (separatorIndex < 0) return [idExpr: raw, normalizer: null]
+        String idExpr = raw.substring(0, separatorIndex)?.trim()
+        String normalizer = raw.substring(separatorIndex + 1)?.trim()
+        return [idExpr: idExpr, normalizer: normalizer]
+    }
+
+    private static String resolveIdNormalizer(String rawNormalizer) {
+        String code = normalize(rawNormalizer)
+        if (!code) return null
+        String normalized = code.replace("-", "_").replace(" ", "_").toUpperCase()
+        switch (normalized) {
+            case "SHOPIFY_GID_TAIL":
+            case "SHOPIFY_GID":
+            case "SHOPIFY_GID_NUMERIC":
+            case "GID_TAIL":
+                return "SHOPIFY_GID_TAIL"
+            case "TRAILING_DIGITS":
+            case "DIGITS":
+                return "TRAILING_DIGITS"
+            default:
+                throw new IllegalArgumentException("Unsupported ID normalizer '${rawNormalizer}'. Supported values: SHOPIFY_GID_TAIL, TRAILING_DIGITS")
+        }
+    }
     
     // JSON & CSV Helpers
     private static String normalizeCsvId(String expr) {
@@ -332,7 +372,7 @@ class ReconciliationServices {
         }
         return raw
     }
-     private static String normalizeJsonIdExpr(String expr) {
+    private static String normalizeJsonIdExpr(String expr) {
         def raw = normalize(expr)
         if (!raw) return "\$.id"
         if (raw.startsWith("\$")) return raw
@@ -351,7 +391,7 @@ class ReconciliationServices {
         }
         return [needsExplode: false, path: path]
     }
-     private static String normalizeSparkPath(String jsonPath) {
+    private static String normalizeSparkPath(String jsonPath) {
         if (!jsonPath) return jsonPath
         def path = jsonPath.toString().trim()
         path = path.replaceFirst(/^\$\[\*\]/, "")
@@ -359,52 +399,68 @@ class ReconciliationServices {
         if (path.startsWith(".")) path = path.substring(1)
         return path
     }
+
+    private static Column applyIdNormalizer(Column sourceCol, String idNormalizer) {
+        Column normalized = trim(sourceCol.cast("string"))
+        if (!idNormalizer) return normalized
+
+        if ("SHOPIFY_GID_TAIL".equals(idNormalizer)) {
+            Column shopifyTail = regexp_extract(normalized, 'gid://shopify/[^/]+/(\\d+)(?:\\?.*)?$', 1)
+            Column trailingDigits = regexp_extract(normalized, '(\\d+)$', 1)
+            return when(length(shopifyTail).gt(0), shopifyTail)
+                    .when(length(trailingDigits).gt(0), trailingDigits)
+                    .otherwise(normalized)
+        }
+        if ("TRAILING_DIGITS".equals(idNormalizer)) {
+            Column trailingDigits = regexp_extract(normalized, '(\\d+)$', 1)
+            return when(length(trailingDigits).gt(0), trailingDigits).otherwise(normalized)
+        }
+
+        throw new IllegalArgumentException("Unsupported ID normalizer '${idNormalizer}'")
+    }
+
+    private static Dataset normalizeCompareIdDataset(Dataset sourceDf, String idNormalizer) {
+        return sourceDf
+                .withColumn("compare_id", applyIdNormalizer(col("compare_id"), idNormalizer))
+                .filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0")
+    }
     
-    private static Dataset buildJsonIdDf(Dataset rawDf, Map pathInfo, String pathLabel) {
+    private static Dataset buildJsonIdDf(Dataset rawDf, Map pathInfo, String pathLabel, String idNormalizer) {
         if (pathInfo.needsExplode) {
              String arrayPath = normalizeSparkPath(pathInfo.arrayPath as String)
              String fieldPath = normalizeSparkPath(pathInfo.fieldPath as String)
-             return rawDf.selectExpr("explode(${arrayPath}) as exploded_item")
+             Dataset idDf = rawDf.selectExpr("explode(${arrayPath}) as exploded_item")
                 .selectExpr("exploded_item.${fieldPath} as compare_id")
-                .filter("compare_id IS NOT NULL AND length(trim(cast(compare_id as string))) > 0")
-                .withColumn("compare_id", col("compare_id").cast("string"))
-                .distinct()
+             return normalizeCompareIdDataset(idDf, idNormalizer).distinct()
         }
         String safePath = normalizeSparkPath(pathInfo.path as String)
-        return rawDf.selectExpr("${safePath} as compare_id")
-             .filter("compare_id IS NOT NULL AND length(trim(cast(compare_id as string))) > 0")
-             .withColumn("compare_id", col("compare_id").cast("string"))
-             .distinct()
+        Dataset idDf = rawDf.selectExpr("${safePath} as compare_id")
+        return normalizeCompareIdDataset(idDf, idNormalizer).distinct()
     }
     
-    private static Dataset buildJsonDataDf(Dataset rawDf, Map pathInfo, String pathLabel) {
+    private static Dataset buildJsonDataDf(Dataset rawDf, Map pathInfo, String pathLabel, String idNormalizer) {
          if (pathInfo.needsExplode) {
              String arrayPath = normalizeSparkPath(pathInfo.arrayPath as String)
              String fieldPath = normalizeSparkPath(pathInfo.fieldPath as String)
-             return rawDf.selectExpr("explode(${arrayPath}) as exploded_item")
+             Dataset dataDf = rawDf.selectExpr("explode(${arrayPath}) as exploded_item")
                  .selectExpr("exploded_item.${fieldPath} as compare_id", "exploded_item as data")
-                 .filter("compare_id IS NOT NULL AND length(trim(cast(compare_id as string))) > 0")
-                 .withColumn("compare_id", col("compare_id").cast("string"))
+             return normalizeCompareIdDataset(dataDf, idNormalizer)
          }
          String safePath = normalizeSparkPath(pathInfo.path as String)
-         return rawDf.selectExpr("${safePath} as compare_id", "struct(*) as data")
-             .filter("compare_id IS NOT NULL AND length(trim(cast(compare_id as string))) > 0")
-             .withColumn("compare_id", col("compare_id").cast("string"))
+         Dataset dataDf = rawDf.selectExpr("${safePath} as compare_id", "struct(*) as data")
+         return normalizeCompareIdDataset(dataDf, idNormalizer)
     }
     
-    private static Dataset buildCsvIdDf(Dataset rawDf, String fieldName) {
+    private static Dataset buildCsvIdDf(Dataset rawDf, String fieldName, String idNormalizer) {
          String fieldExpr = (fieldName?.replace("`", "``") ?: "id")
          fieldExpr = "`" + fieldExpr + "`"
-         return rawDf.selectExpr("${fieldExpr} as compare_id")
-             .filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0")
-             .withColumn("compare_id", col("compare_id").cast("string"))
-             .distinct()
+         Dataset idDf = rawDf.selectExpr("${fieldExpr} as compare_id")
+         return normalizeCompareIdDataset(idDf, idNormalizer).distinct()
     }
-     private static Dataset buildCsvDataDf(Dataset rawDf, String fieldName) {
+     private static Dataset buildCsvDataDf(Dataset rawDf, String fieldName, String idNormalizer) {
          String fieldExpr = (fieldName?.replace("`", "``") ?: "id")
          fieldExpr = "`" + fieldExpr + "`"
-         return rawDf.selectExpr("${fieldExpr} as compare_id", "struct(*) as data")
-             .filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0")
-             .withColumn("compare_id", col("compare_id").cast("string"))
+         Dataset dataDf = rawDf.selectExpr("${fieldExpr} as compare_id", "struct(*) as data")
+         return normalizeCompareIdDataset(dataDf, idNormalizer)
     }
 }

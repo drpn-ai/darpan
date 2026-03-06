@@ -2,7 +2,7 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="reconcile" noun="GenericFiles" type="script"
+    <service verb="reconcile" noun="GenericFiles" type="script" transaction="ignore"
             location="component://darpan/src/main/groovy/darpan/reconciliation/generic/reconcileGenericFiles.groovy">
         <description>
             Generic file reconciliation that auto-detects file types (CSV/JSON) and routes appropriately.

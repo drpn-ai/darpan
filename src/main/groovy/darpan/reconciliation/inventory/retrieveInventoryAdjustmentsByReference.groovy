@@ -121,13 +121,16 @@ when
     \$m : Map(this["compareStatus"] == null)
     eval("ERROR".equals(String.valueOf(\$m.get("nsStatus"))) || "ERROR".equals(String.valueOf(\$m.get("hcStatus"))))
 then
-    int _ns = (\$m.get("nsRecordCount") instanceof Number) ? ((Number) \$m.get("nsRecordCount")).intValue() : 0;
-    int _hc = (\$m.get("hcRecordCount") instanceof Number) ? ((Number) \$m.get("hcRecordCount")).intValue() : 0;
-    \$m.put("compareStatus", "ERROR");
-    \$m.put("missingInNs", false);
-    \$m.put("missingInReadDb", false);
-    \$m.put("recordCountDelta", _ns - _hc);
-    if (!results.contains(\$m)) results.add(\$m);
+    if (\$m.get("compareStatus") == null) {
+        int _ns = (\$m.get("nsRecordCount") instanceof Number) ? ((Number) \$m.get("nsRecordCount")).intValue() : 0;
+        int _hc = (\$m.get("hcRecordCount") instanceof Number) ? ((Number) \$m.get("hcRecordCount")).intValue() : 0;
+        \$m.put("compareStatus", "ERROR");
+        \$m.put("missingInNs", false);
+        \$m.put("missingInReadDb", false);
+        \$m.put("recordCountDelta", _ns - _hc);
+        update(\$m);
+        if (!results.contains(\$m)) results.add(\$m);
+    }
 end"""
             ],
             [
@@ -141,13 +144,16 @@ when
     eval((\$m.get("nsRecordCount") instanceof Number) && ((Number) \$m.get("nsRecordCount")).intValue() == 0 &&
          (\$m.get("hcRecordCount") instanceof Number) && ((Number) \$m.get("hcRecordCount")).intValue() == 0)
 then
-    int _ns = ((Number) \$m.get("nsRecordCount")).intValue();
-    int _hc = ((Number) \$m.get("hcRecordCount")).intValue();
-    \$m.put("compareStatus", "NO_RECORDS");
-    \$m.put("missingInNs", false);
-    \$m.put("missingInReadDb", false);
-    \$m.put("recordCountDelta", _ns - _hc);
-    if (!results.contains(\$m)) results.add(\$m);
+    if (\$m.get("compareStatus") == null) {
+        int _ns = ((Number) \$m.get("nsRecordCount")).intValue();
+        int _hc = ((Number) \$m.get("hcRecordCount")).intValue();
+        \$m.put("compareStatus", "NO_RECORDS");
+        \$m.put("missingInNs", false);
+        \$m.put("missingInReadDb", false);
+        \$m.put("recordCountDelta", _ns - _hc);
+        update(\$m);
+        if (!results.contains(\$m)) results.add(\$m);
+    }
 end"""
             ],
             [
@@ -161,13 +167,16 @@ when
     eval((\$m.get("nsRecordCount") instanceof Number) && ((Number) \$m.get("nsRecordCount")).intValue() == 0 &&
          (\$m.get("hcRecordCount") instanceof Number) && ((Number) \$m.get("hcRecordCount")).intValue() > 0)
 then
-    int _ns = ((Number) \$m.get("nsRecordCount")).intValue();
-    int _hc = ((Number) \$m.get("hcRecordCount")).intValue();
-    \$m.put("compareStatus", "MISSING_IN_NS");
-    \$m.put("missingInNs", true);
-    \$m.put("missingInReadDb", false);
-    \$m.put("recordCountDelta", _ns - _hc);
-    if (!results.contains(\$m)) results.add(\$m);
+    if (\$m.get("compareStatus") == null) {
+        int _ns = ((Number) \$m.get("nsRecordCount")).intValue();
+        int _hc = ((Number) \$m.get("hcRecordCount")).intValue();
+        \$m.put("compareStatus", "MISSING_IN_NS");
+        \$m.put("missingInNs", true);
+        \$m.put("missingInReadDb", false);
+        \$m.put("recordCountDelta", _ns - _hc);
+        update(\$m);
+        if (!results.contains(\$m)) results.add(\$m);
+    }
 end"""
             ],
             [
@@ -181,13 +190,16 @@ when
     eval((\$m.get("hcRecordCount") instanceof Number) && ((Number) \$m.get("hcRecordCount")).intValue() == 0 &&
          (\$m.get("nsRecordCount") instanceof Number) && ((Number) \$m.get("nsRecordCount")).intValue() > 0)
 then
-    int _ns = ((Number) \$m.get("nsRecordCount")).intValue();
-    int _hc = ((Number) \$m.get("hcRecordCount")).intValue();
-    \$m.put("compareStatus", "MISSING_IN_READ_DB");
-    \$m.put("missingInNs", false);
-    \$m.put("missingInReadDb", true);
-    \$m.put("recordCountDelta", _ns - _hc);
-    if (!results.contains(\$m)) results.add(\$m);
+    if (\$m.get("compareStatus") == null) {
+        int _ns = ((Number) \$m.get("nsRecordCount")).intValue();
+        int _hc = ((Number) \$m.get("hcRecordCount")).intValue();
+        \$m.put("compareStatus", "MISSING_IN_READ_DB");
+        \$m.put("missingInNs", false);
+        \$m.put("missingInReadDb", true);
+        \$m.put("recordCountDelta", _ns - _hc);
+        update(\$m);
+        if (!results.contains(\$m)) results.add(\$m);
+    }
 end"""
             ],
             [
@@ -202,13 +214,16 @@ when
          ((Number) \$m.get("nsRecordCount")).intValue() > 0 &&
          ((Number) \$m.get("nsRecordCount")).intValue() == ((Number) \$m.get("hcRecordCount")).intValue())
 then
-    int _ns = ((Number) \$m.get("nsRecordCount")).intValue();
-    int _hc = ((Number) \$m.get("hcRecordCount")).intValue();
-    \$m.put("compareStatus", "MATCHED_COUNT");
-    \$m.put("missingInNs", false);
-    \$m.put("missingInReadDb", false);
-    \$m.put("recordCountDelta", _ns - _hc);
-    if (!results.contains(\$m)) results.add(\$m);
+    if (\$m.get("compareStatus") == null) {
+        int _ns = ((Number) \$m.get("nsRecordCount")).intValue();
+        int _hc = ((Number) \$m.get("hcRecordCount")).intValue();
+        \$m.put("compareStatus", "MATCHED_COUNT");
+        \$m.put("missingInNs", false);
+        \$m.put("missingInReadDb", false);
+        \$m.put("recordCountDelta", _ns - _hc);
+        update(\$m);
+        if (!results.contains(\$m)) results.add(\$m);
+    }
 end"""
             ],
             [
@@ -219,14 +234,19 @@ end"""
 salience 10
 when
     \$m : Map(this["compareStatus"] == null)
+    eval((\$m.get("nsRecordCount") instanceof Number) && (\$m.get("hcRecordCount") instanceof Number) &&
+         ((Number) \$m.get("nsRecordCount")).intValue() != ((Number) \$m.get("hcRecordCount")).intValue())
 then
-    int _ns = (\$m.get("nsRecordCount") instanceof Number) ? ((Number) \$m.get("nsRecordCount")).intValue() : 0;
-    int _hc = (\$m.get("hcRecordCount") instanceof Number) ? ((Number) \$m.get("hcRecordCount")).intValue() : 0;
-    \$m.put("compareStatus", "COUNT_MISMATCH");
-    \$m.put("missingInNs", false);
-    \$m.put("missingInReadDb", false);
-    \$m.put("recordCountDelta", _ns - _hc);
-    if (!results.contains(\$m)) results.add(\$m);
+    if (\$m.get("compareStatus") == null) {
+        int _ns = (\$m.get("nsRecordCount") instanceof Number) ? ((Number) \$m.get("nsRecordCount")).intValue() : 0;
+        int _hc = (\$m.get("hcRecordCount") instanceof Number) ? ((Number) \$m.get("hcRecordCount")).intValue() : 0;
+        \$m.put("compareStatus", "COUNT_MISMATCH");
+        \$m.put("missingInNs", false);
+        \$m.put("missingInReadDb", false);
+        \$m.put("recordCountDelta", _ns - _hc);
+        update(\$m);
+        if (!results.contains(\$m)) results.add(\$m);
+    }
 end"""
             ]
     ]
@@ -246,6 +266,21 @@ end"""
                     .set("enabled", "Y")
                     .set("createdDate", new Timestamp(System.currentTimeMillis()))
                     .create()
+        } else if (ruleSetId == existingRule.ruleSetId) {
+            String existingLogic = normalize(existingRule.ruleLogic) ?: ""
+            boolean hasActivationGroup = existingLogic.contains('activation-group "INV_ADJ_COMPARE_STATUS"')
+            boolean missingConsequenceGuard = !existingLogic.contains('if ($m.get("compareStatus") == null)')
+            boolean mismatchMissingInequality = "INV_ADJ_DEF_MISMATCH".equals(defRule.ruleId) &&
+                    !existingLogic.contains('!= ((Number) $m.get("hcRecordCount")).intValue()')
+            boolean shouldRefreshLegacyRule = hasActivationGroup || missingConsequenceGuard || mismatchMissingInequality
+            if (shouldRefreshLegacyRule) {
+                existingRule.set("sequenceNum", defRule.sequenceNum)
+                existingRule.set("ruleText", defRule.ruleText)
+                existingRule.set("ruleLogic", defRule.ruleLogic)
+                if (!normalize(existingRule.enabled)) existingRule.set("enabled", "Y")
+                existingRule.set("lastUpdatedDate", new Timestamp(System.currentTimeMillis()))
+                existingRule.update()
+            }
         }
     }
 }

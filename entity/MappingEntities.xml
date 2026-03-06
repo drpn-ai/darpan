@@ -29,6 +29,9 @@
         <field name="idFieldExpression" type="text-medium">
             <description>ID field: CSV column name (e.g. order_id) or JSONPath (e.g. $.id)</description>
         </field>
+        <field name="idValueNormalizer" type="text-short">
+            <description>Optional ID value normalizer (for example SHOPIFY_GID_TAIL) applied before comparison.</description>
+        </field>
         <field name="createdDate" type="date-time"/>
 
         <relationship type="one" related="darpan.mapping.ReconciliationMapping" fk-name="MAPMEM_MAPDEF">

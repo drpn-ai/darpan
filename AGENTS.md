@@ -56,6 +56,9 @@ Component-generic guidance lives here; user-specific preferences are in `AGENTS.
 ### UI screens
 - Use Moqui’s built-in pagination widgets/styling; avoid custom HTML pagination unless there’s no alternative.
 - For multiple paginated lists on one screen, prefer standalone list screens in dynamic containers so each list keeps its own pageIndex.
+- For screen dropdown option lists, prefer pre-actions script assignment over complex inline `from="[...]"` literals to avoid rendering/parser edge cases.
+- For enumeration dropdown labels, prefer robust fallbacks like `${enumCode ?: description ?: enumId}` to reduce UI breakage when descriptions are bad.
+- When removing or relocating screens, validate legacy routes (direct URLs/bookmarks) and keep behavior explicit (hidden alias/redirect or clear restart note) to avoid stale placeholder pages.
 
 ### JSON schema handling
 - Store schemas in `runtime/schemas/json/*.schema.json` and reference by filename.

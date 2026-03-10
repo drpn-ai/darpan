@@ -4,8 +4,11 @@
 - Configuration entities: `runtime/component/darpan/entity/ReconciliationEntities.xml`, `runtime/component/darpan/entity/MappingEntities.xml`
 - **Reconciliation Service**: `runtime/component/darpan/service/reconciliation/ReconciliationGenericServices.xml`
 - **JSON Schema Services**: `runtime/component/darpan/service/jsonschema/JsonSchemaServices.xml`
-- Spark-based compare implementation: `runtime/component/darpan/src/reconciliation`
+- Spark-based compare implementation: `runtime/component/darpan/src/main/groovy/darpan/reconciliation`
 - Sample data inputs: `runtime/component/darpan/data/sample/`
+
+## Active Migration Project
+- RuleSet-only cutover execution plan and tickets: `runtime/component/darpan/docs/reconciliation/projects/ruleset-only-cutover/README.md`
 
 ## 1. Purpose
 

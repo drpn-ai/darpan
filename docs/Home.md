@@ -4,6 +4,22 @@ Welcome to the darpan wiki!
 
 - [code-map](code-map.md)
 - [java17-compatibility](build/java17-compatibility.md)
+- [theme-library](theme-library.md)
+
+## Active Projects
+
+- [ruleset-only cutover](reconciliation/projects/ruleset-only-cutover/README.md)
+
+## Domain Boundaries
+
+- [reconciliation domain](domains/reconciliation/README.md)
+- [jsonschema domain](domains/jsonschema/README.md)
+- [rule-engine domain](domains/rule-engine/README.md)
+- [debug domain](domains/debug/README.md)
+
+## Validation
+
+- `./gradlew :runtime:component:darpan:verifyOrganization --console=plain`
 
 
 ## Reconciliation
@@ -26,4 +42,4 @@ Technology
 - [drools](reconciliation/technology/drools.md)
 
 Rules
-- [rule-workspace-llm-generation](reconciliation/rule-workspace-llm-generation.md)
+- [rule-engine-services](reconciliation/rule-engine-services.md)

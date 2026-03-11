@@ -3,7 +3,7 @@
     <subscreens default-item="Reconciliation">
         <subscreens-item name="Reconciliation" menu-title="Reconciliation" location="component://darpan/screen/Reconciliation.xml"/>
         <subscreens-item name="Settings" menu-title="Settings" location="component://darpan/screen/Settings.xml"/>
-        <subscreens-item name="Rules" menu-title="Rules" location="component://darpan/screen/Rules.xml"/>
+        <subscreens-item name="Debug" menu-include="false" location="component://darpan/screen/Debug.xml"/>
     </subscreens>
     <widgets>
         <subscreens-panel id="darpan-app" type="popup"/>

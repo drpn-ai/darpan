@@ -4,39 +4,69 @@
     <parameter name="ruleSetId" required="true"/>
 
     <transition name="updateRuleSet">
-        <service-call name="update#darpan.rule.RuleSet"/>
+        <service-call name="reconciliation.ReconciliationRuleEngineServices.save#RuleSet"/>
         <default-response url="."/>
     </transition>
     <transition name="createRule">
-        <service-call name="create#darpan.rule.Rule"/>
+        <service-call name="reconciliation.ReconciliationRuleEngineServices.save#Rule"/>
         <default-response url="."/>
     </transition>
     <transition name="updateRule">
-        <service-call name="update#darpan.rule.Rule"/>
+        <service-call name="reconciliation.ReconciliationRuleEngineServices.save#Rule"/>
         <default-response url="."/>
     </transition>
     <transition name="deleteRule">
-        <service-call name="delete#darpan.rule.Rule"/>
+        <service-call name="reconciliation.ReconciliationRuleEngineServices.delete#Rule"/>
         <default-response url="."/>
     </transition>
 
     <transition name="compileRuleSet">
-        <service-call name="reconciliation.ReconciliationSampleServices.compile#RuleSet"/>
+        <service-call name="reconciliation.ReconciliationRuleEngineServices.compile#RuleSet" in-map="[ruleSetId:ruleSetId, forceRebuild:true]"/>
         <default-response url="."/>
     </transition>
 
-    <!-- Test Bench Transition -->
-    <!-- We want to run this and show results. Usually we might use a dedicated screen or just render result on same page. -->
     <transition name="testRules">
         <actions>
-            <script>
-                if (!jsonData) jsonData = '[{"id":1, "status":"Pending"}]'
-                if (!ruleSetId) ruleSetId = ruleSetId // Ensure it's in context
-            </script>
-            <service-call name="reconciliation.ReconciliationSampleServices.execute#RuleSetJson" in-map="[ruleSetId:ruleSetId, jsonData:jsonData]" out-map="context"/>
-            <script>ec.web.sendJsonResponse(results)</script>
+            <service-call name="reconciliation.ReconciliationRuleEngineServices.execute#RuleSetJson" in-map="[ruleSetId:ruleSetId, jsonData:jsonData, returnAllFacts:returnAllFacts]" out-map="testOut"/>
+            <script><![CDATA[
+                String sessionKey = "ruleEngineTestOut_" + ruleSetId
+                boolean returnAll = false
+                if (returnAllFacts instanceof Boolean) {
+                    returnAll = (Boolean) returnAllFacts
+                } else if (returnAllFacts != null) {
+                    String raw = returnAllFacts.toString().trim().toLowerCase()
+                    returnAll = ["y", "yes", "true", "1"].contains(raw)
+                }
+                Map sessionPayload = [
+                        jsonData      : jsonData,
+                        returnAllFacts: returnAll,
+                        results       : (testOut.results ?: []),
+                        matchedResults: (testOut.matchedResults ?: []),
+                        warnings      : (testOut.warnings ?: []),
+                        firedRuleCount: (testOut.firedRuleCount ?: 0),
+                        ruleCount     : (testOut.ruleCount ?: 0),
+                        error         : testOut.error
+                ]
+                ec.web.session.setAttribute(sessionKey, sessionPayload)
+                if (testOut.error) {
+                    ec.message.addError("Rule test failed: ${testOut.error}")
+                } else {
+                    int resultCount = ((testOut.results ?: []) as List).size()
+                    ec.message.addMessage("Rule test completed. fired=${testOut.firedRuleCount ?: 0}, results=${resultCount}.")
+                }
+            ]]></script>
         </actions>
-        <default-response type="none"/>
+        <default-response url="."/>
+    </transition>
+
+    <transition name="clearTestResult">
+        <actions>
+            <script><![CDATA[
+                ec.web.session.removeAttribute("ruleEngineTestOut_" + ruleSetId)
+                ec.message.addMessage("Cleared test bench results.")
+            ]]></script>
+        </actions>
+        <default-response url="."/>
     </transition>
 
     <actions>
@@ -44,7 +74,20 @@
         <entity-find entity-name="darpan.rule.Rule" list="ruleList">
             <econdition field-name="ruleSetId"/>
             <order-by field-name="sequenceNum"/>
+            <order-by field-name="ruleId"/>
         </entity-find>
+        <script><![CDATA[
+            String testKey = "ruleEngineTestOut_" + ruleSetId
+            Map testOut = (Map) ec.web.session.getAttribute(testKey)
+            testResultRows = (testOut?.results ?: []) as List
+            testMatchedRows = (testOut?.matchedResults ?: []) as List
+            testWarnings = (testOut?.warnings ?: []) as List
+            testError = testOut?.error
+            testFiredRuleCount = (testOut?.firedRuleCount ?: 0) as int
+            testRuleCount = (testOut?.ruleCount ?: 0) as int
+            testJsonData = testOut?.jsonData ?: '[{"id":1, "status":"Pending"}]'
+            testReturnAllFacts = ((testOut?.returnAllFacts == true) ? "Y" : "N")
+        ]]></script>
     </actions>
 
     <widgets>
@@ -72,6 +115,16 @@
                             <text-line size="10"/>
                         </default-field>
                     </field>
+                    <field name="explosionPath">
+                        <default-field>
+                            <text-line size="40" placeholder="Optional JSONPath/list path for exploded items"/>
+                        </default-field>
+                    </field>
+                    <field name="primaryKeyPath">
+                        <default-field>
+                            <text-line size="40" placeholder="Optional key path (for uniqueness or lookup)"/>
+                        </default-field>
+                    </field>
                     <field name="submitButton">
                         <default-field>
                             <submit text="Update"/>
@@ -79,18 +132,17 @@
                     </field>
                     <field name="compileButton">
                         <default-field>
-                            <link url="compileRuleSet" text="Compile Rules" btn-type="success" confirmation="Compile RuleSet?"/>
+                            <link url="compileRuleSet" text="Validate and Compile" btn-type="success" confirmation="Compile RuleSet with current active rules?"/>
                         </default-field>
                     </field>
                 </form-single>
             </box-body>
         </container-box>
 
-        <!-- Test Bench Box -->
         <container-box>
             <box-header title="Test Bench"/>
             <box-body>
-                <form-single name="TestRulesForm" transition="testRules" map="[ruleSetId:ruleSetId, jsonData:'[{\&quot;id\&quot;:1, \&quot;status\&quot;:\&quot;Pending\&quot;}]']">
+                <form-single name="TestRulesForm" transition="testRules" map="[ruleSetId:ruleSetId, jsonData:testJsonData, returnAllFacts:testReturnAllFacts]">
                     <field name="ruleSetId">
                         <default-field>
                             <hidden default-value="${ruleSetId}"/>
@@ -98,7 +150,15 @@
                     </field>
                     <field name="jsonData">
                         <default-field title="JSON Data Packet">
-                            <text-area rows="5" cols="80" default-value='[{"id":1, "status":"Pending"}]'/>
+                            <text-area rows="6" cols="90" default-value="${testJsonData}"/>
+                        </default-field>
+                    </field>
+                    <field name="returnAllFacts">
+                        <default-field title="Response Mode">
+                            <drop-down>
+                                <option key="N" text="Matched Facts Only"/>
+                                <option key="Y" text="Return All Facts (with rule mutations)"/>
+                            </drop-down>
                         </default-field>
                     </field>
                     <field name="testButton">
@@ -106,19 +166,34 @@
                             <submit text="Run Test"/>
                         </default-field>
                     </field>
+                    <field name="clearButton">
+                        <default-field>
+                            <link url="clearTestResult" text="Clear Last Result"/>
+                        </default-field>
+                    </field>
                 </form-single>
 
-                <section-iterate name="ResultList" list="results" entry="res">
+                <label text="Last Run Summary: fired=${testFiredRuleCount}, activeRules=${testRuleCount}, results=${testResultRows.size()}"/>
+                <label text="Matched Rows Count: ${testMatchedRows.size()}"/>
+
+                <section-iterate name="WarningList" list="testWarnings" entry="warn">
+                    <widgets>
+                        <label text="Warning: ${warn}" style="text-warning"/>
+                    </widgets>
+                </section-iterate>
+                <label text="Error: ${testError}" condition="testError"/>
+
+                <section-iterate name="ResultList" list="testResultRows" entry="res">
                     <widgets>
                         <container-row>
                             <container-col md="12">
-                                <label text="Match: Rule ${res.ruleId} - ${res.ruleText}" type="strong" style="text-success"/>
-                                <label text="Data: ${res.data}"/>
+                                <label text="Matched Rules: ${(res._matchedRuleIds ?: [])}" type="strong"/>
+                                <label text="Fact: ${res}" type="pre"/>
                             </container-col>
                         </container-row>
                     </widgets>
                 </section-iterate>
-                <label text="No Matches Found" condition="results != null &amp;&amp; results.size() == 0"/>
+                <label text="No Test Results Available" condition="testResultRows != null &amp;&amp; testResultRows.size() == 0"/>
             </box-body>
         </container-box>
 
@@ -126,6 +201,16 @@
             <box-header title="Rules"/>
             <box-body>
                 <form-list name="RuleList" list="ruleList" transition="updateRule">
+                    <field name="ruleSetId">
+                        <default-field>
+                            <hidden/>
+                        </default-field>
+                    </field>
+                    <field name="validateOnSave">
+                        <default-field>
+                            <hidden default-value="true"/>
+                        </default-field>
+                    </field>
                     <field name="ruleId">
                         <header-field show-order-by="true"/>
                         <default-field>
@@ -139,15 +224,15 @@
                         </default-field>
                     </field>
                     <field name="ruleText">
-                        <header-field title="Condition (Text)" show-order-by="true"/>
+                        <header-field title="Condition Text"/>
                         <default-field>
                             <text-area rows="2" cols="40"/>
                         </default-field>
                     </field>
                     <field name="ruleLogic">
-                        <header-field title="DRL Override (Optional)"/>
+                        <header-field title="DRL or Condition Override"/>
                         <default-field>
-                            <text-area rows="2" cols="40"/>
+                            <text-area rows="3" cols="55"/>
                         </default-field>
                     </field>
                     <field name="enabled">
@@ -168,7 +253,7 @@
                     <field name="deleteButton">
                         <header-field title="Delete"/>
                         <default-field>
-                            <link url="deleteRule" text="X" btn-type="danger" confirmation="Delete rule?"/>
+                            <link url="deleteRule" text="X" btn-type="danger" confirmation="Delete rule?" parameter-map="[ruleId:ruleId]"/>
                         </default-field>
                     </field>
                 </form-list>
@@ -182,19 +267,29 @@
                                     <hidden/>
                                 </default-field>
                             </field>
+                            <field name="validateOnSave">
+                                <default-field>
+                                    <hidden default-value="true"/>
+                                </default-field>
+                            </field>
                             <field name="ruleId">
                                 <default-field>
-                                    <text-line size="20" placeholder="Rule ID (Unique)"/>
+                                    <text-line size="24" placeholder="Optional rule ID (auto-generated when blank)"/>
                                 </default-field>
                             </field>
                             <field name="sequenceNum">
                                 <default-field>
-                                    <text-line size="5" default-value="10"/>
+                                    <text-line size="6" default-value="10"/>
                                 </default-field>
                             </field>
                             <field name="ruleText">
                                 <default-field>
-                                    <text-line size="60" placeholder="e.g. status is 'Pending'"/>
+                                    <text-line size="70" placeholder="Example: status is 'Pending'"/>
+                                </default-field>
+                            </field>
+                            <field name="ruleLogic">
+                                <default-field title="Optional DRL or Condition Override">
+                                    <text-area rows="3" cols="70"/>
                                 </default-field>
                             </field>
                             <field name="enabled">

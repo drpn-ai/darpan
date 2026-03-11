@@ -46,6 +46,26 @@
         <default-response type="none"/>
     </transition>
 
+    <transition name="deleteDiff" begin-transaction="false">
+        <parameter name="filename"/>
+        <actions>
+            <set field="filename" from="filename?.trim()"/>
+            <if condition="!filename">
+                <return error="true" message="Filename is required"/>
+            </if>
+            <service-call name="reconciliation.ReconciliationGenericServices.delete#GeneratedOutputFile"
+                    in-map="[filename:filename]"
+                    out-map="context"/>
+            <if condition="deleted">
+                <message>${statusMessage ?: ('Deleted ' + filename)}</message>
+            </if>
+            <if condition="!deleted">
+                <message type="warning" text="${statusMessage ?: 'Unable to delete file'}"/>
+            </if>
+        </actions>
+        <default-response url="."/>
+    </transition>
+
     <pre-actions>
         <entity-find entity-name="moqui.basic.Enumeration" list="systemEnumList" cache="false">
             <econdition field-name="enumTypeId" value="DarpanSystemSource"/>
@@ -137,6 +157,12 @@
                     link-type="anchor-button" btn-type="info">
                 <parameter name="viewFile" from="latestFile"/>
             </link>
+            <link url="deleteDiff" text="Delete Latest" condition="latestFile"
+                    link-type="auto" btn-type="danger"
+                    confirmation="Delete file ${latestFile}?">
+                <parameter name="filename" from="latestFile"/>
+                <parameter name="moquiSessionToken" from="ec.web.sessionToken"/>
+            </link>
 
             <section name="DiffFilesSection" condition="diffFiles">
                 <widgets>
@@ -167,6 +193,12 @@
                                         btn-type="info" style="btn-xs"
                                         condition="fileName &amp;&amp; fileName.toLowerCase().endsWith('.json')">
                                     <parameter name="viewFile" from="fileName"/>
+                                </link>
+                                <link url="deleteDiff" text="Delete" link-type="auto"
+                                        btn-type="danger" style="btn-xs" condition="fileName"
+                                        confirmation="Delete file ${fileName}?">
+                                    <parameter name="filename" from="fileName"/>
+                                    <parameter name="moquiSessionToken" from="ec.web.sessionToken"/>
                                 </link>
                             </default-field>
                         </field>

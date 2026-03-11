@@ -6,17 +6,13 @@
     <!-- ========================================================= -->
 
     <entity entity-name="Reconciliation" package="darpan.reconciliation" use="configuration">
-        <description>Schedulable grouping of reconciliation runs scoped to a party.</description>
+        <description>Schedulable grouping of reconciliation runs.</description>
         <field name="reconciliationId" type="id" is-pk="true"/>
         <field name="reconciliationName" type="text-medium"/>
         <field name="description" type="text-medium"/>
         <field name="scheduleExpr" type="text-medium"/>
-        <field name="partyId" type="id"/>
         <field name="isActive" type="text-indicator"/>
 
-        <relationship type="one" related="darpan.party.Party">
-            <key-map field-name="partyId"/>
-        </relationship>
         <relationship type="many" related="darpan.reconciliation.ReconciliationRun" short-alias="runs">
             <key-map field-name="reconciliationId"/>
         </relationship>
@@ -30,14 +26,14 @@
         <field name="dataDomain" type="text-short"/>
         <field name="purpose" type="text-short"/>
         <field name="defaultTimeWindow" type="text-short"/>
-        <field name="ruleId" type="id"/>
+        <field name="ruleSetId" type="id"/>
         <field name="runSequence" type="number-integer"/>
 
         <relationship type="one" related="darpan.reconciliation.Reconciliation">
             <key-map field-name="reconciliationId"/>
         </relationship>
-        <relationship type="one" related="darpan.rule.RuleHeader">
-            <key-map field-name="ruleId"/>
+        <relationship type="one" related="darpan.rule.RuleSet">
+            <key-map field-name="ruleSetId"/>
         </relationship>
         <relationship type="many" related="darpan.reconciliation.RunDataDocument" short-alias="dataDocuments">
             <key-map field-name="reconciliationRunId"/>

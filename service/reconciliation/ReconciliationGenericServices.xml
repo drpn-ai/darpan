@@ -68,4 +68,48 @@
             </parameter>
         </out-parameters>
     </service>
+
+    <service verb="delete" noun="GeneratedOutputFile" type="script" transaction="ignore" authenticate="anonymous-all"
+            location="component://darpan/src/main/groovy/darpan/reconciliation/generic/deleteGeneratedOutputFile.groovy">
+        <description>Delete one generated reconciliation output file from the generic output directory.</description>
+        <in-parameters>
+            <parameter name="filename" required="true">
+                <description>Exact filename to delete (no path separators).</description>
+            </parameter>
+            <parameter name="outputLocation">
+                <description>Optional output directory override. Defaults to generic reconciliation output.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="deleted" type="Boolean"/>
+            <parameter name="deletedFileName"/>
+            <parameter name="statusMessage"/>
+        </out-parameters>
+    </service>
+
+    <service verb="purge" noun="GeneratedOutputFiles" type="script" transaction="ignore" authenticate="anonymous-all"
+            location="component://darpan/src/main/groovy/darpan/reconciliation/generic/purgeGeneratedOutputFiles.groovy">
+        <description>Purge generated reconciliation output files older than the configured retention period.</description>
+        <in-parameters>
+            <parameter name="retentionDays" type="Integer" default-value="15">
+                <description>Delete files whose last-modified timestamp is retentionDays or older.</description>
+            </parameter>
+            <parameter name="outputLocation">
+                <description>Optional output directory override. Defaults to generic reconciliation output.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="retentionDays" type="Integer"/>
+            <parameter name="outputLocation"/>
+            <parameter name="cutoffTimestamp" type="Long"/>
+            <parameter name="scannedCount" type="Integer"/>
+            <parameter name="deletedCount" type="Integer"/>
+            <parameter name="retainedCount" type="Integer"/>
+            <parameter name="failedFiles">
+                <parameter name="fileName"/>
+                <parameter name="errorMessage"/>
+            </parameter>
+            <parameter name="statusMessage"/>
+        </out-parameters>
+    </service>
 </services>

@@ -32,47 +32,4 @@
         </relationship>
     </entity>
 
-    <entity entity-name="RuleHeader" package="darpan.rule" use="configuration">
-        <description>Master record for a rule with tenant and permission scope.</description>
-        <field name="ruleId" type="id" is-pk="true"/>
-        <field name="tenantId" type="id"/>
-        <field name="ruleName" type="text-medium"/>
-        <field name="description" type="text-medium"/>
-        <field name="packageName" type="text-medium"/>
-        <field name="statusId" type="id"/>
-        <!-- DRAFT, ACTIVE, ARCHIVED -->
-        <field name="ownerUserId" type="id"/>
-        <field name="scopeType" type="id"/>
-        <!-- PRIVATE, GROUP, TENANT, CUSTOM -->
-        <field name="lastUpdatedDate" type="date-time"/>
-    </entity>
-
-    <entity entity-name="RuleVersion" package="darpan.rule" use="configuration">
-        <description>Versioning for Rule DRL and validation metadata.</description>
-        <field name="ruleId" type="id" is-pk="true"/>
-        <field name="ruleVersionId" type="id" is-pk="true"/>
-        <field name="createdDate" type="date-time"/>
-        <field name="createdByUserId" type="id"/>
-        <field name="drlText" type="text-long"/>
-        <field name="nlPromptText" type="text-long"/>
-        <field name="generatorMetaJson" type="text-long"/>
-        <field name="isPublished" type="text-indicator"/>
-        <relationship type="one" related="darpan.rule.RuleHeader">
-            <key-map field-name="ruleId"/>
-        </relationship>
-    </entity>
-
-    <entity entity-name="RuleAccess" package="darpan.rule" use="configuration">
-        <description>Record-level access control for rules.</description>
-        <field name="ruleAccessId" type="id" is-pk="true"/>
-        <field name="ruleId" type="id"/>
-        <field name="userId" type="id"/>
-        <field name="userGroupId" type="id"/>
-        <field name="permissionEnumId" type="id"/>
-        <!-- VIEW, EDIT, ADMIN -->
-        <relationship type="one" related="darpan.rule.RuleHeader">
-            <key-map field-name="ruleId"/>
-        </relationship>
-    </entity>
-
 </entities>

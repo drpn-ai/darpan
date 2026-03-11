@@ -27,7 +27,7 @@ if (!inputRows) {
 }
 
 Map ruleExec = ec.service.sync()
-        .name("reconciliation.ReconciliationSampleServices.execute#Rules")
+        .name("reconciliation.ReconciliationRuleEngineServices.execute#RuleSet")
         .parameters([
                 ruleSetId    : ruleSetIdToUse,
                 dataList     : inputRows,

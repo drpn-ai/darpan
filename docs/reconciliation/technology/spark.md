@@ -21,9 +21,9 @@ We started with NoSQL/Elasticsearch for easy ingest of messy CSVs. That worked f
 
 ## In-Repo Example
 
-- Spark-based comparison: `runtime/component/darpan/src/reconciliation/sample/compareSampleOrderIds.groovy`
-- Service entry point: `runtime/component/darpan/service/ReconciliationSampleServices.xml` (`compare#SampleOrderIds`)
-- Sample JSON inputs: `runtime/component/darpan/data/sample/omsBulkData.json`, `runtime/component/darpan/data/sample/shopifyBulkData.json`
+- Spark-based comparison: `runtime/component/darpan/src/main/groovy/darpan/debug/reconciliation/compareSampleOrderIds.groovy`
+- Service entry point: `runtime/component/darpan/service/debug/ReconciliationDebugServices.xml` (`compare#SampleOrderIds`)
+- Sample JSON inputs: `runtime/component/darpan/data/sample/omsData.json`, `runtime/component/darpan/data/sample/shopifyData.json`
 
 ## When to Add Elasticsearch
 

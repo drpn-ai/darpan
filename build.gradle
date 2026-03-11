@@ -71,3 +71,178 @@ task copyDependencies { doLast {
 } }
 copyDependencies.dependsOn cleanLib
 jar.dependsOn copyDependencies
+
+task verifyOrganization {
+    group = "Verification"
+    description = "Verify component locations and docs path references resolve."
+
+    doLast {
+        List<String> failures = []
+
+        def lineNumberFor = { String content, int charIndex ->
+            content.substring(0, charIndex).count("\n") + 1
+        }
+        def relativePathFor = { File file ->
+            projectDir.toPath().relativize(file.toPath()).toString().replace('\\', '/')
+        }
+        // Historical docs may retain legacy names for timeline context.
+        List<String> legacyReferenceDocExceptions = [
+                "docs/history/",
+                "docs/reconciliation/history/"
+        ]
+        def isLegacyDocException = { File file ->
+            String relativePath = relativePathFor(file)
+            legacyReferenceDocExceptions.any { String prefix -> relativePath.startsWith(prefix) }
+        }
+
+        def locationPattern = ~/location\s*=\s*"component:\/\/darpan\/([^"]+)"/
+        fileTree(dir: projectDir, include: ["service/**/*.xml", "screen/**/*.xml"]).files.sort { it.path }.each { File xmlFile ->
+            String xmlText = xmlFile.getText("UTF-8")
+            def matcher = locationPattern.matcher(xmlText)
+            while (matcher.find()) {
+                String relativePath = matcher.group(1)
+                File target = new File(projectDir, relativePath)
+                if (!target.exists()) {
+                    int lineNumber = lineNumberFor(xmlText, matcher.start())
+                    failures.add("${xmlFile.path}:${lineNumber} missing component target component://darpan/${relativePath}")
+                }
+            }
+        }
+
+        File docsDir = new File(projectDir, "docs")
+        if (docsDir.exists()) {
+            def codePattern = ~/`([^`]+)`/
+            fileTree(dir: docsDir, include: ["**/*.md"]).files.sort { it.path }.each { File docFile ->
+                String docText = docFile.getText("UTF-8")
+                def matcher = codePattern.matcher(docText)
+                while (matcher.find()) {
+                    String token = matcher.group(1)?.trim()
+                    if (!token?.startsWith("runtime/component/darpan/")) continue
+
+                    File target = new File(rootDir, token)
+                    if (!target.exists()) {
+                        int lineNumber = lineNumberFor(docText, matcher.start())
+                        failures.add("${docFile.path}:${lineNumber} missing docs path ${token}")
+                    }
+                }
+            }
+        }
+
+        List<String> forbiddenLegacyArtifacts = [
+                "screen/Rules.xml",
+                "service/darpan/rule/RuleServices.xml",
+                "src/main/groovy/darpan/rule/service/generateDrlFromPrompt.groovy",
+                "entity/PartyEntities.xml"
+        ]
+        forbiddenLegacyArtifacts.each { String relativePath ->
+            File artifact = new File(projectDir, relativePath)
+            if (artifact.exists()) {
+                failures.add("${artifact.path}:1 legacy Rules/party artifact must be removed")
+            }
+        }
+        File legacyRulesDir = new File(projectDir, "screen/Rules")
+        if (legacyRulesDir.exists()) {
+            failures.add("${legacyRulesDir.path}:1 legacy Rules screen directory must be removed")
+        }
+
+        List<File> productionFiles = fileTree(
+                dir: projectDir,
+                include: ["service/**/*.xml", "screen/**/*.xml", "src/main/groovy/darpan/**/*.groovy"],
+                exclude: ["service/debug/**", "screen/Debug.xml", "screen/Debug/**", "src/main/groovy/darpan/debug/**"]
+        ).files.sort { it.path }
+
+        productionFiles.each { File sourceFile ->
+            String sourceText = sourceFile.getText("UTF-8")
+
+            def sampleNamespaceMatcher = ~/\breconciliation\.ReconciliationSampleServices\./
+            def sampleNamespace = sampleNamespaceMatcher.matcher(sourceText)
+            while (sampleNamespace.find()) {
+                int lineNumber = lineNumberFor(sourceText, sampleNamespace.start())
+                failures.add("${sourceFile.path}:${lineNumber} production references reconciliation.ReconciliationSampleServices.*")
+            }
+
+            def samplePathMatcher = ~/\breconciliation\/sample\//
+            def samplePath = samplePathMatcher.matcher(sourceText)
+            while (samplePath.find()) {
+                int lineNumber = lineNumberFor(sourceText, samplePath.start())
+                failures.add("${sourceFile.path}:${lineNumber} production references reconciliation/sample path")
+            }
+        }
+
+        List<File> productionScreenAndServiceFiles = fileTree(
+                dir: projectDir,
+                include: ["service/**/*.xml", "screen/**/*.xml"],
+                exclude: ["service/debug/**", "screen/Debug.xml", "screen/Debug/**"]
+        ).files.sort { it.path }
+
+        productionScreenAndServiceFiles.each { File xmlFile ->
+            String xmlText = xmlFile.getText("UTF-8")
+            def debugCallPattern = ~/\bdebug\.[A-Za-z0-9_.#]+/
+            def debugCallMatcher = debugCallPattern.matcher(xmlText)
+            while (debugCallMatcher.find()) {
+                int lineNumber = lineNumberFor(xmlText, debugCallMatcher.start())
+                failures.add("${xmlFile.path}:${lineNumber} production screen/service references debug namespace")
+            }
+        }
+
+        List<File> legacyReferenceFiles = fileTree(
+                dir: projectDir,
+                include: ["entity/**/*.xml", "service/**/*.xml", "screen/**/*.xml", "src/main/groovy/**/*.groovy", "docs/**/*.md"]
+        ).files.sort { it.path }
+        legacyReferenceFiles.each { File sourceFile ->
+            if (isLegacyDocException(sourceFile)) return
+
+            String sourceText = sourceFile.getText("UTF-8")
+
+            def legacyRulesRoutePattern = ~/\bscreen\/Rules(?:\.xml|\/[A-Za-z0-9_.\-\/]+)?\b/
+            def legacyRulesRouteMatcher = legacyRulesRoutePattern.matcher(sourceText)
+            while (legacyRulesRouteMatcher.find()) {
+                int lineNumber = lineNumberFor(sourceText, legacyRulesRouteMatcher.start())
+                failures.add("${sourceFile.path}:${lineNumber} references legacy /Rules screen surface")
+            }
+
+            def legacyRuleServicePattern = ~/\bdarpan\.rule\.RuleServices\b/
+            def legacyRuleServiceMatcher = legacyRuleServicePattern.matcher(sourceText)
+            while (legacyRuleServiceMatcher.find()) {
+                int lineNumber = lineNumberFor(sourceText, legacyRuleServiceMatcher.start())
+                failures.add("${sourceFile.path}:${lineNumber} references legacy darpan.rule.RuleServices namespace")
+            }
+
+            def legacyEntityPattern = ~/\b(RuleHeader|RuleVersion|RuleAccess|darpan\.party\.[A-Za-z0-9_]+)\b/
+            def legacyEntityMatcher = legacyEntityPattern.matcher(sourceText)
+            while (legacyEntityMatcher.find()) {
+                int lineNumber = lineNumberFor(sourceText, legacyEntityMatcher.start())
+                failures.add("${sourceFile.path}:${lineNumber} references removed legacy rule/party entities")
+            }
+        }
+
+        File mainNavFile = new File(projectDir, "screen/darpan.xml")
+        if (mainNavFile.exists()) {
+            String navText = mainNavFile.getText("UTF-8")
+            def debugRoutePattern = ~/<subscreens-item\b[^>]*\bname\s*=\s*"Debug"[^>]*>/
+            def debugRouteMatcher = debugRoutePattern.matcher(navText)
+            while (debugRouteMatcher.find()) {
+                String debugRouteTag = debugRouteMatcher.group()
+                if (!debugRouteTag.contains('menu-include="false"')) {
+                    int lineNumber = lineNumberFor(navText, debugRouteMatcher.start())
+                    failures.add("${mainNavFile.path}:${lineNumber} Debug route must stay hidden with menu-include=\"false\"")
+                }
+            }
+
+            def legacyRulesSubscreenPattern = ~/<subscreens-item\b[^>]*\bname\s*=\s*"Rules"\b[^>]*>/
+            def legacyRulesSubscreenMatcher = legacyRulesSubscreenPattern.matcher(navText)
+            while (legacyRulesSubscreenMatcher.find()) {
+                int lineNumber = lineNumberFor(navText, legacyRulesSubscreenMatcher.start())
+                failures.add("${mainNavFile.path}:${lineNumber} legacy /Rules navigation item must not exist")
+            }
+        }
+
+        if (!failures.isEmpty()) {
+            logger.error("verifyOrganization failed with ${failures.size()} issue(s):")
+            failures.each { logger.error(" - ${it}") }
+            throw new org.gradle.api.GradleException("verifyOrganization detected broken component or docs references.")
+        }
+
+        logger.lifecycle("verifyOrganization passed: all component and docs paths resolved.")
+    }
+}

@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="980" viewBox="0 0 1600 980" role="img" aria-labelledby="title desc">
+  <title id="title">Ticket #10 Reconciliation Flow - Minimal Technical</title>
+  <desc id="desc">Minimal technical monochrome mockup with open space for reconciliation run and output actions.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f8f8f8"/>
+      <stop offset="100%" stop-color="#f1f1f1"/>
+    </linearGradient>
+    <pattern id="grid" width="44" height="44" patternUnits="userSpaceOnUse">
+      <path d="M 44 0 L 0 0 0 44" fill="none" stroke="#ececec" stroke-width="1"/>
+    </pattern>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="980" fill="url(#bg)"/>
+  <rect width="1600" height="980" fill="url(#grid)"/>
+
+  <text x="92" y="88" fill="#4e4e4e" font-family="'IBM Plex Mono','SFMono-Regular',monospace" font-size="13">[ticket_10] reconciliation_step_card</text>
+  <text x="92" y="152" fill="#101010" font-family="'IBM Plex Mono','SFMono-Regular',monospace" font-size="56" font-weight="700">Run and review</text>
+
+  <line x1="92" y1="202" x2="650" y2="202" stroke="#262626" stroke-width="2"/>
+  <circle cx="650" cy="202" r="6" fill="#262626"/>
+  <circle cx="742" cy="202" r="6" fill="#262626"/>
+  <circle cx="834" cy="202" r="6" fill="#262626"/>
+  <circle cx="926" cy="202" r="6" fill="#bdbdbd"/>
+  <text x="952" y="208" fill="#666666" font-family="'IBM Plex Mono','SFMono-Regular',monospace" font-size="12">step_3_of_4</text>
+
+  <rect x="220" y="274" width="820" height="286" rx="10" fill="#ffffff" stroke="#dadada" filter="url(#soft)"/>
+
+  <text x="268" y="334" fill="#8a8a8a" font-family="'IBM Plex Mono','SFMono-Regular',monospace" font-size="12">active_step // validate_and_run</text>
+  <text x="268" y="382" fill="#101010" font-family="'IBM Plex Mono','SFMono-Regular',monospace" font-size="38" font-weight="700">Ready to execute</text>
+
+  <rect x="268" y="414" width="320" height="56" rx="8" fill="#fafafa" stroke="#dbdbdb"/>
+  <text x="290" y="449" fill="#1a1a1a" font-family="'IBM Plex Mono','SFMono-Regular',monospace" font-size="16">mapping: product-id-sync-v3</text>
+
+  <rect x="604" y="414" width="196" height="56" rx="8" fill="#fafafa" stroke="#dbdbdb"/>
+  <text x="626" y="449" fill="#1a1a1a" font-family="'IBM Plex Mono','SFMono-Regular',monospace" font-size="16">file1: Shopify</text>
+
+  <rect x="816" y="414" width="196" height="56" rx="8" fill="#fafafa" stroke="#dbdbdb"/>
+  <text x="838" y="449" fill="#1a1a1a" font-family="'IBM Plex Mono','SFMono-Regular',monospace" font-size="16">file2: NetSuite</text>
+
+  <text x="268" y="512" fill="#8a8a8a" font-family="'IBM Plex Mono','SFMono-Regular',monospace" font-size="12">state_model: processing | success_counts | validation_error | service_error</text>
+
+  <rect x="1082" y="420" width="128" height="48" rx="8" fill="#ffffff" stroke="#bcbcbc"/>
+  <text x="1120" y="450" fill="#2f2f2f" font-family="'IBM Plex Mono','SFMono-Regular',monospace" font-size="14" font-weight="700">back</text>
+
+  <rect x="1224" y="420" width="128" height="48" rx="8" fill="#101010"/>
+  <text x="1262" y="450" fill="#ffffff" font-family="'IBM Plex Mono','SFMono-Regular',monospace" font-size="14" font-weight="700">run</text>
+
+  <rect x="220" y="628" width="1006" height="248" rx="10" fill="#ffffff" stroke="#dadada" filter="url(#soft)"/>
+  <text x="268" y="688" fill="#8a8a8a" font-family="'IBM Plex Mono','SFMono-Regular',monospace" font-size="12">step_4_preview // summary_and_output_actions</text>
+  <text x="268" y="734" fill="#101010" font-family="'IBM Plex Mono','SFMono-Regular',monospace" font-size="34" font-weight="700">Outputs stay simple</text>
+
+  <text x="268" y="778" fill="#2f2f2f" font-family="'IBM Plex Mono','SFMono-Regular',monospace" font-size="16">match=9820  only_file1=142  only_file2=58  diff=200</text>
+  <text x="268" y="808" fill="#2f2f2f" font-family="'IBM Plex Mono','SFMono-Regular',monospace" font-size="16">artifact: 20260310-114200-product-id-sync-v3.json</text>
+  <text x="268" y="838" fill="#2f2f2f" font-family="'IBM Plex Mono','SFMono-Regular',monospace" font-size="16">actions: view | download | delete</text>
+
+  <text x="1280" y="690" fill="#7a7a7a" font-family="'IBM Plex Mono','SFMono-Regular',monospace" font-size="12">fallback</text>
+  <text x="1280" y="718" fill="#2a2a2a" font-family="'IBM Plex Mono','SFMono-Regular',monospace" font-size="14">classic_ui_available</text>
+</svg>

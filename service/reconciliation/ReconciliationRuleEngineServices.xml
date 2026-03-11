@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="compile" noun="RuleSet" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy" method="compileRuleSet">
+        <description>Compile active rules for a RuleSet into a Drools container and cache the compiled result.</description>
+        <in-parameters>
+            <parameter name="ruleSetId" required="true"/>
+            <parameter name="useCache" type="Boolean" default-value="false"/>
+            <parameter name="forceRebuild" type="Boolean" default-value="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="kieContainer" type="org.kie.api.runtime.KieContainer"/>
+            <parameter name="ruleCount" type="Integer"/>
+            <parameter name="drlText"/>
+            <parameter name="warnings" type="List"/>
+            <parameter name="error"/>
+        </out-parameters>
+    </service>
+
+    <service verb="execute" noun="RuleSet" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy" method="executeRuleSet">
+        <description>Execute a compiled RuleSet on a list of map facts.</description>
+        <in-parameters>
+            <parameter name="ruleSetId" required="true"/>
+            <parameter name="dataList" type="List" required="true"/>
+            <parameter name="returnAllFacts" type="Boolean" default-value="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"/>
+            <parameter name="matchedResults" type="List"/>
+            <parameter name="firedRuleCount" type="Integer"/>
+            <parameter name="ruleCount" type="Integer"/>
+            <parameter name="warnings" type="List"/>
+            <parameter name="error"/>
+        </out-parameters>
+    </service>
+
+    <service verb="execute" noun="RuleSetJson" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy" method="executeRuleSetJson">
+        <description>Execute RuleSet rules by accepting JSON payload input.</description>
+        <in-parameters>
+            <parameter name="ruleSetId" required="true"/>
+            <parameter name="jsonData" required="true"/>
+            <parameter name="returnAllFacts" type="Boolean" default-value="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"/>
+            <parameter name="matchedResults" type="List"/>
+            <parameter name="firedRuleCount" type="Integer"/>
+            <parameter name="ruleCount" type="Integer"/>
+            <parameter name="warnings" type="List"/>
+            <parameter name="error"/>
+        </out-parameters>
+    </service>
+
+    <service verb="save" noun="RuleSet" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy" method="saveRuleSet">
+        <description>Create or update RuleSet metadata with normalized IDs and timestamps.</description>
+        <in-parameters>
+            <parameter name="ruleSetId"/>
+            <parameter name="ruleSetName"/>
+            <parameter name="description"/>
+            <parameter name="version" default-value="1.0"/>
+            <parameter name="explosionPath"/>
+            <parameter name="primaryKeyPath"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ruleSetId"/>
+            <parameter name="created" type="Boolean"/>
+            <parameter name="updated" type="Boolean"/>
+        </out-parameters>
+    </service>
+
+    <service verb="save" noun="Rule" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy" method="saveRule">
+        <description>Create or update a Rule with validation and cache invalidation.</description>
+        <in-parameters>
+            <parameter name="ruleSetId" required="true"/>
+            <parameter name="ruleId"/>
+            <parameter name="sequenceNum" type="Integer"/>
+            <parameter name="ruleText"/>
+            <parameter name="ruleLogic"/>
+            <parameter name="ruleType"/>
+            <parameter name="expression"/>
+            <parameter name="severity"/>
+            <parameter name="enabled" default-value="Y"/>
+            <parameter name="validateOnSave" type="Boolean" default-value="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ruleId"/>
+            <parameter name="ruleSetId"/>
+            <parameter name="sequenceNum" type="Integer"/>
+            <parameter name="warnings" type="List"/>
+        </out-parameters>
+    </service>
+
+    <service verb="delete" noun="Rule" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy" method="deleteRule">
+        <description>Delete a Rule and invalidate its RuleSet cache.</description>
+        <in-parameters>
+            <parameter name="ruleId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ruleId"/>
+            <parameter name="ruleSetId"/>
+        </out-parameters>
+    </service>
+
+    <service verb="delete" noun="RuleSet" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy" method="deleteRuleSet">
+        <description>Delete a RuleSet, optionally deleting all child rules in the same transaction.</description>
+        <in-parameters>
+            <parameter name="ruleSetId" required="true"/>
+            <parameter name="forceDeleteRules" type="Boolean" default-value="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ruleSetId"/>
+            <parameter name="deletedRuleCount" type="Integer"/>
+        </out-parameters>
+    </service>
+
+    <service verb="clear" noun="RuleSetCache" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy" method="clearRuleSetCache">
+        <description>Clear Rule Engine cache for one RuleSet or for all cached RuleSets.</description>
+        <in-parameters>
+            <parameter name="ruleSetId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="cacheCleared" type="Boolean"/>
+            <parameter name="ruleSetId"/>
+        </out-parameters>
+    </service>
+
+</services>

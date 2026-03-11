@@ -1,0 +1,153 @@
+/* Core page scaffolding */
+.dt-shell {
+  min-height: 100vh;
+  margin: 0;
+  padding: var(--dt-space-7);
+  color: var(--dt-color-fg-strong);
+  background: linear-gradient(135deg, var(--dt-color-bg-0), var(--dt-color-bg-1));
+  font-family: var(--dt-font-mono);
+}
+
+.dt-container {
+  max-width: var(--dt-container-max);
+  margin: 0 auto;
+}
+
+.dt-title {
+  margin: 0 0 var(--dt-space-2) 0;
+  font-size: 48px;
+  line-height: 1.1;
+  font-weight: 700;
+  color: var(--dt-color-fg-strong);
+}
+
+.dt-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--dt-color-fg-muted);
+  letter-spacing: 0.02em;
+}
+
+/* Step flow */
+.dt-flow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--dt-space-4);
+  margin: var(--dt-space-6) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dt-flow-step {
+  padding: var(--dt-space-3) var(--dt-space-4);
+  border: 1px solid var(--dt-color-border);
+  border-radius: var(--dt-radius-sm);
+  background: var(--dt-color-bg-1);
+  color: var(--dt-color-fg-muted);
+}
+
+.dt-flow-step.is-active {
+  border-color: var(--dt-color-fg-strong);
+  color: var(--dt-color-fg-strong);
+}
+
+.dt-flow-index {
+  display: inline-block;
+  margin-right: var(--dt-space-2);
+  font-weight: 700;
+}
+
+/* Reusable cards and fields */
+.dt-card {
+  background: var(--dt-color-panel);
+  border: 1px solid var(--dt-color-border);
+  border-radius: var(--dt-radius-md);
+  box-shadow: var(--dt-shadow-1);
+  padding: var(--dt-space-6);
+}
+
+.dt-card-title {
+  margin: 0 0 var(--dt-space-4) 0;
+  font-size: 32px;
+  line-height: 1.2;
+  color: var(--dt-color-fg-strong);
+}
+
+.dt-field {
+  margin-bottom: var(--dt-space-5);
+}
+
+.dt-label {
+  display: block;
+  margin-bottom: var(--dt-space-2);
+  font-size: 12px;
+  color: var(--dt-color-fg-muted);
+  text-transform: lowercase;
+}
+
+.dt-input,
+.dt-select,
+.dt-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--dt-color-border-soft);
+  border-radius: var(--dt-radius-sm);
+  background: var(--dt-color-bg-2);
+  color: var(--dt-color-fg-strong);
+  padding: var(--dt-space-3) var(--dt-space-4);
+  font-family: var(--dt-font-mono);
+  font-size: 15px;
+}
+
+.dt-help {
+  margin-top: var(--dt-space-2);
+  font-size: 12px;
+  color: var(--dt-color-fg-muted);
+}
+
+.dt-actions {
+  display: flex;
+  gap: var(--dt-space-3);
+  justify-content: flex-end;
+  margin-top: var(--dt-space-6);
+}
+
+.dt-btn {
+  border-radius: var(--dt-radius-sm);
+  border: 1px solid var(--dt-color-border-soft);
+  padding: 10px 16px;
+  font-family: var(--dt-font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.dt-btn-secondary {
+  background: var(--dt-color-bg-2);
+  color: var(--dt-color-fg);
+}
+
+.dt-btn-primary {
+  background: var(--dt-color-fg-strong);
+  border-color: var(--dt-color-fg-strong);
+  color: var(--dt-color-inverse);
+}
+
+.dt-status {
+  margin-top: var(--dt-space-4);
+  padding: var(--dt-space-3);
+  border-radius: var(--dt-radius-sm);
+  border: 1px solid var(--dt-color-border-soft);
+  background: var(--dt-color-bg-2);
+  color: var(--dt-color-fg);
+  font-size: 12px;
+}
+
+/* Utility helpers */
+.dt-hidden {
+  display: none !important;
+}
+
+.dt-space-top-lg {
+  margin-top: var(--dt-space-7);
+}

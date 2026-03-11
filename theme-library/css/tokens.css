@@ -1,0 +1,30 @@
+:root {
+  --dt-font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  --dt-font-sans: "IBM Plex Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+
+  --dt-color-bg-0: #090909;
+  --dt-color-bg-1: #101010;
+  --dt-color-bg-2: #161616;
+  --dt-color-panel: #121212;
+  --dt-color-border: #2a2a2a;
+  --dt-color-border-soft: #303030;
+  --dt-color-fg-strong: #f2f2f2;
+  --dt-color-fg: #c8c8c8;
+  --dt-color-fg-muted: #9a9a9a;
+  --dt-color-inverse: #111111;
+
+  --dt-space-1: 4px;
+  --dt-space-2: 8px;
+  --dt-space-3: 12px;
+  --dt-space-4: 16px;
+  --dt-space-5: 24px;
+  --dt-space-6: 32px;
+  --dt-space-7: 48px;
+
+  --dt-radius-sm: 6px;
+  --dt-radius-md: 10px;
+
+  --dt-shadow-1: 0 8px 14px rgba(0, 0, 0, 0.45);
+
+  --dt-container-max: 1200px;
+}

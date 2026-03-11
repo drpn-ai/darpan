@@ -50,6 +50,22 @@ Single reconciliation engine for all file type combinations. It converts CSV/JSO
 
 > **Note**: Direct usage of `ReconciliationJsonServices.reconcile#JsonFiles` is supported but the Generic service is preferred for UI integration.
 
+### `ReconciliationGenericServices.delete#GeneratedOutputFile`
+
+Deletes a single generated output file from `runtime://tmp/reconciliation/generic/output`.
+
+**Inputs (key):** `filename` (required), optional `outputLocation`.
+
+**Outputs (key):** `deleted`, `deletedFileName`, `statusMessage`.
+
+### `ReconciliationGenericServices.purge#GeneratedOutputFiles`
+
+Purges generated output files older than retention policy from `runtime://tmp/reconciliation/generic/output`.
+
+**Inputs (key):** `retentionDays` (default `15`), optional `outputLocation`.
+
+**Outputs (key):** `scannedCount`, `deletedCount`, `retainedCount`, `failedFiles`, `statusMessage`.
+
 ## Schema Management
 
 For details on creating and managing schemas used in reconciliation, see [JSON Schema Management](json-schema-management.md).
@@ -189,3 +205,4 @@ Schema: `runtime://schemas/json/test-orders.schema.json`
 - What changed: Simple ID keys are resolved against array-root schemas (e.g., `id` -> `$[*].id`) and small array payloads are fully validated before sampling large ones
 - What changed: Schema generation in non-strict mode merges array item shapes to keep schemas compact instead of emitting large `anyOf` lists
 - What changed: Mapping members now support explicit `idValueNormalizer` so ID transforms (for example Shopify GID tail extraction) can be configured separately from JSONPath/column expressions before comparison
+- What changed: Generated Reconciliation Files now support inline delete actions in the UI, and seed data includes a daily purge job (`purge_ReconciliationGeneratedFiles_daily`) with `retentionDays=15`

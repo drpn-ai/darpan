@@ -3,74 +3,94 @@ import org.moqui.context.ExecutionContext
 
 ExecutionContext ec = context.ec
 
-ec.logger.info("saveRefinedSchema transition triggered.")
-ec.logger.info("Raw Context Keys: " + context.keySet())
-ec.logger.info("Web Parameters (Full Dump): " + ec.web.parameters)
+def firstValue = { Object value ->
+    if (value instanceof List) return value ? value[0] : null
+    return value
+}
 
-def fields = []
-Map params = ec.web.parameters
+def firstText = { Object value ->
+    Object raw = firstValue(value)
+    if (raw == null) return null
+    String text = raw.toString().trim()
+    return text ? text : null
+}
 
-ec.logger.info("Checking for schemaName and jsonSchemaId in parameters...")
-// Fix: Resolve schemaName/ID from first row if missing or if it's a list (form-list multi=true)
-if (params.schemaName instanceof List) ec.context.put("schemaName", params.schemaName[0])
-if (params.jsonSchemaId instanceof List) ec.context.put("jsonSchemaId", params.jsonSchemaId[0])
+List<Map> fields = []
+Map params = ec.web.parameters ?: [:]
+boolean usedSessionFallback = false
 
-if (!context.schemaName && params.schemaName_0) ec.context.put("schemaName", params.schemaName_0)
-if (!context.jsonSchemaId && params.jsonSchemaId_0) ec.context.put("jsonSchemaId", params.jsonSchemaId_0)
+String requestSchemaName = firstText(params.schemaName)
+if (requestSchemaName) ec.context.put("schemaName", requestSchemaName)
 
-ec.logger.info("Resolved Context - schemaName: ${context.schemaName}, jsonSchemaId: ${context.jsonSchemaId}")
+String requestSchemaId = firstText(params.jsonSchemaId)
+if (requestSchemaId) ec.context.put("jsonSchemaId", requestSchemaId)
 
-def maxIndex = 1000 // Safety limit
-ec.logger.info("Starting loop to extract fields (limit ${maxIndex})...")
-for (int i=0; i < maxIndex; i++) {
-     String pKey = "fieldPath_" + i
-     if (!params.containsKey(pKey)) {
-        ec.logger.info("Loop break at index ${i}. Key ${pKey} not found.")
-        break
-     }
-     
-     def fieldData = [
-         fieldPath: params[pKey],
-         type: params["type_" + i],
-         required: params["required_" + i]
-     ]
-     // ec.logger.info("Found field at index ${i}: ${fieldData}")
-     fields.add(fieldData)
+if (!context.schemaName && params.schemaName_0) {
+    String rowSchemaName = firstText(params.schemaName_0)
+    if (rowSchemaName) ec.context.put("schemaName", rowSchemaName)
+}
+
+if (!context.jsonSchemaId && params.jsonSchemaId_0) {
+    String rowSchemaId = firstText(params.jsonSchemaId_0)
+    if (rowSchemaId) ec.context.put("jsonSchemaId", rowSchemaId)
+}
+
+int maxIndex = 1000
+for (int i = 0; i < maxIndex; i++) {
+    String pKey = "fieldPath_${i}"
+    if (!params.containsKey(pKey)) break
+
+    String fieldPath = firstText(params[pKey])
+    if (!fieldPath) continue
+
+    fields.add([
+        fieldPath: fieldPath,
+        type: (firstText(params["type_${i}"]) ?: "string"),
+        required: (firstText(params["required_${i}"]) ?: "false")
+    ])
 }
 
 // Fallback: If no suffixed fields found, check for list/array parameters (fieldPath, type, required)
 if (fields.isEmpty() && params.fieldPath) {
-     ec.logger.info("No suffixed fields found, trying array parameters.")
-     def fPaths = params.fieldPath instanceof List ? params.fieldPath : [params.fieldPath]
-     def types = params.type instanceof List ? params.type : [params.type]
-     def reqs = params.required instanceof List ? params.required : [params.required]
-     
-     ec.logger.info("Array parameter details - fieldPath size: ${fPaths.size()}")
-     
-     for (int i=0; i < fPaths.size(); i++) {
-         fields.add([
-             fieldPath: fPaths[i],
-             type: (i < types.size() ? types[i] : 'string'),
-             required: (i < reqs.size() ? reqs[i] : 'false')
-         ])
-     }
+    def fPaths = params.fieldPath instanceof List ? params.fieldPath : [params.fieldPath]
+    def types = params.type instanceof List ? params.type : [params.type]
+    def reqs = params.required instanceof List ? params.required : [params.required]
+
+    for (int i = 0; i < fPaths.size(); i++) {
+        String fieldPath = firstText(fPaths[i])
+        if (!fieldPath) continue
+
+        fields.add([
+            fieldPath: fieldPath,
+            type: (firstText(i < types.size() ? types[i] : null) ?: "string"),
+            required: (firstText(i < reqs.size() ? reqs[i] : null) ?: "false")
+        ])
+    }
 }
 
 // Final Fallback: Use wizardResultList from session if available
 // This protects against cases where form parameters aren't submitted but the session state is valid (e.g. after Add/Remove)
 if (fields.isEmpty()) {
     def sessionList = ec.web.session.getAttribute("wizardResultList")
-    if (sessionList) {
-        ec.logger.warn("Form fields empty. Falling back to 'wizardResultList' from session (Size: ${sessionList.size()}). Edits to text fields may be lost if not submitted.")
-        fields = sessionList
+    if (sessionList instanceof Collection && !sessionList.isEmpty()) {
+        fields = sessionList.collect { row ->
+            if (!(row instanceof Map)) return null
+            String fieldPath = firstText(row.fieldPath)
+            if (!fieldPath) return null
+            return [
+                fieldPath: fieldPath,
+                type: (firstText(row.type) ?: "string"),
+                required: (firstText(row.required) ?: "false")
+            ]
+        }.findAll { it != null }
+        usedSessionFallback = true
     }
 }
 
-ec.logger.info("Final Field List Size: " + fields.size())
-if (fields.size() > 0) {
-    ec.logger.info("First field sample: " + fields[0])
-} else {
-    ec.logger.warn("WARNING: Field list is empty! Service call will likely fail.")
-}
-
 ec.context.put("fieldList", fields)
+
+if (fields.isEmpty()) {
+    ec.logger.warn("JsonSchema editor save prepared with no fields (schemaName: ${context.schemaName}, jsonSchemaId: ${context.jsonSchemaId})")
+} else {
+    ec.logger.info("JsonSchema editor save prepared (schemaName: ${context.schemaName}, jsonSchemaId: ${context.jsonSchemaId}, fieldCount: ${fields.size()}, source: ${usedSessionFallback ? 'session' : 'request'})")
+}

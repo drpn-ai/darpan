@@ -1,19 +1,19 @@
 # Rule Engine Test Service Documentation
 
-This document describes the implementation and usage of the Rule Engine Test Service (`testRuleEngine.groovy`) and the underlying Cancellation Sync logic executed by `RuleServices.groovy`.
+This document describes the implementation and usage of the Rule Engine Test Service (`testRuleEngine.groovy`) and the underlying Cancellation Sync logic executed by `RuleEngineServices.groovy`.
 
 ## Overview
 
 The Rule Engine POC is designed to validate business logic using Apache Drools. The current implementation focuses on reconciling Order statuses between two systems (e.g., Shopify and OMS) to identify synchronization issues, specifically regarding order cancellations.
 
 ### Key Components
-1.  **Service**: `reconciliation.ReconciliationSampleServices.execute#Rules`
-2.  **Implementation**: `RuleServices.groovy` (Compiles and executes DRL)
+1.  **Service**: `reconciliation.ReconciliationRuleEngineServices.execute#RuleSet`
+2.  **Implementation**: `RuleEngineServices.groovy` (Compiles and executes DRL)
 3.  **Test Script**: `testRuleEngine.groovy` (Generates synthetic data and invokes the service)
 
 ## Cancellation Sync Logic
 
-The `RuleServices.groovy` defines hardcoded Drools rules (DRL) to check the state of orders passed in a data map.
+The `RuleEngineServices.groovy` execution path runs Drools rules (DRL) against map facts and returns matched facts.
 
 ### Rules
 The following rules are applied to each order record:
@@ -49,7 +49,7 @@ Run the test script from the command line using the Moqui ExecWar JAR.
 **Note**: Ensure no other Moqui instance is using the same transaction logs (port 9090 default). If an instance is running, stop it first or run the script inside that instance's context if available.
 
 ```bash
-java -jar moqui.war -T runtime/component/darpan/src/reconciliation/sample/testRuleEngine.groovy
+java -jar moqui.war -T runtime/component/darpan/src/main/groovy/darpan/debug/reconciliation/testRuleEngine.groovy
 ```
 
 ### Expected Output

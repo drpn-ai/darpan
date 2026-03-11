@@ -64,11 +64,11 @@
 
     <service verb="save" noun="RefinedSchema" type="script"
             location="component://darpan/src/main/groovy/darpan/jsonschema/service/crud/saveRefinedSchema.groovy">
-        <description>Save a schema from the refined field list to DB.</description>
+        <description>Save a schema from the refined field list to DB; schemaName is required when creating a new schema.</description>
         <in-parameters>
-            <parameter name="jsonSchemaId"/>
-            <parameter name="schemaName" required="true"/>
-            <parameter name="description"/>
+            <parameter name="jsonSchemaId" type="String"/>
+            <parameter name="schemaName" type="String"/>
+            <parameter name="description" type="String"/>
             <parameter name="fieldList" required="true" type="List"/>
         </in-parameters>
         <out-parameters>

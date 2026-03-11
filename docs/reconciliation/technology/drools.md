@@ -2,36 +2,45 @@
 
 ## Goal
 
-Keep reconciliation logic configurable per client while the execution service stays generic and stable.
+Keep comparison and classification logic configurable without changing reconciliation service code for every rule change.
 
-## Why Drools
+## Implementation in Darpan
 
-- Externalizes rules from application code
-- Supports DRL and decision tables for business-friendly updates
-- Separates facts (data) from rules (logic)
-- Provides priorities and conditional execution for complex comparisons
+- Rule configuration entities:
+  - `runtime/component/darpan/entity/RuleEntities.xml`
+  - `darpan.rule.RuleSet`
+  - `darpan.rule.Rule`
+- Production rule services:
+  - `runtime/component/darpan/service/reconciliation/ReconciliationRuleEngineServices.xml`
+  - Script implementation: `runtime/component/darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy`
 
-## How It Fits the Platform
+## Execution model
 
-1. The service loads canonical facts (orders, shipments, payments, etc.)
-2. It selects the rule package for the client and entity
-3. Drools evaluates rules
-4. Results are persisted in the reconciliation store
+1. Load active `Rule` rows for a `RuleSet`.
+2. Build DRL from:
+   - `ruleLogic` (full DRL block or inline Map condition), or
+   - parsed `ruleText` (for example, `status is 'Pending'`).
+3. Compile DRL to a `KieContainer`.
+4. Execute facts as `Map` rows.
+5. Return:
+   - `results`
+   - `matchedResults`
+   - `firedRuleCount`
+   - `warnings`
 
-Only the rules change; the execution pipeline does not.
+## Operational notes
 
-## Current Repo State
+- Cache key includes tenant + ruleSet; saves/deletes invalidate cache.
+- Use `compile#RuleSet` for explicit pre-run validation.
+- Rule actions can enrich facts; generated rules append `_matchedRuleIds` on matched rows.
+- Keep large payload processing in Spark and avoid loading large datasets into rule facts unless required.
 
-- RuleSet and Rule configuration entities live in `runtime/component/darpan/entity/ReconciliationEntities.xml`
-- No Drools integration code is present yet in this component
+## Example
 
-## Operational Considerations
-
-- Governance: versioned rule sets with review and approval
-- Performance: batch execution and bounded fact sizes
-
-## Next Steps
-
-- Prototype the order presence rule in Drools
-- Define the canonical fact model
-- Pick the initial authoring format (DRL or decision tables)
+```xml
+<service-call name="reconciliation.ReconciliationRuleEngineServices.execute#RuleSet">
+    <parameter name="ruleSetId" value="INV_ADJ_DEFAULT_RS"/>
+    <parameter name="dataList" from="itemResultRows"/>
+    <parameter name="returnAllFacts" value="true"/>
+</service-call>
+```

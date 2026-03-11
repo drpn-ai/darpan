@@ -8,11 +8,18 @@ import org.slf4j.LoggerFactory
 
 import java.io.File
 import java.time.LocalDate
-import java.sql.Timestamp
 
 def logger = LoggerFactory.getLogger("darpan.reconciliation.inventory.retrieveInventoryAdjustmentsByReference")
 
 def normalize = { Object value -> value?.toString()?.trim() }
+def normalizeBool = { Object value, boolean defaultValue ->
+    if (value == null) return defaultValue
+    if (value instanceof Boolean) return (boolean) value
+    String raw = normalize(value)?.toLowerCase()
+    if (["y", "yes", "true", "1"].contains(raw)) return true
+    if (["n", "no", "false", "0"].contains(raw)) return false
+    return defaultValue
+}
 def extractErrorText = {
     try {
         List errs = (ec.message?.errors ?: []) as List
@@ -67,13 +74,18 @@ String defaultItemIdFieldExpr = normalize(itemIdField) ?: "itemId"
 String defaultLocationIdFieldExpr = normalize(locationIdField) ?: "locationId"
 String nsItemIdFieldExpr = normalize(nsItemIdField) ?: defaultItemIdFieldExpr
 String nsLocationIdFieldExpr = normalize(nsLocationIdField) ?: defaultLocationIdFieldExpr
-String readDbItemIdFieldExpr = normalize(readDbItemIdField ?: hcItemIdField) ?: defaultItemIdFieldExpr
-String readDbLocationIdFieldExpr = normalize(readDbLocationIdField ?: hcLocationIdField) ?: defaultLocationIdFieldExpr
+String readDbItemIdFieldExpr = normalize(readDbItemIdField) ?: defaultItemIdFieldExpr
+String readDbLocationIdFieldExpr = normalize(readDbLocationIdField) ?: defaultLocationIdFieldExpr
 String fromDateStr = normalize(from)
 String toDateStr = normalize(to)
 String nsConfigId = normalize(nsRestletConfigId)
-String hcConfigId = normalize(readDbConfigId ?: hcReadDbConfigId)
+String readDbConfigIdToUse = normalize(readDbConfigId)
+String readDbConfigIdForFetch = readDbConfigIdToUse
+String sqlRuleSetIdToUse = normalize(sqlRuleSetId)
+String sqlStatementTemplateToUse = normalize(sqlStatementTemplate)
+String sqlTemplateNameToUse = normalize(sqlTemplateName)
 String comparisonRuleSetIdToUse = normalize(comparisonRuleSetId)
+boolean useInventoryItemJoinFlag = normalizeBool(useInventoryItemJoin, false)
 String compareStatusFieldName = normalize(compareStatusField) ?: "compareStatus"
 String missingInNsStatusValue = normalize(missingInNsStatus) ?: "MISSING_IN_NS"
 String missingInReadDbStatusValue = normalize(missingInReadDbStatus) ?: "MISSING_IN_READ_DB"
@@ -88,204 +100,20 @@ if (!refLocation) throw new IllegalArgumentException("referenceFileLocation is r
 if (!fromDateStr) throw new IllegalArgumentException("from is required in yyyy-MM-dd format")
 if (!toDateStr) throw new IllegalArgumentException("to is required in yyyy-MM-dd format")
 if (!nsConfigId) throw new IllegalArgumentException("nsRestletConfigId is required")
-if (!hcConfigId) throw new IllegalArgumentException("readDbConfigId (or hcReadDbConfigId) is required")
+if (!readDbConfigIdToUse) throw new IllegalArgumentException("readDbConfigId is required")
 if (!comparisonRuleSetIdToUse) throw new IllegalArgumentException("comparisonRuleSetId is required")
+if (!sqlRuleSetIdToUse && !sqlStatementTemplateToUse) {
+    throw new IllegalArgumentException("Either sqlRuleSetId or sqlStatementTemplate is required for read DB SQL resolution")
+}
 if (!(fromDateStr ==~ /\d{4}-\d{2}-\d{2}/)) throw new IllegalArgumentException("from must be yyyy-MM-dd")
 if (!(toDateStr ==~ /\d{4}-\d{2}-\d{2}/)) throw new IllegalArgumentException("to must be yyyy-MM-dd")
-
-def ensureDefaultInventoryComparisonRuleSet = { String ruleSetId ->
-    if (!"INV_ADJ_DEFAULT_RS".equals(ruleSetId)) return
-
-    def existingRuleSet = ec.entity.find("darpan.rule.RuleSet")
-            .condition("ruleSetId", ruleSetId)
-            .useCache(false)
-            .one()
-    if (!existingRuleSet) {
-        ec.entity.makeValue("darpan.rule.RuleSet")
-                .set("ruleSetId", ruleSetId)
-                .set("ruleSetName", "Inventory Adjustment Default Comparison")
-                .set("description", "Default configurable rules for NS vs Read DB inventory adjustment comparison")
-                .set("version", "1.0")
-                .set("createdDate", new Timestamp(System.currentTimeMillis()))
-                .create()
-    }
-
-    List<Map> defaultRules = [
-            [
-                    ruleId     : "INV_ADJ_DEF_ERROR",
-                    sequenceNum: 10L,
-                    ruleText   : "Mark ERROR",
-                    ruleLogic  : """rule "INV_ADJ_DEF_ERROR"
-salience 100
-when
-    \$m : Map(this["compareStatus"] == null)
-    eval("ERROR".equals(String.valueOf(\$m.get("nsStatus"))) || "ERROR".equals(String.valueOf(\$m.get("hcStatus"))))
-then
-    if (\$m.get("compareStatus") == null) {
-        int _ns = (\$m.get("nsRecordCount") instanceof Number) ? ((Number) \$m.get("nsRecordCount")).intValue() : 0;
-        int _hc = (\$m.get("hcRecordCount") instanceof Number) ? ((Number) \$m.get("hcRecordCount")).intValue() : 0;
-        \$m.put("compareStatus", "ERROR");
-        \$m.put("missingInNs", false);
-        \$m.put("missingInReadDb", false);
-        \$m.put("recordCountDelta", _ns - _hc);
-        update(\$m);
-        if (!results.contains(\$m)) results.add(\$m);
-    }
-end"""
-            ],
-            [
-                    ruleId     : "INV_ADJ_DEF_NOREC",
-                    sequenceNum: 20L,
-                    ruleText   : "Mark NO_RECORDS",
-                    ruleLogic  : """rule "INV_ADJ_DEF_NOREC"
-salience 90
-when
-    \$m : Map(this["compareStatus"] == null)
-    eval((\$m.get("nsRecordCount") instanceof Number) && ((Number) \$m.get("nsRecordCount")).intValue() == 0 &&
-         (\$m.get("hcRecordCount") instanceof Number) && ((Number) \$m.get("hcRecordCount")).intValue() == 0)
-then
-    if (\$m.get("compareStatus") == null) {
-        int _ns = ((Number) \$m.get("nsRecordCount")).intValue();
-        int _hc = ((Number) \$m.get("hcRecordCount")).intValue();
-        \$m.put("compareStatus", "NO_RECORDS");
-        \$m.put("missingInNs", false);
-        \$m.put("missingInReadDb", false);
-        \$m.put("recordCountDelta", _ns - _hc);
-        update(\$m);
-        if (!results.contains(\$m)) results.add(\$m);
-    }
-end"""
-            ],
-            [
-                    ruleId     : "INV_ADJ_DEF_MISS_NS",
-                    sequenceNum: 30L,
-                    ruleText   : "Mark MISSING_IN_NS",
-                    ruleLogic  : """rule "INV_ADJ_DEF_MISS_NS"
-salience 80
-when
-    \$m : Map(this["compareStatus"] == null)
-    eval((\$m.get("nsRecordCount") instanceof Number) && ((Number) \$m.get("nsRecordCount")).intValue() == 0 &&
-         (\$m.get("hcRecordCount") instanceof Number) && ((Number) \$m.get("hcRecordCount")).intValue() > 0)
-then
-    if (\$m.get("compareStatus") == null) {
-        int _ns = ((Number) \$m.get("nsRecordCount")).intValue();
-        int _hc = ((Number) \$m.get("hcRecordCount")).intValue();
-        \$m.put("compareStatus", "MISSING_IN_NS");
-        \$m.put("missingInNs", true);
-        \$m.put("missingInReadDb", false);
-        \$m.put("recordCountDelta", _ns - _hc);
-        update(\$m);
-        if (!results.contains(\$m)) results.add(\$m);
-    }
-end"""
-            ],
-            [
-                    ruleId     : "INV_ADJ_DEF_MISS_DB",
-                    sequenceNum: 40L,
-                    ruleText   : "Mark MISSING_IN_READ_DB",
-                    ruleLogic  : """rule "INV_ADJ_DEF_MISS_DB"
-salience 70
-when
-    \$m : Map(this["compareStatus"] == null)
-    eval((\$m.get("hcRecordCount") instanceof Number) && ((Number) \$m.get("hcRecordCount")).intValue() == 0 &&
-         (\$m.get("nsRecordCount") instanceof Number) && ((Number) \$m.get("nsRecordCount")).intValue() > 0)
-then
-    if (\$m.get("compareStatus") == null) {
-        int _ns = ((Number) \$m.get("nsRecordCount")).intValue();
-        int _hc = ((Number) \$m.get("hcRecordCount")).intValue();
-        \$m.put("compareStatus", "MISSING_IN_READ_DB");
-        \$m.put("missingInNs", false);
-        \$m.put("missingInReadDb", true);
-        \$m.put("recordCountDelta", _ns - _hc);
-        update(\$m);
-        if (!results.contains(\$m)) results.add(\$m);
-    }
-end"""
-            ],
-            [
-                    ruleId     : "INV_ADJ_DEF_MATCH",
-                    sequenceNum: 50L,
-                    ruleText   : "Mark MATCHED_COUNT",
-                    ruleLogic  : """rule "INV_ADJ_DEF_MATCH"
-salience 60
-when
-    \$m : Map(this["compareStatus"] == null)
-    eval((\$m.get("nsRecordCount") instanceof Number) && (\$m.get("hcRecordCount") instanceof Number) &&
-         ((Number) \$m.get("nsRecordCount")).intValue() > 0 &&
-         ((Number) \$m.get("nsRecordCount")).intValue() == ((Number) \$m.get("hcRecordCount")).intValue())
-then
-    if (\$m.get("compareStatus") == null) {
-        int _ns = ((Number) \$m.get("nsRecordCount")).intValue();
-        int _hc = ((Number) \$m.get("hcRecordCount")).intValue();
-        \$m.put("compareStatus", "MATCHED_COUNT");
-        \$m.put("missingInNs", false);
-        \$m.put("missingInReadDb", false);
-        \$m.put("recordCountDelta", _ns - _hc);
-        update(\$m);
-        if (!results.contains(\$m)) results.add(\$m);
-    }
-end"""
-            ],
-            [
-                    ruleId     : "INV_ADJ_DEF_MISMATCH",
-                    sequenceNum: 60L,
-                    ruleText   : "Mark COUNT_MISMATCH",
-                    ruleLogic  : """rule "INV_ADJ_DEF_MISMATCH"
-salience 10
-when
-    \$m : Map(this["compareStatus"] == null)
-    eval((\$m.get("nsRecordCount") instanceof Number) && (\$m.get("hcRecordCount") instanceof Number) &&
-         ((Number) \$m.get("nsRecordCount")).intValue() != ((Number) \$m.get("hcRecordCount")).intValue())
-then
-    if (\$m.get("compareStatus") == null) {
-        int _ns = (\$m.get("nsRecordCount") instanceof Number) ? ((Number) \$m.get("nsRecordCount")).intValue() : 0;
-        int _hc = (\$m.get("hcRecordCount") instanceof Number) ? ((Number) \$m.get("hcRecordCount")).intValue() : 0;
-        \$m.put("compareStatus", "COUNT_MISMATCH");
-        \$m.put("missingInNs", false);
-        \$m.put("missingInReadDb", false);
-        \$m.put("recordCountDelta", _ns - _hc);
-        update(\$m);
-        if (!results.contains(\$m)) results.add(\$m);
-    }
-end"""
-            ]
-    ]
-
-    defaultRules.each { Map defRule ->
-        def existingRule = ec.entity.find("darpan.rule.Rule")
-                .condition("ruleId", defRule.ruleId)
-                .useCache(false)
-                .one()
-        if (!existingRule) {
-            ec.entity.makeValue("darpan.rule.Rule")
-                    .set("ruleId", defRule.ruleId)
-                    .set("ruleSetId", ruleSetId)
-                    .set("sequenceNum", defRule.sequenceNum)
-                    .set("ruleText", defRule.ruleText)
-                    .set("ruleLogic", defRule.ruleLogic)
-                    .set("enabled", "Y")
-                    .set("createdDate", new Timestamp(System.currentTimeMillis()))
-                    .create()
-        } else if (ruleSetId == existingRule.ruleSetId) {
-            String existingLogic = normalize(existingRule.ruleLogic) ?: ""
-            boolean hasActivationGroup = existingLogic.contains('activation-group "INV_ADJ_COMPARE_STATUS"')
-            boolean missingConsequenceGuard = !existingLogic.contains('if ($m.get("compareStatus") == null)')
-            boolean mismatchMissingInequality = "INV_ADJ_DEF_MISMATCH".equals(defRule.ruleId) &&
-                    !existingLogic.contains('!= ((Number) $m.get("hcRecordCount")).intValue()')
-            boolean shouldRefreshLegacyRule = hasActivationGroup || missingConsequenceGuard || mismatchMissingInequality
-            if (shouldRefreshLegacyRule) {
-                existingRule.set("sequenceNum", defRule.sequenceNum)
-                existingRule.set("ruleText", defRule.ruleText)
-                existingRule.set("ruleLogic", defRule.ruleLogic)
-                if (!normalize(existingRule.enabled)) existingRule.set("enabled", "Y")
-                existingRule.set("lastUpdatedDate", new Timestamp(System.currentTimeMillis()))
-                existingRule.update()
-            }
-        }
-    }
+def comparisonRuleSetExists = ec.entity.find("darpan.rule.RuleSet")
+        .condition("ruleSetId", comparisonRuleSetIdToUse)
+        .useCache(false)
+        .one()
+if (!comparisonRuleSetExists) {
+    throw new IllegalArgumentException("comparisonRuleSetId ${comparisonRuleSetIdToUse} not found. Create it in Rule Engine.")
 }
-
-ensureDefaultInventoryComparisonRuleSet(comparisonRuleSetIdToUse)
 
 LocalDate fromDate = LocalDate.parse(fromDateStr)
 LocalDate toDate = LocalDate.parse(toDateStr)
@@ -399,9 +227,9 @@ try {
 
     def itemResultRows = []
     def nsPayloadByItem = []
-    def hcPayloadByItem = []
+    def readDbPayloadByItem = []
     int nsTotal = 0
-    int hcTotal = 0
+    int readDbTotal = 0
     int missingInNsTotal = 0
     int missingInReadDbTotal = 0
     int countMismatchTotal = 0
@@ -418,10 +246,10 @@ try {
         String pairReadDbLocationId = pair.readDbLocationId
         String nsStatus = "OK"
         String nsError = null
-        String hcStatus = "OK"
-        String hcError = null
+        String readDbStatus = "OK"
+        String readDbError = null
         List nsRecordsForItem = []
-        List hcRecordsForItem = []
+        List readDbRecordsForItem = []
 
         try {
             def nsResult = callService("reconciliation.ReconciliationInventoryServices.fetch#NsInventoryAdjustments", [
@@ -445,9 +273,8 @@ try {
         }
 
         try {
-            def hcResult = callService("reconciliation.ReconciliationInventoryServices.fetch#HcInventoryAdjustments", [
-                    readDbConfigId       : hcConfigId,
-                    hcReadDbConfigId     : hcConfigId,
+            def readDbResult = callService("reconciliation.ReconciliationInventoryServices.fetch#ReadDbRecords", [
+                    readDbConfigId       : readDbConfigIdForFetch,
                     itemId               : pairReadDbItemId,
                     locationId           : pairReadDbLocationId,
                     from                 : fromDateStr,
@@ -457,23 +284,26 @@ try {
                     locationIdColumn     : locationIdColumn,
                     transactionDateColumn: transactionDateColumn,
                     inventoryItemTable   : inventoryItemTable,
-                    sqlRuleSetId         : sqlRuleSetId
+                    sqlRuleSetId         : sqlRuleSetIdToUse,
+                    sqlStatementTemplate : sqlStatementTemplateToUse,
+                    sqlTemplateName      : sqlTemplateNameToUse,
+                    useInventoryItemJoin : useInventoryItemJoinFlag
             ])
-            List hcRows = (hcResult.records ?: []) as List
-            hcRecordsForItem = hcRows.collect { it?.record }
-            ((hcResult.processingWarnings ?: []) as List).each { warnRow ->
+            List readDbRows = (readDbResult.records ?: []) as List
+            readDbRecordsForItem = readDbRows.collect { it?.record }
+            ((readDbResult.processingWarnings ?: []) as List).each { warnRow ->
                 String warnText = normalize(warnRow?.warningMessage)
                 if (warnText) warnings.add(warnText)
             }
-        } catch (Exception hcEx) {
-            hcStatus = "ERROR"
-            hcError = normalize(hcEx.message) ?: "Read DB fetch failed"
-            warnings.add("Read DB fetch failed for itemId=${pairReadDbItemId}, locationId=${pairReadDbLocationId}: ${hcError}")
+        } catch (Exception readDbEx) {
+            readDbStatus = "ERROR"
+            readDbError = normalize(readDbEx.message) ?: "Read DB fetch failed"
+            warnings.add("Read DB fetch failed for itemId=${pairReadDbItemId}, locationId=${pairReadDbLocationId}: ${readDbError}")
             clearErrors()
         }
 
         int nsRecordCountForItem = nsRecordsForItem.size()
-        int hcRecordCountForItem = hcRecordsForItem.size()
+        int readDbRecordCountForItem = readDbRecordsForItem.size()
 
         itemResultRows.add([
                 itemId          : pairItemId,
@@ -486,10 +316,10 @@ try {
                 nsRecordCount   : nsRecordCountForItem,
                 nsError         : nsError,
                 nsRecords       : nsRecordsForItem,
-                hcStatus        : hcStatus,
-                hcRecordCount   : hcRecordCountForItem,
-                hcError         : hcError,
-                hcRecords       : hcRecordsForItem
+                readDbStatus    : readDbStatus,
+                readDbRecordCount: readDbRecordCountForItem,
+                readDbError     : readDbError,
+                readDbRecords   : readDbRecordsForItem
         ])
 
         nsPayloadByItem.add([
@@ -502,15 +332,15 @@ try {
                 recordCount     : nsRecordCountForItem,
                 records         : nsRecordsForItem
         ])
-        hcPayloadByItem.add([
+        readDbPayloadByItem.add([
                 itemId          : pairReadDbItemId,
                 locationId      : pairReadDbLocationId,
                 nsItemId        : pairNsItemId,
                 nsLocationId    : pairNsLocationId,
-                status          : hcStatus,
-                error           : hcError,
-                recordCount     : hcRecordCountForItem,
-                records         : hcRecordsForItem
+                status          : readDbStatus,
+                error           : readDbError,
+                recordCount     : readDbRecordCountForItem,
+                records         : readDbRecordsForItem
         ])
 
         if (nsDelayMsToUse > 0 && index < itemPairs.size() - 1) {
@@ -555,11 +385,11 @@ try {
 
         Row totalsRow = itemResultDf.agg(
                 functions.sum("nsRecordCount").alias("ns_total"),
-                functions.sum("hcRecordCount").alias("hc_total")
+                functions.sum("readDbRecordCount").alias("read_db_total")
         ).first()
 
         nsTotal = totalsRow ? toInt(totalsRow.getAs("ns_total")) : 0
-        hcTotal = totalsRow ? toInt(totalsRow.getAs("hc_total")) : 0
+        readDbTotal = totalsRow ? toInt(totalsRow.getAs("read_db_total")) : 0
         missingInNsTotal = toInt(statusCounts[missingInNsStatusValue])
         missingInReadDbTotal = toInt(statusCounts[missingInReadDbStatusValue])
         countMismatchTotal = toInt(statusCounts[countMismatchStatusValue])
@@ -569,7 +399,7 @@ try {
     } catch (Exception sparkAggEx) {
         warnings.add("Spark summary aggregation failed, using fallback aggregation: ${normalize(sparkAggEx.message)}")
         nsTotal = itemResultRows.collect { Map row -> toInt(row.nsRecordCount) }.sum() as int
-        hcTotal = itemResultRows.collect { Map row -> toInt(row.hcRecordCount) }.sum() as int
+        readDbTotal = itemResultRows.collect { Map row -> toInt(row.readDbRecordCount) }.sum() as int
         missingInNsTotal = itemResultRows.count { Map row -> missingInNsStatusValue == normalize(row[compareStatusFieldName]) } as int
         missingInReadDbTotal = itemResultRows.count { Map row -> missingInReadDbStatusValue == normalize(row[compareStatusFieldName]) } as int
         countMismatchTotal = itemResultRows.count { Map row -> countMismatchStatusValue == normalize(row[compareStatusFieldName]) } as int
@@ -607,7 +437,7 @@ try {
     }
 
     File nsFile = createUniqueFile("ns")
-    File hcFile = createUniqueFile("hc")
+    File readDbFile = createUniqueFile("read-db")
     File summaryFile = createUniqueFile("summary")
 
     Map nsDoc = [
@@ -620,16 +450,15 @@ try {
             ],
             rows    : nsPayloadByItem
     ]
-    Map hcDoc = [
+    Map readDbDoc = [
             metadata: [
                     source         : "READ_DB",
-                    readDbConfigId : hcConfigId,
-                    hcReadDbConfigId: hcConfigId,
+                    readDbConfigId : readDbConfigIdForFetch,
                     from           : fromDateStr,
                     to             : toDateStr,
                     generatedAt    : ec.user.nowTimestamp?.toString()
             ],
-            rows    : hcPayloadByItem
+            rows    : readDbPayloadByItem
     ]
     Map summaryDoc = [
             metadata : [
@@ -659,7 +488,7 @@ try {
                     referenceItemCount   : referenceItemCount,
                     processedItemCount   : itemResultRows.size(),
                     nsRecordCount        : nsTotal,
-                    hcRecordCount        : hcTotal,
+                    readDbRecordCount    : readDbTotal,
                     missingInNsCount     : missingInNsTotal,
                     missingInReadDbCount : missingInReadDbTotal,
                     countMismatchCount   : countMismatchTotal,
@@ -672,12 +501,12 @@ try {
     ]
 
     nsFile.withWriter("UTF-8") { writer -> writer << JsonOutput.prettyPrint(JsonOutput.toJson(nsDoc)) }
-    hcFile.withWriter("UTF-8") { writer -> writer << JsonOutput.prettyPrint(JsonOutput.toJson(hcDoc)) }
+    readDbFile.withWriter("UTF-8") { writer -> writer << JsonOutput.prettyPrint(JsonOutput.toJson(readDbDoc)) }
     summaryFile.withWriter("UTF-8") { writer -> writer << JsonOutput.prettyPrint(JsonOutput.toJson(summaryDoc)) }
 
     processedItemCount = itemResultRows.size()
     nsRecordCount = nsTotal
-    hcRecordCount = hcTotal
+    readDbRecordCount = readDbTotal
     missingInNsCount = missingInNsTotal
     missingInReadDbCount = missingInReadDbTotal
     countMismatchCount = countMismatchTotal
@@ -685,13 +514,13 @@ try {
     noRecordCount = noRecordTotal
     errorItemCount = errorItemTotal
     nsOutputLocation = nsFile.absolutePath
-    hcOutputLocation = hcFile.absolutePath
+    readDbOutputLocation = readDbFile.absolutePath
     summaryLocation = summaryFile.absolutePath
     itemResults = itemResultRows
     processingWarnings = warnings.unique().collect { [warningMessage: it] }
 
-    logger.info("Inventory retrieval complete reference={} ruleSetId={} processedItems={} nsRecords={} hcRecords={} missingInNs={} missingInReadDb={} countMismatch={} summary={}",
-            refLocation, comparisonRuleSetIdToUse, processedItemCount, nsRecordCount, hcRecordCount, missingInNsCount, missingInReadDbCount, countMismatchCount, summaryLocation)
+    logger.info("Inventory retrieval complete reference={} ruleSetId={} processedItems={} nsRecords={} readDbRecords={} missingInNs={} missingInReadDb={} countMismatch={} summary={}",
+            refLocation, comparisonRuleSetIdToUse, processedItemCount, nsRecordCount, readDbRecordCount, missingInNsCount, missingInReadDbCount, countMismatchCount, summaryLocation)
 } finally {
     try { spark?.stop() } catch (Exception ignored) {}
 }

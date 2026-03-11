@@ -2,15 +2,15 @@
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd" default-menu-title="Rule Sets">
 
     <transition name="createRuleSet">
-        <service-call name="create#darpan.rule.RuleSet"/>
+        <service-call name="reconciliation.ReconciliationRuleEngineServices.save#RuleSet"/>
         <default-response url="."/>
     </transition>
     <transition name="updateRuleSet">
-        <service-call name="update#darpan.rule.RuleSet"/>
+        <service-call name="reconciliation.ReconciliationRuleEngineServices.save#RuleSet"/>
         <default-response url="."/>
     </transition>
     <transition name="deleteRuleSet">
-        <service-call name="delete#darpan.rule.RuleSet"/>
+        <service-call name="reconciliation.ReconciliationRuleEngineServices.delete#RuleSet"/>
         <default-response url="."/>
     </transition>
     <transition name="editRuleSet">
@@ -27,16 +27,11 @@
         <container-box>
             <box-header title="Manage Rule Sets"/>
             <box-body>
-                <container-row>
-                    <container-col md="12">
-                        <link url="../RuleEngineTest" text="Run Verification Test" btn-type="primary"/>
-                    </container-col>
-                </container-row>
                 <form-list name="RuleSetList" list="ruleSetList" transition="updateRuleSet">
                     <field name="ruleSetId">
                         <header-field show-order-by="true"/>
                         <default-field>
-                            <link url="editRuleSet" text="${ruleSetId}" link-type="anchor"/>
+                            <link url="editRuleSet" text="${ruleSetId}" link-type="anchor" parameter-map="[ruleSetId:ruleSetId]"/>
                         </default-field>
                     </field>
                     <field name="ruleSetName">
@@ -70,7 +65,7 @@
                     <field name="deleteButton">
                         <header-field title="Delete"/>
                         <default-field>
-                            <link url="deleteRuleSet" text="Delete" confirmation="Are you sure?"/>
+                            <link url="deleteRuleSet" text="Delete" confirmation="Are you sure?" parameter-map="[ruleSetId:ruleSetId]"/>
                         </default-field>
                     </field>
                 </form-list>
@@ -83,12 +78,12 @@
                 <form-single name="CreateRuleSet" transition="createRuleSet">
                     <field name="ruleSetId">
                         <default-field>
-                            <text-line size="20"/>
+                            <text-line size="24" placeholder="Optional (auto-generated from name)"/>
                         </default-field>
                     </field>
                     <field name="ruleSetName">
                         <default-field>
-                            <text-line size="30"/>
+                            <text-line size="40" placeholder="Inventory Comparison RuleSet"/>
                         </default-field>
                     </field>
                     <field name="description">

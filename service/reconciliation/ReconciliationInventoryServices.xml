@@ -29,11 +29,10 @@
         </out-parameters>
     </service>
 
-    <service verb="fetch" noun="HcInventoryAdjustments" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/inventory/fetchHcInventoryAdjustments.groovy">
-        <description>Fetch inventory adjustment details for one item/location from configured read-only database.</description>
+    <service verb="fetch" noun="ReadDbRecords" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/inventory/fetchReadDbRecords.groovy">
+        <description>Fetch records from configured read-only database using direct SQL template or RuleSet-driven SQL resolution.</description>
         <in-parameters>
-            <parameter name="readDbConfigId"/>
-            <parameter name="hcReadDbConfigId"/>
+            <parameter name="readDbConfigId" default-value="darpan-test-seed"/>
             <parameter name="itemId" required="true"/>
             <parameter name="locationId" required="true"/>
             <parameter name="from" required="true">
@@ -47,10 +46,17 @@
             <parameter name="locationIdColumn"/>
             <parameter name="transactionDateColumn"/>
             <parameter name="inventoryItemTable">
-                <description>Optional join table used when querying inventory_item_detail by product/location (default inventory_item).</description>
+                <description>Optional join table used by SQL templates when join mode is enabled.</description>
             </parameter>
-            <parameter name="sqlRuleSetId" default-value="INV_ADJ_HC_SQL_RS">
-                <description>Drools RuleSet ID that resolves the HC read SQL template.</description>
+            <parameter name="sqlRuleSetId">
+                <description>Drools RuleSet ID used to resolve read DB SQL template when sqlStatementTemplate is not provided.</description>
+            </parameter>
+            <parameter name="sqlStatementTemplate">
+                <description>Optional direct SQL template override; when provided, rule-set SQL resolution is skipped.</description>
+            </parameter>
+            <parameter name="sqlTemplateName"/>
+            <parameter name="useInventoryItemJoin" type="Boolean" default-value="false">
+                <description>Hint flag available to SQL RuleSet logic for choosing detail/item join templates.</description>
             </parameter>
         </in-parameters>
         <out-parameters>
@@ -84,7 +90,7 @@
     <service verb="retrieve" noun="InventoryAdjustmentsByReference" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/inventory/retrieveInventoryAdjustmentsByReference.groovy">
         <description>Read item/location pairs from a staged SFTP reference file and fetch matching NetSuite and read-only DB inventory adjustment details.</description>
         <in-parameters>
-            <parameter name="referenceFileLocation" required="true" default-value="component://darpan/data/sample/inventory_reference_test.csv">
+            <parameter name="referenceFileLocation" required="true">
                 <description>Staged file location (runtime://, component://, or absolute path).</description>
             </parameter>
             <parameter name="referenceFileType">
@@ -93,44 +99,42 @@
             <parameter name="referenceHasHeader" type="Boolean" default-value="true"/>
             <parameter name="itemIdField" default-value="itemId"/>
             <parameter name="locationIdField" default-value="locationId"/>
-            <parameter name="nsItemIdField" default-value="netsuite_product_id">
+            <parameter name="nsItemIdField" default-value="itemId">
                 <description>Reference column used for NS itemId. Defaults to itemIdField.</description>
             </parameter>
-            <parameter name="nsLocationIdField" default-value="facility_id">
+            <parameter name="nsLocationIdField" default-value="locationId">
                 <description>Reference column used for NS locationId. Defaults to locationIdField.</description>
             </parameter>
-            <parameter name="readDbItemIdField" default-value="product_id">
+            <parameter name="readDbItemIdField" default-value="itemId">
                 <description>Reference column used for Read DB itemId. Defaults to itemIdField.</description>
             </parameter>
-            <parameter name="readDbLocationIdField" default-value="facility_id">
+            <parameter name="readDbLocationIdField" default-value="locationId">
                 <description>Reference column used for Read DB locationId. Defaults to locationIdField.</description>
             </parameter>
-            <parameter name="hcItemIdField">
-                <description>Backward-compatible alias of readDbItemIdField.</description>
-            </parameter>
-            <parameter name="hcLocationIdField">
-                <description>Backward-compatible alias of readDbLocationIdField.</description>
-            </parameter>
-            <parameter name="from" required="true" default-value="2026-02-23">
+            <parameter name="from" required="true">
                 <description>Start date in yyyy-MM-dd format.</description>
             </parameter>
-            <parameter name="to" required="true" default-value="2026-03-03">
+            <parameter name="to" required="true">
                 <description>End date in yyyy-MM-dd format.</description>
             </parameter>
-            <parameter name="nsRestletConfigId" required="true" default-value="NS_INV_MAIN"/>
-            <parameter name="readDbConfigId" default-value="READ_DB_MAIN"/>
-            <parameter name="hcReadDbConfigId"/>
+            <parameter name="nsRestletConfigId" required="true"/>
+            <parameter name="readDbConfigId" default-value="darpan-test-seed"/>
             <parameter name="tableName"/>
             <parameter name="itemIdColumn"/>
             <parameter name="locationIdColumn"/>
             <parameter name="transactionDateColumn"/>
             <parameter name="inventoryItemTable">
-                <description>Optional join table passed through to fetch#HcInventoryAdjustments when using detail/item join model.</description>
+                <description>Optional join table passed through to fetch#ReadDbRecords when using detail/item join model.</description>
             </parameter>
-            <parameter name="sqlRuleSetId" default-value="INV_ADJ_HC_SQL_RS">
-                <description>Drools RuleSet ID used to resolve SQL template for read DB fetch.</description>
+            <parameter name="sqlRuleSetId">
+                <description>Drools RuleSet ID used to resolve SQL template for read DB fetch when sqlStatementTemplate is not provided.</description>
             </parameter>
-            <parameter name="comparisonRuleSetId" required="true" default-value="INV_ADJ_DEFAULT_RS">
+            <parameter name="sqlStatementTemplate">
+                <description>Optional direct SQL template override passed to fetch#ReadDbRecords.</description>
+            </parameter>
+            <parameter name="sqlTemplateName"/>
+            <parameter name="useInventoryItemJoin" type="Boolean" default-value="false"/>
+            <parameter name="comparisonRuleSetId" required="true">
                 <description>Drools RuleSet ID used for all comparison logic.</description>
             </parameter>
             <parameter name="compareStatusField" default-value="compareStatus">
@@ -157,7 +161,7 @@
             <parameter name="referenceItemCount" type="Integer"/>
             <parameter name="processedItemCount" type="Integer"/>
             <parameter name="nsRecordCount" type="Integer"/>
-            <parameter name="hcRecordCount" type="Integer"/>
+            <parameter name="readDbRecordCount" type="Integer"/>
             <parameter name="missingInNsCount" type="Integer"/>
             <parameter name="missingInReadDbCount" type="Integer"/>
             <parameter name="countMismatchCount" type="Integer"/>
@@ -166,7 +170,7 @@
             <parameter name="errorItemCount" type="Integer"/>
             <parameter name="summaryLocation"/>
             <parameter name="nsOutputLocation"/>
-            <parameter name="hcOutputLocation"/>
+            <parameter name="readDbOutputLocation"/>
             <parameter name="itemResults">
                 <parameter name="itemId"/>
                 <parameter name="locationId"/>
@@ -178,10 +182,10 @@
                 <parameter name="nsRecordCount"/>
                 <parameter name="nsError"/>
                 <parameter name="nsRecords"/>
-                <parameter name="hcStatus"/>
-                <parameter name="hcRecordCount"/>
-                <parameter name="hcError"/>
-                <parameter name="hcRecords"/>
+                <parameter name="readDbStatus"/>
+                <parameter name="readDbRecordCount"/>
+                <parameter name="readDbError"/>
+                <parameter name="readDbRecords"/>
                 <parameter name="compareStatus"/>
                 <parameter name="missingInNs"/>
                 <parameter name="missingInReadDb"/>

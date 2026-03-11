@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entity-facade-xml type="seed">
+    <moqui.service.job.ServiceJob
+            jobName="purge_ReconciliationGeneratedFiles_daily"
+            description="Purge generated reconciliation output files older than retention policy."
+            serviceName="reconciliation.ReconciliationGenericServices.purge#GeneratedOutputFiles"
+            cronExpression="0 0 2 * * ?"
+            paused="N"/>
+
+    <moqui.service.job.ServiceJobParameter
+            jobName="purge_ReconciliationGeneratedFiles_daily"
+            parameterName="retentionDays"
+            parameterValue="15"/>
+</entity-facade-xml>

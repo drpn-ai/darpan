@@ -39,6 +39,26 @@
         <default-response type="none"/>
     </transition>
 
+    <transition name="deleteDiff" begin-transaction="false">
+        <parameter name="filename"/>
+        <actions>
+            <set field="filename" from="filename?.trim()"/>
+            <if condition="!filename">
+                <return error="true" message="Filename is required"/>
+            </if>
+            <service-call name="reconciliation.ReconciliationGenericServices.delete#GeneratedOutputFile"
+                    in-map="[filename:filename]"
+                    out-map="context"/>
+            <if condition="deleted">
+                <message>${statusMessage ?: ('Deleted ' + filename)}</message>
+            </if>
+            <if condition="!deleted">
+                <message type="warning" text="${statusMessage ?: 'Unable to delete file'}"/>
+            </if>
+        </actions>
+        <default-response url=".."/>
+    </transition>
+
     <pre-actions>
         <script location="component://darpan/screen/Reconciliation/GenericReconciliation/GenericReconciliationView/GenericReconciliationViewActions.groovy"/>
         <script location="component://darpan/screen/Reconciliation/GenericReconciliation/GenericReconciliationView/MissingJsonListActions.groovy"/>
@@ -54,6 +74,12 @@
                     <link url="downloadDiff" text="Download" link-type="anchor-button" target-window="_blank"
                             btn-type="success" style="btn-sm" condition="viewFile">
                         <parameter name="filename" from="viewFile"/>
+                    </link>
+                    <link url="deleteDiff" text="Delete" link-type="auto"
+                            btn-type="danger" style="btn-sm" condition="viewFile"
+                            confirmation="Delete file ${viewFile}?">
+                        <parameter name="filename" from="viewFile"/>
+                        <parameter name="moquiSessionToken" from="ec.web.sessionToken"/>
                     </link>
                 </container>
             </container>

@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entity-facade-xml type="seed">
+    <darpan.reconciliation.HcReadDbConfig
+            hcReadDbConfigId="darpan-test-seed"
+            description="Seed reader profile for inventory reconciliation examples."
+            displayName="Darpan Seed Reader"
+            host="localhost"
+            port="3306"
+            databaseName="darpan_seed"
+            additionalParameters="useSSL=false"
+            jdbcUrl="jdbc:mysql://localhost:3306/darpan_seed?useSSL=false"
+            username="reader"
+            password="reader"
+            dbDriver="com.mysql.cj.jdbc.Driver"
+            defaultTableName="inventory_item_detail"
+            itemIdColumn="product_id"
+            locationIdColumn="facility_id"
+            transactionDateColumn="effective_date"
+            connectionPropertiesJson='{"useUnicode":"true","characterEncoding":"utf8"}'
+            isActive="Y"/>
+
+    <darpan.rule.RuleSet
+            ruleSetId="DARPAN_TEST_SQL_TEMPLATE_RS"
+            ruleSetName="Darpan Test SQL Template RuleSet"
+            description="Resolves read-db SQL template for inventory reconciliation test flow."
+            version="1.0"
+            explosionPath="rows"
+            primaryKeyPath="itemId"/>
+    <darpan.rule.Rule
+            ruleId="DARPAN_TEST_SQL_RULE_JOIN"
+            ruleSetId="DARPAN_TEST_SQL_TEMPLATE_RS"
+            sequenceNum="10"
+            ruleText="Join template when useInventoryItemJoin is true"
+            ruleLogic='rule "Select Join SQL Template" salience 200 when $m : Map( this["sqlStatementTemplate"] == null, this["useInventoryItemJoin"] == true ) then $m.put("sqlTemplateName", "TEST_JOIN_TEMPLATE"); $m.put("sqlStatementTemplate", "SELECT d.* FROM ${DETAIL_TABLE} d JOIN ${ITEM_TABLE} i ON d.${ITEM_COLUMN} = i.${ITEM_COLUMN} WHERE i.${ITEM_COLUMN} = ? AND d.${LOCATION_COLUMN} = ? AND d.${DATE_COLUMN} >= ? AND d.${DATE_COLUMN} &lt; ?"); end'
+            enabled="Y"
+            ruleType="DRL"
+            severity="INFO"/>
+    <darpan.rule.Rule
+            ruleId="DARPAN_TEST_SQL_RULE_DETAIL"
+            ruleSetId="DARPAN_TEST_SQL_TEMPLATE_RS"
+            sequenceNum="20"
+            ruleText="Detail-only template when useInventoryItemJoin is false"
+            ruleLogic='rule "Select Detail SQL Template" salience 100 when $m : Map( this["sqlStatementTemplate"] == null ) then $m.put("sqlTemplateName", "TEST_DETAIL_TEMPLATE"); $m.put("sqlStatementTemplate", "SELECT * FROM ${DETAIL_TABLE} WHERE ${ITEM_COLUMN} = ? AND ${LOCATION_COLUMN} = ? AND ${DATE_COLUMN} >= ? AND ${DATE_COLUMN} &lt; ?"); end'
+            enabled="Y"
+            ruleType="DRL"
+            severity="INFO"/>
+
+    <darpan.rule.RuleSet
+            ruleSetId="DARPAN_TEST_COMPARE_RS"
+            ruleSetName="Darpan Test Compare RuleSet"
+            description="Classifies inventory reconciliation comparison status for testing."
+            version="1.0"
+            explosionPath="rows"
+            primaryKeyPath="itemId"/>
+    <darpan.rule.Rule
+            ruleId="DARPAN_TEST_CMP_ERROR"
+            ruleSetId="DARPAN_TEST_COMPARE_RS"
+            sequenceNum="10"
+            ruleText="Mark error rows"
+            ruleLogic='rule "Mark Error" salience 1000 when $m : Map( this["compareStatus"] == null, (this["nsStatus"] == "ERROR" || this["readDbStatus"] == "ERROR") ) then $m.put("compareStatus", "ERROR"); end'
+            enabled="Y"
+            ruleType="DRL"
+            severity="ERROR"/>
+    <darpan.rule.Rule
+            ruleId="DARPAN_TEST_CMP_NO_RECORDS"
+            ruleSetId="DARPAN_TEST_COMPARE_RS"
+            sequenceNum="20"
+            ruleText="Mark no records in both sources"
+            ruleLogic='rule "Mark No Records" salience 900 when $m : Map( this["compareStatus"] == null, this["nsRecordCount"] == 0, this["readDbRecordCount"] == 0 ) then $m.put("compareStatus", "NO_RECORDS"); end'
+            enabled="Y"
+            ruleType="DRL"
+            severity="INFO"/>
+    <darpan.rule.Rule
+            ruleId="DARPAN_TEST_CMP_MISSING_IN_NS"
+            ruleSetId="DARPAN_TEST_COMPARE_RS"
+            sequenceNum="30"
+            ruleText="Mark missing records in NS"
+            ruleLogic='rule "Mark Missing In NS" salience 800 when $m : Map( this["compareStatus"] == null, this["nsRecordCount"] == 0, this["readDbRecordCount"] > 0 ) then $m.put("compareStatus", "MISSING_IN_NS"); end'
+            enabled="Y"
+            ruleType="DRL"
+            severity="WARN"/>
+    <darpan.rule.Rule
+            ruleId="DARPAN_TEST_CMP_MISSING_IN_READ_DB"
+            ruleSetId="DARPAN_TEST_COMPARE_RS"
+            sequenceNum="40"
+            ruleText="Mark missing records in read DB"
+            ruleLogic='rule "Mark Missing In Read DB" salience 700 when $m : Map( this["compareStatus"] == null, this["nsRecordCount"] > 0, this["readDbRecordCount"] == 0 ) then $m.put("compareStatus", "MISSING_IN_READ_DB"); end'
+            enabled="Y"
+            ruleType="DRL"
+            severity="WARN"/>
+    <darpan.rule.Rule
+            ruleId="DARPAN_TEST_CMP_MISMATCH"
+            ruleSetId="DARPAN_TEST_COMPARE_RS"
+            sequenceNum="50"
+            ruleText="Mark count mismatch"
+            ruleLogic='rule "Mark Count Mismatch" salience 600 when $m : Map( this["compareStatus"] == null, this["nsRecordCount"] != this["readDbRecordCount"] ) then $m.put("compareStatus", "COUNT_MISMATCH"); end'
+            enabled="Y"
+            ruleType="DRL"
+            severity="WARN"/>
+    <darpan.rule.Rule
+            ruleId="DARPAN_TEST_CMP_MATCHED"
+            ruleSetId="DARPAN_TEST_COMPARE_RS"
+            sequenceNum="60"
+            ruleText="Mark matched counts"
+            ruleLogic='rule "Mark Matched Count" salience 100 when $m : Map( this["compareStatus"] == null ) then $m.put("compareStatus", "MATCHED_COUNT"); end'
+            enabled="Y"
+            ruleType="DRL"
+            severity="INFO"/>
+</entity-facade-xml>

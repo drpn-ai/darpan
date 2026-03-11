@@ -20,6 +20,10 @@ Go to `Settings` and configure:
 - `Settings -> Read DB`
   - Entity: `darpan.reconciliation.HcReadDbConfig`
   - Supports Host, Port, Database Name, Username/Password, Display Name, Additional Parameters, plus driver and reconciliation default table/column mapping.
+  - Seed reader profile is loaded from `runtime/component/darpan/data/ReconciliationInventorySeedData.xml` with ID `darpan-test-seed`.
+  - Seed RuleSets for testing are also loaded from the same file:
+    - SQL template RuleSet: `DARPAN_TEST_SQL_TEMPLATE_RS`
+    - Comparison RuleSet: `DARPAN_TEST_COMPARE_RS`
   - Config ID can be entered manually or left blank; when blank, Darpan auto-generates a safe ID from Display Name/Host/Database.
   - If `READ_DB_CONFIG` table is missing in a dev runtime, Darpan attempts to create it automatically on first save.
   - JDBC URL is generated internally from Host/Port/Database/Additional Parameters.
@@ -39,26 +43,21 @@ Secrets (`password`, `apiToken`) are encrypted fields in entities.
       "to": "2026-03-03"
     }
     ```
-- `reconciliation.ReconciliationInventoryServices.fetch#HcInventoryAdjustments`
+- `reconciliation.ReconciliationInventoryServices.fetch#ReadDbRecords`
   - Queries configured read-only DB for one `itemId` + `locationId` + date range.
-  - Accepts `readDbConfigId` (preferred) or `hcReadDbConfigId` (backward-compatible).
-  - Table/column names default from `HcReadDbConfig` but can be overridden in service input.
-  - Supports `inventoryItemTable` for join-based inventory models (`inventory_item_detail` joined to `inventory_item`).
-  - Uses Drools SQL RuleSet (`sqlRuleSetId`, default `INV_ADJ_HC_SQL_RS`) to resolve `sqlStatementTemplate` before executing JDBC query.
+  - Accepts `readDbConfigId` (default: `darpan-test-seed`).
+  - Resolves table/column names from service input first, then `HcReadDbConfig`.
+  - SQL resolution options:
+    - pass `sqlStatementTemplate` directly, or
+    - pass `sqlRuleSetId` to resolve template through Rule Engine.
+  - Optional flags:
+    - `useInventoryItemJoin=true` to expose a join-preference hint for SQL RuleSet logic.
 - `reconciliation.ReconciliationInventoryServices.retrieve#InventoryAdjustmentsByReference`
   - Reads staged reference file (CSV/JSON), extracts item/location pairs, then calls both services per pair.
-  - Includes test-friendly defaults:
-    - `referenceFileLocation=component://darpan/data/sample/inventory_reference_test.csv`
-    - `from=2026-02-23`, `to=2026-03-03`
-    - `nsItemIdField=netsuite_product_id`, `nsLocationIdField=facility_id`
-    - `readDbItemIdField=product_id`, `readDbLocationIdField=facility_id`
-    - `nsRestletConfigId=NS_INV_MAIN`, `readDbConfigId=READ_DB_MAIN`
-    - `comparisonRuleSetId=INV_ADJ_DEFAULT_RS`
-    - HC DB defaults: `tableName=inventory_item_detail`, `inventoryItemTable=inventory_item`, `itemIdColumn=product_id`, `locationIdColumn=facility_id`, `transactionDateColumn=effective_date`
-    - `sqlRuleSetId=INV_ADJ_HC_SQL_RS`
+  - Production inputs must be provided explicitly (`referenceFileLocation`, `from`, `to`, `nsRestletConfigId`, `comparisonRuleSetId`, and one of `sqlRuleSetId` or `sqlStatementTemplate`); `readDbConfigId` defaults to `darpan-test-seed`.
   - Supports separate source-field mapping per system:
     - `nsItemIdField`, `nsLocationIdField`
-    - `readDbItemIdField` (or alias `hcItemIdField`), `readDbLocationIdField` (or alias `hcLocationIdField`)
+    - `readDbItemIdField`, `readDbLocationIdField`
     - When not set, both systems default to shared `itemIdField` and `locationIdField`.
   - Requires `comparisonRuleSetId` and sends each item fact to Drools for comparison classification.
   - The service does not hardcode compare rules; `compareStatus` (or any custom field) must be set by your RuleSet/DRL.
@@ -79,14 +78,14 @@ Secrets (`password`, `apiToken`) are encrypted fields in entities.
     <parameter name="from" value="2026-02-23"/>
     <parameter name="to" value="2026-03-03"/>
     <parameter name="nsRestletConfigId" value="NS_INV_MAIN"/>
-    <parameter name="readDbConfigId" value="READ_DB_MAIN"/>
-    <parameter name="comparisonRuleSetId" value="INV_ADJ_COMPARE_RS"/>
+    <parameter name="readDbConfigId" value="darpan-test-seed"/>
+    <parameter name="comparisonRuleSetId" value="DARPAN_TEST_COMPARE_RS"/>
     <parameter name="tableName" value="inventory_item_detail"/>
     <parameter name="itemIdColumn" value="product_id"/>
     <parameter name="locationIdColumn" value="facility_id"/>
     <parameter name="transactionDateColumn" value="effective_date"/>
     <parameter name="inventoryItemTable" value="inventory_item"/>
-    <parameter name="sqlRuleSetId" value="INV_ADJ_HC_SQL_RS"/>
+    <parameter name="sqlRuleSetId" value="DARPAN_TEST_SQL_TEMPLATE_RS"/>
 </service-call>
 ```
 
@@ -105,8 +104,8 @@ Use this mapping when the CSV has NS and OMS item IDs in different columns (for 
     <parameter name="from" value="2026-02-23"/>
     <parameter name="to" value="2026-03-03"/>
     <parameter name="nsRestletConfigId" value="NS_INV_MAIN"/>
-    <parameter name="readDbConfigId" value="gorjana-prod"/>
-    <parameter name="comparisonRuleSetId" value="INV_ADJ_COMPARE_RS"/>
+    <parameter name="readDbConfigId" value="darpan-test-seed"/>
+    <parameter name="comparisonRuleSetId" value="DARPAN_TEST_COMPARE_RS"/>
     <parameter name="compareStatusField" value="compareStatus"/>
     <parameter name="missingInNsStatus" value="MISSING_IN_NS"/>
     <parameter name="missingInReadDbStatus" value="MISSING_IN_READ_DB"/>
@@ -124,14 +123,14 @@ Fact keys available to rules include:
 
 - `itemId`, `locationId`
 - `nsItemId`, `nsLocationId`, `nsStatus`, `nsRecordCount`, `nsError`, `nsRecords`
-- `readDbItemId`, `readDbLocationId`, `hcStatus`, `hcRecordCount`, `hcError`, `hcRecords`
+- `readDbItemId`, `readDbLocationId`, `readDbStatus`, `readDbRecordCount`, `readDbError`, `readDbRecords`
 
 Example rule action:
 
 ```drl
 rule "Mark Missing In NS"
 when
-    $m : Map( this["nsRecordCount"] == 0 && this["hcRecordCount"] > 0 )
+    $m : Map( this["nsRecordCount"] == 0 && this["readDbRecordCount"] > 0 )
 then
     $m.put("compareStatus", "MISSING_IN_NS");
 end
@@ -146,7 +145,5 @@ end
 - Use `maxItems` on orchestration service for controlled dry runs.
 - Use `nsDelayMs` when NS rate limiting is required.
 - `comparisonRuleSetId` is required; comparison/diff decisions come from your configured rules.
-- `INV_ADJ_DEFAULT_RS` is auto-bootstrapped on first use with generic rules based on `nsStatus/nsRecordCount` and `hcStatus/hcRecordCount`.
-- `INV_ADJ_HC_SQL_RS` is auto-bootstrapped on first use and resolves the SQL template for HC reads; users can fully customize SQL template selection in Rule Engine.
-- Backward compatibility: if a saved Read DB config still uses legacy `inventory_adjustment` defaults, HC fetch auto-switches to `inventory_item_detail` + `product_id/facility_id/effective_date`, and legacy hardcoded default SQL rules are refreshed to tokenized templates.
+- Services do not create RuleSet/Rule data; maintain rules through Rule Engine UI or seed data.
 - `itemResults` contains the rule-mutated facts returned by Drools, including any custom fields added by rules.

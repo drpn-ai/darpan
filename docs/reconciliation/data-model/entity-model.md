@@ -7,8 +7,8 @@ are intentionally out of scope.
 ## Source of Truth (Code)
 
 - Reconciliation entities: `runtime/component/darpan/entity/ReconciliationEntities.xml`
+- Rule entities: `runtime/component/darpan/entity/RuleEntities.xml`
 - Mapping entities: `runtime/component/darpan/entity/MappingEntities.xml`
-- Party entities: `runtime/component/darpan/entity/PartyEntities.xml`
 - DataDocument: `framework/entity/EntityEntities.xml`
 - SystemMessageRemote: `framework/entity/ServiceEntities.xml`
 - Enumeration: `framework/entity/BasicEntities.xml`
@@ -19,7 +19,6 @@ are intentionally out of scope.
 erDiagram
 
     RECONCILIATION ||--o{ RECONCILIATION_RUN : groups
-    PARTY ||--o{ RECONCILIATION : owns
 
     RECONCILIATION_RUN ||--o{ RUN_DATA_DOCUMENT : uses
     DATA_DOCUMENT ||--o{ RUN_DATA_DOCUMENT : defined_by
@@ -39,7 +38,6 @@ erDiagram
         string reconciliation_name
         string description
         string schedule_expr
-        string party_id FK
         boolean is_active
     }
 
@@ -52,12 +50,6 @@ erDiagram
         string default_time_window
         string ruleset_id FK
         int run_sequence
-    }
-
-    PARTY {
-        string party_id PK
-        string party_type
-        string party_name
     }
 
     DATA_DOCUMENT {
@@ -145,14 +137,12 @@ A schedulable parent entity that groups one or more reconciliation runs.
 **Purpose**
 - Acts as the orchestration boundary
 - Defines scheduling cadence
-- Scoped to a client via `darpan.party.Party`
 
 **Key Fields**
 - `reconciliationId`
 - `reconciliationName`
 - `description`
 - `scheduleExpr`
-- `partyId`
 - `isActive`
 
 ### ReconciliationRun (darpan.reconciliation.ReconciliationRun)
@@ -173,17 +163,11 @@ Defines a single reconciliation check within a reconciliation.
 - `ruleSetId`
 - `runSequence`
 
-### Party (darpan.party.Party)
-Represents the client, merchant, or tenant.
+**Example linkage**
+- `darpan.reconciliation.ReconciliationRun(ruleSetId="INV_ADJ_DEFAULT_RS")` links to `darpan.rule.RuleSet(ruleSetId="INV_ADJ_DEFAULT_RS")`.
 
-**Purpose**
-- Multi-tenant isolation
-- Ownership of reconciliation configurations
-
-**Key Fields**
-- `partyId`
-- `partyTypeId`
-- `partyName`
+**Operational Note**
+- Reconciliation ownership is no longer modeled with dedicated party entities in component configuration.
 
 ### DataDocument (moqui.entity.document.DataDocument)
 Defines a canonical data point used in reconciliation.

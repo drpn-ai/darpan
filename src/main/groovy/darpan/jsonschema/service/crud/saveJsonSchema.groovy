@@ -1,7 +1,5 @@
-import groovy.json.JsonOutput
 import jsonschema.common.JsonSchemaUtil
 import org.slf4j.LoggerFactory
-import org.moqui.resource.ResourceReference
 
 def logger = LoggerFactory.getLogger("darpan.jsonschema.SaveSchema")
 
@@ -12,6 +10,7 @@ def normalizeBool = { val, boolean defaultValue ->
 
 // Use schemaName input or fallback to file name (without enforcing strict filename chars)
 String nameToSave = schemaName ? schemaName.trim() : schemaFile.getName()
+boolean overwriteMode = normalizeBool(overwrite, false)
 
 String schemaJson = null
 if (schemaFile != null && schemaFile.getSize() > 0) {
@@ -26,7 +25,7 @@ if (!schemaJson) {
 // --------------------------------------------------------------------------------
 // Unique naming logic centralized in JsonSchemaUtil
 // --------------------------------------------------------------------------------
-String finalName = JsonSchemaUtil.generateUniqueSchemaName(ec, nameToSave, doOverwrite)
+String finalName = JsonSchemaUtil.generateUniqueSchemaName(ec, nameToSave, overwriteMode)
 
 // Re-fetch to confirm if we are updating or creating
 existingSchema = ec.entity.find("darpan.reconciliation.JsonSchema")

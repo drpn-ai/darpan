@@ -72,3 +72,5 @@ Desktop.ini
 
 # Linux auto files
 *~
+
+.github/workflows/

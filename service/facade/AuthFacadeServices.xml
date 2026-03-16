@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="login" noun="Session" type="script" allow-remote="true" authenticate="anonymous-all"
+            location="component://darpan/src/main/groovy/darpan/facade/auth/loginSession.groovy">
+        <description>Create authenticated session from username/password for darpan-ui login screen.</description>
+        <in-parameters>
+            <parameter name="username" required="true"/>
+            <parameter name="password" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="authenticated" type="Boolean"/>
+            <parameter name="sessionInfo">
+                <parameter name="userId"/>
+                <parameter name="username"/>
+                <parameter name="locale"/>
+                <parameter name="timeZone"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="get" noun="SessionInfo" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/auth/getSessionInfo.groovy">
+        <description>Return authenticated session metadata for darpan-ui route guards.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="authenticated" type="Boolean"/>
+            <parameter name="sessionInfo">
+                <parameter name="userId"/>
+                <parameter name="username"/>
+                <parameter name="locale"/>
+                <parameter name="timeZone"/>
+            </parameter>
+        </out-parameters>
+    </service>
+</services>

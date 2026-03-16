@@ -33,6 +33,9 @@ Component-generic guidance lives here; user-specific preferences are in `/Users/
 - Mask credentials/secrets in logs and config.
 
 ## UI conventions
+- For Darpan UI tasks, use provided mockups as source of truth and match layout/copy/control structure unless the request explicitly asks for deviations.
+- Use dark monochrome style only for current PWA/sample-page UI work: whitespace-heavy layouts, white/gray text on black/charcoal surfaces, and console-like monospaced typography.
+- Do not use legacy light/accent visual patterns unless explicitly requested with new approved mockups.
 - Use Moqui built-in pagination; avoid custom pagination unless unavoidable.
 - Isolate pagination state per list when multiple lists are on one screen.
 - Build dropdown options in actions/scripts, not complex inline `from` literals.

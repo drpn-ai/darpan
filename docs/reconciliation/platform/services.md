@@ -21,6 +21,11 @@ Move reconciliation out of OMS into a standalone Moqui platform while keeping in
 - Spark-based compare implementation: `runtime/component/darpan/src/main/groovy/darpan/debug/reconciliation/compareSampleOrderIds.groovy`
 - Sample input data: `runtime/component/darpan/data/sample/omsData.json`, `runtime/component/darpan/data/sample/shopifyData.json`
 
+## UI Facade Contracts (Wave 1)
+
+- Wave 1 authenticated facade APIs for `darpan-ui` (Settings + JSON Schema):
+  `runtime/component/darpan/docs/reconciliation/platform/facade-wave1-services.md`
+
 ## Platform Boundaries
 
 - No direct reads from OMS or POS databases

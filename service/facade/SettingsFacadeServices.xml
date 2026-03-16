@@ -1,0 +1,360 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="list" noun="EnumOptions" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/settings/listEnumOptions.groovy">
+        <description>List enum options for frontend dropdowns using fallback-friendly labels.</description>
+        <in-parameters>
+            <parameter name="enumTypeId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="options">
+                <parameter name="enumId"/>
+                <parameter name="enumCode"/>
+                <parameter name="description"/>
+                <parameter name="sequenceNum" type="Integer"/>
+                <parameter name="label"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="get" noun="LlmSettings" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/settings/getLlmSettings.groovy">
+        <description>Get LLM provider settings with stored-secret indicators.</description>
+        <in-parameters>
+            <parameter name="llmProvider"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="llmSettings">
+                <parameter name="activeProvider"/>
+                <parameter name="llmProvider"/>
+                <parameter name="llmModel"/>
+                <parameter name="llmBaseUrl"/>
+                <parameter name="llmTimeoutSeconds"/>
+                <parameter name="llmEnabled"/>
+                <parameter name="hasStoredLlmApiKey" type="Boolean"/>
+                <parameter name="hasFallbackLlmApiKey" type="Boolean"/>
+                <parameter name="fallbackLlmKeyEnvName"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="save" noun="LlmSettings" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/settings/saveLlmSettings.groovy">
+        <description>Save LLM provider settings while preserving existing key when blank.</description>
+        <in-parameters>
+            <parameter name="llmProvider" required="true"/>
+            <parameter name="llmApiKey"/>
+            <parameter name="llmModel"/>
+            <parameter name="llmBaseUrl"/>
+            <parameter name="llmTimeoutSeconds"/>
+            <parameter name="llmEnabled"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="llmSettings">
+                <parameter name="activeProvider"/>
+                <parameter name="llmProvider"/>
+                <parameter name="llmModel"/>
+                <parameter name="llmBaseUrl"/>
+                <parameter name="llmTimeoutSeconds"/>
+                <parameter name="llmEnabled"/>
+                <parameter name="hasStoredLlmApiKey" type="Boolean"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="list" noun="SftpServers" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/settings/listSftpServers.groovy">
+        <description>List SFTP server configs with secret redaction indicators.</description>
+        <in-parameters>
+            <parameter name="query"/>
+            <parameter name="pageIndex" type="Integer" default-value="0"/>
+            <parameter name="pageSize" type="Integer" default-value="20"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="pagination">
+                <parameter name="pageIndex" type="Integer"/>
+                <parameter name="pageSize" type="Integer"/>
+                <parameter name="totalCount" type="Integer"/>
+                <parameter name="pageCount" type="Integer"/>
+            </parameter>
+            <parameter name="servers">
+                <parameter name="sftpServerId"/>
+                <parameter name="description"/>
+                <parameter name="host"/>
+                <parameter name="port" type="Integer"/>
+                <parameter name="username"/>
+                <parameter name="remoteAttributes"/>
+                <parameter name="hasPassword" type="Boolean"/>
+                <parameter name="hasPrivateKey" type="Boolean"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="save" noun="SftpServer" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/settings/saveSftpServer.groovy">
+        <description>Create or update an SFTP server configuration.</description>
+        <in-parameters>
+            <parameter name="sftpServerId" required="true"/>
+            <parameter name="description"/>
+            <parameter name="host" required="true"/>
+            <parameter name="port" type="Integer" default-value="22"/>
+            <parameter name="username" required="true"/>
+            <parameter name="password"/>
+            <parameter name="privateKey" allow-html="true"/>
+            <parameter name="remoteAttributes"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="savedServer">
+                <parameter name="sftpServerId"/>
+                <parameter name="description"/>
+                <parameter name="host"/>
+                <parameter name="port" type="Integer"/>
+                <parameter name="username"/>
+                <parameter name="remoteAttributes"/>
+                <parameter name="hasPassword" type="Boolean"/>
+                <parameter name="hasPrivateKey" type="Boolean"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="list" noun="NsAuthConfigs" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/settings/listNsAuthConfigs.groovy">
+        <description>List NetSuite auth configurations with secret indicators.</description>
+        <in-parameters>
+            <parameter name="query"/>
+            <parameter name="pageIndex" type="Integer" default-value="0"/>
+            <parameter name="pageSize" type="Integer" default-value="20"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="pagination">
+                <parameter name="pageIndex" type="Integer"/>
+                <parameter name="pageSize" type="Integer"/>
+                <parameter name="totalCount" type="Integer"/>
+                <parameter name="pageCount" type="Integer"/>
+            </parameter>
+            <parameter name="authConfigs">
+                <parameter name="nsAuthConfigId"/>
+                <parameter name="description"/>
+                <parameter name="authType"/>
+                <parameter name="username"/>
+                <parameter name="tokenUrl"/>
+                <parameter name="clientId"/>
+                <parameter name="certId"/>
+                <parameter name="scope"/>
+                <parameter name="isActive"/>
+                <parameter name="hasPassword" type="Boolean"/>
+                <parameter name="hasApiToken" type="Boolean"/>
+                <parameter name="hasPrivateKeyPem" type="Boolean"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="save" noun="NsAuthConfig" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/settings/saveNsAuthConfig.groovy">
+        <description>Create or update a NetSuite auth configuration.</description>
+        <in-parameters>
+            <parameter name="nsAuthConfigId" required="true"/>
+            <parameter name="description"/>
+            <parameter name="authType" default-value="NONE"/>
+            <parameter name="username"/>
+            <parameter name="password"/>
+            <parameter name="apiToken"/>
+            <parameter name="tokenUrl"/>
+            <parameter name="clientId"/>
+            <parameter name="certId"/>
+            <parameter name="scope" default-value="restlets rest_webservices"/>
+            <parameter name="privateKeyPem" allow-html="true"/>
+            <parameter name="isActive"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="savedAuthConfig">
+                <parameter name="nsAuthConfigId"/>
+                <parameter name="description"/>
+                <parameter name="authType"/>
+                <parameter name="username"/>
+                <parameter name="tokenUrl"/>
+                <parameter name="clientId"/>
+                <parameter name="certId"/>
+                <parameter name="scope"/>
+                <parameter name="isActive"/>
+                <parameter name="hasPassword" type="Boolean"/>
+                <parameter name="hasApiToken" type="Boolean"/>
+                <parameter name="hasPrivateKeyPem" type="Boolean"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="list" noun="NsRestletConfigs" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/settings/listNsRestletConfigs.groovy">
+        <description>List NetSuite endpoint configs joined with auth metadata.</description>
+        <in-parameters>
+            <parameter name="query"/>
+            <parameter name="pageIndex" type="Integer" default-value="0"/>
+            <parameter name="pageSize" type="Integer" default-value="20"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="pagination">
+                <parameter name="pageIndex" type="Integer"/>
+                <parameter name="pageSize" type="Integer"/>
+                <parameter name="totalCount" type="Integer"/>
+                <parameter name="pageCount" type="Integer"/>
+            </parameter>
+            <parameter name="restletConfigs">
+                <parameter name="nsRestletConfigId"/>
+                <parameter name="description"/>
+                <parameter name="endpointUrl"/>
+                <parameter name="httpMethod"/>
+                <parameter name="nsAuthConfigId"/>
+                <parameter name="authDescription"/>
+                <parameter name="authType"/>
+                <parameter name="authIsActive"/>
+                <parameter name="headersJson"/>
+                <parameter name="connectTimeoutSeconds" type="Integer"/>
+                <parameter name="readTimeoutSeconds" type="Integer"/>
+                <parameter name="isActive"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="save" noun="NsRestletConfig" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/settings/saveNsRestletConfig.groovy">
+        <description>Create or update a NetSuite endpoint configuration bound to an auth config.</description>
+        <in-parameters>
+            <parameter name="nsRestletConfigId" required="true"/>
+            <parameter name="description"/>
+            <parameter name="endpointUrl" required="true"/>
+            <parameter name="httpMethod" default-value="POST"/>
+            <parameter name="nsAuthConfigId" required="true"/>
+            <parameter name="headersJson" allow-html="true"/>
+            <parameter name="connectTimeoutSeconds" type="Integer" default-value="30"/>
+            <parameter name="readTimeoutSeconds" type="Integer" default-value="60"/>
+            <parameter name="isActive"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="savedRestletConfig">
+                <parameter name="nsRestletConfigId"/>
+                <parameter name="description"/>
+                <parameter name="endpointUrl"/>
+                <parameter name="httpMethod"/>
+                <parameter name="nsAuthConfigId"/>
+                <parameter name="headersJson"/>
+                <parameter name="connectTimeoutSeconds" type="Integer"/>
+                <parameter name="readTimeoutSeconds" type="Integer"/>
+                <parameter name="isActive"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="list" noun="HcReadDbConfigs" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/settings/listHcReadDbConfigs.groovy">
+        <description>List external Read DB settings with redacted secret indicators.</description>
+        <in-parameters>
+            <parameter name="query"/>
+            <parameter name="pageIndex" type="Integer" default-value="0"/>
+            <parameter name="pageSize" type="Integer" default-value="20"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="pagination">
+                <parameter name="pageIndex" type="Integer"/>
+                <parameter name="pageSize" type="Integer"/>
+                <parameter name="totalCount" type="Integer"/>
+                <parameter name="pageCount" type="Integer"/>
+            </parameter>
+            <parameter name="configs">
+                <parameter name="hcReadDbConfigId"/>
+                <parameter name="displayName"/>
+                <parameter name="host"/>
+                <parameter name="port" type="Integer"/>
+                <parameter name="databaseName"/>
+                <parameter name="additionalParameters"/>
+                <parameter name="jdbcUrl"/>
+                <parameter name="username"/>
+                <parameter name="dbDriver"/>
+                <parameter name="defaultTableName"/>
+                <parameter name="itemIdColumn"/>
+                <parameter name="locationIdColumn"/>
+                <parameter name="transactionDateColumn"/>
+                <parameter name="connectionPropertiesJson"/>
+                <parameter name="isActive"/>
+                <parameter name="hasPassword" type="Boolean"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="save" noun="HcReadDbConfig" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/settings/saveHcReadDbConfig.groovy">
+        <description>Create or update Read DB config; auto-generates config ID/JDBC URL when needed.</description>
+        <in-parameters>
+            <parameter name="hcReadDbConfigId"/>
+            <parameter name="displayName"/>
+            <parameter name="host" required="true"/>
+            <parameter name="port" type="Integer" default-value="3306"/>
+            <parameter name="databaseName" required="true"/>
+            <parameter name="username" required="true"/>
+            <parameter name="password"/>
+            <parameter name="additionalParameters"/>
+            <parameter name="dbDriver" default-value="com.mysql.cj.jdbc.Driver"/>
+            <parameter name="defaultTableName" default-value="inventory_item_detail"/>
+            <parameter name="itemIdColumn" default-value="product_id"/>
+            <parameter name="locationIdColumn" default-value="facility_id"/>
+            <parameter name="transactionDateColumn" default-value="effective_date"/>
+            <parameter name="connectionPropertiesJson" allow-html="true"/>
+            <parameter name="isActive"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="savedConfig">
+                <parameter name="hcReadDbConfigId"/>
+                <parameter name="displayName"/>
+                <parameter name="host"/>
+                <parameter name="port" type="Integer"/>
+                <parameter name="databaseName"/>
+                <parameter name="additionalParameters"/>
+                <parameter name="jdbcUrl"/>
+                <parameter name="username"/>
+                <parameter name="dbDriver"/>
+                <parameter name="defaultTableName"/>
+                <parameter name="itemIdColumn"/>
+                <parameter name="locationIdColumn"/>
+                <parameter name="transactionDateColumn"/>
+                <parameter name="connectionPropertiesJson"/>
+                <parameter name="isActive"/>
+                <parameter name="hasPassword" type="Boolean"/>
+            </parameter>
+        </out-parameters>
+    </service>
+</services>

@@ -5,6 +5,7 @@ Welcome to the darpan wiki!
 - [code-map](code-map.md)
 - [java17-compatibility](build/java17-compatibility.md)
 - [theme-library](theme-library.md)
+- [repository-boundary](repository-boundary.md)
 
 ## Active Projects
 
@@ -29,6 +30,8 @@ Platform
 - [security](reconciliation/platform/security.md)
 - [services](reconciliation/platform/services.md)
 - [bom-cycle-check](reconciliation/bom-cycle-check.md)
+- [ui-mockups](reconciliation/ui-mockups.md)
+- [pwa-ui-aesthetic-guidelines](reconciliation/pwa-ui-aesthetic-guidelines.md)
 
 Data model
 - [entity-model](reconciliation/data-model/entity-model.md)

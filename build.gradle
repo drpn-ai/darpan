@@ -132,7 +132,9 @@ task verifyOrganization {
                 "screen/Rules.xml",
                 "service/darpan/rule/RuleServices.xml",
                 "src/main/groovy/darpan/rule/service/generateDrlFromPrompt.groovy",
-                "entity/PartyEntities.xml"
+                "entity/PartyEntities.xml",
+                "screen/Reconciliation/UiFacadePoc.xml",
+                "docs/reconciliation/poc/ui-facade-poc-screen.md"
         ]
         forbiddenLegacyArtifacts.each { String relativePath ->
             File artifact = new File(projectDir, relativePath)
@@ -166,6 +168,13 @@ task verifyOrganization {
             while (samplePath.find()) {
                 int lineNumber = lineNumberFor(sourceText, samplePath.start())
                 failures.add("${sourceFile.path}:${lineNumber} production references reconciliation/sample path")
+            }
+
+            def uiFacadePocMatcher = ~/\bUiFacadePoc\b/
+            def uiFacadePoc = uiFacadePocMatcher.matcher(sourceText)
+            while (uiFacadePoc.find()) {
+                int lineNumber = lineNumberFor(sourceText, uiFacadePoc.start())
+                failures.add("${sourceFile.path}:${lineNumber} backend must not carry custom UI/PWA POC surface UiFacadePoc")
             }
         }
 

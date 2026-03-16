@@ -17,6 +17,12 @@ Darpan is a Moqui component focused on data reconciliation workflows, with Spark
 - **JSON Schemas**: `runtime/component/darpan/docs/reconciliation/json-schema-management.md`
 - Java 17 compatibility notes: `runtime/component/darpan/docs/build/java17-compatibility.md`
 
+## Repository boundary
+
+- `darpan-backend` owns Moqui backend contracts, services, entities, and processing logic.
+- `darpan-ui` owns custom UI and PWA implementation.
+- Do not add or extend custom UI/PWA surfaces in `darpan-backend`; implement them in `darpan-ui`.
+
 ## Licensing
 
 See `LICENSE.md`.

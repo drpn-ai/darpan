@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="list" noun="JsonSchemas" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/jsonschema/listJsonSchemas.groovy">
+        <description>List active JSON schemas with pagination for darpan-ui browse page.</description>
+        <in-parameters>
+            <parameter name="query"/>
+            <parameter name="pageIndex" type="Integer" default-value="0"/>
+            <parameter name="pageSize" type="Integer" default-value="20"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="pagination">
+                <parameter name="pageIndex" type="Integer"/>
+                <parameter name="pageSize" type="Integer"/>
+                <parameter name="totalCount" type="Integer"/>
+                <parameter name="pageCount" type="Integer"/>
+            </parameter>
+            <parameter name="schemas">
+                <parameter name="jsonSchemaId"/>
+                <parameter name="schemaName"/>
+                <parameter name="description"/>
+                <parameter name="statusId"/>
+                <parameter name="createdDate" type="Timestamp"/>
+                <parameter name="lastUpdatedStamp" type="Timestamp"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="get" noun="JsonSchema" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/jsonschema/getJsonSchema.groovy">
+        <description>Get a single JSON schema including schemaText.</description>
+        <in-parameters>
+            <parameter name="jsonSchemaId"/>
+            <parameter name="schemaName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="schemaData">
+                <parameter name="jsonSchemaId"/>
+                <parameter name="schemaName"/>
+                <parameter name="description"/>
+                <parameter name="schemaText" allow-html="true"/>
+                <parameter name="statusId"/>
+                <parameter name="createdDate" type="Timestamp"/>
+                <parameter name="lastUpdatedStamp" type="Timestamp"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="save" noun="JsonSchemaText" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/jsonschema/saveJsonSchemaText.groovy">
+        <description>Save schema text directly from darpan-ui (no backend screen transition dependency).</description>
+        <in-parameters>
+            <parameter name="jsonSchemaId"/>
+            <parameter name="schemaName"/>
+            <parameter name="description"/>
+            <parameter name="schemaText" required="true" allow-html="true"/>
+            <parameter name="overwrite" type="Boolean" default-value="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="savedSchema">
+                <parameter name="jsonSchemaId"/>
+                <parameter name="schemaName"/>
+                <parameter name="description"/>
+                <parameter name="statusId"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="infer" noun="JsonSchemaFromText" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/jsonschema/inferJsonSchemaFromText.groovy">
+        <description>Infer schema from JSON text and return flattened editor field rows.</description>
+        <in-parameters>
+            <parameter name="jsonText" required="true" allow-html="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="jsonSchemaString" allow-html="true"/>
+            <parameter name="fieldList" type="List"/>
+        </out-parameters>
+    </service>
+
+    <service verb="validate" noun="JsonTextAgainstSchema" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/jsonschema/validateJsonText.groovy">
+        <description>Validate JSON text against a saved schema.</description>
+        <in-parameters>
+            <parameter name="jsonText" required="true" allow-html="true"/>
+            <parameter name="jsonSchemaId"/>
+            <parameter name="schemaName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="valid" type="Boolean"/>
+            <parameter name="errorCount" type="Integer"/>
+            <parameter name="errorMessages"><parameter name="errorMessage"/></parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="flatten" noun="JsonSchema" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/jsonschema/flattenJsonSchemaFacade.groovy">
+        <description>Flatten a saved schema to editor field rows.</description>
+        <in-parameters>
+            <parameter name="jsonSchemaId"/>
+            <parameter name="schemaName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="jsonSchemaString" allow-html="true"/>
+            <parameter name="fieldList" type="List"/>
+        </out-parameters>
+    </service>
+
+    <service verb="save" noun="RefinedSchema" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/jsonschema/saveRefinedSchemaFacade.groovy">
+        <description>Save refined schema field rows from editor in darpan-ui.</description>
+        <in-parameters>
+            <parameter name="jsonSchemaId"/>
+            <parameter name="schemaName"/>
+            <parameter name="description"/>
+            <parameter name="fieldList" type="List" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="savedSchema">
+                <parameter name="jsonSchemaId"/>
+                <parameter name="schemaName"/>
+                <parameter name="filename"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="delete" noun="JsonSchema" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/jsonschema/deleteJsonSchemaFacade.groovy">
+        <description>Delete a saved JSON schema by id or schemaName.</description>
+        <in-parameters>
+            <parameter name="jsonSchemaId"/>
+            <parameter name="schemaName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="deleted" type="Boolean"/>
+        </out-parameters>
+    </service>
+</services>

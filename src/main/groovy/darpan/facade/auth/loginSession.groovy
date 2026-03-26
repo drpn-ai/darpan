@@ -1,3 +1,4 @@
+import darpan.facade.auth.AuthSessionSupport
 import darpan.facade.common.FacadeSupport
 
 String usernameValue = FacadeSupport.normalize(username)
@@ -16,12 +17,8 @@ def userId = ec.user.userId
 authenticated = loggedIn && userId != null && userId.toString().trim().length() > 0
 
 if (authenticated) {
-    sessionInfo = [
-        userId: userId,
-        username: ec.user.username,
-        locale: ec.l10n?.locale?.toLanguageTag(),
-        timeZone: ec.user?.userAccount?.timeZone ?: ec.l10n?.timeZone,
-    ]
+    AuthSessionSupport.issuePersistentLogin(ec)
+    sessionInfo = AuthSessionSupport.buildSessionInfo(ec)
 }
 
 Map envelope = FacadeSupport.envelope(ec)

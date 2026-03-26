@@ -4,38 +4,85 @@
 
     <service verb="login" noun="Session" type="script" allow-remote="true" authenticate="anonymous-all"
             location="component://darpan/src/main/groovy/darpan/facade/auth/loginSession.groovy">
-        <description>Create authenticated session from username/password for darpan-ui login screen.</description>
+        <description>Create authenticated session from username/password and issue the pilot persistent login cookie.</description>
         <in-parameters>
-            <parameter name="username" required="true"/>
-            <parameter name="password" required="true"/>
+            <parameter name="username" required="true">
+                <description>Account username used for pilot login.</description>
+            </parameter>
+            <parameter name="password" required="true">
+                <description>Account password used for pilot login.</description>
+            </parameter>
         </in-parameters>
         <out-parameters>
-            <parameter name="ok" type="Boolean"/>
-            <parameter name="messages"><parameter name="message"/></parameter>
-            <parameter name="errors"><parameter name="error"/></parameter>
-            <parameter name="authenticated" type="Boolean"/>
+            <parameter name="ok" type="Boolean">
+                <description>True when the login attempt completed without facade errors.</description>
+            </parameter>
+            <parameter name="messages">
+                <description>Informational messages emitted during login handling.</description>
+                <parameter name="message"/>
+            </parameter>
+            <parameter name="errors">
+                <description>Validation or authentication errors for the login attempt.</description>
+                <parameter name="error"/>
+            </parameter>
+            <parameter name="authenticated" type="Boolean">
+                <description>True when the session is authenticated after the login attempt.</description>
+            </parameter>
             <parameter name="sessionInfo">
-                <parameter name="userId"/>
-                <parameter name="username"/>
-                <parameter name="locale"/>
-                <parameter name="timeZone"/>
+                <description>Authenticated session metadata returned to darpan-ui.</description>
+                <parameter name="userId" type="String"/>
+                <parameter name="username" type="String"/>
+                <parameter name="locale" type="String"/>
+                <parameter name="timeZone" type="String"/>
             </parameter>
         </out-parameters>
     </service>
 
-    <service verb="get" noun="SessionInfo" type="script" allow-remote="true" authenticate="true"
+    <service verb="get" noun="SessionInfo" type="script" allow-remote="true" authenticate="anonymous-all"
             location="component://darpan/src/main/groovy/darpan/facade/auth/getSessionInfo.groovy">
-        <description>Return authenticated session metadata for darpan-ui route guards.</description>
+        <description>Return session metadata for darpan-ui route guards, restoring the session from a persistent login cookie when possible.</description>
         <out-parameters>
-            <parameter name="ok" type="Boolean"/>
-            <parameter name="messages"><parameter name="message"/></parameter>
-            <parameter name="errors"><parameter name="error"/></parameter>
-            <parameter name="authenticated" type="Boolean"/>
+            <parameter name="ok" type="Boolean">
+                <description>True when the session info lookup completed without facade errors.</description>
+            </parameter>
+            <parameter name="messages">
+                <description>Informational messages emitted during session bootstrap.</description>
+                <parameter name="message"/>
+            </parameter>
+            <parameter name="errors">
+                <description>Errors returned while resolving session state.</description>
+                <parameter name="error"/>
+            </parameter>
+            <parameter name="authenticated" type="Boolean">
+                <description>True when the current request resolves to an authenticated session.</description>
+            </parameter>
             <parameter name="sessionInfo">
-                <parameter name="userId"/>
-                <parameter name="username"/>
-                <parameter name="locale"/>
-                <parameter name="timeZone"/>
+                <description>Authenticated session metadata returned to darpan-ui.</description>
+                <parameter name="userId" type="String"/>
+                <parameter name="username" type="String"/>
+                <parameter name="locale" type="String"/>
+                <parameter name="timeZone" type="String"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="logout" noun="Session" type="script" allow-remote="true" authenticate="anonymous-all"
+            location="component://darpan/src/main/groovy/darpan/facade/auth/logoutSession.groovy">
+        <description>Clear the pilot persistent login cookie and terminate the current authenticated session when present.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean">
+                <description>True when logout cleanup completed without facade errors.</description>
+            </parameter>
+            <parameter name="messages">
+                <description>Informational messages emitted during logout handling.</description>
+                <parameter name="message"/>
+            </parameter>
+            <parameter name="errors">
+                <description>Errors returned while clearing session state.</description>
+                <parameter name="error"/>
+            </parameter>
+            <parameter name="authenticated" type="Boolean">
+                <description>Always false after logout cleanup finishes.</description>
             </parameter>
         </out-parameters>
     </service>

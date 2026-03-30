@@ -45,11 +45,18 @@ class PilotMappingSupport {
     }
 
     static boolean isResolvableJsonIdExpression(String idFieldExpression, String schemaText) {
-        String propertyName = extractJsonPropertyName(idFieldExpression)
-        if (!propertyName || !schemaText?.trim()) return false
+        String normalizedExpression = normalizeBaseIdFieldExpression(idFieldExpression)
+        if (!normalizedExpression || !schemaText?.trim()) return false
 
         def schemaDocument = new JsonSlurper().parseText(schemaText)
-        return schemaContainsProperty(schemaDocument, propertyName, [] as Set<Integer>)
+        if (!normalizedExpression.startsWith('$')) {
+            String propertyName = extractJsonPropertyName(normalizedExpression)
+            return propertyName ? schemaContainsProperty(schemaDocument, propertyName, [] as Set<Integer>) : false
+        }
+
+        List<String> pathTokens = tokenizeJsonPath(normalizedExpression)
+        if (pathTokens.isEmpty()) return false
+        return pathExistsInSchema(schemaDocument, schemaDocument, pathTokens, 0, [] as Set<String>)
     }
 
     static String normalizeBaseIdFieldExpression(String rawExpression) {
@@ -71,6 +78,84 @@ class PilotMappingSupport {
                 .collect { segment -> segment.startsWith('$') ? segment.substring(1) : segment }
                 .findAll { segment -> segment }
         return segments ? segments.last() : null
+    }
+
+    protected static List<String> tokenizeJsonPath(String rawExpression) {
+        String normalized = normalizeBaseIdFieldExpression(rawExpression)
+        if (!normalized?.startsWith('$')) return []
+
+        String path = normalized.substring(1).trim()
+        if (!path) return []
+
+        String normalizedPath = path.replace("[*]", ".[*]")
+        return normalizedPath.tokenize(".")
+                .collect { segment -> segment?.trim() }
+                .findAll { segment -> segment }
+    }
+
+    protected static boolean pathExistsInSchema(Object rootSchema, Object node, List<String> pathTokens, int index, Set<String> visited) {
+        if (index >= pathTokens.size()) return true
+        if (node == null) return false
+
+        Object actualNode = dereferenceSchemaNode(rootSchema, node)
+        String visitKey = "${System.identityHashCode(actualNode)}:${index}"
+        if (!visited.add(visitKey)) return false
+
+        if (actualNode instanceof Map) {
+            Map nodeMap = (Map) actualNode
+            String token = pathTokens[index]
+            Object itemsNode = nodeMap.get("items")
+
+            if (token == "[*]") {
+                if (itemsNode == null) return false
+                return pathExistsInSchema(rootSchema, itemsNode, pathTokens, index + 1, visited)
+            }
+
+            Object properties = nodeMap.get("properties")
+            if (properties instanceof Map && ((Map) properties).containsKey(token)) {
+                return pathExistsInSchema(rootSchema, ((Map) properties).get(token), pathTokens, index + 1, visited)
+            }
+
+            // Spark path expressions in existing mappings are often written relative to each row object,
+            // even when the source schema root is an array.
+            if (itemsNode != null && pathExistsInSchema(rootSchema, itemsNode, pathTokens, index, visited)) {
+                return true
+            }
+
+            for (String compositeKey in ["allOf", "anyOf", "oneOf"]) {
+                Object variants = nodeMap.get(compositeKey)
+                if (variants instanceof List && ((List) variants).any { child ->
+                    pathExistsInSchema(rootSchema, child, pathTokens, index, visited)
+                }) {
+                    return true
+                }
+            }
+            return false
+        }
+
+        if (actualNode instanceof List) {
+            return ((List) actualNode).any { child -> pathExistsInSchema(rootSchema, child, pathTokens, index, visited) }
+        }
+
+        return false
+    }
+
+    protected static Object dereferenceSchemaNode(Object rootSchema, Object node) {
+        if (!(node instanceof Map)) return node
+
+        Object ref = ((Map) node).get('$ref')
+        if (!(ref instanceof CharSequence)) return node
+
+        String refValue = ref.toString()
+        if (!refValue.startsWith("#/")) return node
+
+        Object current = rootSchema
+        for (String rawPart in refValue.substring(2).split("/")) {
+            String part = rawPart.replace("~1", "/").replace("~0", "~")
+            if (!(current instanceof Map)) return node
+            current = ((Map) current).get(part)
+        }
+        return current ?: node
     }
 
     protected static boolean schemaContainsProperty(Object node, String propertyName, Set<Integer> visited) {

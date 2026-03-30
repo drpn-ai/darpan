@@ -50,6 +50,11 @@ class PilotMappingSupportTests {
     }
 
     @Test
+    void rejectsJsonPathThatOnlyMatchesLeafNameElsewhere() {
+        assertFalse(PilotMappingSupport.isResolvableJsonIdExpression("\$.foo.legacyResourceId", NESTED_SCHEMA))
+    }
+
+    @Test
     void rejectsUnknownJsonSchemaProperty() {
         assertFalse(PilotMappingSupport.isResolvableJsonIdExpression("order_id", NESTED_SCHEMA))
         assertFalse(PilotMappingSupport.isResolvableJsonIdExpression("\$.data.orders.edges[*].node.order_id", NESTED_SCHEMA))

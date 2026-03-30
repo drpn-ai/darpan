@@ -49,6 +49,4 @@ Component-generic guidance lives here; user-specific preferences are in `/Users/
 - Tests are not automatic; run targeted checks as needed and report what was not run.
 
 ## Ticket workflow
-- Use Linear as the source of truth for issue status, roadmap placement, and execution notes.
-- Use GitHub only for branches, commits, pull requests, and code review artifacts tied back to the Linear issue ID.
-- Do not create or manage GitHub Issues for component work unless explicitly requested.
+- When closing a GitHub issue after review readiness, remove `needs review` as part of final closeout.

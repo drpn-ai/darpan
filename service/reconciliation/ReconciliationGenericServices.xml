@@ -9,11 +9,23 @@
             Supports CSV-CSV, JSON-JSON, and mixed CSV-JSON comparisons.
         </description>
         <in-parameters>
-            <parameter name="file1" type="org.apache.commons.fileupload.FileItem" required="true">
+            <parameter name="file1" type="org.apache.commons.fileupload.FileItem">
                 <description>First file to compare (CSV or JSON)</description>
             </parameter>
-            <parameter name="file2" type="org.apache.commons.fileupload.FileItem" required="true">
+            <parameter name="file2" type="org.apache.commons.fileupload.FileItem">
                 <description>Second file to compare (CSV or JSON)</description>
+            </parameter>
+            <parameter name="file1Name">
+                <description>Optional file name override used when the caller provides text payload instead of FileItem.</description>
+            </parameter>
+            <parameter name="file1Text" allow-html="true">
+                <description>Optional UTF-8 file text payload for remote facade callers that cannot send FileItem uploads.</description>
+            </parameter>
+            <parameter name="file2Name">
+                <description>Optional file name override used when the caller provides text payload instead of FileItem.</description>
+            </parameter>
+            <parameter name="file2Text" allow-html="true">
+                <description>Optional UTF-8 file text payload for remote facade callers that cannot send FileItem uploads.</description>
             </parameter>
             
             <parameter name="file1SystemEnumId" required="true">

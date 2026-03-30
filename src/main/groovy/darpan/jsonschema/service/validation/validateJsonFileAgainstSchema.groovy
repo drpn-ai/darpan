@@ -7,6 +7,7 @@ import com.networknt.schema.JsonSchema
 import com.networknt.schema.JsonSchemaFactory
 import com.networknt.schema.SpecVersion
 import com.networknt.schema.ValidationMessage
+import jsonschema.common.JsonSchemaUtil
 import org.slf4j.LoggerFactory
 
 def logger = LoggerFactory.getLogger("darpan.jsonschema.Validate")
@@ -15,30 +16,8 @@ if (!jsonFile) {
     throw new IllegalArgumentException("jsonFile is required")
 }
 
-// --------------------------------------------------------------------------------
-// Helper: Load Schema Logic (Inlined from JsonSchemaUtil)
-// --------------------------------------------------------------------------------
-def loadSchemaText = { Object id, Object name ->
-    // 1. Try DB by ID
-    if (id) {
-        def schema = ec.entity.find("darpan.reconciliation.JsonSchema")
-            .condition("jsonSchemaId", id).useCache(true).one()
-        if (schema?.schemaText) return schema.schemaText
-    }
-    
-    // 2. Try DB by Name
-    def nameKey = (name ?: id)?.toString()
-    if (!nameKey) return null
-    
-    def schema = ec.entity.find("darpan.reconciliation.JsonSchema")
-        .condition("schemaName", nameKey).useCache(true).one()
-    if (schema?.schemaText) return schema.schemaText
-    
-    return null
-}
-
 ObjectMapper mapper = new ObjectMapper()
-String schemaText = loadSchemaText(jsonSchemaId, (filename ?: schemaFileName))
+String schemaText = JsonSchemaUtil.loadSchemaText(ec, jsonSchemaId, (filename ?: schemaFileName))
 if (!schemaText) {
     throw new IllegalArgumentException("Schema not found for provided ID or filename")
 }
@@ -136,4 +115,3 @@ errorCount = result.count
 errorMessages = result.errors
 
 logger.info("JSON schema validation result: valid=${valid} errors=${errorCount}")
-

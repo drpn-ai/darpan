@@ -226,7 +226,9 @@ class ReconciliationServices {
                 file2Label: label2,
                 file1Type: type1,
                 file2Type: type2,
-                reconciliation: reconciliationType
+                reconciliation: reconciliationType,
+                reconciliationMappingId: reconciliationMappingId,
+                reconciliationMappingName: reconciliationMappingName
             ]
             Map outputSummary = [
                 totalDifferences: differenceCount,

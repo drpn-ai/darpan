@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.JsonNode
 import org.moqui.context.ExecutionContext
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
-import groovy.json.JsonSlurper
 
 class JsonSchemaUtil {
     private static final Logger logger = LoggerFactory.getLogger(JsonSchemaUtil.class)
@@ -25,7 +24,7 @@ class JsonSchemaUtil {
     }
 
     /**
-     * Loads schema text from Database (primary).
+     * Loads schema text from saved schemas first, then falls back to legacy runtime schema files.
      * @param ec ExecutionContext
      * @param id Optional jsonSchemaId
      * @param name Optional schemaName (or filename)
@@ -46,9 +45,17 @@ class JsonSchemaUtil {
         def schema = ec.entity.find("darpan.reconciliation.JsonSchema")
             .condition("schemaName", nameKey).useCache(true).one()
         if (schema?.schemaText) return schema.schemaText
-        
-        // Removed Legacy File System Fallback
-        return null
+
+        // 3. Fallback to legacy runtime schema files still referenced by seeded mappings.
+        String safeName = cleanFileName(nameKey)
+        if (!safeName) return null
+
+        def schemaRef = ec.resource.getLocationReference("runtime://schemas/json/${safeName}")
+        if (schemaRef == null) return null
+        if (schemaRef.supportsExists() && !schemaRef.getExists()) return null
+
+        String schemaText = schemaRef.getText()
+        return schemaText?.trim() ? schemaText : null
     }
 
     /**

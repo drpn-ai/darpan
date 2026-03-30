@@ -1,4 +1,5 @@
 import darpan.facade.common.FacadeSupport
+import darpan.facade.common.PilotAccessSupport
 
 String id = FacadeSupport.normalize(jsonSchemaId)
 String name = FacadeSupport.normalize(schemaName)
@@ -21,7 +22,7 @@ if (!ec.message.hasError()) {
             .useCache(false)
             .one()
     }
-    if (!schema) ec.message.addError("Schema not found")
+    PilotAccessSupport.requireOwnedRecordAccess(ec, schema, "Schema not found", "Schema is not available in your customer scope.")
 }
 
 if (!ec.message.hasError()) {
@@ -29,6 +30,7 @@ if (!ec.message.hasError()) {
         jsonSchemaId: schema.jsonSchemaId,
         schemaName: schema.schemaName,
         description: schema.description,
+        ownerUserId: schema.ownerUserId,
         schemaText: schema.schemaText,
         statusId: schema.statusId,
         createdDate: schema.createdDate,

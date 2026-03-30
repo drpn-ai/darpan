@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd" include-child-content="true" menu-image="fa fa-exchange" menu-image-type="icon" default-menu-title="Reconciliation" require-authentication="false">
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd" include-child-content="true" menu-image="fa fa-exchange" menu-image-type="icon" default-menu-title="Reconciliation" require-authentication="true">
         <subscreens default-item="GenericReconciliation">
                 <conditional-default item="GenericReconciliation" condition="true"/>
                 <subscreens-item name="GenericReconciliation" menu-title="File Reconciliation" location="component://darpan/screen/Reconciliation/GenericReconciliation.xml"/>
@@ -9,6 +9,11 @@
                 <subscreens-item name="RuleEngine" menu-title="Rule Engine" location="component://darpan/screen/Reconciliation/RuleEngine/RuleSets.xml"/>
                 <subscreens-item name="Settings" menu-include="false" location="component://darpan/screen/Settings.xml"/>
         </subscreens>
+        <pre-actions>
+                <if condition="!darpan.facade.common.PilotAccessSupport.isSuperAdmin(ec)">
+                        <return error="true" message="Pilot administration screens are restricted to super-admin users."/>
+                </if>
+        </pre-actions>
         <widgets>
                 <subscreens-panel id="reconciliation-app" type="popup"/>
         </widgets>

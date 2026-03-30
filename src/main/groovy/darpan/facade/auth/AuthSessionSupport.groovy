@@ -1,5 +1,7 @@
 package darpan.facade.auth
 
+import darpan.facade.common.PilotAccessSupport
+
 import java.sql.Timestamp
 
 class AuthSessionSupport {
@@ -14,12 +16,14 @@ class AuthSessionSupport {
     }
 
     static Map<String, Object> buildSessionInfo(def ec) {
-        return [
+        Map<String, Object> sessionInfo = [
             userId: ec?.user?.userId,
             username: ec?.user?.username,
             locale: ec?.l10n?.locale?.toLanguageTag(),
             timeZone: ec?.user?.userAccount?.timeZone ?: ec?.l10n?.timeZone,
         ]
+        PilotAccessSupport.applyScopeToSessionInfo(ec, sessionInfo)
+        return sessionInfo
     }
 
     static String issuePersistentLogin(def ec) {

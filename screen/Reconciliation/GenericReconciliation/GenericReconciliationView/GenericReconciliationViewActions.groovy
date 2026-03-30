@@ -1,6 +1,7 @@
 import groovy.json.JsonSlurper
 import com.fasterxml.jackson.core.JsonToken
 import com.fasterxml.jackson.databind.ObjectMapper
+import darpan.facade.common.PilotAccessSupport
 
 def logger = org.slf4j.LoggerFactory.getLogger("darpan.reconciliation.view.GenericReconciliationView")
 
@@ -206,7 +207,7 @@ if (!viewFileName.toLowerCase().endsWith('.json')) {
     return
 }
 
-def outputDirRef = ec.resource.getLocationReference('runtime://tmp/reconciliation/generic/output')
+def outputDirRef = ec.resource.getLocationReference(PilotAccessSupport.resolveGenericOutputLocation(ec))
 def fileRef = outputDirRef != null ? outputDirRef.getChild(viewFileName) : null
 if (fileRef == null || !fileRef.getExists()) {
     viewError = "Diff file not found"

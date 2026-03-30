@@ -12,6 +12,18 @@ This document defines Wave 1 backend facade APIs used by `darpan-ui`.
 - Remaining services use `authenticate="true"`.
 - Frontend calls are expected through authenticated remote service invocation with session credentials.
 
+## Pilot Shared-Tenant Access Scope
+
+- `facade.AuthFacadeServices.login#Session` and `facade.AuthFacadeServices.get#SessionInfo` now return scope metadata inside `sessionInfo`.
+- `scopeType` is `GLOBAL` for super-admin sessions and `CUSTOMER` for normal pilot customer sessions.
+- `customerScopeId` is the current `userId` for customer sessions in this release. This keeps one customer scope per pilot login without requiring separate tenants.
+- `isSuperAdmin` is `true` only when the current user belongs to the Moqui `ADMIN` group.
+- Current shared-tenant enforcement in this repo applies to:
+  - Wave 1 settings facades: super-admin only
+  - Wave 1 JSON schema facades: customer users only see schemas they created through the facade
+  - Generic reconciliation outputs under `runtime://tmp/reconciliation/generic/**`: non-admin sessions use per-user temp/output folders
+  - Legacy backend reconciliation and settings screens: authenticated super-admin only for the pilot release
+
 ## Artifact Authorization Requirement
 
 Wave 1 facade methods require service artifact authorization in addition to session authentication.
@@ -54,6 +66,10 @@ Without this, authenticated users can still get errors like:
 - `list#HcReadDbConfigs`
 - `save#HcReadDbConfig`
 
+Shared-tenant rule:
+
+- All settings facade methods now reject non-admin users with an authorization error because these records are global integration/system configuration, not customer-scoped pilot data.
+
 ### `facade.JsonSchemaFacadeServices`
 - `list#JsonSchemas`
 - `get#JsonSchema`
@@ -63,6 +79,13 @@ Without this, authenticated users can still get errors like:
 - `flatten#JsonSchema`
 - `save#RefinedSchema`
 - `delete#JsonSchema`
+
+Shared-tenant rule:
+
+- JSON schemas created through the facade are stamped with `ownerUserId`.
+- Super-admin users can access all schema rows.
+- Customer users can only list, load, update, validate against, flatten, and delete schemas whose `ownerUserId` matches the authenticated user.
+- Legacy rows without `ownerUserId` are treated as super-admin only.
 
 ## Response Envelope
 
@@ -117,7 +140,10 @@ Expected success shape after session restoration:
       "userId": "EXAMPLE_USER",
       "username": "pilot.user",
       "locale": "en-US",
-      "timeZone": "Asia/Kolkata"
+      "timeZone": "Asia/Kolkata",
+      "scopeType": "CUSTOMER",
+      "customerScopeId": "EXAMPLE_USER",
+      "isSuperAdmin": false
     }
   }
 }
@@ -168,5 +194,5 @@ Settings list/save payloads never expose raw stored secrets. They return flags s
 ## UI Migration Notes
 
 - These facade services replace screen-transition dependency for Wave 1 UI pages.
-- Existing backend screens remain active during phased parallel cutover.
+- Existing backend screens remain active during phased parallel cutover, but the legacy reconciliation/settings screen tree is now restricted to authenticated super-admin users so it cannot bypass pilot customer scoping.
 - Backend UI surfaces (`screen/**`, `template/**`, `theme-library/**`) are not extended by this change.

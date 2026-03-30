@@ -7,6 +7,9 @@
         <field name="jsonSchemaId" type="id" is-pk="true"/>
         <field name="schemaName" type="text-medium" enable-audit-log="true"/>
         <field name="description" type="text-long"/>
+        <field name="ownerUserId" type="id">
+            <description>Owning pilot user for shared-tenant customer scope; blank rows remain super-admin only.</description>
+        </field>
         <field name="schemaText" type="text-very-long"/>
         <field name="statusId" type="id"/>
         <field name="createdDate" type="date-time"/>

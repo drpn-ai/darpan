@@ -92,6 +92,19 @@ class AuthSessionSupportTests {
         assertEquals(1, keyFinder.deleteAllCalls)
     }
 
+    @Test
+    void buildSessionInfoIncludesCustomerScopeMetadata() {
+        def ec = executionContext(user: new UserStub(userId: "CUST_100", username: "pilot.customer"))
+
+        Map<String, Object> sessionInfo = AuthSessionSupport.buildSessionInfo(ec)
+
+        assertEquals("CUST_100", sessionInfo.userId)
+        assertEquals("pilot.customer", sessionInfo.username)
+        assertEquals("CUSTOMER", sessionInfo.scopeType)
+        assertEquals("CUST_100", sessionInfo.customerScopeId)
+        assertFalse(sessionInfo.isSuperAdmin as boolean)
+    }
+
     private static Expando executionContext(Map overrides = [:]) {
         RequestStub request = overrides.request ?: new RequestStub()
         ResponseStub response = overrides.response ?: new ResponseStub()

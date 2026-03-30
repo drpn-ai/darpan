@@ -1,4 +1,7 @@
 import darpan.facade.common.FacadeSupport
+import darpan.facade.common.PilotAccessSupport
+
+PilotAccessSupport.requireSuperAdmin(ec, "Pilot settings are restricted to super-admin users.")
 
 String enumType = FacadeSupport.normalize(enumTypeId)
 if (!enumType) {

@@ -1,3 +1,4 @@
+import darpan.facade.common.PilotAccessSupport
 import org.slf4j.LoggerFactory
 
 def logger = LoggerFactory.getLogger("darpan.reconciliation.generic.PurgeGeneratedOutputFiles")
@@ -5,6 +6,20 @@ def logger = LoggerFactory.getLogger("darpan.reconciliation.generic.PurgeGenerat
 def normalize = { val -> val?.toString()?.trim() }
 
 def resolveOutputLocation = { -> "runtime://tmp/reconciliation/generic/output" }
+
+PilotAccessSupport.requireSuperAdmin(ec, "Only super-admin users may purge reconciliation outputs.")
+
+if (ec.message.hasError()) {
+    retentionDays = retentionDays == null ? 15 : retentionDays
+    outputLocation = normalize(outputLocation) ?: resolveOutputLocation()
+    cutoffTimestamp = null
+    scannedCount = 0
+    deletedCount = 0
+    retainedCount = 0
+    failedFiles = []
+    statusMessage = "Purge skipped."
+    return
+}
 
 Integer resolvedRetentionDays
 if (retentionDays == null) {
@@ -16,7 +31,7 @@ if (resolvedRetentionDays < 0) {
     throw new IllegalArgumentException("retentionDays must be 0 or greater")
 }
 
-String resolvedOutputLocation = normalize(outputLocation) ?: resolveOutputLocation()
+String resolvedOutputLocation = PilotAccessSupport.resolveScopedRuntimeLocation(ec, normalize(outputLocation) ?: resolveOutputLocation())
 def outputDirRef = ec.resource.getLocationReference(resolvedOutputLocation)
 
 long cutoffMillis = ec.user.nowTimestamp.getTime() - (resolvedRetentionDays * 24L * 60L * 60L * 1000L)

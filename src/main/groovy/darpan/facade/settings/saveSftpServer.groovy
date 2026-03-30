@@ -1,4 +1,5 @@
 import darpan.facade.common.FacadeSupport
+import darpan.facade.common.PilotAccessSupport
 
 String sftpServerIdValue = FacadeSupport.normalize(sftpServerId)
 String descriptionValue = FacadeSupport.normalize(description)
@@ -8,6 +9,8 @@ String passwordValue = FacadeSupport.normalize(password)
 String privateKeyValue = FacadeSupport.normalize(privateKey)
 Integer portValue = FacadeSupport.normalizeInt(port, 22)
 String remoteAttributesValue = FacadeSupport.normalizeBool(remoteAttributes, true) ? "Y" : "N"
+
+PilotAccessSupport.requireSuperAdmin(ec, "Pilot settings are restricted to super-admin users.")
 
 if (!sftpServerIdValue) ec.message.addError("Server ID is required.")
 if (!hostValue) ec.message.addError("Host is required.")

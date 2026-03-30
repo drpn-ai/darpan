@@ -1,3 +1,4 @@
+import darpan.facade.common.PilotAccessSupport
 import org.slf4j.LoggerFactory
 
 def logger = LoggerFactory.getLogger("darpan.reconciliation.generic.GenericReconciliation")
@@ -28,7 +29,7 @@ if (!reconciliationMappingId) {
     throw new IllegalArgumentException("Mapping selection is required")
 }
 
-def tempLoc = ec.resource.properties['reconciliation.temp.location'] ?: 'runtime://tmp/reconciliation/generic'
+def tempLoc = PilotAccessSupport.resolveGenericTempLocation(ec)
 def baseDirRef = ec.resource.getLocationReference(tempLoc)
 if (baseDirRef == null) {
     throw new IllegalStateException("Unable to resolve generic reconciliation temp directory: ${tempLoc}")

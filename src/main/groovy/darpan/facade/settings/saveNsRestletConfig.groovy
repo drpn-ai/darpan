@@ -1,4 +1,5 @@
 import darpan.facade.common.FacadeSupport
+import darpan.facade.common.PilotAccessSupport
 import groovy.json.JsonSlurper
 
 String nsRestletConfigIdValue = FacadeSupport.normalize(nsRestletConfigId)
@@ -10,6 +11,8 @@ String nsHeadersJsonValue = FacadeSupport.normalize(headersJson)
 Integer nsConnectTimeoutValue = FacadeSupport.normalizeInt(connectTimeoutSeconds, 30)
 Integer nsReadTimeoutValue = FacadeSupport.normalizeInt(readTimeoutSeconds, 60)
 String nsIsActiveValue = FacadeSupport.normalizeBool(isActive, true) ? "Y" : "N"
+
+PilotAccessSupport.requireSuperAdmin(ec, "Pilot settings are restricted to super-admin users.")
 
 if (!nsRestletConfigIdValue) ec.message.addError("Endpoint Config ID is required.")
 if (!nsEndpointUrlValue) ec.message.addError("Endpoint URL is required.")

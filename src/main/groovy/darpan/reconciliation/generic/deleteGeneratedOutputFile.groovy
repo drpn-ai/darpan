@@ -1,3 +1,4 @@
+import darpan.facade.common.PilotAccessSupport
 import org.slf4j.LoggerFactory
 
 def logger = LoggerFactory.getLogger("darpan.reconciliation.generic.DeleteGeneratedOutputFile")
@@ -14,7 +15,7 @@ if (fileNameToDelete.contains("..") || fileNameToDelete.contains("/") || fileNam
     throw new IllegalArgumentException("Invalid filename")
 }
 
-String outputLoc = normalize(outputLocation) ?: resolveOutputLocation()
+String outputLoc = PilotAccessSupport.resolveScopedRuntimeLocation(ec, normalize(outputLocation) ?: resolveOutputLocation())
 def outputDirRef = ec.resource.getLocationReference(outputLoc)
 if (outputDirRef == null || !outputDirRef.getExists()) {
     deleted = false

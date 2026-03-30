@@ -69,7 +69,7 @@
         </out-parameters>
     </service>
 
-    <service verb="delete" noun="GeneratedOutputFile" type="script" transaction="ignore" authenticate="anonymous-all"
+    <service verb="delete" noun="GeneratedOutputFile" type="script" transaction="ignore" authenticate="true"
             location="component://darpan/src/main/groovy/darpan/reconciliation/generic/deleteGeneratedOutputFile.groovy">
         <description>Delete one generated reconciliation output file from the generic output directory.</description>
         <in-parameters>
@@ -87,7 +87,7 @@
         </out-parameters>
     </service>
 
-    <service verb="purge" noun="GeneratedOutputFiles" type="script" transaction="ignore" authenticate="anonymous-all"
+    <service verb="purge" noun="GeneratedOutputFiles" type="script" transaction="ignore" authenticate="true"
             location="component://darpan/src/main/groovy/darpan/reconciliation/generic/purgeGeneratedOutputFiles.groovy">
         <description>Purge generated reconciliation output files older than the configured retention period.</description>
         <in-parameters>

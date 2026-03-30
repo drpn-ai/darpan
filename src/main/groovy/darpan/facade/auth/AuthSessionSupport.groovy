@@ -29,6 +29,20 @@ class AuthSessionSupport {
         return loginKey
     }
 
+    static boolean revokePersistentLogin(def ec) {
+        String loginKey = readPersistentLoginCookie(ec)
+        if (!loginKey) return false
+
+        String hashedKey = ec?.factory?.getSimpleHash(loginKey, "", ec?.factory?.getLoginKeyHashType(), false)
+        if (!hashedKey) return false
+
+        def deleted = ec?.entity?.find("moqui.security.UserLoginKey")
+                ?.condition("loginKey", hashedKey)
+                ?.disableAuthz()
+                ?.deleteAll()
+        return ((deleted ?: 0) as int) > 0
+    }
+
     static boolean restoreAuthenticatedSession(def ec) {
         if (isAuthenticated(ec)) return true
 

@@ -39,7 +39,7 @@ Without this, authenticated users can still get errors like:
 - The cookie is scoped to `/`, uses `SameSite=Lax`, and is marked `Secure` when the request arrives over HTTPS or a forwarded HTTPS proxy header.
 - Cookie lifetime is aligned to `user-facade/login-key@expire-hours` from Moqui config. The default remains 144 hours.
 - `get#SessionInfo` restores the authenticated session from that cookie when the normal web session is missing.
-- `logout#Session` clears the persistent cookie and terminates the authenticated session.
+- `logout#Session` clears the persistent cookie, revokes the matching `moqui.security.UserLoginKey`, and terminates the authenticated session.
 
 ### `facade.SettingsFacadeServices`
 - `list#EnumOptions`

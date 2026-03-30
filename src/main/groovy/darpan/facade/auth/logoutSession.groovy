@@ -1,6 +1,7 @@
 import darpan.facade.auth.AuthSessionSupport
 import darpan.facade.common.FacadeSupport
 
+AuthSessionSupport.revokePersistentLogin(ec)
 AuthSessionSupport.clearPersistentLoginCookie(ec)
 
 if (AuthSessionSupport.isAuthenticated(ec)) {

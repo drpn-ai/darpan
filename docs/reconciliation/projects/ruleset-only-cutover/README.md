@@ -13,8 +13,8 @@ This project is documentation and execution orchestration only. It does not itse
 - Legacy mapping entities remain only as historical/read-only data during this migration window.
 
 ## Scope Guardrails
-- Primary execution scope is limited to `runtime/component/darpan/**`.
-- Any required changes outside `runtime/component/darpan/**` must be explicitly justified in the relevant ticket before implementation.
+- Primary execution scope is limited to `runtime/component/darpan/` and its descendants.
+- Any required changes outside `runtime/component/darpan/` must be explicitly justified in the relevant ticket before implementation.
 - Ticket implementations must preserve existing non-reconciliation behavior.
 
 ## Deliverables

@@ -1,4 +1,5 @@
 import groovy.json.JsonSlurper
+import jsonschema.common.JsonSchemaUtil
 import org.slf4j.LoggerFactory
 
 def logger = LoggerFactory.getLogger("darpan.jsonschema.ResolveJsonPath")
@@ -19,30 +20,7 @@ if (keyName.startsWith('$')) {
     return
 }
 
-// --------------------------------------------------------------------------------
-// Helper: Load Schema Logic (Inlined from JsonSchemaUtil)
-// --------------------------------------------------------------------------------
-def loadSchemaText = { Object id, Object name ->
-    // 1. Try DB by ID
-    if (id) {
-        def schema = ec.entity.find("darpan.reconciliation.JsonSchema")
-            .condition("jsonSchemaId", id).useCache(true).one()
-        if (schema?.schemaText) return schema.schemaText
-    }
-    
-    // 2. Try DB by Name
-    def nameKey = (name ?: id)?.toString()
-    if (!nameKey) return null
-    
-    def schema = ec.entity.find("darpan.reconciliation.JsonSchema")
-        .condition("schemaName", nameKey).useCache(true).one()
-    if (schema?.schemaText) return schema.schemaText
-    
-    return null
-}
-
-// Resolve schema text using local closure
-String schemaJsonString = loadSchemaText(jsonSchemaId, (filename ?: schemaFileName))
+String schemaJsonString = JsonSchemaUtil.loadSchemaText(ec, jsonSchemaId, (filename ?: schemaFileName))
 
 if (!schemaJsonString) {
     throw new IllegalArgumentException("Schema not found for provided ID or Name")

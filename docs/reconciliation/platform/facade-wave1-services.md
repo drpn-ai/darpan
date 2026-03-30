@@ -1,6 +1,6 @@
-# Wave 1 Facade Services (Settings + JSON Schema)
+# Wave 1 Facade Services (Auth, Settings, JSON Schema, Pilot Reconciliation)
 
-This document defines Wave 1 backend facade APIs used by `darpan-ui`.
+This document defines backend facade APIs used by `darpan-ui` during the pilot rollout.
 
 ## Auth and Remote Access
 
@@ -87,15 +87,35 @@ Shared-tenant rule:
 - Customer users can only list, load, update, validate against, flatten, and delete schemas whose `ownerUserId` matches the authenticated user.
 - Legacy rows without `ownerUserId` are treated as super-admin only.
 
+### `facade.ReconciliationFacadeServices`
+- `list#PilotMappings`
+- `run#PilotGenericDiff`
+- `list#PilotGeneratedOutputs`
+- `get#PilotGeneratedOutput`
+- `delete#PilotGeneratedOutput`
+
+Pilot release contract notes:
+
+- The active pilot remains mapping-based for this release. The facade contract uses `reconciliationMappingId` rather than `ruleSetId`.
+- `run#PilotGenericDiff` is JSON-RPC friendly for `darpan-ui`; it accepts `file1Name`/`file1Text` and `file2Name`/`file2Text` instead of raw multipart `FileItem` uploads.
+- The underlying reconciliation engine still writes a scoped JSON diff file under `runtime://tmp/reconciliation/generic/**`.
+- `get#PilotGeneratedOutput` can return that stored JSON directly or convert it to CSV on demand for the pilot UI download action.
+
+Shared-tenant rule:
+
+- Mapping configuration is readable by authenticated pilot users so they can choose an allowed reconciliation pair.
+- Generated output storage remains customer-scoped for non-admin users through `PilotAccessSupport.resolveGenericOutputLocation(ec)`.
+- Super-admin users can list and retrieve outputs across the shared tenant because they resolve to the unscoped generic output directory.
+
 ## Response Envelope
 
-Wave 1 facade services return these top-level keys:
+Facade services return these top-level keys:
 
 - `ok` (`Boolean`)
 - `messages` (`List<String>`)
 - `errors` (`List<String>`)
 
-Payload keys vary by service (`llmSettings`, `servers`, `authConfigs`, `schemas`, etc).
+Payload keys vary by service (`llmSettings`, `servers`, `authConfigs`, `schemas`, `mappings`, `runResult`, `generatedOutputs`, etc).
 
 ## Concrete Example (JSON-RPC)
 
@@ -177,6 +197,59 @@ Expected success shape:
         "hasPrivateKey": false
       }
     ]
+  }
+}
+```
+
+Pilot diff run example:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 17100003,
+  "method": "facade.ReconciliationFacadeServices.run#PilotGenericDiff",
+  "params": {
+    "reconciliationMappingId": "OrderIdMap",
+    "file1Name": "oms-orders.csv",
+    "file1Text": "order_id\n1001\n1002\n",
+    "file2Name": "shopify-orders.csv",
+    "file2Text": "order_id\n1002\n1003\n"
+  }
+}
+```
+
+Expected success shape:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 17100003,
+  "result": {
+    "ok": true,
+    "messages": [],
+    "errors": [],
+    "runResult": {
+      "reconciliationMappingId": "OrderIdMap",
+      "mappingName": "Order ID",
+      "file1Name": "oms-orders.csv",
+      "file2Name": "shopify-orders.csv",
+      "file1SystemEnumId": "DarSysOms",
+      "file1SystemLabel": "OMS",
+      "file2SystemEnumId": "DarSysShopify",
+      "file2SystemLabel": "SHOPIFY",
+      "validationErrors": [],
+      "processingWarnings": [],
+      "generatedOutput": {
+        "fileName": "Order-ID-diff-20260330-123000.json",
+        "sourceFormat": "json",
+        "availableFormats": ["json", "csv"],
+        "preferredDownloadFormat": "csv",
+        "reconciliationType": "CSV",
+        "totalDifferences": 2,
+        "onlyInFile1Count": 1,
+        "onlyInFile2Count": 1
+      }
+    }
   }
 }
 ```

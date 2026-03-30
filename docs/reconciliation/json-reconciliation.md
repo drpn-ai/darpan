@@ -25,6 +25,13 @@ Primary entry point for uploads. It stages files, then delegates to the shared r
 - `reconciliationMappingId` (required): Configuration ID that defines schemas and ID paths
 - `sparkMaster` (optional): Spark master URL (default: "local[*]")
 
+Additional pilot-compatible input mode:
+
+- `file1Name` + `file1Text`
+- `file2Name` + `file2Text`
+
+These optional parameters allow a remote facade to pass UTF-8 file payloads from `darpan-ui` over JSON-RPC when browser multipart `FileItem` upload is not available.
+
 **Output:**
 - `reconciliationType`: "CSV", "JSON", or "MIXED"
 - `differenceCount`: Total differences found
@@ -150,6 +157,8 @@ The reconciliation output is a JSON file with the following structure:
   ]
 }
 ```
+
+For the pilot PWA flow, the backend facade keeps this JSON file as the stored source of truth but can convert the `differences` array to CSV on retrieval so the UI can offer a direct CSV download without reintroducing the larger legacy output-management surface.
 
 ## Usage Example
 

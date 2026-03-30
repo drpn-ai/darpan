@@ -7,6 +7,7 @@ import com.networknt.schema.JsonSchema
 import com.networknt.schema.JsonSchemaFactory
 import com.networknt.schema.SpecVersion
 import com.networknt.schema.ValidationMessage
+import jsonschema.common.JsonSchemaUtil
 import org.slf4j.LoggerFactory
 import org.moqui.context.ExecutionContext
 
@@ -35,28 +36,6 @@ def resolveFilePath = { ExecutionContext context, String location ->
         }
     }
     return location
-}
-
-// --------------------------------------------------------------------------------
-// Helper: Load Schema Logic (Inlined from JsonSchemaUtil)
-// --------------------------------------------------------------------------------
-def loadSchemaText = { Object id, Object name ->
-    // 1. Try DB by ID
-    if (id) {
-        def schema = ec.entity.find("darpan.reconciliation.JsonSchema")
-            .condition("jsonSchemaId", id).useCache(true).one()
-        if (schema?.schemaText) return schema.schemaText
-    }
-    
-    // 2. Try DB by Name
-    def nameKey = (name ?: id)?.toString()
-    if (!nameKey) return null
-    
-    def schema = ec.entity.find("darpan.reconciliation.JsonSchema")
-        .condition("schemaName", nameKey).useCache(true).one()
-    if (schema?.schemaText) return schema.schemaText
-    
-    return null
 }
 
 // --------------------------------------------------------------------------------
@@ -151,7 +130,7 @@ if (!jsonFile.exists()) {
 }
 
 // 2. Load Schema Node
-String schemaText = loadSchemaText(null, schemaFileName)
+String schemaText = JsonSchemaUtil.loadSchemaText(ec, null, schemaFileName)
 if (!schemaText) {
      throw new IllegalArgumentException("Schema not found: ${schemaFileName}")
 }
@@ -171,4 +150,3 @@ errorCount = result.count
 errorMessages = result.errors
 
 logger.info("Validation complete: valid=${valid}, errors=${errorCount}")
-

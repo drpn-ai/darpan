@@ -48,10 +48,13 @@ Without this, authenticated users can still get errors like:
 ## Pilot Persistent Login Behavior
 
 - Successful `login#Session` calls issue a Moqui login key and return it only through an HTTP-only cookie named `darpan_pilot_login_key`.
-- The cookie is scoped to `/`, uses `SameSite=Lax`, and is marked `Secure` when the request arrives over HTTPS or a forwarded HTTPS proxy header.
+- The cookie is scoped to `/`, uses `SameSite=Lax` for same-origin browser flows, upgrades to `SameSite=None` for secure cross-site hosted clients, and is marked `Secure` when the request arrives over HTTPS or a forwarded HTTPS proxy header.
 - Cookie lifetime is aligned to `user-facade/login-key@expire-hours` from Moqui config. The default remains 144 hours.
-- `get#SessionInfo` restores the authenticated session from that cookie when the normal web session is missing.
-- `logout#Session` clears the persistent cookie, revokes the matching `moqui.security.UserLoginKey`, and terminates the authenticated session.
+- `login#Session` returns `authState`, `authSource`, and `persistentLoginIssued` as the explicit auth contract.
+- `get#SessionInfo` restores the authenticated session from that cookie when the normal web session is missing, and now returns `authState`, `authSource`, and `sessionRestored`.
+- `logout#Session` clears the persistent cookie, revokes the matching `moqui.security.UserLoginKey`, terminates the authenticated session, and returns `persistentLoginRevoked`.
+- Explicit pilot logout in `darpan-ui` must call `logout#Session`. The legacy `/Login/logout` path is not the pilot logout contract because it does not clear the pilot login-key cookie by itself.
+- Production hosted deployments must set `webapp_allow_origins` to the concrete frontend origin list instead of relying on a wildcard when credentialed cross-origin requests are expected.
 
 ### `facade.SettingsFacadeServices`
 - `list#EnumOptions`

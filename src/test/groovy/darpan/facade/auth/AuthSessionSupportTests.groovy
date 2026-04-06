@@ -33,6 +33,26 @@ class AuthSessionSupportTests {
     }
 
     @Test
+    void writePersistentLoginCookieUsesSameSiteNoneForCrossSiteSecureRequests() {
+        ResponseStub response = new ResponseStub()
+        def ec = executionContext(
+                request: new RequestStub(headers: [
+                        "Origin"           : "https://hotwax-darpan-dev.web.app",
+                        "Host"             : "darpan-uat.hotwax.io",
+                        "X-Forwarded-Proto": "https",
+                ]),
+                response: response
+        )
+
+        AuthSessionSupport.writePersistentLoginCookie(ec, "issued-key")
+
+        assertEquals(1, response.cookieHeaders.size())
+        String header = response.cookieHeaders[0]
+        assertTrue(header.contains("; SameSite=None"))
+        assertTrue(header.contains("; Secure"))
+    }
+
+    @Test
     void restoreAuthenticatedSessionClearsCookieWhenLoginKeyIsInvalid() {
         FinderStub keyFinder = new FinderStub(oneResult: null)
         EntityFacadeStub entity = new EntityFacadeStub(finders: ["moqui.security.UserLoginKey": keyFinder])
@@ -103,6 +123,68 @@ class AuthSessionSupportTests {
         assertEquals("CUSTOMER", sessionInfo.scopeType)
         assertEquals("CUST_100", sessionInfo.customerScopeId)
         assertFalse(sessionInfo.isSuperAdmin as boolean)
+    }
+
+    @Test
+    void buildAuthContractMarksAuthenticatedSessionWithExplicitSource() {
+        def ec = executionContext(user: new UserStub(userId: "CUST_100", username: "pilot.customer"))
+
+        Map<String, Object> authContract = AuthSessionSupport.buildAuthContract(ec, AuthSessionSupport.AUTH_SOURCE_PERSISTENT_LOGIN)
+
+        assertEquals("AUTHENTICATED", authContract.authState)
+        assertEquals("PERSISTENT_LOGIN", authContract.authSource)
+        assertEquals("CUST_100", authContract.sessionInfo.userId)
+    }
+
+    @Test
+    void buildAuthContractMarksUnauthenticatedStateWithoutSessionInfo() {
+        def ec = executionContext(user: new UserStub())
+
+        Map<String, Object> authContract = AuthSessionSupport.buildAuthContract(ec, AuthSessionSupport.AUTH_SOURCE_PASSWORD_LOGIN)
+
+        assertEquals("UNAUTHENTICATED", authContract.authState)
+        assertEquals("NONE", authContract.authSource)
+        assertEquals(null, authContract.sessionInfo)
+    }
+
+    @Test
+    void buildSessionInfoContractKeepsActiveSessionSourceWhenUserIsAlreadyAuthenticated() {
+        def ec = executionContext(user: new UserStub(userId: "EX_ACTIVE", username: "pilot.active"))
+
+        Map<String, Object> authContract = AuthSessionSupport.buildSessionInfoContract(ec)
+
+        assertEquals("AUTHENTICATED", authContract.authState)
+        assertEquals("ACTIVE_SESSION", authContract.authSource)
+        assertEquals(false, authContract.sessionRestored)
+        assertEquals("EX_ACTIVE", authContract.sessionInfo.userId)
+    }
+
+    @Test
+    void buildSessionInfoContractMarksPersistentLoginOnlyWhenCookieRestoreActuallyOccurs() {
+        FinderStub keyFinder = new FinderStub(oneResult: new EntityValueStub([
+                userId  : "EX_USER",
+                thruDate: new Timestamp(System.currentTimeMillis() + 60_000L),
+        ]))
+        FinderStub accountFinder = new FinderStub(oneResult: new EntityValueStub([
+                username: "pilot.user"
+        ]))
+        EntityFacadeStub entity = new EntityFacadeStub(finders: [
+                "moqui.security.UserLoginKey": keyFinder,
+                "moqui.security.UserAccount" : accountFinder,
+        ])
+        UserStub user = new UserStub()
+        def ec = executionContext(
+                request: new RequestStub(cookies: [new CookieStub(name: AuthSessionSupport.PERSISTENT_LOGIN_COOKIE_NAME, value: "live-key")]),
+                entity: entity,
+                user: user
+        )
+
+        Map<String, Object> authContract = AuthSessionSupport.buildSessionInfoContract(ec)
+
+        assertEquals("AUTHENTICATED", authContract.authState)
+        assertEquals("PERSISTENT_LOGIN", authContract.authSource)
+        assertEquals(true, authContract.sessionRestored)
+        assertEquals("EX_RESTORED", authContract.sessionInfo.userId)
     }
 
     private static Expando executionContext(Map overrides = [:]) {

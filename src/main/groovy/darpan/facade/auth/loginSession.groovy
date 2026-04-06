@@ -13,13 +13,16 @@ if (!ec.message.hasError()) {
     if (!loggedIn) ec.message.addError("Invalid username or password")
 }
 
-def userId = ec.user.userId
-authenticated = loggedIn && userId != null && userId.toString().trim().length() > 0
-
-if (authenticated) {
-    AuthSessionSupport.issuePersistentLogin(ec)
-    sessionInfo = AuthSessionSupport.buildSessionInfo(ec)
+String loginKey = null
+if (loggedIn && AuthSessionSupport.isAuthenticated(ec)) {
+    loginKey = AuthSessionSupport.issuePersistentLogin(ec)
 }
+
+Map authContract = AuthSessionSupport.buildAuthContract(ec, AuthSessionSupport.AUTH_SOURCE_PASSWORD_LOGIN)
+authState = authContract.authState
+authSource = authContract.authSource
+persistentLoginIssued = loginKey != null
+if (authContract.sessionInfo) sessionInfo = authContract.sessionInfo
 
 Map envelope = FacadeSupport.envelope(ec)
 ok = envelope.ok

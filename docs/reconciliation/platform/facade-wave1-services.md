@@ -55,6 +55,7 @@ Without this, authenticated users can still get errors like:
 - `logout#Session` clears the persistent cookie, revokes the matching `moqui.security.UserLoginKey`, terminates the authenticated session, and returns `persistentLoginRevoked`.
 - Explicit pilot logout in `darpan-ui` must call `logout#Session`. The legacy `/Login/logout` path is not the pilot logout contract because it does not clear the pilot login-key cookie by itself.
 - Production hosted deployments must set `webapp_allow_origins` to the concrete frontend origin list instead of relying on a wildcard when credentialed cross-origin requests are expected.
+- The Docker deployment path now also supports runtime override through `Moqui_WEBAPP_ALLOW_ORIGINS` (or `WEBAPP_ALLOW_ORIGINS`) so stale mounted config does not force a wildcard CORS response.
 
 ### `facade.SettingsFacadeServices`
 - `list#EnumOptions`

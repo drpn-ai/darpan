@@ -1,13 +1,15 @@
 import darpan.facade.common.FacadeSupport
+import darpan.facade.common.PilotAccessSupport
 
 int page = Math.max(0, FacadeSupport.normalizeInt(pageIndex, 0))
 int size = Math.max(1, Math.min(200, FacadeSupport.normalizeInt(pageSize, 20)))
 String search = FacadeSupport.normalize(query)?.toLowerCase()
 
 List<Map> rows = []
-(ec.entity.find("darpan.reconciliation.JsonSchema")
-    .condition("statusId", "Active")
-    .orderBy("-lastUpdatedStamp")
+def finder = ec.entity.find("darpan.reconciliation.JsonSchema")
+finder.condition("statusId", "Active")
+PilotAccessSupport.applyOwnerFilter(finder, ec)
+(finder.orderBy("-lastUpdatedStamp")
     .useCache(false)
     .list() ?: []).each { schema ->
     Map row = [

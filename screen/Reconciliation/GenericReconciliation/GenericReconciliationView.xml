@@ -3,7 +3,7 @@
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         default-menu-title="Diff View"
         default-menu-include="false"
-        require-authentication="false"
+        require-authentication="true"
         allow-extra-path="true">
 
     <parameter name="viewFile"/>
@@ -28,7 +28,8 @@
             <if condition="filename.contains('..') || filename.contains('/') || filename.contains('\\')">
                 <return error="true" message="Invalid filename"/>
             </if>
-            <set field="outputDirRef" from="ec.resource.getLocationReference('runtime://tmp/reconciliation/generic/output')"/>
+            <set field="outputDirLocation" from="darpan.facade.common.PilotAccessSupport.resolveGenericOutputLocation(ec)"/>
+            <set field="outputDirRef" from="ec.resource.getLocationReference(outputDirLocation)"/>
             <set field="fileRef" from="outputDirRef != null ? outputDirRef.getChild(filename) : null"/>
             <if condition="fileRef == null || !fileRef.getExists()">
                 <return error="true" message="Diff file not found"/>
@@ -60,6 +61,9 @@
     </transition>
 
     <pre-actions>
+        <if condition="!darpan.facade.common.PilotAccessSupport.isSuperAdmin(ec)">
+            <return error="true" message="Pilot administration screens are restricted to super-admin users."/>
+        </if>
         <script location="component://darpan/screen/Reconciliation/GenericReconciliation/GenericReconciliationView/GenericReconciliationViewActions.groovy"/>
         <script location="component://darpan/screen/Reconciliation/GenericReconciliation/GenericReconciliationView/MissingJsonListActions.groovy"/>
     </pre-actions>

@@ -1,4 +1,8 @@
+import darpan.facade.common.PilotAccessSupport
 import org.slf4j.LoggerFactory
+
+import java.io.ByteArrayInputStream
+import java.nio.charset.StandardCharsets
 
 def logger = LoggerFactory.getLogger("darpan.reconciliation.generic.GenericReconciliation")
 
@@ -17,9 +21,17 @@ def resolveEnumLabel = { String enumId, String fallback ->
     return normalized
 }
 
+String providedFile1Name = normalize(file1Name)
+String providedFile2Name = normalize(file2Name)
+String file1TextValue = file1Text?.toString()
+String file2TextValue = file2Text?.toString()
+
 // Validate required inputs
-if (!file1 || !file2) {
-    throw new IllegalArgumentException("Both file1 and file2 are required")
+if (!file1 && !file1TextValue) {
+    throw new IllegalArgumentException("Either file1 or file1Text is required")
+}
+if (!file2 && !file2TextValue) {
+    throw new IllegalArgumentException("Either file2 or file2Text is required")
 }
 if (!file1SystemEnumId || !file2SystemEnumId) {
     throw new IllegalArgumentException("System selection is required for both files")
@@ -28,7 +40,7 @@ if (!reconciliationMappingId) {
     throw new IllegalArgumentException("Mapping selection is required")
 }
 
-def tempLoc = ec.resource.properties['reconciliation.temp.location'] ?: 'runtime://tmp/reconciliation/generic'
+def tempLoc = PilotAccessSupport.resolveGenericTempLocation(ec)
 def baseDirRef = ec.resource.getLocationReference(tempLoc)
 if (baseDirRef == null) {
     throw new IllegalStateException("Unable to resolve generic reconciliation temp directory: ${tempLoc}")
@@ -40,8 +52,8 @@ if (!inputDirRef.getExists()) {
 }
 
 def timestamp = ec.l10n.format(ec.user.nowTimestamp, 'yyyyMMdd-HHmmssSSS')
-def file1SafeName = file1.getName()?.replaceAll('[^A-Za-z0-9._-]', '_') ?: 'file1'
-def file2SafeName = file2.getName()?.replaceAll('[^A-Za-z0-9._-]', '_') ?: 'file2'
+def file1SafeName = (providedFile1Name ?: file1?.getName())?.replaceAll('[^A-Za-z0-9._-]', '_') ?: 'file1'
+def file2SafeName = (providedFile2Name ?: file2?.getName())?.replaceAll('[^A-Za-z0-9._-]', '_') ?: 'file2'
 
 def file1Ref = inputDirRef.makeFile(timestamp + '-file1-' + file1SafeName)
 def file2Ref = inputDirRef.makeFile(timestamp + '-file2-' + file2SafeName)
@@ -59,8 +71,24 @@ def saveFileItem = { fileItem, targetRef ->
     targetRef.putStream(fileItem.getInputStream())
 }
 
-saveFileItem(file1, file1Ref)
-saveFileItem(file2, file2Ref)
+def saveTextPayload = { String payload, targetRef ->
+    byte[] bytes = (payload ?: "").getBytes(StandardCharsets.UTF_8)
+    File targetFile = targetRef.getFile()
+    if (targetFile != null) {
+        targetFile.parentFile?.mkdirs()
+        targetFile.withOutputStream { outputStream ->
+            outputStream.write(bytes)
+        }
+        return
+    }
+    targetRef.putStream(new ByteArrayInputStream(bytes))
+}
+
+if (file1) saveFileItem(file1, file1Ref)
+else saveTextPayload(file1TextValue, file1Ref)
+
+if (file2) saveFileItem(file2, file2Ref)
+else saveTextPayload(file2TextValue, file2Ref)
 
 def file1Location = file1Ref.getFile()?.getAbsolutePath() ?: file1Ref.getLocation()
 def file2Location = file2Ref.getFile()?.getAbsolutePath() ?: file2Ref.getLocation()

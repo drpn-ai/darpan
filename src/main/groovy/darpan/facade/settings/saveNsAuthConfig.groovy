@@ -1,4 +1,5 @@
 import darpan.facade.common.FacadeSupport
+import darpan.facade.common.PilotAccessSupport
 
 String nsAuthConfigIdValue = FacadeSupport.normalize(nsAuthConfigId)
 String nsAuthDescriptionValue = FacadeSupport.normalize(description)
@@ -12,6 +13,8 @@ String nsCertIdValue = FacadeSupport.normalize(certId)
 String nsScopeValue = FacadeSupport.normalize(scope) ?: "restlets rest_webservices"
 String nsPrivateKeyPemValue = FacadeSupport.normalize(privateKeyPem)
 String nsIsActiveValue = FacadeSupport.normalizeBool(isActive, true) ? "Y" : "N"
+
+PilotAccessSupport.requireSuperAdmin(ec, "Pilot settings are restricted to super-admin users.")
 
 if (!nsAuthConfigIdValue) ec.message.addError("Auth Config ID is required.")
 if (!["NONE", "BASIC", "BEARER", "OAUTH2_M2M_JWT"].contains(nsAuthTypeValue)) {

@@ -1,4 +1,5 @@
 import darpan.facade.common.FacadeSupport
+import darpan.facade.common.PilotAccessSupport
 import groovy.json.JsonSlurper
 
 String inputConfigId = FacadeSupport.normalize(hcReadDbConfigId)
@@ -15,6 +16,8 @@ String locationIdColumn = FacadeSupport.normalize(locationIdColumn) ?: "facility
 String transactionDateColumn = FacadeSupport.normalize(transactionDateColumn) ?: "effective_date"
 String connectionPropertiesJson = FacadeSupport.normalize(connectionPropertiesJson)
 String isActive = FacadeSupport.normalizeBool(isActive, true) ? "Y" : "N"
+
+PilotAccessSupport.requireSuperAdmin(ec, "Pilot settings are restricted to super-admin users.")
 
 Integer port = FacadeSupport.normalizeInt(port, 3306)
 if (port <= 0) ec.message.addError("Port must be greater than 0.")

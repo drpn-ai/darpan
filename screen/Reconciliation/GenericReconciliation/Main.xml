@@ -3,7 +3,7 @@
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         default-menu-title="File Reconciliation"
         default-menu-include="false"
-        require-authentication="false">
+        require-authentication="true">
 
     <transition name="runGenericReconciliation" begin-transaction="false">
         <actions>
@@ -35,7 +35,8 @@
             <if condition="filename.contains('..') || filename.contains('/') || filename.contains('\\')">
                 <return error="true" message="Invalid filename"/>
             </if>
-            <set field="outputDirRef" from="ec.resource.getLocationReference('runtime://tmp/reconciliation/generic/output')"/>
+            <set field="outputDirLocation" from="darpan.facade.common.PilotAccessSupport.resolveGenericOutputLocation(ec)"/>
+            <set field="outputDirRef" from="ec.resource.getLocationReference(outputDirLocation)"/>
             <set field="fileRef" from="outputDirRef != null ? outputDirRef.getChild(filename) : null"/>
             <if condition="fileRef == null || !fileRef.getExists()">
                 <return error="true" message="Diff file not found"/>
@@ -67,6 +68,9 @@
     </transition>
 
     <pre-actions>
+        <if condition="!darpan.facade.common.PilotAccessSupport.isSuperAdmin(ec)">
+            <return error="true" message="Pilot administration screens are restricted to super-admin users."/>
+        </if>
         <entity-find entity-name="moqui.basic.Enumeration" list="systemEnumList" cache="false">
             <econdition field-name="enumTypeId" value="DarpanSystemSource"/>
             <order-by field-name="sequenceNum,description"/>
@@ -75,7 +79,7 @@
             <order-by field-name="mappingName"/>
         </entity-find>
         <script><![CDATA[
-            def diffDirRef = ec.resource.getLocationReference('runtime://tmp/reconciliation/generic/output')
+            def diffDirRef = ec.resource.getLocationReference(darpan.facade.common.PilotAccessSupport.resolveGenericOutputLocation(ec))
             diffFiles = []
             if (diffDirRef != null && diffDirRef.getExists()) {
                 def entries = diffDirRef.getDirectoryEntries() ?: []

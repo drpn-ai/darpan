@@ -1,15 +1,9 @@
+import darpan.facade.auth.AuthSessionSupport
 import darpan.facade.common.FacadeSupport
 
-def userId = ec.user.userId
-
-sessionInfo = [
-    userId: userId,
-    username: ec.user.username,
-    locale: ec.l10n?.locale?.toLanguageTag(),
-    timeZone: ec.user?.userAccount?.timeZone ?: ec.l10n?.timeZone,
-]
-
-authenticated = userId != null && userId.toString().trim().length() > 0
+AuthSessionSupport.restoreAuthenticatedSession(ec)
+authenticated = AuthSessionSupport.isAuthenticated(ec)
+if (authenticated) sessionInfo = AuthSessionSupport.buildSessionInfo(ec)
 
 Map envelope = FacadeSupport.envelope(ec)
 ok = envelope.ok

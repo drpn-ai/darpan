@@ -46,6 +46,7 @@
                 <parameter name="jsonSchemaId"/>
                 <parameter name="schemaName"/>
                 <parameter name="description"/>
+                <parameter name="ownerUserId"/>
                 <parameter name="schemaText" allow-html="true"/>
                 <parameter name="statusId"/>
                 <parameter name="createdDate" type="Timestamp"/>
@@ -72,6 +73,7 @@
                 <parameter name="jsonSchemaId"/>
                 <parameter name="schemaName"/>
                 <parameter name="description"/>
+                <parameter name="ownerUserId"/>
                 <parameter name="statusId"/>
             </parameter>
         </out-parameters>

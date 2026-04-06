@@ -1,5 +1,6 @@
 import com.fasterxml.jackson.databind.ObjectMapper
 import darpan.facade.common.FacadeSupport
+import darpan.facade.common.PilotAccessSupport
 import jsonschema.common.JsonSchemaUtil
 
 ObjectMapper mapper = new ObjectMapper()
@@ -28,9 +29,9 @@ if (!ec.message.hasError()) {
             .condition("jsonSchemaId", schemaIdValue)
             .useCache(false)
             .one()
-        if (!existingSchema) {
-            ec.message.addError("Schema not found for ID '${schemaIdValue}'")
-        }
+        PilotAccessSupport.requireOwnedRecordAccess(ec, existingSchema,
+            "Schema not found for ID '${schemaIdValue}'",
+            "Schema is not available in your customer scope.")
     }
 
     if (!ec.message.hasError()) {
@@ -63,6 +64,7 @@ if (!ec.message.hasError()) {
                     jsonSchemaId: existingSchema.jsonSchemaId,
                     schemaName: existingSchema.schemaName,
                     description: existingSchema.description,
+                    ownerUserId: existingSchema.ownerUserId,
                     statusId: existingSchema.statusId,
                 ]
             } else {
@@ -72,6 +74,7 @@ if (!ec.message.hasError()) {
                 newSchema.description = descriptionValue
                 newSchema.statusId = "Active"
                 newSchema.createdDate = ec.user.nowTimestamp
+                PilotAccessSupport.assignOwnerOnCreate(newSchema, ec)
                 newSchema.setSequencedIdPrimary()
                 newSchema.create()
 
@@ -79,6 +82,7 @@ if (!ec.message.hasError()) {
                     jsonSchemaId: newSchema.jsonSchemaId,
                     schemaName: newSchema.schemaName,
                     description: newSchema.description,
+                    ownerUserId: newSchema.ownerUserId,
                     statusId: newSchema.statusId,
                 ]
             }

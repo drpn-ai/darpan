@@ -4,7 +4,7 @@ import com.networknt.schema.JsonSchemaFactory
 import com.networknt.schema.SpecVersion
 import com.networknt.schema.ValidationMessage
 import darpan.facade.common.FacadeSupport
-import jsonschema.common.JsonSchemaUtil
+import darpan.facade.common.PilotAccessSupport
 
 ObjectMapper mapper = new ObjectMapper()
 
@@ -18,11 +18,24 @@ if (!schemaId && !schemaNameValue) ec.message.addError("jsonSchemaId or schemaNa
 if (!ec.message.hasError()) {
     try {
         JsonNode payloadNode = mapper.readTree(jsonTextValue)
-        String schemaText = JsonSchemaUtil.loadSchemaText(ec, schemaId, schemaNameValue)
-        if (!schemaText) {
-            ec.message.addError("Schema not found")
+        def schemaRecord = null
+        if (schemaId) {
+            schemaRecord = ec.entity.find("darpan.reconciliation.JsonSchema")
+                .condition("jsonSchemaId", schemaId)
+                .useCache(false)
+                .one()
+        }
+        if (!schemaRecord && schemaNameValue) {
+            schemaRecord = ec.entity.find("darpan.reconciliation.JsonSchema")
+                .condition("schemaName", schemaNameValue)
+                .useCache(false)
+                .one()
+        }
+        PilotAccessSupport.requireOwnedRecordAccess(ec, schemaRecord, "Schema not found", "Schema is not available in your customer scope.")
+        if (ec.message.hasError()) {
+            // error already recorded
         } else {
-            JsonNode schemaNode = mapper.readTree(schemaText)
+            JsonNode schemaNode = mapper.readTree(schemaRecord.schemaText)
             def schema = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V7).getSchema(schemaNode)
             Set<ValidationMessage> validationMessages = schema.validate(payloadNode)
 

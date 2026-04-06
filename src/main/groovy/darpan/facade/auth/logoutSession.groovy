@@ -1,7 +1,7 @@
 import darpan.facade.auth.AuthSessionSupport
 import darpan.facade.common.FacadeSupport
 
-AuthSessionSupport.revokePersistentLogin(ec)
+boolean revokedPersistentLogin = AuthSessionSupport.revokePersistentLogin(ec)
 AuthSessionSupport.clearPersistentLoginCookie(ec)
 
 if (AuthSessionSupport.isAuthenticated(ec)) {
@@ -14,7 +14,9 @@ if (AuthSessionSupport.isAuthenticated(ec)) {
     }
 }
 
-authenticated = false
+authState = AuthSessionSupport.AUTH_STATE_UNAUTHENTICATED
+authSource = AuthSessionSupport.AUTH_SOURCE_NONE
+persistentLoginRevoked = revokedPersistentLogin
 
 Map envelope = FacadeSupport.envelope(ec)
 ok = envelope.ok

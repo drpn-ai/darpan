@@ -7,8 +7,15 @@ import java.sql.Timestamp
 class AuthSessionSupport {
     static final String PERSISTENT_LOGIN_COOKIE_NAME = "darpan_pilot_login_key"
     static final String COOKIE_PATH = "/"
-    static final String COOKIE_SAME_SITE = "Lax"
+    static final String COOKIE_SAME_SITE_LAX = "Lax"
+    static final String COOKIE_SAME_SITE_NONE = "None"
     static final String EXPIRED_COOKIE_DATE = "Thu, 01 Jan 1970 00:00:00 GMT"
+    static final String AUTH_STATE_AUTHENTICATED = "AUTHENTICATED"
+    static final String AUTH_STATE_UNAUTHENTICATED = "UNAUTHENTICATED"
+    static final String AUTH_SOURCE_PASSWORD_LOGIN = "PASSWORD_LOGIN"
+    static final String AUTH_SOURCE_ACTIVE_SESSION = "ACTIVE_SESSION"
+    static final String AUTH_SOURCE_PERSISTENT_LOGIN = "PERSISTENT_LOGIN"
+    static final String AUTH_SOURCE_NONE = "NONE"
 
     static boolean isAuthenticated(def ec) {
         String userId = ec?.user?.userId?.toString()?.trim()
@@ -24,6 +31,29 @@ class AuthSessionSupport {
         ]
         PilotAccessSupport.applyScopeToSessionInfo(ec, sessionInfo)
         return sessionInfo
+    }
+
+    static Map<String, Object> buildAuthContract(def ec, String authenticatedSource = AUTH_SOURCE_ACTIVE_SESSION) {
+        boolean authenticated = isAuthenticated(ec)
+        Map<String, Object> contract = [
+                authState    : authenticated ? AUTH_STATE_AUTHENTICATED : AUTH_STATE_UNAUTHENTICATED,
+                authSource   : authenticated ? authenticatedSource : AUTH_SOURCE_NONE,
+        ]
+        if (authenticated) {
+            contract.sessionInfo = buildSessionInfo(ec)
+        }
+        return contract
+    }
+
+    static Map<String, Object> buildSessionInfoContract(def ec) {
+        boolean alreadyAuthenticated = isAuthenticated(ec)
+        boolean sessionRestored = !alreadyAuthenticated && restoreAuthenticatedSession(ec)
+        Map<String, Object> contract = buildAuthContract(
+                ec,
+                sessionRestored ? AUTH_SOURCE_PERSISTENT_LOGIN : AUTH_SOURCE_ACTIVE_SESSION
+        )
+        contract.sessionRestored = sessionRestored
+        return contract
     }
 
     static String issuePersistentLogin(def ec) {
@@ -125,6 +155,53 @@ class AuthSessionSupport {
                 "on".equalsIgnoreCase(frontEndHttps)
     }
 
+    static String resolveCookieSameSite(def ec) {
+        return isCrossSiteRequest(ec) && isSecureRequest(ec) ? COOKIE_SAME_SITE_NONE : COOKIE_SAME_SITE_LAX
+    }
+
+    static boolean isCrossSiteRequest(def ec) {
+        def request = ec?.web?.request
+        if (request == null) return false
+
+        String originHeader = request.getHeader("Origin")?.toString()?.trim()
+        if (!originHeader) return false
+
+        String originHost = extractHost(originHeader)
+        String requestHost = normalizeHost(
+                request.getHeader("X-Forwarded-Host")
+                        ?: request.getHeader("Host")
+                        ?: request.getServerName()
+        )
+        return originHost != null && requestHost != null && originHost != requestHost
+    }
+
+    protected static String extractHost(String originHeader) {
+        String normalizedOrigin = originHeader?.toString()?.trim()
+        if (!normalizedOrigin) return null
+
+        try {
+            return normalizeHost(new URI(normalizedOrigin).host)
+        } catch (Exception ignored) {
+            int schemeIdx = normalizedOrigin.indexOf("://")
+            String withoutScheme = schemeIdx >= 0 ? normalizedOrigin.substring(schemeIdx + 3) : normalizedOrigin
+            int slashIdx = withoutScheme.indexOf("/")
+            return normalizeHost(slashIdx >= 0 ? withoutScheme.substring(0, slashIdx) : withoutScheme)
+        }
+    }
+
+    protected static String normalizeHost(Object value) {
+        String normalized = value?.toString()?.trim()?.toLowerCase()
+        if (!normalized) return null
+
+        int commaIdx = normalized.indexOf(",")
+        if (commaIdx >= 0) normalized = normalized.substring(0, commaIdx).trim()
+
+        int colonIdx = normalized.indexOf(":")
+        if (colonIdx >= 0) normalized = normalized.substring(0, colonIdx).trim()
+
+        return normalized ?: null
+    }
+
     protected static def findActiveUserLoginKey(def ec, String loginKey) {
         String normalizedKey = loginKey?.toString()?.trim()
         if (!normalizedKey) return null
@@ -149,13 +226,14 @@ class AuthSessionSupport {
         def response = ec?.web?.response
         if (response == null) return
 
+        String sameSite = resolveCookieSameSite(ec)
         StringBuilder cookieHeader = new StringBuilder()
         cookieHeader.append(PERSISTENT_LOGIN_COOKIE_NAME).append("=").append(value ?: "")
         cookieHeader.append("; Max-Age=").append(Math.max(maxAgeSeconds ?: 0, 0))
         if (expiresAt) cookieHeader.append("; Expires=").append(expiresAt)
         cookieHeader.append("; Path=").append(COOKIE_PATH)
         cookieHeader.append("; HttpOnly")
-        cookieHeader.append("; SameSite=").append(COOKIE_SAME_SITE)
+        cookieHeader.append("; SameSite=").append(sameSite)
         if (isSecureRequest(ec)) cookieHeader.append("; Secure")
 
         response.addHeader("Set-Cookie", cookieHeader.toString())

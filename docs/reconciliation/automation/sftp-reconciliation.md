@@ -12,7 +12,7 @@ This job polls configured SFTP locations, stages the newest matching files local
   - `receiveUrl`/`sendUrl`: host (with optional `:port`); can include a path, but prefer providing the path via `fileXRemotePath`.
   - `username` plus either `password` or `privateKey`/`publicKey`.
 - Define `ReconciliationMappingMember` rows for each system with:
-  - `systemEnumId` matching the inputs passed to the service.
+  - `systemEnumId` matching the canonical system IDs passed to the service (`OMS`, `SHOPIFY`, etc).
   - `fileTypeEnumId` (`DftCsv` or `DftJson`).
   - `idFieldExpression` (CSV column or JSONPath/key), optional `idValueNormalizer` (`SHOPIFY_GID_TAIL` or `TRAILING_DIGITS`); JSON runs also require `schemaFileName`.
 
@@ -48,8 +48,8 @@ This job polls configured SFTP locations, stages the newest matching files local
     description="Check OMS vs Shopify SFTP drops and run reconciliation"
     frequency="600" pause-time="0">
     <parameter name="reconciliationMappingId" value="OrderIdMap"/>
-    <parameter name="file1SystemEnumId" value="DarSysOms"/>
-    <parameter name="file2SystemEnumId" value="DarSysShopify"/>
+    <parameter name="file1SystemEnumId" value="OMS"/>
+    <parameter name="file2SystemEnumId" value="SHOPIFY"/>
     <parameter name="file1SystemMessageRemoteId" value="OMS_SFTP"/>
     <parameter name="file2SystemMessageRemoteId" value="SHOPIFY_SFTP"/>
     <parameter name="stageLocation" value="runtime://tmp/reconciliation/automation/input/orders"/>

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entity-facade-xml type="seed">
+    <moqui.basic.EnumerationType
+            enumTypeId="DarpanSystemSource"
+            description="Darpan System Source"/>
+
+    <moqui.basic.Enumeration
+            enumId="OMS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="OMS"
+            description="OMS"
+            sequenceNum="1"/>
+
+    <moqui.basic.Enumeration
+            enumId="SHOPIFY"
+            enumTypeId="DarpanSystemSource"
+            enumCode="SHOPIFY"
+            description="Shopify"
+            sequenceNum="2"/>
+
+    <moqui.basic.Enumeration
+            enumId="NETSUITE"
+            enumTypeId="DarpanSystemSource"
+            enumCode="NETSUITE"
+            description="NetSuite"
+            sequenceNum="3"/>
+
+    <moqui.basic.Enumeration
+            enumId="SAPI"
+            enumTypeId="DarpanSystemSource"
+            enumCode="SAPI"
+            description="SAPI"
+            sequenceNum="4"/>
+</entity-facade-xml>

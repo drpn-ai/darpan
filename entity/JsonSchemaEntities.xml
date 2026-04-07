@@ -7,6 +7,9 @@
         <field name="jsonSchemaId" type="id" is-pk="true"/>
         <field name="schemaName" type="text-medium" enable-audit-log="true"/>
         <field name="description" type="text-long"/>
+        <field name="systemEnumId" type="id">
+            <description>Reconciliation system enumeration ID for this schema.</description>
+        </field>
         <field name="ownerUserId" type="id">
             <description>Owning pilot user for shared-tenant customer scope; blank rows remain super-admin only.</description>
         </field>
@@ -18,5 +21,9 @@
         <index name="JSON_SCHEMA_NAME" unique="true">
             <index-field name="schemaName"/>
         </index>
+
+        <relationship type="one" title="System" related="moqui.basic.Enumeration" fk-name="JSONSCHEMA_SYS_ENUM">
+            <key-map field-name="systemEnumId" related-field-name="enumId"/>
+        </relationship>
     </entity>
 </entities>

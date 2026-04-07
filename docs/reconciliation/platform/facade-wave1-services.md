@@ -7,10 +7,10 @@ This document defines backend facade APIs used by `darpan-ui` during the pilot r
 - All Wave 1 facade services are in `service/facade/*.xml`.
 - All services are `allow-remote="true"`.
 - `facade.AuthFacadeServices.login#Session` uses `authenticate="anonymous-all"`.
-- `facade.AuthFacadeServices.get#SessionInfo` uses `authenticate="anonymous-all"` so the backend can restore a missing session from the pilot login-key cookie.
-- `facade.AuthFacadeServices.logout#Session` uses `authenticate="anonymous-all"` so logout can still clear the persistent cookie after session loss.
+- `facade.AuthFacadeServices.get#SessionInfo` uses `authenticate="anonymous-all"` so darpan-ui can verify the explicit auth token without depending on a browser session cookie.
+- `facade.AuthFacadeServices.logout#Session` uses `authenticate="anonymous-all"` so darpan-ui can revoke the current token even after local auth state drift.
 - Remaining services use `authenticate="true"`.
-- Frontend calls are expected through authenticated remote service invocation with session credentials.
+- Frontend calls are expected through authenticated remote service invocation using the `login_key` request header after login.
 
 ## Pilot Shared-Tenant Access Scope
 
@@ -45,17 +45,13 @@ Without this, authenticated users can still get errors like:
 - `get#SessionInfo`
 - `logout#Session`
 
-## Pilot Persistent Login Behavior
+## Pilot Stateless Auth Behavior
 
-- Successful `login#Session` calls issue a Moqui login key and return it only through an HTTP-only cookie named `darpan_pilot_login_key`.
-- The cookie is scoped to `/`, uses `SameSite=Lax` for same-origin browser flows, upgrades to `SameSite=None` for secure cross-site hosted clients, and is marked `Secure` when the request arrives over HTTPS or a forwarded HTTPS proxy header.
-- Cookie lifetime is aligned to `user-facade/login-key@expire-hours` from Moqui config. The default remains 144 hours.
-- `login#Session` returns `authState`, `authSource`, and `persistentLoginIssued` as the explicit auth contract.
-- `get#SessionInfo` restores the authenticated session from that cookie when the normal web session is missing, and now returns `authState`, `authSource`, and `sessionRestored`.
-- `logout#Session` clears the persistent cookie, revokes the matching `moqui.security.UserLoginKey`, terminates the authenticated session, and returns `persistentLoginRevoked`.
-- Explicit pilot logout in `darpan-ui` must call `logout#Session`. The legacy `/Login/logout` path is not the pilot logout contract because it does not clear the pilot login-key cookie by itself.
-- Production hosted deployments must set `webapp_allow_origins` to the concrete frontend origin list instead of relying on a wildcard when credentialed cross-origin requests are expected.
-- The Docker deployment path now also supports runtime override through `Moqui_WEBAPP_ALLOW_ORIGINS` (or `WEBAPP_ALLOW_ORIGINS`) so stale mounted config does not force a wildcard CORS response.
+- Successful `login#Session` calls issue a Moqui login key and return it explicitly in the JSON-RPC result as `authToken`.
+- The frontend must send that token on later requests through the `login_key` request header.
+- Token lifetime is aligned to `user-facade/login-key@expire-hours` from Moqui config. The default remains 144 hours, exposed as `authTokenExpiresInSeconds`.
+- `get#SessionInfo` authenticates from the `login_key` header when present and does not depend on `/Login`, `moquiSessionToken`, or browser session-cookie bootstrap.
+- `logout#Session` revokes the matching `moqui.security.UserLoginKey` and terminates the authenticated session.
 
 ### `facade.SettingsFacadeServices`
 - `list#EnumOptions`
@@ -138,7 +134,7 @@ Payload keys vary by service (`llmSettings`, `servers`, `authConfigs`, `schemas`
 }
 ```
 
-Persistent login bootstrap example:
+Stateless session check example:
 
 ```json
 {
@@ -149,7 +145,7 @@ Persistent login bootstrap example:
 }
 ```
 
-Expected success shape after session restoration:
+Expected success shape:
 
 ```json
 {
@@ -169,6 +165,29 @@ Expected success shape after session restoration:
       "customerScopeId": "EXAMPLE_USER",
       "isSuperAdmin": false
     }
+  }
+}
+```
+
+Login response example with explicit auth token:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 17100004,
+  "result": {
+    "ok": true,
+    "messages": [],
+    "errors": [],
+    "authenticated": true,
+    "sessionInfo": {
+      "userId": "EXAMPLE_USER",
+      "username": "pilot.user"
+    },
+    "authToken": "plain-login-key-value",
+    "authTokenType": "LOGIN_KEY",
+    "authTokenHeaderName": "login_key",
+    "authTokenExpiresInSeconds": 518400
   }
 }
 ```

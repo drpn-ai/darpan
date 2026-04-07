@@ -377,9 +377,13 @@ class ReconciliationServices {
     private static String normalizeJsonIdExpr(String expr) {
         def raw = normalize(expr)
         if (!raw) return "\$.id"
-        if (raw.startsWith("\$")) return raw
-        if (raw.contains("[") || raw.contains(".")) return raw.startsWith("\$.") ? raw : "\$." + raw
-        return "\$[*].${raw}"
+        String normalized = raw
+                .replaceAll(/\[(\d+)\]/, "[*]")
+                .replace(".[*]", "[*]")
+        if (normalized.startsWith("\$")) return normalized
+        if (normalized.startsWith("[")) return '$' + normalized
+        if (normalized.contains("[") || normalized.contains(".")) return '$.' + normalized
+        return "\$[*].${normalized}"
     }
 
     private static Map convertJsonPathToSpark(String jsonPath) {

@@ -59,4 +59,10 @@ class PilotMappingSupportTests {
         assertFalse(PilotMappingSupport.isResolvableJsonIdExpression("order_id", NESTED_SCHEMA))
         assertFalse(PilotMappingSupport.isResolvableJsonIdExpression("\$.data.orders.edges[*].node.order_id", NESTED_SCHEMA))
     }
+
+    @Test
+    void resolvesWizardDisplayPathsAgainstNestedSchema() {
+        assertTrue(PilotMappingSupport.isResolvableJsonIdExpression("data.orders.edges.[0].node.legacyResourceId", NESTED_SCHEMA))
+        assertTrue(PilotMappingSupport.isResolvableJsonIdExpression("[0].data.orders.edges.[0].node.id", NESTED_SCHEMA))
+    }
 }

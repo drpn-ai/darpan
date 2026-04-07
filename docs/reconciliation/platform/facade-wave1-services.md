@@ -101,6 +101,7 @@ Shared-tenant rule:
 Pilot release contract notes:
 
 - `create#PilotMapping` accepts two saved schema IDs plus selected field paths and persists a JSON-backed pilot mapping using `ReconciliationMapping` and `ReconciliationMappingMember`.
+- `create#PilotMapping` normalizes schema-flattener field paths into pilot-safe JSON ID expressions so newly-created mappings remain visible in `list#PilotMappings` and executable by the mapping-backed run flow.
 - The active pilot remains mapping-based for this release. The facade contract uses `reconciliationMappingId` rather than `ruleSetId`.
 - `run#PilotGenericDiff` is JSON-RPC friendly for `darpan-ui`; it accepts `file1Name`/`file1Text` and `file2Name`/`file2Text` instead of raw multipart `FileItem` uploads.
 - The underlying reconciliation engine still writes a scoped JSON diff file under `runtime://tmp/reconciliation/generic/**`.
@@ -110,6 +111,7 @@ Shared-tenant rule:
 
 - Mapping configuration is readable by authenticated pilot users so they can choose an allowed reconciliation pair.
 - `create#PilotMapping` lets authenticated pilot users create a new JSON-backed mapping from schemas they can access through the facade.
+- `list#PilotMappings` tolerates legacy display-format JSON field paths already saved by the wizard so existing mappings are not hidden from the dashboard.
 - Generated output storage remains customer-scoped for non-admin users through `PilotAccessSupport.resolveGenericOutputLocation(ec)`.
 - Super-admin users can list and retrieve outputs across the shared tenant because they resolve to the unscoped generic output directory.
 

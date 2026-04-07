@@ -38,14 +38,14 @@ class PilotMappingSupport {
 
         String propertyName = extractJsonPropertyName(idFieldExpression)
         if (!propertyName || !isResolvableJsonIdExpression(idFieldExpression, schemaText)) {
-            issues.add("${systemLabel} id field '${normalizeBaseIdFieldExpression(idFieldExpression)}' is not present in schema '${schemaFileName}'.")
+            issues.add("${systemLabel} id field '${normalizePilotJsonIdExpression(idFieldExpression) ?: normalizeBaseIdFieldExpression(idFieldExpression)}' is not present in schema '${schemaFileName}'.")
         }
 
         return issues
     }
 
     static boolean isResolvableJsonIdExpression(String idFieldExpression, String schemaText) {
-        String normalizedExpression = normalizeBaseIdFieldExpression(idFieldExpression)
+        String normalizedExpression = normalizePilotJsonIdExpression(idFieldExpression)
         if (!normalizedExpression || !schemaText?.trim()) return false
 
         def schemaDocument = new JsonSlurper().parseText(schemaText)
@@ -66,8 +66,34 @@ class PilotMappingSupport {
         return separatorIndex >= 0 ? normalize(normalized.substring(0, separatorIndex)) : normalized
     }
 
-    protected static String extractJsonPropertyName(String rawExpression) {
+    static String normalizePilotJsonIdExpression(String rawExpression) {
         String normalized = normalizeBaseIdFieldExpression(rawExpression)
+        if (!normalized) return null
+
+        String normalizedArraySegments = normalized
+                .replaceAll(/\[(\d+)\]/, "[*]")
+                .replace(".[*]", "[*]")
+        if (normalizedArraySegments.startsWith('$')) return normalizedArraySegments
+        if (!normalizedArraySegments.contains(".") && !normalizedArraySegments.contains("[")) return normalizedArraySegments
+
+        List<String> segments = normalizedArraySegments.tokenize(".")
+                .collect { segment -> segment?.trim() }
+                .findAll { segment -> segment }
+        if (segments.isEmpty()) return normalizedArraySegments
+
+        StringBuilder builder = new StringBuilder("\$")
+        segments.each { String segment ->
+            if (segment.startsWith("[")) {
+                builder.append(segment)
+            } else {
+                builder.append(".").append(segment)
+            }
+        }
+        return builder.toString()
+    }
+
+    protected static String extractJsonPropertyName(String rawExpression) {
+        String normalized = normalizePilotJsonIdExpression(rawExpression)
         if (!normalized) return null
         if (!normalized.startsWith('$')) return normalized
 
@@ -81,7 +107,7 @@ class PilotMappingSupport {
     }
 
     protected static List<String> tokenizeJsonPath(String rawExpression) {
-        String normalized = normalizeBaseIdFieldExpression(rawExpression)
+        String normalized = normalizePilotJsonIdExpression(rawExpression)
         if (!normalized?.startsWith('$')) return []
 
         String path = normalized.substring(1).trim()

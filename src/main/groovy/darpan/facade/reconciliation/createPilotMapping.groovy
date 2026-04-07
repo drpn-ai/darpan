@@ -1,11 +1,12 @@
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.PilotAccessSupport
+import darpan.facade.reconciliation.PilotMappingSupport
 
 String mappingNameValue = FacadeSupport.normalize(mappingName)
 String schema1IdValue = FacadeSupport.normalize(schema1Id)
 String schema2IdValue = FacadeSupport.normalize(schema2Id)
-String schema1FieldPathValue = FacadeSupport.normalize(schema1FieldPath)
-String schema2FieldPathValue = FacadeSupport.normalize(schema2FieldPath)
+String schema1FieldPathValue = PilotMappingSupport.normalizePilotJsonIdExpression(schema1FieldPath)
+String schema2FieldPathValue = PilotMappingSupport.normalizePilotJsonIdExpression(schema2FieldPath)
 
 String jsonSchemaEntityName = "darpan.reconciliation.JsonSchema"
 String mappingEntityName = "darpan.mapping.ReconciliationMapping"

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertIterableEquals
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -82,5 +83,50 @@ class PilotReconciliationSupportTests {
         assertEquals(1L, row.onlyInFile1Count)
         assertEquals(3L, row.onlyInFile2Count)
         assertEquals(2048L, row.sizeBytes)
+    }
+
+    @Test
+    void matchesGeneratedOutputDescriptorHonorsMappingIdFilter() {
+        Map<String, Object> descriptor = [
+                fileName               : "gorjana-order-diff.json",
+                reconciliationMappingId: "GorjanaOrderReconciliation-260407095913",
+                mappingName            : "Gorjana Order Reconciliation",
+                file1Label             : "OMS",
+                file2Label             : "SHOPIFY",
+                reconciliationType     : "JSON"
+        ]
+
+        assertTrue(PilotReconciliationSupport.matchesGeneratedOutputDescriptor(
+                descriptor,
+                "GorjanaOrderReconciliation-260407095913",
+                null
+        ))
+        assertFalse(PilotReconciliationSupport.matchesGeneratedOutputDescriptor(
+                descriptor,
+                "GorjanaOrderReconciliation",
+                null
+        ))
+        assertTrue(PilotReconciliationSupport.matchesGeneratedOutputDescriptor(
+                descriptor,
+                "GorjanaOrderReconciliation-260407095913",
+                "shopify"
+        ))
+    }
+
+    @Test
+    void matchesGeneratedOutputDescriptorRejectsUnscopedLegacyOutputWhenMappingIdFilterProvided() {
+        Map<String, Object> descriptor = [
+                fileName           : "legacy-output.csv",
+                reconciliationType : "CSV",
+                mappingName        : "Gorjana Order Reconciliation",
+                reconciliationMappingId: null
+        ]
+
+        assertFalse(PilotReconciliationSupport.matchesGeneratedOutputDescriptor(
+                descriptor,
+                "GorjanaOrderReconciliation-260407095913",
+                null
+        ))
+        assertTrue(PilotReconciliationSupport.matchesGeneratedOutputDescriptor(descriptor, null, "legacy"))
     }
 }

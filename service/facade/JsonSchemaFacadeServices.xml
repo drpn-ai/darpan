@@ -24,6 +24,8 @@
                 <parameter name="jsonSchemaId"/>
                 <parameter name="schemaName"/>
                 <parameter name="description"/>
+                <parameter name="systemEnumId"/>
+                <parameter name="systemLabel"/>
                 <parameter name="statusId"/>
                 <parameter name="createdDate" type="Timestamp"/>
                 <parameter name="lastUpdatedStamp" type="Timestamp"/>
@@ -46,6 +48,8 @@
                 <parameter name="jsonSchemaId"/>
                 <parameter name="schemaName"/>
                 <parameter name="description"/>
+                <parameter name="systemEnumId"/>
+                <parameter name="systemLabel"/>
                 <parameter name="ownerUserId"/>
                 <parameter name="schemaText" allow-html="true"/>
                 <parameter name="statusId"/>
@@ -62,6 +66,7 @@
             <parameter name="jsonSchemaId"/>
             <parameter name="schemaName"/>
             <parameter name="description"/>
+            <parameter name="systemEnumId"/>
             <parameter name="schemaText" required="true" allow-html="true"/>
             <parameter name="overwrite" type="Boolean" default-value="false"/>
         </in-parameters>
@@ -73,6 +78,8 @@
                 <parameter name="jsonSchemaId"/>
                 <parameter name="schemaName"/>
                 <parameter name="description"/>
+                <parameter name="systemEnumId"/>
+                <parameter name="systemLabel"/>
                 <parameter name="ownerUserId"/>
                 <parameter name="statusId"/>
             </parameter>
@@ -135,6 +142,7 @@
             <parameter name="jsonSchemaId"/>
             <parameter name="schemaName"/>
             <parameter name="description"/>
+            <parameter name="systemEnumId"/>
             <parameter name="fieldList" type="List" required="true"/>
         </in-parameters>
         <out-parameters>
@@ -145,6 +153,8 @@
                 <parameter name="jsonSchemaId"/>
                 <parameter name="schemaName"/>
                 <parameter name="filename"/>
+                <parameter name="systemEnumId"/>
+                <parameter name="systemLabel"/>
             </parameter>
         </out-parameters>
     </service>

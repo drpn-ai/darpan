@@ -69,6 +69,7 @@
             <parameter name="jsonSchemaId" type="String"/>
             <parameter name="schemaName" type="String"/>
             <parameter name="description" type="String"/>
+            <parameter name="systemEnumId" type="String"/>
             <parameter name="fieldList" required="true" type="List"/>
         </in-parameters>
         <out-parameters>

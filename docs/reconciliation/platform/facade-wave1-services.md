@@ -85,6 +85,7 @@ Shared-tenant rule:
 Shared-tenant rule:
 
 - JSON schemas created through the facade are stamped with `ownerUserId`.
+- Schema payloads now expose `systemEnumId`/`systemLabel` directly from `DarpanSystemSource`.
 - Super-admin users can access all schema rows.
 - Customer users can only list, load, update, validate against, flatten, and delete schemas whose `ownerUserId` matches the authenticated user.
 - Legacy rows without `ownerUserId` are treated as super-admin only.
@@ -258,9 +259,9 @@ Expected success shape:
       "mappingName": "Order ID",
       "file1Name": "oms-orders.csv",
       "file2Name": "shopify-orders.csv",
-      "file1SystemEnumId": "DarSysOms",
+      "file1SystemEnumId": "OMS",
       "file1SystemLabel": "OMS",
-      "file2SystemEnumId": "DarSysShopify",
+      "file2SystemEnumId": "SHOPIFY",
       "file2SystemLabel": "SHOPIFY",
       "validationErrors": [],
       "processingWarnings": [],

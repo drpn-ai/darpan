@@ -4,7 +4,7 @@
 
     <service verb="login" noun="Session" type="script" allow-remote="true" authenticate="anonymous-all"
             location="component://darpan/src/main/groovy/darpan/facade/auth/loginSession.groovy">
-        <description>Create authenticated session from username/password and issue the pilot persistent login cookie.</description>
+        <description>Create an authenticated session from username/password and return an explicit login-key token for stateless darpan-ui auth.</description>
         <in-parameters>
             <parameter name="username" required="true">
                 <description>Account username used for pilot login.</description>
@@ -28,6 +28,18 @@
             <parameter name="authenticated" type="Boolean">
                 <description>True when the session is authenticated after the login attempt.</description>
             </parameter>
+            <parameter name="authToken" type="String">
+                <description>Explicit login-key token that darpan-ui sends on later requests through the `login_key` header.</description>
+            </parameter>
+            <parameter name="authTokenType" type="String">
+                <description>Token scheme identifier. Current value: `LOGIN_KEY`.</description>
+            </parameter>
+            <parameter name="authTokenHeaderName" type="String">
+                <description>Request header name darpan-ui must send for stateless auth. Current value: `login_key`.</description>
+            </parameter>
+            <parameter name="authTokenExpiresInSeconds" type="Integer">
+                <description>Approximate token lifetime in seconds, derived from the Moqui login-key expiry.</description>
+            </parameter>
             <parameter name="sessionInfo">
                 <description>Authenticated session metadata returned to darpan-ui.</description>
                 <parameter name="userId" type="String"/>
@@ -43,13 +55,13 @@
 
     <service verb="get" noun="SessionInfo" type="script" allow-remote="true" authenticate="anonymous-all"
             location="component://darpan/src/main/groovy/darpan/facade/auth/getSessionInfo.groovy">
-        <description>Return session metadata for darpan-ui route guards, restoring the session from a persistent login cookie when possible.</description>
+        <description>Return session metadata for darpan-ui route guards, authenticating the request from the explicit `login_key` header when present.</description>
         <out-parameters>
             <parameter name="ok" type="Boolean">
                 <description>True when the session info lookup completed without facade errors.</description>
             </parameter>
             <parameter name="messages">
-                <description>Informational messages emitted during session bootstrap.</description>
+                <description>Informational messages emitted during session-info lookup.</description>
                 <parameter name="message"/>
             </parameter>
             <parameter name="errors">
@@ -74,7 +86,7 @@
 
     <service verb="logout" noun="Session" type="script" allow-remote="true" authenticate="anonymous-all"
             location="component://darpan/src/main/groovy/darpan/facade/auth/logoutSession.groovy">
-        <description>Clear the pilot persistent login cookie and terminate the current authenticated session when present.</description>
+        <description>Revoke the explicit login-key token from the current request and terminate any active authenticated session.</description>
         <out-parameters>
             <parameter name="ok" type="Boolean">
                 <description>True when logout cleanup completed without facade errors.</description>
@@ -89,6 +101,9 @@
             </parameter>
             <parameter name="authenticated" type="Boolean">
                 <description>Always false after logout cleanup finishes.</description>
+            </parameter>
+            <parameter name="authTokenRevoked" type="Boolean">
+                <description>True when logout removed the matching `UserLoginKey` record for the supplied auth token.</description>
             </parameter>
         </out-parameters>
     </service>

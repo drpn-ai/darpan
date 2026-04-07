@@ -2,13 +2,9 @@ package darpan.facade.auth
 
 import darpan.facade.common.PilotAccessSupport
 
-import java.sql.Timestamp
-
 class AuthSessionSupport {
-    static final String PERSISTENT_LOGIN_COOKIE_NAME = "darpan_pilot_login_key"
-    static final String COOKIE_PATH = "/"
-    static final String COOKIE_SAME_SITE = "Lax"
-    static final String EXPIRED_COOKIE_DATE = "Thu, 01 Jan 1970 00:00:00 GMT"
+    static final String AUTH_TOKEN_HEADER_NAME = "login_key"
+    static final String AUTH_TOKEN_TYPE_LOGIN_KEY = "LOGIN_KEY"
 
     static boolean isAuthenticated(def ec) {
         String userId = ec?.user?.userId?.toString()?.trim()
@@ -26,18 +22,41 @@ class AuthSessionSupport {
         return sessionInfo
     }
 
-    static String issuePersistentLogin(def ec) {
-        String loginKey = ec?.user?.getLoginKey()?.toString()?.trim()
-        if (!loginKey) return null
-        writePersistentLoginCookie(ec, loginKey)
-        return loginKey
+    static String issueAuthToken(def ec) {
+        return normalizeTokenValue(ec?.user?.getLoginKey())
     }
 
-    static boolean revokePersistentLogin(def ec) {
-        String loginKey = readPersistentLoginCookie(ec)
-        if (!loginKey) return false
+    static Map<String, Object> buildAuthTokenContract(def ec, String authToken) {
+        String normalizedToken = normalizeTokenValue(authToken)
+        if (!normalizedToken) return [:]
 
-        String hashedKey = ec?.factory?.getSimpleHash(loginKey, "", ec?.factory?.getLoginKeyHashType(), false)
+        return [
+                authToken                : normalizedToken,
+                authTokenType            : AUTH_TOKEN_TYPE_LOGIN_KEY,
+                authTokenHeaderName      : AUTH_TOKEN_HEADER_NAME,
+                authTokenExpiresInSeconds: resolveAuthTokenExpiresInSeconds(ec),
+        ]
+    }
+
+    static String readRequestAuthToken(def ec) {
+        def request = ec?.web?.request
+        if (request == null) return null
+
+        String headerToken = normalizeTokenValue(request.getHeader(AUTH_TOKEN_HEADER_NAME) ?: request.getHeader("api_key"))
+        if (headerToken) return headerToken
+
+        try {
+            return normalizeTokenValue(request.getParameter(AUTH_TOKEN_HEADER_NAME) ?: request.getParameter("api_key"))
+        } catch (Exception ignored) {
+            return null
+        }
+    }
+
+    static boolean revokeAuthToken(def ec, String authToken = null) {
+        String normalizedToken = normalizeTokenValue(authToken) ?: readRequestAuthToken(ec)
+        if (!normalizedToken) return false
+
+        String hashedKey = ec?.factory?.getSimpleHash(normalizedToken, "", ec?.factory?.getLoginKeyHashType(), false)
         if (!hashedKey) return false
 
         def deleted = ec?.entity?.find("moqui.security.UserLoginKey")
@@ -47,56 +66,7 @@ class AuthSessionSupport {
         return ((deleted ?: 0) as int) > 0
     }
 
-    static boolean restoreAuthenticatedSession(def ec) {
-        if (isAuthenticated(ec)) return true
-
-        String loginKey = readPersistentLoginCookie(ec)
-        if (!loginKey) return false
-
-        def userLoginKey = findActiveUserLoginKey(ec, loginKey)
-        if (userLoginKey == null) {
-            clearPersistentLoginCookie(ec)
-            return false
-        }
-
-        def userAccount = ec?.entity?.find("moqui.security.UserAccount")
-                ?.condition("userId", userLoginKey.userId)
-                ?.disableAuthz()
-                ?.one()
-        String username = userAccount?.username?.toString()?.trim()
-        if (!username) {
-            clearPersistentLoginCookie(ec)
-            return false
-        }
-
-        boolean restored = ec?.user?.internalLoginUser(username) as boolean
-        if (!restored) clearPersistentLoginCookie(ec)
-        return restored
-    }
-
-    static void writePersistentLoginCookie(def ec, String loginKey) {
-        if (!loginKey?.trim()) return
-        addCookieHeader(ec, loginKey.trim(), resolveCookieMaxAgeSeconds(ec), null)
-    }
-
-    static void clearPersistentLoginCookie(def ec) {
-        addCookieHeader(ec, "", 0, EXPIRED_COOKIE_DATE)
-    }
-
-    static String readPersistentLoginCookie(def ec) {
-        def cookies = ec?.web?.request?.getCookies()
-        if (cookies == null) return null
-
-        for (def cookie : cookies) {
-            if (cookie?.name == PERSISTENT_LOGIN_COOKIE_NAME) {
-                String value = cookie.value?.toString()?.trim()
-                if (value) return value
-            }
-        }
-        return null
-    }
-
-    static Integer resolveCookieMaxAgeSeconds(def ec) {
+    static Integer resolveAuthTokenExpiresInSeconds(def ec) {
         float expireHours = 144.0f
         try {
             def configured = ec?.factory?.getLoginKeyExpireHours()
@@ -111,53 +81,11 @@ class AuthSessionSupport {
         return Math.max(1, Math.round(expireHours * 60.0f * 60.0f))
     }
 
-    static boolean isSecureRequest(def ec) {
-        def request = ec?.web?.request
-        if (request == null) return false
-
-        String forwardedProto = request.getHeader("X-Forwarded-Proto")?.toString()?.trim()
-        String forwardedSsl = request.getHeader("X-Forwarded-Ssl")?.toString()?.trim()
-        String frontEndHttps = request.getHeader("Front-End-Https")?.toString()?.trim()
-
-        return request.isSecure() ||
-                "https".equalsIgnoreCase(forwardedProto) ||
-                "on".equalsIgnoreCase(forwardedSsl) ||
-                "on".equalsIgnoreCase(frontEndHttps)
-    }
-
-    protected static def findActiveUserLoginKey(def ec, String loginKey) {
-        String normalizedKey = loginKey?.toString()?.trim()
-        if (!normalizedKey) return null
-
-        String hashedKey = ec?.factory?.getSimpleHash(normalizedKey, "", ec?.factory?.getLoginKeyHashType(), false)
-        if (!hashedKey) return null
-
-        def userLoginKey = ec?.entity?.find("moqui.security.UserLoginKey")
-                ?.condition("loginKey", hashedKey)
-                ?.disableAuthz()
-                ?.one()
-        if (userLoginKey == null) return null
-
-        Timestamp thruDate = userLoginKey.getTimestamp("thruDate")
-        Timestamp now = new Timestamp(System.currentTimeMillis())
-        if (thruDate != null && now.after(thruDate)) return null
-
-        return userLoginKey
-    }
-
-    protected static void addCookieHeader(def ec, String value, Integer maxAgeSeconds, String expiresAt) {
-        def response = ec?.web?.response
-        if (response == null) return
-
-        StringBuilder cookieHeader = new StringBuilder()
-        cookieHeader.append(PERSISTENT_LOGIN_COOKIE_NAME).append("=").append(value ?: "")
-        cookieHeader.append("; Max-Age=").append(Math.max(maxAgeSeconds ?: 0, 0))
-        if (expiresAt) cookieHeader.append("; Expires=").append(expiresAt)
-        cookieHeader.append("; Path=").append(COOKIE_PATH)
-        cookieHeader.append("; HttpOnly")
-        cookieHeader.append("; SameSite=").append(COOKIE_SAME_SITE)
-        if (isSecureRequest(ec)) cookieHeader.append("; Secure")
-
-        response.addHeader("Set-Cookie", cookieHeader.toString())
+    protected static String normalizeTokenValue(Object value) {
+        String normalized = value?.toString()?.trim()
+        if (!normalized || "null".equalsIgnoreCase(normalized) || "undefined".equalsIgnoreCase(normalized)) {
+            return null
+        }
+        return normalized
     }
 }

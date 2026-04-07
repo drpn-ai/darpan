@@ -1,21 +1,44 @@
-import darpan.facade.auth.AuthSessionSupport
 import darpan.facade.common.FacadeSupport
 
-authTokenRevoked = AuthSessionSupport.revokeAuthToken(ec)
+def request = ec?.web?.request
+def normalizeTokenValue = { Object value ->
+    String normalized = FacadeSupport.normalize(value)
+    if (!normalized || "null".equalsIgnoreCase(normalized) || "undefined".equalsIgnoreCase(normalized)) return null
+    return normalized
+}
 
-if (AuthSessionSupport.isAuthenticated(ec)) {
-    ec.user.logoutUser()
-} else {
-    def session = ec.web?.request?.getSession(false)
-    if (session != null) {
-        session.invalidate()
-        ec.web.request.getSession(true)
+String requestToken = normalizeTokenValue(request?.getHeader("login_key") ?: request?.getHeader("api_key"))
+if (!requestToken) {
+    try {
+        requestToken = normalizeTokenValue(request?.getParameter("login_key") ?: request?.getParameter("api_key"))
+    } catch (Exception ignored) {
+        requestToken = null
     }
 }
 
-authState = AuthSessionSupport.AUTH_STATE_UNAUTHENTICATED
-authSource = AuthSessionSupport.AUTH_SOURCE_NONE
-persistentLoginRevoked = revokedPersistentLogin
+authTokenRevoked = false
+if (requestToken) {
+    String hashedKey = ec?.factory?.getSimpleHash(requestToken, "", ec?.factory?.getLoginKeyHashType(), false)
+    if (hashedKey) {
+        def deleted = ec?.entity?.find("moqui.security.UserLoginKey")
+                ?.condition("loginKey", hashedKey)
+                ?.disableAuthz()
+                ?.deleteAll()
+        authTokenRevoked = ((deleted ?: 0) as int) > 0
+    }
+}
+
+if (FacadeSupport.normalize(ec?.user?.userId) != null) {
+    ec.user.logoutUser()
+} else {
+    def session = request?.getSession(false)
+    if (session != null) {
+        session.invalidate()
+        request.getSession(true)
+    }
+}
+
+authenticated = false
 
 Map envelope = FacadeSupport.envelope(ec)
 ok = envelope.ok

@@ -91,6 +91,7 @@ Shared-tenant rule:
 - Legacy rows without `ownerUserId` are treated as super-admin only.
 
 ### `facade.ReconciliationFacadeServices`
+- `create#PilotMapping`
 - `list#PilotMappings`
 - `run#PilotGenericDiff`
 - `list#PilotGeneratedOutputs`
@@ -99,6 +100,7 @@ Shared-tenant rule:
 
 Pilot release contract notes:
 
+- `create#PilotMapping` accepts two saved schema IDs plus selected field paths and persists a JSON-backed pilot mapping using `ReconciliationMapping` and `ReconciliationMappingMember`.
 - The active pilot remains mapping-based for this release. The facade contract uses `reconciliationMappingId` rather than `ruleSetId`.
 - `run#PilotGenericDiff` is JSON-RPC friendly for `darpan-ui`; it accepts `file1Name`/`file1Text` and `file2Name`/`file2Text` instead of raw multipart `FileItem` uploads.
 - The underlying reconciliation engine still writes a scoped JSON diff file under `runtime://tmp/reconciliation/generic/**`.
@@ -107,6 +109,7 @@ Pilot release contract notes:
 Shared-tenant rule:
 
 - Mapping configuration is readable by authenticated pilot users so they can choose an allowed reconciliation pair.
+- `create#PilotMapping` lets authenticated pilot users create a new JSON-backed mapping from schemas they can access through the facade.
 - Generated output storage remains customer-scoped for non-admin users through `PilotAccessSupport.resolveGenericOutputLocation(ec)`.
 - Super-admin users can list and retrieve outputs across the shared tenant because they resolve to the unscoped generic output directory.
 

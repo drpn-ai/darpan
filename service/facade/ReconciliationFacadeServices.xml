@@ -2,6 +2,33 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
+    <service verb="create" noun="PilotMapping" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/createPilotMapping.groovy">
+        <description>Create a pilot reconciliation mapping from two saved JSON schemas and selected id field paths.</description>
+        <in-parameters>
+            <parameter name="mappingName" required="true"/>
+            <parameter name="schema1Id" required="true"/>
+            <parameter name="schema2Id" required="true"/>
+            <parameter name="schema1FieldPath" required="true"/>
+            <parameter name="schema2FieldPath" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="savedMapping">
+                <parameter name="reconciliationMappingId"/>
+                <parameter name="mappingName"/>
+                <parameter name="file1SystemEnumId"/>
+                <parameter name="file2SystemEnumId"/>
+                <parameter name="file1SchemaName"/>
+                <parameter name="file2SchemaName"/>
+                <parameter name="file1FieldPath"/>
+                <parameter name="file2FieldPath"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
     <service verb="list" noun="PilotMappings" type="script" allow-remote="true" authenticate="true"
             location="component://darpan/src/main/groovy/darpan/facade/reconciliation/listPilotMappings.groovy">
         <description>List pilot-safe mapping options and their system pairs for darpan-ui generic diff flow.</description>

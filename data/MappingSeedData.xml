@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <entity-facade-xml type="seed">
     <moqui.basic.EnumerationType enumTypeId="DarpanSystemSource" description="Darpan System Source"/>
-    <moqui.basic.Enumeration enumId="DarSysOms" enumTypeId="DarpanSystemSource" enumCode="OMS" description="OMS" sequenceNum="1"/>
-    <moqui.basic.Enumeration enumId="DarSysShopify" enumTypeId="DarpanSystemSource" enumCode="SHOPIFY" description="Shopify" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="OMS" enumTypeId="DarpanSystemSource" enumCode="OMS" description="OMS" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="SHOPIFY" enumTypeId="DarpanSystemSource" enumCode="SHOPIFY" description="Shopify" sequenceNum="2"/>
 
     <moqui.basic.EnumerationType enumTypeId="DarpanFileType" description="File Types for Reconciliation"/>
     <moqui.basic.Enumeration enumId="DftCsv" enumTypeId="DarpanFileType" enumCode="CSV" description="CSV" sequenceNum="1"/>
@@ -10,9 +10,9 @@
 
     <darpan.mapping.ReconciliationMapping reconciliationMappingId="OrderIdMap" mappingName="Order ID" description="Order ID field mapping"/>
     <darpan.mapping.ReconciliationMappingMember mappingMemberId="OrderIdMapOms"
-            reconciliationMappingId="OrderIdMap" systemEnumId="DarSysOms" 
+            reconciliationMappingId="OrderIdMap" systemEnumId="OMS" 
             fileTypeEnumId="DftCsv" idFieldExpression="order_id"/>
     <darpan.mapping.ReconciliationMappingMember mappingMemberId="OrderIdMapShopify"
-            reconciliationMappingId="OrderIdMap" systemEnumId="DarSysShopify" 
+            reconciliationMappingId="OrderIdMap" systemEnumId="SHOPIFY" 
             fileTypeEnumId="DftCsv" idFieldExpression="order_id"/>
 </entity-facade-xml>

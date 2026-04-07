@@ -4,6 +4,12 @@ import org.slf4j.LoggerFactory
 
 def logger = LoggerFactory.getLogger("darpan.jsonschema.SaveRefinedSchema")
 Set<String> allowedTypes = ["string", "integer", "number", "boolean", "object", "array"] as Set<String>
+String systemEnumTypeId = "DarpanSystemSource"
+
+String jsonSchemaEntityName = "darpan.reconciliation.JsonSchema"
+String jsonSchemaGroupName = ec.entity.getEntityGroupName(jsonSchemaEntityName) ?: "default"
+def jsonSchemaDatasourceFactory = ec.entity.getDatasourceFactory(jsonSchemaGroupName)
+jsonSchemaDatasourceFactory?.checkAndAddTable(jsonSchemaEntityName)
 
 def normalizeString = { Object value ->
     String text = value?.toString()?.trim()
@@ -15,6 +21,17 @@ def normalizeBool = { Object value ->
     if (value instanceof Boolean) return (Boolean) value
     String text = value.toString().trim().toLowerCase()
     return ["true", "1", "y", "yes", "on"].contains(text)
+}
+
+def findSystemEnum = { Object rawSystemId, boolean useCache = true ->
+    String normalized = normalizeString(rawSystemId)
+    if (!normalized) return null
+
+    return ec.entity.find("moqui.basic.Enumeration")
+        .condition("enumTypeId", systemEnumTypeId)
+        .condition("enumId", normalized)
+        .useCache(useCache)
+        .one()
 }
 
 def parsePathTokens = { String fieldPath ->
@@ -146,6 +163,16 @@ fieldList.eachWithIndex { Object rawField, int index ->
 
 if (ec.message.hasError()) return
 
+String requestedSystemEnumId = normalizeString(systemEnumId)
+boolean hasSystemEnumIdInput = context.containsKey("systemEnumId")
+String resolvedSystemEnumId = hasSystemEnumIdInput ?
+        requestedSystemEnumId :
+        null
+if (hasSystemEnumIdInput && requestedSystemEnumId && !findSystemEnum(requestedSystemEnumId, false)) {
+    ec.message.addError("systemEnumId '${requestedSystemEnumId}' is not a valid reconciliation system.")
+    return
+}
+
 def existingSchema = null
 if (jsonSchemaId) {
     existingSchema = ec.entity.find("darpan.reconciliation.JsonSchema")
@@ -241,6 +268,7 @@ if (existingSchema) {
     existingSchema.schemaName = finalSchemaName
     existingSchema.schemaText = schemaJson
     if (hasDescriptionInput) existingSchema.description = descriptionText
+    if (hasSystemEnumIdInput) existingSchema.systemEnumId = resolvedSystemEnumId
     existingSchema.lastUpdatedStamp = ec.user.nowTimestamp
     existingSchema.update()
     jsonSchemaId = existingSchema.jsonSchemaId
@@ -249,6 +277,7 @@ if (existingSchema) {
     newSchema.schemaName = finalSchemaName
     newSchema.schemaText = schemaJson
     newSchema.description = descriptionText
+    newSchema.systemEnumId = resolvedSystemEnumId
     newSchema.statusId = "Active"
     newSchema.createdDate = ec.user.nowTimestamp
     newSchema.setSequencedIdPrimary()

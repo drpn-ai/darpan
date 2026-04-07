@@ -1,8 +1,8 @@
-import darpan.facade.auth.AuthSessionSupport
 import darpan.facade.common.FacadeSupport
+import darpan.facade.common.PilotAccessSupport
 
-authenticated = AuthSessionSupport.isAuthenticated(ec)
-if (authenticated) sessionInfo = AuthSessionSupport.buildSessionInfo(ec)
+authenticated = FacadeSupport.normalize(ec?.user?.userId) != null
+if (authenticated) sessionInfo = PilotAccessSupport.buildSessionInfo(ec)
 
 Map envelope = FacadeSupport.envelope(ec)
 ok = envelope.ok

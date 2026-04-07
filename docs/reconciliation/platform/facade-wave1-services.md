@@ -11,6 +11,7 @@ This document defines backend facade APIs used by `darpan-ui` during the pilot r
 - `facade.AuthFacadeServices.logout#Session` uses `authenticate="anonymous-all"` so darpan-ui can revoke the current token even after local auth state drift.
 - Remaining services use `authenticate="true"`.
 - Frontend calls are expected through authenticated remote service invocation using the `login_key` request header after login.
+- These facade auth methods are thin adapters over Moqui's built-in login-key issuance and request authentication rather than a separate Darpan auth state machine.
 
 ## Pilot Shared-Tenant Access Scope
 
@@ -52,6 +53,7 @@ Without this, authenticated users can still get errors like:
 - Token lifetime is aligned to `user-facade/login-key@expire-hours` from Moqui config. The default remains 144 hours, exposed as `authTokenExpiresInSeconds`.
 - `get#SessionInfo` authenticates from the `login_key` header when present and does not depend on `/Login`, `moquiSessionToken`, or browser session-cookie bootstrap.
 - `logout#Session` revokes the matching `moqui.security.UserLoginKey` and terminates the authenticated session.
+- The UI contract is intentionally small: `authenticated`, `sessionInfo`, and the explicit token fields returned from `login#Session`.
 
 ### `facade.SettingsFacadeServices`
 - `list#EnumOptions`

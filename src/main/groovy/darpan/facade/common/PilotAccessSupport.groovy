@@ -45,6 +45,17 @@ class PilotAccessSupport {
         sessionInfo.putAll(buildAccessScope(ec))
     }
 
+    static Map<String, Object> buildSessionInfo(def ec) {
+        Map<String, Object> sessionInfo = [
+            userId: ec?.user?.userId,
+            username: ec?.user?.username,
+            locale: ec?.l10n?.locale?.toLanguageTag(),
+            timeZone: ec?.user?.userAccount?.timeZone ?: ec?.l10n?.timeZone,
+        ]
+        applyScopeToSessionInfo(ec, sessionInfo)
+        return sessionInfo
+    }
+
     static void applyOwnerFilter(def finder, def ec, String ownerField = "ownerUserId") {
         if (finder == null || isSuperAdmin(ec)) return
         String userId = currentUserId(ec)

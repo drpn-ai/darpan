@@ -25,8 +25,26 @@
                 <description>Validation or authentication errors for the login attempt.</description>
                 <parameter name="error"/>
             </parameter>
-            <parameter name="authenticated" type="Boolean">
-                <description>True when the session is authenticated after the login attempt.</description>
+            <parameter name="authState" type="String">
+                <description>`AUTHENTICATED` or `UNAUTHENTICATED` to make the frontend contract explicit.</description>
+            </parameter>
+            <parameter name="authSource" type="String">
+                <description>How the current auth state was established (`PASSWORD_LOGIN` on successful login, otherwise `NONE`).</description>
+            </parameter>
+            <parameter name="persistentLoginIssued" type="Boolean">
+                <description>True when the login attempt issued the pilot persistent login cookie.</description>
+            </parameter>
+            <parameter name="authToken" type="String">
+                <description>Explicit login-key token that darpan-ui sends on later requests through the `login_key` header.</description>
+            </parameter>
+            <parameter name="authTokenType" type="String">
+                <description>Token scheme identifier. Current value: `LOGIN_KEY`.</description>
+            </parameter>
+            <parameter name="authTokenHeaderName" type="String">
+                <description>Request header name darpan-ui must send for stateless auth. Current value: `login_key`.</description>
+            </parameter>
+            <parameter name="authTokenExpiresInSeconds" type="Integer">
+                <description>Approximate token lifetime in seconds, derived from the Moqui login-key expiry.</description>
             </parameter>
             <parameter name="authToken" type="String">
                 <description>Explicit login-key token that darpan-ui sends on later requests through the `login_key` header.</description>
@@ -68,8 +86,14 @@
                 <description>Errors returned while resolving session state.</description>
                 <parameter name="error"/>
             </parameter>
-            <parameter name="authenticated" type="Boolean">
-                <description>True when the current request resolves to an authenticated session.</description>
+            <parameter name="authState" type="String">
+                <description>`AUTHENTICATED` or `UNAUTHENTICATED` to make the frontend contract explicit.</description>
+            </parameter>
+            <parameter name="authSource" type="String">
+                <description>How the authenticated session was resolved (`ACTIVE_SESSION`, `PERSISTENT_LOGIN`, or `NONE`).</description>
+            </parameter>
+            <parameter name="sessionRestored" type="Boolean">
+                <description>True when the current authenticated session was restored from the pilot persistent login cookie.</description>
             </parameter>
             <parameter name="sessionInfo">
                 <description>Authenticated session metadata returned to darpan-ui.</description>
@@ -99,8 +123,17 @@
                 <description>Errors returned while clearing session state.</description>
                 <parameter name="error"/>
             </parameter>
-            <parameter name="authenticated" type="Boolean">
-                <description>Always false after logout cleanup finishes.</description>
+            <parameter name="authState" type="String">
+                <description>Always `UNAUTHENTICATED` after logout cleanup finishes.</description>
+            </parameter>
+            <parameter name="authSource" type="String">
+                <description>Always `NONE` after logout cleanup finishes.</description>
+            </parameter>
+            <parameter name="persistentLoginRevoked" type="Boolean">
+                <description>True when logout cleanup revoked the matching persistent login key.</description>
+            </parameter>
+            <parameter name="authTokenRevoked" type="Boolean">
+                <description>True when logout removed the matching `UserLoginKey` record for the supplied auth token.</description>
             </parameter>
             <parameter name="authTokenRevoked" type="Boolean">
                 <description>True when logout removed the matching `UserLoginKey` record for the supplied auth token.</description>

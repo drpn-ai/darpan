@@ -8,6 +8,11 @@ sed -i 's/name="entity_ds_user" value="moqui"/name="entity_ds_user" value="'$Moq
 sed -i 's/name="entity_ds_password" value="moqui"/name="entity_ds_password" value="'$Moqui_DB_PASSWORD'"/g' $CONF_FILE
 sed -i 's/name="entity_ds_database" value="moqui"/name="entity_ds_database" value="'$Moqui_DB_NAME'"/g' $CONF_FILE
 
+WEBAPP_ALLOW_ORIGINS_OVERRIDE="${Moqui_WEBAPP_ALLOW_ORIGINS:-${WEBAPP_ALLOW_ORIGINS:-}}"
+if [ -n "$WEBAPP_ALLOW_ORIGINS_OVERRIDE" ]; then
+  sed -i 's|name="webapp_allow_origins" value="[^"]*"|name="webapp_allow_origins" value="'"$WEBAPP_ALLOW_ORIGINS_OVERRIDE"'"|g' "$CONF_FILE"
+fi
+
 #Timezone Setting
 sed -i 's|name="default_time_zone" value=""|name="default_time_zone" value="'$TIME_ZONE'"|g' $CONF_FILE
 sed -i 's|name="database_time_zone" value=""|name="database_time_zone" value="'$TIME_ZONE'"|g' $CONF_FILE

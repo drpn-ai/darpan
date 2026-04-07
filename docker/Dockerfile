@@ -22,6 +22,7 @@ WORKDIR /moqui-framework/runtime/component
 RUN git clone --depth 1 -b "build-gradle-file" https://github.com/dixitdeepak/moqui-atomikos.git
 RUN git clone --depth 1 -b "main" https://github.com/hotwax/moqui-sftp.git
 RUN git clone --depth 1 -b "main" https://github.com/hotwax/darpan.git
+RUN git clone --depth 1 -b "main" https://github.com/toaditi/netsuite-darpan.git
 
 RUN rm -rf /root/.netrc
 
@@ -29,6 +30,7 @@ WORKDIR /moqui-framework
 
 #Copy production configuration file.
 RUN cp -rf runtime/component/darpan/docker/MoquiProductionConf.xml runtime/conf/
+RUN sed -i 's/__SAME_SITE_LAX__/__SAME_SITE_NONE__/g' framework/src/main/webapp/WEB-INF/web.xml
 RUN git apply runtime/component/darpan/docker/buildGradle.patch
 
 #Create war file.
@@ -51,6 +53,8 @@ ENV Moqui_DB_HOST=
 ENV Moqui_DB_USER=
 ENV Moqui_DB_PASSWORD=
 ENV Moqui_DB_NAME=
+ENV Moqui_WEBAPP_ALLOW_ORIGINS="darpan-uat.hotwax.io,hotwax-darpan-dev.web.app,hotwax-darpan-dev.firebaseapp.com"
+ENV WEBAPP_ALLOW_ORIGINS=
 ENV ELASTICSEARCH_HOST=
 ENV TIME_ZONE=
 

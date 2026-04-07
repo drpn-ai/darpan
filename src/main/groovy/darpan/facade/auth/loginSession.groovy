@@ -35,6 +35,12 @@ if (authenticated) {
     context.authTokenExpiresInSeconds = tokenContract.authTokenExpiresInSeconds
 }
 
+Map authContract = AuthSessionSupport.buildAuthContract(ec, AuthSessionSupport.AUTH_SOURCE_PASSWORD_LOGIN)
+authState = authContract.authState
+authSource = authContract.authSource
+persistentLoginIssued = loginKey != null
+if (authContract.sessionInfo) sessionInfo = authContract.sessionInfo
+
 Map envelope = FacadeSupport.envelope(ec)
 ok = envelope.ok
 messages = envelope.messages

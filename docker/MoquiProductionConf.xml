@@ -1,6 +1,6 @@
 <moqui-conf xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/moqui-conf-3.xsd">
 
-    <default-property name="webapp_allow_origins" value="*"/>
+    <default-property name="webapp_allow_origins" value="darpan-uat.hotwax.io,hotwax-darpan-dev.web.app,hotwax-darpan-dev.firebaseapp.com"/>
     <default-property name="entity_ds_db_conf" value="mysql"/>
     <default-property name="entity_ds_host" value="127.0.0.1"/>
     <default-property name="entity_ds_port" value="3306"/>
@@ -32,5 +32,9 @@
             </inline-jdbc>
         </datasource>
     </entity-facade>
+
+    <component-list>
+        <component name="netsuite-darpan" location="component/netsuite-darpan"/>
+    </component-list>
 
 </moqui-conf>

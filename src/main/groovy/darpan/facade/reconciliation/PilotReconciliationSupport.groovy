@@ -70,6 +70,27 @@ class PilotReconciliationSupport {
         ]
     }
 
+    static boolean matchesGeneratedOutputDescriptor(Map<String, Object> descriptor, String reconciliationMappingId, String search) {
+        String mappingIdFilter = normalize(reconciliationMappingId)
+        String descriptorMappingId = normalize(descriptor?.reconciliationMappingId)
+        if (mappingIdFilter && descriptorMappingId != mappingIdFilter) return false
+
+        String normalizedSearch = normalize(search)?.toLowerCase()
+        if (!normalizedSearch) return true
+
+        return [
+                descriptor?.fileName,
+                descriptor?.reconciliationMappingId,
+                descriptor?.mappingName,
+                descriptor?.file1Label,
+                descriptor?.file2Label,
+                descriptor?.reconciliationType
+        ].any { value ->
+            String normalizedValue = normalize(value)?.toLowerCase()
+            normalizedValue?.contains(normalizedSearch)
+        }
+    }
+
     static String deriveDownloadFileName(String sourceFileName, String requestedFormat) {
         String format = (requestedFormat ?: "").toLowerCase()
         if (!format) return sourceFileName

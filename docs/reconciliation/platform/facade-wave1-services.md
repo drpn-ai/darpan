@@ -104,6 +104,7 @@ Pilot release contract notes:
 - `create#PilotMapping` normalizes schema-flattener field paths into pilot-safe JSON ID expressions so newly-created mappings remain visible in `list#PilotMappings` and executable by the mapping-backed run flow.
 - The active pilot remains mapping-based for this release. The facade contract uses `reconciliationMappingId` rather than `ruleSetId`.
 - `run#PilotGenericDiff` is JSON-RPC friendly for `darpan-ui`; it accepts `file1Name`/`file1Text` and `file2Name`/`file2Text` instead of raw multipart `FileItem` uploads.
+- `list#PilotGeneratedOutputs` accepts optional `reconciliationMappingId` and only returns generated outputs whose stored metadata matches that mapping when the filter is provided.
 - The underlying reconciliation engine still writes a scoped JSON diff file under `runtime://tmp/reconciliation/generic/**`.
 - `get#PilotGeneratedOutput` can return that stored JSON directly or convert it to CSV on demand for the pilot UI download action.
 

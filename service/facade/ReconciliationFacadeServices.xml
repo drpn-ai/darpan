@@ -122,6 +122,7 @@
             location="component://darpan/src/main/groovy/darpan/facade/reconciliation/listPilotGeneratedOutputs.groovy">
         <description>List generated pilot diff outputs within the current user scope.</description>
         <in-parameters>
+            <parameter name="reconciliationMappingId"/>
             <parameter name="query"/>
             <parameter name="pageIndex" type="Integer" default-value="0"/>
             <parameter name="pageSize" type="Integer" default-value="20"/>

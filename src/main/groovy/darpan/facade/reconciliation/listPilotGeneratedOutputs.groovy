@@ -6,6 +6,7 @@ import java.sql.Timestamp
 
 int page = Math.max(0, FacadeSupport.normalizeInt(pageIndex, 0))
 int size = Math.max(1, Math.min(200, FacadeSupport.normalizeInt(pageSize, 20)))
+String mappingId = FacadeSupport.normalize(reconciliationMappingId)
 String search = FacadeSupport.normalize(query)?.toLowerCase()
 
 generatedOutputs = []
@@ -20,8 +21,6 @@ if (outputDir?.exists()) {
             .findAll { File file -> file.isFile() && PilotReconciliationSupport.isSupportedOutputFile(file.name) }
             .sort { File left, File right -> Long.compare(right.lastModified(), left.lastModified()) }
             .each { File file ->
-                if (search && !file.name.toLowerCase().contains(search)) return
-
                 Map outputDocument = [:]
                 if (PilotReconciliationSupport.sourceFormatForFile(file.name) == "json") {
                     try {
@@ -31,12 +30,15 @@ if (outputDir?.exists()) {
                     }
                 }
 
-                rows.add(PilotReconciliationSupport.buildGeneratedOutputDescriptor(
+                Map<String, Object> descriptor = PilotReconciliationSupport.buildGeneratedOutputDescriptor(
                         file.name,
                         outputDocument,
                         file.length(),
                         new Timestamp(file.lastModified())
-                ))
+                )
+
+                if (!PilotReconciliationSupport.matchesGeneratedOutputDescriptor(descriptor, mappingId, search)) return
+                rows.add(descriptor)
             }
 
     int totalCount = rows.size()

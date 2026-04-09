@@ -16,9 +16,6 @@
         <field name="schemaText" type="text-very-long"/>
         <field name="statusId" type="id"/>
         <field name="createdDate" type="date-time"/>
-        <field name="lastUpdatedStamp" type="date-time">
-            <description>Most recent save timestamp for schema text or refined-field edits.</description>
-        </field>
 
         
         <index name="JSON_SCHEMA_NAME" unique="true">

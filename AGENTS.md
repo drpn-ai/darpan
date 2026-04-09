@@ -14,13 +14,14 @@ Component-generic guidance lives here; user-specific preferences are in `/Users/
 
 ## Scope and ownership
 - Keep changes in `runtime/component/darpan/**` unless explicitly requested.
-- Put business logic in `src/**`; expose contracts in `service/*.xml`; keep entity model changes in `entity/*.xml`.
+- Put service contracts and any logic that stays cleanly declarative in `service/*.xml`; use `src/**` only when the logic is materially less clear or maintainable in XML; keep entity model changes in `entity/*.xml`.
 - Use generic, system-neutral naming for entities/services/screens/config.
 
 ## Service and XML conventions
 - Define explicit `in-parameters` and `out-parameters` with type/default/description.
 - Keep XML `default-value` plain (example: `default-value="value"`), not extra-quoted.
-- Keep XML declarative; move non-trivial logic to Groovy/Java in `src/**`.
+- Default to an XML-first implementation for services. Use XML actions or `entity-auto` for validation, orchestration, entity operations, and straightforward branching or transformation when they stay readable.
+- Escalate to Groovy/Java in `src/**` only when the XML-first option becomes materially less clear, maintainable, or reusable.
 - Prefer `component://` and `runtime://` locations over absolute paths.
 - Do not add backward-compatibility aliases in services/contracts unless explicitly requested.
 

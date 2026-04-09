@@ -18,13 +18,13 @@
             <parameter name="file1Name">
                 <description>Optional file name override used when the caller provides text payload instead of FileItem.</description>
             </parameter>
-            <parameter name="file1Text" allow-html="true">
+            <parameter name="file1Text" allow-html="any">
                 <description>Optional UTF-8 file text payload for remote facade callers that cannot send FileItem uploads.</description>
             </parameter>
             <parameter name="file2Name">
                 <description>Optional file name override used when the caller provides text payload instead of FileItem.</description>
             </parameter>
-            <parameter name="file2Text" allow-html="true">
+            <parameter name="file2Text" allow-html="any">
                 <description>Optional UTF-8 file text payload for remote facade callers that cannot send FileItem uploads.</description>
             </parameter>
             

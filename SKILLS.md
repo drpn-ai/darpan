@@ -26,8 +26,8 @@ Guide coding and verifying functionality within the Darpan component, ensuring l
 2. **Repo Boundary**: Keep custom UI/PWA work in `darpan-ui`; in this component, change only backend contracts/services/processing.
 3. **Docs**: Update `docs/**` if behavior changes.
 4. **Logic**:
-    - Thin XML (routing/validation).
-    - Groovy/Java for heavy lifting.
+    - Start XML-first for service orchestration, validation, entity operations, and straightforward transforms that remain readable.
+    - Use Groovy/Java only when the service would become materially less clear, maintainable, or reusable in XML.
     - Spark for large datasets (keep sessions alive).
 5. **Data**: Store inputs in `runtime://tmp/`, schemas in `runtime/schemas/json/`.
 6. **Verify**: Run `./gradlew test` (targeted) or XML validation interactively.

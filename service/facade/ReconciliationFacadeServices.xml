@@ -316,9 +316,9 @@
         <in-parameters>
             <parameter name="reconciliationMappingId" required="true"/>
             <parameter name="file1Name" required="true"/>
-            <parameter name="file1Text" required="true" allow-html="true"/>
+            <parameter name="file1Text" required="true" allow-html="any"/>
             <parameter name="file2Name" required="true"/>
-            <parameter name="file2Text" required="true" allow-html="true"/>
+            <parameter name="file2Text" required="true" allow-html="any"/>
             <parameter name="file1SystemEnumId"/>
             <parameter name="file2SystemEnumId"/>
             <parameter name="hasHeader" type="Boolean" default-value="true"/>

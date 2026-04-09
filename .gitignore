@@ -44,6 +44,7 @@ tmp
 *.bak
 *.swp
 *~.nib
+moqui_logs/
 local.properties
 .settings
 .loadpath

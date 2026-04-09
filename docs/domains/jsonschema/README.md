@@ -17,5 +17,6 @@ JSON schema authoring, refinement, and validation for reconciliation payloads.
 
 - Keep schema-editor save and validation flows within `jsonschema.*` service contracts.
 - `update#JsonSchemaText` resolves the target schema by `jsonSchemaId`, `schemaName`, or legacy `filename` input so older callers remain compatible during migration.
-- Persist both `createdDate` and `lastUpdatedStamp` on `darpan.reconciliation.JsonSchema`; creation flows initialize both values and text/refined saves must refresh `lastUpdatedStamp` so darpan-ui can show the `Updated` card consistently.
+- Persist both `createdDate` and `lastUpdatedStamp` on `darpan.reconciliation.JsonSchema`; creation flows initialize `createdDate`, and Moqui's built-in entity update stamp owns the single `lastUpdatedStamp` column that text/refined saves refresh so darpan-ui can show the `Updated` card consistently.
+- Example: `save#JsonSchemaText` creating `schemaName=OrderPayload` writes `createdDate` from the service input map while Moqui supplies one `lastUpdatedStamp` field on the resulting `JSON_SCHEMA` insert.
 - Re-run compile and organization verification after contract or path edits.

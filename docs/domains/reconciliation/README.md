@@ -13,4 +13,5 @@ Production reconciliation flows (file ingest, compare, persistence, and run trac
 ## Operational Notes
 
 - Keep production flows free of sample/debug service calls.
+- For pilot/generic reconciliation text payload parameters such as `file1Text` and `file2Text`, use `allow-html="any"` in service XML. Moqui does not treat `allow-html="true"` as enabled input allowance, so literal `<` and `>` content will still be rejected during parameter validation.
 - Use `./gradlew :runtime:component:darpan:verifyOrganization --console=plain` to validate boundary rules.

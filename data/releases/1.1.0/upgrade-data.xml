@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Candidate release-scoped upgrade data for Darpan 1.1.0.
+Generated from backend compare range: v1.0.0..main
+Reviewed to keep only mandatory operator-facing records.
+-->
+<entity-facade-xml type="seed">
+    <!-- Mandatory release-scoped records from data/SecuritySeedData.xml -->
+    <moqui.security.ArtifactGroup artifactGroupId="DARPAN_AUTH_API" description="Darpan auth facade APIs"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_AUTH_API" artifactName="facade\.AuthFacadeServices\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y" inheritAuthz="Y"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_AUTH_API_ALL_USERS" userGroupId="ALL_USERS" artifactGroupId="DARPAN_AUTH_API" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.basic.Enumeration enumId="darpan.dashboard.pinnedReconciliationMappingIds" description="Pinned dashboard reconciliation mappings" enumTypeId="UserPreferenceKey"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_APP_ADMIN" userGroupId="ADMIN" artifactGroupId="DARPAN_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+</entity-facade-xml>

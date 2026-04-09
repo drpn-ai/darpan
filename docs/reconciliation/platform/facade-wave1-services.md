@@ -93,6 +93,9 @@ Shared-tenant rule:
 ### `facade.ReconciliationFacadeServices`
 - `create#PilotMapping`
 - `list#PilotMappings`
+- `get#PilotMapping`
+- `save#PilotMapping`
+- `save#DashboardPinnedMappings`
 - `run#PilotGenericDiff`
 - `list#PilotGeneratedOutputs`
 - `get#PilotGeneratedOutput`
@@ -102,7 +105,11 @@ Pilot release contract notes:
 
 - `create#PilotMapping` accepts two saved schema IDs plus selected field paths and persists a JSON-backed pilot mapping using `ReconciliationMapping` and `ReconciliationMappingMember`.
 - `create#PilotMapping` normalizes schema-flattener field paths into pilot-safe JSON ID expressions so newly-created mappings remain visible in `list#PilotMappings` and executable by the mapping-backed run flow.
+- `get#PilotMapping` loads one saved mapping with editable member details for the PWA runs settings workflow, including resolved schema IDs/names when those schemas are still available in scope.
+- `save#PilotMapping` updates an existing two-source mapping from the PWA runs settings workflow and preserves the existing mapping/member record IDs while refreshing schema and field selections.
 - The active pilot remains mapping-based for this release. The facade contract uses `reconciliationMappingId` rather than `ruleSetId`.
+- `list#PilotMappings` now also returns `pinnedReconciliationMappingIds`, a user-scoped ordered list of saved dashboard pins backed by Moqui `UserPreference`.
+- `save#DashboardPinnedMappings` accepts `pinnedReconciliationMappingIds` and persists that ordered list for the authenticated user, so pinned runs survive browser/profile/origin changes after login.
 - `run#PilotGenericDiff` is JSON-RPC friendly for `darpan-ui`; it accepts `file1Name`/`file1Text` and `file2Name`/`file2Text` instead of raw multipart `FileItem` uploads.
 - `list#PilotGeneratedOutputs` accepts optional `reconciliationMappingId` and only returns generated outputs whose stored metadata matches that mapping when the filter is provided.
 - The underlying reconciliation engine still writes a scoped JSON diff file under `runtime://tmp/reconciliation/generic/**`.
@@ -154,7 +161,7 @@ Stateless session check example:
 }
 ```
 
-Expected success shape:
+Settings list success shape:
 
 ```json
 {
@@ -228,6 +235,64 @@ Expected success shape:
         "hasPassword": true,
         "hasPrivateKey": false
       }
+    ]
+  }
+}
+```
+
+Pilot mappings list success shape:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 17100006,
+  "result": {
+    "ok": true,
+    "messages": [],
+    "errors": [],
+    "pagination": {
+      "pageIndex": 0,
+      "pageSize": 12,
+      "totalCount": 2,
+      "pageCount": 1
+    },
+    "pinnedReconciliationMappingIds": [
+      "OrderIdMap"
+    ],
+    "mappings": [
+      {
+        "reconciliationMappingId": "OrderIdMap",
+        "mappingName": "Order ID",
+        "requiresSystemSelection": false,
+        "defaultFile1SystemEnumId": "DarSysOms",
+        "defaultFile2SystemEnumId": "DarSysShopify",
+        "systemOptions": [
+          {
+            "enumId": "DarSysOms",
+            "label": "OMS"
+          },
+          {
+            "enumId": "DarSysShopify",
+            "label": "SHOPIFY"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Dashboard pin persistence example:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 17100005,
+  "method": "facade.ReconciliationFacadeServices.save#DashboardPinnedMappings",
+  "params": {
+    "pinnedReconciliationMappingIds": [
+      "OrderIdMap",
+      "InventoryDriftMap"
     ]
   }
 }

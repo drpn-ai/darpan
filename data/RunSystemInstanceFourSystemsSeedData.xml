@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entity-facade-xml type="darpan-seed">
+    <!--
+        UAT-friendly RunSystemInstance data for SHOPIFY, OMS, NETSUITE, and SAPI.
+        Includes dependent SystemMessageRemote, Reconciliation, and ReconciliationRun rows
+        so the file can be loaded as a single unit.
+    -->
+
+    <moqui.service.message.SystemMessageRemote
+            systemMessageRemoteId="SHOPIFY"
+            description="Shopify system for RunSystemInstance UAT data"
+            sendUrl="https://shopify.uat.example.invalid"/>
+
+    <moqui.service.message.SystemMessageRemote
+            systemMessageRemoteId="OMS"
+            description="OMS system for RunSystemInstance UAT data"
+            sendUrl="https://oms.uat.example.invalid"/>
+
+    <moqui.service.message.SystemMessageRemote
+            systemMessageRemoteId="NETSUITE"
+            description="NetSuite system for RunSystemInstance UAT data"
+            sendUrl="https://netsuite.uat.example.invalid"/>
+
+    <moqui.service.message.SystemMessageRemote
+            systemMessageRemoteId="SAPI"
+            description="SAPI system for RunSystemInstance UAT data"
+            sendUrl="https://sapi.uat.example.invalid"/>
+
+    <darpan.reconciliation.Reconciliation
+            reconciliationId="UAT_RUNSYS_4SYS_RECON"
+            reconciliationName="UAT Run System Instance Four Systems"
+            description="Seed reconciliation for SHOPIFY, OMS, NETSUITE, and SAPI RunSystemInstance data."
+            scheduleExpr="0 0 6 * * ?"
+            isActive="Y"/>
+
+    <darpan.reconciliation.ReconciliationRun
+            reconciliationRunId="UAT_RUNSYS_SHOPIFY_OMS"
+            reconciliationId="UAT_RUNSYS_4SYS_RECON"
+            runName="Shopify to OMS"
+            dataDomain="ORDERS"
+            purpose="UAT"
+            defaultTimeWindow="LAST_7_DAYS"
+            runSequence="10"/>
+
+    <darpan.reconciliation.ReconciliationRun
+            reconciliationRunId="UAT_RUNSYS_NETSUITE_SAPI"
+            reconciliationId="UAT_RUNSYS_4SYS_RECON"
+            runName="NetSuite to SAPI"
+            dataDomain="INVENTORY"
+            purpose="UAT"
+            defaultTimeWindow="LAST_7_DAYS"
+            runSequence="20"/>
+
+    <darpan.reconciliation.RunSystemInstance
+            reconciliationRunId="UAT_RUNSYS_SHOPIFY_OMS"
+            systemMessageRemoteId="SHOPIFY"
+            role="SOURCE"/>
+
+    <darpan.reconciliation.RunSystemInstance
+            reconciliationRunId="UAT_RUNSYS_SHOPIFY_OMS"
+            systemMessageRemoteId="OMS"
+            role="SOURCE"/>
+
+    <darpan.reconciliation.RunSystemInstance
+            reconciliationRunId="UAT_RUNSYS_NETSUITE_SAPI"
+            systemMessageRemoteId="NETSUITE"
+            role="SOURCE"/>
+
+    <darpan.reconciliation.RunSystemInstance
+            reconciliationRunId="UAT_RUNSYS_NETSUITE_SAPI"
+            systemMessageRemoteId="SAPI"
+            role="SOURCE"/>
+</entity-facade-xml>

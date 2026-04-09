@@ -2,8 +2,7 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="list" noun="EnumOptions" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/settings/listEnumOptions.groovy">
+    <service verb="list" noun="EnumOptions" allow-remote="true" authenticate="true">
         <description>List enum options for frontend dropdowns using fallback-friendly labels.</description>
         <in-parameters>
             <parameter name="enumTypeId" required="true"/>
@@ -20,10 +19,27 @@
                 <parameter name="label"/>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="options" from="[]"/>
+            <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireSuperAdmin(ec, 'Pilot settings are restricted to super-admin users.')"/>
+            <set field="enumTypeIdSafe" from="darpan.facade.common.FacadeSupport.normalize(enumTypeId)"/>
+            <if condition="!ec.message.hasError() &amp;&amp; !enumTypeIdSafe">
+                <message error="true">enumTypeId is required</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <entity-find entity-name="moqui.basic.Enumeration" list="enumList" cache="false">
+                    <econdition field-name="enumTypeId" from="enumTypeIdSafe"/>
+                    <order-by field-name="sequenceNum,description,enumId"/>
+                </entity-find>
+                <set field="options" from="(enumList ?: []).collect { item -> [enumId: item.enumId, enumCode: item.enumCode, description: item.description, sequenceNum: item.sequenceNum, label: darpan.facade.common.FacadeSupport.enumLabel(item)] }"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
     </service>
 
-    <service verb="get" noun="LlmSettings" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/settings/getLlmSettings.groovy">
+    <service verb="get" noun="LlmSettings" allow-remote="true" authenticate="true">
         <description>Get LLM provider settings with stored-secret indicators.</description>
         <in-parameters>
             <parameter name="llmProvider"/>
@@ -44,10 +60,18 @@
                 <parameter name="fallbackLlmKeyEnvName"/>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireSuperAdmin(ec, 'Pilot settings are restricted to super-admin users.')"/>
+            <if condition="!ec.message.hasError()">
+                <set field="llmSettings" from="darpan.facade.settings.LlmSettingsSupport.buildReadSettings(ec, llmProvider)"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
     </service>
 
-    <service verb="save" noun="LlmSettings" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/settings/saveLlmSettings.groovy">
+    <service verb="save" noun="LlmSettings" allow-remote="true" authenticate="true">
         <description>Save LLM provider settings while preserving existing key when blank.</description>
         <in-parameters>
             <parameter name="llmProvider" required="true"/>
@@ -71,10 +95,24 @@
                 <parameter name="hasStoredLlmApiKey" type="Boolean"/>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireSuperAdmin(ec, 'Pilot settings are restricted to super-admin users.')"/>
+            <if condition="!ec.message.hasError()">
+                <set field="savePayload" from="darpan.facade.settings.LlmSettingsSupport.buildSavePayload(ec, llmProvider, llmApiKey, llmModel, llmBaseUrl, llmTimeoutSeconds, llmEnabled)"/>
+                <service-call name="store#moqui.service.message.SystemMessageRemote" in-map="savePayload.llmRemoteMap"/>
+                <service-call name="store#moqui.service.message.SystemMessageRemote" in-map="savePayload.llmActiveMap"/>
+                <set field="llmSettings" from="savePayload.llmSettings"/>
+                <if condition="!ec.message.hasError()">
+                    <message>Saved ${savePayload.provider} provider settings.</message>
+                </if>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
     </service>
 
-    <service verb="list" noun="SftpServers" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/settings/listSftpServers.groovy">
+    <service verb="list" noun="SftpServers" allow-remote="true" authenticate="true">
         <description>List SFTP server configs with secret redaction indicators.</description>
         <in-parameters>
             <parameter name="query"/>
@@ -102,10 +140,32 @@
                 <parameter name="hasPrivateKey" type="Boolean"/>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="pageIndexSafe" from="Math.max(0, darpan.facade.common.FacadeSupport.normalizeInt(pageIndex, 0))"/>
+            <set field="pageSizeSafe" from="Math.max(1, Math.min(200, darpan.facade.common.FacadeSupport.normalizeInt(pageSize, 20)))"/>
+            <set field="searchLower" from="darpan.facade.common.FacadeSupport.normalize(query)?.toLowerCase()"/>
+            <set field="servers" from="[]"/>
+            <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
+            <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireSuperAdmin(ec, 'Pilot settings are restricted to super-admin users.')"/>
+            <if condition="!ec.message.hasError()">
+                <entity-find entity-name="darpan.reconciliation.SftpServer" list="sftpServerList" cache="false">
+                    <order-by field-name="description,sftpServerId"/>
+                </entity-find>
+                <set field="rows" from="(sftpServerList ?: []).collect { item -> [sftpServerId: item.sftpServerId, description: item.description, host: item.host, port: item.port, username: item.username, remoteAttributes: item.remoteAttributes ?: 'Y', hasPassword: item.password ? true : false, hasPrivateKey: item.privateKey ? true : false] }"/>
+                <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.sftpServerId, row.description, row.host, row.username].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
+                <set field="totalCount" from="filteredRows.size()"/>
+                <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>
+                <set field="toIndex" from="Math.min(fromIndex + pageSizeSafe, totalCount)"/>
+                <set field="servers" from="filteredRows.subList(fromIndex, toIndex)"/>
+                <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: totalCount, pageCount: Math.max(1, ((totalCount + pageSizeSafe - 1) / pageSizeSafe) as int)]"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
     </service>
 
-    <service verb="save" noun="SftpServer" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/settings/saveSftpServer.groovy">
+    <service verb="save" noun="SftpServer" allow-remote="true" authenticate="true">
         <description>Create or update an SFTP server configuration.</description>
         <in-parameters>
             <parameter name="sftpServerId" required="true"/>
@@ -132,10 +192,47 @@
                 <parameter name="hasPrivateKey" type="Boolean"/>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="sftpServerIdValue" from="darpan.facade.common.FacadeSupport.normalize(sftpServerId)"/>
+            <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
+            <set field="hostValue" from="darpan.facade.common.FacadeSupport.normalize(host)"/>
+            <set field="usernameValue" from="darpan.facade.common.FacadeSupport.normalize(username)"/>
+            <set field="passwordValue" from="darpan.facade.common.FacadeSupport.normalize(password)"/>
+            <set field="privateKeyValue" from="darpan.facade.common.FacadeSupport.normalize(privateKey)"/>
+            <set field="portValue" from="darpan.facade.common.FacadeSupport.normalizeInt(port, 22)"/>
+            <set field="remoteAttributesValue" from="darpan.facade.common.FacadeSupport.normalizeBool(remoteAttributes, true) ? 'Y' : 'N'"/>
+            <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireSuperAdmin(ec, 'Pilot settings are restricted to super-admin users.')"/>
+            <if condition="!sftpServerIdValue">
+                <message error="true">Server ID is required.</message>
+            </if>
+            <if condition="!hostValue">
+                <message error="true">Host is required.</message>
+            </if>
+            <if condition="!usernameValue">
+                <message error="true">Username is required for SFTP access.</message>
+            </if>
+            <if condition="portValue &lt;= 0">
+                <message error="true">Port must be greater than 0.</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="existingServer" from="ec.entity.find('darpan.reconciliation.SftpServer').condition('sftpServerId', sftpServerIdValue).useCache(false).one()"/>
+                <set field="serverMap" from="[sftpServerId: sftpServerIdValue, description: descriptionValue, host: hostValue, port: portValue, username: usernameValue, remoteAttributes: remoteAttributesValue, password: passwordValue ?: existingServer?.password, privateKey: privateKeyValue ?: existingServer?.privateKey]"/>
+                <service-call name="store#darpan.reconciliation.SftpServer" in-map="serverMap"/>
+                <set field="savedServer" from="[sftpServerId: sftpServerIdValue, description: descriptionValue, host: hostValue, port: portValue, username: usernameValue, remoteAttributes: remoteAttributesValue, hasPassword: !!darpan.facade.common.FacadeSupport.normalize(serverMap.password), hasPrivateKey: !!darpan.facade.common.FacadeSupport.normalize(serverMap.privateKey)]"/>
+                <if condition="!ec.message.hasError() &amp;&amp; !darpan.facade.common.FacadeSupport.normalize(serverMap.password) &amp;&amp; !darpan.facade.common.FacadeSupport.normalize(serverMap.privateKey)">
+                    <message>Saved server without credentials. Add password or key before running automation.</message>
+                </if>
+                <if condition="!ec.message.hasError() &amp;&amp; (darpan.facade.common.FacadeSupport.normalize(serverMap.password) || darpan.facade.common.FacadeSupport.normalize(serverMap.privateKey))">
+                    <message>Saved SFTP server ${sftpServerIdValue}.</message>
+                </if>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
     </service>
 
-    <service verb="list" noun="NsAuthConfigs" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/settings/listNsAuthConfigs.groovy">
+    <service verb="list" noun="NsAuthConfigs" allow-remote="true" authenticate="true">
         <description>List NetSuite auth configurations with secret indicators.</description>
         <in-parameters>
             <parameter name="query"/>
@@ -167,10 +264,32 @@
                 <parameter name="hasPrivateKeyPem" type="Boolean"/>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="pageIndexSafe" from="Math.max(0, darpan.facade.common.FacadeSupport.normalizeInt(pageIndex, 0))"/>
+            <set field="pageSizeSafe" from="Math.max(1, Math.min(200, darpan.facade.common.FacadeSupport.normalizeInt(pageSize, 20)))"/>
+            <set field="searchLower" from="darpan.facade.common.FacadeSupport.normalize(query)?.toLowerCase()"/>
+            <set field="authConfigs" from="[]"/>
+            <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
+            <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireSuperAdmin(ec, 'Pilot settings are restricted to super-admin users.')"/>
+            <if condition="!ec.message.hasError()">
+                <entity-find entity-name="darpan.reconciliation.NsAuthConfig" list="nsAuthConfigList" cache="false">
+                    <order-by field-name="description,nsAuthConfigId"/>
+                </entity-find>
+                <set field="rows" from="(nsAuthConfigList ?: []).collect { item -> [nsAuthConfigId: item.nsAuthConfigId, description: item.description, authType: item.authType ?: 'NONE', username: item.username, tokenUrl: item.tokenUrl, clientId: item.clientId, certId: item.certId, scope: item.scope ?: 'restlets rest_webservices', isActive: item.isActive ?: 'Y', hasPassword: item.password ? true : false, hasApiToken: item.apiToken ? true : false, hasPrivateKeyPem: item.privateKeyPem ? true : false] }"/>
+                <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.nsAuthConfigId, row.description, row.authType, row.username].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
+                <set field="totalCount" from="filteredRows.size()"/>
+                <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>
+                <set field="toIndex" from="Math.min(fromIndex + pageSizeSafe, totalCount)"/>
+                <set field="authConfigs" from="filteredRows.subList(fromIndex, toIndex)"/>
+                <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: totalCount, pageCount: Math.max(1, ((totalCount + pageSizeSafe - 1) / pageSizeSafe) as int)]"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
     </service>
 
-    <service verb="save" noun="NsAuthConfig" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/settings/saveNsAuthConfig.groovy">
+    <service verb="save" noun="NsAuthConfig" allow-remote="true" authenticate="true">
         <description>Create or update a NetSuite auth configuration.</description>
         <in-parameters>
             <parameter name="nsAuthConfigId" required="true"/>
@@ -205,10 +324,62 @@
                 <parameter name="hasPrivateKeyPem" type="Boolean"/>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="nsAuthConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(nsAuthConfigId)"/>
+            <set field="nsAuthDescriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
+            <set field="nsAuthTypeValue" from="darpan.facade.common.FacadeSupport.normalize(authType)?.toUpperCase() ?: 'NONE'"/>
+            <set field="nsUsernameValue" from="darpan.facade.common.FacadeSupport.normalize(username)"/>
+            <set field="nsPasswordValue" from="darpan.facade.common.FacadeSupport.normalize(password)"/>
+            <set field="nsApiTokenValue" from="darpan.facade.common.FacadeSupport.normalize(apiToken)"/>
+            <set field="nsTokenUrlValue" from="darpan.facade.common.FacadeSupport.normalize(tokenUrl)"/>
+            <set field="nsClientIdValue" from="darpan.facade.common.FacadeSupport.normalize(clientId)"/>
+            <set field="nsCertIdValue" from="darpan.facade.common.FacadeSupport.normalize(certId)"/>
+            <set field="nsScopeValue" from="darpan.facade.common.FacadeSupport.normalize(scope) ?: 'restlets rest_webservices'"/>
+            <set field="nsPrivateKeyPemValue" from="darpan.facade.common.FacadeSupport.normalize(privateKeyPem)"/>
+            <set field="nsIsActiveValue" from="darpan.facade.common.FacadeSupport.normalizeBool(isActive, true) ? 'Y' : 'N'"/>
+            <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireSuperAdmin(ec, 'Pilot settings are restricted to super-admin users.')"/>
+            <if condition="!nsAuthConfigIdValue">
+                <message error="true">Auth Config ID is required.</message>
+            </if>
+            <if condition="!['NONE', 'BASIC', 'BEARER', 'OAUTH2_M2M_JWT'].contains(nsAuthTypeValue)">
+                <message error="true">Auth Type must be NONE, BASIC, BEARER, or OAUTH2_M2M_JWT.</message>
+            </if>
+            <if condition="nsAuthTypeValue == 'BASIC' &amp;&amp; !nsUsernameValue">
+                <message error="true">Username is required for BASIC auth.</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="existingAuth" from="ec.entity.find('darpan.reconciliation.NsAuthConfig').condition('nsAuthConfigId', nsAuthConfigIdValue).useCache(false).one()"/>
+                <if condition="nsAuthTypeValue == 'OAUTH2_M2M_JWT' &amp;&amp; !nsTokenUrlValue">
+                    <message error="true">Token URL is required for OAUTH2_M2M_JWT auth.</message>
+                </if>
+                <if condition="nsAuthTypeValue == 'OAUTH2_M2M_JWT' &amp;&amp; !nsClientIdValue">
+                    <message error="true">Client ID is required for OAUTH2_M2M_JWT auth.</message>
+                </if>
+                <if condition="nsAuthTypeValue == 'OAUTH2_M2M_JWT' &amp;&amp; !nsCertIdValue">
+                    <message error="true">Cert ID is required for OAUTH2_M2M_JWT auth.</message>
+                </if>
+                <if condition="nsAuthTypeValue == 'OAUTH2_M2M_JWT' &amp;&amp; !nsPrivateKeyPemValue &amp;&amp; !existingAuth?.privateKeyPem">
+                    <message error="true">Private Key PEM is required for OAUTH2_M2M_JWT auth.</message>
+                </if>
+                <if condition="nsAuthTypeValue == 'BEARER' &amp;&amp; !nsApiTokenValue &amp;&amp; !nsPasswordValue &amp;&amp; !existingAuth?.apiToken &amp;&amp; !existingAuth?.password">
+                    <message>Provide API Token (or password fallback) for BEARER auth.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="authMap" from="[nsAuthConfigId: nsAuthConfigIdValue, description: nsAuthDescriptionValue, authType: nsAuthTypeValue, username: nsUsernameValue, tokenUrl: nsTokenUrlValue, clientId: nsClientIdValue, certId: nsCertIdValue, scope: nsScopeValue, isActive: nsIsActiveValue, password: nsPasswordValue ?: existingAuth?.password, apiToken: nsApiTokenValue ?: existingAuth?.apiToken, privateKeyPem: nsPrivateKeyPemValue ?: existingAuth?.privateKeyPem]"/>
+                <service-call name="store#darpan.reconciliation.NsAuthConfig" in-map="authMap"/>
+                <set field="savedAuthConfig" from="[nsAuthConfigId: nsAuthConfigIdValue, description: nsAuthDescriptionValue, authType: nsAuthTypeValue, username: nsUsernameValue, tokenUrl: nsTokenUrlValue, clientId: nsClientIdValue, certId: nsCertIdValue, scope: nsScopeValue, isActive: nsIsActiveValue, hasPassword: !!darpan.facade.common.FacadeSupport.normalize(authMap.password), hasApiToken: !!darpan.facade.common.FacadeSupport.normalize(authMap.apiToken), hasPrivateKeyPem: !!darpan.facade.common.FacadeSupport.normalize(authMap.privateKeyPem)]"/>
+                <if condition="!ec.message.hasError()">
+                    <message>Saved NS Auth config ${nsAuthConfigIdValue}.</message>
+                </if>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
     </service>
 
-    <service verb="list" noun="NsRestletConfigs" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/settings/listNsRestletConfigs.groovy">
+    <service verb="list" noun="NsRestletConfigs" allow-remote="true" authenticate="true">
         <description>List NetSuite endpoint configs joined with auth metadata.</description>
         <in-parameters>
             <parameter name="query"/>
@@ -240,10 +411,34 @@
                 <parameter name="isActive"/>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="pageIndexSafe" from="Math.max(0, darpan.facade.common.FacadeSupport.normalizeInt(pageIndex, 0))"/>
+            <set field="pageSizeSafe" from="Math.max(1, Math.min(200, darpan.facade.common.FacadeSupport.normalizeInt(pageSize, 20)))"/>
+            <set field="searchLower" from="darpan.facade.common.FacadeSupport.normalize(query)?.toLowerCase()"/>
+            <set field="restletConfigs" from="[]"/>
+            <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
+            <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireSuperAdmin(ec, 'Pilot settings are restricted to super-admin users.')"/>
+            <if condition="!ec.message.hasError()">
+                <entity-find entity-name="darpan.reconciliation.NsAuthConfig" list="authConfigList" cache="false"/>
+                <entity-find entity-name="darpan.reconciliation.NsRestletConfig" list="nsRestletConfigList" cache="false">
+                    <order-by field-name="description,nsRestletConfigId"/>
+                </entity-find>
+                <set field="authById" from="(authConfigList ?: []).collectEntries { item -> [(item.nsAuthConfigId): [description: item.description, authType: item.authType, isActive: item.isActive ?: 'Y']] }"/>
+                <set field="rows" from="(nsRestletConfigList ?: []).collect { item -> def authMeta = authById[item.nsAuthConfigId]; [nsRestletConfigId: item.nsRestletConfigId, description: item.description, endpointUrl: item.endpointUrl, httpMethod: item.httpMethod ?: 'POST', nsAuthConfigId: item.nsAuthConfigId, authDescription: authMeta?.description, authType: authMeta?.authType, authIsActive: authMeta?.isActive ?: 'Y', headersJson: item.headersJson, connectTimeoutSeconds: item.connectTimeoutSeconds ?: 30, readTimeoutSeconds: item.readTimeoutSeconds ?: 60, isActive: item.isActive ?: 'Y'] }"/>
+                <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.nsRestletConfigId, row.description, row.endpointUrl, row.nsAuthConfigId, row.authType].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
+                <set field="totalCount" from="filteredRows.size()"/>
+                <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>
+                <set field="toIndex" from="Math.min(fromIndex + pageSizeSafe, totalCount)"/>
+                <set field="restletConfigs" from="filteredRows.subList(fromIndex, toIndex)"/>
+                <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: totalCount, pageCount: Math.max(1, ((totalCount + pageSizeSafe - 1) / pageSizeSafe) as int)]"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
     </service>
 
-    <service verb="save" noun="NsRestletConfig" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/settings/saveNsRestletConfig.groovy">
+    <service verb="save" noun="NsRestletConfig" allow-remote="true" authenticate="true">
         <description>Create or update a NetSuite endpoint configuration bound to an auth config.</description>
         <in-parameters>
             <parameter name="nsRestletConfigId" required="true"/>
@@ -272,10 +467,63 @@
                 <parameter name="isActive"/>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="nsRestletConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(nsRestletConfigId)"/>
+            <set field="nsDescriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
+            <set field="nsEndpointUrlValue" from="darpan.facade.common.FacadeSupport.normalize(endpointUrl)"/>
+            <set field="nsHttpMethodValue" from="darpan.facade.common.FacadeSupport.normalize(httpMethod)?.toUpperCase() ?: 'POST'"/>
+            <set field="nsAuthConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(nsAuthConfigId)"/>
+            <set field="nsHeadersJsonValue" from="darpan.facade.common.FacadeSupport.normalize(headersJson)"/>
+            <set field="nsConnectTimeoutValue" from="darpan.facade.common.FacadeSupport.normalizeInt(connectTimeoutSeconds, 30)"/>
+            <set field="nsReadTimeoutValue" from="darpan.facade.common.FacadeSupport.normalizeInt(readTimeoutSeconds, 60)"/>
+            <set field="nsIsActiveValue" from="darpan.facade.common.FacadeSupport.normalizeBool(isActive, true) ? 'Y' : 'N'"/>
+            <set field="headersJsonError" from="darpan.facade.settings.SettingsFacadeSupport.validateJsonObjectText(nsHeadersJsonValue, 'Headers JSON')"/>
+            <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireSuperAdmin(ec, 'Pilot settings are restricted to super-admin users.')"/>
+            <if condition="!nsRestletConfigIdValue">
+                <message error="true">Endpoint Config ID is required.</message>
+            </if>
+            <if condition="!nsEndpointUrlValue">
+                <message error="true">Endpoint URL is required.</message>
+            </if>
+            <if condition="!['POST', 'PUT', 'GET'].contains(nsHttpMethodValue)">
+                <message error="true">HTTP Method must be POST, PUT, or GET.</message>
+            </if>
+            <if condition="!nsAuthConfigIdValue">
+                <message error="true">Auth Config ID is required.</message>
+            </if>
+            <if condition="nsConnectTimeoutValue &lt;= 0">
+                <set field="nsConnectTimeoutValue" from="30"/>
+            </if>
+            <if condition="nsReadTimeoutValue &lt;= 0">
+                <set field="nsReadTimeoutValue" from="60"/>
+            </if>
+            <if condition="headersJsonError">
+                <message error="true">${headersJsonError}</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="authCfg" from="ec.entity.find('darpan.reconciliation.NsAuthConfig').condition('nsAuthConfigId', nsAuthConfigIdValue).useCache(false).one()"/>
+                <if condition="!authCfg">
+                    <message error="true">NsAuthConfig ${nsAuthConfigIdValue} not found.</message>
+                </if>
+                <if condition="authCfg &amp;&amp; (authCfg.isActive ?: 'Y').toString().equalsIgnoreCase('N')">
+                    <message error="true">NsAuthConfig ${nsAuthConfigIdValue} is inactive.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="endpointMap" from="[nsRestletConfigId: nsRestletConfigIdValue, description: nsDescriptionValue, endpointUrl: nsEndpointUrlValue, httpMethod: nsHttpMethodValue, nsAuthConfigId: nsAuthConfigIdValue, headersJson: nsHeadersJsonValue, connectTimeoutSeconds: nsConnectTimeoutValue, readTimeoutSeconds: nsReadTimeoutValue, isActive: nsIsActiveValue, authType: null, username: null, password: null, apiToken: null, tokenUrl: null, clientId: null, certId: null, privateKeyPem: null, scope: null]"/>
+                <service-call name="store#darpan.reconciliation.NsRestletConfig" in-map="endpointMap"/>
+                <set field="savedRestletConfig" from="[nsRestletConfigId: nsRestletConfigIdValue, description: nsDescriptionValue, endpointUrl: nsEndpointUrlValue, httpMethod: nsHttpMethodValue, nsAuthConfigId: nsAuthConfigIdValue, headersJson: nsHeadersJsonValue, connectTimeoutSeconds: nsConnectTimeoutValue, readTimeoutSeconds: nsReadTimeoutValue, isActive: nsIsActiveValue]"/>
+                <if condition="!ec.message.hasError()">
+                    <message>Saved NS endpoint config ${nsRestletConfigIdValue}.</message>
+                </if>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
     </service>
 
-    <service verb="list" noun="HcReadDbConfigs" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/settings/listHcReadDbConfigs.groovy">
+    <service verb="list" noun="HcReadDbConfigs" allow-remote="true" authenticate="true">
         <description>List external Read DB settings with redacted secret indicators.</description>
         <in-parameters>
             <parameter name="query"/>
@@ -311,10 +559,32 @@
                 <parameter name="hasPassword" type="Boolean"/>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="pageIndexSafe" from="Math.max(0, darpan.facade.common.FacadeSupport.normalizeInt(pageIndex, 0))"/>
+            <set field="pageSizeSafe" from="Math.max(1, Math.min(200, darpan.facade.common.FacadeSupport.normalizeInt(pageSize, 20)))"/>
+            <set field="searchLower" from="darpan.facade.common.FacadeSupport.normalize(query)?.toLowerCase()"/>
+            <set field="configs" from="[]"/>
+            <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
+            <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireSuperAdmin(ec, 'Pilot settings are restricted to super-admin users.')"/>
+            <if condition="!ec.message.hasError()">
+                <entity-find entity-name="darpan.reconciliation.HcReadDbConfig" list="hcReadDbConfigList" cache="false">
+                    <order-by field-name="displayName,hcReadDbConfigId"/>
+                </entity-find>
+                <set field="rows" from="(hcReadDbConfigList ?: []).collect { item -> [hcReadDbConfigId: item.hcReadDbConfigId, displayName: item.displayName ?: item.description, host: item.host, port: item.port ?: 3306, databaseName: item.databaseName, additionalParameters: item.additionalParameters, jdbcUrl: item.jdbcUrl?.toString()?.replaceAll('(?i)(password=)[^&amp;;]+', '$1***'), username: item.username, dbDriver: item.dbDriver ?: 'com.mysql.cj.jdbc.Driver', defaultTableName: item.defaultTableName ?: 'inventory_item_detail', itemIdColumn: item.itemIdColumn ?: 'product_id', locationIdColumn: item.locationIdColumn ?: 'facility_id', transactionDateColumn: item.transactionDateColumn ?: 'effective_date', connectionPropertiesJson: item.connectionPropertiesJson, isActive: item.isActive ?: 'Y', hasPassword: item.password ? true : false] }"/>
+                <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.hcReadDbConfigId, row.displayName, row.host, row.databaseName, row.username].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
+                <set field="totalCount" from="filteredRows.size()"/>
+                <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>
+                <set field="toIndex" from="Math.min(fromIndex + pageSizeSafe, totalCount)"/>
+                <set field="configs" from="filteredRows.subList(fromIndex, toIndex)"/>
+                <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: totalCount, pageCount: Math.max(1, ((totalCount + pageSizeSafe - 1) / pageSizeSafe) as int)]"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
     </service>
 
-    <service verb="save" noun="HcReadDbConfig" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/settings/saveHcReadDbConfig.groovy">
+    <service verb="save" noun="HcReadDbConfig" allow-remote="true" authenticate="true">
         <description>Create or update Read DB config; auto-generates config ID/JDBC URL when needed.</description>
         <in-parameters>
             <parameter name="hcReadDbConfigId"/>
@@ -356,5 +626,60 @@
                 <parameter name="hasPassword" type="Boolean"/>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="inputConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(hcReadDbConfigId)"/>
+            <set field="displayNameValue" from="darpan.facade.common.FacadeSupport.normalize(displayName)"/>
+            <set field="hostValue" from="darpan.facade.common.FacadeSupport.normalize(host)"/>
+            <set field="databaseNameValue" from="darpan.facade.common.FacadeSupport.normalize(databaseName)"/>
+            <set field="usernameValue" from="darpan.facade.common.FacadeSupport.normalize(username)"/>
+            <set field="passwordValue" from="darpan.facade.common.FacadeSupport.normalize(password)"/>
+            <set field="additionalParametersValue" from="darpan.facade.common.FacadeSupport.normalize(additionalParameters)"/>
+            <set field="dbDriverValue" from="darpan.facade.common.FacadeSupport.normalize(dbDriver) ?: 'com.mysql.cj.jdbc.Driver'"/>
+            <set field="defaultTableNameValue" from="darpan.facade.common.FacadeSupport.normalize(defaultTableName) ?: 'inventory_item_detail'"/>
+            <set field="itemIdColumnValue" from="darpan.facade.common.FacadeSupport.normalize(itemIdColumn) ?: 'product_id'"/>
+            <set field="locationIdColumnValue" from="darpan.facade.common.FacadeSupport.normalize(locationIdColumn) ?: 'facility_id'"/>
+            <set field="transactionDateColumnValue" from="darpan.facade.common.FacadeSupport.normalize(transactionDateColumn) ?: 'effective_date'"/>
+            <set field="connectionPropertiesJsonValue" from="darpan.facade.common.FacadeSupport.normalize(connectionPropertiesJson)"/>
+            <set field="isActiveValue" from="darpan.facade.common.FacadeSupport.normalizeBool(isActive, true) ? 'Y' : 'N'"/>
+            <set field="portValue" from="darpan.facade.common.FacadeSupport.normalizeInt(port, 3306)"/>
+            <set field="connectionPropertiesError" from="darpan.facade.settings.SettingsFacadeSupport.validateJsonObjectText(connectionPropertiesJsonValue, 'Connection Properties JSON')"/>
+            <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireSuperAdmin(ec, 'Pilot settings are restricted to super-admin users.')"/>
+            <if condition="portValue &lt;= 0">
+                <message error="true">Port must be greater than 0.</message>
+            </if>
+            <if condition="!hostValue">
+                <message error="true">Host is required.</message>
+            </if>
+            <if condition="!databaseNameValue">
+                <message error="true">Database Name is required.</message>
+            </if>
+            <if condition="!usernameValue">
+                <message error="true">Username is required.</message>
+            </if>
+            <if condition="connectionPropertiesError">
+                <message error="true">${connectionPropertiesError}</message>
+            </if>
+            <set field="cleanAdditionalValue" from="darpan.facade.settings.SettingsFacadeSupport.normalizeAdditionalParameters(additionalParametersValue)"/>
+            <if condition="!ec.message.hasError()">
+                <set field="configIdResult" from="darpan.facade.settings.SettingsFacadeSupport.resolveHcReadDbConfigId(ec, inputConfigIdValue, displayNameValue, hostValue, databaseNameValue)"/>
+                <if condition="configIdResult.error">
+                    <message error="true">${configIdResult.error}</message>
+                </if>
+                <set field="resolvedConfigId" from="configIdResult.configId"/>
+                <set field="jdbcUrlValue" from="darpan.facade.settings.SettingsFacadeSupport.buildMysqlJdbcUrl(hostValue, portValue, databaseNameValue, cleanAdditionalValue)"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="existingConfig" from="ec.entity.find('darpan.reconciliation.HcReadDbConfig').condition('hcReadDbConfigId', resolvedConfigId).useCache(false).one()"/>
+                <set field="hcMap" from="[hcReadDbConfigId: resolvedConfigId, description: displayNameValue, displayName: displayNameValue, host: hostValue, port: portValue, databaseName: databaseNameValue, additionalParameters: cleanAdditionalValue, jdbcUrl: jdbcUrlValue, username: usernameValue, dbDriver: dbDriverValue, defaultTableName: defaultTableNameValue, itemIdColumn: itemIdColumnValue, locationIdColumn: locationIdColumnValue, transactionDateColumn: transactionDateColumnValue, connectionPropertiesJson: connectionPropertiesJsonValue, isActive: isActiveValue, password: passwordValue ?: existingConfig?.password]"/>
+                <service-call name="store#darpan.reconciliation.HcReadDbConfig" in-map="hcMap"/>
+                <set field="savedConfig" from="[hcReadDbConfigId: resolvedConfigId, displayName: displayNameValue, host: hostValue, port: portValue, databaseName: databaseNameValue, additionalParameters: cleanAdditionalValue, jdbcUrl: jdbcUrlValue, username: usernameValue, dbDriver: dbDriverValue, defaultTableName: defaultTableNameValue, itemIdColumn: itemIdColumnValue, locationIdColumn: locationIdColumnValue, transactionDateColumn: transactionDateColumnValue, connectionPropertiesJson: connectionPropertiesJsonValue, isActive: isActiveValue, hasPassword: !!darpan.facade.common.FacadeSupport.normalize(hcMap.password)]"/>
+                <if condition="!ec.message.hasError()">
+                    <message>Saved Read DB config ${resolvedConfigId}.</message>
+                </if>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
     </service>
 </services>

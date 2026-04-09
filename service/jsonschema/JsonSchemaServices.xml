@@ -19,8 +19,7 @@
         </out-parameters>
     </service>
 
-    <service verb="save" noun="JsonSchema" type="script"
-            location="component://darpan/src/main/groovy/darpan/jsonschema/service/crud/saveJsonSchema.groovy">
+    <service verb="save" noun="JsonSchema">
         <description>Save an uploaded JSON schema file to the DB.</description>
         <in-parameters>
             <parameter name="schemaFile" type="org.apache.commons.fileupload.FileItem" required="true"/>
@@ -33,10 +32,39 @@
             <parameter name="schemaName"/>
             <parameter name="filename"/><!-- Deprecated -->
         </out-parameters>
+        <actions>
+            <set field="schemaUpload" from="jsonschema.common.JsonSchemaUtil.readUploadedText(schemaFile, 'schema file')"/>
+            <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
+            <set field="overwriteMode" from="darpan.facade.common.FacadeSupport.normalizeBool(overwrite, false)"/>
+            <set field="nameToSave" from="darpan.facade.common.FacadeSupport.normalize(schemaName) ?: schemaUpload.fileName"/>
+            <if condition="schemaUpload.error">
+                <message error="true">${schemaUpload.error}</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="finalName" from="jsonschema.common.JsonSchemaUtil.generateUniqueSchemaName(ec, nameToSave, overwriteMode)"/>
+                <set field="existingSchema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', finalName).useCache(false).one()"/>
+                <if condition="existingSchema != null">
+                    <set field="ignoreSchemaText" from="existingSchema.set('schemaText', schemaUpload.text)"/>
+                    <if condition="descriptionValue">
+                        <set field="ignoreDescription" from="existingSchema.set('description', descriptionValue)"/>
+                    </if>
+                    <set field="ignoreLastUpdated" from="existingSchema.set('lastUpdatedStamp', ec.user.nowTimestamp)"/>
+                    <set field="ignoreSchemaUpdate" from="existingSchema.update()"/>
+                    <set field="jsonSchemaId" from="existingSchema.jsonSchemaId"/>
+                </if>
+                <if condition="existingSchema == null">
+                    <service-call name="create#darpan.reconciliation.JsonSchema"
+                            in-map="[schemaName: finalName, schemaText: schemaUpload.text, description: descriptionValue, statusId: 'Active']"
+                            out-map="createSchemaResult"/>
+                    <set field="jsonSchemaId" from="createSchemaResult.jsonSchemaId"/>
+                </if>
+                <set field="filename" from="finalName"/>
+                <set field="schemaName" from="finalName"/>
+            </if>
+        </actions>
     </service>
 
-    <service verb="update" noun="JsonSchemaText" type="script"
-            location="component://darpan/src/main/groovy/darpan/jsonschema/service/crud/updateJsonSchemaText.groovy">
+    <service verb="update" noun="JsonSchemaText">
         <description>Update an existing JSON schema in the DB.</description>
         <in-parameters>
             <parameter name="jsonSchemaId"/>
@@ -47,6 +75,31 @@
         <out-parameters>
             <parameter name="jsonSchemaId"/>
         </out-parameters>
+        <actions>
+            <set field="jsonSchemaIdValue" from="darpan.facade.common.FacadeSupport.normalize(jsonSchemaId)"/>
+            <set field="schemaNameValue" from="darpan.facade.common.FacadeSupport.normalize(schemaName)"/>
+            <set field="filenameValue" from="darpan.facade.common.FacadeSupport.normalize(filename)"/>
+            <set field="jsonTextValue" from="darpan.facade.common.FacadeSupport.normalize(jsonText)"/>
+            <set field="jsonValidationError" from="jsonschema.common.JsonSchemaUtil.validateJsonText(jsonTextValue, 'jsonText')"/>
+            <if condition="!jsonSchemaIdValue &amp;&amp; !schemaNameValue &amp;&amp; !filenameValue">
+                <message error="true">jsonSchemaId, schemaName, or filename is required</message>
+            </if>
+            <if condition="jsonValidationError">
+                <message error="true">${jsonValidationError}</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="existingSchema" from="jsonschema.common.JsonSchemaUtil.resolveSchemaRecord(ec, jsonSchemaIdValue, schemaNameValue, filenameValue, false)"/>
+                <if condition="!existingSchema">
+                    <message error="true">Schema not found for ID ${jsonSchemaIdValue} or Name ${schemaNameValue ?: filenameValue}</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreSchemaText" from="existingSchema.set('schemaText', jsonTextValue)"/>
+                <set field="ignoreLastUpdated" from="existingSchema.set('lastUpdatedStamp', ec.user.nowTimestamp)"/>
+                <set field="ignoreSchemaUpdate" from="existingSchema.update()"/>
+                <set field="jsonSchemaId" from="existingSchema.jsonSchemaId"/>
+            </if>
+        </actions>
     </service>
 
 
@@ -125,14 +178,30 @@
             <parameter name="found" type="Boolean"/>
         </out-parameters>
     </service>
-    <service verb="delete" noun="JsonSchema" type="script"
-            location="component://darpan/src/main/groovy/darpan/jsonschema/service/crud/deleteJsonSchema.groovy">
+    <service verb="delete" noun="JsonSchema">
         <description>Delete a JSON schema from DB.</description>
         <in-parameters>
             <parameter name="jsonSchemaId"/>
             <parameter name="filename"/> <!-- Deprecated -->
             <parameter name="schemaName"/>
+            <parameter name="schemaFileName"/> <!-- Deprecated -->
         </in-parameters>
+        <actions>
+            <set field="jsonSchemaIdValue" from="darpan.facade.common.FacadeSupport.normalize(jsonSchemaId)"/>
+            <set field="schemaNameValue" from="darpan.facade.common.FacadeSupport.normalize(schemaName ?: filename ?: schemaFileName)"/>
+            <if condition="!jsonSchemaIdValue &amp;&amp; !schemaNameValue">
+                <message error="true">Schema ID or filename is required</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; jsonSchemaIdValue">
+                <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', jsonSchemaIdValue).one()"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; !schema &amp;&amp; schemaNameValue">
+                <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).one()"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoredDelete" from="jsonschema.common.JsonSchemaUtil.deleteSchemaRecord(ec, schema)"/>
+            </if>
+        </actions>
     </service>
 
     <service verb="flatten" noun="JsonSchema" type="script" authenticate="false"

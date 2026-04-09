@@ -1,5 +1,7 @@
 package darpan.facade.auth
 
+import darpan.facade.common.FacadeSupport
+import darpan.facade.common.PilotAccessSupport
 import groovy.lang.Binding
 import groovy.lang.GroovyShell
 import org.junit.jupiter.api.Test
@@ -51,16 +53,15 @@ class AuthFacadeScriptsTests {
         EntityFacadeStub entity = new EntityFacadeStub()
         def ec = executionContext(message: message, user: user, entity: entity)
 
-        Binding binding = runScript("src/main/groovy/darpan/facade/auth/getSessionInfo.groovy", [
-                ec: ec,
-        ])
+        boolean authenticated = FacadeSupport.normalize(ec?.user?.userId) != null
+        Map<String, Object> sessionInfo = authenticated ? (PilotAccessSupport.buildSessionInfo(ec) as Map<String, Object>) : null
+        Map<String, Object> envelope = FacadeSupport.envelope(ec)
 
-        assertTrue(binding.getVariable("authenticated") as boolean)
-        Map<String, Object> sessionInfo = binding.getVariable("sessionInfo") as Map<String, Object>
+        assertTrue(authenticated)
         assertEquals("EX_USER", sessionInfo.userId)
         assertEquals("pilot.user", sessionInfo.username)
         assertEquals("CUSTOMER", sessionInfo.scopeType)
-        assertTrue(binding.getVariable("ok") as boolean)
+        assertTrue(envelope.ok as boolean)
     }
 
     @Test

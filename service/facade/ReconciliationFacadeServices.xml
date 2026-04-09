@@ -2,8 +2,7 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="create" noun="PilotMapping" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/createPilotMapping.groovy">
+    <service verb="create" noun="PilotMapping" allow-remote="true" authenticate="true">
         <description>Create a pilot reconciliation mapping from two saved JSON schemas and selected id field paths.</description>
         <in-parameters>
             <parameter name="mappingName" required="true"/>
@@ -27,6 +26,69 @@
                 <parameter name="file2FieldPath"/>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="mappingNameValue" from="darpan.facade.common.FacadeSupport.normalize(mappingName)"/>
+            <set field="schema1IdValue" from="darpan.facade.common.FacadeSupport.normalize(schema1Id)"/>
+            <set field="schema2IdValue" from="darpan.facade.common.FacadeSupport.normalize(schema2Id)"/>
+            <set field="schema1FieldPathValue" from="darpan.facade.reconciliation.PilotMappingSupport.normalizePilotJsonIdExpression(schema1FieldPath)"/>
+            <set field="schema2FieldPathValue" from="darpan.facade.reconciliation.PilotMappingSupport.normalizePilotJsonIdExpression(schema2FieldPath)"/>
+            <set field="ignoreTableEnsure" from="darpan.facade.reconciliation.PilotMappingSupport.ensurePilotMappingTables(ec)"/>
+            <if condition="!mappingNameValue">
+                <message error="true">mappingName is required</message>
+            </if>
+            <if condition="!schema1IdValue">
+                <message error="true">schema1Id is required</message>
+            </if>
+            <if condition="!schema2IdValue">
+                <message error="true">schema2Id is required</message>
+            </if>
+            <if condition="!schema1FieldPathValue">
+                <message error="true">schema1FieldPath is required</message>
+            </if>
+            <if condition="!schema2FieldPathValue">
+                <message error="true">schema2FieldPath is required</message>
+            </if>
+            <if condition="schema1IdValue &amp;&amp; schema2IdValue &amp;&amp; schema1IdValue == schema2IdValue">
+                <message error="true">schema1Id and schema2Id must be different</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="schema1" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schema1IdValue).useCache(false).one()"/>
+                <set field="schema2" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schema2IdValue).useCache(false).one()"/>
+                <set field="ignoreAccessCheck1" from="darpan.facade.common.PilotAccessSupport.requireOwnedRecordAccess(ec, schema1, &quot;Schema not found for schema1Id '${schema1IdValue}'&quot;, 'Schema 1 is not available in your customer scope.')"/>
+                <set field="ignoreAccessCheck2" from="darpan.facade.common.PilotAccessSupport.requireOwnedRecordAccess(ec, schema2, &quot;Schema not found for schema2Id '${schema2IdValue}'&quot;, 'Schema 2 is not available in your customer scope.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="schema1SystemEnumId" from="darpan.facade.common.FacadeSupport.normalize(schema1?.systemEnumId)"/>
+                <set field="schema2SystemEnumId" from="darpan.facade.common.FacadeSupport.normalize(schema2?.systemEnumId)"/>
+                <if condition="!schema1SystemEnumId">
+                    <message error="true">Schema '${schema1?.schemaName}' is missing systemEnumId</message>
+                </if>
+                <if condition="!schema2SystemEnumId">
+                    <message error="true">Schema '${schema2?.schemaName}' is missing systemEnumId</message>
+                </if>
+                <if condition="schema1SystemEnumId &amp;&amp; schema2SystemEnumId &amp;&amp; schema1SystemEnumId == schema2SystemEnumId">
+                    <message error="true">Selected schemas must use different systems</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="nowTs" from="ec.user.nowTimestamp"/>
+                <set field="mappingIdValue" from="darpan.facade.reconciliation.PilotMappingSupport.generatePilotMappingId(ec, mappingNameValue)"/>
+                <service-call name="create#darpan.mapping.ReconciliationMapping"
+                        in-map="[reconciliationMappingId: mappingIdValue, mappingName: mappingNameValue, createdDate: nowTs, lastUpdatedDate: nowTs]"
+                        out-map="mappingCreateResult"/>
+                <service-call name="create#darpan.mapping.ReconciliationMappingMember"
+                        in-map="[mappingMemberId: mappingIdValue + '-1', reconciliationMappingId: mappingIdValue, systemEnumId: schema1.systemEnumId, fileTypeEnumId: 'DftJson', idFieldExpression: schema1FieldPathValue, systemFieldName: schema1FieldPathValue, schemaFileName: schema1.schemaName, createdDate: nowTs]"
+                        out-map="mappingMember1Result"/>
+                <service-call name="create#darpan.mapping.ReconciliationMappingMember"
+                        in-map="[mappingMemberId: mappingIdValue + '-2', reconciliationMappingId: mappingIdValue, systemEnumId: schema2.systemEnumId, fileTypeEnumId: 'DftJson', idFieldExpression: schema2FieldPathValue, systemFieldName: schema2FieldPathValue, schemaFileName: schema2.schemaName, createdDate: nowTs]"
+                        out-map="mappingMember2Result"/>
+                <set field="savedMapping" from="[reconciliationMappingId: mappingIdValue, mappingName: mappingNameValue, file1SystemEnumId: schema1SystemEnumId, file2SystemEnumId: schema2SystemEnumId, file1SchemaName: schema1.schemaName, file2SchemaName: schema2.schemaName, file1FieldPath: schema1FieldPathValue, file2FieldPath: schema2FieldPathValue]"/>
+                <message>Created reconciliation flow ${mappingNameValue}.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
     </service>
 
     <service verb="list" noun="PilotMappings" type="script" allow-remote="true" authenticate="true"
@@ -47,6 +109,7 @@
                 <parameter name="totalCount" type="Integer"/>
                 <parameter name="pageCount" type="Integer"/>
             </parameter>
+            <parameter name="pinnedReconciliationMappingIds" type="List"/>
             <parameter name="mappings">
                 <parameter name="reconciliationMappingId"/>
                 <parameter name="mappingName"/>
@@ -65,6 +128,185 @@
                     <parameter name="schemaFileName"/>
                 </parameter>
             </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="get" noun="PilotMapping" allow-remote="true" authenticate="true">
+        <description>Load one pilot mapping with editable schema and field details for darpan-ui settings workflows.</description>
+        <in-parameters>
+            <parameter name="reconciliationMappingId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="pilotMapping">
+                <parameter name="reconciliationMappingId"/>
+                <parameter name="mappingName"/>
+                <parameter name="members">
+                    <parameter name="mappingMemberId"/>
+                    <parameter name="systemEnumId"/>
+                    <parameter name="systemLabel"/>
+                    <parameter name="jsonSchemaId"/>
+                    <parameter name="schemaName"/>
+                    <parameter name="fieldPath"/>
+                </parameter>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="mappingIdValue" from="darpan.facade.common.FacadeSupport.normalize(reconciliationMappingId)"/>
+            <set field="ignoreTableEnsure" from="darpan.facade.reconciliation.PilotMappingSupport.ensurePilotMappingTables(ec)"/>
+            <if condition="!mappingIdValue">
+                <message error="true">reconciliationMappingId is required</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="mapping" from="ec.entity.find('darpan.mapping.ReconciliationMapping').condition('reconciliationMappingId', mappingIdValue).useCache(false).one()"/>
+                <if condition="mapping == null">
+                    <message error="true">Mapping '${mappingIdValue}' was not found.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="members" from="ec.entity.find('darpan.mapping.ReconciliationMappingMember').condition('reconciliationMappingId', mappingIdValue).orderBy('mappingMemberId').useCache(false).list() ?: []"/>
+                <if condition="members.isEmpty()">
+                    <message error="true">Mapping '${mappingIdValue}' does not contain any system members.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="resolvedMembers" from="darpan.facade.reconciliation.PilotMappingSupport.buildEditablePilotMappingMembers(ec, members)"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="pilotMapping" from="[reconciliationMappingId: mapping.reconciliationMappingId, mappingName: mapping.mappingName, members: resolvedMembers]"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="PilotMapping" allow-remote="true" authenticate="true">
+        <description>Update an existing two-source pilot mapping for darpan-ui settings workflows.</description>
+        <in-parameters>
+            <parameter name="reconciliationMappingId" required="true"/>
+            <parameter name="mappingName" required="true"/>
+            <parameter name="schema1Id" required="true"/>
+            <parameter name="schema2Id" required="true"/>
+            <parameter name="schema1FieldPath" required="true"/>
+            <parameter name="schema2FieldPath" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="savedMapping">
+                <parameter name="reconciliationMappingId"/>
+                <parameter name="mappingName"/>
+                <parameter name="file1SystemEnumId"/>
+                <parameter name="file2SystemEnumId"/>
+                <parameter name="file1SchemaName"/>
+                <parameter name="file2SchemaName"/>
+                <parameter name="file1FieldPath"/>
+                <parameter name="file2FieldPath"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="mappingIdValue" from="darpan.facade.common.FacadeSupport.normalize(reconciliationMappingId)"/>
+            <set field="mappingNameValue" from="darpan.facade.common.FacadeSupport.normalize(mappingName)"/>
+            <set field="schema1IdValue" from="darpan.facade.common.FacadeSupport.normalize(schema1Id)"/>
+            <set field="schema2IdValue" from="darpan.facade.common.FacadeSupport.normalize(schema2Id)"/>
+            <set field="schema1FieldPathValue" from="darpan.facade.reconciliation.PilotMappingSupport.normalizeEditableFieldPath(schema1FieldPath)"/>
+            <set field="schema2FieldPathValue" from="darpan.facade.reconciliation.PilotMappingSupport.normalizeEditableFieldPath(schema2FieldPath)"/>
+            <set field="ignoreTableEnsure" from="darpan.facade.reconciliation.PilotMappingSupport.ensurePilotMappingTables(ec)"/>
+            <if condition="!mappingIdValue">
+                <message error="true">reconciliationMappingId is required</message>
+            </if>
+            <if condition="!mappingNameValue">
+                <message error="true">mappingName is required</message>
+            </if>
+            <if condition="!schema1IdValue">
+                <message error="true">schema1Id is required</message>
+            </if>
+            <if condition="!schema2IdValue">
+                <message error="true">schema2Id is required</message>
+            </if>
+            <if condition="!schema1FieldPathValue">
+                <message error="true">schema1FieldPath is required</message>
+            </if>
+            <if condition="!schema2FieldPathValue">
+                <message error="true">schema2FieldPath is required</message>
+            </if>
+            <if condition="schema1IdValue &amp;&amp; schema2IdValue &amp;&amp; schema1IdValue == schema2IdValue">
+                <message error="true">schema1Id and schema2Id must be different</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="mapping" from="ec.entity.find('darpan.mapping.ReconciliationMapping').condition('reconciliationMappingId', mappingIdValue).useCache(false).one()"/>
+                <if condition="mapping == null">
+                    <message error="true">Mapping '${mappingIdValue}' was not found.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="existingMembers" from="ec.entity.find('darpan.mapping.ReconciliationMappingMember').condition('reconciliationMappingId', mappingIdValue).orderBy('mappingMemberId').useCache(false).list() ?: []"/>
+                <if condition="existingMembers.size() != 2">
+                    <message error="true">Only two-source runs can be edited in this settings workflow.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="schema1" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schema1IdValue).useCache(false).one()"/>
+                <set field="schema2" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schema2IdValue).useCache(false).one()"/>
+                <set field="ignoreAccessCheck1" from="darpan.facade.common.PilotAccessSupport.requireOwnedRecordAccess(ec, schema1, &quot;Schema not found for schema1Id '${schema1IdValue}'&quot;, 'Schema 1 is not available in your customer scope.')"/>
+                <set field="ignoreAccessCheck2" from="darpan.facade.common.PilotAccessSupport.requireOwnedRecordAccess(ec, schema2, &quot;Schema not found for schema2Id '${schema2IdValue}'&quot;, 'Schema 2 is not available in your customer scope.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="schema1SystemEnumId" from="darpan.facade.common.FacadeSupport.normalize(schema1?.systemEnumId)"/>
+                <set field="schema2SystemEnumId" from="darpan.facade.common.FacadeSupport.normalize(schema2?.systemEnumId)"/>
+                <if condition="!schema1SystemEnumId">
+                    <message error="true">Schema '${schema1?.schemaName}' is missing systemEnumId</message>
+                </if>
+                <if condition="!schema2SystemEnumId">
+                    <message error="true">Schema '${schema2?.schemaName}' is missing systemEnumId</message>
+                </if>
+                <if condition="schema1SystemEnumId &amp;&amp; schema2SystemEnumId &amp;&amp; schema1SystemEnumId == schema2SystemEnumId">
+                    <message error="true">Selected schemas must use different systems</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="nowTs" from="ec.user.nowTimestamp"/>
+                <set field="ignoreMappingName" from="mapping.set('mappingName', mappingNameValue)"/>
+                <set field="ignoreMappingUpdatedDate" from="mapping.set('lastUpdatedDate', nowTs)"/>
+                <set field="ignoreMappingUpdate" from="mapping.update()"/>
+                <set field="firstMember" from="existingMembers[0]"/>
+                <set field="secondMember" from="existingMembers[1]"/>
+                <set field="ignoreFirstSystem" from="firstMember.set('systemEnumId', schema1SystemEnumId)"/>
+                <set field="ignoreFirstFileType" from="firstMember.set('fileTypeEnumId', 'DftJson')"/>
+                <set field="ignoreFirstIdField" from="firstMember.set('idFieldExpression', schema1FieldPathValue)"/>
+                <set field="ignoreFirstSystemField" from="firstMember.set('systemFieldName', schema1FieldPathValue)"/>
+                <set field="ignoreFirstSchemaName" from="firstMember.set('schemaFileName', schema1.schemaName)"/>
+                <set field="ignoreFirstUpdate" from="firstMember.update()"/>
+                <set field="ignoreSecondSystem" from="secondMember.set('systemEnumId', schema2SystemEnumId)"/>
+                <set field="ignoreSecondFileType" from="secondMember.set('fileTypeEnumId', 'DftJson')"/>
+                <set field="ignoreSecondIdField" from="secondMember.set('idFieldExpression', schema2FieldPathValue)"/>
+                <set field="ignoreSecondSystemField" from="secondMember.set('systemFieldName', schema2FieldPathValue)"/>
+                <set field="ignoreSecondSchemaName" from="secondMember.set('schemaFileName', schema2.schemaName)"/>
+                <set field="ignoreSecondUpdate" from="secondMember.update()"/>
+                <set field="savedMapping" from="[reconciliationMappingId: mappingIdValue, mappingName: mappingNameValue, file1SystemEnumId: schema1SystemEnumId, file2SystemEnumId: schema2SystemEnumId, file1SchemaName: schema1.schemaName, file2SchemaName: schema2.schemaName, file1FieldPath: schema1FieldPathValue, file2FieldPath: schema2FieldPathValue]"/>
+                <message>Saved run ${mappingNameValue}.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="DashboardPinnedMappings" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/saveDashboardPinnedMappings.groovy">
+        <description>Persist dashboard pinned reconciliation mappings for the authenticated user.</description>
+        <in-parameters>
+            <parameter name="pinnedReconciliationMappingIds" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="pinnedReconciliationMappingIds" type="List"/>
         </out-parameters>
     </service>
 
@@ -178,8 +420,7 @@
         </out-parameters>
     </service>
 
-    <service verb="delete" noun="PilotGeneratedOutput" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/deletePilotGeneratedOutput.groovy">
+    <service verb="delete" noun="PilotGeneratedOutput" allow-remote="true" authenticate="true">
         <description>Delete one scoped generated pilot diff output file.</description>
         <in-parameters>
             <parameter name="fileName" required="true"/>
@@ -192,5 +433,24 @@
             <parameter name="deletedFileName"/>
             <parameter name="statusMessage"/>
         </out-parameters>
+        <actions>
+            <set field="fileNameValue" from="darpan.facade.common.FacadeSupport.normalize(fileName)"/>
+            <if condition="!fileNameValue">
+                <message error="true">fileName is required</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; (fileNameValue.contains('..') || fileNameValue.contains('/') || fileNameValue.indexOf((char) 92) >= 0)">
+                <message error="true">fileName is invalid</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <service-call name="reconciliation.ReconciliationGenericServices.delete#GeneratedOutputFile"
+                        in-map="[filename:fileNameValue]" out-map="deleteResult"/>
+                <set field="deleted" from="deleteResult.deleted"/>
+                <set field="deletedFileName" from="deleteResult.deletedFileName ?: fileNameValue"/>
+                <set field="statusMessage" from="deleteResult.statusMessage"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
     </service>
 </services>

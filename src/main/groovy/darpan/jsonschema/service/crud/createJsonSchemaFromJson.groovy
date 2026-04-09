@@ -259,6 +259,8 @@ if (existingSchema) {
     newSchema.schemaText = schemaJson
     newSchema.description = description
     newSchema.statusId = "Active"
+    newSchema.createdDate = ec.user.nowTimestamp
+    newSchema.lastUpdatedStamp = ec.user.nowTimestamp
     
     // Create will handle ID generation
     newSchema.setSequencedIdPrimary()
@@ -272,4 +274,3 @@ schemaName = nameToSave
 
 
 logger.info("Saved generated JSON schema ${filename} to DB with ID ${jsonSchemaId}")
-

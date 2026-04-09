@@ -5,8 +5,19 @@ This document describes the production RuleSet/Rule service contracts used by re
 ## Service file
 
 - `runtime/component/darpan/service/reconciliation/ReconciliationRuleEngineServices.xml`
-- Script implementation:
+- XML-backed orchestration:
+  - `save#RuleSet`
+  - `delete#Rule`
+  - `delete#RuleSet`
+  - `clear#RuleSetCache`
+- Script-backed rule engine core:
   - `runtime/component/darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy`
+  - `compile#RuleSet`
+  - `execute#RuleSet`
+  - `execute#RuleSetJson`
+  - `save#Rule`
+- Shared helper for cache and ID orchestration:
+  - `runtime/component/darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineSupport.groovy`
 
 ## Service contracts
 
@@ -42,6 +53,7 @@ This document describes the production RuleSet/Rule service contracts used by re
   - `save#Rule`
   - `delete#Rule`
   - `delete#RuleSet`
+- Cache invalidation is tenant-scoped through `RuleEngineSupport`, so XML-backed CRUD and script-backed compile/execute share the same cache entries.
 - Rule parsing supports user-friendly condition text (for example: `status is Pending`).
 - Generated rules add `_matchedRuleIds` to matched fact maps.
 

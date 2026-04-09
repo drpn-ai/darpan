@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entity-facade-xml type="darpan-seed">
+    <moqui.service.message.SystemMessageRemote
+            systemMessageRemoteId="SHOPIFY"
+            description="Shopify"
+            sendUrl="https://shopify.uat.example.invalid"/>
+
+    <moqui.service.message.SystemMessageRemote
+            systemMessageRemoteId="OMS"
+            description="HotWax OMS"
+            sendUrl="https://oms.uat.example.invalid"/>
+
+    <moqui.service.message.SystemMessageRemote
+            systemMessageRemoteId="NETSUITE"
+            description="NetSuite"
+            sendUrl="https://netsuite.uat.example.invalid"/>
+
+    <moqui.service.message.SystemMessageRemote
+            systemMessageRemoteId="SAPI"
+            description="SAPI"
+            sendUrl="https://sapi.uat.example.invalid"/>
+</entity-facade-xml>

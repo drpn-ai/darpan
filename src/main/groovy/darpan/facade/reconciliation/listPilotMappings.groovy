@@ -1,4 +1,5 @@
 import darpan.facade.common.FacadeSupport
+import darpan.facade.reconciliation.PilotDashboardPreferenceSupport
 import darpan.facade.reconciliation.PilotMappingSupport
 
 int page = Math.max(0, FacadeSupport.normalizeInt(pageIndex, 0))
@@ -14,6 +15,7 @@ def findEnum = { String enumId ->
 }
 
 List<Map> rows = []
+Set<String> availableMappingIds = [] as Set<String>
 (ec.entity.find("darpan.mapping.ReconciliationMapping")
         .orderBy("mappingName,reconciliationMappingId")
         .useCache(false)
@@ -54,6 +56,7 @@ List<Map> rows = []
                 defaultFile2SystemEnumId: systemIds.size() >= 2 ? systemIds[1] : null,
                 systemOptions           : systemOptions.collect { Map option -> option.findAll { String key, Object value -> key != "sequenceNum" } },
         ]
+        availableMappingIds.add(mapping.reconciliationMappingId as String)
 
         boolean matches = !search || [
                 row.reconciliationMappingId,
@@ -71,6 +74,7 @@ int totalCount = rows.size()
 int fromIndex = Math.min(page * size, totalCount)
 int toIndex = Math.min(fromIndex + size, totalCount)
 mappings = rows.subList(fromIndex, toIndex)
+pinnedReconciliationMappingIds = PilotDashboardPreferenceSupport.listPinnedReconciliationMappingIds(ec, availableMappingIds)
 pagination = [
         pageIndex : page,
         pageSize  : size,

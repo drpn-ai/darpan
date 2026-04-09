@@ -51,7 +51,7 @@
         </out-parameters>
     </service>
 
-    <service verb="save" noun="RuleSet" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy" method="saveRuleSet">
+    <service verb="save" noun="RuleSet">
         <description>Create or update RuleSet metadata with normalized IDs and timestamps.</description>
         <in-parameters>
             <parameter name="ruleSetId"/>
@@ -66,6 +66,29 @@
             <parameter name="created" type="Boolean"/>
             <parameter name="updated" type="Boolean"/>
         </out-parameters>
+        <actions>
+            <set field="requestedRuleSetIdValue" from="darpan.facade.common.FacadeSupport.normalize(ruleSetId)"/>
+            <set field="ruleSetNameValue" from="darpan.facade.common.FacadeSupport.normalize(ruleSetName)"/>
+            <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
+            <set field="versionValue" from="darpan.facade.common.FacadeSupport.normalize(version) ?: '1.0'"/>
+            <set field="explosionPathValue" from="darpan.facade.common.FacadeSupport.normalize(explosionPath)"/>
+            <set field="primaryKeyPathValue" from="darpan.facade.common.FacadeSupport.normalize(primaryKeyPath)"/>
+            <set field="resolvedRuleSet" from="reconciliation.rule.RuleEngineSupport.resolveRuleSetId(ec, requestedRuleSetIdValue, ruleSetNameValue)"/>
+            <if condition="resolvedRuleSet.error">
+                <message error="true">${resolvedRuleSet.error}</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ruleSetId" from="resolvedRuleSet.ruleSetId"/>
+                <set field="existingRuleSet" from="ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', ruleSetId).useCache(false).one()"/>
+                <set field="nowTs" from="ec.user.nowTimestamp"/>
+                <set field="ruleSetValue" from="[ruleSetId: ruleSetId, ruleSetName: ruleSetNameValue ?: (existingRuleSet?.ruleSetName ?: ruleSetId), description: descriptionValue, version: versionValue, explosionPath: explosionPathValue, primaryKeyPath: primaryKeyPathValue, createdDate: existingRuleSet?.createdDate ?: nowTs, lastUpdatedDate: nowTs]"/>
+                <service-call name="store#darpan.rule.RuleSet" in-map="ruleSetValue"/>
+                <set field="created" from="existingRuleSet == null"/>
+                <set field="updated" from="existingRuleSet != null"/>
+                <set field="ignoreCacheClear" from="reconciliation.rule.RuleEngineSupport.invalidateRuleSetCache(ec, ruleSetId)"/>
+                <message>${created ? 'Created' : 'Updated'} RuleSet ${ruleSetId}.</message>
+            </if>
+        </actions>
     </service>
 
     <service verb="save" noun="Rule" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy" method="saveRule">
@@ -90,7 +113,7 @@
         </out-parameters>
     </service>
 
-    <service verb="delete" noun="Rule" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy" method="deleteRule">
+    <service verb="delete" noun="Rule">
         <description>Delete a Rule and invalidate its RuleSet cache.</description>
         <in-parameters>
             <parameter name="ruleId" required="true"/>
@@ -99,9 +122,31 @@
             <parameter name="ruleId"/>
             <parameter name="ruleSetId"/>
         </out-parameters>
+        <actions>
+            <set field="ruleValidation" from="reconciliation.rule.RuleEngineSupport.validateProvidedId(ruleId, 'ruleId')"/>
+            <set field="ruleId" from="ruleValidation.value"/>
+            <if condition="ruleValidation.error">
+                <message error="true">${ruleValidation.error}</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; !ruleId">
+                <message error="true">ruleId is required</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="existingRule" from="ec.entity.find('darpan.rule.Rule').condition('ruleId', ruleId).useCache(false).one()"/>
+                <if condition="!existingRule">
+                    <message error="true">Rule ${ruleId} not found</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ruleSetId" from="existingRule?.ruleSetId?.toString()?.trim()"/>
+                <service-call name="delete#darpan.rule.Rule" in-map="[ruleId: ruleId]"/>
+                <set field="ignoreCacheClear" from="reconciliation.rule.RuleEngineSupport.invalidateRuleSetCache(ec, ruleSetId)"/>
+                <message>Deleted Rule ${ruleId}.</message>
+            </if>
+        </actions>
     </service>
 
-    <service verb="delete" noun="RuleSet" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy" method="deleteRuleSet">
+    <service verb="delete" noun="RuleSet">
         <description>Delete a RuleSet, optionally deleting all child rules in the same transaction.</description>
         <in-parameters>
             <parameter name="ruleSetId" required="true"/>
@@ -111,9 +156,39 @@
             <parameter name="ruleSetId"/>
             <parameter name="deletedRuleCount" type="Integer"/>
         </out-parameters>
+        <actions>
+            <set field="ruleSetValidation" from="reconciliation.rule.RuleEngineSupport.validateProvidedId(ruleSetId, 'ruleSetId')"/>
+            <set field="ruleSetId" from="ruleSetValidation.value"/>
+            <set field="forceDeleteRulesValue" from="darpan.facade.common.FacadeSupport.normalizeBool(forceDeleteRules, false)"/>
+            <if condition="ruleSetValidation.error">
+                <message error="true">${ruleSetValidation.error}</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; !ruleSetId">
+                <message error="true">ruleSetId is required</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="existingRuleSet" from="ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', ruleSetId).useCache(false).one()"/>
+                <if condition="!existingRuleSet">
+                    <message error="true">RuleSet ${ruleSetId} not found</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ruleList" from="ec.entity.find('darpan.rule.Rule').condition('ruleSetId', ruleSetId).useCache(false).list() ?: []"/>
+                <set field="deletedRuleCount" from="ruleList.size()"/>
+                <if condition="deletedRuleCount &gt; 0 &amp;&amp; !forceDeleteRulesValue">
+                    <message error="true">RuleSet ${ruleSetId} has ${deletedRuleCount} rule(s). Delete rules first or set forceDeleteRules=true.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreRuleDelete" from="deletedRuleCount ? ec.entity.find('darpan.rule.Rule').condition('ruleSetId', ruleSetId).useCache(false).deleteAll() : 0"/>
+                <service-call name="delete#darpan.rule.RuleSet" in-map="[ruleSetId: ruleSetId]"/>
+                <set field="ignoreCacheClear" from="reconciliation.rule.RuleEngineSupport.invalidateRuleSetCache(ec, ruleSetId)"/>
+                <message>Deleted RuleSet ${ruleSetId}${deletedRuleCount ? ' with ' + deletedRuleCount + ' rule(s)' : ''}.</message>
+            </if>
+        </actions>
     </service>
 
-    <service verb="clear" noun="RuleSetCache" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy" method="clearRuleSetCache">
+    <service verb="clear" noun="RuleSetCache">
         <description>Clear Rule Engine cache for one RuleSet or for all cached RuleSets.</description>
         <in-parameters>
             <parameter name="ruleSetId"/>
@@ -122,6 +197,16 @@
             <parameter name="cacheCleared" type="Boolean"/>
             <parameter name="ruleSetId"/>
         </out-parameters>
+        <actions>
+            <set field="ruleSetId" from="darpan.facade.common.FacadeSupport.normalize(ruleSetId)"/>
+            <set field="cacheCleared" from="reconciliation.rule.RuleEngineSupport.invalidateRuleSetCache(ec, ruleSetId)"/>
+            <if condition="ruleSetId">
+                <message>Cleared cache for RuleSet ${ruleSetId}.</message>
+            </if>
+            <if condition="!ruleSetId">
+                <message>Cleared Rule Engine cache for all RuleSets.</message>
+            </if>
+        </actions>
     </service>
 
 </services>

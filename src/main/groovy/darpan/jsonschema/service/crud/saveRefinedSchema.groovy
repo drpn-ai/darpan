@@ -280,6 +280,7 @@ if (existingSchema) {
     newSchema.systemEnumId = resolvedSystemEnumId
     newSchema.statusId = "Active"
     newSchema.createdDate = ec.user.nowTimestamp
+    newSchema.lastUpdatedStamp = ec.user.nowTimestamp
     newSchema.setSequencedIdPrimary()
     newSchema.create()
     jsonSchemaId = newSchema.jsonSchemaId

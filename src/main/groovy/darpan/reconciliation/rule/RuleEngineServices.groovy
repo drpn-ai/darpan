@@ -13,12 +13,10 @@ import org.moqui.entity.EntityValue
 import org.slf4j.LoggerFactory
 
 import java.sql.Timestamp
-import java.util.concurrent.ConcurrentHashMap
 
 import static reconciliation.rule.RuleConditionParser.parseCondition
 
 @Field final def logger = LoggerFactory.getLogger("darpan.reconciliation.rule.RuleEngineServices")
-@Field final Map<String, Map> RULESET_CACHE = new ConcurrentHashMap<>()
 
 String normalize(Object value) { value?.toString()?.trim() }
 
@@ -55,44 +53,14 @@ String sanitizePackagePart(String raw) {
     return cleaned
 }
 
-String sanitizeIdToken(String raw, String fallbackPrefix) {
-    String cleaned = normalize(raw)?.toUpperCase()?.replaceAll(/[^A-Z0-9_]/, "_")
-    cleaned = cleaned?.replaceAll(/_+/, "_")?.replaceAll(/^_+|_+$/, "")
-    if (!cleaned) cleaned = fallbackPrefix
-    if (!(cleaned[0] ==~ /[A-Z]/)) cleaned = "${fallbackPrefix}_${cleaned}"
-    if (cleaned.length() > 60) cleaned = cleaned.substring(0, 60)
-    return cleaned
-}
-
 String validateProvidedId(String providedId, String label) {
-    String normalized = normalize(providedId)
-    if (!normalized) return null
-    if (!(normalized ==~ /[A-Za-z0-9_.:-]+/)) {
-        throw new IllegalArgumentException("${label} contains invalid characters: ${normalized}")
-    }
-    return normalized
+    Map validation = RuleEngineSupport.validateProvidedId(providedId, label)
+    if (validation.error) throw new IllegalArgumentException(validation.error as String)
+    return validation.value as String
 }
 
 String normalizeEnabled(Object value) {
     return normalizeBool(value, true) ? "Y" : "N"
-}
-
-String resolveTenantToken(ExecutionContext ec) {
-    String tenantId = normalize(ec?.context?.tenantId)
-    return sanitizeIdToken(tenantId ?: "DEFAULT", "TENANT")
-}
-
-String buildCacheKey(ExecutionContext ec, String ruleSetId) {
-    String tenantId = resolveTenantToken(ec)
-    return "${tenantId}::${ruleSetId}"
-}
-
-void invalidateRuleSetCache(ExecutionContext ec, String ruleSetId) {
-    if (ruleSetId) {
-        RULESET_CACHE.remove(buildCacheKey(ec, ruleSetId))
-        return
-    }
-    RULESET_CACHE.clear()
 }
 
 List fetchActiveRules(ExecutionContext ec, String ruleSetId) {
@@ -226,11 +194,11 @@ Map getOrBuildContainer(ExecutionContext ec, String ruleSetId, boolean useCache 
     List rules = fetchActiveRules(ec, ruleSetId)
     if (!rules) throw new IllegalArgumentException("RuleSet ${ruleSetId} has no active rules")
 
-    String tenantId = resolveTenantToken(ec)
+    String tenantId = RuleEngineSupport.resolveTenantToken(ec)
     String signature = makeRuleSignature(ruleSet, rules)
-    String cacheKey = buildCacheKey(ec, ruleSetId)
+    String cacheKey = RuleEngineSupport.buildCacheKey(ec, ruleSetId)
 
-    Map cached = RULESET_CACHE[cacheKey]
+    Map cached = RuleEngineSupport.RULESET_CACHE[cacheKey]
     if (!forceRebuild && useCache && cached != null && signature == cached.signature && cached.container != null) {
         return [
                 container: cached.container,
@@ -267,7 +235,7 @@ Map getOrBuildContainer(ExecutionContext ec, String ruleSetId, boolean useCache 
             warnings : warnings,
             container: container
     ]
-    RULESET_CACHE[cacheKey] = entry
+    RuleEngineSupport.RULESET_CACHE[cacheKey] = entry
 
     return [
             container: container,
@@ -390,30 +358,11 @@ def executeRuleSetJson() {
     }
 }
 
-String generateRuleSetId(ExecutionContext ec, String requestedId, String ruleSetName) {
-    String provided = validateProvidedId(requestedId, "ruleSetId")
-    if (provided) return provided
-
-    String base = sanitizeIdToken(ruleSetName ?: "RULE_SET", "RS")
-    if (!base.startsWith("RS_")) base = "RS_${base}"
-    String candidate = base
-
-    int suffix = 1
-    while (ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", candidate).useCache(false).one() != null) {
-        String suffixText = "_${suffix}"
-        int maxBaseLen = Math.max(1, 60 - suffixText.length())
-        String shortBase = base.length() > maxBaseLen ? base.substring(0, maxBaseLen) : base
-        candidate = shortBase + suffixText
-        suffix++
-    }
-    return candidate
-}
-
 String generateRuleId(ExecutionContext ec, String requestedId, String ruleSetId, long sequenceNum) {
     String provided = validateProvidedId(requestedId, "ruleId")
     if (provided) return provided
 
-    String base = sanitizeIdToken("${ruleSetId}_R_${sequenceNum}", "RULE")
+    String base = RuleEngineSupport.sanitizeIdToken("${ruleSetId}_R_${sequenceNum}", "RULE")
 
     String candidate = base
     int suffix = 1
@@ -425,51 +374,6 @@ String generateRuleId(ExecutionContext ec, String requestedId, String ruleSetId,
         suffix++
     }
     return candidate
-}
-
-def saveRuleSet() {
-    ExecutionContext ec = context.ec as ExecutionContext
-    String requestedRuleSetId = normalize(context.ruleSetId)
-    String ruleSetName = normalize(context.ruleSetName)
-    String description = normalize(context.description)
-    String version = normalize(context.version) ?: "1.0"
-    String explosionPath = normalize(context.explosionPath)
-    String primaryKeyPath = normalize(context.primaryKeyPath)
-    Timestamp nowTs = new Timestamp(System.currentTimeMillis())
-
-    String ruleSetId = generateRuleSetId(ec, requestedRuleSetId, ruleSetName)
-    EntityValue existing = ec.entity.find("darpan.rule.RuleSet")
-            .condition("ruleSetId", ruleSetId)
-            .useCache(false)
-            .one()
-
-    if (existing == null) {
-        ec.entity.makeValue("darpan.rule.RuleSet")
-                .set("ruleSetId", ruleSetId)
-                .set("ruleSetName", ruleSetName ?: ruleSetId)
-                .set("description", description)
-                .set("version", version)
-                .set("explosionPath", explosionPath)
-                .set("primaryKeyPath", primaryKeyPath)
-                .set("createdDate", nowTs)
-                .set("lastUpdatedDate", nowTs)
-                .create()
-        ec.message.addMessage("Created RuleSet ${ruleSetId}.")
-        invalidateRuleSetCache(ec, ruleSetId)
-        return [ruleSetId: ruleSetId, created: true, updated: false]
-    }
-
-    existing.set("ruleSetName", ruleSetName ?: normalize(existing.ruleSetName) ?: ruleSetId)
-    existing.set("description", description)
-    existing.set("version", version)
-    existing.set("explosionPath", explosionPath)
-    existing.set("primaryKeyPath", primaryKeyPath)
-    existing.set("lastUpdatedDate", nowTs)
-    existing.update()
-
-    ec.message.addMessage("Updated RuleSet ${ruleSetId}.")
-    invalidateRuleSetCache(ec, ruleSetId)
-    return [ruleSetId: ruleSetId, created: false, updated: true]
 }
 
 def saveRule() {
@@ -537,7 +441,7 @@ def saveRule() {
         existingRule.update()
     }
 
-    invalidateRuleSetCache(ec, ruleSetId)
+    RuleEngineSupport.invalidateRuleSetCache(ec, ruleSetId)
     List warnings = []
     if (validateOnSave && "Y".equals(enabled)) {
         Map compiled = getOrBuildContainer(ec, ruleSetId, false, true)
@@ -546,63 +450,4 @@ def saveRule() {
 
     ec.message.addMessage("${existingRule == null ? 'Created' : 'Updated'} Rule ${ruleId}.")
     return [ruleId: ruleId, ruleSetId: ruleSetId, sequenceNum: sequenceNum, warnings: warnings]
-}
-
-def deleteRule() {
-    ExecutionContext ec = context.ec as ExecutionContext
-    String ruleId = validateProvidedId(context.ruleId, "ruleId")
-    if (!ruleId) throw new IllegalArgumentException("ruleId is required")
-
-    EntityValue existingRule = ec.entity.find("darpan.rule.Rule")
-            .condition("ruleId", ruleId)
-            .useCache(false)
-            .one()
-    if (!existingRule) throw new IllegalArgumentException("Rule ${ruleId} not found")
-
-    String ruleSetId = normalize(existingRule.ruleSetId)
-    existingRule.delete()
-    invalidateRuleSetCache(ec, ruleSetId)
-    ec.message.addMessage("Deleted Rule ${ruleId}.")
-    return [ruleId: ruleId, ruleSetId: ruleSetId]
-}
-
-def deleteRuleSet() {
-    ExecutionContext ec = context.ec as ExecutionContext
-    String ruleSetId = validateProvidedId(context.ruleSetId, "ruleSetId")
-    boolean forceDeleteRules = normalizeBool(context.forceDeleteRules, false)
-    if (!ruleSetId) throw new IllegalArgumentException("ruleSetId is required")
-
-    EntityValue ruleSet = ec.entity.find("darpan.rule.RuleSet")
-            .condition("ruleSetId", ruleSetId)
-            .useCache(false)
-            .one()
-    if (!ruleSet) throw new IllegalArgumentException("RuleSet ${ruleSetId} not found")
-
-    List rules = (ec.entity.find("darpan.rule.Rule")
-            .condition("ruleSetId", ruleSetId)
-            .useCache(false)
-            .list() ?: []) as List
-
-    if (rules && !forceDeleteRules) {
-        throw new IllegalArgumentException("RuleSet ${ruleSetId} has ${rules.size()} rule(s). Delete rules first or set forceDeleteRules=true.")
-    }
-
-    rules.each { EntityValue ruleVal -> ruleVal.delete() }
-    ruleSet.delete()
-    invalidateRuleSetCache(ec, ruleSetId)
-    ec.message.addMessage("Deleted RuleSet ${ruleSetId}${rules ? ' with ' + rules.size() + ' rule(s)' : ''}.")
-    return [ruleSetId: ruleSetId, deletedRuleCount: rules.size()]
-}
-
-def clearRuleSetCache() {
-    ExecutionContext ec = context.ec as ExecutionContext
-    String ruleSetId = normalize(context.ruleSetId)
-    if (ruleSetId) {
-        invalidateRuleSetCache(ec, ruleSetId)
-        ec.message.addMessage("Cleared cache for RuleSet ${ruleSetId}.")
-        return [ruleSetId: ruleSetId, cacheCleared: true]
-    }
-    invalidateRuleSetCache(ec, null)
-    ec.message.addMessage("Cleared Rule Engine cache for all RuleSets.")
-    return [cacheCleared: true]
 }

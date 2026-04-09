@@ -70,7 +70,7 @@
         </out-parameters>
     </service>
 
-    <service verb="evaluate" noun="InventoryAdjustmentComparisonRules" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/inventory/evaluateInventoryAdjustmentComparisonRules.groovy">
+    <service verb="evaluate" noun="InventoryAdjustmentComparisonRules">
         <description>Evaluate per-item reconciliation outcomes using a user-configured Drools RuleSet.</description>
         <in-parameters>
             <parameter name="ruleSetId" required="true"/>
@@ -85,6 +85,51 @@
             <parameter name="warnings" type="List"/>
             <parameter name="error"/>
         </out-parameters>
+        <actions>
+            <set field="ruleSetIdValue" from="darpan.facade.common.FacadeSupport.normalize(ruleSetId)"/>
+            <set field="returnAllFactsValue" from="darpan.facade.common.FacadeSupport.normalizeBool(returnAllFacts, true)"/>
+            <set field="inputRows" from="(dataList instanceof List) ? dataList : []"/>
+            <if condition="!ruleSetIdValue">
+                <message error="true">ruleSetId is required</message>
+            </if>
+            <if condition="!inputRows">
+                <set field="results" from="[]"/>
+                <set field="matchedResults" from="[]"/>
+                <set field="ruleCount" from="0"/>
+                <set field="firedRuleCount" from="0"/>
+                <set field="warnings" from="[]"/>
+            </if>
+            <if condition="inputRows">
+                <service-call name="reconciliation.ReconciliationRuleEngineServices.execute#RuleSet"
+                        in-map="[ruleSetId: ruleSetIdValue, dataList: inputRows, returnAllFacts: returnAllFactsValue]" out-map="ruleExec"/>
+                <if condition="!ruleExec">
+                    <set field="results" from="[]"/>
+                    <set field="matchedResults" from="[]"/>
+                    <set field="ruleCount" from="0"/>
+                    <set field="firedRuleCount" from="0"/>
+                    <set field="warnings" from="[]"/>
+                    <set field="error" from="'RuleSet ' + ruleSetIdValue + ' execution returned no result.'"/>
+                    <log level="error" message="${error}"/>
+                </if>
+                <if condition="ruleExec &amp;&amp; ruleExec.error">
+                    <set field="results" from="returnAllFactsValue ? inputRows : []"/>
+                    <set field="matchedResults" from="[]"/>
+                    <set field="ruleCount" from="(ruleExec.ruleCount ?: 0) as int"/>
+                    <set field="firedRuleCount" from="(ruleExec.firedRuleCount ?: 0) as int"/>
+                    <set field="warnings" from="(ruleExec.warnings ?: []) as List"/>
+                    <set field="error" from="'RuleSet ' + ruleSetIdValue + ' execution failed: ' + ruleExec.error"/>
+                    <log level="error" message="${error}"/>
+                </if>
+                <if condition="ruleExec &amp;&amp; !ruleExec.error">
+                    <set field="results" from="(ruleExec.results ?: []) as List"/>
+                    <set field="matchedResults" from="(ruleExec.matchedResults ?: []) as List"/>
+                    <set field="ruleCount" from="(ruleExec.ruleCount ?: 0) as int"/>
+                    <set field="firedRuleCount" from="(ruleExec.firedRuleCount ?: 0) as int"/>
+                    <set field="warnings" from="(ruleExec.warnings ?: []) as List"/>
+                    <log level="info" message="Inventory comparison ruleSet=${ruleSetIdValue} rows=${results.size()} fired=${firedRuleCount} ruleCount=${ruleCount}"/>
+                </if>
+            </if>
+        </actions>
     </service>
 
     <service verb="retrieve" noun="InventoryAdjustmentsByReference" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/inventory/retrieveInventoryAdjustmentsByReference.groovy">

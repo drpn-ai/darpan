@@ -1,10 +1,64 @@
 package darpan.facade.reconciliation
 
+import darpan.facade.common.FacadeSupport
+import darpan.facade.common.PilotAccessSupport
 import groovy.json.JsonSlurper
 import jsonschema.common.JsonSchemaUtil
 import org.moqui.context.ExecutionContext
 
 class PilotMappingSupport {
+
+    static boolean ensurePilotMappingTables(def ec) {
+        [
+                "darpan.reconciliation.JsonSchema",
+                "darpan.mapping.ReconciliationMapping",
+                "darpan.mapping.ReconciliationMappingMember"
+        ].each { String entityName -> ensureEntityTable(ec, entityName) }
+        return true
+    }
+
+    static String generatePilotMappingId(def ec, String rawName) {
+        String mappingIdBase = rawName?.replaceAll('[^A-Za-z0-9]', '')
+        if (!mappingIdBase) mappingIdBase = "Mapping"
+        if (mappingIdBase.length() > 38) mappingIdBase = mappingIdBase.substring(0, 38)
+
+        String mappingIdValue = mappingIdBase
+        def existingMapping = ec.entity.find("darpan.mapping.ReconciliationMapping")
+                .condition("reconciliationMappingId", mappingIdValue)
+                .useCache(false)
+                .one()
+        if (existingMapping != null) {
+            String idSuffix = ec.l10n.format(ec.user.nowTimestamp, 'yyMMddHHmmss')
+            int baseMax = 38 - idSuffix.length() - 1
+            String trimmedBase = mappingIdBase.length() > baseMax ? mappingIdBase.substring(0, baseMax) : mappingIdBase
+            mappingIdValue = "${trimmedBase}-${idSuffix}"
+        }
+        return mappingIdValue
+    }
+
+    static List<Map<String, Object>> buildEditablePilotMappingMembers(def ec, List mappingMembers) {
+        return (mappingMembers ?: []).collect { member ->
+            String schemaName = FacadeSupport.normalize(member?.schemaFileName)
+            def schema = schemaName ? JsonSchemaUtil.resolveSchemaRecord(ec, null, schemaName, schemaName, false) : null
+            if (schema != null) {
+                PilotAccessSupport.requireOwnedRecordAccess(
+                        ec,
+                        schema,
+                        "Schema '${schemaName}' was not found.",
+                        "Schema '${schemaName}' is not available in your customer scope."
+                )
+            }
+
+            [
+                    mappingMemberId: member?.mappingMemberId,
+                    systemEnumId   : member?.systemEnumId,
+                    systemLabel    : JsonSchemaUtil.resolveSystemLabel(ec, member?.systemEnumId, member?.systemEnumId as String, true),
+                    jsonSchemaId   : schema?.jsonSchemaId,
+                    schemaName     : schema?.schemaName ?: schemaName,
+                    fieldPath      : normalizeEditableFieldPath(member?.idFieldExpression ?: member?.systemFieldName),
+            ]
+        }
+    }
 
     static List<String> collectPilotReadinessIssues(ExecutionContext ec, List mappingMembers) {
         List members = mappingMembers ?: []
@@ -90,6 +144,11 @@ class PilotMappingSupport {
             }
         }
         return builder.toString()
+    }
+
+    static String normalizeEditableFieldPath(Object rawExpression) {
+        String rawValue = rawExpression?.toString()
+        return normalizePilotJsonIdExpression(rawValue) ?: normalizeBaseIdFieldExpression(rawValue)
     }
 
     protected static String extractJsonPropertyName(String rawExpression) {
@@ -235,5 +294,11 @@ class PilotMappingSupport {
 
     protected static String normalize(Object value) {
         return value?.toString()?.trim()
+    }
+
+    protected static void ensureEntityTable(def ec, String entityName) {
+        String groupName = ec.entity.getEntityGroupName(entityName) ?: "default"
+        def datasourceFactory = ec.entity.getDatasourceFactory(groupName)
+        datasourceFactory?.checkAndAddTable(entityName)
     }
 }

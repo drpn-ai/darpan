@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- No copyright or license for configuration file, details here are not considered a creative work. -->
-<entity-facade-xml type="seed">
+<entity-facade-xml type="darpan-seed">
+    <moqui.security.ArtifactGroup artifactGroupId="DARPAN_AUTH_API" description="Darpan auth facade APIs"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_AUTH_API"
+            artifactName="facade\.AuthFacadeServices\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y" inheritAuthz="Y"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_AUTH_API_ALL_USERS" userGroupId="ALL_USERS"
+            artifactGroupId="DARPAN_AUTH_API" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+
     <moqui.security.ArtifactGroup artifactGroupId="DARPAN_APP" description="Darpan App (via root screen)"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
             artifactName="component://darpan/screen/.*" artifactTypeEnumId="AT_XML_SCREEN" nameIsPattern="Y" inheritAuthz="Y"/>
@@ -12,6 +18,10 @@
             artifactName="darpan.mapping.ReconciliationMapping" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
             artifactName="darpan.mapping.ReconciliationMappingMember" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
-    <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_APP_ADMIN" userGroupId="ALL_USERS"
+    <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_APP_ADMIN" userGroupId="ADMIN"
             artifactGroupId="DARPAN_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+
+    <moqui.basic.Enumeration enumId="darpan.dashboard.pinnedReconciliationMappingIds"
+            description="Pinned dashboard reconciliation mappings"
+            enumTypeId="UserPreferenceKey"/>
 </entity-facade-xml>

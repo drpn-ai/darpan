@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entity-facade-xml type="darpan-seed">
+    <!--
+        Minimal UAT-friendly configuration bundle for darpan.reconciliation.RunSystemInstance.
+        Includes dependent SystemMessageRemote, Reconciliation, and ReconciliationRun rows so the
+        file can be uploaded as a single unit even when those records do not already exist.
+    -->
+
+    <moqui.service.message.SystemMessageRemote
+            systemMessageRemoteId="DARPAN_UAT_SRC_SYS"
+            description="UAT source system for RunSystemInstance finder data"
+            sendUrl="https://inventory-source.uat.example.invalid"/>
+
+    <moqui.service.message.SystemMessageRemote
+            systemMessageRemoteId="DARPAN_UAT_TGT_SYS"
+            description="UAT target system for RunSystemInstance finder data"
+            sendUrl="https://inventory-target.uat.example.invalid"/>
+
+    <moqui.service.message.SystemMessageRemote
+            systemMessageRemoteId="DARPAN_UAT_PEER_A_SYS"
+            description="UAT peer system A for RunSystemInstance finder data"
+            sendUrl="https://peer-a.uat.example.invalid"/>
+
+    <moqui.service.message.SystemMessageRemote
+            systemMessageRemoteId="DARPAN_UAT_PEER_B_SYS"
+            description="UAT peer system B for RunSystemInstance finder data"
+            sendUrl="https://peer-b.uat.example.invalid"/>
+
+    <darpan.reconciliation.Reconciliation
+            reconciliationId="DARPAN_UAT_RUNSYS_RECON"
+            reconciliationName="UAT Run System Instance Demo"
+            description="Seed reconciliation used to populate RunSystemInstance finder data in UAT."
+            scheduleExpr="0 0 6 * * ?"
+            isActive="Y"/>
+
+    <darpan.reconciliation.ReconciliationRun
+            reconciliationRunId="DARPAN_UAT_RUNSYS_RUN_INV"
+            reconciliationId="DARPAN_UAT_RUNSYS_RECON"
+            runName="Inventory Source Target Pair"
+            dataDomain="INVENTORY"
+            purpose="DEMO"
+            defaultTimeWindow="LAST_24_HOURS"
+            runSequence="10"/>
+
+    <darpan.reconciliation.ReconciliationRun
+            reconciliationRunId="DARPAN_UAT_RUNSYS_RUN_PEER"
+            reconciliationId="DARPAN_UAT_RUNSYS_RECON"
+            runName="Peer Comparison Pair"
+            dataDomain="ORDERS"
+            purpose="DEMO"
+            defaultTimeWindow="LAST_7_DAYS"
+            runSequence="20"/>
+
+    <darpan.reconciliation.RunSystemInstance
+            reconciliationRunId="DARPAN_UAT_RUNSYS_RUN_INV"
+            systemMessageRemoteId="DARPAN_UAT_SRC_SYS"
+            role="SOURCE"/>
+
+    <darpan.reconciliation.RunSystemInstance
+            reconciliationRunId="DARPAN_UAT_RUNSYS_RUN_INV"
+            systemMessageRemoteId="DARPAN_UAT_TGT_SYS"
+            role="TARGET"/>
+
+    <darpan.reconciliation.RunSystemInstance
+            reconciliationRunId="DARPAN_UAT_RUNSYS_RUN_PEER"
+            systemMessageRemoteId="DARPAN_UAT_PEER_A_SYS"
+            role="PEER"/>
+
+    <darpan.reconciliation.RunSystemInstance
+            reconciliationRunId="DARPAN_UAT_RUNSYS_RUN_PEER"
+            systemMessageRemoteId="DARPAN_UAT_PEER_B_SYS"
+            role="PEER"/>
+</entity-facade-xml>

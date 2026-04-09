@@ -2,6 +2,7 @@ package jsonschema.common
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.JsonNode
+import darpan.facade.common.FacadeSupport
 import org.moqui.context.ExecutionContext
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -9,6 +10,8 @@ import org.slf4j.LoggerFactory
 class JsonSchemaUtil {
     private static final Logger logger = LoggerFactory.getLogger(JsonSchemaUtil.class)
     private static final ObjectMapper mapper = new ObjectMapper()
+    private static final String JSON_SCHEMA_ENTITY_NAME = "darpan.reconciliation.JsonSchema"
+    private static final String SYSTEM_ENUM_TYPE_ID = "DarpanSystemSource"
 
     /**
      * Sanitizes a filename to prevent path traversal/injection.
@@ -33,7 +36,7 @@ class JsonSchemaUtil {
     static String loadSchemaText(ExecutionContext ec, Object id, Object name) {
         // 1. Try DB by ID
         if (id) {
-            def schema = ec.entity.find("darpan.reconciliation.JsonSchema")
+            def schema = ec.entity.find(JSON_SCHEMA_ENTITY_NAME)
                 .condition("jsonSchemaId", id).useCache(true).one()
             if (schema?.schemaText) return schema.schemaText
         }
@@ -42,7 +45,7 @@ class JsonSchemaUtil {
         def nameKey = (name ?: id)?.toString()
         if (!nameKey) return null
         
-        def schema = ec.entity.find("darpan.reconciliation.JsonSchema")
+        def schema = ec.entity.find(JSON_SCHEMA_ENTITY_NAME)
             .condition("schemaName", nameKey).useCache(true).one()
         if (schema?.schemaText) return schema.schemaText
 
@@ -86,6 +89,113 @@ class JsonSchemaUtil {
         return mapper.readTree(text)
     }
 
+    static boolean ensureJsonSchemaTable(def ec) {
+        String groupName = ec?.entity?.getEntityGroupName(JSON_SCHEMA_ENTITY_NAME) ?: "default"
+        def datasourceFactory = ec?.entity?.getDatasourceFactory(groupName)
+        datasourceFactory?.checkAndAddTable(JSON_SCHEMA_ENTITY_NAME)
+        return true
+    }
+
+    static def findSystemEnum(def ec, Object rawSystemId, boolean useCache = true) {
+        String normalized = FacadeSupport.normalize(rawSystemId)
+        if (!normalized) return null
+
+        return ec?.entity?.find("moqui.basic.Enumeration")
+                ?.condition("enumTypeId", SYSTEM_ENUM_TYPE_ID)
+                ?.condition("enumId", normalized)
+                ?.useCache(useCache)
+                ?.one()
+    }
+
+    static String resolveSystemLabel(def ec, Object rawSystemId, String fallback = null, boolean useCache = true) {
+        String normalized = FacadeSupport.normalize(rawSystemId)
+        if (!normalized) return fallback
+
+        def systemEnum = findSystemEnum(ec, normalized, useCache)
+        if (systemEnum == null) return fallback ?: normalized
+        return FacadeSupport.enumLabel(systemEnum)
+    }
+
+    static boolean deleteSchemaRecord(def ec, def schema) {
+        if (schema == null) {
+            ec?.message?.addError("Schema not found in database to delete")
+            return false
+        }
+
+        try {
+            String schemaName = FacadeSupport.normalize(schema.schemaName)
+            schema.delete()
+            ec?.message?.addMessage("Deleted schema: ${schemaName}")
+            return true
+        } catch (Exception e) {
+            ec?.message?.addError("Error deleting schema: ${e.message}")
+            return false
+        }
+    }
+
+    static String validateJsonText(Object rawJsonText, String fieldName = "jsonText") {
+        String normalized = FacadeSupport.normalize(rawJsonText)
+        if (!normalized) return "${fieldName} is required"
+
+        try {
+            mapper.readTree(normalized)
+            return null
+        } catch (Exception e) {
+            return "${fieldName} is invalid JSON: ${e.message}"
+        }
+    }
+
+    static Map<String, Object> readUploadedText(def fileItem, String fieldLabel = "schema file") {
+        if (fileItem == null) {
+            return [fileName: null, text: null, error: "Uploaded ${fieldLabel} is empty"]
+        }
+
+        long size = 0L
+        try {
+            size = (fileItem.getSize() ?: 0L) as long
+        } catch (Exception ignored) {
+            size = 0L
+        }
+
+        if (size <= 0L) {
+            return [fileName: FacadeSupport.normalize(fileItem?.getName()), text: null, error: "Uploaded ${fieldLabel} is empty"]
+        }
+
+        String text = fileItem.getString("UTF-8")
+        if (!FacadeSupport.normalize(text)) {
+            return [fileName: FacadeSupport.normalize(fileItem?.getName()), text: null, error: "Uploaded ${fieldLabel} is empty"]
+        }
+
+        return [
+                fileName : FacadeSupport.normalize(fileItem?.getName()),
+                text     : text,
+                error    : null
+        ]
+    }
+
+    static def resolveSchemaRecord(def ec, Object rawJsonSchemaId, Object rawSchemaName = null,
+            Object rawFilename = null, boolean useCache = false) {
+        String jsonSchemaId = FacadeSupport.normalize(rawJsonSchemaId)
+        String schemaName = FacadeSupport.normalize(rawSchemaName)
+        String filename = FacadeSupport.normalize(rawFilename)
+
+        if (jsonSchemaId) {
+            def schema = ec?.entity?.find(JSON_SCHEMA_ENTITY_NAME)
+                    ?.condition("jsonSchemaId", jsonSchemaId)
+                    ?.useCache(useCache)
+                    ?.one()
+            if (schema != null) return schema
+        }
+
+        String lookupName = schemaName ?: filename
+        if (!lookupName) return null
+
+        return ec?.entity?.find(JSON_SCHEMA_ENTITY_NAME)
+                ?.condition("schemaName", lookupName)
+                ?.useCache(useCache)
+                ?.one()
+    }
+
     /**
      * Generates a unique schema name by appending (1), (2), etc. if the name already exists.
      * @param ec ExecutionContext
@@ -98,7 +208,7 @@ class JsonSchemaUtil {
         if (overwrite) return baseName
 
         String nameToSave = baseName
-        def existingSchema = ec.entity.find("darpan.reconciliation.JsonSchema")
+        def existingSchema = ec.entity.find(JSON_SCHEMA_ENTITY_NAME)
             .condition("schemaName", nameToSave)
             .one()
         
@@ -107,7 +217,7 @@ class JsonSchemaUtil {
             int suffix = 1
             while (existingSchema != null) {
                 nameToSave = "${nameRoot} (${suffix})"
-                existingSchema = ec.entity.find("darpan.reconciliation.JsonSchema")
+                existingSchema = ec.entity.find(JSON_SCHEMA_ENTITY_NAME)
                     .condition("schemaName", nameToSave)
                     .one()
                 suffix++

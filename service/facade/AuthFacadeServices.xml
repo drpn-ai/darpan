@@ -53,8 +53,7 @@
         </out-parameters>
     </service>
 
-    <service verb="get" noun="SessionInfo" type="script" allow-remote="true" authenticate="anonymous-all"
-            location="component://darpan/src/main/groovy/darpan/facade/auth/getSessionInfo.groovy">
+    <service verb="get" noun="SessionInfo" allow-remote="true" authenticate="anonymous-all">
         <description>Return session metadata for darpan-ui route guards. Moqui resolves the request user from the explicit `login_key` header when present.</description>
         <out-parameters>
             <parameter name="ok" type="Boolean">
@@ -82,6 +81,15 @@
                 <parameter name="isSuperAdmin" type="Boolean"/>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="authenticated" from="darpan.facade.common.FacadeSupport.normalize(ec.user.userId) != null"/>
+            <if condition="authenticated">
+                <set field="sessionInfo" from="darpan.facade.common.PilotAccessSupport.buildSessionInfo(ec)"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
     </service>
 
     <service verb="logout" noun="Session" type="script" allow-remote="true" authenticate="anonymous-all"

@@ -5,8 +5,8 @@
     <service verb="reconcile" noun="GenericFiles" type="script" transaction="ignore"
             location="component://darpan/src/main/groovy/darpan/reconciliation/generic/reconcileGenericFiles.groovy">
         <description>
-            Generic file reconciliation that auto-detects file types (CSV/JSON) and routes appropriately.
-            Supports CSV-CSV, JSON-JSON, and mixed CSV-JSON comparisons.
+            Generic file reconciliation that stages uploads and routes through either the RuleSet compare-scope pipeline
+            or the legacy mapping bridge during the RuleSet cutover.
         </description>
         <in-parameters>
             <parameter name="file1" type="org.apache.commons.fileupload.FileItem">
@@ -27,23 +27,27 @@
             <parameter name="file2Text" allow-html="any">
                 <description>Optional UTF-8 file text payload for remote facade callers that cannot send FileItem uploads.</description>
             </parameter>
-            
-            <parameter name="file1SystemEnumId" required="true">
-                <description>System identifier for file 1</description>
+
+            <parameter name="ruleSetId">
+                <description>Preferred RuleSet input for the Generic backend cutover. When present, Generic routing uses the RuleSet compare-scope pipeline.</description>
             </parameter>
-            <parameter name="file2SystemEnumId" required="true">
-                <description>System identifier for file 2</description>
+            <parameter name="compareScopeId">
+                <description>Optional compare-scope override. Required only when the RuleSet exposes more than one compare scope.</description>
             </parameter>
-            <parameter name="reconciliationMappingId" required="true">
-                <description>Mapping that defines file types, schemas, and ID fields</description>
+            <parameter name="file1SystemEnumId">
+                <description>Optional file 1 system identifier. In RuleSet mode this is used only for file-side validation; in mapping mode it remains required.</description>
             </parameter>
-            
-            <!-- CSV option - typically always true -->
+            <parameter name="file2SystemEnumId">
+                <description>Optional file 2 system identifier. In RuleSet mode this is used only for file-side validation; in mapping mode it remains required.</description>
+            </parameter>
+            <parameter name="reconciliationMappingId">
+                <description>Legacy mapping bridge input. Still supported temporarily when RuleSet inputs are not yet provided.</description>
+            </parameter>
+
             <parameter name="hasHeader" type="Boolean" default-value="true">
                 <description>Whether CSV files have headers</description>
             </parameter>
-            
-            <!-- Spark configuration -->
+
             <parameter name="sparkMaster" default-value="local[*]"/>
             <parameter name="sparkAppName" default-value="GenericReconciliation"/>
         </in-parameters>
@@ -72,12 +76,8 @@
             <parameter name="onlyInFile2Count" type="Integer">
                 <description>Count of IDs only in file 2</description>
             </parameter>
-            <parameter name="validationErrors">
-                <parameter name="errorMessage"/>
-            </parameter>
-            <parameter name="processingWarnings">
-                <parameter name="warningMessage"/>
-            </parameter>
+            <parameter name="validationErrors" type="List"/>
+            <parameter name="processingWarnings" type="List"/>
         </out-parameters>
     </service>
 

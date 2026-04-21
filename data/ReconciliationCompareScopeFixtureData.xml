@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entity-facade-xml type="darpan-seed">
+    <moqui.basic.EnumerationType
+            enumTypeId="DarpanSystemSource"
+            description="Darpan System Source"/>
+
+    <moqui.basic.Enumeration
+            enumId="OMS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="OMS"
+            description="OMS"
+            sequenceNum="1"/>
+
+    <moqui.basic.Enumeration
+            enumId="SHOPIFY"
+            enumTypeId="DarpanSystemSource"
+            enumCode="SHOPIFY"
+            description="Shopify"
+            sequenceNum="2"/>
+
+    <moqui.basic.EnumerationType
+            enumTypeId="DarpanFileType"
+            description="File Types for Reconciliation"/>
+
+    <moqui.basic.Enumeration
+            enumId="DftJson"
+            enumTypeId="DarpanFileType"
+            enumCode="JSON"
+            description="JSON"
+            sequenceNum="2"/>
+
+    <darpan.rule.RuleSet
+            ruleSetId="DARPAN_TEST_PRODUCT_COMPARE_RS"
+            ruleSetName="Darpan Test Product Compare RuleSet"
+            description="Smoke-test RuleSet for matched-pair field diff generation."
+            version="1.0"
+            explosionPath="data.products"
+            primaryKeyPath="productId"/>
+
+    <darpan.rule.RuleSet
+            ruleSetId="DARPAN_TEST_PRODUCT_BROKEN_RS"
+            ruleSetName="Darpan Test Broken Product RuleSet"
+            description="Smoke-test RuleSet for preserving base diffs when DRL compilation fails."
+            version="1.0"
+            explosionPath="data.products"
+            primaryKeyPath="productId"/>
+
+    <darpan.rule.Rule
+            ruleId="DARPAN_TEST_PRODUCT_SKU_MISMATCH"
+            ruleSetId="DARPAN_TEST_PRODUCT_COMPARE_RS"
+            sequenceNum="10"
+            ruleText="Emit a field diff when SKU differs for the same product"
+            ruleLogic='rule "DARPAN_TEST_PRODUCT_SKU_MISMATCH" salience 200 when $m : Map( this["file1"] != null, this["file2"] != null ) eval(RuleDiffSupport.valuesDiffer(((Map) $m.get("file1")).get("sku"), ((Map) $m.get("file2")).get("sku"))) then RuleDiffSupport.addFieldMismatch($m, kcontext.getRule().getName(), "sku", ((Map) $m.get("file1")).get("sku"), ((Map) $m.get("file2")).get("sku"), "WARN", "SKU mismatch"); end'
+            enabled="Y"
+            ruleType="DRL"
+            severity="WARN"/>
+
+    <darpan.rule.Rule
+            ruleId="DARPAN_TEST_PRODUCT_PRICE_MISMATCH"
+            ruleSetId="DARPAN_TEST_PRODUCT_COMPARE_RS"
+            sequenceNum="20"
+            ruleText="Emit a field diff when price differs for the same product"
+            ruleLogic='rule "DARPAN_TEST_PRODUCT_PRICE_MISMATCH" salience 100 when $m : Map( this["file1"] != null, this["file2"] != null ) eval(RuleDiffSupport.valuesDiffer(((Map) $m.get("file1")).get("price"), ((Map) $m.get("file2")).get("price"))) then RuleDiffSupport.addFieldMismatch($m, kcontext.getRule().getName(), "price", ((Map) $m.get("file1")).get("price"), ((Map) $m.get("file2")).get("price"), "WARN", "Price mismatch"); end'
+            enabled="Y"
+            ruleType="DRL"
+            severity="WARN"/>
+
+    <darpan.rule.Rule
+            ruleId="DARPAN_TEST_PRODUCT_BROKEN_RULE"
+            ruleSetId="DARPAN_TEST_PRODUCT_BROKEN_RS"
+            sequenceNum="10"
+            ruleText="Broken DRL used to verify base-diff preservation"
+            ruleLogic='rule "DARPAN_TEST_PRODUCT_BROKEN_RULE" when $m : Map( this["file1"] != null ) then BROKEN end'
+            enabled="Y"
+            ruleType="DRL"
+            severity="ERROR"/>
+
+    <darpan.rule.RuleSetCompareScope
+            compareScopeId="DARPAN_TEST_ORDER_JSON_SCOPE"
+            ruleSetId="DARPAN_TEST_COMPARE_RS"
+            objectType="ORDER"
+            description="Smoke-test compare scope for nested JSON order IDs."/>
+
+    <darpan.rule.RuleSetCompareSource
+            compareScopeId="DARPAN_TEST_ORDER_JSON_SCOPE"
+            fileSide="FILE_1"
+            systemEnumId="SHOPIFY"
+            fileTypeEnumId="DftJson"
+            recordRootExpression="data.orders.edges"
+            primaryIdExpression="node.id|SHOPIFY_GID_TAIL"/>
+
+    <darpan.rule.RuleSetCompareSource
+            compareScopeId="DARPAN_TEST_ORDER_JSON_SCOPE"
+            fileSide="FILE_2"
+            systemEnumId="OMS"
+            fileTypeEnumId="DftJson"
+            recordRootExpression="data.orders.edges"
+            primaryIdExpression="node.id"
+            idValueNormalizer="TRAILING_DIGITS"/>
+
+    <darpan.rule.RuleSetCompareScope
+            compareScopeId="DARPAN_TEST_PRODUCT_JSON_SCOPE"
+            ruleSetId="DARPAN_TEST_PRODUCT_COMPARE_RS"
+            objectType="PRODUCT"
+            description="Smoke-test compare scope for product field mismatches."/>
+
+    <darpan.rule.RuleSetCompareScope
+            compareScopeId="DARPAN_TEST_PRODUCT_BROKEN_JSON_SCOPE"
+            ruleSetId="DARPAN_TEST_PRODUCT_BROKEN_RS"
+            objectType="PRODUCT"
+            description="Smoke-test compare scope for broken DRL preservation behavior."/>
+
+    <darpan.rule.RuleSetCompareSource
+            compareScopeId="DARPAN_TEST_PRODUCT_JSON_SCOPE"
+            fileSide="FILE_1"
+            systemEnumId="SHOPIFY"
+            fileTypeEnumId="DftJson"
+            recordRootExpression="data.products"
+            primaryIdExpression="productId"/>
+
+    <darpan.rule.RuleSetCompareSource
+            compareScopeId="DARPAN_TEST_PRODUCT_JSON_SCOPE"
+            fileSide="FILE_2"
+            systemEnumId="OMS"
+            fileTypeEnumId="DftJson"
+            recordRootExpression="data.products"
+            primaryIdExpression="productId"/>
+
+    <darpan.rule.RuleSetCompareSource
+            compareScopeId="DARPAN_TEST_PRODUCT_BROKEN_JSON_SCOPE"
+            fileSide="FILE_1"
+            systemEnumId="SHOPIFY"
+            fileTypeEnumId="DftJson"
+            recordRootExpression="data.products"
+            primaryIdExpression="productId"/>
+
+    <darpan.rule.RuleSetCompareSource
+            compareScopeId="DARPAN_TEST_PRODUCT_BROKEN_JSON_SCOPE"
+            fileSide="FILE_2"
+            systemEnumId="OMS"
+            fileTypeEnumId="DftJson"
+            recordRootExpression="data.products"
+            primaryIdExpression="productId"/>
+</entity-facade-xml>

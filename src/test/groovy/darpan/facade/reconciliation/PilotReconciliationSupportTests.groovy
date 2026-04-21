@@ -48,6 +48,46 @@ class PilotReconciliationSupportTests {
     }
 
     @Test
+    void renderDifferencesCsvSupportsRuleSetDiffDocuments() {
+        Map<String, Object> diffDocument = [
+                differences: [
+                        [
+                                diffType  : "FIELD_MISMATCH",
+                                primaryId : "P200",
+                                field     : "sku",
+                                file1Value: "SKU-B",
+                                file2Value: "SKU-B-ALT",
+                                ruleId    : "PRODUCT_SKU_MISMATCH",
+                                severity  : "WARN",
+                                message   : "SKU mismatch",
+                                data      : [productId: "P200"]
+                        ],
+                        [
+                                diffType : "MISSING_IN_FILE_1",
+                                primaryId: "P500",
+                                presentIn: "OMS",
+                                missingIn: "SHOPIFY",
+                                message  : "Present in OMS, missing in SHOPIFY",
+                                data     : "{\"productId\":\"P500\"}"
+                        ]
+                ]
+        ]
+
+        String csv = PilotReconciliationSupport.renderDifferencesCsv(diffDocument)
+        List<String> lines = csv.readLines()
+
+        assertEquals("diffType,primaryId,field,file1Value,file2Value,presentIn,missingIn,ruleId,severity,message,data", lines.first())
+        assertEquals(3, lines.size())
+        assertTrue(lines[1].contains("\"FIELD_MISMATCH\""))
+        assertTrue(lines[1].contains("\"P200\""))
+        assertTrue(lines[1].contains("\"sku\""))
+        assertTrue(lines[1].contains("\"SKU-B-ALT\""))
+        assertTrue(lines[2].contains("\"MISSING_IN_FILE_1\""))
+        assertTrue(lines[2].contains("\"P500\""))
+        assertTrue(lines[2].contains("\"Present in OMS, missing in SHOPIFY\""))
+    }
+
+    @Test
     void buildGeneratedOutputDescriptorExposesSummaryAndFormats() {
         Map<String, Object> diffDocument = [
                 metadata: [

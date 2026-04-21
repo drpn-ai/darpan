@@ -15,14 +15,15 @@ The JSON reconciliation feature allows you to compare two JSON files using ID-ba
 
 ### `ReconciliationGenericServices.reconcile#GenericFiles`
 
-Primary entry point for uploads. It stages files, then delegates to the shared router so upload and automation paths stay aligned.
+Primary entry point for uploads. It stages files, then delegates to the RuleSet compare-scope pipeline when `ruleSetId` is provided. During migration it can still fall back to the mapping bridge when only `reconciliationMappingId` is provided.
 
 **Input Parameters:**
 - `file1` (FileItem, required): First file (CSV or JSON)
 - `file2` (FileItem, required): Second file (CSV or JSON)
-- `file1SystemEnumId` (required): Identifier for the source system of file 1
-- `file2SystemEnumId` (required): Identifier for the source system of file 2
-- `reconciliationMappingId` (required): Configuration ID that defines schemas and ID paths
+- `ruleSetId` (preferred): RuleSet to run through the compare-scope + DRL path
+- `compareScopeId` (optional): Compare-scope override; required only when a RuleSet has multiple scopes
+- `file1SystemEnumId` / `file2SystemEnumId` (optional in RuleSet mode, required in mapping mode): source-system identifiers
+- `reconciliationMappingId` (migration bridge): legacy mapping input retained temporarily for old callers
 - `sparkMaster` (optional): Spark master URL (default: "local[*]")
 
 Additional pilot-compatible input mode:
@@ -39,13 +40,104 @@ These optional parameters allow a remote facade to pass UTF-8 file payloads from
 - `validationErrors`: Any schema validation errors found
 - `processingWarnings`: Any normalization fallbacks that were applied
 
+Behavior notes:
+- RuleSet mode writes one generated JSON artifact that contains both missing-object rows and rule-generated rows.
+- In RuleSet mode, `onlyInFile1Count` maps to IDs present only in file 1 (`missingInFile2Count` from the compare-scope service), and `onlyInFile2Count` maps to IDs present only in file 2 (`missingInFile1Count`).
+- If the RuleSet defines exactly one compare scope, Generic routing resolves it automatically. When a RuleSet has multiple scopes, `compareScopeId` is required.
+- The mapping route remains available only as a migration bridge until the later cutover tickets remove it.
+
+### `ReconciliationAutomationServices.poll#SftpAndReconcile`
+
+SFTP automation stages remote files and now routes through the same RuleSet compare-scope pipeline as Generic reconciliation when `ruleSetId` is provided. Older automation jobs can continue to use `reconciliationMappingId` temporarily until they are migrated.
+
+**Inputs (key):** `ruleSetId`, optional `compareScopeId`, temporary `reconciliationMappingId`, `file1SftpServerId`, `file2SftpServerId`, optional `file1SystemEnumId`/`file2SystemEnumId`, optional file-type/schema overrides, `file1RemotePath`, `file2RemotePath`, `stageLocation`, `outputLocation`, `sparkMaster`, `sparkAppName`.
+
+**Outputs (key):** `dataAvailable`, `file1StagedLocation`, `file2StagedLocation`, `reconciliationType`, `diffLocation`, `diffFileName`, `differenceCount`, `onlyInFile1Count`, `onlyInFile2Count`, `validationErrors`, `processingWarnings`.
+
 ### `ReconciliationCoreServices.reconcile#FilesByMapping`
 
-Shared router used by both Generic uploads and SFTP automation. It normalizes staged file locations, resolves mapping metadata (types, schemas, ID fields), and hands everything to the unified comparator.
+Shared mapping bridge used by older Generic uploads and older SFTP automation jobs. It normalizes staged file locations, resolves mapping metadata (types, schemas, ID fields), and hands everything to the unified comparator.
 
 **Inputs (key):** `reconciliationMappingId`, `file1Location`, `file2Location`, `file1SystemEnumId`, `file2SystemEnumId`, optional `file1Name`/`file2Name`, `file1FileTypeEnumId`/`file2FileTypeEnumId`, `file1SchemaFileName`/`file2SchemaFileName`, `hasHeader`, `outputLocation`, `sparkMaster`, `sparkAppName`.
 
 **Outputs (key):** `file1Type`, `file2Type`, `reconciliationType`, `diffLocation`, `diffFileName`, `differenceCount`, `onlyInFile1Count`, `onlyInFile2Count`, `validationErrors`, `processingWarnings`.
+
+This service remains the Generic/SFTP migration bridge. New RuleSet-backed Generic and SFTP runs should use `reconcile#RuleSetCompareScope` instead.
+
+### `ReconciliationCoreServices.prepare#RuleSetCompareScope`
+
+Internal compare-scope extraction adapter introduced for the RuleSet cutover. It resolves `RuleSetCompareScope` plus `RuleSetCompareSource`, derives file-side config, and returns normalized Spark datasets for later missing-object and matched-pair stages.
+
+**Inputs (key):** `ruleSetId`, `compareScopeId`, `file1Location`, `file2Location`, optional `file1Name`/`file2Name`, optional `file1FileTypeEnumId`/`file2FileTypeEnumId`, optional `file1SchemaFileName`/`file2SchemaFileName`, `hasHeader`, `sparkMaster`, `sparkAppName`.
+
+**Outputs (key):** `objectType`, `file1Type`, `file2Type`, `file1SystemEnumId`, `file2SystemEnumId`, `file1IdExpression`, `file2IdExpression`, `file1IdDf`, `file2IdDf`, `file1DataDf`, `file2DataDf`, `validationErrors`, `processingWarnings`.
+
+Generic uploads and SFTP automation now route here when `ruleSetId` is provided. `reconcile#FilesByMapping` remains only for the temporary legacy bridge path.
+
+### `ReconciliationCoreServices.reconcile#RuleSetCompareScopeBaseDiff`
+
+Internal base compare stage for the RuleSet cutover. It calls `prepare#RuleSetCompareScope`, runs the primary-ID anti-joins, emits missing-object Diff rows, and returns matched object pairs for later DRL execution.
+
+**Inputs (key):** same as `prepare#RuleSetCompareScope`.
+
+**Outputs (key):** `missingInFile1Count`, `missingInFile2Count`, `differenceCount`, `matchedPairCount`, `missingDiffDf`, `matchedPairDf`, `validationErrors`, `processingWarnings`.
+
+Missing-object Diff direction is explicit:
+- `MISSING_IN_FILE_1`: primary ID exists in file 2 but not file 1
+- `MISSING_IN_FILE_2`: primary ID exists in file 1 but not file 2
+
+The returned `matchedPairDf` keeps one row per matched primary ID with:
+- `compareScopeId`
+- `objectType`
+- `primaryId`
+- `file1`
+- `file2`
+
+Duplicate `primaryId` values on either file side are invalid for the compare-scope contract. The RuleSet compare-scope services reject those inputs before missing-object or matched-pair output is returned.
+
+When no objects are missing on either side, `missingDiffDf` is still returned as an empty Dataset with the normal Diff-row schema. Callers should not need to special-case `null` for the no-difference path.
+
+### `ReconciliationCoreServices.reconcile#RuleSetCompareScope`
+
+Internal full RuleSet compare pipeline for the cutover. It preserves the base missing-object Diff stage, executes DRL only on matched pairs, and returns one normalized diff dataset for both missing-object and field/business-rule outcomes.
+
+**Inputs (key):** same as `reconcile#RuleSetCompareScopeBaseDiff`, plus optional `ruleBatchSize` for bounded matched-pair execution.
+
+**Outputs (key):**
+- `missingInFile1Count`
+- `missingInFile2Count`
+- `missingObjectDifferenceCount`
+- `ruleDifferenceCount`
+- `differenceCount`
+- `matchedPairCount`
+- `ruleCount`
+- `firedRuleCount`
+- `diffDf`
+- `missingDiffDf`
+- `ruleDiffDf`
+- `validationErrors`
+- `processingWarnings`
+
+The normalized `diffDf` rows use a stable internal contract:
+- `diffType`
+- `compareScopeId`
+- `objectType`
+- `primaryId`
+- `field`
+- `file1Value`
+- `file2Value`
+- `presentIn`
+- `missingIn`
+- `data`
+- `ruleId`
+- `severity`
+- `message`
+
+Behavior notes:
+- Missing-object rows remain explicit as `MISSING_IN_FILE_1` / `MISSING_IN_FILE_2`.
+- Field/business-rule rows are emitted from DRL as `FIELD_MISMATCH` or another rule-defined `diffType`.
+- Matched pairs are processed in bounded batches before they are passed to Drools, so the Spark side stays responsible for the large-volume preparation.
+- If DRL compilation or execution fails, the service preserves the base missing-object Diffs and reports the failure in `processingWarnings` with `ruleSetId`, `compareScopeId`, and sample `primaryId` values when available.
 
 ### `ReconciliationCoreServices.reconcile#UnifiedFiles`
 
@@ -84,8 +176,14 @@ The `compareJsonPath` parameter uses JSONPath syntax to extract ID values from y
 
 When a schema is provided and you pass a simple key (like `id` or `$.id`), the resolver expands it to the full JSONPath. For array-root schemas this becomes `$[*].id`.
 
-When source ID formats differ between systems, configure an ID normalizer per mapping member (`idValueNormalizer`) in Mapping Builder/Editor.
+When source ID formats differ between systems, configure an ID normalizer per mapping member (`idValueNormalizer`) in Mapping Builder/Editor. In the compare-scope adapter path, the same normalizer behavior is configured per `RuleSetCompareSource`.
 For backward compatibility, inline syntax with `|NORMALIZER` in `idFieldExpression` is still supported.
+
+For compare-scope JSON sources, extraction can also be split into:
+- `recordRootExpression`: where the repeated object records live
+- `primaryIdExpression`: how to extract the compare ID from each object
+
+The adapter combines those two values into the JSONPath shape used by the existing Spark ingestion logic. When `recordRootExpression` names a repeated collection without an explicit array marker, the adapter expands it to the collection wildcard form first. Example: `data.orders.edges` becomes `$.data.orders.edges[*]` before `primaryIdExpression` is appended.
 
 Supported normalizers:
 - `SHOPIFY_GID_TAIL`: extracts the numeric tail from Shopify GIDs (for example `gid://shopify/Product/7944971747446` -> `7944971747446`)

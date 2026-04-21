@@ -1,25 +1,27 @@
-# RSCUT-001: RuleSetSourceConfig Data Model Foundation
+# RSCUT-001: RuleSet Compare Scope Model Foundation
 
 ## Metadata
 - Ticket ID: RSCUT-001
-- Title: RuleSetSourceConfig Data Model Foundation
+- Title: RuleSet Compare Scope Model Foundation
 - Depends On: None
 - Wave: Wave 1
 - Owner: Agent
 
 ## Goal
-Introduce a structured RuleSet-linked source configuration model that can replace mapping-member runtime metadata in later tickets.
+Introduce RuleSet-owned compare-scope configuration that can represent the object identity and file-side extraction details currently carried by Mapping.
 
 ## In Scope
-- Add `darpan.rule.RuleSetSourceConfig` entity with source-specific reconciliation fields.
-- Add relationships to `darpan.rule.RuleSet` and relevant `moqui.basic.Enumeration` entities.
-- Add security exposure for the new entity in Darpan app auth seed data.
-- Update reconciliation data model docs.
+- Add or define compare-scope entities/config under the RuleSet model.
+- Represent a compare object such as Product, Order, OrderLine, or InventoryItem.
+- Represent source config for each file side.
+- Capture primary ID expression and normalizer per file side.
+- Update data-model docs with the new contract.
 
 ## Out of Scope
-- Any migration logic from mapping entities.
-- Any service/screen contract cutover.
-- Removal of mapping entities.
+- Runtime extraction changes.
+- Generic/SFTP contract changes.
+- Mapping deprecation.
+- Migration from existing Mapping rows.
 
 ## Dependencies
 - None.
@@ -30,49 +32,56 @@ Introduce a structured RuleSet-linked source configuration model that can replac
 - `docs/reconciliation/data-model/entity-model.md`
 
 ## Contract/API Changes
-- New entity: `darpan.rule.RuleSetSourceConfig`
-- Proposed keys and fields:
-  - PK: `ruleSetId`, `systemEnumId`
-  - fields: `fileTypeEnumId`, `schemaFileName`, `idFieldExpression`, `idValueNormalizer`, `createdDate`, `lastUpdatedDate`
-- No service API changes in this ticket.
+- New configuration concept: RuleSet compare scope.
+- Suggested entities:
+  - `darpan.rule.RuleSetCompareScope`
+  - `darpan.rule.RuleSetCompareSource`
+- Suggested key fields:
+  - `compareScopeId`
+  - `ruleSetId`
+  - `objectType`
+  - `fileSide` (`FILE_1`, `FILE_2`)
+  - `systemEnumId`
+  - `fileTypeEnumId`
+  - `schemaFileName`
+  - `recordRootExpression`
+  - `primaryIdExpression`
+  - `idValueNormalizer`
+- No active service parameters change in this ticket.
 
 ## Implementation Steps
-1. Add `RuleSetSourceConfig` entity definition in `RuleEntities.xml` under package `darpan.rule` and use `configuration`.
-2. Define relationships:
-   - `ruleSetId` -> `darpan.rule.RuleSet`
-   - `systemEnumId` -> `moqui.basic.Enumeration.enumId`
-   - `fileTypeEnumId` -> `moqui.basic.Enumeration.enumId` (title `FileType`)
-3. Add descriptive field documentation for `idFieldExpression` and `idValueNormalizer`.
-4. Update `SecuritySeedData.xml` to include `darpan.rule.RuleSetSourceConfig` under `DARPAN_APP` artifact group.
-5. Update `entity-model.md` with a dedicated section for the new entity and operational intent.
+1. Add compare-scope entity definitions with descriptions and relationships.
+2. Add source-side config entity with one row per file side.
+3. Link compare scopes to `darpan.rule.RuleSet`.
+4. Add security seed entries for any new entities.
+5. Update data-model docs with the object identity and source extraction contract.
 
 ## Acceptance Criteria
-- `RuleEntities.xml` contains `RuleSetSourceConfig` with the exact fields in this ticket.
-- `SecuritySeedData.xml` references the new entity in `DARPAN_APP` artifact group.
-- `entity-model.md` documents the new entity and its purpose.
-- No existing service contracts are changed in this ticket.
+- RuleSet compare-scope config can define product-level comparison by `productId`.
+- Each file side can define a different primary ID expression if systems differ.
+- Mapping entities remain unchanged in this ticket.
+- No runtime service contract changes are made.
 
 ## Validation Commands and Expected Results
-1. Command: `rg -n "entity-name=\"RuleSetSourceConfig\"|idValueNormalizer|idFieldExpression" entity/RuleEntities.xml`
-   Expected: Entity and required fields are present.
-2. Command: `rg -n "RuleSetSourceConfig" data/SecuritySeedData.xml docs/reconciliation/data-model/entity-model.md`
-   Expected: Matches in both security seed and data-model docs.
+1. Command: `rg -n "RuleSetCompareScope|RuleSetCompareSource|primaryIdExpression|recordRootExpression" entity/RuleEntities.xml docs/reconciliation/data-model/entity-model.md`
+   Expected: Entity/config fields and docs are present.
+2. Command: `rg -n "RuleSetCompareScope|RuleSetCompareSource" data/SecuritySeedData.xml`
+   Expected: Security seed references are present if entities are added.
 3. Command: `./gradlew :runtime:component:darpan:compileGroovy :runtime:component:darpan:verifyOrganization --console=plain`
-   Expected: Build completes successfully without XML/service organization errors.
+   Expected: Build and organization checks pass.
 
 ## Rollback Plan
-- Revert all changes in the three files listed in "Files to Touch".
-- Re-run validation commands to ensure no residual references to `RuleSetSourceConfig` remain.
+- Revert entity, seed, and data-model docs touched by this ticket.
+- Re-run validation commands to ensure no partial compare-scope references remain.
 
 ## Risks and Mitigations
-- Risk: Incorrect relationship mapping to enumerations.
-  Mitigation: Validate field names and relationship key maps against existing `Enumeration` usage patterns.
-- Risk: Security artifact omission blocks UI/service access later.
-  Mitigation: Ensure security seed includes the new entity in this ticket itself.
+- Risk: compare-scope model duplicates RuleSet fields already used elsewhere.
+  Mitigation: keep identity/source details in compare-scope config and keep RuleSet as the rule container.
+- Risk: future multi-object RuleSets need multiple scopes.
+  Mitigation: model `compareScopeId` explicitly instead of assuming one scope forever.
 
 ## Handoff Inputs for Next Ticket
-- Confirmed entity schema and relationship names.
-- Verified canonical field names for migration script mapping in `RSCUT-002`.
+- Confirmed entity names, primary ID fields, file-side enum values, and relationship names.
 
 ## Closure Checklist
 - [ ] All acceptance criteria met.

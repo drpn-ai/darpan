@@ -1,5 +1,6 @@
 import groovy.json.JsonSlurper
 import org.slf4j.LoggerFactory
+import darpan.reconciliation.inventory.InventoryWarningSupport
 
 import java.sql.Connection
 import java.sql.Date
@@ -301,6 +302,6 @@ try {
     try { connection?.close() } catch (Exception ignored) {}
 }
 
-processingWarnings = warningList.collect { [warningMessage: it] }
+processingWarnings = InventoryWarningSupport.normalizeWarningTexts(warningList)
 logger.info("Read-only DB query success config={} itemId={} locationId={} records={}",
         readDbConfigIdToUse, itemIdStr, locationIdStr, recordCount ?: 0)

@@ -6,7 +6,8 @@ import groovy.json.JsonSlurper
 import java.sql.Timestamp
 
 class PilotReconciliationSupport {
-    static final List<String> CSV_COLUMNS = ["type", "id", "presentIn", "missingIn", "note", "data"]
+    static final List<String> LEGACY_CSV_COLUMNS = ["type", "id", "presentIn", "missingIn", "note", "data"]
+    static final List<String> RULESET_CSV_COLUMNS = ["diffType", "primaryId", "field", "file1Value", "file2Value", "presentIn", "missingIn", "ruleId", "severity", "message", "data"]
 
     static boolean isSupportedOutputFile(String fileName) {
         String lower = sourceFormatForFile(fileName)
@@ -115,13 +116,14 @@ class PilotReconciliationSupport {
     static String renderDifferencesCsv(Map<String, Object> diffDocument) {
         List<Map<String, Object>> differences = ((diffDocument?.differences ?: []) as List)
                 .collect { it instanceof Map ? (Map<String, Object>) it : [:] }
+        List<String> csvColumns = selectCsvColumns(differences)
 
-        StringBuilder csv = new StringBuilder(CSV_COLUMNS.join(","))
+        StringBuilder csv = new StringBuilder(csvColumns.join(","))
         if (!differences.isEmpty()) csv.append("\n")
 
         differences.eachWithIndex { Map<String, Object> difference, int index ->
-            List<String> values = CSV_COLUMNS.collect { String columnName ->
-                Object rawValue = difference[columnName]
+            List<String> values = csvColumns.collect { String columnName ->
+                Object rawValue = extractCsvValue(difference, columnName)
                 if (columnName == "data" && rawValue != null && !(rawValue instanceof CharSequence)) {
                     rawValue = JsonOutput.toJson(rawValue)
                 }
@@ -132,6 +134,27 @@ class PilotReconciliationSupport {
         }
 
         return csv.toString()
+    }
+
+    protected static List<String> selectCsvColumns(List<Map<String, Object>> differences) {
+        Map<String, Object> firstDifference = differences ? (differences[0] ?: [:]) : [:]
+        if (firstDifference.containsKey("diffType") || firstDifference.containsKey("primaryId")) {
+            return RULESET_CSV_COLUMNS
+        }
+        return LEGACY_CSV_COLUMNS
+    }
+
+    protected static Object extractCsvValue(Map<String, Object> difference, String columnName) {
+        switch (columnName) {
+            case "diffType":
+                return difference.diffType ?: difference.type
+            case "primaryId":
+                return difference.primaryId ?: difference.id
+            case "message":
+                return difference.message ?: difference.note
+            default:
+                return difference[columnName]
+        }
     }
 
     protected static Long normalizeLong(Object value) {

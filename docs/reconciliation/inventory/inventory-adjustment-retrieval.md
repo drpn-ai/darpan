@@ -66,6 +66,7 @@ Secrets (`password`, `apiToken`) are encrypted fields in entities.
     - NS payload file
     - Read DB payload file
     - Summary file (per-item status + missing/diff counts + warnings)
+  - Inventory fetch services and orchestration return `processingWarnings` as raw `List<String>` values. The generated summary JSON uses the same string-list shape for `warnings`.
 
 ## Example Orchestration Call
 
@@ -147,3 +148,11 @@ end
 - `comparisonRuleSetId` is required; comparison/diff decisions come from your configured rules.
 - Services do not create RuleSet/Rule data; maintain rules through Rule Engine UI or seed data.
 - `itemResults` contains the rule-mutated facts returned by Drools, including any custom fields added by rules.
+- Warning output example:
+  ```json
+  {
+    "processingWarnings": [
+      "JDBC URL was generated from host/port/databaseName for config darpan-test-seed."
+    ]
+  }
+  ```

@@ -3,8 +3,12 @@ package darpan.reconciliation.core
 import groovy.json.JsonOutput
 import org.apache.spark.sql.Column
 import org.apache.spark.sql.Dataset
+import org.apache.spark.sql.Row
+import org.apache.spark.sql.RowFactory
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.storage.StorageLevel
+import org.apache.spark.sql.types.DataTypes
+import org.apache.spark.sql.types.StructType
 import org.moqui.context.ExecutionContext
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -12,6 +16,27 @@ import static org.apache.spark.sql.functions.*
 
 class ReconciliationServices {
     private static final Logger logger = LoggerFactory.getLogger(ReconciliationServices.class)
+    private static final StructType MISSING_DIFF_SCHEMA = new StructType()
+            .add("type", DataTypes.StringType, true)
+            .add("id", DataTypes.StringType, true)
+            .add("presentIn", DataTypes.StringType, true)
+            .add("missingIn", DataTypes.StringType, true)
+            .add("data", DataTypes.StringType, true)
+            .add("note", DataTypes.StringType, true)
+    private static final StructType RULESET_DIFF_SCHEMA = new StructType()
+            .add("diffType", DataTypes.StringType, true)
+            .add("compareScopeId", DataTypes.StringType, true)
+            .add("objectType", DataTypes.StringType, true)
+            .add("primaryId", DataTypes.StringType, true)
+            .add("field", DataTypes.StringType, true)
+            .add("file1Value", DataTypes.StringType, true)
+            .add("file2Value", DataTypes.StringType, true)
+            .add("presentIn", DataTypes.StringType, true)
+            .add("missingIn", DataTypes.StringType, true)
+            .add("data", DataTypes.StringType, true)
+            .add("ruleId", DataTypes.StringType, true)
+            .add("severity", DataTypes.StringType, true)
+            .add("message", DataTypes.StringType, true)
 
     /**
      * Core Spark-based reconciliation of two ID DataFrames.
@@ -280,7 +305,7 @@ class ReconciliationServices {
 
     // --- Private Helpers ---
 
-    private static Map ingestFile(ExecutionContext ec, SparkSession spark, String loc, String type, Map idSpec, boolean hasHeader, String label, List validationErrors, String schemaFile) {
+    static Map ingestFile(ExecutionContext ec, SparkSession spark, String loc, String type, Map idSpec, boolean hasHeader, String label, List validationErrors, String schemaFile) {
         String path = resolvePath(ec, loc)
         String idExpr = normalize(idSpec?.idExpr)
         String idNormalizer = normalize(idSpec?.idNormalizer)
@@ -313,7 +338,7 @@ class ReconciliationServices {
         return [idDf: idDf, dataDf: dataDf]
     }
     
-    private static String resolvePath(ExecutionContext ec, String location) {
+    static String resolvePath(ExecutionContext ec, String location) {
          def rr = ec.resource.getLocationReference(location)
          if (rr != null && rr.supportsUrl()) {
              def url = rr.getUrl()
@@ -325,9 +350,102 @@ class ReconciliationServices {
          return location
     }
 
-    private static String normalize(Object val) { return val?.toString()?.trim() }
+    static String normalize(Object val) { return val?.toString()?.trim() }
 
-    private static Map parseIdSpec(String expr, boolean isCsv) {
+    static String resolveEnumLabel(ExecutionContext ec, String enumId, String fallback) {
+        String normalized = normalize(enumId)
+        if (!normalized) return fallback
+        def enumValue = ec.entity.find("moqui.basic.Enumeration")
+                .condition("enumId", normalized)
+                .disableAuthz()
+                .useCache(true)
+                .one()
+        String code = normalize(enumValue?.enumCode)
+        if (code) return code
+        String description = normalize(enumValue?.description)
+        if (description) return description
+        return normalized
+    }
+
+    static String determineReconciliationType(String file1Type, String file2Type) {
+        String left = normalize(file1Type)?.toUpperCase()
+        String right = normalize(file2Type)?.toUpperCase()
+        if (left == "CSV" && right == "CSV") return "CSV"
+        if (left == "JSON" && right == "JSON") return "JSON"
+        return "MIXED"
+    }
+
+    static Map<String, Object> resolveRuleSetCompareScopeConfig(ExecutionContext ec, String ruleSetIdValue,
+                                                                String compareScopeIdValue,
+                                                                String requestedFile1SystemEnumId,
+                                                                String requestedFile2SystemEnumId) {
+        String normalizedRuleSetId = normalize(ruleSetIdValue)
+        if (!normalizedRuleSetId) {
+            throw new IllegalArgumentException("ruleSetId is required")
+        }
+
+        def compareScope = null
+        if (compareScopeIdValue) {
+            compareScope = ec.entity.find("darpan.rule.RuleSetCompareScope")
+                    .condition("compareScopeId", compareScopeIdValue)
+                    .condition("ruleSetId", normalizedRuleSetId)
+                    .disableAuthz()
+                    .useCache(false)
+                    .one()
+            if (compareScope == null) {
+                throw new IllegalArgumentException("Compare scope ${compareScopeIdValue} was not found for RuleSet ${normalizedRuleSetId}")
+            }
+        } else {
+            List compareScopes = ec.entity.find("darpan.rule.RuleSetCompareScope")
+                    .condition("ruleSetId", normalizedRuleSetId)
+                    .orderBy("compareScopeId")
+                    .disableAuthz()
+                    .useCache(false)
+                    .list() ?: []
+            if (compareScopes.isEmpty()) {
+                throw new IllegalArgumentException("RuleSet ${normalizedRuleSetId} does not define any compare scopes")
+            }
+            if (compareScopes.size() > 1) {
+                throw new IllegalArgumentException("RuleSet ${normalizedRuleSetId} defines ${compareScopes.size()} compare scopes; compareScopeId is required")
+            }
+            compareScope = compareScopes[0]
+        }
+
+        List sources = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition("compareScopeId", compareScope.compareScopeId)
+                .disableAuthz()
+                .useCache(false)
+                .list() ?: []
+        Map sourceBySide = [:]
+        sources.each { source ->
+            sourceBySide[normalize(source.fileSide)] = source
+        }
+        def file1Source = sourceBySide["FILE_1"]
+        def file2Source = sourceBySide["FILE_2"]
+        if (file1Source == null || file2Source == null) {
+            throw new IllegalArgumentException("Compare scope ${compareScope.compareScopeId} must define both FILE_1 and FILE_2 sources")
+        }
+
+        String scopeFile1SystemEnumId = normalize(file1Source.systemEnumId)
+        String scopeFile2SystemEnumId = normalize(file2Source.systemEnumId)
+        if (requestedFile1SystemEnumId && requestedFile1SystemEnumId != scopeFile1SystemEnumId) {
+            throw new IllegalArgumentException("file1SystemEnumId ${requestedFile1SystemEnumId} does not match compare scope ${compareScope.compareScopeId} FILE_1 system ${scopeFile1SystemEnumId}")
+        }
+        if (requestedFile2SystemEnumId && requestedFile2SystemEnumId != scopeFile2SystemEnumId) {
+            throw new IllegalArgumentException("file2SystemEnumId ${requestedFile2SystemEnumId} does not match compare scope ${compareScope.compareScopeId} FILE_2 system ${scopeFile2SystemEnumId}")
+        }
+
+        return [
+                compareScopeId    : normalize(compareScope.compareScopeId),
+                objectType        : normalize(compareScope.objectType),
+                file1SystemEnumId : scopeFile1SystemEnumId,
+                file2SystemEnumId : scopeFile2SystemEnumId,
+                file1Label        : resolveEnumLabel(ec, scopeFile1SystemEnumId, "File 1"),
+                file2Label        : resolveEnumLabel(ec, scopeFile2SystemEnumId, "File 2")
+        ]
+    }
+
+    static Map parseIdSpec(String expr, boolean isCsv) {
         Map split = splitIdExpression(expr)
         String baseExpr = (String) split.idExpr
         String rawNormalizer = (String) split.normalizer
@@ -336,7 +454,7 @@ class ReconciliationServices {
         return [idExpr: normalizedExpr, idNormalizer: normalizedIdNormalizer]
     }
 
-    private static Map splitIdExpression(String expr) {
+    static Map splitIdExpression(String expr) {
         String raw = normalize(expr)
         if (!raw) return [idExpr: null, normalizer: null]
         int separatorIndex = raw.indexOf("|")
@@ -346,7 +464,7 @@ class ReconciliationServices {
         return [idExpr: idExpr, normalizer: normalizer]
     }
 
-    private static String resolveIdNormalizer(String rawNormalizer) {
+    static String resolveIdNormalizer(String rawNormalizer) {
         String code = normalize(rawNormalizer)
         if (!code) return null
         String normalized = code.replace("-", "_").replace(" ", "_").toUpperCase()
@@ -365,7 +483,7 @@ class ReconciliationServices {
     }
     
     // JSON & CSV Helpers
-    private static String normalizeCsvId(String expr) {
+    static String normalizeCsvId(String expr) {
         def raw = normalize(expr)
         if (!raw) return "id"
         if (raw.startsWith("\$")) {
@@ -374,7 +492,7 @@ class ReconciliationServices {
         }
         return raw
     }
-    private static String normalizeJsonIdExpr(String expr) {
+    static String normalizeJsonIdExpr(String expr) {
         def raw = normalize(expr)
         if (!raw) return "\$.id"
         String normalized = raw
@@ -386,7 +504,7 @@ class ReconciliationServices {
         return "\$[*].${normalized}"
     }
 
-    private static Map convertJsonPathToSpark(String jsonPath) {
+    static Map convertJsonPathToSpark(String jsonPath) {
         def path = normalizeSparkPath(jsonPath)
         if (!path) throw new IllegalArgumentException("JSONPath ${jsonPath} resolves to an empty field path.")
         if (path.contains("[*]")) {
@@ -397,7 +515,7 @@ class ReconciliationServices {
         }
         return [needsExplode: false, path: path]
     }
-    private static String normalizeSparkPath(String jsonPath) {
+    static String normalizeSparkPath(String jsonPath) {
         if (!jsonPath) return jsonPath
         def path = jsonPath.toString().trim()
         path = path.replaceFirst(/^\$\[\*\]/, "")
@@ -406,7 +524,7 @@ class ReconciliationServices {
         return path
     }
 
-    private static Column applyIdNormalizer(Column sourceCol, String idNormalizer) {
+    static Column applyIdNormalizer(Column sourceCol, String idNormalizer) {
         Column normalized = trim(sourceCol.cast("string"))
         if (!idNormalizer) return normalized
 
@@ -425,13 +543,189 @@ class ReconciliationServices {
         throw new IllegalArgumentException("Unsupported ID normalizer '${idNormalizer}'")
     }
 
-    private static Dataset normalizeCompareIdDataset(Dataset sourceDf, String idNormalizer) {
+    static Dataset normalizeCompareIdDataset(Dataset sourceDf, String idNormalizer) {
         return sourceDf
                 .withColumn("compare_id", applyIdNormalizer(col("compare_id"), idNormalizer))
                 .filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0")
     }
+
+    static Dataset buildMissingDiffRows(Dataset presentDataDf, Dataset missingIdDf, String diffType,
+                                        String presentLabel, String missingLabel, String note) {
+        if (presentDataDf == null || missingIdDf == null) return null
+        return presentDataDf.join(missingIdDf, "compare_id", "inner")
+                .select(
+                        lit(diffType).alias("type"),
+                        col("compare_id").alias("id"),
+                        lit(presentLabel).alias("presentIn"),
+                        lit(missingLabel).alias("missingIn"),
+                        to_json(col("data")).alias("data"),
+                        lit(note).alias("note")
+                )
+    }
+
+    static void validateUniqueCompareIds(Dataset dataDf, String compareScopeId, String fileSide, String fileLabel) {
+        if (dataDf == null) return
+
+        List duplicateRows = dataDf.groupBy("compare_id")
+                .count()
+                .filter(col("count").gt(1))
+                .orderBy(col("compare_id"))
+                .limit(5)
+                .collectAsList()
+        if (!duplicateRows) return
+
+        String sideCode = normalize(fileSide) ?: "FILE"
+        String label = normalize(fileLabel) ?: sideCode
+        String examples = duplicateRows.collect { row ->
+            String compareId = row.getAs("compare_id")?.toString()
+            long duplicateCount = ((Number) row.getAs("count")).longValue()
+            return "${compareId} (${duplicateCount} rows)"
+        }.join(", ")
+
+        throw new IllegalArgumentException(
+                "Compare scope ${compareScopeId} ${sideCode} (${label}) produced duplicate primaryId values after normalization: ${examples}. primaryId must identify exactly one object per file side."
+        )
+    }
+
+    static Dataset unionDatasets(Dataset firstDf, Dataset secondDf) {
+        if (firstDf != null && secondDf != null) return firstDf.union(secondDf)
+        if (firstDf != null) return firstDf
+        return secondDf
+    }
+
+    static Dataset emptyMissingDiffDataset(Dataset referenceDf) {
+        if (referenceDf == null) {
+            throw new IllegalArgumentException("referenceDf is required to create an empty missingDiffDf")
+        }
+        return referenceDf.sparkSession().createDataFrame(new ArrayList<Row>(), MISSING_DIFF_SCHEMA)
+    }
+
+    static Dataset convertMissingDiffToRuleSetDiffDataset(Dataset missingDiffDf, String compareScopeId, String objectType) {
+        if (missingDiffDf == null) return null
+        return missingDiffDf.select(
+                col("type").alias("diffType"),
+                lit(compareScopeId).alias("compareScopeId"),
+                lit(objectType).alias("objectType"),
+                col("id").alias("primaryId"),
+                lit(null).cast(DataTypes.StringType).alias("field"),
+                lit(null).cast(DataTypes.StringType).alias("file1Value"),
+                lit(null).cast(DataTypes.StringType).alias("file2Value"),
+                col("presentIn").alias("presentIn"),
+                col("missingIn").alias("missingIn"),
+                col("data").alias("data"),
+                lit(null).cast(DataTypes.StringType).alias("ruleId"),
+                lit(null).cast(DataTypes.StringType).alias("severity"),
+                col("note").alias("message")
+        )
+    }
+
+    static Dataset emptyRuleSetDiffDataset(Dataset referenceDf) {
+        if (referenceDf == null) {
+            throw new IllegalArgumentException("referenceDf is required to create an empty ruleSet diff dataset")
+        }
+        return referenceDf.sparkSession().createDataFrame(new ArrayList<Row>(), RULESET_DIFF_SCHEMA)
+    }
+
+    static Dataset buildRuleSetDiffDataset(Dataset referenceDf, List<Map<String, Object>> diffRows) {
+        if (referenceDf == null) {
+            throw new IllegalArgumentException("referenceDf is required to create a ruleSet diff dataset")
+        }
+        List<Map<String, Object>> safeDiffRows = diffRows ?: []
+        if (!safeDiffRows) return emptyRuleSetDiffDataset(referenceDf)
+
+        List<Row> rows = safeDiffRows.collect { Map<String, Object> diff ->
+            RowFactory.create(
+                    normalize(diff.diffType),
+                    normalize(diff.compareScopeId),
+                    normalize(diff.objectType),
+                    normalize(diff.primaryId),
+                    normalize(diff.field),
+                    normalize(diff.file1Value),
+                    normalize(diff.file2Value),
+                    normalize(diff.presentIn),
+                    normalize(diff.missingIn),
+                    normalize(diff.data),
+                    normalize(diff.ruleId),
+                    normalize(diff.severity),
+                    normalize(diff.message)
+            )
+        }
+        return referenceDf.sparkSession().createDataFrame(rows, RULESET_DIFF_SCHEMA)
+    }
+
+    static Dataset unionByNameDatasets(Dataset firstDf, Dataset secondDf) {
+        if (firstDf != null && secondDf != null) return firstDf.unionByName(secondDf)
+        if (firstDf != null) return firstDf
+        return secondDf
+    }
+
+    static Map<String, Object> writeDiffDatasetOutput(ExecutionContext ec, Dataset diffDf, String outputLocation,
+                                                      String outputFileName, String defaultBaseName,
+                                                      Map<String, Object> outputMetadata, Map<String, Object> outputSummary,
+                                                      List validationErrors, List processingWarnings) {
+        if (ec == null) throw new IllegalArgumentException("ec is required")
+        if (diffDf == null) throw new IllegalArgumentException("diffDf is required")
+
+        String outputBaseLocation = normalize(outputLocation) ?: "runtime://tmp/reconciliation/output"
+        def outputRef = ec.resource.getLocationReference(outputBaseLocation)
+        File outputDir = outputRef?.getFile()
+        if (outputDir == null) {
+            String runtimePath = ec.factory.getRuntimePath()
+            outputDir = new File(runtimePath, outputBaseLocation.replace("runtime://", ""))
+        }
+        if (!outputDir.exists()) outputDir.mkdirs()
+
+        String timestamp = ec.l10n.format(ec.user.nowTimestamp, "yyyyMMdd-HHmmss")
+        String baseFileName = normalize(outputFileName) ?: normalize(defaultBaseName) ?: "diff-${timestamp}.json"
+        if (!baseFileName.toLowerCase().endsWith(".json")) baseFileName = baseFileName + ".json"
+
+        File outputFile = new File(outputDir, baseFileName)
+        int suffix = 1
+        String nameRoot = baseFileName.indexOf(".") > 0 ? baseFileName.substring(0, baseFileName.lastIndexOf(".")) : baseFileName
+        while (outputFile.exists()) {
+            outputFile = new File(outputDir, "${nameRoot}-${suffix}.json")
+            suffix++
+        }
+
+        outputFile.withWriter("UTF-8") { writer ->
+            writer << "{\n"
+            writer << "\"metadata\":" + JsonOutput.toJson(outputMetadata ?: [:]) + ",\n"
+            writer << "\"summary\":" + JsonOutput.toJson(outputSummary ?: [:]) + ",\n"
+            writer << "\"validationErrors\":" + JsonOutput.toJson(validationErrors ?: []) + ",\n"
+            writer << "\"processingWarnings\":" + JsonOutput.toJson(processingWarnings ?: []) + ",\n"
+            writer << "\"differences\":["
+            boolean first = true
+            def iter = diffDf.toJSON().toLocalIterator()
+            while (iter.hasNext()) {
+                String rowJson = iter.next()
+                if (!first) writer << ","
+                writer << "\n" << rowJson
+                first = false
+            }
+            writer << "]\n}"
+        }
+
+        return [
+                diffLocation: outputFile.getAbsolutePath(),
+                diffFileName: outputFile.getName()
+        ]
+    }
+
+    static Dataset buildMatchedPairDataset(Dataset file1DataDf, Dataset file2DataDf, Dataset matchedIdDf,
+                                           String compareScopeId, String objectType) {
+        return matchedIdDf.alias("matched")
+                .join(file1DataDf.alias("file1"), col("matched.compare_id").equalTo(col("file1.compare_id")), "inner")
+                .join(file2DataDf.alias("file2"), col("matched.compare_id").equalTo(col("file2.compare_id")), "inner")
+                .select(
+                        lit(compareScopeId).alias("compareScopeId"),
+                        lit(objectType).alias("objectType"),
+                        col("matched.compare_id").alias("primaryId"),
+                        col("file1.data").alias("file1"),
+                        col("file2.data").alias("file2")
+                )
+    }
     
-    private static Dataset buildJsonIdDf(Dataset rawDf, Map pathInfo, String pathLabel, String idNormalizer) {
+    static Dataset buildJsonIdDf(Dataset rawDf, Map pathInfo, String pathLabel, String idNormalizer) {
         if (pathInfo.needsExplode) {
              String arrayPath = normalizeSparkPath(pathInfo.arrayPath as String)
              String fieldPath = normalizeSparkPath(pathInfo.fieldPath as String)
@@ -444,7 +738,7 @@ class ReconciliationServices {
         return normalizeCompareIdDataset(idDf, idNormalizer).distinct()
     }
     
-    private static Dataset buildJsonDataDf(Dataset rawDf, Map pathInfo, String pathLabel, String idNormalizer) {
+    static Dataset buildJsonDataDf(Dataset rawDf, Map pathInfo, String pathLabel, String idNormalizer) {
          if (pathInfo.needsExplode) {
              String arrayPath = normalizeSparkPath(pathInfo.arrayPath as String)
              String fieldPath = normalizeSparkPath(pathInfo.fieldPath as String)
@@ -457,13 +751,13 @@ class ReconciliationServices {
          return normalizeCompareIdDataset(dataDf, idNormalizer)
     }
     
-    private static Dataset buildCsvIdDf(Dataset rawDf, String fieldName, String idNormalizer) {
+    static Dataset buildCsvIdDf(Dataset rawDf, String fieldName, String idNormalizer) {
          String fieldExpr = (fieldName?.replace("`", "``") ?: "id")
          fieldExpr = "`" + fieldExpr + "`"
          Dataset idDf = rawDf.selectExpr("${fieldExpr} as compare_id")
          return normalizeCompareIdDataset(idDf, idNormalizer).distinct()
     }
-     private static Dataset buildCsvDataDf(Dataset rawDf, String fieldName, String idNormalizer) {
+     static Dataset buildCsvDataDf(Dataset rawDf, String fieldName, String idNormalizer) {
          String fieldExpr = (fieldName?.replace("`", "``") ?: "id")
          fieldExpr = "`" + fieldExpr + "`"
          Dataset dataDf = rawDf.selectExpr("${fieldExpr} as compare_id", "struct(*) as data")

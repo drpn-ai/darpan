@@ -56,7 +56,7 @@ class RuleEngineSupport {
         String candidate = base
         int suffix = 1
 
-        while (ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", candidate).useCache(false).one() != null) {
+        while (ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", candidate).disableAuthz().useCache(false).one() != null) {
             String suffixText = "_${suffix}"
             int maxBaseLen = Math.max(1, 60 - suffixText.length())
             String shortBase = base.length() > maxBaseLen ? base.substring(0, maxBaseLen) : base

@@ -1,5 +1,7 @@
+import darpan.reconciliation.automation.SftpAutomationSupport
+import darpan.reconciliation.core.ReconciliationServices
 import org.slf4j.LoggerFactory
-import org.moqui.sftp.SftpClient
+import org.apache.spark.sql.Dataset
 
 
 def logger = LoggerFactory.getLogger("darpan.reconciliation.automation.SftpReconciliation")
@@ -68,19 +70,6 @@ def resolveHostAndPort = { String host, Object portVal, String label ->
 
     return [host: hostOnly, port: portNum, basePath: hostBasePath]
 }
-def resolveEnumLabel = { String enumId, String fallback ->
-    def normalized = normalize(enumId)
-    if (!normalized) return fallback
-    def enumValue = ec.entity.find("moqui.basic.Enumeration")
-            .condition("enumId", normalized)
-            .useCache(true)
-            .one()
-    def code = normalize(enumValue?.enumCode)
-    if (code) return code
-    def description = normalize(enumValue?.description)
-    if (description) return description
-    return normalized
-}
 def ensureDirectory = { rr ->
     if (rr == null) return rr
     if (rr.supportsExists() && rr.getExists() && rr.isDirectory()) return rr
@@ -105,7 +94,11 @@ def stageStream = { InputStream inputStream, stageDirRef, String label, String s
     return [location: stagedLocation, name: safeName]
 }
 
-def selectSftpCandidateFile = { SftpClient client, String basePath, String label, String archiveFolderName = null ->
+def safeToken = { String raw, String fallback ->
+    String normalized = normalize(raw)?.replaceAll(/[^A-Za-z0-9_-]/, "-")
+    return normalized ?: fallback
+}
+def selectSftpCandidateFile = { client, String basePath, String label, String archiveFolderName = null ->
     List<Map> entries = []
     boolean listedDirectory = true
     try {
@@ -152,14 +145,38 @@ def selectSftpCandidateFile = { SftpClient client, String basePath, String label
     return [refPath: path, name: chosen.name]
 }
 
-if (!reconciliationMappingId) {
-    throw new IllegalArgumentException("reconciliationMappingId is required")
+String ruleSetIdValue = normalize(ruleSetId)
+String compareScopeIdValue = normalize(compareScopeId)
+String mappingIdValue = normalize(reconciliationMappingId)
+String requestedFile1SystemEnumId = normalize(file1SystemEnumId)
+String requestedFile2SystemEnumId = normalize(file2SystemEnumId)
+
+if (!ruleSetIdValue && !mappingIdValue) {
+    throw new IllegalArgumentException("Either ruleSetId or reconciliationMappingId is required")
 }
-if (!file1SystemEnumId || !file2SystemEnumId) {
-    throw new IllegalArgumentException("file1SystemEnumId and file2SystemEnumId are required")
+if (!ruleSetIdValue && (!requestedFile1SystemEnumId || !requestedFile2SystemEnumId)) {
+    throw new IllegalArgumentException("file1SystemEnumId and file2SystemEnumId are required when using reconciliationMappingId")
 }
 if (!file1SftpServerId || !file2SftpServerId) {
     throw new IllegalArgumentException("file1SftpServerId and file2SftpServerId are required")
+}
+
+Map compareScopeConfig = null
+String effectiveFile1SystemEnumId = requestedFile1SystemEnumId
+String effectiveFile2SystemEnumId = requestedFile2SystemEnumId
+if (ruleSetIdValue) {
+    compareScopeConfig = ReconciliationServices.resolveRuleSetCompareScopeConfig(
+            ec,
+            ruleSetIdValue,
+            compareScopeIdValue,
+            requestedFile1SystemEnumId,
+            requestedFile2SystemEnumId
+    )
+    effectiveFile1SystemEnumId = normalize(compareScopeConfig.file1SystemEnumId)
+    effectiveFile2SystemEnumId = normalize(compareScopeConfig.file2SystemEnumId)
+}
+if (!effectiveFile1SystemEnumId || !effectiveFile2SystemEnumId) {
+    throw new IllegalArgumentException("file1SystemEnumId and file2SystemEnumId are required")
 }
 
 def stageDirRef = ensureDirectory(ec.resource.getLocationReference(stageLocation ?: "runtime://tmp/reconciliation/automation/input"))
@@ -221,11 +238,16 @@ if (!outputDirRef.supportsWrite()) {
     throw new IllegalStateException("Output directory ${outputDirRef.getLocation()} is not writable")
 }
 def outputLoc = outputDirRef.getLocation()
-logMsg("Starting SFTP poll for mapping ${reconciliationMappingId}")
+if (ruleSetIdValue) {
+    logMsg("Starting SFTP poll for RuleSet ${ruleSetIdValue} compareScope ${compareScopeConfig.compareScopeId}")
+} else {
+    logMsg("Starting SFTP poll for mapping ${mappingIdValue}")
+}
 
 def prepareFile = { String label, String systemEnumId, String sftpServerId, String overridePath ->
     def server = ec.entity.find("darpan.reconciliation.SftpServer")
             .condition("sftpServerId", sftpServerId)
+            .disableAuthz()
             .useCache(true)
             .one()
     if (!server) {
@@ -254,7 +276,7 @@ def prepareFile = { String label, String systemEnumId, String sftpServerId, Stri
     def sftpConfig = [host: cleanHost, port: cleanPort, basePath: sftpTarget]
 
     if (sftpConfig) {
-        SftpClient sftpClient = new SftpClient((String) sftpConfig.host, (String) cleanUser, (int) sftpConfig.port)
+        def sftpClient = SftpAutomationSupport.createClient((String) sftpConfig.host, (String) cleanUser, (int) sftpConfig.port)
         if (cleanPass) sftpClient.password((String) cleanPass)
         if (server.privateKey) sftpClient.privateKey((String) server.privateKey)
         
@@ -318,7 +340,7 @@ def prepareFile = { String label, String systemEnumId, String sftpServerId, Stri
                 source         : "sftp://${sftpConfig.host}:${sftpConfig.port}${sftpConfig.basePath}",
                 selectedName   : selection.name ?: selection.refPath,
                 stagedLocation : staged.location,
-                systemLabel    : resolveEnumLabel(systemEnumId, label),
+                systemLabel    : ReconciliationServices.resolveEnumLabel(ec, systemEnumId, label),
                 basePathUsed   : sftpConfig.basePath
         ]
     }
@@ -328,8 +350,8 @@ def prepareFile = { String label, String systemEnumId, String sftpServerId, Stri
     return [found: false, message: "Invalid SFTP configuration for ${label}"]
 }
 
-def file1Prep = prepareFile("file1", file1SystemEnumId, file1SftpServerId, file1RemotePath)
-def file2Prep = prepareFile("file2", file2SystemEnumId, file2SftpServerId, file2RemotePath)
+def file1Prep = prepareFile("file1", effectiveFile1SystemEnumId, file1SftpServerId, file1RemotePath)
+def file2Prep = prepareFile("file2", effectiveFile2SystemEnumId, file2SftpServerId, file2RemotePath)
 
 file1Source = file1Prep.source
 file2Source = file2Prep.source
@@ -353,39 +375,108 @@ dataAvailable = true
 
 def sparkMasterToUse = sparkMaster ?: (ec.resource.properties['spark.master'] ?: "local[*]")
 
-def reconcileResult = ec.service.sync()
-        .name("reconciliation.ReconciliationCoreServices.reconcile#FilesByMapping")
-        .parameters([
-                reconciliationMappingId: reconciliationMappingId,
-                file1Location          : file1StagedLocation,
-                file2Location          : file2StagedLocation,
-                file1Name              : file1SelectedName,
-                file2Name              : file2SelectedName,
-                file1SystemEnumId      : file1SystemEnumId,
-                file2SystemEnumId      : file2SystemEnumId,
-                file1FileTypeEnumId    : file1FileTypeEnumId,
-                file2FileTypeEnumId    : file2FileTypeEnumId,
-                file1SchemaFileName    : file1SchemaFileName,
-                file2SchemaFileName    : file2SchemaFileName,
-                file1Label             : file1Prep.systemLabel ?: resolveEnumLabel(file1SystemEnumId, "File 1"),
-                file2Label             : file2Prep.systemLabel ?: resolveEnumLabel(file2SystemEnumId, "File 2"),
-                hasHeader              : hasHeader,
-                outputLocation         : outputLoc,
-                sparkMaster            : sparkMasterToUse,
-                sparkAppName           : sparkAppName
-        ])
-        .call()
+if (ruleSetIdValue) {
+    Map reconcileResult = ec.service.sync()
+            .name("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope")
+            .parameters([
+                    ruleSetId          : ruleSetIdValue,
+                    compareScopeId     : compareScopeConfig.compareScopeId,
+                    file1Location      : file1StagedLocation,
+                    file2Location      : file2StagedLocation,
+                    file1Name          : file1SelectedName,
+                    file2Name          : file2SelectedName,
+                    file1Label         : compareScopeConfig.file1Label,
+                    file2Label         : compareScopeConfig.file2Label,
+                    file1FileTypeEnumId: file1FileTypeEnumId,
+                    file2FileTypeEnumId: file2FileTypeEnumId,
+                    file1SchemaFileName: file1SchemaFileName,
+                    file2SchemaFileName: file2SchemaFileName,
+                    hasHeader          : hasHeader,
+                    sparkMaster        : sparkMasterToUse,
+                    sparkAppName       : sparkAppName
+            ])
+            .call()
 
-file1Type = reconcileResult.file1Type
-file2Type = reconcileResult.file2Type
-reconciliationType = reconcileResult.reconciliationType
-diffLocation = reconcileResult.diffLocation
-diffFileName = reconcileResult.diffFileName
-differenceCount = reconcileResult.differenceCount
-onlyInFile1Count = reconcileResult.onlyInFile1Count
-onlyInFile2Count = reconcileResult.onlyInFile2Count
-validationErrors = reconcileResult.validationErrors ?: []
-processingWarnings = (processingWarnings ?: []) + (reconcileResult.processingWarnings ?: [])
+    file1Type = reconcileResult.file1Type
+    file2Type = reconcileResult.file2Type
+    reconciliationType = ReconciliationServices.determineReconciliationType(file1Type as String, file2Type as String)
+    differenceCount = reconcileResult.differenceCount
+    onlyInFile1Count = reconcileResult.missingInFile2Count
+    onlyInFile2Count = reconcileResult.missingInFile1Count
+    validationErrors = (reconcileResult.validationErrors ?: []) as List
+    processingWarnings = ((processingWarnings ?: []) + (reconcileResult.processingWarnings ?: [])) as List
+
+    String defaultBaseName = "${safeToken(compareScopeConfig.compareScopeId as String, safeToken(ruleSetIdValue, 'ruleset'))}-diff-${timestamp}.json"
+    Map outputMetadata = [
+            timestamp          : ec.user.nowTimestamp?.toString(),
+            reconciliationRunId: normalize(reconciliationRunId),
+            file1Label         : compareScopeConfig.file1Label,
+            file2Label         : compareScopeConfig.file2Label,
+            file1Type          : file1Type,
+            file2Type          : file2Type,
+            reconciliation     : reconciliationType,
+            ruleSetId          : ruleSetIdValue,
+            compareScopeId     : compareScopeConfig.compareScopeId,
+            objectType         : reconcileResult.objectType,
+            file1Source        : file1Source,
+            file2Source        : file2Source
+    ]
+    Map outputSummary = [
+            totalDifferences            : differenceCount,
+            onlyInFile1Count            : onlyInFile1Count,
+            onlyInFile2Count            : onlyInFile2Count,
+            missingObjectDifferenceCount: reconcileResult.missingObjectDifferenceCount,
+            ruleDifferenceCount         : reconcileResult.ruleDifferenceCount
+    ]
+    Map outputInfo = ReconciliationServices.writeDiffDatasetOutput(
+            ec,
+            (Dataset) reconcileResult.diffDf,
+            outputLoc,
+            null,
+            defaultBaseName,
+            outputMetadata,
+            outputSummary,
+            validationErrors,
+            processingWarnings
+    )
+
+    diffLocation = outputInfo.diffLocation
+    diffFileName = outputInfo.diffFileName
+} else {
+    Map reconcileResult = ec.service.sync()
+            .name("reconciliation.ReconciliationCoreServices.reconcile#FilesByMapping")
+            .parameters([
+                    reconciliationMappingId: mappingIdValue,
+                    file1Location          : file1StagedLocation,
+                    file2Location          : file2StagedLocation,
+                    file1Name              : file1SelectedName,
+                    file2Name              : file2SelectedName,
+                    file1SystemEnumId      : effectiveFile1SystemEnumId,
+                    file2SystemEnumId      : effectiveFile2SystemEnumId,
+                    file1FileTypeEnumId    : file1FileTypeEnumId,
+                    file2FileTypeEnumId    : file2FileTypeEnumId,
+                    file1SchemaFileName    : file1SchemaFileName,
+                    file2SchemaFileName    : file2SchemaFileName,
+                    file1Label             : file1Prep.systemLabel ?: ReconciliationServices.resolveEnumLabel(ec, effectiveFile1SystemEnumId, "File 1"),
+                    file2Label             : file2Prep.systemLabel ?: ReconciliationServices.resolveEnumLabel(ec, effectiveFile2SystemEnumId, "File 2"),
+                    hasHeader              : hasHeader,
+                    outputLocation         : outputLoc,
+                    sparkMaster            : sparkMasterToUse,
+                    sparkAppName           : sparkAppName
+            ])
+            .call()
+
+    file1Type = reconcileResult.file1Type
+    file2Type = reconcileResult.file2Type
+    reconciliationType = reconcileResult.reconciliationType ?: ReconciliationServices.determineReconciliationType(file1Type as String, file2Type as String)
+    diffLocation = reconcileResult.diffLocation
+    diffFileName = reconcileResult.diffFileName
+    differenceCount = reconcileResult.differenceCount
+    onlyInFile1Count = reconcileResult.onlyInFile1Count
+    onlyInFile2Count = reconcileResult.onlyInFile2Count
+    validationErrors = reconcileResult.validationErrors ?: []
+    processingWarnings = (processingWarnings ?: []) + (reconcileResult.processingWarnings ?: [])
+}
 statusMessage = "${reconciliationType ?: 'Reconciliation'} complete"
 
 logger.info("SFTP reconciliation done: run=${reconciliationRunId ?: 'ad-hoc'} type=${reconciliationType} diff=${diffFileName} dataAvailable=${dataAvailable}")
@@ -404,6 +495,7 @@ try {
     if (resultFile && (!resultFile.supportsExists() || resultFile.getExists())) {
         def server = ec.entity.find("darpan.reconciliation.SftpServer")
             .condition("sftpServerId", file1SftpServerId)
+            .disableAuthz()
             .useCache(true)
             .one()
         if (server) {
@@ -414,7 +506,7 @@ try {
             def cleanUser = normalize(server.username)
             def cleanPass = normalize(server.password)
             
-            SftpClient sftpClient = new SftpClient((String) cleanHost, (String) cleanUser, (int) cleanPort)
+            def sftpClient = SftpAutomationSupport.createClient((String) cleanHost, (String) cleanUser, (int) cleanPort)
             
             if (cleanPass) sftpClient.password((String) cleanPass)
             if (server.privateKey) sftpClient.privateKey((String) server.privateKey)

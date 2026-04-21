@@ -15,19 +15,22 @@ This document provides a granular, step-by-step breakdown of the work required t
 ### 1.2. Entity Design (Database)
 - [ ] **Define RuleSet Entity** (`RuleEntities.xml`)
     - Fields: `ruleSetId` (PK), `ruleSetName`, `description`, `statusId`, `targetEntity` (optional).
-    - **Key Management**:
-        - `primaryKeyPath`: JSONPath to the unique ID (e.g., `$.id`, `order_id`). Used for tracking results.
-        - `explosionPath`: JSONPath to the array to explode (e.g., `$.items`, `line_items`). If null, treats root as list.
+    - RuleSet remains the rule container; object identity and file-side extraction belong to compare-scope config.
     - **Verification**: Check default Moqui entity validation.
 - [ ] **Define Rule Entity** (`RuleEntities.xml`)
     - Fields: `ruleId` (PK), `ruleSetId` (FK), `ruleText` (Human readable), `ruleCondition` (Executable DRL/Expression), `errorMessage` (What to show if failed), `severity` (Info/Warn/Error), `sequenceNum`.
     - **Verification**: Verify Foreign Key constraints.
 - [ ] **Define RuleExecutionResult Entity** (Optional but recommended for auditing)
     - Fields: `executionId`, `ruleId`, `resultStatus`, `timestamp`, `recordId` (if applicable).
-- [ ] **Deprecate Legacy Entities**
-    - Edit `MappingEntities.xml`.
-    - Add `deprecated="true"` attribute to `ReconciliationMapping` and `ReconciliationMappingMember`.
-    - Add descriptions to guide developers to the new entities.
+- [ ] **Define RuleSetCompareScope**
+    - Fields: `compareScopeId` (PK), `ruleSetId` (FK), `objectType`, `description`, `statusId`.
+    - Represents one compared object shape, such as Product, Order, OrderLine, or InventoryItem.
+- [ ] **Define RuleSetCompareSource**
+    - Fields: `compareScopeId` (PK/FK), `fileSide` (PK), `systemEnumId`, `fileTypeEnumId`, `schemaFileName`, `recordRootExpression`, `primaryIdExpression`, `idValueNormalizer`.
+    - Stores one source definition per file side.
+- [ ] **Preserve Mapping for Migration**
+    - Keep `ReconciliationMapping` and `ReconciliationMappingMember` as the current baseline until caller cutover is complete.
+    - Do not mark Mapping deprecated until migration and parity evidence exist.
 
 ## Phase 2: Core Rule Service Implementation
 **Goal:** Create the backend services that load, compile, and execute rules.
@@ -35,7 +38,7 @@ This document provides a granular, step-by-step breakdown of the work required t
 ### 2.1. Service Definition
 - [ ] **Create RuleServices.xml**
     - Define `executeRuleSet`
-        - In: `ruleSetId`, `dataList` (List<Map>).
+        - In: `ruleSetId`, `compareScopeId`, `matchedPairList` or a bounded matched-pair dataset.
         - Out: `results` (List<Map>).
     - Define `validateRuleSyntax` (for UI validation).
 
@@ -71,14 +74,15 @@ This document provides a granular, step-by-step breakdown of the work required t
 
 ### 2.3. Data Preparation (Spark Integration) - **[NEW]**
 - [ ] **Service: `prepareRuleData`**
-    - Input: `inputFileLocation`, `ruleSetId`.
+    - Input: `inputFileLocation`, `ruleSetId`, `compareScopeId`, `fileSide`.
     - Logic:
-        1. Retrieve `explosionPath` and `primaryKeyPath` from RuleSet.
+        1. Retrieve `recordRootExpression` and `primaryIdExpression` from `RuleSetCompareSource`.
         2. Read JSON/CSV using Spark.
-        3. If `explosionPath` is set:
+        3. If `recordRootExpression` is set:
             - Explode the array column.
             - Flatten the structure (Select `col("*")`).
-        4. Convert DataFrame to `List<Map>` for Drools Config.
+        4. Produce normalized primary ID datasets for base missing-object compare.
+        5. Convert matched pairs to bounded `List<Map>` batches for Drools execution.
             - *Optimization*: For huge datasets, process in partitions/batches.
 
 ## Phase 3: Rule Parser (The "Science" Part)

@@ -30,6 +30,9 @@ This document describes the production RuleSet/Rule service contracts used by re
 - `reconciliation.ReconciliationRuleEngineServices.execute#RuleSetJson`
   - Inputs: `ruleSetId`, `jsonData`, `returnAllFacts` (default `false`)
   - Outputs: same as `execute#RuleSet`
+- `reconciliation.ReconciliationRuleEngineServices.execute#RuleSetMatchedPairs`
+  - Inputs: `ruleSetId`, `dataList` (`List` of matched-pair facts), `returnAllFacts` (default `false`)
+  - Outputs: `diffResults`, `matchedResults`, `firedRuleCount`, `ruleCount`, `warnings`, `error`
 - `reconciliation.ReconciliationRuleEngineServices.save#RuleSet`
   - Creates or updates RuleSet metadata.
   - `ruleSetId` is optional; if blank, an ID is generated from `ruleSetName`.
@@ -56,6 +59,52 @@ This document describes the production RuleSet/Rule service contracts used by re
 - Cache invalidation is tenant-scoped through `RuleEngineSupport`, so XML-backed CRUD and script-backed compile/execute share the same cache entries.
 - Rule parsing supports user-friendly condition text (for example: `status is Pending`).
 - Generated rules add `_matchedRuleIds` to matched fact maps.
+- Compiled DRL resources are written under a package-aligned resource path so Drools package validation succeeds for tenant-scoped RuleSets.
+
+## Matched-pair contract
+
+`execute#RuleSetMatchedPairs` is the RuleSet cutover entrypoint for DRL that compares matched objects from both file sides. Each fact is a `Map` with:
+
+- `compareScopeId`
+- `objectType`
+- `primaryId`
+- `file1`
+- `file2`
+
+Rule-generated diff rows are normalized to:
+
+- `diffType`
+- `compareScopeId`
+- `objectType`
+- `primaryId`
+- `field`
+- `file1Value`
+- `file2Value`
+- `ruleId`
+- `severity`
+- `message`
+
+Use `RuleDiffSupport` from DRL to emit those rows. Example:
+
+```drl
+rule "PRODUCT_SKU_MISMATCH"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(RuleDiffSupport.valuesDiffer(((Map) $m.get("file1")).get("sku"), ((Map) $m.get("file2")).get("sku")))
+then
+    RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "sku",
+        ((Map) $m.get("file1")).get("sku"),
+        ((Map) $m.get("file2")).get("sku"),
+        "WARN",
+        "SKU mismatch"
+    );
+end
+```
+
+If DRL fires but emits no diff rows, `execute#RuleSetMatchedPairs` returns a warning so caller pipelines can catch incomplete rule authoring before cutover.
 
 ## Example
 

@@ -1,0 +1,28 @@
+[
+    {
+        "data": {
+            "products": [
+                {
+                    "productId": "P100",
+                    "sku": "SKU-A",
+                    "price": "10.00"
+                },
+                {
+                    "productId": "P200",
+                    "sku": "SKU-B",
+                    "price": "20.00"
+                },
+                {
+                    "productId": "P300",
+                    "sku": "SKU-C",
+                    "price": "30.00"
+                },
+                {
+                    "productId": "P400",
+                    "sku": "SKU-D",
+                    "price": "49.99"
+                }
+            ]
+        }
+    }
+]

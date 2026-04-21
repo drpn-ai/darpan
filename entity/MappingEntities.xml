@@ -6,7 +6,7 @@
     <!-- ========================================================= -->
 
     <entity entity-name="ReconciliationMapping" package="darpan.mapping" use="configuration">
-        <description>(DEPRECATED) Named mapping definition for source field values by system. Use RuleSet instead.</description>
+        <description>Current named source extraction contract for reconciliation. Mappings define systems and record-id expressions for existing compare flows and provide migration input for RuleSet compare scopes.</description>
         <field name="reconciliationMappingId" type="id" is-pk="true"/>
         <field name="mappingName" type="text-short" not-null="true"/>
         <field name="description" type="text-medium"/>
@@ -21,7 +21,7 @@
     </entity>
 
     <entity entity-name="ReconciliationMappingMember" package="darpan.mapping" use="configuration">
-        <description>(DEPRECATED) Mapping entry that binds a source field/value to a system.</description>
+        <description>Current system-specific source extraction entry for a Mapping, including file type, schema, ID expression, and optional ID normalizer.</description>
         <field name="mappingMemberId" type="id" is-pk="true"/>
         <field name="reconciliationMappingId" type="id" not-null="true"/>
         <field name="systemEnumId" type="id" not-null="true"/>

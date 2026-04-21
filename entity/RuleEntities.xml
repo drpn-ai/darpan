@@ -11,6 +11,10 @@
         <field name="primaryKeyPath" type="text-medium"/>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>
+
+        <relationship type="many" related="darpan.rule.RuleSetCompareScope" short-alias="compareScopes">
+            <key-map field-name="ruleSetId"/>
+        </relationship>
     </entity>
 
     <entity entity-name="Rule" package="darpan.rule" use="configuration">
@@ -29,6 +33,59 @@
 
         <relationship type="one" related="darpan.rule.RuleSet" fk-name="RULE_RULESET">
             <key-map field-name="ruleSetId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="RuleSetCompareScope" package="darpan.rule" use="configuration">
+        <description>RuleSet-owned compare object definition for reconciliation, such as Product, Order, OrderLine, or InventoryItem.</description>
+        <field name="compareScopeId" type="id" is-pk="true"/>
+        <field name="ruleSetId" type="id" not-null="true"/>
+        <field name="objectType" type="text-short" not-null="true"/>
+        <field name="description" type="text-medium"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="lastUpdatedDate" type="date-time"/>
+
+        <relationship type="one" related="darpan.rule.RuleSet" fk-name="RSCMP_RULESET">
+            <key-map field-name="ruleSetId"/>
+        </relationship>
+        <relationship type="many" related="darpan.rule.RuleSetCompareSource" short-alias="sources">
+            <key-map field-name="compareScopeId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="RuleSetCompareSource" package="darpan.rule" use="configuration">
+        <description>One file-side source definition for a RuleSet compare scope, including schema, record root, primary ID expression, and optional ID normalizer.</description>
+        <field name="compareScopeId" type="id" is-pk="true" not-null="true"/>
+        <field name="fileSide" type="text-short" is-pk="true" not-null="true">
+            <description>Logical file side for the compare scope: FILE_1 or FILE_2.</description>
+        </field>
+        <field name="systemEnumId" type="id" not-null="true"/>
+        <field name="fileTypeEnumId" type="id">
+            <description>Optional file type override, such as DftCsv or DftJson.</description>
+        </field>
+        <field name="schemaFileName" type="text-medium">
+            <description>Optional schema filename used for validation or schema-guided extraction.</description>
+        </field>
+        <field name="recordRootExpression" type="text-medium">
+            <description>Optional root/explosion expression used to locate the repeated object records before ID extraction.</description>
+        </field>
+        <field name="primaryIdExpression" type="text-medium" not-null="true">
+            <description>Expression used to extract the primary compare ID from each object for this file side.</description>
+        </field>
+        <field name="idValueNormalizer" type="text-short">
+            <description>Optional ID value normalizer (for example SHOPIFY_GID_TAIL) applied before compare.</description>
+        </field>
+        <field name="createdDate" type="date-time"/>
+        <field name="lastUpdatedDate" type="date-time"/>
+
+        <relationship type="one" related="darpan.rule.RuleSetCompareScope" fk-name="RSCSR_SCOPE">
+            <key-map field-name="compareScopeId"/>
+        </relationship>
+        <relationship type="one" related="moqui.basic.Enumeration" fk-name="RSCSR_SYS_ENUM">
+            <key-map field-name="systemEnumId" related-field-name="enumId"/>
+        </relationship>
+        <relationship type="one" title="FileType" related="moqui.basic.Enumeration" fk-name="RSCSR_FTYPE_ENUM">
+            <key-map field-name="fileTypeEnumId" related-field-name="enumId"/>
         </relationship>
     </entity>
 

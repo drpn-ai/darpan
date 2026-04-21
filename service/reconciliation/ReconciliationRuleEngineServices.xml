@@ -51,6 +51,23 @@
         </out-parameters>
     </service>
 
+    <service verb="execute" noun="RuleSetMatchedPairs" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy" method="executeRuleSetMatchedPairs">
+        <description>Execute RuleSet DRL against matched compare-scope facts and return normalized rule-generated Diff maps.</description>
+        <in-parameters>
+            <parameter name="ruleSetId" required="true"/>
+            <parameter name="dataList" type="List" required="true"/>
+            <parameter name="returnAllFacts" type="Boolean" default-value="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="diffResults" type="List"/>
+            <parameter name="matchedResults" type="List"/>
+            <parameter name="firedRuleCount" type="Integer"/>
+            <parameter name="ruleCount" type="Integer"/>
+            <parameter name="warnings" type="List"/>
+            <parameter name="error"/>
+        </out-parameters>
+    </service>
+
     <service verb="save" noun="RuleSet">
         <description>Create or update RuleSet metadata with normalized IDs and timestamps.</description>
         <in-parameters>

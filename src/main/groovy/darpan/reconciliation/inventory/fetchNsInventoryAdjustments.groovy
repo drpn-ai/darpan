@@ -2,6 +2,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import groovy.transform.Field
 import org.slf4j.LoggerFactory
+import darpan.reconciliation.inventory.InventoryWarningSupport
 
 import java.net.URI
 import java.net.URLEncoder
@@ -454,7 +455,7 @@ records = rawRecords.collect { Object rec ->
     [record: rec]
 }
 recordCount = records.size()
-processingWarnings = warningList.collect { [warningMessage: it] }
+processingWarnings = InventoryWarningSupport.normalizeWarningTexts(warningList)
 
 logger.info("NetSuite restlet success config={} itemId={} locationId={} records={}",
         nsConfigId, itemIdStr, locationIdStr, recordCount)

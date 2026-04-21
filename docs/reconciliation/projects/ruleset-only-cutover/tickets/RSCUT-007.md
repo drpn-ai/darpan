@@ -1,69 +1,77 @@
-# RSCUT-007: SFTP Automation Screen and Job Editor Cutover
+# RSCUT-007: SFTP Automation RuleSet Compare Contract
 
 ## Metadata
 - Ticket ID: RSCUT-007
-- Title: SFTP Automation Screen and Job Editor Cutover
-- Depends On: RSCUT-006
+- Title: SFTP Automation RuleSet Compare Contract
+- Depends On: RSCUT-004
 - Wave: Wave 3
 - Owner: Agent
 
 ## Goal
-Update SFTP Automation UI and schedule parameter handling to use RuleSet IDs in create/edit/list flows.
+Cut SFTP automation backend execution from Mapping job parameters to RuleSet compare-scope job parameters while preserving scheduling and output behavior.
 
 ## In Scope
-- Replace mapping dropdown with RuleSet dropdown.
-- Save job parameter as `ruleSetId`.
-- Display RuleSet labels in existing schedules list.
-- Keep schedule cadence and advanced settings behavior unchanged.
+- Add `ruleSetId` and optional `compareScopeId` to SFTP automation service contract.
+- Route SFTP reconciliation through the RuleSet compare pipeline from RSCUT-004.
+- Preserve current data availability, diff output, count, warning, and status behavior.
+- Optionally keep temporary compatibility for existing `reconciliationMappingId` jobs until migration.
 
 ## Out of Scope
-- Backend service contract changes (RSCUT-006).
-- Migration script behavior (RSCUT-002).
-- Mapping screen decommission.
+- SFTP schedule screen changes.
+- Generic service/screen changes.
+- Mapping entity deprecation.
 
 ## Dependencies
-- RSCUT-006 completed.
+- RSCUT-004 completed.
 
 ## Files to Touch
-- `screen/Reconciliation/Automation/SftpAutomation.xml`
+- `service/reconciliation/ReconciliationAutomationServices.xml`
+- `src/main/groovy/darpan/reconciliation/automation/pollSftpAndRunReconciliation.groovy`
+- `docs/reconciliation/automation/sftp-reconciliation.md`
 
 ## Contract/API Changes
-- UI and job-parameter binding rename:
-  - before: `reconciliationMappingId`
-  - after: `ruleSetId`
-- Pre-action dropdown source changes from mapping entity to RuleSet entity.
+- Service changed: `reconciliation.ReconciliationAutomationServices.poll#SftpAndReconcile`
+- New required input:
+  - `ruleSetId`
+- New optional input:
+  - `compareScopeId` (required when RuleSet has multiple active scopes)
+- Compatibility input:
+  - `reconciliationMappingId` may remain temporarily for existing scheduled jobs.
 
 ## Implementation Steps
-1. Update save transition validation to require `ruleSetId`.
-2. Update schedule parameter map to write `ruleSetId` key.
-3. Replace mapping preload query with RuleSet preload query.
-4. Replace mapping label map with RuleSet label map.
-5. Update form field name/title and existing jobs table column text to RuleSet terminology.
-6. Ensure edit prefill reads `ruleSetId` from job parameters.
+1. Add `ruleSetId` and optional `compareScopeId` to automation service XML.
+2. Update poll script to resolve compare scope.
+3. Route execution through the RuleSet compare pipeline.
+4. Preserve existing schedule status and diff output behavior.
+5. Add clear errors for ambiguous/missing compare scope.
+6. Document temporary Mapping job compatibility if retained.
 
 ## Acceptance Criteria
-- SFTP schedule form stores and loads `ruleSetId`.
-- Existing schedules table shows RuleSet label column.
-- No mapping entity lookup or mapping field remains in this screen.
+- SFTP automation can run without `reconciliationMappingId`.
+- Existing scheduled Mapping jobs remain supported until RSCUT-009 migration, if compatibility is retained.
+- SFTP flow produces missing-object Diffs before rule Diffs.
+- SFTP flow runs DRL only on matched object pairs.
 
 ## Validation Commands and Expected Results
-1. Command: `rg -n "reconciliationMappingId|mappingList|mappingLabel" screen/Reconciliation/Automation/SftpAutomation.xml`
-   Expected: No matches.
-2. Command: `rg -n "ruleSetId|ruleSetList|ruleSetLabel|darpan.rule.RuleSet" screen/Reconciliation/Automation/SftpAutomation.xml`
-   Expected: Matches in pre-actions, form fields, and list rendering.
-3. Command: `./gradlew :runtime:component:darpan:verifyOrganization --console=plain`
-   Expected: Screen organization check passes.
+1. Command: `rg -n "ruleSetId|compareScopeId|reconciliationMappingId" service/reconciliation/ReconciliationAutomationServices.xml src/main/groovy/darpan/reconciliation/automation/pollSftpAndRunReconciliation.groovy`
+   Expected: New RuleSet compare contract is present; Mapping compatibility is explicit if retained.
+2. Command: `rg -n "MISSING_IN_FILE_1|MISSING_IN_FILE_2|MatchedRecordPair|FIELD_MISMATCH" src/main/groovy/darpan/reconciliation docs/reconciliation/automation/sftp-reconciliation.md`
+   Expected: SFTP flow reaches base and DRL Diff stages.
+3. Command: `./gradlew :runtime:component:darpan:compileGroovy --console=plain`
+   Expected: BUILD SUCCESSFUL.
 
 ## Rollback Plan
-- Revert `SftpAutomation.xml` to mapping-based parameter and dropdowns.
-- Confirm form and list render correctly with previous schema.
+- Revert automation service/script changes.
+- Restore Mapping-only scheduled job execution while keeping lower-level compare-scope services if valid.
 
 ## Risks and Mitigations
-- Risk: Existing jobs created before migration appear blank in edit mode.
-  Mitigation: pair deployment with `RSCUT-002` apply-mode migration before using updated screen.
+- Risk: existing scheduled jobs fail if job parameter migration is not complete.
+  Mitigation: retain compatibility until RSCUT-009 migration has evidence.
+- Risk: multiple scopes create ambiguous scheduled execution.
+  Mitigation: require `compareScopeId` whenever more than one active scope exists.
 
 ## Handoff Inputs for Next Ticket
-- Confirmed UI no longer references mapping IDs and is ready for decommission ticket `RSCUT-008`.
+- Final SFTP request/job parameter fields and error behavior for screen changes.
 
 ## Closure Checklist
 - [ ] All acceptance criteria met.

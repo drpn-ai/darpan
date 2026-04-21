@@ -9,6 +9,7 @@ def resolveFileTypeCode = { String enumId ->
     if (!normalized) return null
     def enumValue = ec.entity.find("moqui.basic.Enumeration")
             .condition("enumId", normalized)
+            .disableAuthz()
             .useCache(true)
             .one()
     return normalize(enumValue?.enumCode)
@@ -62,6 +63,7 @@ def resolveEnumLabel = { String enumId, String fallback ->
     if (!normalized) return fallback
     def enumValue = ec.entity.find("moqui.basic.Enumeration")
             .condition("enumId", normalized)
+            .disableAuthz()
             .useCache(true)
             .one()
     def code = normalize(enumValue?.enumCode)
@@ -97,6 +99,7 @@ def resolveIdFieldForCompare = { Map memberConfig, String systemEnumId ->
 
 def mappingMembers = ec.entity.find("darpan.mapping.ReconciliationMappingMember")
         .condition("reconciliationMappingId", reconciliationMappingId)
+        .disableAuthz()
         .useCache(true)
         .list()
 if (!mappingMembers) {
@@ -203,7 +206,7 @@ def result = ec.service.sync()
                 hasHeader             : hasHeader,
                 outputLocation        : outputBase,
                 reconciliationMappingId: reconciliationMappingId,
-                reconciliationMappingName: ec.entity.find("darpan.mapping.ReconciliationMapping").condition("reconciliationMappingId", reconciliationMappingId).useCache(true).one()?.mappingName,
+                reconciliationMappingName: ec.entity.find("darpan.mapping.ReconciliationMapping").condition("reconciliationMappingId", reconciliationMappingId).disableAuthz().useCache(true).one()?.mappingName,
                 sparkMaster           : sparkMasterToUse,
                 sparkAppName          : sparkAppNameToUse,
                 processingWarnings    : processingWarnings

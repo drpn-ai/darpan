@@ -1,0 +1,273 @@
+package darpan.reconciliation.core
+
+import groovy.json.JsonSlurper
+import org.apache.spark.sql.Dataset
+import org.junit.jupiter.api.AfterAll
+import org.junit.jupiter.api.BeforeAll
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestInstance
+import org.moqui.Moqui
+import org.moqui.context.ExecutionContext
+import org.moqui.impl.context.ExecutionContextFactoryImpl
+
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.Paths
+
+import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertIterableEquals
+import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertTrue
+
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+class RuleSetCompareScopeServiceSmokeTests {
+    private static final JsonSlurper JSON_SLURPER = new JsonSlurper()
+
+    private ExecutionContext ec
+
+    @BeforeAll
+    void setup() {
+        if (Moqui.getExecutionContextFactory() == null || Moqui.getExecutionContextFactory().isDestroyed()) {
+            Path backendRoot = resolveBackendRoot()
+            String runtimePath = backendRoot.resolve("runtime").toString()
+            String testDbPath = backendRoot.resolve("runtime/tmp/test-h2/ruleset-compare-scope-smoke").toString()
+            System.setProperty("moqui.runtime", runtimePath)
+            System.setProperty("moqui_runtime", runtimePath)
+            System.setProperty("entity_ds_url", "jdbc:h2:${testDbPath};lock_timeout=30000")
+            Moqui.dynamicInit(new ExecutionContextFactoryImpl(
+                    runtimePath,
+                    "conf/MoquiDevConf.xml"
+            ))
+        }
+        ec = Moqui.getExecutionContext()
+        assertTrue(ec.user.loginAnonymousIfNoUser())
+        ec.artifactExecution.disableAuthz()
+
+        ec.entity.makeDataLoader().location("component://darpan/data/ReconciliationInventorySeedData.xml").load()
+        ec.entity.makeDataLoader().location("component://darpan/data/ReconciliationCompareScopeFixtureData.xml").load()
+    }
+
+    @AfterAll
+    void cleanup() {
+        ec?.destroy()
+        if (Moqui.getExecutionContextFactory() != null && !Moqui.getExecutionContextFactory().isDestroyed()) {
+            Moqui.destroyActiveExecutionContextFactory()
+        }
+    }
+
+    @BeforeEach
+    void clearErrors() {
+        ec.message.clearErrors()
+    }
+
+    @Test
+    void prepareCompareScopeReturnsNormalizedDatasetsForCallerPipeline() {
+        Map<String, Object> prepared = ec.service.sync()
+                .name("reconciliation.ReconciliationCoreServices.prepare#RuleSetCompareScope")
+                .parameters([
+                        ruleSetId    : "DARPAN_TEST_COMPARE_RS",
+                        compareScopeId: "DARPAN_TEST_ORDER_JSON_SCOPE",
+                        file1Location: "component://darpan/data/test/test-orders-1.json",
+                        file2Location: "component://darpan/data/test/test-orders-2.json",
+                        sparkMaster  : "local[1]",
+                        sparkAppName : "RuleSetCompareScopeServiceSmokeTests"
+                ])
+                .call()
+
+        assertEquals("DARPAN_TEST_COMPARE_RS", prepared.ruleSetId)
+        assertEquals("DARPAN_TEST_ORDER_JSON_SCOPE", prepared.compareScopeId)
+        assertEquals("ORDER", prepared.objectType)
+        assertEquals("JSON", prepared.file1Type)
+        assertEquals("JSON", prepared.file2Type)
+        assertEquals('$.data.orders.edges[*].node.id', prepared.file1IdExpression)
+        assertEquals('$.data.orders.edges[*].node.id', prepared.file2IdExpression)
+        assertEquals("SHOPIFY_GID_TAIL", prepared.file1IdNormalizer)
+        assertEquals("TRAILING_DIGITS", prepared.file2IdNormalizer)
+        assertEquals("SHOPIFY", prepared.file1Label)
+        assertEquals("OMS", prepared.file2Label)
+        assertTrue(((List) prepared.validationErrors).isEmpty())
+        assertTrue(((List) prepared.processingWarnings).isEmpty())
+        assertFalse(ec.message.hasError())
+
+        Dataset file1IdDf = (Dataset) prepared.file1IdDf
+        Dataset file2IdDf = (Dataset) prepared.file2IdDf
+        Dataset file1DataDf = (Dataset) prepared.file1DataDf
+        Dataset file2DataDf = (Dataset) prepared.file2DataDf
+
+        assertEquals(3L, file1IdDf.count())
+        assertEquals(3L, file2IdDf.count())
+        assertEquals(3L, file1DataDf.count())
+        assertEquals(3L, file2DataDf.count())
+        assertIterableEquals(
+                ["6470622019715", "6470622478467", "6470624575619"],
+                collectCompareIds(file1IdDf)
+        )
+        assertIterableEquals(
+                ["6470622478467", "6470624804995", "6470625460355"],
+                collectCompareIds(file2IdDf)
+        )
+
+        Map<String, Object> reconciliation = ec.service.sync()
+                .name("reconciliation.ReconciliationCoreServices.reconcile#IdDataFrames")
+                .parameters([
+                        df1       : file1IdDf,
+                        df2       : file2IdDf,
+                        idColumnName: "compare_id",
+                        df1Label  : prepared.file1Label,
+                        df2Label  : prepared.file2Label
+                ])
+                .call()
+
+        assertEquals(2L, reconciliation.onlyInDf1Count)
+        assertEquals(2L, reconciliation.onlyInDf2Count)
+        assertEquals(4L, reconciliation.differenceCount)
+        assertIterableEquals(
+                ["6470622019715", "6470624575619"],
+                collectCompareIds((Dataset) reconciliation.onlyInDf1)
+        )
+        assertIterableEquals(
+                ["6470624804995", "6470625460355"],
+                collectCompareIds((Dataset) reconciliation.onlyInDf2)
+        )
+    }
+
+    @Test
+    void baseDiffStageReturnsMissingDiffsAndMatchedPairsWithCorrectDirectionality() {
+        Map<String, Object> result = ec.service.sync()
+                .name("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScopeBaseDiff")
+                .parameters([
+                        ruleSetId      : "DARPAN_TEST_COMPARE_RS",
+                        compareScopeId : "DARPAN_TEST_ORDER_JSON_SCOPE",
+                        file1Location  : "component://darpan/data/test/test-orders-1.json",
+                        file2Location  : "component://darpan/data/test/test-orders-2.json",
+                        sparkMaster    : "local[1]",
+                        sparkAppName   : "RuleSetCompareScopeServiceSmokeTests"
+                ])
+                .call()
+
+        assertEquals("DARPAN_TEST_ORDER_JSON_SCOPE", result.compareScopeId)
+        assertEquals("ORDER", result.objectType)
+        assertEquals(2L, result.missingInFile1Count)
+        assertEquals(2L, result.missingInFile2Count)
+        assertEquals(4L, result.differenceCount)
+        assertEquals(1L, result.matchedPairCount)
+        assertTrue(((List) result.validationErrors).isEmpty())
+        assertTrue(((List) result.processingWarnings).isEmpty())
+        assertFalse(ec.message.hasError())
+
+        List<Map<String, Object>> missingDiffs = collectRows((Dataset) result.missingDiffDf)
+        assertEquals(4, missingDiffs.size())
+        assertIterableEquals(
+                ["6470622019715", "6470624575619", "6470624804995", "6470625460355"],
+                missingDiffs.collect { Map<String, Object> row -> row.id?.toString() }.sort()
+        )
+
+        Map<String, Object> missingInFile1 = missingDiffs.find { Map<String, Object> row ->
+            row.type == "MISSING_IN_FILE_1" && row.id == "6470624804995"
+        }
+        assertEquals("OMS", missingInFile1.presentIn)
+        assertEquals("SHOPIFY", missingInFile1.missingIn)
+        assertTrue((missingInFile1.note as String).contains("missing in SHOPIFY"))
+        assertTrue((missingInFile1.data as String).contains("6470624804995"))
+
+        Map<String, Object> missingInFile2 = missingDiffs.find { Map<String, Object> row ->
+            row.type == "MISSING_IN_FILE_2" && row.id == "6470622019715"
+        }
+        assertEquals("SHOPIFY", missingInFile2.presentIn)
+        assertEquals("OMS", missingInFile2.missingIn)
+        assertTrue((missingInFile2.note as String).contains("missing in OMS"))
+        assertTrue((missingInFile2.data as String).contains("6470622019715"))
+
+        List<Map<String, Object>> matchedPairs = collectRows((Dataset) result.matchedPairDf)
+        assertEquals(1, matchedPairs.size())
+        assertEquals("DARPAN_TEST_ORDER_JSON_SCOPE", matchedPairs[0].compareScopeId)
+        assertEquals("ORDER", matchedPairs[0].objectType)
+        assertEquals("6470622478467", matchedPairs[0].primaryId)
+        assertEquals("gid://shopify/Order/6470622478467", matchedPairs[0].file1.node.id)
+        assertEquals("gid://shopify/Order/6470622478467", matchedPairs[0].file2.node.id)
+    }
+
+    @Test
+    void baseDiffStageReturnsEmptyMissingDiffDatasetWhenNoObjectsAreMissing() {
+        Map<String, Object> result = ec.service.sync()
+                .name("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScopeBaseDiff")
+                .parameters([
+                        ruleSetId      : "DARPAN_TEST_COMPARE_RS",
+                        compareScopeId : "DARPAN_TEST_ORDER_JSON_SCOPE",
+                        file1Location  : "component://darpan/data/test/test-orders-1.json",
+                        file2Location  : "component://darpan/data/test/test-orders-1.json",
+                        sparkMaster    : "local[1]",
+                        sparkAppName   : "RuleSetCompareScopeServiceSmokeTests"
+                ])
+                .call()
+
+        assertEquals("DARPAN_TEST_ORDER_JSON_SCOPE", result.compareScopeId)
+        assertEquals(0L, result.missingInFile1Count)
+        assertEquals(0L, result.missingInFile2Count)
+        assertEquals(0L, result.differenceCount)
+        assertEquals(3L, result.matchedPairCount)
+        assertTrue(((List) result.validationErrors).isEmpty())
+        assertTrue(((List) result.processingWarnings).isEmpty())
+        assertFalse(ec.message.hasError())
+        assertTrue(result.missingDiffDf instanceof Dataset)
+        assertEquals(0L, ((Dataset) result.missingDiffDf).count())
+        assertTrue(collectRows((Dataset) result.missingDiffDf).isEmpty())
+    }
+
+    @Test
+    void baseDiffStageRejectsDuplicatePrimaryIdsOnAFileSide() {
+        Map<String, Object> result = ec.service.sync()
+                .name("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScopeBaseDiff")
+                .parameters([
+                        ruleSetId      : "DARPAN_TEST_COMPARE_RS",
+                        compareScopeId : "DARPAN_TEST_ORDER_JSON_SCOPE",
+                        file1Location  : "component://darpan/data/test/test-orders-duplicate-file1.json",
+                        file2Location  : "component://darpan/data/test/test-orders-2.json",
+                        sparkMaster    : "local[1]",
+                        sparkAppName   : "RuleSetCompareScopeServiceSmokeTests"
+                ])
+                .call()
+
+        assertTrue(result == null || result.isEmpty())
+        assertTrue(ec.message.hasError())
+        assertTrue(ec.message.errors.any { String message -> message.contains("DARPAN_TEST_ORDER_JSON_SCOPE") })
+        assertTrue(ec.message.errors.any { String message -> message.contains("FILE_1") })
+        assertTrue(ec.message.errors.any { String message -> message.contains("SHOPIFY") })
+        assertTrue(ec.message.errors.any { String message -> message.contains("6470622478467") })
+        assertTrue(ec.message.errors.any { String message -> message.contains("2 rows") })
+        assertTrue(ec.message.errors.any { String message -> message.contains("primaryId must identify exactly one object per file side") })
+    }
+
+    private static List<String> collectCompareIds(Dataset dataset) {
+        return dataset.collectAsList()
+                .collect { row -> row.getAs("compare_id")?.toString() }
+                .findAll { String value -> value != null }
+                .sort()
+    }
+
+    private static List<Map<String, Object>> collectRows(Dataset dataset) {
+        return dataset.toJSON().collectAsList()
+                .collect { String rowJson -> (Map<String, Object>) JSON_SLURPER.parseText(rowJson) }
+    }
+
+    private static Path resolveBackendRoot() {
+        Path cwd = Paths.get("").toAbsolutePath().normalize()
+        List<Path> candidates = [
+                cwd,
+                cwd.resolve("darpan-backend"),
+                cwd.resolve("runtime/component/darpan").normalize(),
+                cwd.resolve("../../..").normalize(),
+                cwd.resolve("../../../..").normalize()
+        ].unique()
+
+        for (Path candidate : candidates) {
+            if (Files.exists(candidate.resolve("runtime/conf/MoquiDevConf.xml")) &&
+                    Files.exists(candidate.resolve("runtime/component/darpan"))) {
+                return candidate
+            }
+        }
+
+        throw new IllegalStateException("Unable to resolve darpan-backend root from ${cwd}")
+    }
+}

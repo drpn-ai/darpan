@@ -1,71 +1,88 @@
-# RSCUT-004: Generic Reconciliation Backend Contract Cutover
+# RSCUT-004: DRL Matched-Pair Rule Execution
 
 ## Metadata
 - Ticket ID: RSCUT-004
-- Title: Generic Reconciliation Backend Contract Cutover
+- Title: DRL Matched-Pair Rule Execution
 - Depends On: RSCUT-003
-- Wave: Wave 3
+- Wave: Wave 2
 - Owner: Agent
 
 ## Goal
-Switch Generic reconciliation backend contract from mapping-based routing to RuleSet-based routing.
+Execute RuleSet DRL rules only against matched object pairs and append rule-generated Diffs to the base missing-object Diff output.
 
 ## In Scope
-- Replace required input `reconciliationMappingId` with `ruleSetId` in Generic service contract.
-- Update Generic reconciliation script to call `reconcile#FilesByRuleSet`.
-- Remove backend mapping terminology in messages and validations.
+- Define matched-pair fact shape for DRL.
+- Execute the RuleSet for pairs whose primary ID exists in both files.
+- Allow rules such as same SKU and same price for each product ID.
+- Append field/business-rule Diffs to existing Diff output.
+- Preserve missing-object Diffs emitted before this stage.
 
 ## Out of Scope
-- Generic UI form field changes.
-- SFTP service/screen changes.
-- Mapping service path removal.
+- Running DRL on objects missing from either file.
+- Generic/SFTP caller changes.
+- Mapping deprecation.
 
 ## Dependencies
 - RSCUT-003 completed.
 
 ## Files to Touch
-- `service/reconciliation/ReconciliationGenericServices.xml`
-- `src/main/groovy/darpan/reconciliation/generic/reconcileGenericFiles.groovy`
+- `service/reconciliation/ReconciliationRuleEngineServices.xml`
+- `src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy`
+- `src/main/groovy/darpan/reconciliation/core/ReconciliationServices.groovy`
+- `docs/reconciliation/rule-engine-services.md`
 
 ## Contract/API Changes
-- Service changed: `reconciliation.ReconciliationGenericServices.reconcile#GenericFiles`
-- Required in-parameter rename:
-  - before: `reconciliationMappingId`
-  - after: `ruleSetId`
-- Delegation changed:
-  - before: `reconcile#FilesByMapping`
-  - after: `reconcile#FilesByRuleSet`
+- Matched-pair fact contract:
+  - `objectType`
+  - `compareScopeId`
+  - `primaryId`
+  - `file1` record map
+  - `file2` record map
+- Rule-generated Diff contract:
+  - `diffType`
+  - `objectType`
+  - `primaryId`
+  - `field` when applicable
+  - `file1Value`
+  - `file2Value`
+  - `ruleId`
+  - optional severity/message
 
 ## Implementation Steps
-1. Update Generic service XML parameter definition and descriptions to RuleSet terminology.
-2. Update script input validation to require `ruleSetId`.
-3. Update service call target to `reconcile#FilesByRuleSet` and pass `ruleSetId`.
-4. Update service messages/logging strings to remove mapping references.
-5. Keep output contract unchanged for downstream consumers.
+1. Define how matched pairs are converted into DRL facts.
+2. Execute `execute#RuleSet` for matched pairs in bounded batches if needed.
+3. Add DRL examples for SKU mismatch and price mismatch.
+4. Append generated Diff rows to the same output artifact as missing-object Diffs.
+5. Preserve counts for missing and field/business-rule Diffs.
+6. Add diagnostics for rule failures that identify `ruleSetId`, `compareScopeId`, and `primaryId` where possible.
 
 ## Acceptance Criteria
-- Generic backend no longer references `reconciliationMappingId`.
-- Generic backend calls `reconcile#FilesByRuleSet`.
-- Existing output fields (`diffFileName`, counts, warnings) are preserved.
+- DRL is not executed for missing-object rows.
+- A SKU mismatch for a matched product produces a field Diff with the product primary ID.
+- A price mismatch for a matched product produces a field Diff with the product primary ID.
+- Missing-object Diffs and rule-generated Diffs appear in one stable output contract.
+- Rule execution failures are reported without losing the base missing-object Diff evidence.
 
 ## Validation Commands and Expected Results
-1. Command: `rg -n "reconciliationMappingId|reconcile#FilesByMapping" service/reconciliation/ReconciliationGenericServices.xml src/main/groovy/darpan/reconciliation/generic/reconcileGenericFiles.groovy`
-   Expected: No matches.
-2. Command: `rg -n "ruleSetId|reconcile#FilesByRuleSet" service/reconciliation/ReconciliationGenericServices.xml src/main/groovy/darpan/reconciliation/generic/reconcileGenericFiles.groovy`
-   Expected: Required matches in both files.
+1. Command: `rg -n "MatchedRecordPair|primaryId|file1Value|file2Value|ruleId|execute#RuleSet" service/reconciliation src/main/groovy/darpan/reconciliation docs/reconciliation`
+   Expected: Matched-pair rule execution contract is present.
+2. Command: `rg -n "sku|price|FIELD_MISMATCH|MISSING_IN_FILE_1|MISSING_IN_FILE_2" docs/reconciliation/rule-engine-services.md docs/reconciliation`
+   Expected: Example field rules and missing-object Diff outcomes are documented.
 3. Command: `./gradlew :runtime:component:darpan:compileGroovy --console=plain`
    Expected: BUILD SUCCESSFUL.
 
 ## Rollback Plan
-- Revert the two touched files to restore mapping-based input and router call.
-- Re-run the grep commands to confirm mapping contract is restored.
+- Revert Rule Engine and compare-output changes.
+- Keep RSCUT-003 base missing-object Diff stage intact if it is independently valid.
 
 ## Risks and Mitigations
-- Risk: Caller breakage if UI still posts old parameter name.
-  Mitigation: Pair with `RSCUT-005` immediately in same wave.
+- Risk: DRL rule authoring becomes too technical for operators.
+  Mitigation: store examples and generated templates for common field equality/tolerance checks.
+- Risk: matched-pair payload size creates memory pressure.
+  Mitigation: execute in bounded batches and keep Spark as the high-volume data preparation layer.
 
 ## Handoff Inputs for Next Ticket
-- Confirmed backend parameter name and required field for Generic UI update (`ruleSetId`).
+- Stable `ruleSetId`/`compareScopeId` service contract and Diff output for Generic backend cutover.
 
 ## Closure Checklist
 - [ ] All acceptance criteria met.

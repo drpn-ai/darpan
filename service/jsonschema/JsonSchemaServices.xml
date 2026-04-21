@@ -144,7 +144,7 @@
         <out-parameters>
             <parameter name="valid" type="Boolean"/>
             <parameter name="errorCount" type="Integer"/>
-            <parameter name="errorMessages"><parameter name="errorMessage"/></parameter>
+            <parameter name="errorMessages" type="List"/>
         </out-parameters>
     </service>
     
@@ -158,7 +158,7 @@
         <out-parameters>
             <parameter name="valid" type="Boolean"/>
             <parameter name="errorCount" type="Integer"/>
-            <parameter name="errorMessages"><parameter name="errorMessage"/></parameter>
+            <parameter name="errorMessages" type="List"/>
         </out-parameters>
     </service>
 

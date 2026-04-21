@@ -47,6 +47,39 @@ Shared router used by both Generic uploads and SFTP automation. It normalizes st
 
 **Outputs (key):** `file1Type`, `file2Type`, `reconciliationType`, `diffLocation`, `diffFileName`, `differenceCount`, `onlyInFile1Count`, `onlyInFile2Count`, `validationErrors`, `processingWarnings`.
 
+### `ReconciliationCoreServices.prepare#RuleSetCompareScope`
+
+Internal compare-scope extraction adapter introduced for the RuleSet cutover. It resolves `RuleSetCompareScope` plus `RuleSetCompareSource`, derives file-side config, and returns normalized Spark datasets for later missing-object and matched-pair stages.
+
+**Inputs (key):** `ruleSetId`, `compareScopeId`, `file1Location`, `file2Location`, optional `file1Name`/`file2Name`, optional `file1FileTypeEnumId`/`file2FileTypeEnumId`, optional `file1SchemaFileName`/`file2SchemaFileName`, `hasHeader`, `sparkMaster`, `sparkAppName`.
+
+**Outputs (key):** `objectType`, `file1Type`, `file2Type`, `file1SystemEnumId`, `file2SystemEnumId`, `file1IdExpression`, `file2IdExpression`, `file1IdDf`, `file2IdDf`, `file1DataDf`, `file2DataDf`, `validationErrors`, `processingWarnings`.
+
+Current public Generic and SFTP flows still route through `reconcile#FilesByMapping`. This service is the internal adapter for the compare-scope path used by the cutover tickets.
+
+### `ReconciliationCoreServices.reconcile#RuleSetCompareScopeBaseDiff`
+
+Internal base compare stage for the RuleSet cutover. It calls `prepare#RuleSetCompareScope`, runs the primary-ID anti-joins, emits missing-object Diff rows, and returns matched object pairs for later DRL execution.
+
+**Inputs (key):** same as `prepare#RuleSetCompareScope`.
+
+**Outputs (key):** `missingInFile1Count`, `missingInFile2Count`, `differenceCount`, `matchedPairCount`, `missingDiffDf`, `matchedPairDf`, `validationErrors`, `processingWarnings`.
+
+Missing-object Diff direction is explicit:
+- `MISSING_IN_FILE_1`: primary ID exists in file 2 but not file 1
+- `MISSING_IN_FILE_2`: primary ID exists in file 1 but not file 2
+
+The returned `matchedPairDf` keeps one row per matched primary ID with:
+- `compareScopeId`
+- `objectType`
+- `primaryId`
+- `file1`
+- `file2`
+
+Duplicate `primaryId` values on either file side are invalid for the compare-scope contract. The RuleSet compare-scope services reject those inputs before missing-object or matched-pair output is returned.
+
+When no objects are missing on either side, `missingDiffDf` is still returned as an empty Dataset with the normal Diff-row schema. Callers should not need to special-case `null` for the no-difference path.
+
 ### `ReconciliationCoreServices.reconcile#UnifiedFiles`
 
 Single reconciliation engine for all file type combinations. It converts CSV/JSON inputs into a normalized Spark structure, runs the compare once, and always emits a JSON diff. JSON and Mixed legacy service entry points are wrappers only.
@@ -84,8 +117,14 @@ The `compareJsonPath` parameter uses JSONPath syntax to extract ID values from y
 
 When a schema is provided and you pass a simple key (like `id` or `$.id`), the resolver expands it to the full JSONPath. For array-root schemas this becomes `$[*].id`.
 
-When source ID formats differ between systems, configure an ID normalizer per mapping member (`idValueNormalizer`) in Mapping Builder/Editor.
+When source ID formats differ between systems, configure an ID normalizer per mapping member (`idValueNormalizer`) in Mapping Builder/Editor. In the compare-scope adapter path, the same normalizer behavior is configured per `RuleSetCompareSource`.
 For backward compatibility, inline syntax with `|NORMALIZER` in `idFieldExpression` is still supported.
+
+For compare-scope JSON sources, extraction can also be split into:
+- `recordRootExpression`: where the repeated object records live
+- `primaryIdExpression`: how to extract the compare ID from each object
+
+The adapter combines those two values into the JSONPath shape used by the existing Spark ingestion logic. When `recordRootExpression` names a repeated collection without an explicit array marker, the adapter expands it to the collection wildcard form first. Example: `data.orders.edges` becomes `$.data.orders.edges[*]` before `primaryIdExpression` is appended.
 
 Supported normalizers:
 - `SHOPIFY_GID_TAIL`: extracts the numeric tail from Shopify GIDs (for example `gid://shopify/Product/7944971747446` -> `7944971747446`)

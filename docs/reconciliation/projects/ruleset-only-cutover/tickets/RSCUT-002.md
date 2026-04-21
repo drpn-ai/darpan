@@ -1,94 +1,79 @@
-# RSCUT-002: Mapping to RuleSet Migration Service
+# RSCUT-002: Compare Scope Extraction Adapter
 
 ## Metadata
 - Ticket ID: RSCUT-002
-- Title: Mapping to RuleSet Migration Service
+- Title: Compare Scope Extraction Adapter
 - Depends On: RSCUT-001
 - Wave: Wave 1
 - Owner: Agent
 
 ## Goal
-Provide an idempotent migration service that converts legacy mapping rows into RuleSet and RuleSetSourceConfig data, including default presence rules and SFTP job parameter rewrites.
+Extract the existing file parsing, ID normalization, and source configuration logic into a reusable adapter driven by RuleSet compare-scope config instead of Mapping entities.
 
 ## In Scope
-- Add migration service contract and Groovy implementation.
-- Support `dryRun` and `apply` behavior.
-- Convert mapping definitions and members into RuleSet + RuleSetSourceConfig rows.
-- Add default presence rules for migrated RuleSets.
-- Rewrite `ServiceJobParameter` rows from `reconciliationMappingId` to `ruleSetId` for SFTP reconciliation jobs.
+- Preserve existing CSV, JSON, and mixed-file extraction semantics.
+- Resolve source configuration from `RuleSetCompareScope` and `RuleSetCompareSource`.
+- Produce Spark datasets keyed by normalized primary ID.
+- Preserve current normalizer behavior such as `SHOPIFY_GID_TAIL` and `TRAILING_DIGITS`.
 
 ## Out of Scope
-- Switching active runtime reconciliation callers to `ruleSetId`.
-- Removing mapping runtime services/screens.
-- UI changes.
+- Anti-join Diff emission.
+- DRL rule execution.
+- Generic/SFTP caller changes.
+- Mapping deprecation.
 
 ## Dependencies
 - RSCUT-001 completed.
 
 ## Files to Touch
-- `service/reconciliation/ReconciliationMigrationServices.xml` (new)
-- `src/main/groovy/darpan/reconciliation/migration/migrateMappingsToRuleSets.groovy` (new)
-- `docs/reconciliation/automation/sftp-reconciliation.md` (migration usage note)
+- `src/main/groovy/darpan/reconciliation/core/reconcileFilesByMapping.groovy` only to extract shared behavior if needed.
+- New helper under `src/main/groovy/darpan/reconciliation/core/` for compare-scope extraction.
+- `service/reconciliation/ReconciliationCoreServices.xml` if a narrow internal service wrapper is useful.
+- `docs/reconciliation/json-reconciliation.md`
 
 ## Contract/API Changes
-- New service: `reconciliation.ReconciliationMigrationServices.migrate#MappingsToRuleSets`
-- Inputs:
-  - `dryRun` (Boolean, default `true`)
-  - `mappingId` (optional)
-  - `rewriteSftpJobParams` (Boolean, default `true`)
-- Outputs:
-  - `mappingsScanned`, `ruleSetsCreated`, `sourceConfigsCreated`, `rulesCreated`, `jobsUpdated`
-  - `warnings` list
-  - `applied` flag
+- Internal extraction API takes `ruleSetId`, `compareScopeId`, file locations, names, and optional overrides.
+- Internal output includes:
+  - file-side metadata
+  - normalized primary ID dataset
+  - raw or structured record payload needed for matched-pair rule facts
+  - warnings and validation errors
+- No external Generic/SFTP contract change in this ticket.
 
 ## Implementation Steps
-1. Define the new service contract in `ReconciliationMigrationServices.xml` with clear in/out parameters.
-2. Implement migration script behavior:
-   - Load `darpan.mapping.ReconciliationMapping` and `ReconciliationMappingMember` rows.
-   - Create `RuleSet` rows if absent, reusing mapping ID as `ruleSetId` when valid.
-   - Create `RuleSetSourceConfig` rows for each mapping member if absent.
-   - Canonicalize normalizers to `SHOPIFY_GID_TAIL` or `TRAILING_DIGITS`.
-3. Create two default presence rules per migrated RuleSet when missing:
-   - `*_SRC_PRESENT` sets `routeSelected=true` when `sourcePresent=true`.
-   - `*_SRC_MISSING` sets `routeSelected=false` and `routeError` when `sourcePresent=false`.
-4. If `rewriteSftpJobParams=true`, update `moqui.service.job.ServiceJobParameter`:
-   - For service `reconciliation.ReconciliationAutomationServices.poll#SftpAndReconcile`
-   - Rename `reconciliationMappingId` parameter to `ruleSetId` while preserving value.
-5. Ensure idempotency by checking for existing RuleSet, source config, and rule IDs before create/update.
-6. In `dryRun=true`, return a full report but do not persist changes.
+1. Identify extraction/normalization code currently tied to Mapping members.
+2. Extract or duplicate narrowly into a compare-scope adapter.
+3. Resolve file-side config from RuleSet compare-scope sources.
+4. Return normalized primary IDs as strings.
+5. Return enough record payload to build matched-pair facts later.
+6. Add clear validation errors for missing primary ID expression, unsupported file type, or unsupported normalizer.
 
 ## Acceptance Criteria
-- New migration service exists and is callable.
-- `dryRun` produces a non-mutating migration summary.
-- `apply` mode creates missing RuleSet and RuleSetSourceConfig records without duplicates.
-- Default presence rules are created once and not duplicated on repeated runs.
-- SFTP job parameter rewrite updates only targeted jobs and is idempotent.
+- Adapter can extract Product records by `productId` for both files.
+- Existing normalizer behavior is preserved.
+- Adapter does not require `darpan.mapping.ReconciliationMapping`.
+- Implementation avoids unbounded `collect()` for large datasets.
 
 ## Validation Commands and Expected Results
-1. Command: `rg -n "migrate#MappingsToRuleSets|dryRun|rewriteSftpJobParams" service/reconciliation/ReconciliationMigrationServices.xml`
-   Expected: Service definition includes required contract fields.
-2. Command: `rg -n "SRC_PRESENT|SRC_MISSING|ServiceJobParameter|reconciliationMappingId|ruleSetId" src/main/groovy/darpan/reconciliation/migration/migrateMappingsToRuleSets.groovy`
-   Expected: Rule creation and job parameter rewrite logic is present.
-3. Command: `./gradlew :runtime:component:darpan:compileGroovy :runtime:component:darpan:verifyOrganization --console=plain`
-   Expected: Build and organization checks pass.
-4. Command: `echo "Run migration service in dryRun=true via service runner"`
-   Expected: Report shows scanned counts with no persisted changes.
-5. Command: `echo "Run migration service in dryRun=false twice"`
-   Expected: Second run reports zero net new records for already-migrated mappings.
+1. Command: `rg -n "primaryIdExpression|RuleSetCompareSource|SHOPIFY_GID_TAIL|TRAILING_DIGITS" src/main/groovy/darpan/reconciliation/core service/reconciliation`
+   Expected: Compare-scope extraction and normalizer handling are present.
+2. Command: `rg -n "ReconciliationMappingMember|reconciliationMappingId" src/main/groovy/darpan/reconciliation/core/*Compare* src/main/groovy/darpan/reconciliation/core/*Scope*`
+   Expected: New compare-scope adapter does not depend on Mapping entities.
+3. Command: `./gradlew :runtime:component:darpan:compileGroovy --console=plain`
+   Expected: BUILD SUCCESSFUL.
 
 ## Rollback Plan
-- Revert service XML and migration script files.
-- If apply-mode was executed and rollback is required, restore DB backup or remove created `RuleSet`, `RuleSetSourceConfig`, and default rules using controlled cleanup scripts.
+- Revert helper/service changes.
+- Confirm existing Mapping router still runs through the previous implementation.
 
 ## Risks and Mitigations
-- Risk: Invalid mapping IDs conflict with RuleSet ID constraints.
-  Mitigation: sanitize IDs and emit warning mapping list.
-- Risk: accidental rewrite of unrelated job parameters.
-  Mitigation: filter by exact service name and exact old parameter name.
+- Risk: extraction adapter drifts from existing Mapping behavior.
+  Mitigation: compare output against current Mapping extraction for representative CSV, JSON, and mixed inputs.
+- Risk: raw record payload is too large for DRL.
+  Mitigation: keep payload as structured rows and only materialize matched-pair facts in bounded batches.
 
 ## Handoff Inputs for Next Ticket
-- Migration contract and output report format.
-- Confirmed default presence rule IDs and payload shape for use in `RSCUT-003`.
+- Stable adapter output contract for missing-object Diff stage.
 
 ## Closure Checklist
 - [ ] All acceptance criteria met.

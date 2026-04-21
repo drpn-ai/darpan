@@ -1,71 +1,72 @@
-# RSCUT-006: SFTP Automation Backend Contract Cutover
+# RSCUT-006: Generic UI RuleSet Compare Scope Selector
 
 ## Metadata
 - Ticket ID: RSCUT-006
-- Title: SFTP Automation Backend Contract Cutover
-- Depends On: RSCUT-003
+- Title: Generic UI RuleSet Compare Scope Selector
+- Depends On: RSCUT-005
 - Wave: Wave 3
 - Owner: Agent
 
 ## Goal
-Switch SFTP automation backend from mapping-based input to RuleSet-based input while preserving existing runtime output behavior.
+Update the Generic Reconciliation screen to select RuleSet compare scopes instead of Mapping records.
 
 ## In Scope
-- Rename required input from `reconciliationMappingId` to `ruleSetId` in automation service contract.
-- Update poll script to require `ruleSetId` and call `reconcile#FilesByRuleSet`.
-- Update runtime log/status strings to RuleSet terminology.
+- Replace Mapping dropdown with RuleSet and compare-scope selection.
+- Submit `ruleSetId` and `compareScopeId` to the Generic backend.
+- Show object type and primary ID expression context.
+- Preserve existing file upload/text behavior and output list behavior.
 
 ## Out of Scope
-- SFTP schedule screen form/list changes.
-- Migration job parameter rewrite logic.
-- Mapping route/menu decommission.
+- Backend service contract changes.
+- SFTP screen changes.
+- Mapping entity deprecation.
 
 ## Dependencies
-- RSCUT-003 completed.
+- RSCUT-005 completed.
 
 ## Files to Touch
-- `service/reconciliation/ReconciliationAutomationServices.xml`
-- `src/main/groovy/darpan/reconciliation/automation/pollSftpAndRunReconciliation.groovy`
+- `screen/Reconciliation/GenericReconciliation/Main.xml`
+- Related docs only if operator copy changes need explanation.
 
 ## Contract/API Changes
-- Service changed: `reconciliation.ReconciliationAutomationServices.poll#SftpAndReconcile`
-- Required in-parameter rename:
+- UI request payload changes:
   - before: `reconciliationMappingId`
-  - after: `ruleSetId`
-- Delegation changed:
-  - before: `reconcile#FilesByMapping`
-  - after: `reconcile#FilesByRuleSet`
+  - after: `ruleSetId`, `compareScopeId`
+- Dropdown source changes:
+  - before: `darpan.mapping.ReconciliationMapping`
+  - after: RuleSet compare-scope config.
 
 ## Implementation Steps
-1. Update service XML in-parameters and descriptions to RuleSet terminology.
-2. Update script validation to require `ruleSetId`.
-3. Replace reconciliation service call target and parameter map to pass `ruleSetId`.
-4. Replace log/message text containing "mapping" with "ruleSet" where it describes routing identity.
-5. Preserve existing output fields and behavior (`dataAvailable`, diff info, counts, warnings).
+1. Replace Mapping preload query with RuleSet compare-scope preload query.
+2. Update `runGenericReconciliation` transition input map.
+3. Display RuleSet, compare scope, object type, and primary ID expression.
+4. Preserve existing file and result UI sections.
+5. Add empty-state guidance when no active compare scopes exist.
 
 ## Acceptance Criteria
-- SFTP automation backend no longer requires or references `reconciliationMappingId`.
-- Script delegates to `reconcile#FilesByRuleSet`.
-- Status outputs and diff generation behavior remain intact.
+- Generic UI no longer requires Mapping selection.
+- Generic UI submits `ruleSetId` and `compareScopeId`.
+- Operator can see what object and primary ID are being compared.
+- Existing output list interactions remain unchanged.
 
 ## Validation Commands and Expected Results
-1. Command: `rg -n "reconciliationMappingId|reconcile#FilesByMapping" service/reconciliation/ReconciliationAutomationServices.xml src/main/groovy/darpan/reconciliation/automation/pollSftpAndRunReconciliation.groovy`
-   Expected: No matches.
-2. Command: `rg -n "ruleSetId|reconcile#FilesByRuleSet" service/reconciliation/ReconciliationAutomationServices.xml src/main/groovy/darpan/reconciliation/automation/pollSftpAndRunReconciliation.groovy`
-   Expected: Required matches in both files.
-3. Command: `./gradlew :runtime:component:darpan:compileGroovy --console=plain`
-   Expected: BUILD SUCCESSFUL.
+1. Command: `rg -n "darpan.mapping.ReconciliationMapping|reconciliationMappingId" screen/Reconciliation/GenericReconciliation/Main.xml`
+   Expected: No active UI dependency remains, except explicit migration copy if retained.
+2. Command: `rg -n "ruleSetId|compareScopeId|objectType|primaryIdExpression" screen/Reconciliation/GenericReconciliation/Main.xml`
+   Expected: RuleSet compare-scope bindings are present.
+3. Command: `./gradlew :runtime:component:darpan:verifyOrganization --console=plain`
+   Expected: Organization verification passes for updated screen route.
 
 ## Rollback Plan
-- Revert both files to restore mapping-based parameter and router call.
-- Re-run grep validations to confirm rollback state.
+- Revert `Main.xml` to Mapping selector.
+- Confirm backend compatibility mode remains available if rollback is needed.
 
 ## Risks and Mitigations
-- Risk: Existing scheduled jobs still pass old parameter name.
-  Mitigation: ensure `RSCUT-002` migration step is executed before production cutover.
+- Risk: operators cannot identify the correct compare scope.
+  Mitigation: display object type, RuleSet name, and primary ID expressions in the selector text.
 
 ## Handoff Inputs for Next Ticket
-- Stable backend contract for SFTP screen update in `RSCUT-007`.
+- UI selector pattern for SFTP screen update.
 
 ## Closure Checklist
 - [ ] All acceptance criteria met.

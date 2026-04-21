@@ -221,7 +221,7 @@
             <parameter name="errors"><parameter name="error"/></parameter>
             <parameter name="valid" type="Boolean"/>
             <parameter name="errorCount" type="Integer"/>
-            <parameter name="errorMessages"><parameter name="errorMessage"/></parameter>
+            <parameter name="errorMessages" type="List"/>
         </out-parameters>
     </service>
 

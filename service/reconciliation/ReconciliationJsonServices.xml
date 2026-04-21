@@ -34,7 +34,7 @@
             <parameter name="diffLocation"/>
             <parameter name="diffFileName"/>
             <parameter name="validationPassed" type="Boolean"/>
-            <parameter name="validationErrors"><parameter name="errorMessage"/></parameter>
+            <parameter name="validationErrors" type="List"/>
         </out-parameters>
         <actions>
             <if condition="!json1Location || !json2Location">
@@ -107,7 +107,7 @@
             <parameter name="onlyInJson1Count" type="Integer"/>
             <parameter name="onlyInJson2Count" type="Integer"/>
             <parameter name="validationPassed" type="Boolean"/>
-            <parameter name="validationErrors"><parameter name="errorMessage"/></parameter>
+            <parameter name="validationErrors" type="List"/>
         </out-parameters>
         <actions>
             <if condition="json1File == null || json2File == null">

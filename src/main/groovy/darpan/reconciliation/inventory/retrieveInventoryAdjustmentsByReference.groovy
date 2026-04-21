@@ -5,6 +5,7 @@ import org.apache.spark.sql.Row
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions
 import org.slf4j.LoggerFactory
+import darpan.reconciliation.inventory.InventoryWarningSupport
 
 import java.io.File
 import java.time.LocalDate
@@ -261,10 +262,7 @@ try {
             ])
             List nsRows = (nsResult.records ?: []) as List
             nsRecordsForItem = nsRows.collect { it?.record }
-            ((nsResult.processingWarnings ?: []) as List).each { warnRow ->
-                String warnText = normalize(warnRow?.warningMessage)
-                if (warnText) warnings.add(warnText)
-            }
+            warnings.addAll(InventoryWarningSupport.normalizeWarningTexts(nsResult.processingWarnings))
         } catch (Exception nsEx) {
             nsStatus = "ERROR"
             nsError = normalize(nsEx.message) ?: "NS fetch failed"
@@ -291,10 +289,7 @@ try {
             ])
             List readDbRows = (readDbResult.records ?: []) as List
             readDbRecordsForItem = readDbRows.collect { it?.record }
-            ((readDbResult.processingWarnings ?: []) as List).each { warnRow ->
-                String warnText = normalize(warnRow?.warningMessage)
-                if (warnText) warnings.add(warnText)
-            }
+            warnings.addAll(InventoryWarningSupport.normalizeWarningTexts(readDbResult.processingWarnings))
         } catch (Exception readDbEx) {
             readDbStatus = "ERROR"
             readDbError = normalize(readDbEx.message) ?: "Read DB fetch failed"
@@ -460,6 +455,7 @@ try {
             ],
             rows    : readDbPayloadByItem
     ]
+    List<String> normalizedWarnings = InventoryWarningSupport.normalizeWarningTexts(warnings)
     Map summaryDoc = [
             metadata : [
                     referenceFileLocation: refLocation,
@@ -497,7 +493,7 @@ try {
                     errorItemCount       : errorItemTotal
             ],
             itemResults: itemResultRows,
-            warnings: warnings
+            warnings   : normalizedWarnings
     ]
 
     nsFile.withWriter("UTF-8") { writer -> writer << JsonOutput.prettyPrint(JsonOutput.toJson(nsDoc)) }
@@ -517,7 +513,7 @@ try {
     readDbOutputLocation = readDbFile.absolutePath
     summaryLocation = summaryFile.absolutePath
     itemResults = itemResultRows
-    processingWarnings = warnings.unique().collect { [warningMessage: it] }
+    processingWarnings = normalizedWarnings
 
     logger.info("Inventory retrieval complete reference={} ruleSetId={} processedItems={} nsRecords={} readDbRecords={} missingInNs={} missingInReadDb={} countMismatch={} summary={}",
             refLocation, comparisonRuleSetIdToUse, processedItemCount, nsRecordCount, readDbRecordCount, missingInNsCount, missingInReadDbCount, countMismatchCount, summaryLocation)

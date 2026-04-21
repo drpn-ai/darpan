@@ -1,70 +1,77 @@
-# RSCUT-005: Generic Reconciliation UI Cutover to RuleSet Selector
+# RSCUT-005: Generic Backend RuleSet Compare Contract
 
 ## Metadata
 - Ticket ID: RSCUT-005
-- Title: Generic Reconciliation UI Cutover to RuleSet Selector
+- Title: Generic Backend RuleSet Compare Contract
 - Depends On: RSCUT-004
 - Wave: Wave 3
 - Owner: Agent
 
 ## Goal
-Update Generic Reconciliation screen to use RuleSet selection instead of Mapping selection, aligned with the backend cutover.
+Cut Generic reconciliation backend execution from Mapping-backed input to RuleSet compare-scope input while preserving output compatibility.
 
 ## In Scope
-- Replace mapping preload query with RuleSet query.
-- Replace form field from `reconciliationMappingId` to `ruleSetId`.
-- Update form labels/help text to RuleSet terminology.
-- Keep page-display behavior and navigation unchanged.
+- Add `ruleSetId` and optional `compareScopeId` to Generic service contract.
+- Route Generic reconciliation through the compare-scope extraction, base missing-object Diff, and matched-pair DRL stages.
+- Preserve current output fields and file staging behavior.
+- Optionally keep temporary compatibility for `reconciliationMappingId` only as a migration bridge.
 
 ## Out of Scope
-- Service contract changes (handled in RSCUT-004).
-- SFTP screen changes.
-- Mapping menu removal.
+- Generic UI selector changes.
+- SFTP contract changes.
+- Mapping entity deprecation.
 
 ## Dependencies
 - RSCUT-004 completed.
 
 ## Files to Touch
-- `screen/Reconciliation/GenericReconciliation/Main.xml`
+- `service/reconciliation/ReconciliationGenericServices.xml`
+- `src/main/groovy/darpan/reconciliation/generic/reconcileGenericFiles.groovy`
+- `docs/reconciliation/json-reconciliation.md`
 
 ## Contract/API Changes
-- UI request payload for transition `runGenericReconciliation` changes:
-  - before: `reconciliationMappingId`
-  - after: `ruleSetId`
-- Dropdown source changes:
-  - before: `darpan.mapping.ReconciliationMapping`
-  - after: `darpan.rule.RuleSet`
+- Service changed: `reconciliation.ReconciliationGenericServices.reconcile#GenericFiles`
+- New required input:
+  - `ruleSetId`
+- New optional input:
+  - `compareScopeId` (required when RuleSet has multiple active scopes)
+- Compatibility input:
+  - `reconciliationMappingId` may remain temporarily but must be documented as migration-only.
 
 ## Implementation Steps
-1. Update `runGenericReconciliation` transition `in-map` to send `ruleSetId`.
-2. Replace pre-action entity-find list from mapping entity to RuleSet entity.
-3. Replace form field name and dropdown key/text mappings for RuleSet (`ruleSetId`, `ruleSetName`).
-4. Update user-facing labels and empty-state message to RuleSet-first wording.
-5. Preserve existing file list, download/view/delete widgets unchanged.
+1. Add `ruleSetId` and optional `compareScopeId` to Generic service XML.
+2. Resolve a default compare scope when exactly one active scope exists for the RuleSet.
+3. Route execution through the RuleSet compare pipeline from RSCUT-004.
+4. Preserve output fields: `diffFileName`, counts, warnings, validation errors.
+5. Add a clear error for ambiguous/missing compare scope.
+6. Document temporary Mapping compatibility if retained.
 
 ## Acceptance Criteria
-- Generic Reconciliation form displays RuleSet dropdown and submits `ruleSetId`.
-- No mapping entity lookup remains in this screen.
-- Existing output list interactions remain unchanged.
+- Generic backend can run without `reconciliationMappingId`.
+- Generic backend produces missing-object Diffs before rule Diffs.
+- Generic backend runs DRL only on matched object pairs.
+- Existing consumers receive compatible output fields.
 
 ## Validation Commands and Expected Results
-1. Command: `rg -n "darpan.mapping.ReconciliationMapping|reconciliationMappingId" screen/Reconciliation/GenericReconciliation/Main.xml`
-   Expected: No matches.
-2. Command: `rg -n "darpan.rule.RuleSet|ruleSetId" screen/Reconciliation/GenericReconciliation/Main.xml`
-   Expected: Matches in pre-actions and form/transition bindings.
-3. Command: `./gradlew :runtime:component:darpan:verifyOrganization --console=plain`
-   Expected: Organization verification passes for updated screen route.
+1. Command: `rg -n "ruleSetId|compareScopeId|reconciliationMappingId" service/reconciliation/ReconciliationGenericServices.xml src/main/groovy/darpan/reconciliation/generic/reconcileGenericFiles.groovy`
+   Expected: New RuleSet compare contract is present; Mapping compatibility is explicit if retained.
+2. Command: `rg -n "MISSING_IN_FILE_1|MISSING_IN_FILE_2|MatchedRecordPair|FIELD_MISMATCH" src/main/groovy/darpan/reconciliation docs/reconciliation/json-reconciliation.md`
+   Expected: Generic flow reaches base and DRL Diff stages.
+3. Command: `./gradlew :runtime:component:darpan:compileGroovy --console=plain`
+   Expected: BUILD SUCCESSFUL.
 
 ## Rollback Plan
-- Revert `Main.xml` to mapping-based dropdown and parameter names.
-- Confirm route and form references match backend expectation before retry.
+- Revert Generic service/script changes.
+- Restore Mapping-only Generic execution while keeping lower-level compare-scope services if they remain valid.
 
 ## Risks and Mitigations
-- Risk: User confusion due terminology switch.
-  Mitigation: update field title/help text to explicitly state "Rule Set" and expected purpose.
+- Risk: UI still submits Mapping while backend expects RuleSet.
+  Mitigation: retain compatibility until RSCUT-006 is deployed or release both tickets together.
+- Risk: multiple scopes create ambiguous execution.
+  Mitigation: require `compareScopeId` whenever more than one active scope exists.
 
 ## Handoff Inputs for Next Ticket
-- Confirmed RuleSet field names and screen bindings for SFTP parity in `RSCUT-007`.
+- Final Generic request fields and error behavior for UI selector changes.
 
 ## Closure Checklist
 - [ ] All acceptance criteria met.

@@ -23,9 +23,7 @@
                 <parameter name="record"/>
             </parameter>
             <parameter name="responseBody"/>
-            <parameter name="processingWarnings">
-                <parameter name="warningMessage"/>
-            </parameter>
+            <parameter name="processingWarnings" type="List"/>
         </out-parameters>
     </service>
 
@@ -64,9 +62,7 @@
             <parameter name="records">
                 <parameter name="record"/>
             </parameter>
-            <parameter name="processingWarnings">
-                <parameter name="warningMessage"/>
-            </parameter>
+            <parameter name="processingWarnings" type="List"/>
         </out-parameters>
     </service>
 
@@ -236,9 +232,7 @@
                 <parameter name="missingInReadDb"/>
                 <parameter name="recordCountDelta"/>
             </parameter>
-            <parameter name="processingWarnings">
-                <parameter name="warningMessage"/>
-            </parameter>
+            <parameter name="processingWarnings" type="List"/>
         </out-parameters>
     </service>
 

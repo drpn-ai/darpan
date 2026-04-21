@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entity-facade-xml type="darpan-seed">
+    <moqui.basic.EnumerationType
+            enumTypeId="DarpanSystemSource"
+            description="Darpan System Source"/>
+
+    <moqui.basic.Enumeration
+            enumId="OMS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="OMS"
+            description="OMS"
+            sequenceNum="1"/>
+
+    <moqui.basic.Enumeration
+            enumId="SHOPIFY"
+            enumTypeId="DarpanSystemSource"
+            enumCode="SHOPIFY"
+            description="Shopify"
+            sequenceNum="2"/>
+
+    <moqui.basic.EnumerationType
+            enumTypeId="DarpanFileType"
+            description="File Types for Reconciliation"/>
+
+    <moqui.basic.Enumeration
+            enumId="DftJson"
+            enumTypeId="DarpanFileType"
+            enumCode="JSON"
+            description="JSON"
+            sequenceNum="2"/>
+
+    <darpan.rule.RuleSetCompareScope
+            compareScopeId="DARPAN_TEST_ORDER_JSON_SCOPE"
+            ruleSetId="DARPAN_TEST_COMPARE_RS"
+            objectType="ORDER"
+            description="Smoke-test compare scope for nested JSON order IDs."/>
+
+    <darpan.rule.RuleSetCompareSource
+            compareScopeId="DARPAN_TEST_ORDER_JSON_SCOPE"
+            fileSide="FILE_1"
+            systemEnumId="SHOPIFY"
+            fileTypeEnumId="DftJson"
+            recordRootExpression="data.orders.edges"
+            primaryIdExpression="node.id|SHOPIFY_GID_TAIL"/>
+
+    <darpan.rule.RuleSetCompareSource
+            compareScopeId="DARPAN_TEST_ORDER_JSON_SCOPE"
+            fileSide="FILE_2"
+            systemEnumId="OMS"
+            fileTypeEnumId="DftJson"
+            recordRootExpression="data.orders.edges"
+            primaryIdExpression="node.id"
+            idValueNormalizer="TRAILING_DIGITS"/>
+</entity-facade-xml>

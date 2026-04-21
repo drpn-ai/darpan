@@ -71,12 +71,8 @@
             <parameter name="differenceCount" type="Integer"/>
             <parameter name="onlyInFile1Count" type="Integer"/>
             <parameter name="onlyInFile2Count" type="Integer"/>
-            <parameter name="validationErrors">
-                <parameter name="errorMessage"/>
-            </parameter>
-            <parameter name="processingWarnings">
-                <parameter name="warningMessage"/>
-            </parameter>
+            <parameter name="validationErrors" type="List"/>
+            <parameter name="processingWarnings" type="List"/>
         </out-parameters>
     </service>
 

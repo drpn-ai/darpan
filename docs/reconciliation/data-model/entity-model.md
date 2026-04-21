@@ -27,7 +27,11 @@ erDiagram
     SYSTEM_MESSAGE_REMOTE ||--o{ RUN_SYSTEM_INSTANCE : provides_data
 
     RULE_SET ||--o{ RULE : contains
+    RULE_SET ||--o{ RULE_SET_COMPARE_SCOPE : owns
     RULE_SET ||--o{ RECONCILIATION_RUN : concludes_with
+    RULE_SET_COMPARE_SCOPE ||--o{ RULE_SET_COMPARE_SOURCE : defines
+    ENUMERATION ||--o{ RULE_SET_COMPARE_SOURCE : identifies_system
+    ENUMERATION ||--o{ RULE_SET_COMPARE_SOURCE : identifies_file_type
 
     RECONCILIATION_MAPPING ||--o{ RECONCILIATION_MAPPING_MEMBER : defines
     ENUMERATION ||--o{ RECONCILIATION_MAPPING_MEMBER : identifies_system
@@ -94,6 +98,28 @@ erDiagram
         string severity
     }
 
+    RULE_SET_COMPARE_SCOPE {
+        string compare_scope_id PK
+        string ruleset_id FK
+        string object_type
+        string description
+        datetime created_date
+        datetime last_updated_date
+    }
+
+    RULE_SET_COMPARE_SOURCE {
+        string compare_scope_id PK
+        string file_side PK
+        string system_enum_id FK
+        string file_type_enum_id FK
+        string schema_file_name
+        string record_root_expression
+        string primary_id_expression
+        string id_value_normalizer
+        datetime created_date
+        datetime last_updated_date
+    }
+
     RECONCILIATION_MAPPING {
         string reconciliation_mapping_id PK
         string mapping_name
@@ -107,6 +133,10 @@ erDiagram
         string reconciliation_mapping_id FK
         string system_enum_id FK
         string system_field_name
+        string file_type_enum_id
+        string schema_file_name
+        string id_field_expression
+        string id_value_normalizer
         datetime created_date
     }
 
@@ -310,16 +340,20 @@ Stores external read-only JDBC settings for inventory adjustment retrieval. Mapp
 - `isActive`
 
 ### RuleSet and Rule (darpan.rule.RuleSet, darpan.rule.Rule)
-Defines conclusion logic for reconciliation runs.
+Defines executable DRL decisioning for reconciliation runs.
 
 **Purpose**
-- Determines success, warnings, or failures
-- Encapsulates business tolerances and thresholds
+- Stores executable reconciliation rules.
+- Owns compare scopes that define object identity and file-side primary ID extraction.
+- DRL runs on matched object-pair facts after base compare has already emitted missing-object Diffs.
+- Emits field or business-rule Diff outcomes such as SKU and price mismatches.
 
 **RuleSet Key Fields**
 - `ruleSetId`
 - `ruleSetName`
 - `version`
+- `explosionPath` (legacy, still present on the entity)
+- `primaryKeyPath` (legacy, still present on the entity)
 
 **Rule Key Fields**
 - `ruleId`
@@ -331,11 +365,54 @@ Defines conclusion logic for reconciliation runs.
 - `expression`
 - `severity`
 
-### ReconciliationMapping (darpan.mapping.ReconciliationMapping)
-Defines a named mapping set for reconciliation system fields.
+### RuleSetCompareScope (darpan.rule.RuleSetCompareScope)
+Defines the reconciliation object identity owned by a RuleSet.
 
 **Purpose**
-- Groups mapping entries under a stable name
+- Represents the compared object, such as Product, Order, OrderLine, or InventoryItem.
+- Provides a stable scope key that later caller contracts can pass as `compareScopeId`.
+- Groups the two file-side source definitions used for the same compare object.
+
+**Key Fields**
+- `compareScopeId`
+- `ruleSetId`
+- `objectType`
+- `description`
+- `createdDate`
+- `lastUpdatedDate`
+
+### RuleSetCompareSource (darpan.rule.RuleSetCompareSource)
+Defines one file-side extraction contract for a compare scope.
+
+**Purpose**
+- Captures the file-side system and optional file type/schema metadata.
+- Captures the record root and primary ID extraction expressions used to build the compared object set.
+- Captures an optional ID normalizer so each file side can normalize IDs differently before compare.
+- Restricts the model to one row per file side (`FILE_1`, `FILE_2`) for a given compare scope.
+
+**Key Fields**
+- `compareScopeId`
+- `fileSide`
+- `systemEnumId`
+- `fileTypeEnumId`
+- `schemaFileName`
+- `recordRootExpression`
+- `primaryIdExpression`
+- `idValueNormalizer`
+- `createdDate`
+- `lastUpdatedDate`
+
+**Example**
+- A Product compare scope can use `FILE_1.primaryIdExpression="$.productId"` and `FILE_2.primaryIdExpression="$.id"` while keeping one shared `objectType="Product"`.
+
+### ReconciliationMapping (darpan.mapping.ReconciliationMapping)
+Defines a named source extraction contract for reconciliation.
+
+**Purpose**
+- Groups source-specific extraction entries under a stable operator-facing key
+- Selects the file systems, file types, schemas, ID expressions, and normalizers used by the current compare baseline
+- Remains the current Generic and SFTP caller key through `reconciliationMappingId` until RuleSet compare-scope caller cutover
+- Provides migration input for RuleSet compare-scope configuration
 
 **Key Fields**
 - `reconciliationMappingId`
@@ -348,15 +425,32 @@ Defines a named mapping set for reconciliation system fields.
 Stores a single mapping entry tied to a mapping and system enum.
 
 **Purpose**
-- Captures system-specific field names
-- Enables field-level mapping by system
+- Captures system-specific record-id extraction details
+- Enables current direct record-id comparison by system
+- Provides file-side source data for migration to `RuleSetCompareSource`
 
 **Key Fields**
 - `mappingMemberId`
 - `reconciliationMappingId`
 - `systemEnumId` (from `moqui.basic.Enumeration`)
 - `systemFieldName`
+- `fileTypeEnumId`
+- `schemaFileName`
+- `idFieldExpression`
+- `idValueNormalizer`
 - `createdDate`
+
+### Current Mapping Baseline and Compare-Scope Cutover
+The current reconciliation baseline and planned target keep these responsibilities explicit:
+
+- Current code uses Mapping for source extraction and direct record-id comparison.
+- The target model uses RuleSet compare scopes for the compared object and per-file primary ID extraction.
+- The base compare stage emits missing-object Diffs before DRL:
+  - `MISSING_IN_FILE_1`: primary ID exists in file 2 but not file 1.
+  - `MISSING_IN_FILE_2`: primary ID exists in file 1 but not file 2.
+- DRL receives only matched object pairs and emits field/business-rule Diffs.
+- Mapping deprecation belongs to the migration ticket after RuleSet compare-scope parity evidence exists.
+- The emitted result remains the existing Diff contract consumed by reconciliation screens and jobs.
 
 **Operational Note**
 - Mapping deletion should remove `ReconciliationMappingMember` rows first, then delete `ReconciliationMapping` to satisfy FK constraints (`MAPMEM_MAPDEF`).

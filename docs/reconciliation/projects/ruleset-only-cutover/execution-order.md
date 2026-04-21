@@ -2,12 +2,10 @@
 
 ## Dependency Graph
 ```text
-RSCUT-001 -> RSCUT-002
-RSCUT-001 -> RSCUT-003
-RSCUT-003 -> RSCUT-004 -> RSCUT-005
-RSCUT-003 -> RSCUT-006 -> RSCUT-007
-RSCUT-005 + RSCUT-007 -> RSCUT-008
-RSCUT-002 + RSCUT-008 -> RSCUT-009
+RSCUT-001 -> RSCUT-002 -> RSCUT-003 -> RSCUT-004
+RSCUT-004 -> RSCUT-005 -> RSCUT-006
+RSCUT-004 -> RSCUT-007 -> RSCUT-008
+RSCUT-006 + RSCUT-008 -> RSCUT-009
 RSCUT-009 -> RSCUT-010
 ```
 
@@ -15,42 +13,44 @@ No dependency cycles are allowed.
 
 ## Wave Plan
 
-### Wave 1: Foundation and Data Migration Capability
+### Wave 1: RuleSet Compare Scope Foundation
 - RSCUT-001
 - RSCUT-002
 
 #### Wave 1 Exit Gate
-- New RuleSet source configuration entity is present and queryable.
-- Migration service supports dry-run and apply modes.
-- Migration service is idempotent in repeated apply runs.
+- RuleSet compare scopes can represent the object identity that Mapping previously represented.
+- File-side source config captures primary ID expression, file type, schema, record/root expression, and normalizer.
+- Existing extraction logic has a reusable adapter that does not require Mapping entities.
 
-### Wave 2: RuleSet Routing Core
+### Wave 2: Diff Pipeline Split
 - RSCUT-003
+- RSCUT-004
 
 #### Wave 2 Exit Gate
-- New RuleSet-based router service executes and delegates to unified reconciliation.
-- Presence-based rule execution contract is enforced.
+- Missing-object Diffs are emitted before DRL runs.
+- Matched object pairs are produced for primary IDs present in both files.
+- DRL rules execute only on matched pairs and can emit field/business-rule Diffs.
+- Existing Diff output contract is preserved.
 
-### Wave 3: Caller Contract Cutover
-- RSCUT-004
+### Wave 3: Caller Cutover
 - RSCUT-005
 - RSCUT-006
 - RSCUT-007
+- RSCUT-008
 
 #### Wave 3 Exit Gate
-- Generic and SFTP active contracts use `ruleSetId`.
-- UI forms and job editor no longer require mapping IDs.
+- Generic and SFTP backend contracts support `ruleSetId` and `compareScopeId`.
+- Generic and SFTP screens select RuleSet compare scopes instead of Mapping records.
+- Existing Mapping-backed flows remain available until migration and parity evidence are complete.
 
-### Wave 4: Decommission, Alignment, Final Validation
-- RSCUT-008
+### Wave 4: Migration, Deprecation, Final Validation
 - RSCUT-009
 - RSCUT-010
 
 #### Wave 4 Exit Gate
-- Mapping runtime execution path removed.
-- Mapping screens hidden/disabled.
-- Seeds and docs aligned with RuleSet-first terminology.
-- Final evidence report confirms cutover readiness and rollback checks.
+- Existing Mapping rows can be migrated or translated into RuleSet compare-scope config.
+- Mapping entities and screens are explicitly deprecated after successful migration evidence.
+- Final evidence confirms missing-object and matched-pair DRL parity against baseline outputs.
 
 ## Operational Rules
 1. A ticket cannot start until all dependencies are closed with evidence.
@@ -68,4 +68,3 @@ No dependency cycles are allowed.
 
 ## Suggested Commit Pattern per Ticket
 - `rscut-00x: <outcome-oriented summary>`
-

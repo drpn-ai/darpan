@@ -8,7 +8,7 @@
 - Sample data inputs: `runtime/component/darpan/data/sample/`
 
 ## Active Migration Project
-- RuleSet-only cutover execution plan and tickets: `runtime/component/darpan/docs/reconciliation/projects/ruleset-only-cutover/README.md`
+- RuleSet compare-scope cutover plan and tickets: `runtime/component/darpan/docs/reconciliation/projects/ruleset-only-cutover/README.md`
 
 ## 1. Purpose
 

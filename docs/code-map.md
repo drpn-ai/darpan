@@ -10,6 +10,7 @@ This wiki lives in `runtime/component/darpan/docs/Home.md`. The Darpan component
 - Reconciliation service contracts: `runtime/component/darpan/service/reconciliation/ReconciliationCoreServices.xml`, `runtime/component/darpan/service/reconciliation/ReconciliationGenericServices.xml`, `runtime/component/darpan/service/reconciliation/ReconciliationRuleEngineServices.xml`, `runtime/component/darpan/service/reconciliation/ReconciliationInventoryServices.xml`
 - JSON schema service contracts: `runtime/component/darpan/service/jsonschema/JsonSchemaServices.xml`
 - Reconciliation scripts: `runtime/component/darpan/src/main/groovy/darpan/reconciliation/core/ReconciliationServices.groovy`, `runtime/component/darpan/src/main/groovy/darpan/reconciliation/core/reconcileFilesByMapping.groovy`, `runtime/component/darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy`
+- RuleSet compare-scope cutover plan: `runtime/component/darpan/docs/reconciliation/projects/ruleset-only-cutover/README.md`
 - JSON schema scripts/helpers: `runtime/component/darpan/src/main/groovy/darpan/jsonschema/service/crud/createJsonSchemaFromJson.groovy`, `runtime/component/darpan/src/main/groovy/darpan/jsonschema/service/crud/saveRefinedSchema.groovy`, `runtime/component/darpan/src/main/groovy/darpan/jsonschema/common/JsonSchemaUtil.groovy`, `runtime/component/darpan/src/main/groovy/darpan/jsonschema/service/validation/validateJsonFileAgainstSchema.groovy`
 
 ## Debug Entrypoints

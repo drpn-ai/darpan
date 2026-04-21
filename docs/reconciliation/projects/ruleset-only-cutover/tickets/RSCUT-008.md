@@ -1,73 +1,71 @@
-# RSCUT-008: Mapping Runtime Decommission and Screen Disablement
+# RSCUT-008: SFTP Screen RuleSet Compare Scope Selector
 
 ## Metadata
 - Ticket ID: RSCUT-008
-- Title: Mapping Runtime Decommission and Screen Disablement
-- Depends On: RSCUT-005, RSCUT-007
-- Wave: Wave 4
+- Title: SFTP Screen RuleSet Compare Scope Selector
+- Depends On: RSCUT-007
+- Wave: Wave 3
 - Owner: Agent
 
 ## Goal
-Complete hard-break runtime decommission of mapping execution path and hide/disable mapping UI routes.
+Update SFTP schedule create/edit/list flows to use RuleSet compare scopes instead of Mapping records.
 
 ## In Scope
-- Remove `reconcile#FilesByMapping` service contract.
-- Remove/deprecate `reconcileFilesByMapping.groovy` runtime path.
-- Remove Mapping menu entry from Reconciliation navigation.
-- Disable direct Mapping screen access with explicit deprecation message.
+- Replace Mapping dropdown with RuleSet and compare-scope selection.
+- Save job parameters as `ruleSetId` and `compareScopeId`.
+- Display RuleSet, compare scope, object type, and primary ID expression in existing schedules list.
+- Keep schedule cadence and advanced settings behavior unchanged.
 
 ## Out of Scope
-- Deleting mapping entities/tables.
-- Data migration logic changes.
-- Final documentation sweep.
+- Backend service contract changes.
+- Generic screen changes.
+- Mapping entity deprecation.
 
 ## Dependencies
-- RSCUT-005 and RSCUT-007 completed.
+- RSCUT-007 completed.
 
 ## Files to Touch
-- `service/reconciliation/ReconciliationCoreServices.xml`
-- `src/main/groovy/darpan/reconciliation/core/reconcileFilesByMapping.groovy` (remove or archive as inactive)
-- `screen/Reconciliation.xml`
-- `screen/Reconciliation/Mapping/MappingSetup.xml`
+- `screen/Reconciliation/Automation/SftpAutomation.xml`
+- Related docs only if operator copy changes need explanation.
 
 ## Contract/API Changes
-- Removed service: `reconciliation.ReconciliationCoreServices.reconcile#FilesByMapping`
-- Mapping UI route no longer reachable from active Reconciliation navigation.
+- UI and job-parameter binding changes:
+  - before: `reconciliationMappingId`
+  - after: `ruleSetId`, `compareScopeId`
+- Pre-action dropdown source changes from Mapping entity to RuleSet compare-scope config.
 
 ## Implementation Steps
-1. Remove `reconcile#FilesByMapping` service definition from `ReconciliationCoreServices.xml`.
-2. Delete the mapping router script file or move to an explicitly inactive/deprecated location not referenced by services.
-3. Remove `MappingSetup` subscreen item from `screen/Reconciliation.xml`.
-4. Update `MappingSetup.xml` to return an explicit deprecation/disabled message if directly accessed.
-5. Verify no active runtime service/screen references remain to mapping execution path.
+1. Replace Mapping preload query with RuleSet compare-scope preload query.
+2. Update save transition validation for `ruleSetId` and `compareScopeId`.
+3. Update schedule parameter map to write `ruleSetId` and `compareScopeId`.
+4. Update edit prefill to read new job parameters.
+5. Display RuleSet compare scope labels in the schedules table.
+6. Add temporary compatibility display for old Mapping jobs if backend compatibility remains active.
 
 ## Acceptance Criteria
-- `reconcile#FilesByMapping` is absent from active service definitions.
-- Reconciliation menu no longer shows Mapping.
-- Direct Mapping route is blocked with a deprecation response.
-- Active runtime scripts/screens no longer call mapping router path.
+- SFTP schedule form stores and loads `ruleSetId` and `compareScopeId`.
+- New schedules no longer require Mapping records.
+- Existing schedules table shows RuleSet compare-scope context.
+- Existing Mapping-based jobs remain readable until RSCUT-009 migration if compatibility is retained.
 
 ## Validation Commands and Expected Results
-1. Command: `rg -n "reconcile#FilesByMapping" service/reconciliation src/main/groovy/darpan/reconciliation screen/Reconciliation`
-   Expected: No active runtime references.
-2. Command: `rg -n "MappingSetup" screen/Reconciliation.xml`
-   Expected: No menu/subscreen entry remains.
-3. Command: `./gradlew :runtime:component:darpan:compileGroovy :runtime:component:darpan:verifyOrganization --console=plain`
-   Expected: Build and organization checks pass.
+1. Command: `rg -n "reconciliationMappingId|mappingList|mappingLabel" screen/Reconciliation/Automation/SftpAutomation.xml`
+   Expected: No active new-schedule dependency remains, except explicit migration compatibility if retained.
+2. Command: `rg -n "ruleSetId|compareScopeId|objectType|primaryIdExpression" screen/Reconciliation/Automation/SftpAutomation.xml`
+   Expected: RuleSet compare-scope bindings are present.
+3. Command: `./gradlew :runtime:component:darpan:verifyOrganization --console=plain`
+   Expected: Screen organization check passes.
 
 ## Rollback Plan
-- Restore removed service definition and mapping router script.
-- Re-add Mapping subscreen item in `screen/Reconciliation.xml`.
-- Restore previous `MappingSetup.xml` behavior.
+- Revert `SftpAutomation.xml` to Mapping selector and job parameters.
+- Confirm backend compatibility mode remains available if rollback is needed.
 
 ## Risks and Mitigations
-- Risk: Hidden dependency still calls removed service.
-  Mitigation: run repository-wide grep and verify before merge.
-- Risk: Operators need temporary mapping access for diagnostics.
-  Mitigation: keep mapping entities as historical data; document direct DB/query approach in docs ticket.
+- Risk: old scheduled jobs are hidden or become uneditable before migration.
+  Mitigation: keep explicit compatibility display until RSCUT-009 closes.
 
 ## Handoff Inputs for Next Ticket
-- Confirmed hard-break runtime state for docs/seed alignment in `RSCUT-009`.
+- Confirmed UI no longer creates new Mapping-dependent schedules.
 
 ## Closure Checklist
 - [ ] All acceptance criteria met.

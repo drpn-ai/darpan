@@ -352,6 +352,99 @@ class ReconciliationServices {
 
     static String normalize(Object val) { return val?.toString()?.trim() }
 
+    static String resolveEnumLabel(ExecutionContext ec, String enumId, String fallback) {
+        String normalized = normalize(enumId)
+        if (!normalized) return fallback
+        def enumValue = ec.entity.find("moqui.basic.Enumeration")
+                .condition("enumId", normalized)
+                .disableAuthz()
+                .useCache(true)
+                .one()
+        String code = normalize(enumValue?.enumCode)
+        if (code) return code
+        String description = normalize(enumValue?.description)
+        if (description) return description
+        return normalized
+    }
+
+    static String determineReconciliationType(String file1Type, String file2Type) {
+        String left = normalize(file1Type)?.toUpperCase()
+        String right = normalize(file2Type)?.toUpperCase()
+        if (left == "CSV" && right == "CSV") return "CSV"
+        if (left == "JSON" && right == "JSON") return "JSON"
+        return "MIXED"
+    }
+
+    static Map<String, Object> resolveRuleSetCompareScopeConfig(ExecutionContext ec, String ruleSetIdValue,
+                                                                String compareScopeIdValue,
+                                                                String requestedFile1SystemEnumId,
+                                                                String requestedFile2SystemEnumId) {
+        String normalizedRuleSetId = normalize(ruleSetIdValue)
+        if (!normalizedRuleSetId) {
+            throw new IllegalArgumentException("ruleSetId is required")
+        }
+
+        def compareScope = null
+        if (compareScopeIdValue) {
+            compareScope = ec.entity.find("darpan.rule.RuleSetCompareScope")
+                    .condition("compareScopeId", compareScopeIdValue)
+                    .condition("ruleSetId", normalizedRuleSetId)
+                    .disableAuthz()
+                    .useCache(false)
+                    .one()
+            if (compareScope == null) {
+                throw new IllegalArgumentException("Compare scope ${compareScopeIdValue} was not found for RuleSet ${normalizedRuleSetId}")
+            }
+        } else {
+            List compareScopes = ec.entity.find("darpan.rule.RuleSetCompareScope")
+                    .condition("ruleSetId", normalizedRuleSetId)
+                    .orderBy("compareScopeId")
+                    .disableAuthz()
+                    .useCache(false)
+                    .list() ?: []
+            if (compareScopes.isEmpty()) {
+                throw new IllegalArgumentException("RuleSet ${normalizedRuleSetId} does not define any compare scopes")
+            }
+            if (compareScopes.size() > 1) {
+                throw new IllegalArgumentException("RuleSet ${normalizedRuleSetId} defines ${compareScopes.size()} compare scopes; compareScopeId is required")
+            }
+            compareScope = compareScopes[0]
+        }
+
+        List sources = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition("compareScopeId", compareScope.compareScopeId)
+                .disableAuthz()
+                .useCache(false)
+                .list() ?: []
+        Map sourceBySide = [:]
+        sources.each { source ->
+            sourceBySide[normalize(source.fileSide)] = source
+        }
+        def file1Source = sourceBySide["FILE_1"]
+        def file2Source = sourceBySide["FILE_2"]
+        if (file1Source == null || file2Source == null) {
+            throw new IllegalArgumentException("Compare scope ${compareScope.compareScopeId} must define both FILE_1 and FILE_2 sources")
+        }
+
+        String scopeFile1SystemEnumId = normalize(file1Source.systemEnumId)
+        String scopeFile2SystemEnumId = normalize(file2Source.systemEnumId)
+        if (requestedFile1SystemEnumId && requestedFile1SystemEnumId != scopeFile1SystemEnumId) {
+            throw new IllegalArgumentException("file1SystemEnumId ${requestedFile1SystemEnumId} does not match compare scope ${compareScope.compareScopeId} FILE_1 system ${scopeFile1SystemEnumId}")
+        }
+        if (requestedFile2SystemEnumId && requestedFile2SystemEnumId != scopeFile2SystemEnumId) {
+            throw new IllegalArgumentException("file2SystemEnumId ${requestedFile2SystemEnumId} does not match compare scope ${compareScope.compareScopeId} FILE_2 system ${scopeFile2SystemEnumId}")
+        }
+
+        return [
+                compareScopeId    : normalize(compareScope.compareScopeId),
+                objectType        : normalize(compareScope.objectType),
+                file1SystemEnumId : scopeFile1SystemEnumId,
+                file2SystemEnumId : scopeFile2SystemEnumId,
+                file1Label        : resolveEnumLabel(ec, scopeFile1SystemEnumId, "File 1"),
+                file2Label        : resolveEnumLabel(ec, scopeFile2SystemEnumId, "File 2")
+        ]
+    }
+
     static Map parseIdSpec(String expr, boolean isCsv) {
         Map split = splitIdExpression(expr)
         String baseExpr = (String) split.idExpr

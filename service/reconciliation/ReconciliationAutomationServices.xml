@@ -2,17 +2,27 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
     <service verb="poll" noun="SftpAndReconcile" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/automation/pollSftpAndRunReconciliation.groovy" authenticate="anonymous-all">
-        <description>Check configured SFTP locations for available files and run reconciliation using mapping metadata.</description>
+        <description>Check configured SFTP locations for available files and run reconciliation through the RuleSet compare-scope pipeline or the temporary mapping bridge.</description>
         <in-parameters>
-            <parameter name="reconciliationMappingId" required="true">
-                <description>Mapping that defines file types, schemas, and ID fields per system.</description>
+            <parameter name="ruleSetId">
+                <description>Preferred RuleSet input for the SFTP automation cutover. When present, automation routing uses the RuleSet compare-scope pipeline.</description>
+            </parameter>
+            <parameter name="compareScopeId">
+                <description>Optional compare-scope override. Required only when the RuleSet exposes more than one compare scope.</description>
+            </parameter>
+            <parameter name="reconciliationMappingId">
+                <description>Legacy mapping bridge input retained temporarily for existing scheduled jobs that have not been migrated yet.</description>
             </parameter>
             <parameter name="reconciliationRunId">
                 <description>Optional run identifier for logging/context only.</description>
             </parameter>
 
-            <parameter name="file1SystemEnumId" required="true"/>
-            <parameter name="file2SystemEnumId" required="true"/>
+            <parameter name="file1SystemEnumId">
+                <description>Optional file 1 system identifier. In RuleSet mode this is used only for file-side validation; in mapping mode it remains required.</description>
+            </parameter>
+            <parameter name="file2SystemEnumId">
+                <description>Optional file 2 system identifier. In RuleSet mode this is used only for file-side validation; in mapping mode it remains required.</description>
+            </parameter>
             <parameter name="file1SftpServerId" required="true">
                 <description>SftpServer ID for file 1.</description>
             </parameter>

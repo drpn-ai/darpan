@@ -1,25 +1,40 @@
 package darpan.reconciliation.support
 
+import darpan.facade.common.PilotAccessSupport
 import org.moqui.Moqui
 import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.context.ExecutionContext
 import org.moqui.impl.context.ExecutionContextFactoryImpl
 
 import javax.naming.NameNotFoundException
+import java.sql.Timestamp
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.util.Comparator
 
 class ReconciliationSmokeTestSupport {
     private static final String TRANSACTIONAL_DS_NAME = "transactional_DS"
+    private static final String TEST_COMPANY_USER_ID = "TEST_CUSTOMER_USER"
+    private static final String TEST_COMPANY_USERNAME = "test.customer"
+    private static final String TEST_COMPANY_USER_GROUP_ID = "KREWE"
+    private static final Timestamp TEST_FROM_DATE = Timestamp.valueOf("2026-04-21 00:00:00")
 
     static ExecutionContext initMoqui(Path backendRoot, String testDbName) {
         String runtimePath = backendRoot.resolve("runtime").toString()
-        String testDbPath = backendRoot.resolve("runtime/tmp/test-h2/${testDbName}").toString()
+        Path testDbBasePath = backendRoot.resolve("runtime/tmp/test-h2/${testDbName}")
+        resetDatabaseFiles(testDbBasePath)
+        String testDbPath = testDbBasePath.toString()
+        String safeTestToken = testDbName.replaceAll(/[^A-Za-z0-9_-]/, "_")
+        Path atomikosLogPath = backendRoot.resolve("runtime/tmp/test-atomikos/${safeTestToken}")
 
         System.setProperty("moqui.runtime", runtimePath)
         System.setProperty("moqui_runtime", runtimePath)
         System.setProperty("entity_ds_url", "jdbc:h2:${testDbPath};lock_timeout=30000")
+        resetDirectory(atomikosLogPath)
+        System.setProperty("com.atomikos.icatch.log_base_dir", atomikosLogPath.toString())
+        System.setProperty("com.atomikos.icatch.log_base_name", safeTestToken)
+        System.setProperty("com.atomikos.icatch.tm_unique_name", "tm_${safeTestToken}")
 
         if (Moqui.getExecutionContextFactory() != null && !Moqui.getExecutionContextFactory().isDestroyed()) {
             Moqui.destroyActiveExecutionContextFactory()
@@ -203,26 +218,104 @@ class ReconciliationSmokeTestSupport {
         ])
     }
 
-    static void seedMappingFixtures(ExecutionContext ec) {
+    static void seedSchemaBackedCsvMappingFixtures(ExecutionContext ec) {
+        seedPilotCompanyScope(ec)
         seedSharedReconciliationEnums(ec)
-        upsertEntity(ec, "darpan.mapping.ReconciliationMapping", [reconciliationMappingId: "OrderIdMap"], [
-                reconciliationMappingId: "OrderIdMap",
-                mappingName            : "Order ID",
-                description            : "Order ID field mapping"
+        upsertEntity(ec, "darpan.reconciliation.JsonSchema", [jsonSchemaId: "TestOmsOrderSchema"], [
+                jsonSchemaId       : "TestOmsOrderSchema",
+                schemaName         : "test-oms-order-id.schema.json",
+                description        : "Smoke-test OMS order id schema",
+                systemEnumId       : "OMS",
+                companyUserGroupId : TEST_COMPANY_USER_GROUP_ID,
+                createdDate        : TEST_FROM_DATE,
+                schemaText         : '{"type":"object","properties":{"order_id":{"type":"string"}}}'
         ])
-        upsertEntity(ec, "darpan.mapping.ReconciliationMappingMember", [mappingMemberId: "OrderIdMapOms"], [
-                mappingMemberId         : "OrderIdMapOms",
-                reconciliationMappingId : "OrderIdMap",
+        upsertEntity(ec, "darpan.reconciliation.JsonSchema", [jsonSchemaId: "TestShopifyOrderSchema"], [
+                jsonSchemaId       : "TestShopifyOrderSchema",
+                schemaName         : "test-shopify-order-id.schema.json",
+                description        : "Smoke-test Shopify order id schema",
+                systemEnumId       : "SHOPIFY",
+                companyUserGroupId : TEST_COMPANY_USER_GROUP_ID,
+                createdDate        : TEST_FROM_DATE,
+                schemaText         : '{"type":"object","properties":{"order_id":{"type":"string"}}}'
+        ])
+        upsertEntity(ec, "darpan.mapping.ReconciliationMapping", [reconciliationMappingId: "OrderIdSchemaMap"], [
+                reconciliationMappingId: "OrderIdSchemaMap",
+                mappingName            : "Order ID",
+                description            : "Order ID field mapping backed by saved schemas"
+        ])
+        upsertEntity(ec, "darpan.mapping.ReconciliationMappingMember", [mappingMemberId: "OrderIdSchemaMapOms"], [
+                mappingMemberId         : "OrderIdSchemaMapOms",
+                reconciliationMappingId : "OrderIdSchemaMap",
                 systemEnumId            : "OMS",
                 fileTypeEnumId          : "DftCsv",
+                schemaFileName          : "test-oms-order-id.schema.json",
                 idFieldExpression       : "order_id"
         ])
-        upsertEntity(ec, "darpan.mapping.ReconciliationMappingMember", [mappingMemberId: "OrderIdMapShopify"], [
-                mappingMemberId         : "OrderIdMapShopify",
-                reconciliationMappingId : "OrderIdMap",
+        upsertEntity(ec, "darpan.mapping.ReconciliationMappingMember", [mappingMemberId: "OrderIdSchemaMapShopify"], [
+                mappingMemberId         : "OrderIdSchemaMapShopify",
+                reconciliationMappingId : "OrderIdSchemaMap",
                 systemEnumId            : "SHOPIFY",
                 fileTypeEnumId          : "DftCsv",
+                schemaFileName          : "test-shopify-order-id.schema.json",
                 idFieldExpression       : "order_id"
+        ])
+    }
+
+    static void seedPilotCompanyScope(ExecutionContext ec) {
+        upsertEntity(ec, "moqui.basic.EnumerationType", [enumTypeId: "UserGroupType"], [
+                enumTypeId  : "UserGroupType",
+                description : "User Group Type"
+        ])
+        upsertEntity(ec, "moqui.basic.Enumeration", [enumId: PilotAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID], [
+                enumId      : PilotAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID,
+                enumTypeId  : "UserGroupType",
+                description : "Darpan company groups"
+        ])
+        upsertEntity(ec, "moqui.security.UserGroup", [userGroupId: TEST_COMPANY_USER_GROUP_ID], [
+                userGroupId     : TEST_COMPANY_USER_GROUP_ID,
+                description     : "Krewe",
+                groupTypeEnumId : PilotAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID
+        ])
+        upsertEntityValue(ec, "moqui.security.UserAccount", [userId: TEST_COMPANY_USER_ID], [
+                userId        : TEST_COMPANY_USER_ID,
+                username      : TEST_COMPANY_USERNAME,
+                userFullName  : "Smoke Test Customer",
+                currentPassword: "",
+                disabled      : "N"
+        ])
+        upsertEntityValue(ec, "moqui.security.UserGroupMember", [
+                userGroupId: TEST_COMPANY_USER_GROUP_ID,
+                userId     : TEST_COMPANY_USER_ID,
+                fromDate   : TEST_FROM_DATE
+        ], [
+                userGroupId: TEST_COMPANY_USER_GROUP_ID,
+                userId     : TEST_COMPANY_USER_ID,
+                fromDate   : TEST_FROM_DATE
+        ])
+        ec.user.internalLoginUser(TEST_COMPANY_USERNAME)
+        ec.user.setPreference(PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY, TEST_COMPANY_USER_GROUP_ID)
+        ec.message.clearErrors()
+    }
+
+    static void seedSftpServerFixtures(ExecutionContext ec) {
+        upsertEntityValue(ec, "darpan.reconciliation.SftpServer", [sftpServerId: "SHOPIFY_TEST_SFTP"], [
+                sftpServerId     : "SHOPIFY_TEST_SFTP",
+                description      : "Smoke-test Shopify SFTP server",
+                host             : "shopify.test",
+                port             : 22,
+                username         : "shopify-user",
+                password         : "shopify-pass",
+                remoteAttributes : "N"
+        ])
+        upsertEntityValue(ec, "darpan.reconciliation.SftpServer", [sftpServerId: "OMS_TEST_SFTP"], [
+                sftpServerId     : "OMS_TEST_SFTP",
+                description      : "Smoke-test OMS SFTP server",
+                host             : "oms.test",
+                port             : 22,
+                username         : "oms-user",
+                password         : "oms-pass",
+                remoteAttributes : "N"
         ])
     }
 
@@ -244,6 +337,31 @@ class ReconciliationSmokeTestSupport {
         }
 
         throw new IllegalStateException("Unable to resolve darpan-backend root from ${cwd}")
+    }
+
+    private static void resetDirectory(Path directory) {
+        if (Files.exists(directory)) {
+            Files.walk(directory)
+                    .sorted(Comparator.reverseOrder())
+                    .forEach { Path path -> Files.deleteIfExists(path) }
+        }
+        Files.createDirectories(directory)
+    }
+
+    private static void resetDatabaseFiles(Path dbBasePath) {
+        Path parent = dbBasePath.parent
+        if (parent == null) return
+        Files.createDirectories(parent)
+
+        String baseName = dbBasePath.fileName.toString()
+        Files.list(parent).withCloseable { stream ->
+            stream.filter { Path path ->
+                String fileName = path.fileName.toString()
+                fileName == baseName || fileName.startsWith(baseName + ".")
+            }.forEach { Path path ->
+                Files.deleteIfExists(path)
+            }
+        }
     }
 
     private static void clearTransactionalDatasourceRegistration() {
@@ -317,6 +435,23 @@ class ReconciliationSmokeTestSupport {
                         .parameters(fields)
                         .disableAuthz()
                         .call()
+            }
+        } finally {
+            if (!alreadyDisabled) ec.artifactExecution.enableAuthz()
+        }
+    }
+
+    private static void upsertEntityValue(ExecutionContext ec, String entityName, Map<String, Object> pkFields, Map<String, Object> fields) {
+        boolean alreadyDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            def existing = ec.entity.find(entityName)
+                    .condition(pkFields)
+                    .disableAuthz()
+                    .one()
+            if (existing == null) {
+                def value = ec.entity.makeValue(entityName)
+                value.setAll(fields)
+                value.create()
             }
         } finally {
             if (!alreadyDisabled) ec.artifactExecution.enableAuthz()

@@ -46,15 +46,23 @@ Behavior notes:
 - If the RuleSet defines exactly one compare scope, Generic routing resolves it automatically. When a RuleSet has multiple scopes, `compareScopeId` is required.
 - The mapping route remains available only as a migration bridge until the later cutover tickets remove it.
 
+### `ReconciliationAutomationServices.poll#SftpAndReconcile`
+
+SFTP automation stages remote files and now routes through the same RuleSet compare-scope pipeline as Generic reconciliation when `ruleSetId` is provided. Older automation jobs can continue to use `reconciliationMappingId` temporarily until they are migrated.
+
+**Inputs (key):** `ruleSetId`, optional `compareScopeId`, temporary `reconciliationMappingId`, `file1SftpServerId`, `file2SftpServerId`, optional `file1SystemEnumId`/`file2SystemEnumId`, optional file-type/schema overrides, `file1RemotePath`, `file2RemotePath`, `stageLocation`, `outputLocation`, `sparkMaster`, `sparkAppName`.
+
+**Outputs (key):** `dataAvailable`, `file1StagedLocation`, `file2StagedLocation`, `reconciliationType`, `diffLocation`, `diffFileName`, `differenceCount`, `onlyInFile1Count`, `onlyInFile2Count`, `validationErrors`, `processingWarnings`.
+
 ### `ReconciliationCoreServices.reconcile#FilesByMapping`
 
-Shared router used by both Generic uploads and SFTP automation. It normalizes staged file locations, resolves mapping metadata (types, schemas, ID fields), and hands everything to the unified comparator.
+Shared mapping bridge used by older Generic uploads and older SFTP automation jobs. It normalizes staged file locations, resolves mapping metadata (types, schemas, ID fields), and hands everything to the unified comparator.
 
 **Inputs (key):** `reconciliationMappingId`, `file1Location`, `file2Location`, `file1SystemEnumId`, `file2SystemEnumId`, optional `file1Name`/`file2Name`, `file1FileTypeEnumId`/`file2FileTypeEnumId`, `file1SchemaFileName`/`file2SchemaFileName`, `hasHeader`, `outputLocation`, `sparkMaster`, `sparkAppName`.
 
 **Outputs (key):** `file1Type`, `file2Type`, `reconciliationType`, `diffLocation`, `diffFileName`, `differenceCount`, `onlyInFile1Count`, `onlyInFile2Count`, `validationErrors`, `processingWarnings`.
 
-This service remains the Generic/SFTP migration bridge. New RuleSet-backed Generic runs should use `reconcile#RuleSetCompareScope` instead.
+This service remains the Generic/SFTP migration bridge. New RuleSet-backed Generic and SFTP runs should use `reconcile#RuleSetCompareScope` instead.
 
 ### `ReconciliationCoreServices.prepare#RuleSetCompareScope`
 
@@ -64,7 +72,7 @@ Internal compare-scope extraction adapter introduced for the RuleSet cutover. It
 
 **Outputs (key):** `objectType`, `file1Type`, `file2Type`, `file1SystemEnumId`, `file2SystemEnumId`, `file1IdExpression`, `file2IdExpression`, `file1IdDf`, `file2IdDf`, `file1DataDf`, `file2DataDf`, `validationErrors`, `processingWarnings`.
 
-Current public Generic and SFTP flows still route through `reconcile#FilesByMapping`. This service is the internal adapter for the compare-scope path used by the cutover tickets.
+Generic uploads and SFTP automation now route here when `ruleSetId` is provided. `reconcile#FilesByMapping` remains only for the temporary legacy bridge path.
 
 ### `ReconciliationCoreServices.reconcile#RuleSetCompareScopeBaseDiff`
 

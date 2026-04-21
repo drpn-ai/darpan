@@ -9,27 +9,6 @@ import java.nio.charset.StandardCharsets
 def logger = LoggerFactory.getLogger("darpan.reconciliation.generic.GenericReconciliation")
 
 def normalize = { it?.toString()?.trim() }
-def resolveEnumLabel = { String enumId, String fallback ->
-    String normalized = normalize(enumId)
-    if (!normalized) return fallback
-    def enumValue = ec.entity.find("moqui.basic.Enumeration")
-            .condition("enumId", normalized)
-            .disableAuthz()
-            .useCache(true)
-            .one()
-    String code = normalize(enumValue?.enumCode)
-    if (code) return code
-    String description = normalize(enumValue?.description)
-    if (description) return description
-    return normalized
-}
-def determineReconciliationType = { String file1Type, String file2Type ->
-    String left = normalize(file1Type)?.toUpperCase()
-    String right = normalize(file2Type)?.toUpperCase()
-    if (left == "CSV" && right == "CSV") return "CSV"
-    if (left == "JSON" && right == "JSON") return "JSON"
-    return "MIXED"
-}
 def safeToken = { String raw, String fallback ->
     String normalized = normalize(raw)?.replaceAll(/[^A-Za-z0-9_-]/, "-")
     return normalized ?: fallback
@@ -67,73 +46,6 @@ def resolveMappingName = { String mappingId ->
             .useCache(true)
             .one()
     return normalize(mapping?.mappingName)
-}
-def resolveRuleSetCompareScope = { String ruleSetIdValue, String compareScopeIdValue,
-                                   String requestedFile1SystemEnumId, String requestedFile2SystemEnumId ->
-    String normalizedRuleSetId = normalize(ruleSetIdValue)
-    if (!normalizedRuleSetId) {
-        throw new IllegalArgumentException("ruleSetId is required")
-    }
-
-    def compareScope = null
-    if (compareScopeIdValue) {
-        compareScope = ec.entity.find("darpan.rule.RuleSetCompareScope")
-                .condition("compareScopeId", compareScopeIdValue)
-                .condition("ruleSetId", normalizedRuleSetId)
-                .disableAuthz()
-                .useCache(false)
-                .one()
-        if (compareScope == null) {
-            throw new IllegalArgumentException("Compare scope ${compareScopeIdValue} was not found for RuleSet ${normalizedRuleSetId}")
-        }
-    } else {
-        List compareScopes = ec.entity.find("darpan.rule.RuleSetCompareScope")
-                .condition("ruleSetId", normalizedRuleSetId)
-                .orderBy("compareScopeId")
-                .disableAuthz()
-                .useCache(false)
-                .list() ?: []
-        if (compareScopes.isEmpty()) {
-            throw new IllegalArgumentException("RuleSet ${normalizedRuleSetId} does not define any compare scopes")
-        }
-        if (compareScopes.size() > 1) {
-            throw new IllegalArgumentException("RuleSet ${normalizedRuleSetId} defines ${compareScopes.size()} compare scopes; compareScopeId is required")
-        }
-        compareScope = compareScopes[0]
-    }
-
-    List sources = ec.entity.find("darpan.rule.RuleSetCompareSource")
-            .condition("compareScopeId", compareScope.compareScopeId)
-            .disableAuthz()
-            .useCache(false)
-            .list() ?: []
-    Map sourceBySide = [:]
-    sources.each { source ->
-        sourceBySide[normalize(source.fileSide)] = source
-    }
-    def file1Source = sourceBySide["FILE_1"]
-    def file2Source = sourceBySide["FILE_2"]
-    if (file1Source == null || file2Source == null) {
-        throw new IllegalArgumentException("Compare scope ${compareScope.compareScopeId} must define both FILE_1 and FILE_2 sources")
-    }
-
-    String scopeFile1SystemEnumId = normalize(file1Source.systemEnumId)
-    String scopeFile2SystemEnumId = normalize(file2Source.systemEnumId)
-    if (requestedFile1SystemEnumId && requestedFile1SystemEnumId != scopeFile1SystemEnumId) {
-        throw new IllegalArgumentException("file1SystemEnumId ${requestedFile1SystemEnumId} does not match compare scope ${compareScope.compareScopeId} FILE_1 system ${scopeFile1SystemEnumId}")
-    }
-    if (requestedFile2SystemEnumId && requestedFile2SystemEnumId != scopeFile2SystemEnumId) {
-        throw new IllegalArgumentException("file2SystemEnumId ${requestedFile2SystemEnumId} does not match compare scope ${compareScope.compareScopeId} FILE_2 system ${scopeFile2SystemEnumId}")
-    }
-
-    return [
-            compareScopeId    : normalize(compareScope.compareScopeId),
-            objectType        : normalize(compareScope.objectType),
-            file1SystemEnumId : scopeFile1SystemEnumId,
-            file2SystemEnumId : scopeFile2SystemEnumId,
-            file1Label        : resolveEnumLabel(scopeFile1SystemEnumId, "File 1"),
-            file2Label        : resolveEnumLabel(scopeFile2SystemEnumId, "File 2")
-    ]
 }
 
 String providedFile1Name = normalize(file1Name)
@@ -191,7 +103,8 @@ String sparkAppNameToUse = sparkAppName ?: "GenericReconciliation"
 String mappingNameValue = resolveMappingName(mappingIdValue)
 
 if (ruleSetIdValue) {
-    Map compareScopeConfig = resolveRuleSetCompareScope(
+    Map compareScopeConfig = ReconciliationServices.resolveRuleSetCompareScopeConfig(
+            ec,
             ruleSetIdValue,
             compareScopeIdValue,
             requestedFile1SystemEnumId,
@@ -217,7 +130,7 @@ if (ruleSetIdValue) {
 
     file1Type = reconcileResult.file1Type
     file2Type = reconcileResult.file2Type
-    reconciliationType = determineReconciliationType(file1Type as String, file2Type as String)
+    reconciliationType = ReconciliationServices.determineReconciliationType(file1Type as String, file2Type as String)
     differenceCount = reconcileResult.differenceCount
     onlyInFile1Count = reconcileResult.missingInFile2Count
     onlyInFile2Count = reconcileResult.missingInFile1Count
@@ -264,8 +177,8 @@ if (ruleSetIdValue) {
     return
 }
 
-String system1Label = resolveEnumLabel(requestedFile1SystemEnumId, requestedFile1SystemEnumId)
-String system2Label = resolveEnumLabel(requestedFile2SystemEnumId, requestedFile2SystemEnumId)
+String system1Label = ReconciliationServices.resolveEnumLabel(ec, requestedFile1SystemEnumId, requestedFile1SystemEnumId)
+String system2Label = ReconciliationServices.resolveEnumLabel(ec, requestedFile2SystemEnumId, requestedFile2SystemEnumId)
 
 Map reconcileResult = ec.service.sync()
         .name("reconciliation.ReconciliationCoreServices.reconcile#FilesByMapping")

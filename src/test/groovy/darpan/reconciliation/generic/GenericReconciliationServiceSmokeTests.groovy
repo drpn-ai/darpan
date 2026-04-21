@@ -29,7 +29,7 @@ class GenericReconciliationServiceSmokeTests {
         backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "generic-reconciliation-smoke")
         ReconciliationSmokeTestSupport.seedCompareScopeFixtures(ec)
-        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/MappingSeedData.xml")
+        ReconciliationSmokeTestSupport.seedSchemaBackedCsvMappingFixtures(ec)
     }
 
     @AfterAll
@@ -40,6 +40,7 @@ class GenericReconciliationServiceSmokeTests {
     @BeforeEach
     void clearErrors() {
         ec.message.clearErrors()
+        ReconciliationSmokeTestSupport.seedPilotCompanyScope(ec)
     }
 
     @Test
@@ -106,11 +107,11 @@ class GenericReconciliationServiceSmokeTests {
     }
 
     @Test
-    void genericServiceRetainsMappingBridgePathDuringCutover() {
+    void genericServiceReconcilesSchemaBackedMappingBridgePath() {
         Map<String, Object> result = ec.service.sync()
                 .name("reconciliation.ReconciliationGenericServices.reconcile#GenericFiles")
                 .parameters([
-                        reconciliationMappingId: "OrderIdMap",
+                        reconciliationMappingId: "OrderIdSchemaMap",
                         file1SystemEnumId      : "SHOPIFY",
                         file2SystemEnumId      : "OMS",
                         file1Name              : "orders-1.csv",
@@ -134,7 +135,7 @@ class GenericReconciliationServiceSmokeTests {
         assertNotNull(result.diffLocation)
 
         Map<String, Object> diffDocument = parseOutputFile(result.diffLocation as String)
-        assertEquals("OrderIdMap", diffDocument.metadata.reconciliationMappingId)
+        assertEquals("OrderIdSchemaMap", diffDocument.metadata.reconciliationMappingId)
         assertEquals("CSV", diffDocument.metadata.reconciliation)
         assertEquals(2, diffDocument.summary.totalDifferences)
         assertEquals(1, diffDocument.summary.onlyInFile1Count)

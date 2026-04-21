@@ -31,6 +31,9 @@ class RuleSetCompareScopeDiffStage {
                         sparkAppName       : context.get("sparkAppName")
                 ])
                 .call()
+        if (!prepared || ec.message.hasError()) {
+            return [:]
+        }
 
         Dataset file1IdDf = (Dataset) prepared.file1IdDf
         Dataset file2IdDf = (Dataset) prepared.file2IdDf

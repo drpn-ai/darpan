@@ -36,6 +36,7 @@ class RuleSetCompareScopeAdapter {
 
         def compareScope = ec.entity.find("darpan.rule.RuleSetCompareScope")
                 .condition("compareScopeId", compareScopeId)
+                .disableAuthz()
                 .useCache(true)
                 .one()
         if (!compareScope) {
@@ -48,6 +49,7 @@ class RuleSetCompareScopeAdapter {
 
         List sources = ec.entity.find("darpan.rule.RuleSetCompareSource")
                 .condition("compareScopeId", compareScopeId)
+                .disableAuthz()
                 .useCache(true)
                 .list()
         if (!sources) {
@@ -241,6 +243,7 @@ class RuleSetCompareScopeAdapter {
 
         def enumValue = ec.entity.find("moqui.basic.Enumeration")
                 .condition("enumId", normalized)
+                .disableAuthz()
                 .useCache(true)
                 .one()
         return ReconciliationServices.normalize(enumValue?.enumCode)
@@ -265,6 +268,7 @@ class RuleSetCompareScopeAdapter {
 
         def enumValue = ec.entity.find("moqui.basic.Enumeration")
                 .condition("enumId", normalized)
+                .disableAuthz()
                 .useCache(true)
                 .one()
         String code = ReconciliationServices.normalize(enumValue?.enumCode)

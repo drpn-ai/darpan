@@ -566,6 +566,58 @@ class ReconciliationServices {
         return secondDf
     }
 
+    static Map<String, Object> writeDiffDatasetOutput(ExecutionContext ec, Dataset diffDf, String outputLocation,
+                                                      String outputFileName, String defaultBaseName,
+                                                      Map<String, Object> outputMetadata, Map<String, Object> outputSummary,
+                                                      List validationErrors, List processingWarnings) {
+        if (ec == null) throw new IllegalArgumentException("ec is required")
+        if (diffDf == null) throw new IllegalArgumentException("diffDf is required")
+
+        String outputBaseLocation = normalize(outputLocation) ?: "runtime://tmp/reconciliation/output"
+        def outputRef = ec.resource.getLocationReference(outputBaseLocation)
+        File outputDir = outputRef?.getFile()
+        if (outputDir == null) {
+            String runtimePath = ec.factory.getRuntimePath()
+            outputDir = new File(runtimePath, outputBaseLocation.replace("runtime://", ""))
+        }
+        if (!outputDir.exists()) outputDir.mkdirs()
+
+        String timestamp = ec.l10n.format(ec.user.nowTimestamp, "yyyyMMdd-HHmmss")
+        String baseFileName = normalize(outputFileName) ?: normalize(defaultBaseName) ?: "diff-${timestamp}.json"
+        if (!baseFileName.toLowerCase().endsWith(".json")) baseFileName = baseFileName + ".json"
+
+        File outputFile = new File(outputDir, baseFileName)
+        int suffix = 1
+        String nameRoot = baseFileName.indexOf(".") > 0 ? baseFileName.substring(0, baseFileName.lastIndexOf(".")) : baseFileName
+        while (outputFile.exists()) {
+            outputFile = new File(outputDir, "${nameRoot}-${suffix}.json")
+            suffix++
+        }
+
+        outputFile.withWriter("UTF-8") { writer ->
+            writer << "{\n"
+            writer << "\"metadata\":" + JsonOutput.toJson(outputMetadata ?: [:]) + ",\n"
+            writer << "\"summary\":" + JsonOutput.toJson(outputSummary ?: [:]) + ",\n"
+            writer << "\"validationErrors\":" + JsonOutput.toJson(validationErrors ?: []) + ",\n"
+            writer << "\"processingWarnings\":" + JsonOutput.toJson(processingWarnings ?: []) + ",\n"
+            writer << "\"differences\":["
+            boolean first = true
+            def iter = diffDf.toJSON().toLocalIterator()
+            while (iter.hasNext()) {
+                String rowJson = iter.next()
+                if (!first) writer << ","
+                writer << "\n" << rowJson
+                first = false
+            }
+            writer << "]\n}"
+        }
+
+        return [
+                diffLocation: outputFile.getAbsolutePath(),
+                diffFileName: outputFile.getName()
+        ]
+    }
+
     static Dataset buildMatchedPairDataset(Dataset file1DataDf, Dataset file2DataDf, Dataset matchedIdDf,
                                            String compareScopeId, String objectType) {
         return matchedIdDf.alias("matched")

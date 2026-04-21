@@ -76,6 +76,7 @@ List fetchActiveRules(ExecutionContext ec, String ruleSetId) {
             .condition("ruleSetId", ruleSetId)
             .condition("enabled", "Y")
             .orderBy(["sequenceNum", "ruleId"])
+            .disableAuthz()
             .useCache(false)
             .list() ?: []) as List
 }
@@ -85,6 +86,7 @@ long resolveNextSequence(ExecutionContext ec, String ruleSetId) {
             .condition("ruleSetId", ruleSetId)
             .orderBy(["-sequenceNum"])
             .limit(1)
+            .disableAuthz()
             .useCache(false)
             .list() ?: []) as List
     long maxSeq = (rules && rules[0]?.sequenceNum != null) ? ((rules[0].sequenceNum as Number).longValue()) : 0L
@@ -197,6 +199,7 @@ Map getOrBuildContainer(ExecutionContext ec, String ruleSetId, boolean useCache 
 
     EntityValue ruleSet = ec.entity.find("darpan.rule.RuleSet")
             .condition("ruleSetId", ruleSetId)
+            .disableAuthz()
             .useCache(false)
             .one()
     if (!ruleSet) throw new IllegalArgumentException("RuleSet ${ruleSetId} not found")
@@ -446,7 +449,7 @@ String generateRuleId(ExecutionContext ec, String requestedId, String ruleSetId,
 
     String candidate = base
     int suffix = 1
-    while (ec.entity.find("darpan.rule.Rule").condition("ruleId", candidate).useCache(false).one() != null) {
+    while (ec.entity.find("darpan.rule.Rule").condition("ruleId", candidate).disableAuthz().useCache(false).one() != null) {
         String suffixText = "_${suffix}"
         int maxBaseLen = Math.max(1, 60 - suffixText.length())
         String shortBase = base.length() > maxBaseLen ? base.substring(0, maxBaseLen) : base
@@ -463,6 +466,7 @@ def saveRule() {
 
     EntityValue ruleSet = ec.entity.find("darpan.rule.RuleSet")
             .condition("ruleSetId", ruleSetId)
+            .disableAuthz()
             .useCache(false)
             .one()
     if (!ruleSet) throw new IllegalArgumentException("RuleSet ${ruleSetId} not found")
@@ -484,6 +488,7 @@ def saveRule() {
 
     EntityValue existingRule = requestedRuleId ? ec.entity.find("darpan.rule.Rule")
             .condition("ruleId", validateProvidedId(requestedRuleId, "ruleId"))
+            .disableAuthz()
             .useCache(false)
             .one() : null
 

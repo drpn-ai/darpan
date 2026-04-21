@@ -1,5 +1,6 @@
 package darpan.reconciliation.core
 
+import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonSlurper
 import org.apache.spark.sql.Dataset
 import org.junit.jupiter.api.AfterAll
@@ -7,13 +8,9 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
-import org.moqui.Moqui
 import org.moqui.context.ExecutionContext
-import org.moqui.impl.context.ExecutionContextFactoryImpl
 
-import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.Paths
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertIterableEquals
@@ -28,32 +25,14 @@ class RuleSetCompareScopeServiceSmokeTests {
 
     @BeforeAll
     void setup() {
-        if (Moqui.getExecutionContextFactory() == null || Moqui.getExecutionContextFactory().isDestroyed()) {
-            Path backendRoot = resolveBackendRoot()
-            String runtimePath = backendRoot.resolve("runtime").toString()
-            String testDbPath = backendRoot.resolve("runtime/tmp/test-h2/ruleset-compare-scope-smoke").toString()
-            System.setProperty("moqui.runtime", runtimePath)
-            System.setProperty("moqui_runtime", runtimePath)
-            System.setProperty("entity_ds_url", "jdbc:h2:${testDbPath};lock_timeout=30000")
-            Moqui.dynamicInit(new ExecutionContextFactoryImpl(
-                    runtimePath,
-                    "conf/MoquiDevConf.xml"
-            ))
-        }
-        ec = Moqui.getExecutionContext()
-        assertTrue(ec.user.loginAnonymousIfNoUser())
-        ec.artifactExecution.disableAuthz()
-
-        ec.entity.makeDataLoader().location("component://darpan/data/ReconciliationInventorySeedData.xml").load()
-        ec.entity.makeDataLoader().location("component://darpan/data/ReconciliationCompareScopeFixtureData.xml").load()
+        Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
+        ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "ruleset-compare-scope-smoke")
+        ReconciliationSmokeTestSupport.seedCompareScopeFixtures(ec)
     }
 
     @AfterAll
     void cleanup() {
-        ec?.destroy()
-        if (Moqui.getExecutionContextFactory() != null && !Moqui.getExecutionContextFactory().isDestroyed()) {
-            Moqui.destroyActiveExecutionContextFactory()
-        }
+        ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 
     @BeforeEach
@@ -73,6 +52,7 @@ class RuleSetCompareScopeServiceSmokeTests {
                         sparkMaster  : "local[1]",
                         sparkAppName : "RuleSetCompareScopeServiceSmokeTests"
                 ])
+                .disableAuthz()
                 .call()
 
         assertEquals("DARPAN_TEST_COMPARE_RS", prepared.ruleSetId)
@@ -117,6 +97,7 @@ class RuleSetCompareScopeServiceSmokeTests {
                         df1Label  : prepared.file1Label,
                         df2Label  : prepared.file2Label
                 ])
+                .disableAuthz()
                 .call()
 
         assertEquals(2L, reconciliation.onlyInDf1Count)
@@ -144,6 +125,7 @@ class RuleSetCompareScopeServiceSmokeTests {
                         sparkMaster    : "local[1]",
                         sparkAppName   : "RuleSetCompareScopeServiceSmokeTests"
                 ])
+                .disableAuthz()
                 .call()
 
         assertEquals("DARPAN_TEST_ORDER_JSON_SCOPE", result.compareScopeId)
@@ -200,6 +182,7 @@ class RuleSetCompareScopeServiceSmokeTests {
                         sparkMaster    : "local[1]",
                         sparkAppName   : "RuleSetCompareScopeServiceSmokeTests"
                 ])
+                .disableAuthz()
                 .call()
 
         assertEquals("DARPAN_TEST_ORDER_JSON_SCOPE", result.compareScopeId)
@@ -227,6 +210,7 @@ class RuleSetCompareScopeServiceSmokeTests {
                         sparkMaster    : "local[1]",
                         sparkAppName   : "RuleSetCompareScopeServiceSmokeTests"
                 ])
+                .disableAuthz()
                 .call()
 
         assertTrue(result == null || result.isEmpty())
@@ -252,6 +236,7 @@ class RuleSetCompareScopeServiceSmokeTests {
                         sparkAppName   : "RuleSetCompareScopeServiceSmokeTests",
                         ruleBatchSize  : 2
                 ])
+                .disableAuthz()
                 .call()
 
         assertEquals("DARPAN_TEST_PRODUCT_COMPARE_RS", result.ruleSetId)
@@ -324,6 +309,7 @@ class RuleSetCompareScopeServiceSmokeTests {
                         sparkAppName   : "RuleSetCompareScopeServiceSmokeTests",
                         ruleBatchSize  : 2
                 ])
+                .disableAuthz()
                 .call()
 
         assertEquals("DARPAN_TEST_PRODUCT_BROKEN_RS", result.ruleSetId)
@@ -359,25 +345,5 @@ class RuleSetCompareScopeServiceSmokeTests {
     private static List<Map<String, Object>> collectRows(Dataset dataset) {
         return dataset.toJSON().collectAsList()
                 .collect { String rowJson -> (Map<String, Object>) JSON_SLURPER.parseText(rowJson) }
-    }
-
-    private static Path resolveBackendRoot() {
-        Path cwd = Paths.get("").toAbsolutePath().normalize()
-        List<Path> candidates = [
-                cwd,
-                cwd.resolve("darpan-backend"),
-                cwd.resolve("runtime/component/darpan").normalize(),
-                cwd.resolve("../../..").normalize(),
-                cwd.resolve("../../../..").normalize()
-        ].unique()
-
-        for (Path candidate : candidates) {
-            if (Files.exists(candidate.resolve("runtime/conf/MoquiDevConf.xml")) &&
-                    Files.exists(candidate.resolve("runtime/component/darpan"))) {
-                return candidate
-            }
-        }
-
-        throw new IllegalStateException("Unable to resolve darpan-backend root from ${cwd}")
     }
 }

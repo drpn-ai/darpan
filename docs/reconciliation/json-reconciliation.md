@@ -15,14 +15,15 @@ The JSON reconciliation feature allows you to compare two JSON files using ID-ba
 
 ### `ReconciliationGenericServices.reconcile#GenericFiles`
 
-Primary entry point for uploads. It stages files, then delegates to the shared router so upload and automation paths stay aligned.
+Primary entry point for uploads. It stages files, then delegates to the RuleSet compare-scope pipeline when `ruleSetId` is provided. During migration it can still fall back to the mapping bridge when only `reconciliationMappingId` is provided.
 
 **Input Parameters:**
 - `file1` (FileItem, required): First file (CSV or JSON)
 - `file2` (FileItem, required): Second file (CSV or JSON)
-- `file1SystemEnumId` (required): Identifier for the source system of file 1
-- `file2SystemEnumId` (required): Identifier for the source system of file 2
-- `reconciliationMappingId` (required): Configuration ID that defines schemas and ID paths
+- `ruleSetId` (preferred): RuleSet to run through the compare-scope + DRL path
+- `compareScopeId` (optional): Compare-scope override; required only when a RuleSet has multiple scopes
+- `file1SystemEnumId` / `file2SystemEnumId` (optional in RuleSet mode, required in mapping mode): source-system identifiers
+- `reconciliationMappingId` (migration bridge): legacy mapping input retained temporarily for old callers
 - `sparkMaster` (optional): Spark master URL (default: "local[*]")
 
 Additional pilot-compatible input mode:
@@ -39,6 +40,12 @@ These optional parameters allow a remote facade to pass UTF-8 file payloads from
 - `validationErrors`: Any schema validation errors found
 - `processingWarnings`: Any normalization fallbacks that were applied
 
+Behavior notes:
+- RuleSet mode writes one generated JSON artifact that contains both missing-object rows and rule-generated rows.
+- In RuleSet mode, `onlyInFile1Count` maps to IDs present only in file 1 (`missingInFile2Count` from the compare-scope service), and `onlyInFile2Count` maps to IDs present only in file 2 (`missingInFile1Count`).
+- If the RuleSet defines exactly one compare scope, Generic routing resolves it automatically. When a RuleSet has multiple scopes, `compareScopeId` is required.
+- The mapping route remains available only as a migration bridge until the later cutover tickets remove it.
+
 ### `ReconciliationCoreServices.reconcile#FilesByMapping`
 
 Shared router used by both Generic uploads and SFTP automation. It normalizes staged file locations, resolves mapping metadata (types, schemas, ID fields), and hands everything to the unified comparator.
@@ -46,6 +53,8 @@ Shared router used by both Generic uploads and SFTP automation. It normalizes st
 **Inputs (key):** `reconciliationMappingId`, `file1Location`, `file2Location`, `file1SystemEnumId`, `file2SystemEnumId`, optional `file1Name`/`file2Name`, `file1FileTypeEnumId`/`file2FileTypeEnumId`, `file1SchemaFileName`/`file2SchemaFileName`, `hasHeader`, `outputLocation`, `sparkMaster`, `sparkAppName`.
 
 **Outputs (key):** `file1Type`, `file2Type`, `reconciliationType`, `diffLocation`, `diffFileName`, `differenceCount`, `onlyInFile1Count`, `onlyInFile2Count`, `validationErrors`, `processingWarnings`.
+
+This service remains the Generic/SFTP migration bridge. New RuleSet-backed Generic runs should use `reconcile#RuleSetCompareScope` instead.
 
 ### `ReconciliationCoreServices.prepare#RuleSetCompareScope`
 

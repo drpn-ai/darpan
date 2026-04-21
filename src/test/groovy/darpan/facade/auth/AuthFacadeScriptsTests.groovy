@@ -50,6 +50,7 @@ class AuthFacadeScriptsTests {
         assertEquals("Krewe", sessionInfo.activeCompanyLabel)
         assertEquals([[userGroupId: "KREWE", label: "Krewe"]], sessionInfo.availableCompanies)
         assertFalse(sessionInfo.isSuperAdmin as boolean)
+        assertEquals("KREWE", user.context.activeCompanyUserGroupId)
         assertTrue((binding.getVariable("ok") as boolean))
         assertTrue(((binding.getVariable("errors") as List<String>).isEmpty()))
     }
@@ -78,6 +79,37 @@ class AuthFacadeScriptsTests {
         assertEquals("COMPANY", sessionInfo.scopeType)
         assertEquals("KREWE", sessionInfo.activeCompanyUserGroupId)
         assertEquals("Krewe", sessionInfo.activeCompanyLabel)
+        assertTrue(envelope.ok as boolean)
+    }
+
+    @Test
+    void getSessionInfoIncludesActiveCompanyForAdminMemberships() {
+        MessageFacadeStub message = new MessageFacadeStub()
+        UserStub user = new UserStub(userId: "EX_ADMIN", username: "john.doe", preferences: [
+                (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+        ])
+        EntityFacadeStub entity = new EntityFacadeStub(finders: [
+                "moqui.security.UserGroupMember": new FinderStub(oneResult: [userGroupId: "ADMIN", userId: "EX_ADMIN"]),
+                "moqui.security.UserGroup"      : new FinderStub(listResult: [
+                        [userGroupId: "GORJANA", description: "Gorjana", groupTypeEnumId: "UgtDarpanCompany"],
+                        [userGroupId: "KREWE", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+                ]),
+        ])
+        def ec = executionContext(message: message, user: user, entity: entity)
+
+        boolean authenticated = FacadeSupport.normalize(ec?.user?.userId) != null
+        Map<String, Object> sessionInfo = authenticated ? (PilotAccessSupport.buildSessionInfo(ec) as Map<String, Object>) : null
+        Map<String, Object> envelope = FacadeSupport.envelope(ec)
+
+        assertTrue(authenticated)
+        assertTrue(sessionInfo.isSuperAdmin as boolean)
+        assertEquals("COMPANY", sessionInfo.scopeType)
+        assertEquals("KREWE", sessionInfo.activeCompanyUserGroupId)
+        assertEquals("Krewe", sessionInfo.activeCompanyLabel)
+        assertEquals([
+                [userGroupId: "GORJANA", label: "Gorjana"],
+                [userGroupId: "KREWE", label: "Krewe"],
+        ], sessionInfo.availableCompanies)
         assertTrue(envelope.ok as boolean)
     }
 
@@ -178,6 +210,7 @@ class AuthFacadeScriptsTests {
         boolean loginUserResult = false
         boolean loggedOut = false
         Map<String, Object> preferences = [:]
+        Map<String, Object> context = [:]
         Timestamp nowTimestamp = new Timestamp(System.currentTimeMillis())
         Expando userAccount = new Expando(timeZone: "Asia/Kolkata")
 

@@ -120,6 +120,8 @@
                 <parameter name="reconciliationMappingId"/>
                 <parameter name="mappingName"/>
                 <parameter name="description"/>
+                <parameter name="companyUserGroupId"/>
+                <parameter name="companyLabel"/>
                 <parameter name="requiresSystemSelection" type="Boolean"/>
                 <parameter name="defaultFile1SystemEnumId"/>
                 <parameter name="defaultFile2SystemEnumId"/>

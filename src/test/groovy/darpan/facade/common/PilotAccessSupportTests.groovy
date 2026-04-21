@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 class PilotAccessSupportTests {
 
     @Test
-    void buildAccessScopeTreatsAdminGroupMemberAsGlobal() {
+    void buildAccessScopeTreatsAdminGroupMemberWithoutCompanyMembershipAsCompanyScopedWithoutActiveCompany() {
         FinderStub adminFinder = new FinderStub(oneResult: [userGroupId: "ADMIN", userId: "EX_ADMIN"])
         def ec = executionContext(
                 user: new UserStub(userId: "EX_ADMIN"),
@@ -21,10 +21,64 @@ class PilotAccessSupportTests {
         Map<String, Object> scope = PilotAccessSupport.buildAccessScope(ec)
 
         assertTrue(scope.isSuperAdmin as boolean)
-        assertEquals("GLOBAL", scope.scopeType)
+        assertEquals("COMPANY", scope.scopeType)
         assertEquals(null, scope.customerScopeId)
         assertEquals(null, scope.activeCompanyUserGroupId)
         assertEquals([], scope.availableCompanies)
+    }
+
+    @Test
+    void buildAccessScopeUsesConfiguredCompaniesForAdminWithoutMemberships() {
+        FinderStub adminFinder = new FinderStub(oneResult: [userGroupId: "ADMIN", userId: "EX_ADMIN"])
+        FinderStub companyGroupFinder = new FinderStub(listResult: [
+                [userGroupId: "GORJANA", description: "Gorjana", groupTypeEnumId: "UgtDarpanCompany"],
+                [userGroupId: "KREWE", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_ADMIN", preferences: [
+                        (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+                ]),
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupMember": adminFinder,
+                        "moqui.security.UserGroup"      : companyGroupFinder,
+                ])
+        )
+
+        Map<String, Object> scope = PilotAccessSupport.buildAccessScope(ec)
+
+        assertTrue(scope.isSuperAdmin as boolean)
+        assertEquals("COMPANY", scope.scopeType)
+        assertEquals("KREWE", scope.customerScopeId)
+        assertEquals("KREWE", scope.activeCompanyUserGroupId)
+        assertEquals("Krewe", scope.activeCompanyLabel)
+        assertEquals([
+                [userGroupId: "GORJANA", label: "Gorjana"],
+                [userGroupId: "KREWE", label: "Krewe"],
+        ], scope.availableCompanies)
+    }
+
+    @Test
+    void canAccessCompanyRecordRequiresActiveCompanyMatchForSuperAdmin() {
+        FinderStub adminFinder = new FinderStub(oneResult: [userGroupId: "ADMIN", userId: "EX_ADMIN"])
+        FinderStub companyGroupFinder = new FinderStub(listResult: [
+                [userGroupId: "GORJANA", description: "Gorjana", groupTypeEnumId: "UgtDarpanCompany"],
+                [userGroupId: "KREWE", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_ADMIN", preferences: [
+                        (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+                ]),
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupMember": adminFinder,
+                        "moqui.security.UserGroup"      : companyGroupFinder,
+                ])
+        )
+
+        boolean wrongCompanyAllowed = PilotAccessSupport.canAccessCompanyRecord(ec, [companyUserGroupId: "GORJANA"])
+        boolean activeCompanyAllowed = PilotAccessSupport.canAccessCompanyRecord(ec, [companyUserGroupId: "KREWE"])
+
+        assertFalse(wrongCompanyAllowed)
+        assertTrue(activeCompanyAllowed)
     }
 
     @Test
@@ -83,6 +137,27 @@ class PilotAccessSupportTests {
                         (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
                 ]),
                 entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupAndMember": companyFinder])
+        )
+
+        String outputLocation = PilotAccessSupport.resolveGenericOutputLocation(ec)
+
+        assertEquals("runtime://tmp/reconciliation/generic/company/KREWE/output", outputLocation)
+    }
+
+    @Test
+    void resolveGenericOutputLocationUsesCompanyScopedFolderForAdminWithActiveCompany() {
+        FinderStub adminFinder = new FinderStub(oneResult: [userGroupId: "ADMIN", userId: "EX_ADMIN"])
+        FinderStub companyGroupFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_ADMIN", preferences: [
+                        (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+                ]),
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupMember": adminFinder,
+                        "moqui.security.UserGroup"      : companyGroupFinder,
+                ])
         )
 
         String outputLocation = PilotAccessSupport.resolveGenericOutputLocation(ec)
@@ -164,6 +239,49 @@ class PilotAccessSupportTests {
     }
 
     @Test
+    void buildAccessScopeSyncsActiveCompanyIntoUserContext() {
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        UserStub user = new UserStub(userId: "EX_USER", preferences: [
+                (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+        ])
+        def ec = executionContext(
+                user: user,
+                entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupAndMember": companyFinder])
+        )
+
+        PilotAccessSupport.buildAccessScope(ec)
+
+        assertEquals("KREWE", user.context.activeCompanyUserGroupId)
+        assertEquals("Krewe", user.context.activeCompanyLabel)
+        assertEquals(["KREWE"], user.context.availableCompanyUserGroupIds)
+        assertFalse(user.context.isSuperAdmin as boolean)
+        assertEquals("COMPANY", user.context.scopeType)
+    }
+
+    @Test
+    void saveActiveCompanyAllowsAdminWhenCompanyIsConfigured() {
+        FinderStub adminFinder = new FinderStub(oneResult: [userGroupId: "ADMIN", userId: "EX_ADMIN"])
+        FinderStub companyGroupFinder = new FinderStub(listResult: [
+                [userGroupId: "GORJANA", description: "Gorjana", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        UserStub user = new UserStub(userId: "EX_ADMIN")
+        def ec = executionContext(
+                user: user,
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupMember": adminFinder,
+                        "moqui.security.UserGroup"      : companyGroupFinder,
+                ])
+        )
+
+        boolean saved = PilotAccessSupport.saveActiveCompany(ec, "GORJANA")
+
+        assertTrue(saved)
+        assertEquals("GORJANA", user.preferences[PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY])
+    }
+
+    @Test
     void saveActiveCompanyRejectsRequestedCompanyOutsideUserMembership() {
         MessageFacadeStub message = new MessageFacadeStub()
         FinderStub companyFinder = new FinderStub(listResult: [
@@ -196,6 +314,7 @@ class PilotAccessSupportTests {
         String userId
         Timestamp nowTimestamp = new Timestamp(System.currentTimeMillis())
         Map<String, Object> preferences = [:]
+        Map<String, Object> context = [:]
 
         Object getPreference(String preferenceKey) {
             return preferences[preferenceKey]

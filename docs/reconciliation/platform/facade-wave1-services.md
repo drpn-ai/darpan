@@ -16,7 +16,7 @@ This document defines backend facade APIs used by `darpan-ui` during the pilot r
 ## Pilot Shared-Tenant Access Scope
 
 - `facade.AuthFacadeServices.login#Session` and `facade.AuthFacadeServices.get#SessionInfo` now return scope metadata inside `sessionInfo`.
-- `scopeType` is `GLOBAL` for super-admin sessions and `COMPANY` for authenticated non-admin sessions.
+- `scopeType` is `COMPANY` for authenticated sessions, including super-admin sessions.
 - `activeCompanyUserGroupId` identifies the company group the user is currently working in.
 - `activeCompanyLabel` is the display label for that active company.
 - `availableCompanies[]` lists the user's switchable Darpan company groups.
@@ -25,24 +25,32 @@ This document defines backend facade APIs used by `darpan-ui` during the pilot r
 - The active company preference is stored in `UserPreference` under `darpan.auth.activeCompanyUserGroupId`.
 - Only `UserGroup` rows tagged with the Darpan-specific `UgtDarpanCompany` group type are exposed as switchable companies.
 - Current shared-tenant enforcement in this repo applies to:
-  - Wave 1 settings facades: super-admin only
-  - Wave 1 JSON schema facades: customer users only see schemas they created through the facade
-  - Generic reconciliation outputs under `runtime://tmp/reconciliation/generic/**`: non-admin sessions use per-user temp/output folders
+  - company-owned facade entities are filtered through Moqui `ArtifactAuthzFilter` / `EntityFilterSet` records bound to the PWA service authz path
+  - the active company is pushed into `ec.user.context.activeCompanyUserGroupId` during request/login setup so those filters apply without per-facade query conditions
+  - Wave 1 settings facades remain split: company-owned records (`SFTP`, `NetSuite auth`, `NetSuite endpoint`) are company-scoped, while global settings (`LLM`, `HcReadDbConfig`, enum/global admin settings) stay super-admin only
+  - Generic reconciliation outputs under `runtime://tmp/reconciliation/generic/**` are company-scoped when an active company exists
   - Legacy backend reconciliation and settings screens: authenticated super-admin only for the pilot release
-- This auth contract is the foundation for later issues that move schemas, runs, results, SFTP, and NetSuite records onto true company ownership.
+- This auth contract is the foundation for later issues that move the remaining runs/results surfaces onto the same company ownership model.
 
 ## Artifact Authorization Requirement
 
 Wave 1 facade methods require service artifact authorization in addition to session authentication.
 
-`runtime/component/darpan/data/SecuritySeedData.xml` must include an `AT_SERVICE` artifact group member that matches facade services:
+`runtime/component/darpan/data/SecuritySeedData.xml` should keep the legacy backend screen group admin-only and add a dedicated facade artifact group for the PWA service path:
 
 ```xml
-<moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
+<moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_FACADE_APP"
         artifactName="facade\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y" inheritAuthz="Y"/>
 ```
 
-Without this, authenticated users can still get errors like:
+The recommended coarse access split is:
+
+- `DARPAN_FACADE_APP_USER` on `DARPAN_FACADE_APP` for `DARPAN_USER`
+- `DARPAN_FACADE_APP_ADMIN` on `DARPAN_FACADE_APP` for `ADMIN`
+- `DARPAN_APP_ADMIN` on `DARPAN_APP` for the legacy backend screens
+- both facade authz rows should attach the same `ArtifactAuthzFilter` so company-owned facade reads stay scoped to `ec.user.context.activeCompanyUserGroupId` for admins and non-admin users alike
+
+Without the dedicated facade authz, authenticated users can still get errors like:
 `User <id> is not authorized for All on Service facade.SettingsFacadeServices.list#SftpServers`.
 
 ## Service Groups
@@ -78,7 +86,8 @@ Without this, authenticated users can still get errors like:
 
 Shared-tenant rule:
 
-- All settings facade methods now reject non-admin users with an authorization error because these records are global integration/system configuration, not customer-scoped pilot data.
+- `list#SftpServers`, `save#SftpServer`, `list#NsAuthConfigs`, `save#NsAuthConfig`, `list#NsRestletConfigs`, and `save#NsRestletConfig` are company-scoped through `companyUserGroupId`.
+- `list#EnumOptions`, `get#LlmSettings`, `save#LlmSettings`, `list#HcReadDbConfigs`, and `save#HcReadDbConfig` remain super-admin only.
 
 ### `facade.JsonSchemaFacadeServices`
 - `list#JsonSchemas`
@@ -92,11 +101,10 @@ Shared-tenant rule:
 
 Shared-tenant rule:
 
-- JSON schemas created through the facade are stamped with `ownerUserId`.
+- JSON schemas created through the facade are stamped with `companyUserGroupId` and `createdByUserId`.
 - Schema payloads now expose `systemEnumId`/`systemLabel` directly from `DarpanSystemSource`.
-- Super-admin users can access all schema rows.
-- Customer users can only list, load, update, validate against, flatten, and delete schemas whose `ownerUserId` matches the authenticated user.
-- Legacy rows without `ownerUserId` are treated as super-admin only.
+- Authenticated users, including super-admin users, can only list, load, update, validate against, flatten, and delete schemas in their active company.
+- Legacy rows without `companyUserGroupId` remain effectively admin-only until they are assigned.
 
 ### `facade.ReconciliationFacadeServices`
 - `create#PilotMapping`
@@ -129,8 +137,8 @@ Shared-tenant rule:
 - `create#PilotMapping` lets authenticated pilot users create a new JSON-backed mapping from schemas they can access through the facade.
 - All pilot mappings must keep saved schemas on every member; mappings that lose those saved-schema references are excluded from list/edit/run flows until fixed.
 - `list#PilotMappings` tolerates legacy display-format JSON field paths already saved by the wizard so existing mappings are not hidden from the dashboard.
-- Generated output storage remains customer-scoped for non-admin users through `PilotAccessSupport.resolveGenericOutputLocation(ec)`.
-- Super-admin users can list and retrieve outputs across the shared tenant because they resolve to the unscoped generic output directory.
+- Generated output storage resolves through the active company so list/get/delete only touch the current company-scoped output directory.
+- Super-admin sessions still retain admin capabilities, but company-sensitive output access now follows the same active-company selection when company memberships exist.
 
 ## Response Envelope
 

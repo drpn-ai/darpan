@@ -20,7 +20,6 @@ Set<String> availableMappingIds = [] as Set<String>
 def mappingFinder = ec.entity.find("darpan.mapping.ReconciliationMapping")
         .orderBy("mappingName,reconciliationMappingId")
         .useCache(false)
-PilotAccessSupport.applyCompanyFilter(mappingFinder, ec)
 
 (mappingFinder.list() ?: []).each { mapping ->
     List mappingMembers = ec.entity.find("darpan.mapping.ReconciliationMappingMember")
@@ -54,6 +53,8 @@ PilotAccessSupport.applyCompanyFilter(mappingFinder, ec)
                 reconciliationMappingId : mapping.reconciliationMappingId,
                 mappingName             : mapping.mappingName,
                 description             : mapping.description,
+                companyUserGroupId      : mapping.companyUserGroupId,
+                companyLabel            : PilotAccessSupport.resolveCompanyLabelForUserGroupId(ec, mapping.companyUserGroupId),
                 requiresSystemSelection : systemIds.size() != 2,
                 defaultFile1SystemEnumId: systemIds.size() >= 2 ? systemIds[0] : null,
                 defaultFile2SystemEnumId: systemIds.size() >= 2 ? systemIds[1] : null,
@@ -65,6 +66,8 @@ PilotAccessSupport.applyCompanyFilter(mappingFinder, ec)
                 row.reconciliationMappingId,
                 row.mappingName,
                 row.description,
+                row.companyUserGroupId,
+                row.companyLabel,
                 *(systemOptions.collect { it.label }),
                 *(systemOptions.collect { it.enumCode })
         ].any { it?.toString()?.toLowerCase()?.contains(search) }

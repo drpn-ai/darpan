@@ -28,26 +28,30 @@ Pins are personal and should follow the user everywhere they log in. Company-sen
 - LLM and other global AI settings
 - `HcReadDbConfig`
 - enum/global admin settings
-- an end-user "all companies" data view
+- an end-user "all companies" data view for non-admin users
 - broader global-vs-company policy beyond the surfaces listed above
 
 ## Current Repo State
 
-The current repo already has pieces of the desired behavior, but not the full model:
+The current repo now uses the active company as the working scope for the main company-sensitive Darpan surfaces:
 
 - dashboard pins are already persisted per user through `UserPreference`
-- session scope for normal users is still effectively `customerScopeId = userId`
-- schema access currently relies on `ownerUserId`
-- generated outputs are stored in per-user runtime locations for non-admin users
-- SFTP and NetSuite settings are currently treated as global/admin-only settings
+- authenticated session info resolves an active company from Darpan company groups and returns `activeCompanyUserGroupId`, `activeCompanyLabel`, and `availableCompanies`
+- the PWA facade path now uses a dedicated `DARPAN_FACADE_APP` artifact group plus Moqui `ArtifactAuthzFilter` / `EntityFilterSet` records so company-owned entity reads are filtered automatically from `ec.user.context.activeCompanyUserGroupId`
+- `DARPAN_USER` is the coarse app-access group for non-admin PWA users; company groups continue to represent business scope, not general app permission
+- the user menu exposes company switching whenever the session has one or more Darpan companies; super-admin users see all configured Darpan companies
+- schemas, mappings, generated outputs, SFTP settings, NetSuite auth configs, and NetSuite endpoint configs use `companyUserGroupId` for visibility and write ownership
+- new company-scoped records are stamped with the active company and `createdByUserId`
+- the component Moqui config syncs active-company data into `ec.user.context` on request/login so Moqui entity filters stay aligned with the current session
+- local demo seed data gives `john.doe` `KREWE` as the default active company and a user-menu company switcher across `KREWE` and `GORJANA`
 
-This means user-level persistence exists, but company-level shared visibility does not.
+Remaining work is mostly migration and cleanup for older rows that still have blank company ownership.
 
 ## Core Principles
 
 - Pins are always user-level
 - Company-sensitive records are always company-level
-- The active company controls both read visibility and write ownership
+- The active company controls write ownership and the default working context
 - A user can belong to multiple companies
 - `ALL_USERS` must not be used as a company data-view scope
 - Generic security groups such as `ADMIN` must not appear in the company switcher
@@ -84,6 +88,15 @@ Implementation rules:
 
 Company-sensitive records must be stamped with the active company when created and filtered by the active company when read.
 
+Read-side filtering should default to Moqui configuration instead of per-facade query logic.
+
+Implementation rules:
+
+- use `ArtifactAuthzFilter` + `EntityFilterSet` + `EntityFilter` for company-owned entity reads whenever the entity has a direct `companyUserGroupId`
+- populate `ec.user.context.activeCompanyUserGroupId` from the authenticated session before company-owned entity queries run
+- keep thin backend code only for active-company resolution, company-switch persistence, write stamping, and explicit validation/error handling
+- do not use Moqui tenant IDs for this feature; Darpan remains a shared-app, shared-database deployment with security-scoped company access
+
 Top-level records in scope should carry:
 
 - `companyUserGroupId`
@@ -107,8 +120,10 @@ Visibility rules for normal users:
 
 Admin behavior:
 
-- retain operational admin access
-- do not expose an end-user all-company selector in this phase
+- retain operational admin access across the app while keeping company-owned data scoped by the active company
+- keep the active company selector visible so super-admin users can choose from all configured Darpan companies
+- apply the same active-company read filtering to super-admin users as every other authenticated user
+- stamp new company-sensitive records with the active company even for super-admin
 
 ## Auth and Session Contract
 
@@ -182,6 +197,7 @@ Do not introduce `ALL_USERS` as a fallback shared data scope.
 - Pins remain personal and persist across devices and sessions
 - Users in the same company can see shared runs, schemas, results, SFTP settings, and NetSuite settings
 - Users outside that company cannot access those records
+- Super-admin users can review runs, schemas, SFTP settings, and NetSuite settings across all configured tenants while still choosing an active company
 - New company-sensitive records are stamped with the active company
 - `ALL_USERS` never appears as a selectable company or data-view scope
 

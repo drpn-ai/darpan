@@ -302,6 +302,8 @@ class ReconciliationSmokeTestSupport {
         upsertEntityValue(ec, "darpan.reconciliation.SftpServer", [sftpServerId: "SHOPIFY_TEST_SFTP"], [
                 sftpServerId     : "SHOPIFY_TEST_SFTP",
                 description      : "Smoke-test Shopify SFTP server",
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID,
+                createdByUserId  : TEST_COMPANY_USER_ID,
                 host             : "shopify.test",
                 port             : 22,
                 username         : "shopify-user",
@@ -311,6 +313,8 @@ class ReconciliationSmokeTestSupport {
         upsertEntityValue(ec, "darpan.reconciliation.SftpServer", [sftpServerId: "OMS_TEST_SFTP"], [
                 sftpServerId     : "OMS_TEST_SFTP",
                 description      : "Smoke-test OMS SFTP server",
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID,
+                createdByUserId  : TEST_COMPANY_USER_ID,
                 host             : "oms.test",
                 port             : 22,
                 username         : "oms-user",

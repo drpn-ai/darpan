@@ -26,6 +26,7 @@
                 <parameter name="systemEnumId"/>
                 <parameter name="systemLabel"/>
                 <parameter name="companyUserGroupId"/>
+                <parameter name="companyLabel"/>
                 <parameter name="createdByUserId"/>
                 <parameter name="statusId"/>
                 <parameter name="createdDate" type="Timestamp"/>
@@ -40,8 +41,7 @@
             <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
             <set field="ignoreTableEnsure" from="jsonschema.common.JsonSchemaUtil.ensureJsonSchemaTable(ec)"/>
             <set field="schemaFinder" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('statusId', 'Active').orderBy('-lastUpdatedStamp').useCache(false)"/>
-            <set field="ignoreCompanyFilter" from="darpan.facade.common.PilotAccessSupport.applyCompanyFilter(schemaFinder, ec)"/>
-            <set field="rows" from="(schemaFinder.list() ?: []).collect { item -> [jsonSchemaId: item.jsonSchemaId, schemaName: item.schemaName, description: item.description, systemEnumId: darpan.facade.common.FacadeSupport.normalize(item.systemEnumId), systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, item.systemEnumId, null, true), companyUserGroupId: item.companyUserGroupId, createdByUserId: item.createdByUserId, statusId: item.statusId, createdDate: item.createdDate, lastUpdatedStamp: item.lastUpdatedStamp] }"/>
+            <set field="rows" from="(schemaFinder.list() ?: []).collect { item -> [jsonSchemaId: item.jsonSchemaId, schemaName: item.schemaName, description: item.description, systemEnumId: darpan.facade.common.FacadeSupport.normalize(item.systemEnumId), systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, item.systemEnumId, null, true), companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.PilotAccessSupport.resolveCompanyLabelForUserGroupId(ec, item.companyUserGroupId), createdByUserId: item.createdByUserId, statusId: item.statusId, createdDate: item.createdDate, lastUpdatedStamp: item.lastUpdatedStamp] }"/>
             <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.schemaName, row.description].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
             <set field="totalCount" from="filteredRows.size()"/>
             <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>
@@ -321,7 +321,7 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="savedSchemaEntity" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', saveResult.jsonSchemaId).useCache(false).one()"/>
-                <if condition="savedSchemaEntity != null &amp;&amp; !darpan.facade.common.PilotAccessSupport.isSuperAdmin(ec) &amp;&amp; !savedSchemaEntity.companyUserGroupId">
+                <if condition="savedSchemaEntity != null &amp;&amp; !savedSchemaEntity.companyUserGroupId">
                     <set field="ignoreCompanyAssignment" from="darpan.facade.common.PilotAccessSupport.assignCompanyOwnershipOnCreate(savedSchemaEntity, ec)"/>
                     <if condition="!ec.message.hasError()">
                         <set field="ignoreSavedUpdate" from="savedSchemaEntity.update()"/>

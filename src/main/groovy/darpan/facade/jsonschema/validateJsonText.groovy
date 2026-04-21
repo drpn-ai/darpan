@@ -31,7 +31,7 @@ if (!ec.message.hasError()) {
                 .useCache(false)
                 .one()
         }
-        PilotAccessSupport.requireOwnedRecordAccess(ec, schemaRecord, "Schema not found", "Schema is not available in your customer scope.")
+        PilotAccessSupport.requireCompanyRecordAccess(ec, schemaRecord, "Schema not found", "Schema is not available in your active company.")
         if (ec.message.hasError()) {
             // error already recorded
         } else {

@@ -23,15 +23,71 @@ class PilotAccessSupportTests {
         assertTrue(scope.isSuperAdmin as boolean)
         assertEquals("GLOBAL", scope.scopeType)
         assertEquals(null, scope.customerScopeId)
+        assertEquals(null, scope.activeCompanyUserGroupId)
+        assertEquals([], scope.availableCompanies)
+    }
+
+    @Test
+    void buildAccessScopeUsesPreferredCompanyWhenMembershipIsValid() {
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "ACME", userId: "EX_USER", description: "Acme", groupTypeEnumId: "UgtDarpanCompany"],
+                [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_USER", preferences: [
+                        (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+                ]),
+                entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupAndMember": companyFinder])
+        )
+
+        Map<String, Object> scope = PilotAccessSupport.buildAccessScope(ec)
+
+        assertFalse(scope.isSuperAdmin as boolean)
+        assertEquals("COMPANY", scope.scopeType)
+        assertEquals("KREWE", scope.customerScopeId)
+        assertEquals("KREWE", scope.activeCompanyUserGroupId)
+        assertEquals("Krewe", scope.activeCompanyLabel)
+        assertEquals([
+                [userGroupId: "ACME", label: "Acme"],
+                [userGroupId: "KREWE", label: "Krewe"],
+        ], scope.availableCompanies)
+    }
+
+    @Test
+    void buildAccessScopeFallsBackToFirstAvailableCompanyWhenPreferenceIsInvalid() {
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+                [userGroupId: "ACME", userId: "EX_USER", description: "Acme", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_USER", preferences: [
+                        (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "MISSING",
+                ]),
+                entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupAndMember": companyFinder])
+        )
+
+        Map<String, Object> scope = PilotAccessSupport.buildAccessScope(ec)
+
+        assertEquals("ACME", scope.customerScopeId)
+        assertEquals("ACME", scope.activeCompanyUserGroupId)
+        assertEquals("Acme", scope.activeCompanyLabel)
     }
 
     @Test
     void resolveGenericOutputLocationUsesCustomerScopedFolderForNonAdmin() {
-        def ec = executionContext(user: new UserStub(userId: "pilot.customer"))
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", userId: "pilot.customer", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        def ec = executionContext(
+                user: new UserStub(userId: "pilot.customer", preferences: [
+                        (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+                ]),
+                entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupAndMember": companyFinder])
+        )
 
         String outputLocation = PilotAccessSupport.resolveGenericOutputLocation(ec)
 
-        assertEquals("runtime://tmp/reconciliation/generic/user/pilot.customer/output", outputLocation)
+        assertEquals("runtime://tmp/reconciliation/generic/company/KREWE/output", outputLocation)
     }
 
     @Test
@@ -49,6 +105,84 @@ class PilotAccessSupportTests {
         assertEquals(["Schema is not available in your customer scope."], message.errors)
     }
 
+    @Test
+    void requireCompanyRecordAccessRejectsCrossCompanyRecord() {
+        MessageFacadeStub message = new MessageFacadeStub()
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", userId: "CUSTOMER_A", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        def ec = executionContext(
+                user: new UserStub(userId: "CUSTOMER_A", preferences: [
+                        (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+                ]),
+                entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupAndMember": companyFinder]),
+                message: message
+        )
+
+        PilotAccessSupport.requireCompanyRecordAccess(ec, [companyUserGroupId: "ACME"],
+                "Schema not found", "Schema is not available in your active company.")
+
+        assertTrue(message.hasError())
+        assertEquals(["Schema is not available in your active company."], message.errors)
+    }
+
+    @Test
+    void assignCompanyOwnershipOnCreateUsesActiveCompanyAndCreator() {
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        UserStub user = new UserStub(userId: "EX_USER", preferences: [
+                (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+        ])
+        def ec = executionContext(
+                user: user,
+                entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupAndMember": companyFinder])
+        )
+        Map<String, Object> newValue = [:]
+
+        PilotAccessSupport.assignCompanyOwnershipOnCreate(newValue, ec)
+
+        assertEquals("KREWE", newValue.companyUserGroupId)
+        assertEquals("EX_USER", newValue.createdByUserId)
+    }
+
+    @Test
+    void saveActiveCompanyPersistsRequestedCompanyWhenMembershipIsValid() {
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        UserStub user = new UserStub(userId: "EX_USER")
+        def ec = executionContext(
+                user: user,
+                entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupAndMember": companyFinder])
+        )
+
+        boolean saved = PilotAccessSupport.saveActiveCompany(ec, "KREWE")
+
+        assertTrue(saved)
+        assertEquals("KREWE", user.preferences[PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY])
+    }
+
+    @Test
+    void saveActiveCompanyRejectsRequestedCompanyOutsideUserMembership() {
+        MessageFacadeStub message = new MessageFacadeStub()
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        UserStub user = new UserStub(userId: "EX_USER")
+        def ec = executionContext(
+                user: user,
+                entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupAndMember": companyFinder]),
+                message: message
+        )
+
+        boolean saved = PilotAccessSupport.saveActiveCompany(ec, "OTHER")
+
+        assertFalse(saved)
+        assertEquals(null, user.preferences[PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY])
+        assertEquals([PilotAccessSupport.ACTIVE_COMPANY_UNAVAILABLE_MESSAGE], message.errors)
+    }
+
     private static Expando executionContext(Map overrides = [:]) {
         return new Expando(
                 user: overrides.user ?: new UserStub(),
@@ -61,6 +195,15 @@ class PilotAccessSupportTests {
     static class UserStub {
         String userId
         Timestamp nowTimestamp = new Timestamp(System.currentTimeMillis())
+        Map<String, Object> preferences = [:]
+
+        Object getPreference(String preferenceKey) {
+            return preferences[preferenceKey]
+        }
+
+        void setPreference(String preferenceKey, Object preferenceValue) {
+            preferences[preferenceKey] = preferenceValue
+        }
     }
 
     static class MessageFacadeStub {
@@ -91,6 +234,7 @@ class PilotAccessSupportTests {
     static class FinderStub {
         Map<String, Object> conditions = [:]
         Object oneResult
+        List listResult = []
 
         FinderStub condition(String field, Object value) {
             conditions[field] = value
@@ -107,6 +251,10 @@ class PilotAccessSupportTests {
 
         Object one() {
             return oneResult
+        }
+
+        List list() {
+            return listResult
         }
     }
 }

@@ -3,8 +3,14 @@ package darpan.facade.reconciliation
 import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertTrue
 
 class PilotDashboardPreferenceSupportTests {
+
+    @Test
+    void pinnedPreferenceKeyFitsMoquiIdLimit() {
+        assertTrue(PilotDashboardPreferenceSupport.PINNED_MAPPING_PREFERENCE_KEY.size() <= 40)
+    }
 
     @Test
     void parsesPinnedMappingIdsFromStoredJson() {

@@ -21,7 +21,13 @@
     <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_APP_ADMIN" userGroupId="ADMIN"
             artifactGroupId="DARPAN_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
 
-    <moqui.basic.Enumeration enumId="darpan.dashboard.pinnedReconciliationMappingIds"
+    <moqui.basic.Enumeration enumId="UgtDarpanCompany"
+            description="Darpan company groups"
+            enumTypeId="UserGroupType"/>
+    <moqui.basic.Enumeration enumId="darpan.auth.activeCompanyUserGroupId"
+            description="Preferred active company user group id"
+            enumTypeId="UserPreferenceKey"/>
+    <moqui.basic.Enumeration enumId="darpan.dashboard.pinnedMappingIds"
             description="Pinned dashboard reconciliation mappings"
             enumTypeId="UserPreferenceKey"/>
 </entity-facade-xml>

@@ -18,6 +18,8 @@
             <parameter name="savedMapping">
                 <parameter name="reconciliationMappingId"/>
                 <parameter name="mappingName"/>
+                <parameter name="companyUserGroupId"/>
+                <parameter name="createdByUserId"/>
                 <parameter name="file1SystemEnumId"/>
                 <parameter name="file2SystemEnumId"/>
                 <parameter name="file1SchemaName"/>
@@ -54,8 +56,8 @@
             <if condition="!ec.message.hasError()">
                 <set field="schema1" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schema1IdValue).useCache(false).one()"/>
                 <set field="schema2" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schema2IdValue).useCache(false).one()"/>
-                <set field="ignoreAccessCheck1" from="darpan.facade.common.PilotAccessSupport.requireOwnedRecordAccess(ec, schema1, &quot;Schema not found for schema1Id '${schema1IdValue}'&quot;, 'Schema 1 is not available in your customer scope.')"/>
-                <set field="ignoreAccessCheck2" from="darpan.facade.common.PilotAccessSupport.requireOwnedRecordAccess(ec, schema2, &quot;Schema not found for schema2Id '${schema2IdValue}'&quot;, 'Schema 2 is not available in your customer scope.')"/>
+                <set field="ignoreAccessCheck1" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, schema1, &quot;Schema not found for schema1Id '${schema1IdValue}'&quot;, 'Schema 1 is not available in your active company.')"/>
+                <set field="ignoreAccessCheck2" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, schema2, &quot;Schema not found for schema2Id '${schema2IdValue}'&quot;, 'Schema 2 is not available in your active company.')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="schema1SystemEnumId" from="darpan.facade.common.FacadeSupport.normalize(schema1?.systemEnumId)"/>
@@ -73,17 +75,21 @@
             <if condition="!ec.message.hasError()">
                 <set field="nowTs" from="ec.user.nowTimestamp"/>
                 <set field="mappingIdValue" from="darpan.facade.reconciliation.PilotMappingSupport.generatePilotMappingId(ec, mappingNameValue)"/>
-                <service-call name="create#darpan.mapping.ReconciliationMapping"
-                        in-map="[reconciliationMappingId: mappingIdValue, mappingName: mappingNameValue, createdDate: nowTs, lastUpdatedDate: nowTs]"
-                        out-map="mappingCreateResult"/>
-                <service-call name="create#darpan.mapping.ReconciliationMappingMember"
-                        in-map="[mappingMemberId: mappingIdValue + '-1', reconciliationMappingId: mappingIdValue, systemEnumId: schema1.systemEnumId, fileTypeEnumId: 'DftJson', idFieldExpression: schema1FieldPathValue, systemFieldName: schema1FieldPathValue, schemaFileName: schema1.schemaName, createdDate: nowTs]"
-                        out-map="mappingMember1Result"/>
-                <service-call name="create#darpan.mapping.ReconciliationMappingMember"
-                        in-map="[mappingMemberId: mappingIdValue + '-2', reconciliationMappingId: mappingIdValue, systemEnumId: schema2.systemEnumId, fileTypeEnumId: 'DftJson', idFieldExpression: schema2FieldPathValue, systemFieldName: schema2FieldPathValue, schemaFileName: schema2.schemaName, createdDate: nowTs]"
-                        out-map="mappingMember2Result"/>
-                <set field="savedMapping" from="[reconciliationMappingId: mappingIdValue, mappingName: mappingNameValue, file1SystemEnumId: schema1SystemEnumId, file2SystemEnumId: schema2SystemEnumId, file1SchemaName: schema1.schemaName, file2SchemaName: schema2.schemaName, file1FieldPath: schema1FieldPathValue, file2FieldPath: schema2FieldPathValue]"/>
-                <message>Created reconciliation flow ${mappingNameValue}.</message>
+                <set field="newMappingMap" from="[reconciliationMappingId: mappingIdValue, mappingName: mappingNameValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                <set field="ignoreCompanyAssignment" from="darpan.facade.common.PilotAccessSupport.assignCompanyOwnershipOnCreate(newMappingMap, ec)"/>
+                <if condition="!ec.message.hasError()">
+                    <service-call name="create#darpan.mapping.ReconciliationMapping"
+                            in-map="newMappingMap"
+                            out-map="mappingCreateResult"/>
+                    <service-call name="create#darpan.mapping.ReconciliationMappingMember"
+                            in-map="[mappingMemberId: mappingIdValue + '-1', reconciliationMappingId: mappingIdValue, systemEnumId: schema1.systemEnumId, fileTypeEnumId: 'DftJson', idFieldExpression: schema1FieldPathValue, systemFieldName: schema1FieldPathValue, schemaFileName: schema1.schemaName, createdDate: nowTs]"
+                            out-map="mappingMember1Result"/>
+                    <service-call name="create#darpan.mapping.ReconciliationMappingMember"
+                            in-map="[mappingMemberId: mappingIdValue + '-2', reconciliationMappingId: mappingIdValue, systemEnumId: schema2.systemEnumId, fileTypeEnumId: 'DftJson', idFieldExpression: schema2FieldPathValue, systemFieldName: schema2FieldPathValue, schemaFileName: schema2.schemaName, createdDate: nowTs]"
+                            out-map="mappingMember2Result"/>
+                    <set field="savedMapping" from="[reconciliationMappingId: mappingIdValue, mappingName: mappingNameValue, companyUserGroupId: newMappingMap.companyUserGroupId, createdByUserId: newMappingMap.createdByUserId, file1SystemEnumId: schema1SystemEnumId, file2SystemEnumId: schema2SystemEnumId, file1SchemaName: schema1.schemaName, file2SchemaName: schema2.schemaName, file1FieldPath: schema1FieldPathValue, file2FieldPath: schema2FieldPathValue]"/>
+                    <message>Created reconciliation flow ${mappingNameValue}.</message>
+                </if>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -143,6 +149,8 @@
             <parameter name="pilotMapping">
                 <parameter name="reconciliationMappingId"/>
                 <parameter name="mappingName"/>
+                <parameter name="companyUserGroupId"/>
+                <parameter name="createdByUserId"/>
                 <parameter name="members">
                     <parameter name="mappingMemberId"/>
                     <parameter name="systemEnumId"/>
@@ -166,16 +174,25 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
+                <set field="ignoreMappingAccess" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, mapping, &quot;Mapping '${mappingIdValue}' was not found.&quot;, &quot;Mapping '${mappingIdValue}' is not available in your active company.&quot;)"/>
+            </if>
+            <if condition="!ec.message.hasError()">
                 <set field="members" from="ec.entity.find('darpan.mapping.ReconciliationMappingMember').condition('reconciliationMappingId', mappingIdValue).orderBy('mappingMemberId').useCache(false).list() ?: []"/>
                 <if condition="members.isEmpty()">
                     <message error="true">Mapping '${mappingIdValue}' does not contain any system members.</message>
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
+                <set field="pilotReadinessIssues" from="darpan.facade.reconciliation.PilotMappingSupport.collectPilotReadinessIssues(ec, members)"/>
+                <if condition="!pilotReadinessIssues.isEmpty()">
+                    <message error="true">Mapping '${mappingIdValue}' requires saved schemas before it can be edited. ${pilotReadinessIssues.join(' ')}</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
                 <set field="resolvedMembers" from="darpan.facade.reconciliation.PilotMappingSupport.buildEditablePilotMappingMembers(ec, members)"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="pilotMapping" from="[reconciliationMappingId: mapping.reconciliationMappingId, mappingName: mapping.mappingName, members: resolvedMembers]"/>
+                <set field="pilotMapping" from="[reconciliationMappingId: mapping.reconciliationMappingId, mappingName: mapping.mappingName, companyUserGroupId: mapping.companyUserGroupId, createdByUserId: mapping.createdByUserId, members: resolvedMembers]"/>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -200,6 +217,8 @@
             <parameter name="savedMapping">
                 <parameter name="reconciliationMappingId"/>
                 <parameter name="mappingName"/>
+                <parameter name="companyUserGroupId"/>
+                <parameter name="createdByUserId"/>
                 <parameter name="file1SystemEnumId"/>
                 <parameter name="file2SystemEnumId"/>
                 <parameter name="file1SchemaName"/>
@@ -244,6 +263,9 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
+                <set field="ignoreMappingAccess" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, mapping, &quot;Mapping '${mappingIdValue}' was not found.&quot;, &quot;Mapping '${mappingIdValue}' is not available in your active company.&quot;)"/>
+            </if>
+            <if condition="!ec.message.hasError()">
                 <set field="existingMembers" from="ec.entity.find('darpan.mapping.ReconciliationMappingMember').condition('reconciliationMappingId', mappingIdValue).orderBy('mappingMemberId').useCache(false).list() ?: []"/>
                 <if condition="existingMembers.size() != 2">
                     <message error="true">Only two-source runs can be edited in this settings workflow.</message>
@@ -252,8 +274,8 @@
             <if condition="!ec.message.hasError()">
                 <set field="schema1" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schema1IdValue).useCache(false).one()"/>
                 <set field="schema2" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schema2IdValue).useCache(false).one()"/>
-                <set field="ignoreAccessCheck1" from="darpan.facade.common.PilotAccessSupport.requireOwnedRecordAccess(ec, schema1, &quot;Schema not found for schema1Id '${schema1IdValue}'&quot;, 'Schema 1 is not available in your customer scope.')"/>
-                <set field="ignoreAccessCheck2" from="darpan.facade.common.PilotAccessSupport.requireOwnedRecordAccess(ec, schema2, &quot;Schema not found for schema2Id '${schema2IdValue}'&quot;, 'Schema 2 is not available in your customer scope.')"/>
+                <set field="ignoreAccessCheck1" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, schema1, &quot;Schema not found for schema1Id '${schema1IdValue}'&quot;, 'Schema 1 is not available in your active company.')"/>
+                <set field="ignoreAccessCheck2" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, schema2, &quot;Schema not found for schema2Id '${schema2IdValue}'&quot;, 'Schema 2 is not available in your active company.')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="schema1SystemEnumId" from="darpan.facade.common.FacadeSupport.normalize(schema1?.systemEnumId)"/>
@@ -287,7 +309,7 @@
                 <set field="ignoreSecondSystemField" from="secondMember.set('systemFieldName', schema2FieldPathValue)"/>
                 <set field="ignoreSecondSchemaName" from="secondMember.set('schemaFileName', schema2.schemaName)"/>
                 <set field="ignoreSecondUpdate" from="secondMember.update()"/>
-                <set field="savedMapping" from="[reconciliationMappingId: mappingIdValue, mappingName: mappingNameValue, file1SystemEnumId: schema1SystemEnumId, file2SystemEnumId: schema2SystemEnumId, file1SchemaName: schema1.schemaName, file2SchemaName: schema2.schemaName, file1FieldPath: schema1FieldPathValue, file2FieldPath: schema2FieldPathValue]"/>
+                <set field="savedMapping" from="[reconciliationMappingId: mappingIdValue, mappingName: mappingNameValue, companyUserGroupId: mapping.companyUserGroupId, createdByUserId: mapping.createdByUserId, file1SystemEnumId: schema1SystemEnumId, file2SystemEnumId: schema2SystemEnumId, file1SchemaName: schema1.schemaName, file2SchemaName: schema2.schemaName, file1FieldPath: schema1FieldPathValue, file2FieldPath: schema2FieldPathValue]"/>
                 <message>Saved run ${mappingNameValue}.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
@@ -345,6 +367,7 @@
                     <parameter name="sourceFormat"/>
                     <parameter name="availableFormats" type="List"/>
                     <parameter name="preferredDownloadFormat"/>
+                    <parameter name="companyUserGroupId"/>
                     <parameter name="reconciliationMappingId"/>
                     <parameter name="mappingName"/>
                     <parameter name="reconciliationType"/>
@@ -362,7 +385,7 @@
 
     <service verb="list" noun="PilotGeneratedOutputs" type="script" allow-remote="true" authenticate="true"
             location="component://darpan/src/main/groovy/darpan/facade/reconciliation/listPilotGeneratedOutputs.groovy">
-        <description>List generated pilot diff outputs within the current user scope.</description>
+        <description>List generated pilot diff outputs within the current active-company scope.</description>
         <in-parameters>
             <parameter name="reconciliationMappingId"/>
             <parameter name="query"/>
@@ -384,6 +407,7 @@
                 <parameter name="sourceFormat"/>
                 <parameter name="availableFormats" type="List"/>
                 <parameter name="preferredDownloadFormat"/>
+                <parameter name="companyUserGroupId"/>
                 <parameter name="reconciliationMappingId"/>
                 <parameter name="mappingName"/>
                 <parameter name="reconciliationType"/>

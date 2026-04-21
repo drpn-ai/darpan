@@ -9,6 +9,6 @@ Reviewed to keep only mandatory operator-facing records.
     <moqui.security.ArtifactGroup artifactGroupId="DARPAN_AUTH_API" description="Darpan auth facade APIs"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_AUTH_API" artifactName="facade\.AuthFacadeServices\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y" inheritAuthz="Y"/>
     <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_AUTH_API_ALL_USERS" userGroupId="ALL_USERS" artifactGroupId="DARPAN_AUTH_API" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
-    <moqui.basic.Enumeration enumId="darpan.dashboard.pinnedReconciliationMappingIds" description="Pinned dashboard reconciliation mappings" enumTypeId="UserPreferenceKey"/>
+    <moqui.basic.Enumeration enumId="darpan.dashboard.pinnedMappingIds" description="Pinned dashboard reconciliation mappings" enumTypeId="UserPreferenceKey"/>
     <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_APP_ADMIN" userGroupId="ADMIN" artifactGroupId="DARPAN_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
 </entity-facade-xml>

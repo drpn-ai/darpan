@@ -39,11 +39,11 @@
 <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_APP_ADMIN" userGroupId="ADMIN" artifactGroupId="DARPAN_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
 ```
 
-- Record: `moqui.basic.Enumeration|enumId=darpan.dashboard.pinnedReconciliationMappingIds|enumTypeId=UserPreferenceKey`
+- Record: `moqui.basic.Enumeration|enumId=darpan.dashboard.pinnedMappingIds|enumTypeId=UserPreferenceKey`
 - Element: `moqui.basic.Enumeration`
 
 ```xml
-<moqui.basic.Enumeration enumId="darpan.dashboard.pinnedReconciliationMappingIds" description="Pinned dashboard reconciliation mappings" enumTypeId="UserPreferenceKey"/>
+<moqui.basic.Enumeration enumId="darpan.dashboard.pinnedMappingIds" description="Pinned dashboard reconciliation mappings" enumTypeId="UserPreferenceKey"/>
 ```
 
 ### Excluded from the mandatory release-scoped upgrade load

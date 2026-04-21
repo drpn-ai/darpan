@@ -1,3 +1,4 @@
+import darpan.facade.reconciliation.PilotMappingSupport
 import org.slf4j.LoggerFactory
 
 def logger = LoggerFactory.getLogger("darpan.reconciliation.core.FileRoutingReconciliation")
@@ -102,6 +103,11 @@ if (!mappingMembers) {
     throw new IllegalArgumentException("No mapping members found for mapping ${reconciliationMappingId}")
 }
 
+List<String> persistedReadinessIssues = PilotMappingSupport.collectPilotReadinessIssues(ec, mappingMembers)
+if (!persistedReadinessIssues.isEmpty()) {
+    throw new IllegalArgumentException("Mapping ${reconciliationMappingId} is not runnable until every system member references a saved schema. ${persistedReadinessIssues.join(' ')}")
+}
+
 def configBySystem = [:]
 mappingMembers.each { member ->
     configBySystem[normalize(member.systemEnumId)] = [
@@ -128,6 +134,20 @@ if (file1FileTypeEnumId) configBySystem[file1Key].fileTypeEnumId = file1FileType
 if (file2FileTypeEnumId) configBySystem[file2Key].fileTypeEnumId = file2FileTypeEnumId
 if (file1SchemaFileName) configBySystem[file1Key].schemaFileName = file1SchemaFileName
 if (file2SchemaFileName) configBySystem[file2Key].schemaFileName = file2SchemaFileName
+
+List<Map<String, Object>> effectiveMembers = configBySystem.collect { String systemEnumId, Map memberConfig ->
+    [
+            systemEnumId     : systemEnumId,
+            fileTypeEnumId   : memberConfig.fileTypeEnumId,
+            schemaFileName   : memberConfig.schemaFileName,
+            idFieldExpression: memberConfig.idFieldExpression,
+            systemFieldName  : memberConfig.systemFieldName
+    ]
+}
+List<String> effectiveReadinessIssues = PilotMappingSupport.collectPilotReadinessIssues(ec, effectiveMembers)
+if (!effectiveReadinessIssues.isEmpty()) {
+    throw new IllegalArgumentException("Effective mapping configuration for ${reconciliationMappingId} is not runnable. ${effectiveReadinessIssues.join(' ')}")
+}
 
 def file1SafeName = normalize(file1Name) ?: safeNameFromLocation(file1Location, "file1")
 def file2SafeName = normalize(file2Name) ?: safeNameFromLocation(file2Location, "file2")

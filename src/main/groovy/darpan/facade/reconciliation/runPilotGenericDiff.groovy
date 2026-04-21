@@ -42,6 +42,9 @@ if (!ec.message.hasError()) {
             .one()
     if (mapping == null) {
         ec.message.addError("Mapping '${mappingId}' was not found.")
+    } else {
+        PilotAccessSupport.requireCompanyRecordAccess(ec, mapping, "Mapping '${mappingId}' was not found.",
+                "Mapping '${mappingId}' is not available in your active company.")
     }
 }
 
@@ -149,6 +152,7 @@ if (!ec.message.hasError()) {
                 metadata: [
                         reconciliationMappingId  : mapping.reconciliationMappingId,
                         reconciliationMappingName: mapping.mappingName,
+                        companyUserGroupId       : PilotAccessSupport.currentActiveCompanyUserGroupId(ec),
                         reconciliation           : serviceResult.reconciliationType,
                         file1Label               : file1Label,
                         file2Label               : file2Label,

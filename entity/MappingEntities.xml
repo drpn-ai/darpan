@@ -10,8 +10,14 @@
         <field name="reconciliationMappingId" type="id" is-pk="true"/>
         <field name="mappingName" type="text-short" not-null="true"/>
         <field name="description" type="text-medium"/>
+        <field name="companyUserGroupId" type="id"/>
+        <field name="createdByUserId" type="id"/>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>
+
+        <relationship type="one" title="Company" related="moqui.security.UserGroup" fk-name="RECONMAP_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
     </entity>
 
     <entity entity-name="ReconciliationMappingMember" package="darpan.mapping" use="configuration">

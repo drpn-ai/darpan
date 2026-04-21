@@ -7,12 +7,4 @@
     <moqui.basic.EnumerationType enumTypeId="DarpanFileType" description="File Types for Reconciliation"/>
     <moqui.basic.Enumeration enumId="DftCsv" enumTypeId="DarpanFileType" enumCode="CSV" description="CSV" sequenceNum="1"/>
     <moqui.basic.Enumeration enumId="DftJson" enumTypeId="DarpanFileType" enumCode="JSON" description="JSON" sequenceNum="2"/>
-
-    <darpan.mapping.ReconciliationMapping reconciliationMappingId="OrderIdMap" mappingName="Order ID" description="Order ID field mapping"/>
-    <darpan.mapping.ReconciliationMappingMember mappingMemberId="OrderIdMapOms"
-            reconciliationMappingId="OrderIdMap" systemEnumId="OMS" 
-            fileTypeEnumId="DftCsv" idFieldExpression="order_id"/>
-    <darpan.mapping.ReconciliationMappingMember mappingMemberId="OrderIdMapShopify"
-            reconciliationMappingId="OrderIdMap" systemEnumId="SHOPIFY" 
-            fileTypeEnumId="DftCsv" idFieldExpression="order_id"/>
 </entity-facade-xml>

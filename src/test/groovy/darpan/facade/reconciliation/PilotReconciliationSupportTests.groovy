@@ -51,6 +51,7 @@ class PilotReconciliationSupportTests {
     void buildGeneratedOutputDescriptorExposesSummaryAndFormats() {
         Map<String, Object> diffDocument = [
                 metadata: [
+                        companyUserGroupId       : "KREWE",
                         reconciliationMappingId  : "OrderIdMap",
                         reconciliationMappingName: "Order ID",
                         reconciliation           : "CSV",
@@ -74,6 +75,7 @@ class PilotReconciliationSupportTests {
         assertEquals("order-id-diff-20260330.json", row.fileName)
         assertEquals("json", row.sourceFormat)
         assertIterableEquals(["json", "csv"], row.availableFormats as List<String>)
+        assertEquals("KREWE", row.companyUserGroupId)
         assertEquals("OrderIdMap", row.reconciliationMappingId)
         assertEquals("Order ID", row.mappingName)
         assertEquals("CSV", row.reconciliationType)

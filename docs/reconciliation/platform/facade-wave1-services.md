@@ -16,14 +16,20 @@ This document defines backend facade APIs used by `darpan-ui` during the pilot r
 ## Pilot Shared-Tenant Access Scope
 
 - `facade.AuthFacadeServices.login#Session` and `facade.AuthFacadeServices.get#SessionInfo` now return scope metadata inside `sessionInfo`.
-- `scopeType` is `GLOBAL` for super-admin sessions and `CUSTOMER` for normal pilot customer sessions.
-- `customerScopeId` is the current `userId` for customer sessions in this release. This keeps one customer scope per pilot login without requiring separate tenants.
+- `scopeType` is `GLOBAL` for super-admin sessions and `COMPANY` for authenticated non-admin sessions.
+- `activeCompanyUserGroupId` identifies the company group the user is currently working in.
+- `activeCompanyLabel` is the display label for that active company.
+- `availableCompanies[]` lists the user's switchable Darpan company groups.
+- `customerScopeId` remains in the payload temporarily as a compatibility alias for `activeCompanyUserGroupId` while downstream company-scoped surfaces are migrated off the older field name.
 - `isSuperAdmin` is `true` only when the current user belongs to the Moqui `ADMIN` group.
+- The active company preference is stored in `UserPreference` under `darpan.auth.activeCompanyUserGroupId`.
+- Only `UserGroup` rows tagged with the Darpan-specific `UgtDarpanCompany` group type are exposed as switchable companies.
 - Current shared-tenant enforcement in this repo applies to:
   - Wave 1 settings facades: super-admin only
   - Wave 1 JSON schema facades: customer users only see schemas they created through the facade
   - Generic reconciliation outputs under `runtime://tmp/reconciliation/generic/**`: non-admin sessions use per-user temp/output folders
   - Legacy backend reconciliation and settings screens: authenticated super-admin only for the pilot release
+- This auth contract is the foundation for later issues that move schemas, runs, results, SFTP, and NetSuite records onto true company ownership.
 
 ## Artifact Authorization Requirement
 
@@ -44,6 +50,7 @@ Without this, authenticated users can still get errors like:
 ### `facade.AuthFacadeServices`
 - `login#Session`
 - `get#SessionInfo`
+- `save#ActiveCompany`
 - `logout#Session`
 
 ## Pilot Stateless Auth Behavior
@@ -52,6 +59,7 @@ Without this, authenticated users can still get errors like:
 - The frontend must send that token on later requests through the `login_key` request header.
 - Token lifetime is aligned to `user-facade/login-key@expire-hours` from Moqui config. The default remains 144 hours, exposed as `authTokenExpiresInSeconds`.
 - `get#SessionInfo` authenticates from the `login_key` header when present and does not depend on `/Login`, `moquiSessionToken`, or browser session-cookie bootstrap.
+- `save#ActiveCompany` requires an authenticated request, validates that the requested company belongs to the current user, persists that selection in `UserPreference`, and returns refreshed `sessionInfo`.
 - `logout#Session` revokes the matching `moqui.security.UserLoginKey` and terminates the authenticated session.
 - The UI contract is intentionally small: `authenticated`, `sessionInfo`, and the explicit token fields returned from `login#Session`.
 
@@ -105,7 +113,7 @@ Pilot release contract notes:
 
 - `create#PilotMapping` accepts two saved schema IDs plus selected field paths and persists a JSON-backed pilot mapping using `ReconciliationMapping` and `ReconciliationMappingMember`.
 - `create#PilotMapping` normalizes schema-flattener field paths into pilot-safe JSON ID expressions so newly-created mappings remain visible in `list#PilotMappings` and executable by the mapping-backed run flow.
-- `get#PilotMapping` loads one saved mapping with editable member details for the PWA runs settings workflow, including resolved schema IDs/names when those schemas are still available in scope.
+- `get#PilotMapping` only returns saved mappings whose members still resolve to saved schemas, and includes the editable schema IDs/names needed by the PWA runs settings workflow.
 - `save#PilotMapping` updates an existing two-source mapping from the PWA runs settings workflow and preserves the existing mapping/member record IDs while refreshing schema and field selections.
 - The active pilot remains mapping-based for this release. The facade contract uses `reconciliationMappingId` rather than `ruleSetId`.
 - `list#PilotMappings` now also returns `pinnedReconciliationMappingIds`, a user-scoped ordered list of saved dashboard pins backed by Moqui `UserPreference`.
@@ -119,6 +127,7 @@ Shared-tenant rule:
 
 - Mapping configuration is readable by authenticated pilot users so they can choose an allowed reconciliation pair.
 - `create#PilotMapping` lets authenticated pilot users create a new JSON-backed mapping from schemas they can access through the facade.
+- All pilot mappings must keep saved schemas on every member; mappings that lose those saved-schema references are excluded from list/edit/run flows until fixed.
 - `list#PilotMappings` tolerates legacy display-format JSON field paths already saved by the wizard so existing mappings are not hidden from the dashboard.
 - Generated output storage remains customer-scoped for non-admin users through `PilotAccessSupport.resolveGenericOutputLocation(ec)`.
 - Super-admin users can list and retrieve outputs across the shared tenant because they resolve to the unscoped generic output directory.
@@ -177,8 +186,20 @@ Settings list success shape:
       "username": "pilot.user",
       "locale": "en-US",
       "timeZone": "Asia/Kolkata",
-      "scopeType": "CUSTOMER",
-      "customerScopeId": "EXAMPLE_USER",
+      "scopeType": "COMPANY",
+      "customerScopeId": "KREWE",
+      "activeCompanyUserGroupId": "KREWE",
+      "activeCompanyLabel": "Krewe",
+      "availableCompanies": [
+        {
+          "userGroupId": "ACME",
+          "label": "Acme"
+        },
+        {
+          "userGroupId": "KREWE",
+          "label": "Krewe"
+        }
+      ],
       "isSuperAdmin": false
     }
   }
@@ -198,7 +219,11 @@ Login response example with explicit auth token:
     "authenticated": true,
     "sessionInfo": {
       "userId": "EXAMPLE_USER",
-      "username": "pilot.user"
+      "username": "pilot.user",
+      "scopeType": "COMPANY",
+      "customerScopeId": "KREWE",
+      "activeCompanyUserGroupId": "KREWE",
+      "activeCompanyLabel": "Krewe"
     },
     "authToken": "plain-login-key-value",
     "authTokenType": "LOGIN_KEY",
@@ -253,26 +278,26 @@ Pilot mappings list success shape:
     "pagination": {
       "pageIndex": 0,
       "pageSize": 12,
-      "totalCount": 2,
+      "totalCount": 1,
       "pageCount": 1
     },
     "pinnedReconciliationMappingIds": [
-      "OrderIdMap"
+      "OmsVsShopifyOrders-260421120000"
     ],
     "mappings": [
       {
-        "reconciliationMappingId": "OrderIdMap",
-        "mappingName": "Order ID",
+        "reconciliationMappingId": "OmsVsShopifyOrders-260421120000",
+        "mappingName": "OMS vs Shopify Orders",
         "requiresSystemSelection": false,
-        "defaultFile1SystemEnumId": "DarSysOms",
-        "defaultFile2SystemEnumId": "DarSysShopify",
+        "defaultFile1SystemEnumId": "OMS",
+        "defaultFile2SystemEnumId": "SHOPIFY",
         "systemOptions": [
           {
-            "enumId": "DarSysOms",
+            "enumId": "OMS",
             "label": "OMS"
           },
           {
-            "enumId": "DarSysShopify",
+            "enumId": "SHOPIFY",
             "label": "SHOPIFY"
           }
         ]
@@ -291,7 +316,7 @@ Dashboard pin persistence example:
   "method": "facade.ReconciliationFacadeServices.save#DashboardPinnedMappings",
   "params": {
     "pinnedReconciliationMappingIds": [
-      "OrderIdMap",
+      "OmsVsShopifyOrders-260421120000",
       "InventoryDriftMap"
     ]
   }
@@ -306,7 +331,7 @@ Pilot diff run example:
   "id": 17100003,
   "method": "facade.ReconciliationFacadeServices.run#PilotGenericDiff",
   "params": {
-    "reconciliationMappingId": "OrderIdMap",
+    "reconciliationMappingId": "OmsVsShopifyOrders-260421120000",
     "file1Name": "oms-orders.csv",
     "file1Text": "order_id\n1001\n1002\n",
     "file2Name": "shopify-orders.csv",
@@ -326,8 +351,8 @@ Expected success shape:
     "messages": [],
     "errors": [],
     "runResult": {
-      "reconciliationMappingId": "OrderIdMap",
-      "mappingName": "Order ID",
+      "reconciliationMappingId": "OmsVsShopifyOrders-260421120000",
+      "mappingName": "OMS vs Shopify Orders",
       "file1Name": "oms-orders.csv",
       "file2Name": "shopify-orders.csv",
       "file1SystemEnumId": "OMS",
@@ -337,7 +362,7 @@ Expected success shape:
       "validationErrors": [],
       "processingWarnings": [],
       "generatedOutput": {
-        "fileName": "Order-ID-diff-20260330-123000.json",
+        "fileName": "OMS-vs-Shopify-Orders-diff-20260330-123000.json",
         "sourceFormat": "json",
         "availableFormats": ["json", "csv"],
         "preferredDownloadFormat": "csv",

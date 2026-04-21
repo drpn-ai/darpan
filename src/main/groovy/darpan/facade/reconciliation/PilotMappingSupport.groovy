@@ -4,7 +4,6 @@ import darpan.facade.common.FacadeSupport
 import darpan.facade.common.PilotAccessSupport
 import groovy.json.JsonSlurper
 import jsonschema.common.JsonSchemaUtil
-import org.moqui.context.ExecutionContext
 
 class PilotMappingSupport {
 
@@ -39,13 +38,13 @@ class PilotMappingSupport {
     static List<Map<String, Object>> buildEditablePilotMappingMembers(def ec, List mappingMembers) {
         return (mappingMembers ?: []).collect { member ->
             String schemaName = FacadeSupport.normalize(member?.schemaFileName)
-            def schema = schemaName ? JsonSchemaUtil.resolveSchemaRecord(ec, null, schemaName, schemaName, false) : null
+            def schema = resolveSavedSchemaRecord(ec, schemaName, false)
             if (schema != null) {
-                PilotAccessSupport.requireOwnedRecordAccess(
+                PilotAccessSupport.requireCompanyRecordAccess(
                         ec,
                         schema,
                         "Schema '${schemaName}' was not found.",
-                        "Schema '${schemaName}' is not available in your customer scope."
+                        "Schema '${schemaName}' is not available in your active company."
                 )
             }
 
@@ -60,33 +59,40 @@ class PilotMappingSupport {
         }
     }
 
-    static List<String> collectPilotReadinessIssues(ExecutionContext ec, List mappingMembers) {
+    static List<String> collectPilotReadinessIssues(def ec, List mappingMembers) {
         List members = mappingMembers ?: []
         if (members.isEmpty()) return ["The mapping does not contain any system members."]
         return members.collectMany { member -> collectMemberIssues(ec, member) }.unique()
     }
 
-    static List<String> collectMemberIssues(ExecutionContext ec, Object member) {
+    static List<String> collectMemberIssues(def ec, Object member) {
         String systemLabel = resolveSystemLabel(ec, normalize(member?.systemEnumId))
-        String fileTypeCode = resolveFileTypeCode(ec, normalize(member?.fileTypeEnumId))
         String schemaFileName = normalize(member?.schemaFileName)
         String idFieldExpression = normalize(member?.idFieldExpression ?: member?.systemFieldName)
-        boolean jsonConfigured = "JSON".equalsIgnoreCase(fileTypeCode) || !!schemaFileName
 
         List<String> issues = []
         if (!idFieldExpression) {
             issues.add("${systemLabel} is missing an id field expression.")
         }
 
-        if (!jsonConfigured) return issues
         if (!schemaFileName) {
-            issues.add("${systemLabel} is missing a schema for JSON pilot runs.")
+            issues.add("${systemLabel} is missing a saved schema.")
             return issues
         }
 
-        String schemaText = JsonSchemaUtil.loadSchemaText(ec, null, schemaFileName)
+        def schema = resolveSavedSchemaRecord(ec, schemaFileName, false)
+        if (schema == null) {
+            issues.add("${systemLabel} schema '${schemaFileName}' is not saved in Darpan.")
+            return issues
+        }
+        if (!PilotAccessSupport.canAccessCompanyRecord(ec, schema)) {
+            issues.add("${systemLabel} schema '${schemaFileName}' is not available in your active company.")
+            return issues
+        }
+
+        String schemaText = normalize(schema?.schemaText)
         if (!schemaText) {
-            issues.add("${systemLabel} schema '${schemaFileName}' is not available to the pilot flow.")
+            issues.add("${systemLabel} schema '${schemaFileName}' does not contain schema text.")
             return issues
         }
 
@@ -163,6 +169,12 @@ class PilotMappingSupport {
                 .collect { segment -> segment.startsWith('$') ? segment.substring(1) : segment }
                 .findAll { segment -> segment }
         return segments ? segments.last() : null
+    }
+
+    protected static def resolveSavedSchemaRecord(def ec, Object rawSchemaFileName, boolean useCache = false) {
+        String schemaFileName = normalize(rawSchemaFileName)
+        if (!schemaFileName) return null
+        return JsonSchemaUtil.resolveSchemaRecord(ec, null, schemaFileName, schemaFileName, useCache)
     }
 
     protected static List<String> tokenizeJsonPath(String rawExpression) {
@@ -274,7 +286,7 @@ class PilotMappingSupport {
         return false
     }
 
-    protected static String resolveFileTypeCode(ExecutionContext ec, String enumId) {
+    protected static String resolveFileTypeCode(def ec, String enumId) {
         if (!enumId) return null
         def enumValue = ec.entity.find("moqui.basic.Enumeration")
                 .condition("enumId", enumId)
@@ -283,7 +295,7 @@ class PilotMappingSupport {
         return normalize(enumValue?.enumCode)
     }
 
-    protected static String resolveSystemLabel(ExecutionContext ec, String enumId) {
+    protected static String resolveSystemLabel(def ec, String enumId) {
         if (!enumId) return "A configured system"
         def enumValue = ec.entity.find("moqui.basic.Enumeration")
                 .condition("enumId", enumId)

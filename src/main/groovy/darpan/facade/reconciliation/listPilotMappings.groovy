@@ -1,4 +1,5 @@
 import darpan.facade.common.FacadeSupport
+import darpan.facade.common.PilotAccessSupport
 import darpan.facade.reconciliation.PilotDashboardPreferenceSupport
 import darpan.facade.reconciliation.PilotMappingSupport
 
@@ -16,10 +17,12 @@ def findEnum = { String enumId ->
 
 List<Map> rows = []
 Set<String> availableMappingIds = [] as Set<String>
-(ec.entity.find("darpan.mapping.ReconciliationMapping")
+def mappingFinder = ec.entity.find("darpan.mapping.ReconciliationMapping")
         .orderBy("mappingName,reconciliationMappingId")
         .useCache(false)
-        .list() ?: []).each { mapping ->
+PilotAccessSupport.applyCompanyFilter(mappingFinder, ec)
+
+(mappingFinder.list() ?: []).each { mapping ->
     List mappingMembers = ec.entity.find("darpan.mapping.ReconciliationMappingMember")
             .condition("reconciliationMappingId", mapping.reconciliationMappingId)
             .useCache(false)

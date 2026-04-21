@@ -48,6 +48,12 @@
                 <parameter name="timeZone" type="String"/>
                 <parameter name="scopeType" type="String"/>
                 <parameter name="customerScopeId" type="String"/>
+                <parameter name="activeCompanyUserGroupId" type="String"/>
+                <parameter name="activeCompanyLabel" type="String"/>
+                <parameter name="availableCompanies">
+                    <parameter name="userGroupId" type="String"/>
+                    <parameter name="label" type="String"/>
+                </parameter>
                 <parameter name="isSuperAdmin" type="Boolean"/>
             </parameter>
         </out-parameters>
@@ -78,6 +84,12 @@
                 <parameter name="timeZone" type="String"/>
                 <parameter name="scopeType" type="String"/>
                 <parameter name="customerScopeId" type="String"/>
+                <parameter name="activeCompanyUserGroupId" type="String"/>
+                <parameter name="activeCompanyLabel" type="String"/>
+                <parameter name="availableCompanies">
+                    <parameter name="userGroupId" type="String"/>
+                    <parameter name="label" type="String"/>
+                </parameter>
                 <parameter name="isSuperAdmin" type="Boolean"/>
             </parameter>
         </out-parameters>
@@ -85,6 +97,62 @@
             <set field="authenticated" from="darpan.facade.common.FacadeSupport.normalize(ec.user.userId) != null"/>
             <if condition="authenticated">
                 <set field="sessionInfo" from="darpan.facade.common.PilotAccessSupport.buildSessionInfo(ec)"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="ActiveCompany" allow-remote="true" authenticate="true">
+        <description>Persist the authenticated user's active company selection and return refreshed session metadata.</description>
+        <in-parameters>
+            <parameter name="activeCompanyUserGroupId" required="true">
+                <description>User-group id for the company the user wants to work in.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean">
+                <description>True when the active-company update completed without facade errors.</description>
+            </parameter>
+            <parameter name="messages">
+                <description>Informational messages emitted during active-company handling.</description>
+                <parameter name="message"/>
+            </parameter>
+            <parameter name="errors">
+                <description>Errors returned while validating or saving the active company.</description>
+                <parameter name="error"/>
+            </parameter>
+            <parameter name="authenticated" type="Boolean">
+                <description>True when the current request resolves to an authenticated session.</description>
+            </parameter>
+            <parameter name="sessionInfo">
+                <description>Refreshed authenticated session metadata returned to darpan-ui.</description>
+                <parameter name="userId" type="String"/>
+                <parameter name="username" type="String"/>
+                <parameter name="locale" type="String"/>
+                <parameter name="timeZone" type="String"/>
+                <parameter name="scopeType" type="String"/>
+                <parameter name="customerScopeId" type="String"/>
+                <parameter name="activeCompanyUserGroupId" type="String"/>
+                <parameter name="activeCompanyLabel" type="String"/>
+                <parameter name="availableCompanies">
+                    <parameter name="userGroupId" type="String"/>
+                    <parameter name="label" type="String"/>
+                </parameter>
+                <parameter name="isSuperAdmin" type="Boolean"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="authenticated" from="darpan.facade.common.FacadeSupport.normalize(ec.user.userId) != null"/>
+            <if condition="authenticated">
+                <set field="activeCompanySaved" from="darpan.facade.common.PilotAccessSupport.saveActiveCompany(ec, activeCompanyUserGroupId)"/>
+                <set field="sessionInfo" from="darpan.facade.common.PilotAccessSupport.buildSessionInfo(ec)"/>
+            </if>
+            <if condition="!authenticated">
+                <script><![CDATA[
+                    ec.message.addError("Authentication required to change the active company.")
+                ]]></script>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

@@ -6,7 +6,7 @@ import groovy.json.JsonSlurper
 import java.util.Arrays
 
 class PilotDashboardPreferenceSupport {
-    static final String PINNED_MAPPING_PREFERENCE_KEY = "darpan.dashboard.pinnedReconciliationMappingIds"
+    static final String PINNED_MAPPING_PREFERENCE_KEY = "darpan.dashboard.pinnedMappingIds"
 
     static List<String> parsePinnedReconciliationMappingIds(Object rawValue) {
         String normalized = rawValue?.toString()?.trim()

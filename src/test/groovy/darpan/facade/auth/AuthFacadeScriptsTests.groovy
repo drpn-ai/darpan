@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.sql.Timestamp
 import java.util.Locale
 
 import static org.junit.jupiter.api.Assertions.assertEquals
@@ -21,7 +22,11 @@ class AuthFacadeScriptsTests {
     void loginSessionIssuesLoginKeyTokenAndSessionInfo() {
         MessageFacadeStub message = new MessageFacadeStub()
         UserStub user = new UserStub(userId: "EX_USER", username: "pilot.user", loginUserResult: true, loginKey: "issued-token")
-        EntityFacadeStub entity = new EntityFacadeStub()
+        EntityFacadeStub entity = new EntityFacadeStub(finders: [
+                "moqui.security.UserGroupAndMember": new FinderStub(listResult: [
+                        [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+                ]),
+        ])
         def ec = executionContext(message: message, user: user, entity: entity, factory: new FactoryStub(expireHours: 2.0f))
 
         Binding binding = runScript("src/main/groovy/darpan/facade/auth/loginSession.groovy", [
@@ -39,8 +44,11 @@ class AuthFacadeScriptsTests {
         Map<String, Object> sessionInfo = binding.getVariable("sessionInfo") as Map<String, Object>
         assertEquals("EX_USER", sessionInfo.userId)
         assertEquals("pilot.user", sessionInfo.username)
-        assertEquals("CUSTOMER", sessionInfo.scopeType)
-        assertEquals("EX_USER", sessionInfo.customerScopeId)
+        assertEquals("COMPANY", sessionInfo.scopeType)
+        assertEquals("KREWE", sessionInfo.customerScopeId)
+        assertEquals("KREWE", sessionInfo.activeCompanyUserGroupId)
+        assertEquals("Krewe", sessionInfo.activeCompanyLabel)
+        assertEquals([[userGroupId: "KREWE", label: "Krewe"]], sessionInfo.availableCompanies)
         assertFalse(sessionInfo.isSuperAdmin as boolean)
         assertTrue((binding.getVariable("ok") as boolean))
         assertTrue(((binding.getVariable("errors") as List<String>).isEmpty()))
@@ -49,8 +57,15 @@ class AuthFacadeScriptsTests {
     @Test
     void getSessionInfoUsesCurrentMoquiUserState() {
         MessageFacadeStub message = new MessageFacadeStub()
-        UserStub user = new UserStub(userId: "EX_USER", username: "pilot.user")
-        EntityFacadeStub entity = new EntityFacadeStub()
+        UserStub user = new UserStub(userId: "EX_USER", username: "pilot.user", preferences: [
+                (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+        ])
+        EntityFacadeStub entity = new EntityFacadeStub(finders: [
+                "moqui.security.UserGroupAndMember": new FinderStub(listResult: [
+                        [userGroupId: "ACME", userId: "EX_USER", description: "Acme", groupTypeEnumId: "UgtDarpanCompany"],
+                        [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+                ]),
+        ])
         def ec = executionContext(message: message, user: user, entity: entity)
 
         boolean authenticated = FacadeSupport.normalize(ec?.user?.userId) != null
@@ -60,7 +75,9 @@ class AuthFacadeScriptsTests {
         assertTrue(authenticated)
         assertEquals("EX_USER", sessionInfo.userId)
         assertEquals("pilot.user", sessionInfo.username)
-        assertEquals("CUSTOMER", sessionInfo.scopeType)
+        assertEquals("COMPANY", sessionInfo.scopeType)
+        assertEquals("KREWE", sessionInfo.activeCompanyUserGroupId)
+        assertEquals("Krewe", sessionInfo.activeCompanyLabel)
         assertTrue(envelope.ok as boolean)
     }
 
@@ -160,6 +177,8 @@ class AuthFacadeScriptsTests {
         String loginKey
         boolean loginUserResult = false
         boolean loggedOut = false
+        Map<String, Object> preferences = [:]
+        Timestamp nowTimestamp = new Timestamp(System.currentTimeMillis())
         Expando userAccount = new Expando(timeZone: "Asia/Kolkata")
 
         boolean loginUser(String loginUsername, String password) {
@@ -172,6 +191,14 @@ class AuthFacadeScriptsTests {
 
         String getLoginKey() {
             return loginKey
+        }
+
+        Object getPreference(String preferenceKey) {
+            return preferences[preferenceKey]
+        }
+
+        void setPreference(String preferenceKey, Object preferenceValue) {
+            preferences[preferenceKey] = preferenceValue
         }
 
         void logoutUser() {
@@ -239,6 +266,7 @@ class AuthFacadeScriptsTests {
     static class FinderStub {
         Map<String, Object> conditions = [:]
         Object oneResult
+        List listResult = []
         int deleteAllResult = 0
 
         FinderStub condition(String field, Object value) {
@@ -250,8 +278,20 @@ class AuthFacadeScriptsTests {
             return this
         }
 
+        FinderStub conditionDate(String fromField, String thruField, Object moment) {
+            return this
+        }
+
+        FinderStub useCache(boolean useCache) {
+            return this
+        }
+
         Object one() {
             return oneResult
+        }
+
+        List list() {
+            return listResult
         }
 
         int deleteAll() {

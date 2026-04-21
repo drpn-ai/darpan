@@ -13,6 +13,12 @@
         <field name="ownerUserId" type="id">
             <description>Owning pilot user for shared-tenant customer scope; blank rows remain super-admin only.</description>
         </field>
+        <field name="companyUserGroupId" type="id">
+            <description>Company scope for shared-tenant company access. Blank rows are treated as unassigned legacy data.</description>
+        </field>
+        <field name="createdByUserId" type="id">
+            <description>User who created the schema record.</description>
+        </field>
         <field name="schemaText" type="text-very-long"/>
         <field name="statusId" type="id"/>
         <field name="createdDate" type="date-time"/>
@@ -24,6 +30,9 @@
 
         <relationship type="one" title="System" related="moqui.basic.Enumeration" fk-name="JSONSCHEMA_SYS_ENUM">
             <key-map field-name="systemEnumId" related-field-name="enumId"/>
+        </relationship>
+        <relationship type="one" title="Company" related="moqui.security.UserGroup" fk-name="JSONSCHEMA_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
         </relationship>
     </entity>
 </entities>

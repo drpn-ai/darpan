@@ -57,6 +57,7 @@ class PilotReconciliationSupport {
                 sourceFormat            : sourceFormat,
                 availableFormats        : availableFormatsForSource(sourceFormat),
                 preferredDownloadFormat : availableFormatsForSource(sourceFormat).contains("csv") ? "csv" : sourceFormat,
+                companyUserGroupId      : normalize(metadata.companyUserGroupId),
                 reconciliationMappingId : normalize(metadata.reconciliationMappingId),
                 mappingName             : normalize(metadata.reconciliationMappingName),
                 reconciliationType      : normalize(metadata.reconciliation ?: metadata.reconciliationType),

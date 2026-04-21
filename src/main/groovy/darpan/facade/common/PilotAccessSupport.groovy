@@ -2,18 +2,50 @@ package darpan.facade.common
 
 class PilotAccessSupport {
     static final String ADMIN_USER_GROUP_ID = "ADMIN"
+    static final String ALL_USERS_GROUP_ID = "ALL_USERS"
+    static final String ACTIVE_COMPANY_PREFERENCE_KEY = "darpan.auth.activeCompanyUserGroupId"
+    static final String DARPAN_COMPANY_GROUP_TYPE_ENUM_ID = "UgtDarpanCompany"
     static final String SCOPE_TYPE_ANONYMOUS = "ANONYMOUS"
-    static final String SCOPE_TYPE_CUSTOMER = "CUSTOMER"
+    static final String SCOPE_TYPE_COMPANY = "COMPANY"
     static final String SCOPE_TYPE_GLOBAL = "GLOBAL"
+    static final String ACTIVE_COMPANY_UNAVAILABLE_MESSAGE = "Requested company is not available for current user."
+    static final String COMPANY_RECORD_UNAVAILABLE_MESSAGE = "Requested record is not available in your active company."
+    static final String NO_ACTIVE_COMPANY_FILTER_VALUE = "__NO_ACTIVE_COMPANY__"
     static final String OWNED_RECORD_UNAVAILABLE_MESSAGE = "Requested record is not available in your customer scope."
 
     static Map<String, Object> buildAccessScope(def ec) {
         String userId = currentUserId(ec)
         boolean superAdmin = isSuperAdmin(ec)
+        if (!userId) {
+            return [
+                isSuperAdmin            : false,
+                scopeType               : SCOPE_TYPE_ANONYMOUS,
+                customerScopeId         : null,
+                activeCompanyUserGroupId: null,
+                activeCompanyLabel      : null,
+                availableCompanies      : [],
+            ]
+        }
+        if (superAdmin) {
+            return [
+                isSuperAdmin            : true,
+                scopeType               : SCOPE_TYPE_GLOBAL,
+                customerScopeId         : null,
+                activeCompanyUserGroupId: null,
+                activeCompanyLabel      : null,
+                availableCompanies      : [],
+            ]
+        }
+
+        List<Map<String, Object>> availableCompanies = listAvailableCompanies(ec)
+        Map<String, Object> activeCompany = resolveActiveCompany(availableCompanies, readPreferredActiveCompanyUserGroupId(ec))
         return [
-            isSuperAdmin: superAdmin,
-            scopeType: !userId ? SCOPE_TYPE_ANONYMOUS : (superAdmin ? SCOPE_TYPE_GLOBAL : SCOPE_TYPE_CUSTOMER),
-            customerScopeId: superAdmin ? null : userId,
+            isSuperAdmin            : false,
+            scopeType               : SCOPE_TYPE_COMPANY,
+            customerScopeId         : activeCompany?.userGroupId,
+            activeCompanyUserGroupId: activeCompany?.userGroupId,
+            activeCompanyLabel      : activeCompany?.label,
+            availableCompanies      : availableCompanies,
         ]
     }
 
@@ -40,6 +72,67 @@ class PilotAccessSupport {
         return false
     }
 
+    static List<Map<String, Object>> listAvailableCompanies(def ec) {
+        return listCompanyMembershipRecords(ec)
+                .collect { record ->
+                    String userGroupId = extractString(record, "userGroupId")
+                    if (!userGroupId || userGroupId in [ADMIN_USER_GROUP_ID, ALL_USERS_GROUP_ID]) return null
+
+                    [
+                        userGroupId: userGroupId,
+                        label      : resolveCompanyLabel(record, userGroupId),
+                    ]
+                }
+                .findAll { it != null }
+                .unique { it.userGroupId }
+                .sort { left, right ->
+                    String leftLabel = FacadeSupport.normalize(left?.label) ?: left?.userGroupId ?: ""
+                    String rightLabel = FacadeSupport.normalize(right?.label) ?: right?.userGroupId ?: ""
+                    int labelCompare = leftLabel <=> rightLabel
+                    return labelCompare != 0 ? labelCompare : ((left?.userGroupId ?: "") <=> (right?.userGroupId ?: ""))
+                } as List<Map<String, Object>>
+    }
+
+    static boolean saveActiveCompany(def ec, Object requestedCompanyUserGroupId) {
+        if (!currentUserId(ec)) {
+            ec?.message?.addError("Authentication required to change the active company.")
+            return false
+        }
+        if (isSuperAdmin(ec)) {
+            ec?.message?.addError("Super-admin sessions do not use an active company.")
+            return false
+        }
+
+        String normalizedCompanyUserGroupId = FacadeSupport.normalize(requestedCompanyUserGroupId)
+        if (!normalizedCompanyUserGroupId) {
+            ec?.message?.addError("activeCompanyUserGroupId is required.")
+            return false
+        }
+
+        List<Map<String, Object>> availableCompanies = listAvailableCompanies(ec)
+        if (!availableCompanies) {
+            ec?.message?.addError("No company is available for the current user.")
+            return false
+        }
+
+        Map<String, Object> requestedCompany = availableCompanies.find {
+            it.userGroupId == normalizedCompanyUserGroupId
+        }
+        if (requestedCompany == null) {
+            ec?.message?.addError(ACTIVE_COMPANY_UNAVAILABLE_MESSAGE)
+            return false
+        }
+
+        ec?.user?.setPreference(ACTIVE_COMPANY_PREFERENCE_KEY, normalizedCompanyUserGroupId)
+        return true
+    }
+
+    static String currentActiveCompanyUserGroupId(def ec) {
+        if (!currentUserId(ec) || isSuperAdmin(ec)) return null
+        List<Map<String, Object>> availableCompanies = listAvailableCompanies(ec)
+        return resolveActiveCompany(availableCompanies, readPreferredActiveCompanyUserGroupId(ec))?.userGroupId
+    }
+
     static void applyScopeToSessionInfo(def ec, Map<String, Object> sessionInfo) {
         if (sessionInfo == null) return
         sessionInfo.putAll(buildAccessScope(ec))
@@ -47,13 +140,59 @@ class PilotAccessSupport {
 
     static Map<String, Object> buildSessionInfo(def ec) {
         Map<String, Object> sessionInfo = [
-            userId: ec?.user?.userId,
+            userId  : ec?.user?.userId,
             username: ec?.user?.username,
-            locale: ec?.l10n?.locale?.toLanguageTag(),
+            locale  : ec?.l10n?.locale?.toLanguageTag(),
             timeZone: ec?.user?.userAccount?.timeZone ?: ec?.l10n?.timeZone,
         ]
         applyScopeToSessionInfo(ec, sessionInfo)
         return sessionInfo
+    }
+
+    static void applyCompanyFilter(def finder, def ec, String companyField = "companyUserGroupId") {
+        if (finder == null || isSuperAdmin(ec)) return
+        String activeCompanyUserGroupId = currentActiveCompanyUserGroupId(ec)
+        finder.condition(companyField, activeCompanyUserGroupId ?: NO_ACTIVE_COMPANY_FILTER_VALUE)
+    }
+
+    static boolean canAccessCompanyRecord(def ec, def record, String companyField = "companyUserGroupId") {
+        if (record == null) return false
+        if (isSuperAdmin(ec)) return true
+        String activeCompanyUserGroupId = currentActiveCompanyUserGroupId(ec)
+        if (!activeCompanyUserGroupId) return false
+        String recordCompanyUserGroupId = extractString(record, companyField)
+        return recordCompanyUserGroupId != null && recordCompanyUserGroupId == activeCompanyUserGroupId
+    }
+
+    static void requireCompanyRecordAccess(def ec, def record, String missingMessage = "Requested record was not found.",
+            String forbiddenMessage = COMPANY_RECORD_UNAVAILABLE_MESSAGE, String companyField = "companyUserGroupId") {
+        if (record == null) {
+            ec?.message?.addError(missingMessage)
+            return
+        }
+        if (!canAccessCompanyRecord(ec, record, companyField)) {
+            ec?.message?.addError(forbiddenMessage)
+        }
+    }
+
+    static void assignCompanyOwnershipOnCreate(def value, def ec, String companyField = "companyUserGroupId",
+            String createdByField = "createdByUserId") {
+        if (value == null || isSuperAdmin(ec)) return
+
+        String activeCompanyUserGroupId = currentActiveCompanyUserGroupId(ec)
+        if (!activeCompanyUserGroupId) {
+            ec?.message?.addError("An active company is required for company-scoped data.")
+            return
+        }
+
+        String userId = currentUserId(ec)
+        if (value instanceof Map) {
+            value[companyField] = activeCompanyUserGroupId
+            if (userId) value[createdByField] = userId
+        } else {
+            value."${companyField}" = activeCompanyUserGroupId
+            if (userId) value."${createdByField}" = userId
+        }
     }
 
     static void applyOwnerFilter(def finder, def ec, String ownerField = "ownerUserId") {
@@ -97,10 +236,7 @@ class PilotAccessSupport {
         String normalizedBase = FacadeSupport.normalize(baseLocation)
         if (!normalizedBase || isSuperAdmin(ec)) return normalizedBase
 
-        String userId = currentUserId(ec)
-        if (!userId) return normalizedBase
-
-        String scopedSuffix = "user/${sanitizePathToken(userId)}"
+        String scopedSuffix = resolveRuntimeScopeSuffix(ec)
         if (normalizedBase.endsWith(scopedSuffix)) return normalizedBase
         return normalizedBase + (normalizedBase.endsWith("/") ? "" : "/") + scopedSuffix
     }
@@ -119,6 +255,26 @@ class PilotAccessSupport {
         return FacadeSupport.normalize(ec?.user?.userId)
     }
 
+    protected static List listCompanyMembershipRecords(def ec) {
+        String userId = currentUserId(ec)
+        if (!userId) return []
+
+        def finder = ec?.entity?.find("moqui.security.UserGroupAndMember")
+        if (finder == null) return []
+
+        finder.condition("userId", userId).condition("groupTypeEnumId", DARPAN_COMPANY_GROUP_TYPE_ENUM_ID)
+        if (finder.metaClass.respondsTo(finder, "conditionDate", String, String, Object)) {
+            finder.conditionDate("fromDate", "thruDate", ec?.user?.nowTimestamp)
+        }
+        if (finder.metaClass.respondsTo(finder, "useCache", Boolean)) {
+            finder.useCache(false)
+        }
+        if (!finder.metaClass.respondsTo(finder, "list")) return []
+
+        def membershipList = finder.list()
+        return membershipList instanceof Collection ? membershipList as List : []
+    }
+
     protected static String extractString(def record, String fieldName) {
         if (record == null || !fieldName) return null
         if (record instanceof Map) return FacadeSupport.normalize(record[fieldName])
@@ -126,6 +282,35 @@ class PilotAccessSupport {
             return FacadeSupport.normalize(record.getString(fieldName))
         }
         return FacadeSupport.normalize(record."${fieldName}")
+    }
+
+    protected static String readPreferredActiveCompanyUserGroupId(def ec) {
+        return FacadeSupport.normalize(ec?.user?.getPreference(ACTIVE_COMPANY_PREFERENCE_KEY))
+    }
+
+    protected static Map<String, Object> resolveActiveCompany(List<Map<String, Object>> availableCompanies, String preferredCompanyUserGroupId) {
+        if (!availableCompanies) return null
+        if (preferredCompanyUserGroupId) {
+            Map<String, Object> preferredCompany = availableCompanies.find {
+                it.userGroupId == preferredCompanyUserGroupId
+            }
+            if (preferredCompany != null) return preferredCompany
+        }
+        return availableCompanies.first()
+    }
+
+    protected static String resolveCompanyLabel(def record, String fallbackUserGroupId) {
+        return extractString(record, "description") ?: fallbackUserGroupId
+    }
+
+    protected static String resolveRuntimeScopeSuffix(def ec) {
+        String activeCompanyUserGroupId = currentActiveCompanyUserGroupId(ec)
+        if (activeCompanyUserGroupId) {
+            return "company/${sanitizePathToken(activeCompanyUserGroupId)}"
+        }
+
+        String userId = currentUserId(ec)
+        return "no-company/${sanitizePathToken(userId ?: 'anonymous')}"
     }
 
     protected static String sanitizePathToken(String rawToken) {

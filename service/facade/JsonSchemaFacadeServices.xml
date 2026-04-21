@@ -25,6 +25,8 @@
                 <parameter name="description"/>
                 <parameter name="systemEnumId"/>
                 <parameter name="systemLabel"/>
+                <parameter name="companyUserGroupId"/>
+                <parameter name="createdByUserId"/>
                 <parameter name="statusId"/>
                 <parameter name="createdDate" type="Timestamp"/>
                 <parameter name="lastUpdatedStamp" type="Timestamp"/>
@@ -38,8 +40,8 @@
             <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
             <set field="ignoreTableEnsure" from="jsonschema.common.JsonSchemaUtil.ensureJsonSchemaTable(ec)"/>
             <set field="schemaFinder" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('statusId', 'Active').orderBy('-lastUpdatedStamp').useCache(false)"/>
-            <set field="ignoreOwnerFilter" from="darpan.facade.common.PilotAccessSupport.applyOwnerFilter(schemaFinder, ec)"/>
-            <set field="rows" from="(schemaFinder.list() ?: []).collect { item -> [jsonSchemaId: item.jsonSchemaId, schemaName: item.schemaName, description: item.description, systemEnumId: darpan.facade.common.FacadeSupport.normalize(item.systemEnumId), systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, item.systemEnumId, null, true), statusId: item.statusId, createdDate: item.createdDate, lastUpdatedStamp: item.lastUpdatedStamp] }"/>
+            <set field="ignoreCompanyFilter" from="darpan.facade.common.PilotAccessSupport.applyCompanyFilter(schemaFinder, ec)"/>
+            <set field="rows" from="(schemaFinder.list() ?: []).collect { item -> [jsonSchemaId: item.jsonSchemaId, schemaName: item.schemaName, description: item.description, systemEnumId: darpan.facade.common.FacadeSupport.normalize(item.systemEnumId), systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, item.systemEnumId, null, true), companyUserGroupId: item.companyUserGroupId, createdByUserId: item.createdByUserId, statusId: item.statusId, createdDate: item.createdDate, lastUpdatedStamp: item.lastUpdatedStamp] }"/>
             <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.schemaName, row.description].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
             <set field="totalCount" from="filteredRows.size()"/>
             <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>
@@ -69,6 +71,8 @@
                 <parameter name="systemEnumId"/>
                 <parameter name="systemLabel"/>
                 <parameter name="ownerUserId"/>
+                <parameter name="companyUserGroupId"/>
+                <parameter name="createdByUserId"/>
                 <parameter name="schemaText" allow-html="true"/>
                 <parameter name="statusId"/>
                 <parameter name="createdDate" type="Timestamp"/>
@@ -89,11 +93,11 @@
                 <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireOwnedRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your customer scope.')"/>
+                <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active company.')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="systemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(schema.systemEnumId)"/>
-                <set field="schemaData" from="[jsonSchemaId: schema.jsonSchemaId, schemaName: schema.schemaName, description: schema.description, systemEnumId: systemEnumIdValue, systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, systemEnumIdValue, null, true), ownerUserId: schema.ownerUserId, schemaText: schema.schemaText, statusId: schema.statusId, createdDate: schema.createdDate, lastUpdatedStamp: schema.lastUpdatedStamp]"/>
+                <set field="schemaData" from="[jsonSchemaId: schema.jsonSchemaId, schemaName: schema.schemaName, description: schema.description, systemEnumId: systemEnumIdValue, systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, systemEnumIdValue, null, true), ownerUserId: schema.ownerUserId, companyUserGroupId: schema.companyUserGroupId, createdByUserId: schema.createdByUserId, schemaText: schema.schemaText, statusId: schema.statusId, createdDate: schema.createdDate, lastUpdatedStamp: schema.lastUpdatedStamp]"/>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -122,6 +126,8 @@
                 <parameter name="systemEnumId"/>
                 <parameter name="systemLabel"/>
                 <parameter name="ownerUserId"/>
+                <parameter name="companyUserGroupId"/>
+                <parameter name="createdByUserId"/>
                 <parameter name="statusId"/>
                 <parameter name="lastUpdatedStamp" type="Timestamp"/>
             </parameter>
@@ -148,7 +154,7 @@
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; schemaIdValue">
                 <set field="existingSchema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schemaIdValue).useCache(false).one()"/>
-                <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireOwnedRecordAccess(ec, existingSchema, &quot;Schema not found for ID '${schemaIdValue}'&quot;, 'Schema is not available in your customer scope.')"/>
+                <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, existingSchema, &quot;Schema not found for ID '${schemaIdValue}'&quot;, 'Schema is not available in your active company.')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="resolvedName" from="existingSchema ? (schemaNameValue ?: existingSchema.schemaName) : jsonschema.common.JsonSchemaUtil.generateUniqueSchemaName(ec, schemaNameValue, overwriteMode)"/>
@@ -177,13 +183,15 @@
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; !existingSchema">
                 <set field="newSchemaMap" from="[schemaName: resolvedName, schemaText: schemaTextValue, description: descriptionValue, systemEnumId: systemEnumIdValue, statusId: 'Active', createdDate: ec.user.nowTimestamp, lastUpdatedStamp: ec.user.nowTimestamp]"/>
-                <set field="ignoreOwnerAssignment" from="darpan.facade.common.PilotAccessSupport.assignOwnerOnCreate(newSchemaMap, ec)"/>
-                <service-call name="create#darpan.reconciliation.JsonSchema" in-map="newSchemaMap" out-map="createSchemaResult"/>
-                <set field="savedSchemaEntity" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', createSchemaResult.jsonSchemaId).useCache(false).one()"/>
+                <set field="ignoreCompanyAssignment" from="darpan.facade.common.PilotAccessSupport.assignCompanyOwnershipOnCreate(newSchemaMap, ec)"/>
+                <if condition="!ec.message.hasError()">
+                    <service-call name="create#darpan.reconciliation.JsonSchema" in-map="newSchemaMap" out-map="createSchemaResult"/>
+                    <set field="savedSchemaEntity" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', createSchemaResult.jsonSchemaId).useCache(false).one()"/>
+                </if>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="savedSystemEnumId" from="darpan.facade.common.FacadeSupport.normalize(savedSchemaEntity?.systemEnumId)"/>
-                <set field="savedSchema" from="[jsonSchemaId: savedSchemaEntity?.jsonSchemaId, schemaName: savedSchemaEntity?.schemaName, description: savedSchemaEntity?.description, systemEnumId: savedSystemEnumId, systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, savedSystemEnumId, null, true), ownerUserId: savedSchemaEntity?.ownerUserId, statusId: savedSchemaEntity?.statusId, lastUpdatedStamp: savedSchemaEntity?.lastUpdatedStamp]"/>
+                <set field="savedSchema" from="[jsonSchemaId: savedSchemaEntity?.jsonSchemaId, schemaName: savedSchemaEntity?.schemaName, description: savedSchemaEntity?.description, systemEnumId: savedSystemEnumId, systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, savedSystemEnumId, null, true), ownerUserId: savedSchemaEntity?.ownerUserId, companyUserGroupId: savedSchemaEntity?.companyUserGroupId, createdByUserId: savedSchemaEntity?.createdByUserId, statusId: savedSchemaEntity?.statusId, lastUpdatedStamp: savedSchemaEntity?.lastUpdatedStamp]"/>
                 <message>Saved schema ${savedSchema.schemaName}.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
@@ -251,7 +259,7 @@
                 <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireOwnedRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your customer scope.')"/>
+                <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active company.')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <service-call name="jsonschema.JsonSchemaServices.flatten#JsonSchema"
@@ -284,6 +292,8 @@
                 <parameter name="filename"/>
                 <parameter name="systemEnumId"/>
                 <parameter name="systemLabel"/>
+                <parameter name="companyUserGroupId"/>
+                <parameter name="createdByUserId"/>
                 <parameter name="lastUpdatedStamp" type="Timestamp"/>
             </parameter>
         </out-parameters>
@@ -303,7 +313,7 @@
                 <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; (schemaIdValue || schemaNameValue)">
-                <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireOwnedRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your customer scope.')"/>
+                <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active company.')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <service-call name="jsonschema.JsonSchemaServices.save#RefinedSchema"
@@ -311,12 +321,14 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="savedSchemaEntity" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', saveResult.jsonSchemaId).useCache(false).one()"/>
-                <if condition="savedSchemaEntity != null &amp;&amp; !darpan.facade.common.PilotAccessSupport.isSuperAdmin(ec) &amp;&amp; !savedSchemaEntity.ownerUserId">
-                    <set field="ignoreOwnerAssignment" from="darpan.facade.common.PilotAccessSupport.assignOwnerOnCreate(savedSchemaEntity, ec)"/>
-                    <set field="ignoreSavedUpdate" from="savedSchemaEntity.update()"/>
+                <if condition="savedSchemaEntity != null &amp;&amp; !darpan.facade.common.PilotAccessSupport.isSuperAdmin(ec) &amp;&amp; !savedSchemaEntity.companyUserGroupId">
+                    <set field="ignoreCompanyAssignment" from="darpan.facade.common.PilotAccessSupport.assignCompanyOwnershipOnCreate(savedSchemaEntity, ec)"/>
+                    <if condition="!ec.message.hasError()">
+                        <set field="ignoreSavedUpdate" from="savedSchemaEntity.update()"/>
+                    </if>
                 </if>
                 <set field="savedSystemEnumId" from="darpan.facade.common.FacadeSupport.normalize(savedSchemaEntity?.systemEnumId)"/>
-                <set field="savedSchema" from="[jsonSchemaId: saveResult.jsonSchemaId, schemaName: saveResult.schemaName, filename: saveResult.filename, systemEnumId: savedSystemEnumId, systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, savedSystemEnumId, null, true), lastUpdatedStamp: savedSchemaEntity?.lastUpdatedStamp]"/>
+                <set field="savedSchema" from="[jsonSchemaId: saveResult.jsonSchemaId, schemaName: saveResult.schemaName, filename: saveResult.filename, systemEnumId: savedSystemEnumId, systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, savedSystemEnumId, null, true), companyUserGroupId: savedSchemaEntity?.companyUserGroupId, createdByUserId: savedSchemaEntity?.createdByUserId, lastUpdatedStamp: savedSchemaEntity?.lastUpdatedStamp]"/>
                 <message>Saved refined schema ${saveResult.schemaName}.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
@@ -350,7 +362,7 @@
                 <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireOwnedRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your customer scope.')"/>
+                <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active company.')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <service-call name="jsonschema.JsonSchemaServices.delete#JsonSchema"

@@ -158,6 +158,51 @@
         </out-parameters>
     </service>
 
+    <service verb="reconcile" noun="RuleSetCompareScope" type="java" transaction="ignore" location="darpan.reconciliation.core.RuleSetCompareScopeRuleStage" method="reconcileRuleSetCompareScope">
+        <description>Internal RuleSet compare pipeline that preserves base missing-object Diffs and appends rule-generated Diffs from matched pairs.</description>
+        <in-parameters>
+            <parameter name="ruleSetId" required="true"/>
+            <parameter name="compareScopeId" required="true"/>
+            <parameter name="file1Location" required="true"/>
+            <parameter name="file2Location" required="true"/>
+            <parameter name="file1Name"/>
+            <parameter name="file2Name"/>
+            <parameter name="file1FileTypeEnumId"/>
+            <parameter name="file2FileTypeEnumId"/>
+            <parameter name="file1SchemaFileName"/>
+            <parameter name="file2SchemaFileName"/>
+            <parameter name="file1Label"/>
+            <parameter name="file2Label"/>
+            <parameter name="hasHeader" type="Boolean" default-value="true"/>
+            <parameter name="sparkMaster" default-value="local[*]"/>
+            <parameter name="sparkAppName" default-value="RuleSetCompareScope"/>
+            <parameter name="ruleBatchSize" type="Integer" default-value="500"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ruleSetId"/>
+            <parameter name="compareScopeId"/>
+            <parameter name="objectType"/>
+            <parameter name="file1Type"/>
+            <parameter name="file2Type"/>
+            <parameter name="file1Label"/>
+            <parameter name="file2Label"/>
+            <parameter name="missingInFile1Count" type="Long"/>
+            <parameter name="missingInFile2Count" type="Long"/>
+            <parameter name="missingObjectDifferenceCount" type="Long"/>
+            <parameter name="ruleDifferenceCount" type="Long"/>
+            <parameter name="differenceCount" type="Long"/>
+            <parameter name="matchedPairCount" type="Long"/>
+            <parameter name="ruleCount" type="Integer"/>
+            <parameter name="firedRuleCount" type="Integer"/>
+            <parameter name="diffDf" type="org.apache.spark.sql.Dataset"/>
+            <parameter name="missingDiffDf" type="org.apache.spark.sql.Dataset"/>
+            <parameter name="ruleDiffDf" type="org.apache.spark.sql.Dataset"/>
+            <parameter name="matchedPairDf" type="org.apache.spark.sql.Dataset"/>
+            <parameter name="validationErrors" type="List"/>
+            <parameter name="processingWarnings" type="List"/>
+        </out-parameters>
+    </service>
+
     <service verb="reconcile" noun="FilesByMapping" type="script" transaction="ignore" location="component://darpan/src/main/groovy/darpan/reconciliation/core/reconcileFilesByMapping.groovy">
         <description>Route staged file locations through CSV/JSON/Mixed reconciliation using mapping metadata and optional overrides.</description>
         <in-parameters>

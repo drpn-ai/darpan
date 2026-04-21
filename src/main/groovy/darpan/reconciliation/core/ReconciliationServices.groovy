@@ -4,6 +4,7 @@ import groovy.json.JsonOutput
 import org.apache.spark.sql.Column
 import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.RowFactory
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.sql.types.DataTypes
@@ -22,6 +23,20 @@ class ReconciliationServices {
             .add("missingIn", DataTypes.StringType, true)
             .add("data", DataTypes.StringType, true)
             .add("note", DataTypes.StringType, true)
+    private static final StructType RULESET_DIFF_SCHEMA = new StructType()
+            .add("diffType", DataTypes.StringType, true)
+            .add("compareScopeId", DataTypes.StringType, true)
+            .add("objectType", DataTypes.StringType, true)
+            .add("primaryId", DataTypes.StringType, true)
+            .add("field", DataTypes.StringType, true)
+            .add("file1Value", DataTypes.StringType, true)
+            .add("file2Value", DataTypes.StringType, true)
+            .add("presentIn", DataTypes.StringType, true)
+            .add("missingIn", DataTypes.StringType, true)
+            .add("data", DataTypes.StringType, true)
+            .add("ruleId", DataTypes.StringType, true)
+            .add("severity", DataTypes.StringType, true)
+            .add("message", DataTypes.StringType, true)
 
     /**
      * Core Spark-based reconciliation of two ID DataFrames.
@@ -490,6 +505,65 @@ class ReconciliationServices {
             throw new IllegalArgumentException("referenceDf is required to create an empty missingDiffDf")
         }
         return referenceDf.sparkSession().createDataFrame(new ArrayList<Row>(), MISSING_DIFF_SCHEMA)
+    }
+
+    static Dataset convertMissingDiffToRuleSetDiffDataset(Dataset missingDiffDf, String compareScopeId, String objectType) {
+        if (missingDiffDf == null) return null
+        return missingDiffDf.select(
+                col("type").alias("diffType"),
+                lit(compareScopeId).alias("compareScopeId"),
+                lit(objectType).alias("objectType"),
+                col("id").alias("primaryId"),
+                lit(null).cast(DataTypes.StringType).alias("field"),
+                lit(null).cast(DataTypes.StringType).alias("file1Value"),
+                lit(null).cast(DataTypes.StringType).alias("file2Value"),
+                col("presentIn").alias("presentIn"),
+                col("missingIn").alias("missingIn"),
+                col("data").alias("data"),
+                lit(null).cast(DataTypes.StringType).alias("ruleId"),
+                lit(null).cast(DataTypes.StringType).alias("severity"),
+                col("note").alias("message")
+        )
+    }
+
+    static Dataset emptyRuleSetDiffDataset(Dataset referenceDf) {
+        if (referenceDf == null) {
+            throw new IllegalArgumentException("referenceDf is required to create an empty ruleSet diff dataset")
+        }
+        return referenceDf.sparkSession().createDataFrame(new ArrayList<Row>(), RULESET_DIFF_SCHEMA)
+    }
+
+    static Dataset buildRuleSetDiffDataset(Dataset referenceDf, List<Map<String, Object>> diffRows) {
+        if (referenceDf == null) {
+            throw new IllegalArgumentException("referenceDf is required to create a ruleSet diff dataset")
+        }
+        List<Map<String, Object>> safeDiffRows = diffRows ?: []
+        if (!safeDiffRows) return emptyRuleSetDiffDataset(referenceDf)
+
+        List<Row> rows = safeDiffRows.collect { Map<String, Object> diff ->
+            RowFactory.create(
+                    normalize(diff.diffType),
+                    normalize(diff.compareScopeId),
+                    normalize(diff.objectType),
+                    normalize(diff.primaryId),
+                    normalize(diff.field),
+                    normalize(diff.file1Value),
+                    normalize(diff.file2Value),
+                    normalize(diff.presentIn),
+                    normalize(diff.missingIn),
+                    normalize(diff.data),
+                    normalize(diff.ruleId),
+                    normalize(diff.severity),
+                    normalize(diff.message)
+            )
+        }
+        return referenceDf.sparkSession().createDataFrame(rows, RULESET_DIFF_SCHEMA)
+    }
+
+    static Dataset unionByNameDatasets(Dataset firstDf, Dataset secondDf) {
+        if (firstDf != null && secondDf != null) return firstDf.unionByName(secondDf)
+        if (firstDf != null) return firstDf
+        return secondDf
     }
 
     static Dataset buildMatchedPairDataset(Dataset file1DataDf, Dataset file2DataDf, Dataset matchedIdDf,

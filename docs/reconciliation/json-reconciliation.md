@@ -80,6 +80,48 @@ Duplicate `primaryId` values on either file side are invalid for the compare-sco
 
 When no objects are missing on either side, `missingDiffDf` is still returned as an empty Dataset with the normal Diff-row schema. Callers should not need to special-case `null` for the no-difference path.
 
+### `ReconciliationCoreServices.reconcile#RuleSetCompareScope`
+
+Internal full RuleSet compare pipeline for the cutover. It preserves the base missing-object Diff stage, executes DRL only on matched pairs, and returns one normalized diff dataset for both missing-object and field/business-rule outcomes.
+
+**Inputs (key):** same as `reconcile#RuleSetCompareScopeBaseDiff`, plus optional `ruleBatchSize` for bounded matched-pair execution.
+
+**Outputs (key):**
+- `missingInFile1Count`
+- `missingInFile2Count`
+- `missingObjectDifferenceCount`
+- `ruleDifferenceCount`
+- `differenceCount`
+- `matchedPairCount`
+- `ruleCount`
+- `firedRuleCount`
+- `diffDf`
+- `missingDiffDf`
+- `ruleDiffDf`
+- `validationErrors`
+- `processingWarnings`
+
+The normalized `diffDf` rows use a stable internal contract:
+- `diffType`
+- `compareScopeId`
+- `objectType`
+- `primaryId`
+- `field`
+- `file1Value`
+- `file2Value`
+- `presentIn`
+- `missingIn`
+- `data`
+- `ruleId`
+- `severity`
+- `message`
+
+Behavior notes:
+- Missing-object rows remain explicit as `MISSING_IN_FILE_1` / `MISSING_IN_FILE_2`.
+- Field/business-rule rows are emitted from DRL as `FIELD_MISMATCH` or another rule-defined `diffType`.
+- Matched pairs are processed in bounded batches before they are passed to Drools, so the Spark side stays responsible for the large-volume preparation.
+- If DRL compilation or execution fails, the service preserves the base missing-object Diffs and reports the failure in `processingWarnings` with `ruleSetId`, `compareScopeId`, and sample `primaryId` values when available.
+
 ### `ReconciliationCoreServices.reconcile#UnifiedFiles`
 
 Single reconciliation engine for all file type combinations. It converts CSV/JSON inputs into a normalized Spark structure, runs the compare once, and always emits a JSON diff. JSON and Mixed legacy service entry points are wrappers only.

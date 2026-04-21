@@ -239,6 +239,116 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertTrue(ec.message.errors.any { String message -> message.contains("primaryId must identify exactly one object per file side") })
     }
 
+    @Test
+    void fullRuleSetCompareScopeServiceAppendsRuleDiffsToMissingObjectDiffs() {
+        Map<String, Object> result = ec.service.sync()
+                .name("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope")
+                .parameters([
+                        ruleSetId      : "DARPAN_TEST_PRODUCT_COMPARE_RS",
+                        compareScopeId : "DARPAN_TEST_PRODUCT_JSON_SCOPE",
+                        file1Location  : "component://darpan/data/test/test-products-1.json",
+                        file2Location  : "component://darpan/data/test/test-products-2.json",
+                        sparkMaster    : "local[1]",
+                        sparkAppName   : "RuleSetCompareScopeServiceSmokeTests",
+                        ruleBatchSize  : 2
+                ])
+                .call()
+
+        assertEquals("DARPAN_TEST_PRODUCT_COMPARE_RS", result.ruleSetId)
+        assertEquals("DARPAN_TEST_PRODUCT_JSON_SCOPE", result.compareScopeId)
+        assertEquals("PRODUCT", result.objectType)
+        assertEquals(1L, result.missingInFile1Count)
+        assertEquals(1L, result.missingInFile2Count)
+        assertEquals(2L, result.missingObjectDifferenceCount)
+        assertEquals(2L, result.ruleDifferenceCount)
+        assertEquals(4L, result.differenceCount)
+        assertEquals(3L, result.matchedPairCount)
+        assertEquals(2, result.ruleCount)
+        assertEquals(2, result.firedRuleCount)
+        assertTrue(((List) result.validationErrors).isEmpty())
+        assertTrue(((List) result.processingWarnings).isEmpty())
+        assertFalse(ec.message.hasError())
+
+        List<Map<String, Object>> diffs = collectRows((Dataset) result.diffDf)
+        assertEquals(4, diffs.size())
+
+        Map<String, Object> missingInFile1 = diffs.find { Map<String, Object> row ->
+            row.diffType == "MISSING_IN_FILE_1" && row.primaryId == "P500"
+        }
+        assertTrue(missingInFile1 != null)
+        assertEquals("DARPAN_TEST_PRODUCT_JSON_SCOPE", missingInFile1.compareScopeId)
+        assertEquals("PRODUCT", missingInFile1.objectType)
+        assertEquals("OMS", missingInFile1.presentIn)
+        assertEquals("SHOPIFY", missingInFile1.missingIn)
+        assertTrue((missingInFile1.data as String).contains("\"productId\":\"P500\""))
+
+        Map<String, Object> missingInFile2 = diffs.find { Map<String, Object> row ->
+            row.diffType == "MISSING_IN_FILE_2" && row.primaryId == "P300"
+        }
+        assertTrue(missingInFile2 != null)
+        assertEquals("SHOPIFY", missingInFile2.presentIn)
+        assertEquals("OMS", missingInFile2.missingIn)
+        assertTrue((missingInFile2.data as String).contains("\"productId\":\"P300\""))
+
+        Map<String, Object> skuDiff = diffs.find { Map<String, Object> row ->
+            row.diffType == "FIELD_MISMATCH" && row.primaryId == "P200" && row.field == "sku"
+        }
+        assertTrue(skuDiff != null)
+        assertEquals("DARPAN_TEST_PRODUCT_SKU_MISMATCH", skuDiff.ruleId)
+        assertEquals("SKU-B", skuDiff.file1Value)
+        assertEquals("SKU-B-ALT", skuDiff.file2Value)
+        assertEquals("WARN", skuDiff.severity)
+        assertEquals("SKU mismatch", skuDiff.message)
+
+        Map<String, Object> priceDiff = diffs.find { Map<String, Object> row ->
+            row.diffType == "FIELD_MISMATCH" && row.primaryId == "P400" && row.field == "price"
+        }
+        assertTrue(priceDiff != null)
+        assertEquals("DARPAN_TEST_PRODUCT_PRICE_MISMATCH", priceDiff.ruleId)
+        assertEquals("49.99", priceDiff.file1Value)
+        assertEquals("59.99", priceDiff.file2Value)
+        assertEquals("WARN", priceDiff.severity)
+        assertEquals("Price mismatch", priceDiff.message)
+    }
+
+    @Test
+    void fullRuleSetCompareScopeServicePreservesBaseDiffsWhenRuleExecutionFails() {
+        Map<String, Object> result = ec.service.sync()
+                .name("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope")
+                .parameters([
+                        ruleSetId      : "DARPAN_TEST_PRODUCT_BROKEN_RS",
+                        compareScopeId : "DARPAN_TEST_PRODUCT_BROKEN_JSON_SCOPE",
+                        file1Location  : "component://darpan/data/test/test-products-1.json",
+                        file2Location  : "component://darpan/data/test/test-products-2.json",
+                        sparkMaster    : "local[1]",
+                        sparkAppName   : "RuleSetCompareScopeServiceSmokeTests",
+                        ruleBatchSize  : 2
+                ])
+                .call()
+
+        assertEquals("DARPAN_TEST_PRODUCT_BROKEN_RS", result.ruleSetId)
+        assertEquals("DARPAN_TEST_PRODUCT_BROKEN_JSON_SCOPE", result.compareScopeId)
+        assertEquals(2L, result.missingObjectDifferenceCount)
+        assertEquals(0L, result.ruleDifferenceCount)
+        assertEquals(2L, result.differenceCount)
+        assertEquals(3L, result.matchedPairCount)
+        assertEquals(0, result.firedRuleCount)
+        assertEquals(0, result.ruleCount)
+        assertTrue(((List) result.validationErrors).isEmpty())
+        assertFalse(ec.message.hasError())
+
+        List<String> warnings = ((List) result.processingWarnings).collect { Object value -> value?.toString() }
+        assertTrue(warnings.any { String message -> message.contains("DARPAN_TEST_PRODUCT_BROKEN_RS") })
+        assertTrue(warnings.any { String message -> message.contains("DARPAN_TEST_PRODUCT_BROKEN_JSON_SCOPE") })
+        assertTrue(warnings.any { String message -> message.contains("preserved base missing-object diffs") })
+
+        List<Map<String, Object>> diffs = collectRows((Dataset) result.diffDf)
+        assertEquals(2, diffs.size())
+        assertTrue(diffs.every { Map<String, Object> row ->
+            row.diffType in ["MISSING_IN_FILE_1", "MISSING_IN_FILE_2"]
+        })
+    }
+
     private static List<String> collectCompareIds(Dataset dataset) {
         return dataset.collectAsList()
                 .collect { row -> row.getAs("compare_id")?.toString() }

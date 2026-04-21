@@ -50,6 +50,14 @@ String sanitizePackagePart(String raw) {
     String cleaned = normalize(raw)?.toLowerCase()?.replaceAll(/[^a-z0-9_]/, "_")?.replaceAll(/_+/, "_")
     if (!cleaned) cleaned = "default_ruleset"
     if (!(cleaned[0] ==~ /[a-z_]/)) cleaned = "rs_${cleaned}"
+    if ([
+            "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const",
+            "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally", "float",
+            "for", "goto", "if", "implements", "import", "instanceof", "int", "interface", "long", "native",
+            "new", "package", "private", "protected", "public", "return", "short", "static", "strictfp",
+            "super", "switch", "synchronized", "this", "throw", "throws", "transient", "try", "void",
+            "volatile", "while"
+    ].contains(cleaned)) cleaned = "rs_${cleaned}"
     return cleaned
 }
 
@@ -136,6 +144,8 @@ String buildRuleSetDrl(String tenantId, String ruleSetId, List rules, List<Strin
     drl.append("import java.util.Map\n")
     drl.append("import java.util.List\n")
     drl.append("import java.util.ArrayList\n")
+    drl.append("import java.util.Objects\n")
+    drl.append("import reconciliation.rule.RuleDiffSupport\n")
     drl.append("global java.util.List results\n\n")
 
     int generatedRules = 0
@@ -210,10 +220,11 @@ Map getOrBuildContainer(ExecutionContext ec, String ruleSetId, boolean useCache 
 
     List<String> warnings = []
     String drlText = buildRuleSetDrl(tenantId, ruleSetId, rules, warnings)
+    String packageName = "reconciliation.rules.${sanitizePackagePart(tenantId)}.${sanitizePackagePart(ruleSetId)}"
 
     KieServices ks = KieServices.Factory.get()
     KieFileSystem kfs = ks.newKieFileSystem()
-    String drlPath = "src/main/resources/${sanitizePackagePart(tenantId)}_${sanitizePackagePart(ruleSetId)}.drl"
+    String drlPath = "src/main/resources/${packageName.replace('.', '/')}/${sanitizePackagePart(ruleSetId)}.drl"
     kfs.write(drlPath, drlText)
 
     KieBuilder kb = ks.newKieBuilder(kfs)
@@ -355,6 +366,75 @@ def executeRuleSetJson() {
         return executeRuleSet()
     } catch (Exception e) {
         return [error: "Invalid JSON Data: ${e.message}"]
+    }
+}
+
+def executeRuleSetMatchedPairs() {
+    ExecutionContext ec = context.ec as ExecutionContext
+    String ruleSetId = normalize(context.ruleSetId)
+    List dataList = (context.dataList instanceof List) ? (List) context.dataList : []
+
+    if (!dataList) {
+        return [
+                diffResults   : [],
+                matchedResults: [],
+                firedRuleCount: 0,
+                ruleCount     : 0,
+                warnings      : [],
+                error         : null
+        ]
+    }
+
+    try {
+        Map compiled = getOrBuildContainer(ec, ruleSetId, true, false)
+        KieContainer container = compiled.container as KieContainer
+        List<String> warnings = ((compiled.warnings ?: []) as List).collect { it?.toString() }.findAll { it }
+
+        List<Map> facts = dataList.collect { Object row ->
+            Map fact = (row instanceof Map) ? new LinkedHashMap((Map) row) : [value: row]
+            RuleDiffSupport.ensureGeneratedDiffList(fact)
+            return fact
+        }
+
+        List matchedResults = []
+        KieSession session = container.newKieSession()
+        try {
+            session.setGlobal("results", matchedResults)
+            facts.each { Map fact -> session.insert(fact) }
+            int fired = session.fireAllRules()
+
+            List<Map> diffResults = []
+            facts.each { Map fact ->
+                List<Map> normalizedDiffs = RuleDiffSupport.extractNormalizedDiffs(fact)
+                if (normalizedDiffs) {
+                    diffResults.addAll(normalizedDiffs)
+                    return
+                }
+
+                List matchedRuleIds = (fact.get("_matchedRuleIds") instanceof List) ? (List) fact.get("_matchedRuleIds") : []
+                if (matchedRuleIds) {
+                    String compareScopeId = normalize(fact.compareScopeId)
+                    String primaryId = normalize(fact.primaryId)
+                    warnings.add("RuleSet ${ruleSetId} matched compareScope=${compareScopeId ?: '(unknown)'} primaryId=${primaryId ?: '(unknown)'} but emitted no diff rows.")
+                }
+            }
+
+            logger.info("Executed matched-pair rules ruleSet={} facts={} fired={} diffRows={}",
+                    ruleSetId, facts.size(), fired, diffResults.size())
+            return [
+                    diffResults   : diffResults,
+                    matchedResults: matchedResults,
+                    firedRuleCount: fired,
+                    ruleCount     : compiled.ruleCount,
+                    warnings      : warnings.unique(),
+                    error         : null
+            ]
+        } finally {
+            try { session?.dispose() } catch (Exception ignored) {}
+        }
+    } catch (Exception e) {
+        logger.error("Matched-pair rule execution failed for ruleSet={}", ruleSetId, e)
+        return [error: "Matched-pair rule execution failed: ${e.message}"]
     }
 }
 

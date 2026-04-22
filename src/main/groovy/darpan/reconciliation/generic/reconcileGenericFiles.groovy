@@ -139,7 +139,7 @@ if (ruleSetIdValue) {
 
     String defaultBaseName = "${safeToken(compareScopeConfig.compareScopeId as String, safeToken(ruleSetIdValue, 'ruleset'))}-diff-${timestamp}.json"
     Map outputMetadata = [
-            timestamp                : ec.user.nowTimestamp?.toString(),
+            timestamp                : ReconciliationServices.formatTimestampIso(ec.user.nowTimestamp),
             file1Label               : compareScopeConfig.file1Label,
             file2Label               : compareScopeConfig.file2Label,
             file1Type                : file1Type,

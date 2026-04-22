@@ -1,6 +1,7 @@
 package darpan.facade.reconciliation
 
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import groovy.json.JsonSlurper
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -113,6 +114,25 @@ class PilotRuleSetFacadeSmokeTests {
         assertEquals("DARPAN_TEST_PRODUCT_COMPARE_RS", latestOutput.ruleSetId)
         assertEquals("DARPAN_TEST_PRODUCT_JSON_SCOPE", latestOutput.compareScopeId)
         assertEquals(2L, latestOutput.ruleDifferenceCount)
+
+        Map<String, Object> outputFileResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.get#PilotGeneratedOutput")
+                .parameters([
+                        fileName: latestOutput.fileName,
+                        format  : "json"
+                ])
+                .call()
+
+        assertFalse(ec.message.hasError())
+        assertTrue(((String) outputFileResult.outputFile.createdDate).contains("T"))
+        assertTrue(((String) outputFileResult.outputFile.createdDate).endsWith("Z"))
+
+        Map<String, Object> outputPayload = (Map<String, Object>) new JsonSlurper()
+                .parseText((String) outputFileResult.outputFile.contentText)
+        String metadataTimestamp = outputPayload?.metadata?.timestamp as String
+        assertNotNull(metadataTimestamp)
+        assertTrue(metadataTimestamp.contains("T"))
+        assertTrue(metadataTimestamp.endsWith("Z"))
     }
 
     private String readFixtureText(String relativePath) {

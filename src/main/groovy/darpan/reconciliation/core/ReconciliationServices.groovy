@@ -12,6 +12,9 @@ import org.apache.spark.sql.types.StructType
 import org.moqui.context.ExecutionContext
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+
+import java.sql.Timestamp
+
 import static org.apache.spark.sql.functions.*
 
 class ReconciliationServices {
@@ -246,7 +249,7 @@ class ReconciliationServices {
              
              // Write JSON
             Map outputMetadata = [
-                timestamp: ec.user.nowTimestamp?.toString(),
+                timestamp: formatTimestampIso(ec.user.nowTimestamp),
                 file1Label: label1,
                 file2Label: label2,
                 file1Type: type1,
@@ -774,5 +777,9 @@ class ReconciliationServices {
          fieldExpr = "`" + fieldExpr + "`"
          Dataset dataDf = rawDf.selectExpr("${fieldExpr} as compare_id", "struct(*) as data")
          return normalizeCompareIdDataset(dataDf, idNormalizer)
+    }
+
+    static String formatTimestampIso(Timestamp timestamp) {
+        return timestamp != null ? timestamp.toInstant().toString() : null
     }
 }

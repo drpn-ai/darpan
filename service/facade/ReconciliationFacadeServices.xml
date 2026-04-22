@@ -511,6 +511,7 @@
                 <parameter name="sourceFormat"/>
                 <parameter name="format"/>
                 <parameter name="contentType"/>
+                <parameter name="createdDate"/>
                 <parameter name="contentText" allow-html="true"/>
             </parameter>
         </out-parameters>

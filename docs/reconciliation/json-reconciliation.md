@@ -227,6 +227,8 @@ System 2 ID expression: $[*].shopifyProductId
 
 The reconciliation output is a JSON file with the following structure:
 
+`metadata.timestamp` is written as an ISO-8601 UTC string.
+
 ```json
 {
   "metadata": {

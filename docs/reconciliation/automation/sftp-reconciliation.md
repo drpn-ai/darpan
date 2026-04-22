@@ -7,7 +7,7 @@ The automation polls configured SFTP locations, stages the newest matching files
 - preferred RuleSet path: `reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope`
 - temporary migration bridge: `reconciliation.ReconciliationCoreServices.reconcile#FilesByMapping`
 
-When `ruleSetId` is provided, SFTP automation now uses the same compare-scope + DRL path as Generic reconciliation. Legacy scheduled jobs can continue to run through the mapping bridge until they are migrated.
+When `ruleSetId` is provided, SFTP automation now uses the same compare-scope + DRL path as Generic reconciliation. Legacy scheduled jobs can continue to run through the mapping bridge only until they are migrated.
 
 ## Prerequisites
 - Install/configure the `moqui-sftp` component. For Docker builds, `runtime/component/darpan/docker/Dockerfile` now clones `https://github.com/hotwax/moqui-sftp.git` before running `addRuntime`.
@@ -16,14 +16,14 @@ When `ruleSetId` is provided, SFTP automation now uses the same compare-scope + 
   - define a `RuleSet`
   - define one or more `RuleSetCompareScope` rows under that RuleSet
   - define exactly one `RuleSetCompareSource` for `FILE_1` and one for `FILE_2`
-- For legacy mapping mode:
+- For temporary legacy mapping mode only:
   - keep valid `ReconciliationMappingMember` rows for both systems
   - each mapping member still needs a saved `JsonSchema` row when the current mapping-readiness contract requires one
 
 ## Inputs (key parameters)
 - `ruleSetId` – preferred. Enables the RuleSet compare-scope pipeline.
 - `compareScopeId` – optional compare-scope override; required only when the RuleSet has multiple compare scopes.
-- `reconciliationMappingId` – temporary legacy bridge for unmigrated jobs.
+- `reconciliationMappingId` – deprecated legacy bridge for unmigrated jobs.
 - `file1SystemEnumId`, `file2SystemEnumId`
   - optional in RuleSet mode; when provided they are validated against the compare-scope file sides
   - required in mapping mode
@@ -45,9 +45,19 @@ When `ruleSetId` is provided, SFTP automation now uses the same compare-scope + 
 - Skips the archive subfolder when picking the newest file, and uploads the diff back into the same base path (creating it if missing); root uploads may be rejected by the server.
 - Absolute output locations outside runtime are treated as remote upload targets: the diff is written locally under the default `reconciled` folder, then uploaded to that remote path (or the file 1 base path if none is provided).
 - In RuleSet mode, the service resolves the compare scope first, stages both files, then delegates to `reconcile#RuleSetCompareScope` and writes one unified JSON diff artifact containing both missing-object and rule-generated rows.
-- In mapping mode, the service delegates to `reconcile#FilesByMapping` as a temporary bridge.
+- In mapping mode, the service delegates to `reconcile#FilesByMapping` as a deprecated temporary bridge.
 - RuleSet diff filenames are based on `compareScopeId`; legacy mapping diff filenames continue to use the mapping-based output path.
 - Returns diff file path/name and per-side counts; `processingWarnings` include mapping or detection fallbacks.
+
+## Migrating Legacy Jobs
+
+Use `reconciliation.ReconciliationMigrationServices.migrate#MappingsToRuleSetScopes` to translate deprecated Mapping rows into RuleSet compare-scope configuration and rewrite old `poll#SftpAndReconcile` jobs from `reconciliationMappingId` to `ruleSetId` plus `compareScopeId`.
+
+Recommended sequence:
+1. Run the migration with `dryRun=true` and review `warnings`.
+2. Run again with `dryRun=false`.
+3. Rerun once more to confirm idempotence (`jobsUpdated=0` on the second apply run).
+4. Leave Mapping rows in place only as historical evidence until final cleanup removes the legacy bridge.
 
 ## Scheduling Example (service-job)
 ```xml
@@ -72,6 +82,7 @@ The service returns `dataAvailable=false` when no files are found so the job can
 - Schedule section: pick cadence (minutes/hours/daily) or supply a cron expression, set output location, and pause/resume.
 - Advanced toggle: stage location defaults to `runtime://tmp/reconciliation/automation/input`; output defaults to a `reconciled` subfolder under that stage directory; archive folder name defaults to `archive`; Spark overrides are optional.
 - Existing jobs for this service are listed with edit/pause/resume actions; editing preloads parameters so you can adjust paths or cadence quickly.
+- New jobs should be created with RuleSet + compare-scope configuration, not with Mapping IDs.
 
 ## UI: Settings Screen (SFTP credentials)
 - Navigate to **Settings → SFTP** to add/update `darpan.reconciliation.SftpServer` entries used by the automation screen.

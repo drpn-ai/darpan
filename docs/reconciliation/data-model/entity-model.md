@@ -406,13 +406,12 @@ Defines one file-side extraction contract for a compare scope.
 - A Product compare scope can use `FILE_1.primaryIdExpression="$.productId"` and `FILE_2.primaryIdExpression="$.id"` while keeping one shared `objectType="Product"`.
 
 ### ReconciliationMapping (darpan.mapping.ReconciliationMapping)
-Defines a named source extraction contract for reconciliation.
+Defines a deprecated historical source extraction contract retained for migration.
 
 **Purpose**
-- Groups source-specific extraction entries under a stable operator-facing key
-- Selects the file systems, file types, schemas, ID expressions, and normalizers used by the current compare baseline
-- Remains the current Generic and SFTP caller key through `reconciliationMappingId` until RuleSet compare-scope caller cutover
-- Provides migration input for RuleSet compare-scope configuration
+- Preserves existing Mapping-backed configuration long enough to migrate it to RuleSet compare scopes
+- Provides the source key for the temporary `reconciliationMappingId` legacy bridge
+- Should not be used for new Generic or SFTP setup after RuleSet cutover
 
 **Key Fields**
 - `reconciliationMappingId`
@@ -422,12 +421,12 @@ Defines a named source extraction contract for reconciliation.
 - `lastUpdatedDate`
 
 ### ReconciliationMappingMember (darpan.mapping.ReconciliationMappingMember)
-Stores a single mapping entry tied to a mapping and system enum.
+Stores one deprecated historical file-side extraction entry tied to a mapping and system enum.
 
 **Purpose**
-- Captures system-specific record-id extraction details
-- Enables current direct record-id comparison by system
-- Provides file-side source data for migration to `RuleSetCompareSource`
+- Preserves existing system-specific record-id extraction details during migration
+- Supplies file-side source data for `RuleSetCompareSource` migration
+- Supports only the temporary legacy bridge for unmigrated jobs/callers
 
 **Key Fields**
 - `mappingMemberId`
@@ -440,20 +439,20 @@ Stores a single mapping entry tied to a mapping and system enum.
 - `idValueNormalizer`
 - `createdDate`
 
-### Current Mapping Baseline and Compare-Scope Cutover
-The current reconciliation baseline and planned target keep these responsibilities explicit:
+### Historical Mapping Baseline and Compare-Scope Cutover
+The reconciliation model now treats Mapping as historical migration input while RuleSet compare scopes own new setup:
 
-- Current code uses Mapping for source extraction and direct record-id comparison.
-- The target model uses RuleSet compare scopes for the compared object and per-file primary ID extraction.
+- New Generic and SFTP setup should use RuleSet compare scopes for the compared object and per-file primary ID extraction.
+- Mapping remains available only as legacy bridge configuration and migration input.
 - The base compare stage emits missing-object Diffs before DRL:
   - `MISSING_IN_FILE_1`: primary ID exists in file 2 but not file 1.
   - `MISSING_IN_FILE_2`: primary ID exists in file 1 but not file 2.
 - DRL receives only matched object pairs and emits field/business-rule Diffs.
-- Mapping deprecation belongs to the migration ticket after RuleSet compare-scope parity evidence exists.
+- `reconciliation.ReconciliationMigrationServices.migrate#MappingsToRuleSetScopes` is the idempotent migration path from Mapping to RuleSet compare-scope configuration.
 - The emitted result remains the existing Diff contract consumed by reconciliation screens and jobs.
 
 **Operational Note**
-- Mapping deletion should remove `ReconciliationMappingMember` rows first, then delete `ReconciliationMapping` to satisfy FK constraints (`MAPMEM_MAPDEF`).
+- Do not create new Mapping rows for active setup. Migrate existing rows first, then remove `ReconciliationMappingMember` rows before deleting `ReconciliationMapping` to satisfy FK constraints (`MAPMEM_MAPDEF`).
 
 ## What Is Out of Scope (By Design)
 

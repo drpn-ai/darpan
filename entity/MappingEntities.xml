@@ -6,7 +6,7 @@
     <!-- ========================================================= -->
 
     <entity entity-name="ReconciliationMapping" package="darpan.mapping" use="configuration">
-        <description>Current named source extraction contract for reconciliation. Mappings define systems and record-id expressions for existing compare flows and provide migration input for RuleSet compare scopes.</description>
+        <description>Deprecated historical reconciliation configuration retained as migration input for RuleSet compare scopes. Do not create new Mapping records for active RuleSet-based compare flows.</description>
         <field name="reconciliationMappingId" type="id" is-pk="true"/>
         <field name="mappingName" type="text-short" not-null="true"/>
         <field name="description" type="text-medium"/>
@@ -21,7 +21,7 @@
     </entity>
 
     <entity entity-name="ReconciliationMappingMember" package="darpan.mapping" use="configuration">
-        <description>Current system-specific source extraction entry for a Mapping, including file type, schema, ID expression, and optional ID normalizer.</description>
+        <description>Deprecated historical file-side extraction entry for a Mapping. Retained only for migration and temporary legacy bridge execution.</description>
         <field name="mappingMemberId" type="id" is-pk="true"/>
         <field name="reconciliationMappingId" type="id" not-null="true"/>
         <field name="systemEnumId" type="id" not-null="true"/>

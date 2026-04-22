@@ -221,7 +221,7 @@ class ReconciliationSmokeTestSupport {
     static void seedSchemaBackedCsvMappingFixtures(ExecutionContext ec) {
         seedPilotCompanyScope(ec)
         seedSharedReconciliationEnums(ec)
-        upsertEntity(ec, "darpan.reconciliation.JsonSchema", [jsonSchemaId: "TestOmsOrderSchema"], [
+        upsertEntityValue(ec, "darpan.reconciliation.JsonSchema", [jsonSchemaId: "TestOmsOrderSchema"], [
                 jsonSchemaId       : "TestOmsOrderSchema",
                 schemaName         : "test-oms-order-id.schema.json",
                 description        : "Smoke-test OMS order id schema",
@@ -230,7 +230,7 @@ class ReconciliationSmokeTestSupport {
                 createdDate        : TEST_FROM_DATE,
                 schemaText         : '{"type":"object","properties":{"order_id":{"type":"string"}}}'
         ])
-        upsertEntity(ec, "darpan.reconciliation.JsonSchema", [jsonSchemaId: "TestShopifyOrderSchema"], [
+        upsertEntityValue(ec, "darpan.reconciliation.JsonSchema", [jsonSchemaId: "TestShopifyOrderSchema"], [
                 jsonSchemaId       : "TestShopifyOrderSchema",
                 schemaName         : "test-shopify-order-id.schema.json",
                 description        : "Smoke-test Shopify order id schema",
@@ -239,12 +239,12 @@ class ReconciliationSmokeTestSupport {
                 createdDate        : TEST_FROM_DATE,
                 schemaText         : '{"type":"object","properties":{"order_id":{"type":"string"}}}'
         ])
-        upsertEntity(ec, "darpan.mapping.ReconciliationMapping", [reconciliationMappingId: "OrderIdSchemaMap"], [
+        upsertEntityValue(ec, "darpan.mapping.ReconciliationMapping", [reconciliationMappingId: "OrderIdSchemaMap"], [
                 reconciliationMappingId: "OrderIdSchemaMap",
                 mappingName            : "Order ID",
                 description            : "Order ID field mapping backed by saved schemas"
         ])
-        upsertEntity(ec, "darpan.mapping.ReconciliationMappingMember", [mappingMemberId: "OrderIdSchemaMapOms"], [
+        upsertEntityValue(ec, "darpan.mapping.ReconciliationMappingMember", [mappingMemberId: "OrderIdSchemaMapOms"], [
                 mappingMemberId         : "OrderIdSchemaMapOms",
                 reconciliationMappingId : "OrderIdSchemaMap",
                 systemEnumId            : "OMS",
@@ -252,7 +252,7 @@ class ReconciliationSmokeTestSupport {
                 schemaFileName          : "test-oms-order-id.schema.json",
                 idFieldExpression       : "order_id"
         ])
-        upsertEntity(ec, "darpan.mapping.ReconciliationMappingMember", [mappingMemberId: "OrderIdSchemaMapShopify"], [
+        upsertEntityValue(ec, "darpan.mapping.ReconciliationMappingMember", [mappingMemberId: "OrderIdSchemaMapShopify"], [
                 mappingMemberId         : "OrderIdSchemaMapShopify",
                 reconciliationMappingId : "OrderIdSchemaMap",
                 systemEnumId            : "SHOPIFY",
@@ -263,16 +263,16 @@ class ReconciliationSmokeTestSupport {
     }
 
     static void seedPilotCompanyScope(ExecutionContext ec) {
-        upsertEntity(ec, "moqui.basic.EnumerationType", [enumTypeId: "UserGroupType"], [
+        upsertEntityValue(ec, "moqui.basic.EnumerationType", [enumTypeId: "UserGroupType"], [
                 enumTypeId  : "UserGroupType",
                 description : "User Group Type"
         ])
-        upsertEntity(ec, "moqui.basic.Enumeration", [enumId: PilotAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID], [
+        upsertEntityValue(ec, "moqui.basic.Enumeration", [enumId: PilotAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID], [
                 enumId      : PilotAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID,
                 enumTypeId  : "UserGroupType",
                 description : "Darpan company groups"
         ])
-        upsertEntity(ec, "moqui.security.UserGroup", [userGroupId: TEST_COMPANY_USER_GROUP_ID], [
+        upsertEntityValue(ec, "moqui.security.UserGroup", [userGroupId: TEST_COMPANY_USER_GROUP_ID], [
                 userGroupId     : TEST_COMPANY_USER_GROUP_ID,
                 description     : "Krewe",
                 groupTypeEnumId : PilotAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID
@@ -321,6 +321,59 @@ class ReconciliationSmokeTestSupport {
                 password         : "oms-pass",
                 remoteAttributes : "N"
         ])
+    }
+
+    static void seedLegacyMappingSftpJobFixture(ExecutionContext ec, String jobName = "OrderIdSchemaMapLegacySftpJob") {
+        ec.entity.find("moqui.service.job.ServiceJobParameter")
+                .condition("jobName", jobName)
+                .disableAuthz()
+                .useCache(false)
+                .list()
+                ?.each { it.delete() }
+        def existingJob = ec.entity.find("moqui.service.job.ServiceJob")
+                .condition("jobName", jobName)
+                .disableAuthz()
+                .useCache(false)
+                .one()
+        if (existingJob != null) existingJob.delete()
+
+        upsertEntityValue(ec, "moqui.service.job.ServiceJob", [jobName: jobName], [
+                jobName       : jobName,
+                description   : "Legacy mapping-backed SFTP reconciliation job for migration smoke tests",
+                serviceName   : "reconciliation.ReconciliationAutomationServices.poll#SftpAndReconcile",
+                cronExpression: "0 */15 * * * ?",
+                paused        : "N"
+        ])
+
+        Map<String, String> params = [
+                reconciliationMappingId: "OrderIdSchemaMap",
+                file1SystemEnumId      : "SHOPIFY",
+                file2SystemEnumId      : "OMS",
+                file1SftpServerId      : "SHOPIFY_TEST_SFTP",
+                file2SftpServerId      : "OMS_TEST_SFTP",
+                file1RemotePath        : "/incoming",
+                file2RemotePath        : "/incoming",
+                file1FileTypeEnumId    : "DftCsv",
+                file2FileTypeEnumId    : "DftCsv",
+                file1SchemaFileName    : "test-shopify-order-id.schema.json",
+                file2SchemaFileName    : "test-oms-order-id.schema.json",
+                stageLocation          : "runtime://tmp/reconciliation/automation/input/migration-smoke",
+                outputLocation         : "runtime://tmp/reconciliation/automation/output/migration-smoke",
+                archiveSubdir          : "archive",
+                hasHeader              : "true",
+                sparkMaster            : "local[1]",
+                sparkAppName           : "ReconciliationMigrationServiceSmokeTests"
+        ]
+        params.each { String parameterName, String parameterValue ->
+            upsertEntityValue(ec, "moqui.service.job.ServiceJobParameter", [
+                    jobName      : jobName,
+                    parameterName: parameterName
+            ], [
+                    jobName       : jobName,
+                    parameterName : parameterName,
+                    parameterValue: parameterValue
+            ])
+        }
     }
 
     static Path resolveBackendRoot() {
@@ -390,36 +443,36 @@ class ReconciliationSmokeTestSupport {
     }
 
     private static void seedSharedReconciliationEnums(ExecutionContext ec) {
-        upsertEntity(ec, "moqui.basic.EnumerationType", [enumTypeId: "DarpanSystemSource"], [
+        upsertEntityValue(ec, "moqui.basic.EnumerationType", [enumTypeId: "DarpanSystemSource"], [
                 enumTypeId  : "DarpanSystemSource",
                 description : "Darpan System Source"
         ])
-        upsertEntity(ec, "moqui.basic.EnumerationType", [enumTypeId: "DarpanFileType"], [
+        upsertEntityValue(ec, "moqui.basic.EnumerationType", [enumTypeId: "DarpanFileType"], [
                 enumTypeId  : "DarpanFileType",
                 description : "File Types for Reconciliation"
         ])
-        upsertEntity(ec, "moqui.basic.Enumeration", [enumId: "OMS"], [
+        upsertEntityValue(ec, "moqui.basic.Enumeration", [enumId: "OMS"], [
                 enumId      : "OMS",
                 enumTypeId  : "DarpanSystemSource",
                 enumCode    : "OMS",
                 description : "OMS",
                 sequenceNum : 1
         ])
-        upsertEntity(ec, "moqui.basic.Enumeration", [enumId: "SHOPIFY"], [
+        upsertEntityValue(ec, "moqui.basic.Enumeration", [enumId: "SHOPIFY"], [
                 enumId      : "SHOPIFY",
                 enumTypeId  : "DarpanSystemSource",
                 enumCode    : "SHOPIFY",
                 description : "Shopify",
                 sequenceNum : 2
         ])
-        upsertEntity(ec, "moqui.basic.Enumeration", [enumId: "DftCsv"], [
+        upsertEntityValue(ec, "moqui.basic.Enumeration", [enumId: "DftCsv"], [
                 enumId      : "DftCsv",
                 enumTypeId  : "DarpanFileType",
                 enumCode    : "CSV",
                 description : "CSV",
                 sequenceNum : 1
         ])
-        upsertEntity(ec, "moqui.basic.Enumeration", [enumId: "DftJson"], [
+        upsertEntityValue(ec, "moqui.basic.Enumeration", [enumId: "DftJson"], [
                 enumId      : "DftJson",
                 enumTypeId  : "DarpanFileType",
                 enumCode    : "JSON",

@@ -325,13 +325,15 @@ class ReconciliationSmokeTestSupport {
 
     static Path resolveBackendRoot() {
         Path cwd = Paths.get("").toAbsolutePath().normalize()
+        String configuredRoot = System.getProperty("darpan.backend.root") ?: System.getenv("DARPAN_BACKEND_ROOT")
         List<Path> candidates = [
+                configuredRoot ? Paths.get(configuredRoot).toAbsolutePath().normalize() : null,
                 cwd,
                 cwd.resolve("darpan-backend"),
                 cwd.resolve("runtime/component/darpan").normalize(),
                 cwd.resolve("../../..").normalize(),
                 cwd.resolve("../../../..").normalize()
-        ].unique()
+        ].findAll { it != null }.unique()
 
         for (Path candidate : candidates) {
             if (Files.exists(candidate.resolve("runtime/conf/MoquiDevConf.xml")) &&

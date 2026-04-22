@@ -139,6 +139,47 @@
         </out-parameters>
     </service>
 
+    <service verb="list" noun="PilotRuleSetCompareScopes" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/listPilotRuleSetCompareScopes.groovy">
+        <description>List RuleSet compare scopes and their file-side system definitions for the darpan-ui generic diff flow.</description>
+        <in-parameters>
+            <parameter name="query"/>
+            <parameter name="pageIndex" type="Integer" default-value="0"/>
+            <parameter name="pageSize" type="Integer" default-value="20"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="pagination">
+                <parameter name="pageIndex" type="Integer"/>
+                <parameter name="pageSize" type="Integer"/>
+                <parameter name="totalCount" type="Integer"/>
+                <parameter name="pageCount" type="Integer"/>
+            </parameter>
+            <parameter name="compareScopes">
+                <parameter name="ruleSetId"/>
+                <parameter name="ruleSetName"/>
+                <parameter name="ruleSetDescription"/>
+                <parameter name="compareScopeId"/>
+                <parameter name="compareScopeDescription"/>
+                <parameter name="objectType"/>
+                <parameter name="file1SystemEnumId"/>
+                <parameter name="file1SystemLabel"/>
+                <parameter name="file1FileTypeEnumId"/>
+                <parameter name="file1FileTypeLabel"/>
+                <parameter name="file1PrimaryIdExpression"/>
+                <parameter name="file1SchemaFileName"/>
+                <parameter name="file2SystemEnumId"/>
+                <parameter name="file2SystemLabel"/>
+                <parameter name="file2FileTypeEnumId"/>
+                <parameter name="file2FileTypeLabel"/>
+                <parameter name="file2PrimaryIdExpression"/>
+                <parameter name="file2SchemaFileName"/>
+            </parameter>
+        </out-parameters>
+    </service>
+
     <service verb="get" noun="PilotMapping" allow-remote="true" authenticate="true">
         <description>Load one pilot mapping with editable schema and field details for darpan-ui settings workflows.</description>
         <in-parameters>
@@ -338,7 +379,9 @@
             location="component://darpan/src/main/groovy/darpan/facade/reconciliation/runPilotGenericDiff.groovy">
         <description>Run the pilot generic diff flow using text-based file payloads suitable for darpan-ui JSON-RPC calls.</description>
         <in-parameters>
-            <parameter name="reconciliationMappingId" required="true"/>
+            <parameter name="reconciliationMappingId"/>
+            <parameter name="ruleSetId"/>
+            <parameter name="compareScopeId"/>
             <parameter name="file1Name" required="true"/>
             <parameter name="file1Text" required="true" allow-html="any"/>
             <parameter name="file2Name" required="true"/>
@@ -354,8 +397,15 @@
             <parameter name="messages"><parameter name="message"/></parameter>
             <parameter name="errors"><parameter name="error"/></parameter>
             <parameter name="runResult">
+                <parameter name="runType"/>
+                <parameter name="runName"/>
                 <parameter name="reconciliationMappingId"/>
                 <parameter name="mappingName"/>
+                <parameter name="ruleSetId"/>
+                <parameter name="ruleSetName"/>
+                <parameter name="compareScopeId"/>
+                <parameter name="compareScopeDescription"/>
+                <parameter name="objectType"/>
                 <parameter name="file1Name"/>
                 <parameter name="file2Name"/>
                 <parameter name="file1SystemEnumId"/>
@@ -369,15 +419,24 @@
                     <parameter name="sourceFormat"/>
                     <parameter name="availableFormats" type="List"/>
                     <parameter name="preferredDownloadFormat"/>
+                    <parameter name="runType"/>
+                    <parameter name="runName"/>
                     <parameter name="companyUserGroupId"/>
                     <parameter name="reconciliationMappingId"/>
                     <parameter name="mappingName"/>
+                    <parameter name="ruleSetId"/>
+                    <parameter name="ruleSetName"/>
+                    <parameter name="compareScopeId"/>
+                    <parameter name="compareScopeDescription"/>
+                    <parameter name="objectType"/>
                     <parameter name="reconciliationType"/>
                     <parameter name="file1Label"/>
                     <parameter name="file2Label"/>
                     <parameter name="totalDifferences" type="Long"/>
                     <parameter name="onlyInFile1Count" type="Long"/>
                     <parameter name="onlyInFile2Count" type="Long"/>
+                    <parameter name="missingObjectDifferenceCount" type="Long"/>
+                    <parameter name="ruleDifferenceCount" type="Long"/>
                     <parameter name="createdDate" type="Timestamp"/>
                     <parameter name="sizeBytes" type="Long"/>
                 </parameter>
@@ -390,6 +449,8 @@
         <description>List generated pilot diff outputs within the current active-company scope.</description>
         <in-parameters>
             <parameter name="reconciliationMappingId"/>
+            <parameter name="ruleSetId"/>
+            <parameter name="compareScopeId"/>
             <parameter name="query"/>
             <parameter name="pageIndex" type="Integer" default-value="0"/>
             <parameter name="pageSize" type="Integer" default-value="20"/>
@@ -409,15 +470,24 @@
                 <parameter name="sourceFormat"/>
                 <parameter name="availableFormats" type="List"/>
                 <parameter name="preferredDownloadFormat"/>
+                <parameter name="runType"/>
+                <parameter name="runName"/>
                 <parameter name="companyUserGroupId"/>
                 <parameter name="reconciliationMappingId"/>
                 <parameter name="mappingName"/>
+                <parameter name="ruleSetId"/>
+                <parameter name="ruleSetName"/>
+                <parameter name="compareScopeId"/>
+                <parameter name="compareScopeDescription"/>
+                <parameter name="objectType"/>
                 <parameter name="reconciliationType"/>
                 <parameter name="file1Label"/>
                 <parameter name="file2Label"/>
                 <parameter name="totalDifferences" type="Long"/>
                 <parameter name="onlyInFile1Count" type="Long"/>
                 <parameter name="onlyInFile2Count" type="Long"/>
+                <parameter name="missingObjectDifferenceCount" type="Long"/>
+                <parameter name="ruleDifferenceCount" type="Long"/>
                 <parameter name="createdDate" type="Timestamp"/>
                 <parameter name="sizeBytes" type="Long"/>
             </parameter>

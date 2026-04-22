@@ -46,6 +46,11 @@ Behavior notes:
 - If the RuleSet defines exactly one compare scope, Generic routing resolves it automatically. When a RuleSet has multiple scopes, `compareScopeId` is required.
 - The mapping route remains available only as a migration bridge until the later cutover tickets remove it.
 
+Facade/PWA notes:
+- `facade.ReconciliationFacadeServices.list#PilotRuleSetCompareScopes` lists the RuleSet compare-scope rows that drive the Generic PWA selector.
+- `facade.ReconciliationFacadeServices.run#PilotGenericDiff` now accepts either `ruleSetId` plus optional `compareScopeId` or legacy `reconciliationMappingId`.
+- `facade.ReconciliationFacadeServices.list#PilotGeneratedOutputs` now filters by `ruleSetId` and `compareScopeId` as well as `reconciliationMappingId`, so the RuleSet workflow can load saved history and latest-result cards without mapping IDs.
+
 ### `ReconciliationAutomationServices.poll#SftpAndReconcile`
 
 SFTP automation stages remote files and now routes through the same RuleSet compare-scope pipeline as Generic reconciliation when `ruleSetId` is provided. Older automation jobs can continue to use `reconciliationMappingId` temporarily until they are migrated.

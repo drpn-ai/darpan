@@ -7,6 +7,8 @@ import java.sql.Timestamp
 int page = Math.max(0, FacadeSupport.normalizeInt(pageIndex, 0))
 int size = Math.max(1, Math.min(200, FacadeSupport.normalizeInt(pageSize, 20)))
 String mappingId = FacadeSupport.normalize(reconciliationMappingId)
+String ruleSetIdValue = FacadeSupport.normalize(ruleSetId)
+String compareScopeIdValue = FacadeSupport.normalize(compareScopeId)
 String search = FacadeSupport.normalize(query)?.toLowerCase()
 
 generatedOutputs = []
@@ -21,14 +23,7 @@ if (outputDir?.exists()) {
             .findAll { File file -> file.isFile() && PilotReconciliationSupport.isSupportedOutputFile(file.name) }
             .sort { File left, File right -> Long.compare(right.lastModified(), left.lastModified()) }
             .each { File file ->
-                Map outputDocument = [:]
-                if (PilotReconciliationSupport.sourceFormatForFile(file.name) == "json") {
-                    try {
-                        outputDocument = PilotReconciliationSupport.parseGeneratedOutputText(file.getText("UTF-8"))
-                    } catch (Exception ignored) {
-                        outputDocument = [:]
-                    }
-                }
+                Map outputDocument = PilotReconciliationSupport.parseGeneratedOutputFile(file)
 
                 Map<String, Object> descriptor = PilotReconciliationSupport.buildGeneratedOutputDescriptor(
                         file.name,
@@ -37,7 +32,13 @@ if (outputDir?.exists()) {
                         new Timestamp(file.lastModified())
                 )
 
-                if (!PilotReconciliationSupport.matchesGeneratedOutputDescriptor(descriptor, mappingId, search)) return
+                if (!PilotReconciliationSupport.matchesGeneratedOutputDescriptor(
+                        descriptor,
+                        mappingId,
+                        ruleSetIdValue,
+                        compareScopeIdValue,
+                        search
+                )) return
                 rows.add(descriptor)
             }
 

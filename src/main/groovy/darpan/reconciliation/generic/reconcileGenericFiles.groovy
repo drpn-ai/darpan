@@ -148,7 +148,9 @@ if (ruleSetIdValue) {
             reconciliationMappingId  : mappingIdValue,
             reconciliationMappingName: mappingNameValue,
             ruleSetId                : ruleSetIdValue,
+            ruleSetName              : compareScopeConfig.ruleSetName,
             compareScopeId           : compareScopeConfig.compareScopeId,
+            compareScopeDescription  : compareScopeConfig.compareScopeDescription,
             objectType               : reconcileResult.objectType
     ]
     Map outputSummary = [

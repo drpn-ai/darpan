@@ -109,6 +109,7 @@ Shared-tenant rule:
 ### `facade.ReconciliationFacadeServices`
 - `create#PilotMapping`
 - `list#PilotMappings`
+- `list#PilotRuleSetCompareScopes`
 - `get#PilotMapping`
 - `save#PilotMapping`
 - `save#DashboardPinnedMappings`
@@ -123,11 +124,12 @@ Pilot release contract notes:
 - `create#PilotMapping` normalizes schema-flattener field paths into pilot-safe JSON ID expressions so newly-created mappings remain visible in `list#PilotMappings` and executable by the mapping-backed run flow.
 - `get#PilotMapping` only returns saved mappings whose members still resolve to saved schemas, and includes the editable schema IDs/names needed by the PWA runs settings workflow.
 - `save#PilotMapping` updates an existing two-source mapping from the PWA runs settings workflow and preserves the existing mapping/member record IDs while refreshing schema and field selections.
-- The active pilot remains mapping-based for this release. The facade contract uses `reconciliationMappingId` rather than `ruleSetId`.
+- The active Generic pilot workflow now defaults to RuleSet compare scopes. The facade keeps `reconciliationMappingId` only as a temporary bridge for older launch points while the rest of the cutover lands.
 - `list#PilotMappings` now also returns `pinnedReconciliationMappingIds`, a user-scoped ordered list of saved dashboard pins backed by Moqui `UserPreference`.
+- `list#PilotRuleSetCompareScopes` returns the RuleSet, compare-scope, object-type, file-side system labels, and primary-ID expressions the PWA needs to drive the RuleSet selector flow.
 - `save#DashboardPinnedMappings` accepts `pinnedReconciliationMappingIds` and persists that ordered list for the authenticated user, so pinned runs survive browser/profile/origin changes after login.
-- `run#PilotGenericDiff` is JSON-RPC friendly for `darpan-ui`; it accepts `file1Name`/`file1Text` and `file2Name`/`file2Text` instead of raw multipart `FileItem` uploads.
-- `list#PilotGeneratedOutputs` accepts optional `reconciliationMappingId` and only returns generated outputs whose stored metadata matches that mapping when the filter is provided.
+- `run#PilotGenericDiff` is JSON-RPC friendly for `darpan-ui`; it accepts `file1Name`/`file1Text` and `file2Name`/`file2Text`, and now supports either `ruleSetId` plus optional `compareScopeId` or legacy `reconciliationMappingId`.
+- `list#PilotGeneratedOutputs` accepts optional `reconciliationMappingId`, `ruleSetId`, and `compareScopeId`, and filters saved outputs against the stored metadata for that run scope.
 - The underlying reconciliation engine still writes a scoped JSON diff file under `runtime://tmp/reconciliation/generic/**`.
 - `get#PilotGeneratedOutput` can return that stored JSON directly or convert it to CSV on demand for the pilot UI download action.
 

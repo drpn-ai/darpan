@@ -416,7 +416,9 @@ if (ruleSetIdValue) {
             file2Type          : file2Type,
             reconciliation     : reconciliationType,
             ruleSetId          : ruleSetIdValue,
+            ruleSetName        : compareScopeConfig.ruleSetName,
             compareScopeId     : compareScopeConfig.compareScopeId,
+            compareScopeDescription: compareScopeConfig.compareScopeDescription,
             objectType         : reconcileResult.objectType,
             file1Source        : file1Source,
             file2Source        : file2Source

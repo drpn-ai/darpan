@@ -385,6 +385,15 @@ class ReconciliationServices {
         }
 
         def compareScope = null
+        def ruleSet = ec.entity.find("darpan.rule.RuleSet")
+                .condition("ruleSetId", normalizedRuleSetId)
+                .disableAuthz()
+                .useCache(false)
+                .one()
+        if (ruleSet == null) {
+            throw new IllegalArgumentException("RuleSet ${normalizedRuleSetId} was not found")
+        }
+
         if (compareScopeIdValue) {
             compareScope = ec.entity.find("darpan.rule.RuleSetCompareScope")
                     .condition("compareScopeId", compareScopeIdValue)
@@ -436,7 +445,10 @@ class ReconciliationServices {
         }
 
         return [
+                ruleSetId         : normalizedRuleSetId,
+                ruleSetName       : normalize(ruleSet.ruleSetName) ?: normalizedRuleSetId,
                 compareScopeId    : normalize(compareScope.compareScopeId),
+                compareScopeDescription: normalize(compareScope.description),
                 objectType        : normalize(compareScope.objectType),
                 file1SystemEnumId : scopeFile1SystemEnumId,
                 file2SystemEnumId : scopeFile2SystemEnumId,

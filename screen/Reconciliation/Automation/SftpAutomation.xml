@@ -11,12 +11,12 @@
                 <message type="error" text="Job name is required."/>
                 <return error="true"/>
             </if>
-            <if condition="!reconciliationMappingId">
-                <message type="error" text="Mapping is required."/>
+            <if condition="!ruleSetId">
+                <message type="error" text="RuleSet is required."/>
                 <return error="true"/>
             </if>
-            <if condition="!file1SystemEnumId || !file2SystemEnumId">
-                <message type="error" text="System sources for File 1 and File 2 are required."/>
+            <if condition="!compareScopeId">
+                <message type="error" text="Compare scope is required."/>
                 <return error="true"/>
             </if>
             <if condition="!file1SftpServerId || !file2SftpServerId">
@@ -82,12 +82,53 @@
                     def s = val.toString().toLowerCase()
                     return (s == "y" || s == "true" || s == "1" || s == "on") ? "true" : "false"
                 }
+                String selectedRuleSetId = normalize(ruleSetId)
+                String selectedCompareScopeId = normalize(compareScopeId)
+                Map compareScopeConfig = null
+
+                if (!selectedRuleSetId) scheduleErrors << "RuleSet is required."
+                if (!selectedCompareScopeId) scheduleErrors << "Compare scope is required."
+
+                if (scheduleErrors.isEmpty()) {
+                    def compareScope = ec.entity.find("darpan.rule.RuleSetCompareScope")
+                            .condition("compareScopeId", selectedCompareScopeId)
+                            .useCache(false)
+                            .one()
+                    if (!compareScope) {
+                        scheduleErrors << "Compare scope ${selectedCompareScopeId} was not found."
+                    } else if (normalize(compareScope.ruleSetId) != selectedRuleSetId) {
+                        scheduleErrors << "Compare scope ${selectedCompareScopeId} does not belong to RuleSet ${selectedRuleSetId}."
+                    } else {
+                        Map sourceBySide = [:]
+                        ec.entity.find("darpan.rule.RuleSetCompareSource")
+                                .condition("compareScopeId", selectedCompareScopeId)
+                                .useCache(false)
+                                .list()
+                                ?.each { source ->
+                                    sourceBySide[normalize(source.fileSide)] = source
+                                }
+
+                        def file1Source = sourceBySide["FILE_1"]
+                        def file2Source = sourceBySide["FILE_2"]
+                        if (!file1Source || !file2Source) {
+                            scheduleErrors << "Compare scope ${selectedCompareScopeId} is missing FILE_1 or FILE_2 source configuration."
+                        } else {
+                            compareScopeConfig = [
+                                    ruleSetId        : selectedRuleSetId,
+                                    compareScopeId   : selectedCompareScopeId,
+                                    file1SystemEnumId: normalize(file1Source.systemEnumId),
+                                    file2SystemEnumId: normalize(file2Source.systemEnumId)
+                            ]
+                        }
+                    }
+                }
 
                 Map<String, String> paramMap = [:]
                 [
-                        reconciliationMappingId   : reconciliationMappingId,
-                        file1SystemEnumId         : file1SystemEnumId,
-                        file2SystemEnumId         : file2SystemEnumId,
+                        ruleSetId                 : compareScopeConfig?.ruleSetId,
+                        compareScopeId            : compareScopeConfig?.compareScopeId,
+                        file1SystemEnumId         : compareScopeConfig?.file1SystemEnumId,
+                        file2SystemEnumId         : compareScopeConfig?.file2SystemEnumId,
                         file1SftpServerId         : file1SftpServerId,
                         file2SftpServerId         : file2SftpServerId,
                         file1FileTypeEnumId       : file1FileTypeEnumId,
@@ -190,7 +231,10 @@
             <econdition field-name="enumTypeId" value="DarpanSystemSource"/>
             <order-by field-name="sequenceNum,description"/>
         </entity-find>
-        <entity-find entity-name="darpan.mapping.ReconciliationMapping" list="mappingList" cache="false">
+        <entity-find entity-name="darpan.rule.RuleSet" list="ruleSetList" cache="false">
+            <order-by field-name="ruleSetName,ruleSetId"/>
+        </entity-find>
+        <entity-find entity-name="darpan.mapping.ReconciliationMapping" list="legacyMappingList" cache="false">
             <order-by field-name="mappingName"/>
         </entity-find>
         <entity-find entity-name="moqui.basic.Enumeration" list="fileTypeEnumList" cache="false">
@@ -220,10 +264,69 @@
 
             Map systemLabels = [:]
             systemEnumList?.each { systemLabels[it.enumId] = it.description ?: it.enumId }
-            Map mappingLabels = [:]
-            mappingList?.each { mappingLabels[it.reconciliationMappingId] = it.mappingName ?: it.reconciliationMappingId }
+            context.systemLabels = systemLabels
+            Map legacyMappingLabels = [:]
+            legacyMappingList?.each { legacyMappingLabels[it.reconciliationMappingId] = it.mappingName ?: it.reconciliationMappingId }
             Map serverLabels = [:]
             servers?.each { serverLabels[it.sftpServerId] = it.label }
+
+            List compareScopeList = []
+            Map compareScopeById = [:]
+            (ec.entity.find("darpan.rule.RuleSetCompareScope")
+                    .useCache(false)
+                    .orderBy(["ruleSetId", "compareScopeId"])
+                    .list() ?: []).each { compareScope ->
+                def ruleSet = ruleSetList?.find { it.ruleSetId == compareScope.ruleSetId }
+                if (!ruleSet) return
+
+                Map sourceBySide = [:]
+                ec.entity.find("darpan.rule.RuleSetCompareSource")
+                        .condition("compareScopeId", compareScope.compareScopeId)
+                        .useCache(false)
+                        .list()
+                        ?.each { source ->
+                            sourceBySide[normalize(source.fileSide)] = source
+                        }
+
+                def file1Source = sourceBySide["FILE_1"]
+                def file2Source = sourceBySide["FILE_2"]
+                if (!file1Source || !file2Source) return
+
+                String ruleSetLabel = normalize(ruleSet.ruleSetName) ?: normalize(ruleSet.ruleSetId)
+                String compareScopeLabel = normalize(compareScope.description) ?: normalize(compareScope.compareScopeId)
+                String objectType = normalize(compareScope.objectType)
+                String primaryIdSummary = "File 1: ${normalize(file1Source.primaryIdExpression) ?: '-'} | File 2: ${normalize(file2Source.primaryIdExpression) ?: '-'}"
+
+                Map scopeRow = [
+                        ruleSetId               : normalize(compareScope.ruleSetId),
+                        ruleSetLabel            : ruleSetLabel,
+                        compareScopeId          : normalize(compareScope.compareScopeId),
+                        compareScopeLabel       : compareScopeLabel,
+                        compareScopeDescription : normalize(compareScope.description),
+                        objectType              : objectType,
+                        file1SystemEnumId       : normalize(file1Source.systemEnumId),
+                        file1SystemLabel        : systemLabels[file1Source.systemEnumId] ?: file1Source.systemEnumId,
+                        file1PrimaryIdExpression: normalize(file1Source.primaryIdExpression),
+                        file2SystemEnumId       : normalize(file2Source.systemEnumId),
+                        file2SystemLabel        : systemLabels[file2Source.systemEnumId] ?: file2Source.systemEnumId,
+                        file2PrimaryIdExpression: normalize(file2Source.primaryIdExpression),
+                        primaryIdSummary        : primaryIdSummary,
+                        compareScopeOptionLabel : "${ruleSetLabel} - ${compareScopeLabel}${objectType ? ' (' + objectType + ')' : ''}"
+                ]
+                compareScopeList.add(scopeRow)
+                compareScopeById[scopeRow.compareScopeId] = scopeRow
+            }
+            context.compareScopeList = compareScopeList
+            context.compareScopeById = compareScopeById
+            String selectedCompareScopeId = normalize(context.compareScopeId)
+            context.selectedCompareScope = selectedCompareScopeId ? compareScopeById[selectedCompareScopeId] : null
+            if (!context.ruleSetId && context.selectedCompareScope) context.ruleSetId = context.selectedCompareScope.ruleSetId
+            String selectedRuleSetId = normalize(context.ruleSetId)
+            context.compareScopeListForRuleSet = selectedRuleSetId ?
+                    compareScopeList.findAll { it.ruleSetId == selectedRuleSetId } :
+                    compareScopeList
+            String legacyMappingId = normalize(context.reconciliationMappingId)
+            context.legacyMappingLabel = (!context.ruleSetId && legacyMappingId) ? (legacyMappingLabels[legacyMappingId] ?: legacyMappingId) : null
 
 
             String serviceName = "reconciliation.ReconciliationAutomationServices.poll#SftpAndReconcile"
@@ -246,9 +349,12 @@
                                 description      : job.description,
                                 cronExpression   : job.cronExpression,
                                 paused           : job.paused,
-                                mappingLabel     : mappingLabels[paramMap.reconciliationMappingId] ?: paramMap.reconciliationMappingId,
-                                file1SystemLabel : systemLabels[paramMap.file1SystemEnumId] ?: paramMap.file1SystemEnumId,
-                                file2SystemLabel : systemLabels[paramMap.file2SystemEnumId] ?: paramMap.file2SystemEnumId,
+                                ruleSetLabel     : compareScopeById[normalize(paramMap.compareScopeId)]?.ruleSetLabel ?: (normalize(paramMap.ruleSetId) ?: "Legacy mapping"),
+                                compareScopeLabel: compareScopeById[normalize(paramMap.compareScopeId)]?.compareScopeLabel ?: (legacyMappingLabels[paramMap.reconciliationMappingId] ?: paramMap.reconciliationMappingId),
+                                objectType       : compareScopeById[normalize(paramMap.compareScopeId)]?.objectType ?: (paramMap.reconciliationMappingId ? "Legacy mapping" : null),
+                                primaryIdSummary : compareScopeById[normalize(paramMap.compareScopeId)]?.primaryIdSummary ?: (paramMap.reconciliationMappingId ? "Legacy mapping schedule; migrate to a RuleSet compare scope." : null),
+                                file1SystemLabel : compareScopeById[normalize(paramMap.compareScopeId)]?.file1SystemLabel ?: (systemLabels[paramMap.file1SystemEnumId] ?: paramMap.file1SystemEnumId),
+                                file2SystemLabel : compareScopeById[normalize(paramMap.compareScopeId)]?.file2SystemLabel ?: (systemLabels[paramMap.file2SystemEnumId] ?: paramMap.file2SystemEnumId),
                                 file1RemoteLabel : serverLabels[paramMap.file1SftpServerId] ?: paramMap.file1SftpServerId,
                                 file2RemoteLabel : serverLabels[paramMap.file2SftpServerId] ?: paramMap.file2SftpServerId
                         ])
@@ -330,6 +436,11 @@
             <section name="ScheduleFormSection">
                 <widgets>
                     <label text="${jobName ? 'Edit Schedule' : 'Create Schedule'}" type="h4"/>
+                    <section name="LegacyMappingNoticeSection" condition="legacyMappingLabel">
+                        <widgets>
+                            <label text="This schedule still uses the legacy mapping ${legacyMappingLabel}. Select a RuleSet and compare scope, then save to migrate it." type="p" style="text-warning"/>
+                        </widgets>
+                    </section>
                     <form-single name="SftpScheduleForm" transition="saveSftpSchedule">
                         <field name="jobName">
                             <default-field title="Job Name">
@@ -342,11 +453,19 @@
                             </default-field>
                         </field>
 
-                        <field name="reconciliationMappingId">
-                            <default-field title="Mapping">
+                        <field name="ruleSetId">
+                            <default-field title="RuleSet">
                                 <drop-down>
-                                    <option key="" text="Select mapping"/>
-                                    <list-options list="mappingList" key="${reconciliationMappingId}" text="${(mappingName ?: reconciliationMappingId) + (description ? ' - ' + description : '')}"/>
+                                    <option key="" text="Select RuleSet"/>
+                                    <list-options list="ruleSetList" key="${ruleSetId}" text="${ruleSetName ?: ruleSetId}"/>
+                                </drop-down>
+                            </default-field>
+                        </field>
+                        <field name="compareScopeId">
+                            <default-field title="Compare Scope">
+                                <drop-down>
+                                    <option key="" text="Select compare scope"/>
+                                    <list-options list="compareScopeListForRuleSet" key="${compareScopeId}" text="${compareScopeOptionLabel}"/>
                                 </drop-down>
                             </default-field>
                         </field>
@@ -356,12 +475,14 @@
                                 <display text="File 1" type="h5"/>
                             </default-field>
                         </field>
-                        <field name="file1SystemEnumId">
+                        <field name="file1SystemSummary">
                             <default-field title="System 1">
-                                <drop-down>
-                                    <option key="" text="Select system"/>
-                                    <list-options list="systemEnumList" key="${enumId}" text="${description ?: enumId}"/>
-                                </drop-down>
+                                <display text="${selectedCompareScope?.file1SystemLabel ?: (systemLabels[file1SystemEnumId] ?: (file1SystemEnumId ?: 'Resolved from compare scope on save'))}"/>
+                            </default-field>
+                        </field>
+                        <field name="file1PrimaryIdSummary">
+                            <default-field title="Primary ID 1">
+                                <display text="${selectedCompareScope?.file1PrimaryIdExpression ?: (legacyMappingLabel ? 'Legacy mapping schedule' : 'Resolved from compare scope on save')}"/>
                             </default-field>
                         </field>
                         <field name="file1SftpServerId">
@@ -399,12 +520,14 @@
                                 <display text="File 2" type="h5"/>
                             </default-field>
                         </field>
-                        <field name="file2SystemEnumId">
+                        <field name="file2SystemSummary">
                             <default-field title="System 2">
-                                <drop-down>
-                                    <option key="" text="Select system"/>
-                                    <list-options list="systemEnumList" key="${enumId}" text="${description ?: enumId}"/>
-                                </drop-down>
+                                <display text="${selectedCompareScope?.file2SystemLabel ?: (systemLabels[file2SystemEnumId] ?: (file2SystemEnumId ?: 'Resolved from compare scope on save'))}"/>
+                            </default-field>
+                        </field>
+                        <field name="file2PrimaryIdSummary">
+                            <default-field title="Primary ID 2">
+                                <display text="${selectedCompareScope?.file2PrimaryIdExpression ?: (legacyMappingLabel ? 'Legacy mapping schedule' : 'Resolved from compare scope on save')}"/>
                             </default-field>
                         </field>
                         <field name="file2SftpServerId">
@@ -532,14 +655,18 @@
                                 <field-ref name="description"/>
                             </field-row>
                             <field-row-big>
-                                <field-ref name="reconciliationMappingId"/>
+                                <field-ref name="ruleSetId"/>
+                            </field-row-big>
+                            <field-row-big>
+                                <field-ref name="compareScopeId"/>
                             </field-row-big>
 
                             <field-row-big>
                                 <field-ref name="file1Header"/>
                             </field-row-big>
                             <field-row>
-                                <field-ref name="file1SystemEnumId"/>
+                                <field-ref name="file1SystemSummary"/>
+                                <field-ref name="file1PrimaryIdSummary"/>
                             </field-row>
                             <field-row>
                                 <field-ref name="file1SftpServerId"/>
@@ -556,7 +683,8 @@
                                 <field-ref name="file2Header"/>
                             </field-row-big>
                             <field-row>
-                                <field-ref name="file2SystemEnumId"/>
+                                <field-ref name="file2SystemSummary"/>
+                                <field-ref name="file2PrimaryIdSummary"/>
                             </field-row>
                             <field-row>
                                 <field-ref name="file2SftpServerId"/>
@@ -637,8 +765,26 @@
                                         <display/>
                                     </default-field>
                                 </field>
-                                <field name="mappingLabel">
-                                    <header-field title="Mapping"/>
+                                <field name="ruleSetLabel">
+                                    <header-field title="RuleSet"/>
+                                    <default-field>
+                                        <display/>
+                                    </default-field>
+                                </field>
+                                <field name="compareScopeLabel">
+                                    <header-field title="Compare Scope"/>
+                                    <default-field>
+                                        <display/>
+                                    </default-field>
+                                </field>
+                                <field name="objectType">
+                                    <header-field title="Object"/>
+                                    <default-field>
+                                        <display/>
+                                    </default-field>
+                                </field>
+                                <field name="primaryIdSummary">
+                                    <header-field title="Primary IDs"/>
                                     <default-field>
                                         <display/>
                                     </default-field>

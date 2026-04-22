@@ -131,7 +131,7 @@ Pilot release contract notes:
 - `run#PilotGenericDiff` is JSON-RPC friendly for `darpan-ui`; it accepts `file1Name`/`file1Text` and `file2Name`/`file2Text`, and now supports either `ruleSetId` plus optional `compareScopeId` or legacy `reconciliationMappingId`.
 - `list#PilotGeneratedOutputs` accepts optional `reconciliationMappingId`, `ruleSetId`, and `compareScopeId`, and filters saved outputs against the stored metadata for that run scope.
 - The underlying reconciliation engine still writes a scoped JSON diff file under `runtime://tmp/reconciliation/generic/**`.
-- `get#PilotGeneratedOutput` can return that stored JSON directly or convert it to CSV on demand for the pilot UI download action.
+- `get#PilotGeneratedOutput` can return that stored JSON directly or convert it to CSV on demand for the pilot UI download action, and now also returns a stable file-backed `createdDate` so the PWA result page does not depend on parsing raw `Timestamp.toString()` metadata.
 
 Shared-tenant rule:
 

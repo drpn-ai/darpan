@@ -1,6 +1,9 @@
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.PilotAccessSupport
 import darpan.facade.reconciliation.PilotReconciliationSupport
+import darpan.reconciliation.core.ReconciliationServices
+
+import java.sql.Timestamp
 
 String fileNameValue = FacadeSupport.normalize(fileName)
 String requestedFormat = (FacadeSupport.normalize(format) ?: "json").toLowerCase()
@@ -39,6 +42,7 @@ if (!ec.message.hasError()) {
                 sourceFormat    : sourceFormat,
                 format          : requestedFormat,
                 contentType     : PilotReconciliationSupport.contentTypeForFormat(requestedFormat),
+                createdDate     : ReconciliationServices.formatTimestampIso(new Timestamp(generatedOutputFile.lastModified())),
                 contentText     : contentText,
         ]
     }

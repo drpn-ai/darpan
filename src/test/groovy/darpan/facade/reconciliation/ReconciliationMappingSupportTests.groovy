@@ -1,6 +1,6 @@
 package darpan.facade.reconciliation
 
-import darpan.facade.common.PilotAccessSupport
+import darpan.facade.common.TenantAccessSupport
 import org.junit.jupiter.api.Test
 
 import java.sql.Timestamp
@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
 
-class PilotMappingSupportTests {
+class ReconciliationMappingSupportTests {
 
     private static final String NESTED_SCHEMA = """
         {
@@ -49,32 +49,32 @@ class PilotMappingSupportTests {
 
     @Test
     void resolvesPlainAndJsonPathExpressionsAgainstNestedSchema() {
-        assertTrue(PilotMappingSupport.isResolvableJsonIdExpression("legacyResourceId", NESTED_SCHEMA))
-        assertTrue(PilotMappingSupport.isResolvableJsonIdExpression("\$.data.orders.edges[*].node.legacyResourceId", NESTED_SCHEMA))
+        assertTrue(ReconciliationMappingSupport.isResolvableJsonIdExpression("legacyResourceId", NESTED_SCHEMA))
+        assertTrue(ReconciliationMappingSupport.isResolvableJsonIdExpression("\$.data.orders.edges[*].node.legacyResourceId", NESTED_SCHEMA))
     }
 
     @Test
     void rejectsJsonPathThatOnlyMatchesLeafNameElsewhere() {
-        assertFalse(PilotMappingSupport.isResolvableJsonIdExpression("\$.foo.legacyResourceId", NESTED_SCHEMA))
+        assertFalse(ReconciliationMappingSupport.isResolvableJsonIdExpression("\$.foo.legacyResourceId", NESTED_SCHEMA))
     }
 
     @Test
     void rejectsUnknownJsonSchemaProperty() {
-        assertFalse(PilotMappingSupport.isResolvableJsonIdExpression("order_id", NESTED_SCHEMA))
-        assertFalse(PilotMappingSupport.isResolvableJsonIdExpression("\$.data.orders.edges[*].node.order_id", NESTED_SCHEMA))
+        assertFalse(ReconciliationMappingSupport.isResolvableJsonIdExpression("order_id", NESTED_SCHEMA))
+        assertFalse(ReconciliationMappingSupport.isResolvableJsonIdExpression("\$.data.orders.edges[*].node.order_id", NESTED_SCHEMA))
     }
 
     @Test
     void resolvesWizardDisplayPathsAgainstNestedSchema() {
-        assertTrue(PilotMappingSupport.isResolvableJsonIdExpression("data.orders.edges.[0].node.legacyResourceId", NESTED_SCHEMA))
-        assertTrue(PilotMappingSupport.isResolvableJsonIdExpression("[0].data.orders.edges.[0].node.id", NESTED_SCHEMA))
+        assertTrue(ReconciliationMappingSupport.isResolvableJsonIdExpression("data.orders.edges.[0].node.legacyResourceId", NESTED_SCHEMA))
+        assertTrue(ReconciliationMappingSupport.isResolvableJsonIdExpression("[0].data.orders.edges.[0].node.id", NESTED_SCHEMA))
     }
 
     @Test
     void collectMemberIssuesRequiresSavedSchemaForAllMappings() {
         def ec = buildLookupEc([:])
 
-        List<String> issues = PilotMappingSupport.collectMemberIssues(ec, [
+        List<String> issues = ReconciliationMappingSupport.collectMemberIssues(ec, [
                 systemEnumId     : "OMS",
                 idFieldExpression: "order_id"
         ])
@@ -94,7 +94,7 @@ class PilotMappingSupportTests {
                 ]
         ])
 
-        List<String> issues = PilotMappingSupport.collectMemberIssues(ec, [
+        List<String> issues = ReconciliationMappingSupport.collectMemberIssues(ec, [
                 systemEnumId     : "OMS",
                 schemaFileName   : "missing.schema.json",
                 idFieldExpression: "order_id"
@@ -105,7 +105,7 @@ class PilotMappingSupportTests {
     }
 
     @Test
-    void collectMemberIssuesRejectsSchemaOutsideActiveCompany() {
+    void collectMemberIssuesRejectsSchemaOutsideActiveTenant() {
         def ec = buildLookupEc([
                 "orders.schema.json": [
                         jsonSchemaId      : "JS_ORDER",
@@ -115,18 +115,18 @@ class PilotMappingSupportTests {
                 ]
         ])
 
-        List<String> issues = PilotMappingSupport.collectMemberIssues(ec, [
+        List<String> issues = ReconciliationMappingSupport.collectMemberIssues(ec, [
                 systemEnumId     : "OMS",
                 schemaFileName   : "orders.schema.json",
                 idFieldExpression: "order_id"
         ])
 
         assertEquals(1, issues.size())
-        assertEquals("OMS schema 'orders.schema.json' is not available in your active company.", issues[0].toString())
+        assertEquals("OMS schema 'orders.schema.json' is not available in your active tenant.", issues[0].toString())
     }
 
     @Test
-    void generatePilotMappingIdAddsTimestampSuffixWhenBaseIdExists() {
+    void generateMappingIdAddsTimestampSuffixWhenBaseIdExists() {
         FinderStub finder = new FinderStub(existingIds: ["OrdersVsInventory"] as Set)
         EntityFacadeStub entity = new EntityFacadeStub(finder: finder)
         def ec = new Expando(
@@ -135,7 +135,7 @@ class PilotMappingSupportTests {
                 user: new Expando(nowTimestamp: new java.sql.Timestamp(0L))
         )
 
-        String mappingId = PilotMappingSupport.generatePilotMappingId(ec, "Orders Vs Inventory")
+        String mappingId = ReconciliationMappingSupport.generateMappingId(ec, "Orders Vs Inventory")
 
         assertEquals("OrdersVsInventory-260408123456", mappingId)
     }
@@ -143,7 +143,7 @@ class PilotMappingSupportTests {
     private static Expando buildLookupEc(Map<String, Map<String, Object>> schemasByName) {
         return new Expando(
                 entity: new LookupEntityFacadeStub(schemasByName: schemasByName),
-                user: new UserStub(preferences: [(PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE"]),
+                user: new UserStub(preferences: [(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE"]),
                 message: new Expando(addError: { String ignored -> }),
                 l10n: new Expando()
         )

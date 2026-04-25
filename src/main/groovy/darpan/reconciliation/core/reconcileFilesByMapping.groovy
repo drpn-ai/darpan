@@ -1,4 +1,4 @@
-import darpan.facade.reconciliation.PilotMappingSupport
+import darpan.facade.reconciliation.ReconciliationMappingSupport
 import org.slf4j.LoggerFactory
 
 def logger = LoggerFactory.getLogger("darpan.reconciliation.core.FileRoutingReconciliation")
@@ -106,7 +106,7 @@ if (!mappingMembers) {
     throw new IllegalArgumentException("No mapping members found for mapping ${reconciliationMappingId}")
 }
 
-List<String> persistedReadinessIssues = PilotMappingSupport.collectPilotReadinessIssues(ec, mappingMembers)
+List<String> persistedReadinessIssues = ReconciliationMappingSupport.collectReadinessIssues(ec, mappingMembers)
 if (!persistedReadinessIssues.isEmpty()) {
     throw new IllegalArgumentException("Mapping ${reconciliationMappingId} is not runnable until every system member references a saved schema. ${persistedReadinessIssues.join(' ')}")
 }
@@ -147,7 +147,7 @@ List<Map<String, Object>> effectiveMembers = configBySystem.collect { String sys
             systemFieldName  : memberConfig.systemFieldName
     ]
 }
-List<String> effectiveReadinessIssues = PilotMappingSupport.collectPilotReadinessIssues(ec, effectiveMembers)
+List<String> effectiveReadinessIssues = ReconciliationMappingSupport.collectReadinessIssues(ec, effectiveMembers)
 if (!effectiveReadinessIssues.isEmpty()) {
     throw new IllegalArgumentException("Effective mapping configuration for ${reconciliationMappingId} is not runnable. ${effectiveReadinessIssues.join(' ')}")
 }

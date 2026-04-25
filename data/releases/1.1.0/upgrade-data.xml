@@ -13,12 +13,12 @@ Reviewed to keep only mandatory operator-facing records.
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_FACADE_APP" artifactName="facade\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y" inheritAuthz="Y"/>
     <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_FACADE_APP_ADMIN" userGroupId="ADMIN" artifactGroupId="DARPAN_FACADE_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
     <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_FACADE_APP_USER" userGroupId="DARPAN_USER" artifactGroupId="DARPAN_FACADE_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
-    <moqui.security.EntityFilterSet entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" description="Filter Darpan company-owned rows by the active company in user context"/>
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_JSON_SCHEMA" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.JsonSchema" filterMap="[companyUserGroupId: activeCompanyUserGroupId]"/>
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RECON_MAPPING" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.mapping.ReconciliationMapping" filterMap="[companyUserGroupId: activeCompanyUserGroupId]"/>
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_SFTP_SERVER" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.SftpServer" filterMap="[companyUserGroupId: activeCompanyUserGroupId]"/>
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_NS_AUTH" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.NsAuthConfig" filterMap="[companyUserGroupId: activeCompanyUserGroupId]"/>
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_NS_RESTLET" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.NsRestletConfig" filterMap="[companyUserGroupId: activeCompanyUserGroupId]"/>
+    <moqui.security.EntityFilterSet entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" description="Filter Darpan tenant-owned rows by the active tenant in user context"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_JSON_SCHEMA" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.JsonSchema" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RECON_MAPPING" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.mapping.ReconciliationMapping" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_SFTP_SERVER" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.SftpServer" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_NS_AUTH" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.NsAuthConfig" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_NS_RESTLET" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.NsRestletConfig" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_ADMIN" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"/>
     <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_USER" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"/>
     <moqui.security.UserGroup userGroupId="DARPAN_USER" description="Darpan application users"/>

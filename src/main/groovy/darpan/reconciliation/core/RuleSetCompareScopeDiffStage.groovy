@@ -10,6 +10,8 @@ class RuleSetCompareScopeDiffStage {
 
     static Map<String, Object> reconcileRuleSetCompareScopeBaseDiff(ExecutionContext ec) {
         Map<String, Object> context = (Map<String, Object>) ec.contextStack
+        boolean allowDuplicateCompareIds = context.get("allowDuplicateCompareIds") == Boolean.TRUE
+        boolean buildMatchedPairs = context.get("buildMatchedPairs") != Boolean.FALSE
 
         Map<String, Object> prepared = ec.service.sync()
                 .name("reconciliation.ReconciliationCoreServices.prepare#RuleSetCompareScope")
@@ -27,6 +29,7 @@ class RuleSetCompareScopeDiffStage {
                         file1Label         : context.get("file1Label"),
                         file2Label         : context.get("file2Label"),
                         hasHeader          : context.get("hasHeader"),
+                        allowDuplicateCompareIds: allowDuplicateCompareIds,
                         sparkMaster        : context.get("sparkMaster"),
                         sparkAppName       : context.get("sparkAppName")
                 ])
@@ -60,6 +63,7 @@ class RuleSetCompareScopeDiffStage {
         String file1Label = ReconciliationServices.normalize(prepared.file1Label) ?: "File 1"
         String file2Label = ReconciliationServices.normalize(prepared.file2Label) ?: "File 2"
         String compareScopeId = ReconciliationServices.normalize(prepared.compareScopeId)
+        String compareScopeDescription = ReconciliationServices.normalize(prepared.compareScopeDescription)
         String objectType = ReconciliationServices.normalize(prepared.objectType)
 
         Dataset missingInFile1DiffDf = ReconciliationServices.buildMissingDiffRows(
@@ -86,14 +90,20 @@ class RuleSetCompareScopeDiffStage {
         Dataset matchedIdDf = file1IdDf.join(file2IdDf, "compare_id", "inner")
                 .select("compare_id")
                 .distinct()
-        Dataset matchedPairDf = ReconciliationServices.buildMatchedPairDataset(
-                file1DataDf,
-                file2DataDf,
-                matchedIdDf,
-                compareScopeId,
-                objectType
-        )
-        long matchedPairCount = matchedPairDf.count()
+        Dataset matchedPairDf = null
+        long matchedPairCount
+        if (buildMatchedPairs) {
+            matchedPairDf = ReconciliationServices.buildMatchedPairDataset(
+                    file1DataDf,
+                    file2DataDf,
+                    matchedIdDf,
+                    compareScopeId,
+                    objectType
+            )
+            matchedPairCount = matchedPairDf.count()
+        } else {
+            matchedPairCount = matchedIdDf.count()
+        }
 
         logger.info("Built RuleSet base diff stage: ruleSet={} compareScope={} missingInFile1={} missingInFile2={} matchedPairs={}",
                 prepared.ruleSetId, compareScopeId, onlyInFile2Count, onlyInFile1Count, matchedPairCount)
@@ -101,6 +111,7 @@ class RuleSetCompareScopeDiffStage {
         return [
                 ruleSetId          : prepared.ruleSetId,
                 compareScopeId     : compareScopeId,
+                compareScopeDescription: compareScopeDescription,
                 objectType         : objectType,
                 file1Type          : prepared.file1Type,
                 file2Type          : prepared.file2Type,

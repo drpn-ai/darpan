@@ -164,7 +164,7 @@
     </service>
 
     <service verb="delete" noun="RuleSet">
-        <description>Delete a RuleSet, optionally deleting all child rules in the same transaction.</description>
+        <description>Delete a RuleSet and its owned compare scope/source definitions, optionally deleting all child rules in the same transaction.</description>
         <in-parameters>
             <parameter name="ruleSetId" required="true"/>
             <parameter name="forceDeleteRules" type="Boolean" default-value="false"/>
@@ -172,6 +172,8 @@
         <out-parameters>
             <parameter name="ruleSetId"/>
             <parameter name="deletedRuleCount" type="Integer"/>
+            <parameter name="deletedCompareScopeCount" type="Integer"/>
+            <parameter name="deletedCompareSourceCount" type="Integer"/>
         </out-parameters>
         <actions>
             <set field="ruleSetValidation" from="reconciliation.rule.RuleEngineSupport.validateProvidedId(ruleSetId, 'ruleSetId')"/>
@@ -197,10 +199,15 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
+                <set field="compareScopeList" from="ec.entity.find('darpan.rule.RuleSetCompareScope').condition('ruleSetId', ruleSetId).useCache(false).list() ?: []"/>
+                <set field="compareScopeIds" from="compareScopeList.collect { it.compareScopeId }.findAll { it }"/>
+                <set field="deletedCompareScopeCount" from="compareScopeIds.size()"/>
+                <set field="deletedCompareSourceCount" from="compareScopeIds ? ec.entity.find('darpan.rule.RuleSetCompareSource').condition('compareScopeId', 'in', compareScopeIds).useCache(false).deleteAll() : 0"/>
+                <set field="ignoreCompareScopeDelete" from="compareScopeIds ? ec.entity.find('darpan.rule.RuleSetCompareScope').condition('compareScopeId', 'in', compareScopeIds).useCache(false).deleteAll() : 0"/>
                 <set field="ignoreRuleDelete" from="deletedRuleCount ? ec.entity.find('darpan.rule.Rule').condition('ruleSetId', ruleSetId).useCache(false).deleteAll() : 0"/>
                 <service-call name="delete#darpan.rule.RuleSet" in-map="[ruleSetId: ruleSetId]"/>
                 <set field="ignoreCacheClear" from="reconciliation.rule.RuleEngineSupport.invalidateRuleSetCache(ec, ruleSetId)"/>
-                <message>Deleted RuleSet ${ruleSetId}${deletedRuleCount ? ' with ' + deletedRuleCount + ' rule(s)' : ''}.</message>
+                <message>Deleted RuleSet ${ruleSetId}${deletedRuleCount ? ' with ' + deletedRuleCount + ' rule(s)' : ''}${deletedCompareScopeCount ? ', ' + deletedCompareScopeCount + ' compare scope(s)' : ''}.</message>
             </if>
         </actions>
     </service>

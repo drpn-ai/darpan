@@ -1,6 +1,6 @@
 package darpan.reconciliation.support
 
-import darpan.facade.common.PilotAccessSupport
+import darpan.facade.common.TenantAccessSupport
 import org.moqui.Moqui
 import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.context.ExecutionContext
@@ -55,7 +55,10 @@ class ReconciliationSmokeTestSupport {
                 false
         )
         ec.artifactExecution.setAnonymousAuthorizedAll()
-        assert ec.user.loginAnonymousIfNoUser()
+        if (!ec.user.internalLoginUser("john.doe")) {
+            assert ec.user.loginAnonymousIfNoUser()
+        }
+        ec.message.clearErrors()
         return ec
     }
 
@@ -87,6 +90,7 @@ class ReconciliationSmokeTestSupport {
     }
 
     static void seedBaseCompareRuleSet(ExecutionContext ec) {
+        seedCompanyScope(ec)
         seedSharedReconciliationEnums(ec)
         upsertEntity(ec, "darpan.rule.RuleSet", [ruleSetId: "DARPAN_TEST_COMPARE_RS"], [
                 ruleSetId     : "DARPAN_TEST_COMPARE_RS",
@@ -94,7 +98,9 @@ class ReconciliationSmokeTestSupport {
                 description   : "Base RuleSet required by compare-scope smoke fixtures.",
                 version       : "1.0",
                 explosionPath : "rows",
-                primaryKeyPath: "itemId"
+                primaryKeyPath: "itemId",
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID,
+                createdByUserId: TEST_COMPANY_USER_ID
         ])
     }
 
@@ -106,7 +112,9 @@ class ReconciliationSmokeTestSupport {
                 description   : "Smoke-test RuleSet for matched-pair field diff generation.",
                 version       : "1.0",
                 explosionPath : "data.products",
-                primaryKeyPath: "productId"
+                primaryKeyPath: "productId",
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID,
+                createdByUserId: TEST_COMPANY_USER_ID
         ])
         upsertEntity(ec, "darpan.rule.RuleSet", [ruleSetId: "DARPAN_TEST_PRODUCT_BROKEN_RS"], [
                 ruleSetId     : "DARPAN_TEST_PRODUCT_BROKEN_RS",
@@ -114,7 +122,9 @@ class ReconciliationSmokeTestSupport {
                 description   : "Smoke-test RuleSet for preserving base diffs when DRL compilation fails.",
                 version       : "1.0",
                 explosionPath : "data.products",
-                primaryKeyPath: "productId"
+                primaryKeyPath: "productId",
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID,
+                createdByUserId: TEST_COMPANY_USER_ID
         ])
 
         upsertEntity(ec, "darpan.rule.Rule", [ruleId: "DARPAN_TEST_PRODUCT_SKU_MISMATCH"], [
@@ -154,6 +164,12 @@ class ReconciliationSmokeTestSupport {
                 objectType    : "ORDER",
                 description   : "Smoke-test compare scope for nested JSON order IDs."
         ])
+        upsertEntity(ec, "darpan.rule.RuleSetCompareScope", [compareScopeId: "DARPAN_TEST_ORDER_CSV_SCOPE"], [
+                compareScopeId: "DARPAN_TEST_ORDER_CSV_SCOPE",
+                ruleSetId     : "DARPAN_TEST_COMPARE_RS",
+                objectType    : "ORDER",
+                description   : "Smoke-test compare scope for CSV order IDs."
+        ])
         upsertEntity(ec, "darpan.rule.RuleSetCompareScope", [compareScopeId: "DARPAN_TEST_PRODUCT_JSON_SCOPE"], [
                 compareScopeId: "DARPAN_TEST_PRODUCT_JSON_SCOPE",
                 ruleSetId     : "DARPAN_TEST_PRODUCT_COMPARE_RS",
@@ -183,6 +199,20 @@ class ReconciliationSmokeTestSupport {
                 recordRootExpression: "data.orders.edges",
                 primaryIdExpression : "node.id",
                 idValueNormalizer   : "TRAILING_DIGITS"
+        ])
+        upsertEntity(ec, "darpan.rule.RuleSetCompareSource", [compareScopeId: "DARPAN_TEST_ORDER_CSV_SCOPE", fileSide: "FILE_1"], [
+                compareScopeId      : "DARPAN_TEST_ORDER_CSV_SCOPE",
+                fileSide            : "FILE_1",
+                systemEnumId        : "SHOPIFY",
+                fileTypeEnumId      : "DftCsv",
+                primaryIdExpression : "orderId"
+        ])
+        upsertEntity(ec, "darpan.rule.RuleSetCompareSource", [compareScopeId: "DARPAN_TEST_ORDER_CSV_SCOPE", fileSide: "FILE_2"], [
+                compareScopeId      : "DARPAN_TEST_ORDER_CSV_SCOPE",
+                fileSide            : "FILE_2",
+                systemEnumId        : "OMS",
+                fileTypeEnumId      : "DftCsv",
+                primaryIdExpression : "orderId"
         ])
         upsertEntity(ec, "darpan.rule.RuleSetCompareSource", [compareScopeId: "DARPAN_TEST_PRODUCT_JSON_SCOPE", fileSide: "FILE_1"], [
                 compareScopeId      : "DARPAN_TEST_PRODUCT_JSON_SCOPE",
@@ -219,9 +249,9 @@ class ReconciliationSmokeTestSupport {
     }
 
     static void seedSchemaBackedCsvMappingFixtures(ExecutionContext ec) {
-        seedPilotCompanyScope(ec)
+        seedCompanyScope(ec)
         seedSharedReconciliationEnums(ec)
-        upsertEntityValue(ec, "darpan.reconciliation.JsonSchema", [jsonSchemaId: "TestOmsOrderSchema"], [
+        upsertEntity(ec, "darpan.reconciliation.JsonSchema", [jsonSchemaId: "TestOmsOrderSchema"], [
                 jsonSchemaId       : "TestOmsOrderSchema",
                 schemaName         : "test-oms-order-id.schema.json",
                 description        : "Smoke-test OMS order id schema",
@@ -230,7 +260,7 @@ class ReconciliationSmokeTestSupport {
                 createdDate        : TEST_FROM_DATE,
                 schemaText         : '{"type":"object","properties":{"order_id":{"type":"string"}}}'
         ])
-        upsertEntityValue(ec, "darpan.reconciliation.JsonSchema", [jsonSchemaId: "TestShopifyOrderSchema"], [
+        upsertEntity(ec, "darpan.reconciliation.JsonSchema", [jsonSchemaId: "TestShopifyOrderSchema"], [
                 jsonSchemaId       : "TestShopifyOrderSchema",
                 schemaName         : "test-shopify-order-id.schema.json",
                 description        : "Smoke-test Shopify order id schema",
@@ -239,12 +269,32 @@ class ReconciliationSmokeTestSupport {
                 createdDate        : TEST_FROM_DATE,
                 schemaText         : '{"type":"object","properties":{"order_id":{"type":"string"}}}'
         ])
-        upsertEntityValue(ec, "darpan.mapping.ReconciliationMapping", [reconciliationMappingId: "OrderIdSchemaMap"], [
+        upsertEntity(ec, "darpan.reconciliation.JsonSchema", [jsonSchemaId: "TestOmsOrdersJsonSchema"], [
+                jsonSchemaId       : "TestOmsOrdersJsonSchema",
+                schemaName         : "test-oms-orders.schema.json",
+                description        : "Smoke-test OMS orders JSON schema",
+                systemEnumId       : "OMS",
+                companyUserGroupId : TEST_COMPANY_USER_GROUP_ID,
+                createdDate        : TEST_FROM_DATE,
+                schemaText         : '{"type":"object","properties":{"orders":{"type":"array","items":{"type":"object","properties":{"order_id":{"type":"string"},"status":{"type":"string"}}}}}}'
+        ])
+        upsertEntity(ec, "darpan.reconciliation.JsonSchema", [jsonSchemaId: "TestShopifyOrdersJsonSchema"], [
+                jsonSchemaId       : "TestShopifyOrdersJsonSchema",
+                schemaName         : "test-shopify-orders.schema.json",
+                description        : "Smoke-test Shopify orders JSON schema",
+                systemEnumId       : "SHOPIFY",
+                companyUserGroupId : TEST_COMPANY_USER_GROUP_ID,
+                createdDate        : TEST_FROM_DATE,
+                schemaText         : '{"type":"object","properties":{"data":{"type":"object","properties":{"orders":{"type":"object","properties":{"edges":{"type":"array","items":{"type":"object","properties":{"node":{"type":"object","properties":{"id":{"type":"string"},"status":{"type":"string"}}}}}}}}}}}}'
+        ])
+        upsertEntity(ec, "darpan.mapping.ReconciliationMapping", [reconciliationMappingId: "OrderIdSchemaMap"], [
                 reconciliationMappingId: "OrderIdSchemaMap",
                 mappingName            : "Order ID",
-                description            : "Order ID field mapping backed by saved schemas"
+                description            : "Order ID field mapping backed by saved schemas",
+                companyUserGroupId     : TEST_COMPANY_USER_GROUP_ID,
+                createdByUserId        : TEST_COMPANY_USER_ID
         ])
-        upsertEntityValue(ec, "darpan.mapping.ReconciliationMappingMember", [mappingMemberId: "OrderIdSchemaMapOms"], [
+        upsertEntity(ec, "darpan.mapping.ReconciliationMappingMember", [mappingMemberId: "OrderIdSchemaMapOms"], [
                 mappingMemberId         : "OrderIdSchemaMapOms",
                 reconciliationMappingId : "OrderIdSchemaMap",
                 systemEnumId            : "OMS",
@@ -252,7 +302,7 @@ class ReconciliationSmokeTestSupport {
                 schemaFileName          : "test-oms-order-id.schema.json",
                 idFieldExpression       : "order_id"
         ])
-        upsertEntityValue(ec, "darpan.mapping.ReconciliationMappingMember", [mappingMemberId: "OrderIdSchemaMapShopify"], [
+        upsertEntity(ec, "darpan.mapping.ReconciliationMappingMember", [mappingMemberId: "OrderIdSchemaMapShopify"], [
                 mappingMemberId         : "OrderIdSchemaMapShopify",
                 reconciliationMappingId : "OrderIdSchemaMap",
                 systemEnumId            : "SHOPIFY",
@@ -262,20 +312,30 @@ class ReconciliationSmokeTestSupport {
         ])
     }
 
-    static void seedPilotCompanyScope(ExecutionContext ec) {
-        upsertEntityValue(ec, "moqui.basic.EnumerationType", [enumTypeId: "UserGroupType"], [
+    static void seedCompanyScope(ExecutionContext ec) {
+        upsertEntity(ec, "moqui.basic.EnumerationType", [enumTypeId: "UserGroupType"], [
                 enumTypeId  : "UserGroupType",
                 description : "User Group Type"
         ])
-        upsertEntityValue(ec, "moqui.basic.Enumeration", [enumId: PilotAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID], [
-                enumId      : PilotAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID,
+        upsertEntity(ec, "moqui.basic.Enumeration", [enumId: "UgtDarpanPermission"], [
+                enumId      : "UgtDarpanPermission",
+                enumTypeId  : "UserGroupType",
+                description : "Darpan tenant permission groups"
+        ])
+        upsertEntity(ec, "moqui.basic.Enumeration", [enumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID], [
+                enumId      : TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID,
                 enumTypeId  : "UserGroupType",
                 description : "Darpan company groups"
         ])
-        upsertEntityValue(ec, "moqui.security.UserGroup", [userGroupId: TEST_COMPANY_USER_GROUP_ID], [
+        upsertEntity(ec, "moqui.security.UserGroup", [userGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID], [
+                userGroupId      : TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID,
+                description      : "Can create, update, run, and delete tenant-scoped Darpan data",
+                groupTypeEnumId  : "UgtDarpanPermission"
+        ])
+        upsertEntity(ec, "moqui.security.UserGroup", [userGroupId: TEST_COMPANY_USER_GROUP_ID], [
                 userGroupId     : TEST_COMPANY_USER_GROUP_ID,
                 description     : "Krewe",
-                groupTypeEnumId : PilotAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID
+                groupTypeEnumId : TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID
         ])
         upsertEntityValue(ec, "moqui.security.UserAccount", [userId: TEST_COMPANY_USER_ID], [
                 userId        : TEST_COMPANY_USER_ID,
@@ -293,8 +353,21 @@ class ReconciliationSmokeTestSupport {
                 userId     : TEST_COMPANY_USER_ID,
                 fromDate   : TEST_FROM_DATE
         ])
-        ec.user.internalLoginUser(TEST_COMPANY_USERNAME)
-        ec.user.setPreference(PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY, TEST_COMPANY_USER_GROUP_ID)
+        upsertEntityValue(ec, TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [
+                tenantUserGroupId    : TEST_COMPANY_USER_GROUP_ID,
+                userId               : TEST_COMPANY_USER_ID,
+                permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID,
+                fromDate             : TEST_FROM_DATE
+        ], [
+                tenantUserGroupId    : TEST_COMPANY_USER_GROUP_ID,
+                userId               : TEST_COMPANY_USER_ID,
+                permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID,
+                fromDate             : TEST_FROM_DATE
+        ])
+        if (!ec.user.internalLoginUser(TEST_COMPANY_USER_ID)) {
+            ec.user.internalLoginUser(TEST_COMPANY_USERNAME)
+        }
+        ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, TEST_COMPANY_USER_GROUP_ID)
         ec.message.clearErrors()
     }
 
@@ -323,70 +396,15 @@ class ReconciliationSmokeTestSupport {
         ])
     }
 
-    static void seedLegacyMappingSftpJobFixture(ExecutionContext ec, String jobName = "OrderIdSchemaMapLegacySftpJob") {
-        ec.entity.find("moqui.service.job.ServiceJobParameter")
-                .condition("jobName", jobName)
-                .disableAuthz()
-                .useCache(false)
-                .list()
-                ?.each { it.delete() }
-        def existingJob = ec.entity.find("moqui.service.job.ServiceJob")
-                .condition("jobName", jobName)
-                .disableAuthz()
-                .useCache(false)
-                .one()
-        if (existingJob != null) existingJob.delete()
-
-        upsertEntityValue(ec, "moqui.service.job.ServiceJob", [jobName: jobName], [
-                jobName       : jobName,
-                description   : "Legacy mapping-backed SFTP reconciliation job for migration smoke tests",
-                serviceName   : "reconciliation.ReconciliationAutomationServices.poll#SftpAndReconcile",
-                cronExpression: "0 */15 * * * ?",
-                paused        : "N"
-        ])
-
-        Map<String, String> params = [
-                reconciliationMappingId: "OrderIdSchemaMap",
-                file1SystemEnumId      : "SHOPIFY",
-                file2SystemEnumId      : "OMS",
-                file1SftpServerId      : "SHOPIFY_TEST_SFTP",
-                file2SftpServerId      : "OMS_TEST_SFTP",
-                file1RemotePath        : "/incoming",
-                file2RemotePath        : "/incoming",
-                file1FileTypeEnumId    : "DftCsv",
-                file2FileTypeEnumId    : "DftCsv",
-                file1SchemaFileName    : "test-shopify-order-id.schema.json",
-                file2SchemaFileName    : "test-oms-order-id.schema.json",
-                stageLocation          : "runtime://tmp/reconciliation/automation/input/migration-smoke",
-                outputLocation         : "runtime://tmp/reconciliation/automation/output/migration-smoke",
-                archiveSubdir          : "archive",
-                hasHeader              : "true",
-                sparkMaster            : "local[1]",
-                sparkAppName           : "ReconciliationMigrationServiceSmokeTests"
-        ]
-        params.each { String parameterName, String parameterValue ->
-            upsertEntityValue(ec, "moqui.service.job.ServiceJobParameter", [
-                    jobName      : jobName,
-                    parameterName: parameterName
-            ], [
-                    jobName       : jobName,
-                    parameterName : parameterName,
-                    parameterValue: parameterValue
-            ])
-        }
-    }
-
     static Path resolveBackendRoot() {
         Path cwd = Paths.get("").toAbsolutePath().normalize()
-        String configuredRoot = System.getProperty("darpan.backend.root") ?: System.getenv("DARPAN_BACKEND_ROOT")
         List<Path> candidates = [
-                configuredRoot ? Paths.get(configuredRoot).toAbsolutePath().normalize() : null,
                 cwd,
                 cwd.resolve("darpan-backend"),
                 cwd.resolve("runtime/component/darpan").normalize(),
                 cwd.resolve("../../..").normalize(),
                 cwd.resolve("../../../..").normalize()
-        ].findAll { it != null }.unique()
+        ].unique()
 
         for (Path candidate : candidates) {
             if (Files.exists(candidate.resolve("runtime/conf/MoquiDevConf.xml")) &&
@@ -443,36 +461,36 @@ class ReconciliationSmokeTestSupport {
     }
 
     private static void seedSharedReconciliationEnums(ExecutionContext ec) {
-        upsertEntityValue(ec, "moqui.basic.EnumerationType", [enumTypeId: "DarpanSystemSource"], [
+        upsertEntity(ec, "moqui.basic.EnumerationType", [enumTypeId: "DarpanSystemSource"], [
                 enumTypeId  : "DarpanSystemSource",
                 description : "Darpan System Source"
         ])
-        upsertEntityValue(ec, "moqui.basic.EnumerationType", [enumTypeId: "DarpanFileType"], [
+        upsertEntity(ec, "moqui.basic.EnumerationType", [enumTypeId: "DarpanFileType"], [
                 enumTypeId  : "DarpanFileType",
                 description : "File Types for Reconciliation"
         ])
-        upsertEntityValue(ec, "moqui.basic.Enumeration", [enumId: "OMS"], [
+        upsertEntity(ec, "moqui.basic.Enumeration", [enumId: "OMS"], [
                 enumId      : "OMS",
                 enumTypeId  : "DarpanSystemSource",
                 enumCode    : "OMS",
                 description : "OMS",
                 sequenceNum : 1
         ])
-        upsertEntityValue(ec, "moqui.basic.Enumeration", [enumId: "SHOPIFY"], [
+        upsertEntity(ec, "moqui.basic.Enumeration", [enumId: "SHOPIFY"], [
                 enumId      : "SHOPIFY",
                 enumTypeId  : "DarpanSystemSource",
                 enumCode    : "SHOPIFY",
                 description : "Shopify",
                 sequenceNum : 2
         ])
-        upsertEntityValue(ec, "moqui.basic.Enumeration", [enumId: "DftCsv"], [
+        upsertEntity(ec, "moqui.basic.Enumeration", [enumId: "DftCsv"], [
                 enumId      : "DftCsv",
                 enumTypeId  : "DarpanFileType",
                 enumCode    : "CSV",
                 description : "CSV",
                 sequenceNum : 1
         ])
-        upsertEntityValue(ec, "moqui.basic.Enumeration", [enumId: "DftJson"], [
+        upsertEntity(ec, "moqui.basic.Enumeration", [enumId: "DftJson"], [
                 enumId      : "DftJson",
                 enumTypeId  : "DarpanFileType",
                 enumCode    : "JSON",
@@ -483,36 +501,56 @@ class ReconciliationSmokeTestSupport {
 
     private static void upsertEntity(ExecutionContext ec, String entityName, Map<String, Object> pkFields, Map<String, Object> fields) {
         boolean alreadyDisabled = ec.artifactExecution.disableAuthz()
+        ArtifactExecutionInfo aei = ec.artifactExecution.push(
+                "seedEntity",
+                ArtifactExecutionInfo.AT_OTHER,
+                ArtifactExecutionInfo.AUTHZA_ALL,
+                false
+        )
+        ec.artifactExecution.setAnonymousAuthorizedAll()
         try {
             def existing = ec.entity.find(entityName)
                     .condition(pkFields)
                     .disableAuthz()
+                    .useCache(false)
                     .one()
             if (existing == null) {
                 ec.service.sync()
-                        .name("create", entityName)
+                        .name("store#${entityName}")
                         .parameters(fields)
                         .disableAuthz()
                         .call()
             }
         } finally {
+            ec.artifactExecution.pop(aei)
             if (!alreadyDisabled) ec.artifactExecution.enableAuthz()
         }
     }
 
     private static void upsertEntityValue(ExecutionContext ec, String entityName, Map<String, Object> pkFields, Map<String, Object> fields) {
         boolean alreadyDisabled = ec.artifactExecution.disableAuthz()
+        ArtifactExecutionInfo aei = ec.artifactExecution.push(
+                "seedEntityValue",
+                ArtifactExecutionInfo.AT_OTHER,
+                ArtifactExecutionInfo.AUTHZA_ALL,
+                false
+        )
+        ec.artifactExecution.setAnonymousAuthorizedAll()
         try {
             def existing = ec.entity.find(entityName)
                     .condition(pkFields)
                     .disableAuthz()
+                    .useCache(false)
                     .one()
             if (existing == null) {
-                def value = ec.entity.makeValue(entityName)
-                value.setAll(fields)
-                value.create()
+                ec.service.sync()
+                        .name("store#${entityName}")
+                        .parameters(fields)
+                        .disableAuthz()
+                        .call()
             }
         } finally {
+            ec.artifactExecution.pop(aei)
             if (!alreadyDisabled) ec.artifactExecution.enableAuthz()
         }
     }

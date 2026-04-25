@@ -5,13 +5,13 @@
                 <subscreens-item name="GenericReconciliation" menu-title="File Reconciliation" location="component://darpan/screen/Reconciliation/GenericReconciliation.xml"/>
                 <subscreens-item name="SftpAutomation" menu-title="SFTP Automation" location="component://darpan/screen/Reconciliation/Automation/SftpAutomation.xml"/>
                 <subscreens-item name="JsonSchemaManager" menu-title="JSON Schemas" location="component://darpan/screen/Reconciliation/JsonSchema/JsonSchemaManager.xml"/>
-                <subscreens-item name="MappingSetup" menu-title="Legacy Mappings" location="component://darpan/screen/Reconciliation/Mapping/MappingSetup.xml"/>
+                <subscreens-item name="MappingSetup" menu-title="Mappings" location="component://darpan/screen/Reconciliation/Mapping/MappingSetup.xml"/>
                 <subscreens-item name="RuleEngine" menu-title="Rule Engine" location="component://darpan/screen/Reconciliation/RuleEngine/RuleSets.xml"/>
                 <subscreens-item name="Settings" menu-include="false" location="component://darpan/screen/Settings.xml"/>
         </subscreens>
         <pre-actions>
-                <if condition="!darpan.facade.common.PilotAccessSupport.isSuperAdmin(ec)">
-                        <return error="true" message="Pilot administration screens are restricted to super-admin users."/>
+                <if condition="!darpan.facade.common.TenantAccessSupport.isSuperAdmin(ec)">
+                        <return error="true" message="Reconciliation administration screens are restricted to super-admin users."/>
                 </if>
         </pre-actions>
         <widgets>

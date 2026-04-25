@@ -406,9 +406,11 @@ if (ruleSetIdValue) {
     validationErrors = (reconcileResult.validationErrors ?: []) as List
     processingWarnings = ((processingWarnings ?: []) + (reconcileResult.processingWarnings ?: [])) as List
 
-    String defaultBaseName = "${safeToken(compareScopeConfig.compareScopeId as String, safeToken(ruleSetIdValue, 'ruleset'))}-diff-${timestamp}.json"
+    String compareScopeNameToken = safeToken(compareScopeConfig.compareScopeDescription as String,
+            safeToken(compareScopeConfig.compareScopeId as String, safeToken(ruleSetIdValue, 'ruleset')))
+    String defaultBaseName = "${compareScopeNameToken}-diff-${timestamp}.json"
     Map outputMetadata = [
-            timestamp          : ReconciliationServices.formatTimestampIso(ec.user.nowTimestamp),
+            timestamp          : ec.user.nowTimestamp?.toString(),
             reconciliationRunId: normalize(reconciliationRunId),
             file1Label         : compareScopeConfig.file1Label,
             file2Label         : compareScopeConfig.file2Label,
@@ -416,7 +418,6 @@ if (ruleSetIdValue) {
             file2Type          : file2Type,
             reconciliation     : reconciliationType,
             ruleSetId          : ruleSetIdValue,
-            ruleSetName        : compareScopeConfig.ruleSetName,
             compareScopeId     : compareScopeConfig.compareScopeId,
             compareScopeDescription: compareScopeConfig.compareScopeDescription,
             objectType         : reconcileResult.objectType,

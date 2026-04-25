@@ -5,9 +5,7 @@ import groovy.json.JsonSlurper
 
 import java.sql.Timestamp
 
-class PilotReconciliationSupport {
-    static final String RUN_TYPE_MAPPING = "mapping"
-    static final String RUN_TYPE_RULESET = "ruleset"
+class ReconciliationOutputSupport {
     static final List<String> LEGACY_CSV_COLUMNS = ["type", "id", "presentIn", "missingIn", "note", "data"]
     static final List<String> RULESET_CSV_COLUMNS = ["diffType", "primaryId", "field", "file1Value", "file2Value", "presentIn", "missingIn", "ruleId", "severity", "message", "data"]
 
@@ -49,88 +47,55 @@ class PilotReconciliationSupport {
         return parsed instanceof Map ? (Map<String, Object>) parsed : [:]
     }
 
-    static Map<String, Object> parseGeneratedOutputFile(File file) {
-        if (file == null || !file.exists()) return [:]
-        if (sourceFormatForFile(file.name) != "json") return [:]
-        try {
-            return parseGeneratedOutputText(file.getText("UTF-8"))
-        } catch (Exception ignored) {
-            return [:]
-        }
-    }
-
     static Map<String, Object> buildGeneratedOutputDescriptor(String fileName, Map<String, Object> diffDocument,
             long sizeBytes, Timestamp createdDate) {
         Map metadata = diffDocument?.metadata instanceof Map ? (Map) diffDocument.metadata : [:]
         Map summary = diffDocument?.summary instanceof Map ? (Map) diffDocument.summary : [:]
         String sourceFormat = sourceFormatForFile(fileName)
-        String mappingId = normalize(metadata.reconciliationMappingId)
-        String mappingName = normalize(metadata.reconciliationMappingName)
-        String ruleSetId = normalize(metadata.ruleSetId)
-        String ruleSetName = normalize(metadata.ruleSetName)
-        String compareScopeId = normalize(metadata.compareScopeId)
-        String compareScopeDescription = normalize(metadata.compareScopeDescription)
-        String runType = ruleSetId || compareScopeId ? RUN_TYPE_RULESET : (mappingId ? RUN_TYPE_MAPPING : null)
-        String runName = mappingName ?: compareScopeDescription ?: ruleSetName
 
         return [
                 fileName                : fileName,
                 sourceFormat            : sourceFormat,
                 availableFormats        : availableFormatsForSource(sourceFormat),
                 preferredDownloadFormat : availableFormatsForSource(sourceFormat).contains("csv") ? "csv" : sourceFormat,
-                runType                 : runType,
-                runName                 : runName,
                 companyUserGroupId      : normalize(metadata.companyUserGroupId),
-                reconciliationMappingId : mappingId,
-                mappingName             : mappingName,
-                ruleSetId               : ruleSetId,
-                ruleSetName             : ruleSetName,
-                compareScopeId          : compareScopeId,
-                compareScopeDescription : compareScopeDescription,
-                objectType              : normalize(metadata.objectType),
+                savedRunId              : normalize(metadata.savedRunId ?: metadata.reconciliationMappingId ?: metadata.ruleSetId),
+                savedRunName            : normalize(metadata.savedRunName ?: metadata.reconciliationMappingName ?: metadata.ruleSetName),
+                savedRunType            : normalize(metadata.savedRunType ?: (normalize(metadata.ruleSetId) ? "ruleset" : (normalize(metadata.reconciliationMappingId) ? "mapping" : null))),
+                reconciliationMappingId : normalize(metadata.reconciliationMappingId),
+                mappingName             : normalize(metadata.reconciliationMappingName),
+                ruleSetId               : normalize(metadata.ruleSetId),
+                compareScopeId          : normalize(metadata.compareScopeId),
+                compareScopeDescription : normalize(metadata.compareScopeDescription),
                 reconciliationType      : normalize(metadata.reconciliation ?: metadata.reconciliationType),
                 file1Label              : normalize(metadata.file1Label ?: metadata.json1Label),
                 file2Label              : normalize(metadata.file2Label ?: metadata.json2Label),
                 totalDifferences        : normalizeLong(summary.totalDifferences ?: summary.differenceCount),
                 onlyInFile1Count        : normalizeLong(summary.onlyInFile1Count ?: summary.onlyInJson1Count),
                 onlyInFile2Count        : normalizeLong(summary.onlyInFile2Count ?: summary.onlyInJson2Count),
-                missingObjectDifferenceCount: normalizeLong(summary.missingObjectDifferenceCount),
-                ruleDifferenceCount     : normalizeLong(summary.ruleDifferenceCount),
                 createdDate             : createdDate,
                 sizeBytes               : sizeBytes,
         ]
     }
 
-    static boolean matchesGeneratedOutputDescriptor(Map<String, Object> descriptor, String reconciliationMappingId, String search) {
-        return matchesGeneratedOutputDescriptor(descriptor, reconciliationMappingId, null, null, search)
-    }
-
-    static boolean matchesGeneratedOutputDescriptor(Map<String, Object> descriptor, String reconciliationMappingId,
-            String ruleSetId, String compareScopeId, String search) {
-        String mappingIdFilter = normalize(reconciliationMappingId)
-        String descriptorMappingId = normalize(descriptor?.reconciliationMappingId)
-        if (mappingIdFilter && descriptorMappingId != mappingIdFilter) return false
-        String ruleSetIdFilter = normalize(ruleSetId)
-        String descriptorRuleSetId = normalize(descriptor?.ruleSetId)
-        if (ruleSetIdFilter && descriptorRuleSetId != ruleSetIdFilter) return false
-        String compareScopeIdFilter = normalize(compareScopeId)
-        String descriptorCompareScopeId = normalize(descriptor?.compareScopeId)
-        if (compareScopeIdFilter && descriptorCompareScopeId != compareScopeIdFilter) return false
+    static boolean matchesGeneratedOutputDescriptor(Map<String, Object> descriptor, String savedRunId, String search) {
+        String savedRunIdFilter = normalize(savedRunId)
+        String descriptorSavedRunId = normalize(descriptor?.savedRunId ?: descriptor?.reconciliationMappingId ?: descriptor?.ruleSetId)
+        if (savedRunIdFilter && descriptorSavedRunId != savedRunIdFilter) return false
 
         String normalizedSearch = normalize(search)?.toLowerCase()
         if (!normalizedSearch) return true
 
         return [
                 descriptor?.fileName,
-                descriptor?.runType,
-                descriptor?.runName,
+                descriptor?.savedRunId,
+                descriptor?.savedRunName,
+                descriptor?.savedRunType,
                 descriptor?.reconciliationMappingId,
                 descriptor?.mappingName,
                 descriptor?.ruleSetId,
-                descriptor?.ruleSetName,
                 descriptor?.compareScopeId,
                 descriptor?.compareScopeDescription,
-                descriptor?.objectType,
                 descriptor?.file1Label,
                 descriptor?.file2Label,
                 descriptor?.reconciliationType
@@ -144,7 +109,7 @@ class PilotReconciliationSupport {
         String format = (requestedFormat ?: "").toLowerCase()
         if (!format) return sourceFileName
 
-        String normalizedFileName = sanitizeUploadFileName(sourceFileName, "pilot-output")
+        String normalizedFileName = sanitizeUploadFileName(sourceFileName, "reconciliation-output")
         int extensionIndex = normalizedFileName.lastIndexOf(".")
         String baseName = extensionIndex > 0 ? normalizedFileName.substring(0, extensionIndex) : normalizedFileName
         return "${baseName}.${format}"

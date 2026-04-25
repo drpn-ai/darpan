@@ -37,12 +37,12 @@
             <set field="pageIndexSafe" from="Math.max(0, darpan.facade.common.FacadeSupport.normalizeInt(pageIndex, 0))"/>
             <set field="pageSizeSafe" from="Math.max(1, Math.min(200, darpan.facade.common.FacadeSupport.normalizeInt(pageSize, 20)))"/>
             <set field="searchLower" from="darpan.facade.common.FacadeSupport.normalize(query)?.toLowerCase()"/>
-            <set field="activeCompanyUserGroupId" from="darpan.facade.common.PilotAccessSupport.currentActiveCompanyUserGroupId(ec)"/>
+            <set field="activeTenantUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <set field="schemas" from="[]"/>
             <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
             <set field="ignoreTableEnsure" from="jsonschema.common.JsonSchemaUtil.ensureJsonSchemaTable(ec)"/>
             <set field="schemaFinder" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('statusId', 'Active').orderBy('-lastUpdatedStamp').useCache(false)"/>
-            <set field="rows" from="(activeCompanyUserGroupId ? schemaFinder.condition('companyUserGroupId', activeCompanyUserGroupId).list() : []).collect { item -> [jsonSchemaId: item.jsonSchemaId, schemaName: item.schemaName, description: item.description, systemEnumId: darpan.facade.common.FacadeSupport.normalize(item.systemEnumId), systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, item.systemEnumId, null, true), companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.PilotAccessSupport.resolveCompanyLabelForUserGroupId(ec, item.companyUserGroupId), createdByUserId: item.createdByUserId, statusId: item.statusId, createdDate: item.createdDate, lastUpdatedStamp: item.lastUpdatedStamp] }"/>
+            <set field="rows" from="(activeTenantUserGroupId ? schemaFinder.condition('companyUserGroupId', activeTenantUserGroupId).list() : []).collect { item -> [jsonSchemaId: item.jsonSchemaId, schemaName: item.schemaName, description: item.description, systemEnumId: darpan.facade.common.FacadeSupport.normalize(item.systemEnumId), systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, item.systemEnumId, null, true), companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, item.companyUserGroupId), createdByUserId: item.createdByUserId, statusId: item.statusId, createdDate: item.createdDate, lastUpdatedStamp: item.lastUpdatedStamp] }"/>
             <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.schemaName, row.description].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
             <set field="totalCount" from="filteredRows.size()"/>
             <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>
@@ -94,7 +94,7 @@
                 <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active company.')"/>
+                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active tenant.')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="systemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(schema.systemEnumId)"/>
@@ -139,6 +139,7 @@
             <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
             <set field="schemaIdValue" from="darpan.facade.common.FacadeSupport.normalize(jsonSchemaId)"/>
             <set field="requestedSystemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(systemEnumId)"/>
+            <set field="displayDescriptionValue" from="descriptionValue ?: schemaNameValue"/>
             <set field="overwriteMode" from="darpan.facade.common.FacadeSupport.normalizeBool(overwrite, false)"/>
             <set field="hasSystemEnumIdInput" from="context.containsKey('systemEnumId')"/>
             <set field="systemEnumIdValue" from="hasSystemEnumIdInput ? requestedSystemEnumIdValue : null"/>
@@ -155,7 +156,10 @@
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; schemaIdValue">
                 <set field="existingSchema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schemaIdValue).useCache(false).one()"/>
-                <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, existingSchema, &quot;Schema not found for ID '${schemaIdValue}'&quot;, 'Schema is not available in your active company.')"/>
+                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, existingSchema, &quot;Schema not found for ID '${schemaIdValue}'&quot;, 'Schema is not available in your active tenant.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for schema changes.')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="resolvedName" from="existingSchema ? (schemaNameValue ?: existingSchema.schemaName) : jsonschema.common.JsonSchemaUtil.generateUniqueSchemaName(ec, schemaNameValue, overwriteMode)"/>
@@ -183,8 +187,8 @@
                 <set field="savedSchemaEntity" from="existingSchema"/>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; !existingSchema">
-                <set field="newSchemaMap" from="[schemaName: resolvedName, schemaText: schemaTextValue, description: descriptionValue, systemEnumId: systemEnumIdValue, statusId: 'Active', createdDate: ec.user.nowTimestamp, lastUpdatedStamp: ec.user.nowTimestamp]"/>
-                <set field="ignoreCompanyAssignment" from="darpan.facade.common.PilotAccessSupport.assignCompanyOwnershipOnCreate(newSchemaMap, ec)"/>
+                <set field="newSchemaMap" from="[schemaName: resolvedName, schemaText: schemaTextValue, description: displayDescriptionValue, systemEnumId: systemEnumIdValue, statusId: 'Active', createdDate: ec.user.nowTimestamp, lastUpdatedStamp: ec.user.nowTimestamp]"/>
+                <set field="ignoreCompanyAssignment" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(newSchemaMap, ec)"/>
                 <if condition="!ec.message.hasError()">
                     <service-call name="create#darpan.reconciliation.JsonSchema" in-map="newSchemaMap" out-map="createSchemaResult"/>
                     <set field="savedSchemaEntity" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', createSchemaResult.jsonSchemaId).useCache(false).one()"/>
@@ -260,7 +264,7 @@
                 <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active company.')"/>
+                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active tenant.')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <service-call name="jsonschema.JsonSchemaServices.flatten#JsonSchema"
@@ -314,7 +318,10 @@
                 <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; (schemaIdValue || schemaNameValue)">
-                <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active company.')"/>
+                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active tenant.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for schema changes.')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <service-call name="jsonschema.JsonSchemaServices.save#RefinedSchema"
@@ -323,7 +330,7 @@
             <if condition="!ec.message.hasError()">
                 <set field="savedSchemaEntity" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', saveResult.jsonSchemaId).useCache(false).one()"/>
                 <if condition="savedSchemaEntity != null &amp;&amp; !savedSchemaEntity.companyUserGroupId">
-                    <set field="ignoreCompanyAssignment" from="darpan.facade.common.PilotAccessSupport.assignCompanyOwnershipOnCreate(savedSchemaEntity, ec)"/>
+                    <set field="ignoreCompanyAssignment" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(savedSchemaEntity, ec)"/>
                     <if condition="!ec.message.hasError()">
                         <set field="ignoreSavedUpdate" from="savedSchemaEntity.update()"/>
                     </if>
@@ -363,7 +370,10 @@
                 <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active company.')"/>
+                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active tenant.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for schema changes.')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <service-call name="jsonschema.JsonSchemaServices.delete#JsonSchema"

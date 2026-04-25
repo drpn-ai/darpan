@@ -1,6 +1,6 @@
 package darpan.reconciliation.automation
 
-import darpan.facade.common.PilotAccessSupport
+import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonSlurper
 import org.junit.jupiter.api.AfterAll
@@ -98,6 +98,7 @@ class SftpAutomationServiceSmokeTests {
         Map<String, Object> diffDocument = parseOutputFile(result.diffLocation as String)
         assertEquals("DARPAN_TEST_PRODUCT_COMPARE_RS", diffDocument.metadata.ruleSetId)
         assertEquals("DARPAN_TEST_PRODUCT_JSON_SCOPE", diffDocument.metadata.compareScopeId)
+        assertEquals("Smoke-test compare scope for product field mismatches.", diffDocument.metadata.compareScopeDescription)
         assertEquals("PRODUCT", diffDocument.metadata.objectType)
         assertEquals("JSON", diffDocument.metadata.reconciliation)
         assertEquals(4, diffDocument.summary.totalDifferences)
@@ -118,6 +119,7 @@ class SftpAutomationServiceSmokeTests {
         String uploadedDiff = sftpEnvironment.readFile("shopify.test", 22, "/incoming/${result.diffFileName}")
         assertTrue(uploadedDiff.contains("\"ruleSetId\":\"DARPAN_TEST_PRODUCT_COMPARE_RS\""))
         assertTrue(uploadedDiff.contains("\"compareScopeId\":\"DARPAN_TEST_PRODUCT_JSON_SCOPE\""))
+        assertTrue(uploadedDiff.contains("\"compareScopeDescription\":\"Smoke-test compare scope for product field mismatches.\""))
     }
 
     @Test
@@ -128,12 +130,12 @@ class SftpAutomationServiceSmokeTests {
                 .list()
                 .collect { it as Map<String, Object> }
         assertEquals("TEST_CUSTOMER_USER", ec.user.userId)
-        assertEquals("KREWE", ec.user.getPreference(PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY))
+        assertEquals("KREWE", ec.user.getPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY))
         assertTrue(!companyMemberships.isEmpty(), companyMemberships.toString())
         assertTrue(companyMemberships.any { Map<String, Object> row ->
-            row.userGroupId == "KREWE" && row.groupTypeEnumId == PilotAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID
+            row.userGroupId == "KREWE" && row.groupTypeEnumId == TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID
         }, companyMemberships.toString())
-        assertEquals("KREWE", PilotAccessSupport.currentActiveCompanyUserGroupId(ec))
+        assertEquals("KREWE", TenantAccessSupport.currentActiveTenantUserGroupId(ec))
         assertEquals("KREWE", ec.entity.find("darpan.reconciliation.JsonSchema")
                 .condition("jsonSchemaId", "TestOmsOrderSchema")
                 .disableAuthz()

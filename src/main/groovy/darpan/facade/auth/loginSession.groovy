@@ -1,5 +1,5 @@
 import darpan.facade.common.FacadeSupport
-import darpan.facade.common.PilotAccessSupport
+import darpan.facade.common.TenantAccessSupport
 
 String usernameValue = FacadeSupport.normalize(username)
 String passwordValue = password?.toString()
@@ -36,7 +36,7 @@ if (authenticated) {
 }
 
 if (authenticated) {
-    sessionInfo = PilotAccessSupport.buildSessionInfo(ec)
+    sessionInfo = TenantAccessSupport.buildSessionInfo(ec)
     authToken = issuedAuthToken
     authTokenType = "LOGIN_KEY"
     authTokenHeaderName = "login_key"

@@ -92,6 +92,7 @@
             <parameter name="file1Label"/>
             <parameter name="file2Label"/>
             <parameter name="hasHeader" type="Boolean" default-value="true"/>
+            <parameter name="allowDuplicateCompareIds" type="Boolean" default-value="false"/>
             <parameter name="sparkMaster" default-value="local[*]"/>
             <parameter name="sparkAppName" default-value="RuleSetCompareScopePreparation"/>
         </in-parameters>
@@ -136,6 +137,8 @@
             <parameter name="file1Label"/>
             <parameter name="file2Label"/>
             <parameter name="hasHeader" type="Boolean" default-value="true"/>
+            <parameter name="allowDuplicateCompareIds" type="Boolean" default-value="false"/>
+            <parameter name="buildMatchedPairs" type="Boolean" default-value="true"/>
             <parameter name="sparkMaster" default-value="local[*]"/>
             <parameter name="sparkAppName" default-value="RuleSetCompareScopeBaseDiff"/>
         </in-parameters>

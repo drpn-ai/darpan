@@ -12,9 +12,6 @@ import org.apache.spark.sql.types.StructType
 import org.moqui.context.ExecutionContext
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
-
-import java.sql.Timestamp
-
 import static org.apache.spark.sql.functions.*
 
 class ReconciliationServices {
@@ -249,7 +246,7 @@ class ReconciliationServices {
              
              // Write JSON
             Map outputMetadata = [
-                timestamp: formatTimestampIso(ec.user.nowTimestamp),
+                timestamp: ec.user.nowTimestamp?.toString(),
                 file1Label: label1,
                 file2Label: label2,
                 file1Type: type1,
@@ -315,6 +312,7 @@ class ReconciliationServices {
         Dataset df = null
         Dataset idDf = null
         Dataset dataDf = null
+        validateStagedPayloadShape(path, type, label)
         
         if (type == "JSON") {
             // Validate if needed
@@ -335,8 +333,8 @@ class ReconciliationServices {
         } else {
              // CSV
              df = spark.read().option("header", hasHeader.toString()).option("multiLine", "true").csv(path)
-             idDf = buildCsvIdDf(df, idExpr, idNormalizer)
-             dataDf = buildCsvDataDf(df, idExpr, idNormalizer)
+             idDf = buildCsvIdDf(df, idExpr, idNormalizer, label, hasHeader)
+             dataDf = buildCsvDataDf(df, idExpr, idNormalizer, label, hasHeader)
         }
         return [idDf: idDf, dataDf: dataDf]
     }
@@ -351,6 +349,57 @@ class ReconciliationServices {
              return url.toString()
          }
          return location
+    }
+
+    private static void validateStagedPayloadShape(String path, String type, String label) {
+        String normalizedType = normalize(type)?.toUpperCase()
+        if (!(normalizedType in ["CSV", "JSON"])) return
+
+        File stagedFile = path ? new File(path) : null
+        if (stagedFile == null || !stagedFile.exists() || !stagedFile.isFile()) return
+
+        String preview = readFilePreview(stagedFile, 8192)
+        String trimmedPreview = preview?.trim()
+        if (!trimmedPreview) return
+
+        boolean looksLikeJson = trimmedPreview.startsWith("{") || trimmedPreview.startsWith("[")
+        boolean looksLikeJsonSchema = looksLikeJson && looksLikeJsonSchemaPreview(trimmedPreview)
+        String fileName = stagedFile.name ?: "uploaded file"
+        String inputLabel = normalize(label) ?: fileName
+
+        if (normalizedType == "CSV" && looksLikeJson) {
+            String actualType = looksLikeJsonSchema ? "a JSON Schema document" : "JSON"
+            throw new IllegalArgumentException("${inputLabel} expects CSV data, but ${fileName} looks like ${actualType}. Upload the source data file for this saved run instead.")
+        }
+
+        if (normalizedType == "JSON" && !looksLikeJson) {
+            throw new IllegalArgumentException("${inputLabel} expects JSON data, but ${fileName} does not look like JSON. Upload the source data file for this saved run instead.")
+        }
+
+        if (normalizedType == "JSON" && looksLikeJsonSchema) {
+            throw new IllegalArgumentException("${inputLabel} expects JSON records, but ${fileName} looks like a JSON Schema document. Upload the source data file for this saved run instead of the schema definition.")
+        }
+    }
+
+    private static String readFilePreview(File stagedFile, int maxChars) {
+        if (stagedFile == null || maxChars <= 0) return null
+
+        stagedFile.withReader("UTF-8") { reader ->
+            char[] buffer = new char[maxChars]
+            int readCount = reader.read(buffer, 0, maxChars)
+            return readCount > 0 ? new String(buffer, 0, readCount) : null
+        }
+    }
+
+    private static boolean looksLikeJsonSchemaPreview(String preview) {
+        String normalizedPreview = preview?.toLowerCase()
+        if (!normalizedPreview) return false
+
+        return normalizedPreview.contains('"$schema"') &&
+                (normalizedPreview.contains('"properties"') ||
+                        normalizedPreview.contains('"items"') ||
+                        normalizedPreview.contains('"definitions"') ||
+                        normalizedPreview.contains('"$defs"'))
     }
 
     static String normalize(Object val) { return val?.toString()?.trim() }
@@ -388,15 +437,6 @@ class ReconciliationServices {
         }
 
         def compareScope = null
-        def ruleSet = ec.entity.find("darpan.rule.RuleSet")
-                .condition("ruleSetId", normalizedRuleSetId)
-                .disableAuthz()
-                .useCache(false)
-                .one()
-        if (ruleSet == null) {
-            throw new IllegalArgumentException("RuleSet ${normalizedRuleSetId} was not found")
-        }
-
         if (compareScopeIdValue) {
             compareScope = ec.entity.find("darpan.rule.RuleSetCompareScope")
                     .condition("compareScopeId", compareScopeIdValue)
@@ -423,6 +463,7 @@ class ReconciliationServices {
             compareScope = compareScopes[0]
         }
 
+        String compareScopeLabel = compareScopeDisplayName(compareScope.compareScopeId, compareScope.description)
         List sources = ec.entity.find("darpan.rule.RuleSetCompareSource")
                 .condition("compareScopeId", compareScope.compareScopeId)
                 .disableAuthz()
@@ -435,29 +476,33 @@ class ReconciliationServices {
         def file1Source = sourceBySide["FILE_1"]
         def file2Source = sourceBySide["FILE_2"]
         if (file1Source == null || file2Source == null) {
-            throw new IllegalArgumentException("Compare scope ${compareScope.compareScopeId} must define both FILE_1 and FILE_2 sources")
+            throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' must define both FILE_1 and FILE_2 sources")
         }
 
         String scopeFile1SystemEnumId = normalize(file1Source.systemEnumId)
         String scopeFile2SystemEnumId = normalize(file2Source.systemEnumId)
         if (requestedFile1SystemEnumId && requestedFile1SystemEnumId != scopeFile1SystemEnumId) {
-            throw new IllegalArgumentException("file1SystemEnumId ${requestedFile1SystemEnumId} does not match compare scope ${compareScope.compareScopeId} FILE_1 system ${scopeFile1SystemEnumId}")
+            throw new IllegalArgumentException("file1SystemEnumId ${requestedFile1SystemEnumId} does not match compare scope '${compareScopeLabel}' FILE_1 system ${scopeFile1SystemEnumId}")
         }
         if (requestedFile2SystemEnumId && requestedFile2SystemEnumId != scopeFile2SystemEnumId) {
-            throw new IllegalArgumentException("file2SystemEnumId ${requestedFile2SystemEnumId} does not match compare scope ${compareScope.compareScopeId} FILE_2 system ${scopeFile2SystemEnumId}")
+            throw new IllegalArgumentException("file2SystemEnumId ${requestedFile2SystemEnumId} does not match compare scope '${compareScopeLabel}' FILE_2 system ${scopeFile2SystemEnumId}")
         }
 
         return [
-                ruleSetId         : normalizedRuleSetId,
-                ruleSetName       : normalize(ruleSet.ruleSetName) ?: normalizedRuleSetId,
                 compareScopeId    : normalize(compareScope.compareScopeId),
-                compareScopeDescription: normalize(compareScope.description),
+                compareScopeDescription: compareScopeLabel,
                 objectType        : normalize(compareScope.objectType),
                 file1SystemEnumId : scopeFile1SystemEnumId,
                 file2SystemEnumId : scopeFile2SystemEnumId,
                 file1Label        : resolveEnumLabel(ec, scopeFile1SystemEnumId, "File 1"),
                 file2Label        : resolveEnumLabel(ec, scopeFile2SystemEnumId, "File 2")
         ]
+    }
+
+    static String compareScopeDisplayName(Object compareScopeId, Object compareScopeDescription) {
+        String description = normalize(compareScopeDescription)
+        if (description) return description
+        return normalize(compareScopeId)
     }
 
     static Map parseIdSpec(String expr, boolean isCsv) {
@@ -578,27 +623,49 @@ class ReconciliationServices {
                 )
     }
 
-    static void validateUniqueCompareIds(Dataset dataDf, String compareScopeId, String fileSide, String fileLabel) {
-        if (dataDf == null) return
+    static List<Row> findDuplicateCompareIdRows(Dataset dataDf, int sampleLimit = 5) {
+        if (dataDf == null) return []
 
-        List duplicateRows = dataDf.groupBy("compare_id")
+        int safeLimit = sampleLimit > 0 ? sampleLimit : 5
+        return dataDf.groupBy("compare_id")
                 .count()
                 .filter(col("count").gt(1))
                 .orderBy(col("compare_id"))
-                .limit(5)
+                .limit(safeLimit)
                 .collectAsList()
-        if (!duplicateRows) return
+    }
 
-        String sideCode = normalize(fileSide) ?: "FILE"
-        String label = normalize(fileLabel) ?: sideCode
-        String examples = duplicateRows.collect { row ->
+    static Dataset collapseDuplicateCompareIds(Dataset dataDf) {
+        if (dataDf == null) return null
+
+        // Base-diff-only runs only need one representative row per compare_id.
+        return dataDf.groupBy("compare_id")
+                .agg(first(col("data"), true).alias("data"))
+    }
+
+    static String buildDuplicateCompareIdExamples(List<Row> duplicateRows) {
+        if (!duplicateRows) return ""
+
+        return duplicateRows.collect { row ->
             String compareId = row.getAs("compare_id")?.toString()
             long duplicateCount = ((Number) row.getAs("count")).longValue()
             return "${compareId} (${duplicateCount} rows)"
         }.join(", ")
+    }
+
+    static void validateUniqueCompareIds(Dataset dataDf, String compareScopeLabel, String fileSide, String fileLabel) {
+        if (dataDf == null) return
+
+        List<Row> duplicateRows = findDuplicateCompareIdRows(dataDf)
+        if (!duplicateRows) return
+
+        String scopeLabel = normalize(compareScopeLabel) ?: "compare scope"
+        String sideCode = normalize(fileSide) ?: "FILE"
+        String label = normalize(fileLabel) ?: sideCode
+        String examples = buildDuplicateCompareIdExamples(duplicateRows)
 
         throw new IllegalArgumentException(
-                "Compare scope ${compareScopeId} ${sideCode} (${label}) produced duplicate primaryId values after normalization: ${examples}. primaryId must identify exactly one object per file side."
+                "Compare scope '${scopeLabel}' ${sideCode} (${label}) produced duplicate primaryId values after normalization: ${examples}. primaryId must identify exactly one object per file side."
         )
     }
 
@@ -620,7 +687,7 @@ class ReconciliationServices {
         return missingDiffDf.select(
                 col("type").alias("diffType"),
                 lit(compareScopeId).alias("compareScopeId"),
-                lit(objectType).alias("objectType"),
+                lit(objectType).cast(DataTypes.StringType).alias("objectType"),
                 col("id").alias("primaryId"),
                 lit(null).cast(DataTypes.StringType).alias("field"),
                 lit(null).cast(DataTypes.StringType).alias("file1Value"),
@@ -733,7 +800,7 @@ class ReconciliationServices {
                 .join(file2DataDf.alias("file2"), col("matched.compare_id").equalTo(col("file2.compare_id")), "inner")
                 .select(
                         lit(compareScopeId).alias("compareScopeId"),
-                        lit(objectType).alias("objectType"),
+                        lit(objectType).cast(DataTypes.StringType).alias("objectType"),
                         col("matched.compare_id").alias("primaryId"),
                         col("file1.data").alias("file1"),
                         col("file2.data").alias("file2")
@@ -766,20 +833,50 @@ class ReconciliationServices {
          return normalizeCompareIdDataset(dataDf, idNormalizer)
     }
     
-    static Dataset buildCsvIdDf(Dataset rawDf, String fieldName, String idNormalizer) {
-         String fieldExpr = (fieldName?.replace("`", "``") ?: "id")
-         fieldExpr = "`" + fieldExpr + "`"
+    static Dataset buildCsvIdDf(Dataset rawDf, String fieldName, String idNormalizer, String label = null, boolean hasHeader = true) {
+         String fieldExpr = buildValidatedCsvFieldExpr(rawDf, fieldName, label, hasHeader)
          Dataset idDf = rawDf.selectExpr("${fieldExpr} as compare_id")
          return normalizeCompareIdDataset(idDf, idNormalizer).distinct()
     }
-     static Dataset buildCsvDataDf(Dataset rawDf, String fieldName, String idNormalizer) {
-         String fieldExpr = (fieldName?.replace("`", "``") ?: "id")
-         fieldExpr = "`" + fieldExpr + "`"
+     static Dataset buildCsvDataDf(Dataset rawDf, String fieldName, String idNormalizer, String label = null, boolean hasHeader = true) {
+         String fieldExpr = buildValidatedCsvFieldExpr(rawDf, fieldName, label, hasHeader)
          Dataset dataDf = rawDf.selectExpr("${fieldExpr} as compare_id", "struct(*) as data")
          return normalizeCompareIdDataset(dataDf, idNormalizer)
     }
 
-    static String formatTimestampIso(Timestamp timestamp) {
-        return timestamp != null ? timestamp.toInstant().toString() : null
+    private static String buildValidatedCsvFieldExpr(Dataset rawDf, String fieldName, String label, boolean hasHeader) {
+        String normalizedField = normalize(fieldName) ?: "id"
+        validateCsvFieldExists(rawDf, normalizedField, label, hasHeader)
+        return "`" + normalizedField.replace("`", "``") + "`"
+    }
+
+    private static void validateCsvFieldExists(Dataset rawDf, String fieldName, String label, boolean hasHeader) {
+        List<String> availableColumns = ((rawDf?.columns() ?: [] as String[]) as List<String>)
+        if (availableColumns.contains(fieldName)) return
+
+        String columnSummary = availableColumns.isEmpty() ?
+                "(none)" :
+                availableColumns.collect { String column ->
+                    String normalized = normalize(column)
+                    normalized ?: "(blank)"
+                }.join(", ")
+
+        String labelPrefix = normalize(label) ? "${normalize(label)}: " : ""
+        List<String> hints = []
+        if (availableColumns.any { String column ->
+            String normalized = normalize(column)
+            normalized == "{" || normalized == "[" || normalized?.startsWith("{") || normalized?.startsWith("[")
+        }) {
+            hints.add("The staged file looks like JSON, so either the compare scope file type is wrong or the uploaded file does not match this saved run.")
+        }
+        if (availableColumns && availableColumns.every { String column ->
+            String normalized = normalize(column)
+            normalized ==~ /_c\d+/
+        }) {
+            hints.add("The staged CSV does not expose named headers; check hasHeader and the uploaded file structure.")
+        }
+
+        String hintText = hints.isEmpty() ? "" : " " + hints.join(" ")
+        throw new IllegalArgumentException("${labelPrefix}CSV compare source expected column '${fieldName}' but available columns were [${columnSummary}].${hintText}")
     }
 }

@@ -1,7 +1,7 @@
 package darpan.facade.auth
 
 import darpan.facade.common.FacadeSupport
-import darpan.facade.common.PilotAccessSupport
+import darpan.facade.common.TenantAccessSupport
 import groovy.lang.Binding
 import groovy.lang.GroovyShell
 import org.junit.jupiter.api.Test
@@ -21,17 +21,20 @@ class AuthFacadeScriptsTests {
     @Test
     void loginSessionIssuesLoginKeyTokenAndSessionInfo() {
         MessageFacadeStub message = new MessageFacadeStub()
-        UserStub user = new UserStub(userId: "EX_USER", username: "pilot.user", loginUserResult: true, loginKey: "issued-token")
+        UserStub user = new UserStub(userId: "EX_USER", username: "test.user", loginUserResult: true, loginKey: "issued-token")
         EntityFacadeStub entity = new EntityFacadeStub(finders: [
                 "moqui.security.UserGroupAndMember": new FinderStub(listResult: [
                         [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+                ]),
+                (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): new FinderStub(listResult: [
+                        [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID],
                 ]),
         ])
         def ec = executionContext(message: message, user: user, entity: entity, factory: new FactoryStub(expireHours: 2.0f))
 
         Binding binding = runScript("src/main/groovy/darpan/facade/auth/loginSession.groovy", [
                 ec      : ec,
-                username: "pilot.user",
+                username: "test.user",
                 password: "secret",
         ])
 
@@ -43,14 +46,16 @@ class AuthFacadeScriptsTests {
 
         Map<String, Object> sessionInfo = binding.getVariable("sessionInfo") as Map<String, Object>
         assertEquals("EX_USER", sessionInfo.userId)
-        assertEquals("pilot.user", sessionInfo.username)
-        assertEquals("COMPANY", sessionInfo.scopeType)
+        assertEquals("test.user", sessionInfo.username)
+        assertEquals("TENANT", sessionInfo.scopeType)
         assertEquals("KREWE", sessionInfo.customerScopeId)
-        assertEquals("KREWE", sessionInfo.activeCompanyUserGroupId)
-        assertEquals("Krewe", sessionInfo.activeCompanyLabel)
-        assertEquals([[userGroupId: "KREWE", label: "Krewe"]], sessionInfo.availableCompanies)
+        assertEquals("KREWE", sessionInfo.activeTenantUserGroupId)
+        assertEquals("Krewe", sessionInfo.activeTenantLabel)
+        assertEquals([[userGroupId: "KREWE", label: "Krewe"]], sessionInfo.availableTenants)
+        assertEquals([TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID], sessionInfo.activeTenantPermissionGroupIds)
+        assertTrue(sessionInfo.canEditActiveTenantData as boolean)
         assertFalse(sessionInfo.isSuperAdmin as boolean)
-        assertEquals("KREWE", user.context.activeCompanyUserGroupId)
+        assertEquals("KREWE", user.context.activeTenantUserGroupId)
         assertTrue((binding.getVariable("ok") as boolean))
         assertTrue(((binding.getVariable("errors") as List<String>).isEmpty()))
     }
@@ -58,35 +63,41 @@ class AuthFacadeScriptsTests {
     @Test
     void getSessionInfoUsesCurrentMoquiUserState() {
         MessageFacadeStub message = new MessageFacadeStub()
-        UserStub user = new UserStub(userId: "EX_USER", username: "pilot.user", preferences: [
-                (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+        UserStub user = new UserStub(userId: "EX_USER", username: "test.user", preferences: [
+                (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
         ])
         EntityFacadeStub entity = new EntityFacadeStub(finders: [
                 "moqui.security.UserGroupAndMember": new FinderStub(listResult: [
-                        [userGroupId: "ACME", userId: "EX_USER", description: "Acme", groupTypeEnumId: "UgtDarpanCompany"],
+                        [userGroupId: "GORJANA", userId: "EX_USER", description: "Gorjana", groupTypeEnumId: "UgtDarpanCompany"],
                         [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+                ]),
+                (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): new FinderStub(listResult: [
+                        [tenantUserGroupId: "GORJANA", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID],
+                        [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID],
                 ]),
         ])
         def ec = executionContext(message: message, user: user, entity: entity)
 
         boolean authenticated = FacadeSupport.normalize(ec?.user?.userId) != null
-        Map<String, Object> sessionInfo = authenticated ? (PilotAccessSupport.buildSessionInfo(ec) as Map<String, Object>) : null
+        Map<String, Object> sessionInfo = authenticated ? (TenantAccessSupport.buildSessionInfo(ec) as Map<String, Object>) : null
         Map<String, Object> envelope = FacadeSupport.envelope(ec)
 
         assertTrue(authenticated)
         assertEquals("EX_USER", sessionInfo.userId)
-        assertEquals("pilot.user", sessionInfo.username)
-        assertEquals("COMPANY", sessionInfo.scopeType)
-        assertEquals("KREWE", sessionInfo.activeCompanyUserGroupId)
-        assertEquals("Krewe", sessionInfo.activeCompanyLabel)
+        assertEquals("test.user", sessionInfo.username)
+        assertEquals("TENANT", sessionInfo.scopeType)
+        assertEquals("KREWE", sessionInfo.activeTenantUserGroupId)
+        assertEquals("Krewe", sessionInfo.activeTenantLabel)
+        assertEquals([TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID], sessionInfo.activeTenantPermissionGroupIds)
+        assertFalse(sessionInfo.canEditActiveTenantData as boolean)
         assertTrue(envelope.ok as boolean)
     }
 
     @Test
-    void getSessionInfoIncludesActiveCompanyForAdminMemberships() {
+    void getSessionInfoIncludesActiveTenantForAdminMemberships() {
         MessageFacadeStub message = new MessageFacadeStub()
         UserStub user = new UserStub(userId: "EX_ADMIN", username: "john.doe", preferences: [
-                (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+                (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
         ])
         EntityFacadeStub entity = new EntityFacadeStub(finders: [
                 "moqui.security.UserGroupMember": new FinderStub(oneResult: [userGroupId: "ADMIN", userId: "EX_ADMIN"]),
@@ -98,18 +109,20 @@ class AuthFacadeScriptsTests {
         def ec = executionContext(message: message, user: user, entity: entity)
 
         boolean authenticated = FacadeSupport.normalize(ec?.user?.userId) != null
-        Map<String, Object> sessionInfo = authenticated ? (PilotAccessSupport.buildSessionInfo(ec) as Map<String, Object>) : null
+        Map<String, Object> sessionInfo = authenticated ? (TenantAccessSupport.buildSessionInfo(ec) as Map<String, Object>) : null
         Map<String, Object> envelope = FacadeSupport.envelope(ec)
 
         assertTrue(authenticated)
         assertTrue(sessionInfo.isSuperAdmin as boolean)
-        assertEquals("COMPANY", sessionInfo.scopeType)
-        assertEquals("KREWE", sessionInfo.activeCompanyUserGroupId)
-        assertEquals("Krewe", sessionInfo.activeCompanyLabel)
+        assertEquals("TENANT", sessionInfo.scopeType)
+        assertEquals("KREWE", sessionInfo.activeTenantUserGroupId)
+        assertEquals("Krewe", sessionInfo.activeTenantLabel)
         assertEquals([
                 [userGroupId: "GORJANA", label: "Gorjana"],
                 [userGroupId: "KREWE", label: "Krewe"],
-        ], sessionInfo.availableCompanies)
+        ], sessionInfo.availableTenants)
+        assertEquals([TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID], sessionInfo.activeTenantPermissionGroupIds)
+        assertTrue(sessionInfo.canEditActiveTenantData as boolean)
         assertTrue(envelope.ok as boolean)
     }
 
@@ -119,7 +132,7 @@ class AuthFacadeScriptsTests {
         FinderStub keyFinder = new FinderStub(deleteAllResult: 1)
         EntityFacadeStub entity = new EntityFacadeStub(finders: ["moqui.security.UserLoginKey": keyFinder])
         RequestStub request = new RequestStub(headers: ["login_key": "header-token"])
-        UserStub user = new UserStub(userId: "EX_USER", username: "pilot.user")
+        UserStub user = new UserStub(userId: "EX_USER", username: "test.user")
         def ec = executionContext(message: message, user: user, entity: entity, request: request)
 
         Binding binding = runScript("src/main/groovy/darpan/facade/auth/logoutSession.groovy", [
@@ -324,7 +337,10 @@ class AuthFacadeScriptsTests {
         }
 
         List list() {
-            return listResult
+            return listResult.findAll { Object row ->
+                if (!(row instanceof Map)) return true
+                conditions.every { String field, Object value -> row[field] == value }
+            }
         }
 
         int deleteAll() {

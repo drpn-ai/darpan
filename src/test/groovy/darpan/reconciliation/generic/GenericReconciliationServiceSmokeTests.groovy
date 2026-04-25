@@ -27,7 +27,7 @@ class GenericReconciliationServiceSmokeTests {
     @BeforeAll
     void setup() {
         backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
-        ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "generic-reconciliation-smoke")
+        ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "reconciliation-generic-smoke")
         ReconciliationSmokeTestSupport.seedCompareScopeFixtures(ec)
         ReconciliationSmokeTestSupport.seedSchemaBackedCsvMappingFixtures(ec)
     }
@@ -40,7 +40,7 @@ class GenericReconciliationServiceSmokeTests {
     @BeforeEach
     void clearErrors() {
         ec.message.clearErrors()
-        ReconciliationSmokeTestSupport.seedPilotCompanyScope(ec)
+        ReconciliationSmokeTestSupport.seedCompanyScope(ec)
     }
 
     @Test
@@ -72,6 +72,7 @@ class GenericReconciliationServiceSmokeTests {
         Map<String, Object> diffDocument = parseOutputFile(result.diffLocation as String)
         assertEquals("DARPAN_TEST_PRODUCT_COMPARE_RS", diffDocument.metadata.ruleSetId)
         assertEquals("DARPAN_TEST_PRODUCT_JSON_SCOPE", diffDocument.metadata.compareScopeId)
+        assertEquals("Smoke-test compare scope for product field mismatches.", diffDocument.metadata.compareScopeDescription)
         assertEquals("PRODUCT", diffDocument.metadata.objectType)
         assertEquals("JSON", diffDocument.metadata.reconciliation)
         assertEquals(4, diffDocument.summary.totalDifferences)

@@ -1,44 +1,43 @@
 import darpan.facade.common.FacadeSupport
-import darpan.facade.common.PilotAccessSupport
-import darpan.facade.reconciliation.PilotReconciliationSupport
+import darpan.facade.common.TenantAccessSupport
+import darpan.facade.reconciliation.ReconciliationOutputSupport
 
 import java.sql.Timestamp
 
 int page = Math.max(0, FacadeSupport.normalizeInt(pageIndex, 0))
 int size = Math.max(1, Math.min(200, FacadeSupport.normalizeInt(pageSize, 20)))
-String mappingId = FacadeSupport.normalize(reconciliationMappingId)
-String ruleSetIdValue = FacadeSupport.normalize(ruleSetId)
-String compareScopeIdValue = FacadeSupport.normalize(compareScopeId)
+String savedRunIdFilter = FacadeSupport.normalize(savedRunId ?: reconciliationMappingId)
 String search = FacadeSupport.normalize(query)?.toLowerCase()
 
 generatedOutputs = []
 pagination = [pageIndex: page, pageSize: size, totalCount: 0, pageCount: 1]
 
-String outputLocation = PilotAccessSupport.resolveGenericOutputLocation(ec)
+String outputLocation = TenantAccessSupport.resolveGenericOutputLocation(ec)
 File outputDir = ec.resource.getLocationReference(outputLocation)?.getFile()
 
 if (outputDir?.exists()) {
     List<Map> rows = []
     (outputDir.listFiles() ?: [] as File[])
-            .findAll { File file -> file.isFile() && PilotReconciliationSupport.isSupportedOutputFile(file.name) }
+            .findAll { File file -> file.isFile() && ReconciliationOutputSupport.isSupportedOutputFile(file.name) }
             .sort { File left, File right -> Long.compare(right.lastModified(), left.lastModified()) }
             .each { File file ->
-                Map outputDocument = PilotReconciliationSupport.parseGeneratedOutputFile(file)
+                Map outputDocument = [:]
+                if (ReconciliationOutputSupport.sourceFormatForFile(file.name) == "json") {
+                    try {
+                        outputDocument = ReconciliationOutputSupport.parseGeneratedOutputText(file.getText("UTF-8"))
+                    } catch (Exception ignored) {
+                        outputDocument = [:]
+                    }
+                }
 
-                Map<String, Object> descriptor = PilotReconciliationSupport.buildGeneratedOutputDescriptor(
+                Map<String, Object> descriptor = ReconciliationOutputSupport.buildGeneratedOutputDescriptor(
                         file.name,
                         outputDocument,
                         file.length(),
                         new Timestamp(file.lastModified())
                 )
 
-                if (!PilotReconciliationSupport.matchesGeneratedOutputDescriptor(
-                        descriptor,
-                        mappingId,
-                        ruleSetIdValue,
-                        compareScopeIdValue,
-                        search
-                )) return
+                if (!ReconciliationOutputSupport.matchesGeneratedOutputDescriptor(descriptor, savedRunIdFilter, search)) return
                 rows.add(descriptor)
             }
 

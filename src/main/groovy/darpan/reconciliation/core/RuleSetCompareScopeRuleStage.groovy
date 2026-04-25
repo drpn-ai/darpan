@@ -13,6 +13,8 @@ class RuleSetCompareScopeRuleStage {
 
     static Map<String, Object> reconcileRuleSetCompareScope(ExecutionContext ec) {
         Map<String, Object> context = (Map<String, Object>) ec.contextStack
+        String ruleSetId = ReconciliationServices.normalize(context.get("ruleSetId"))
+        int activeRuleCount = countActiveRules(ec, ruleSetId)
 
         Map<String, Object> baseResult = ec.service.sync()
                 .name("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScopeBaseDiff")
@@ -30,6 +32,8 @@ class RuleSetCompareScopeRuleStage {
                         file1Label         : context.get("file1Label"),
                         file2Label         : context.get("file2Label"),
                         hasHeader          : context.get("hasHeader"),
+                        allowDuplicateCompareIds: activeRuleCount == 0,
+                        buildMatchedPairs  : activeRuleCount > 0,
                         sparkMaster        : context.get("sparkMaster"),
                         sparkAppName       : context.get("sparkAppName")
                 ])
@@ -48,11 +52,12 @@ class RuleSetCompareScopeRuleStage {
         List<Map<String, Object>> ruleDiffRows = []
         int ruleCount = 0
         int firedRuleCount = 0
-        String ruleSetId = ReconciliationServices.normalize(baseResult.ruleSetId)
+        ruleSetId = ReconciliationServices.normalize(baseResult.ruleSetId) ?: ruleSetId
         String compareScopeId = ReconciliationServices.normalize(baseResult.compareScopeId)
+        String compareScopeDescription = ReconciliationServices.normalize(baseResult.compareScopeDescription) ?: compareScopeId
         String objectType = ReconciliationServices.normalize(baseResult.objectType)
 
-        if (matchedPairDf != null && ((Number) baseResult.matchedPairCount).longValue() > 0L) {
+        if (matchedPairDf != null && ((Number) baseResult.matchedPairCount).longValue() > 0L && activeRuleCount > 0) {
             Iterator<String> rowIterator = matchedPairDf.toJSON().toLocalIterator()
             while (rowIterator.hasNext()) {
                 List<Map<String, Object>> batch = nextBatch(rowIterator, ruleBatchSize)
@@ -69,7 +74,7 @@ class RuleSetCompareScopeRuleStage {
 
                 processingWarnings.addAll(toStringList(ruleExec?.warnings))
                 if (ruleExec?.error) {
-                    processingWarnings.add(buildRuleStageWarning(ruleSetId, compareScopeId, batch, ruleExec.error))
+                    processingWarnings.add(buildRuleStageWarning(ruleSetId, compareScopeDescription, batch, ruleExec.error))
                     logger.warn("RuleSet compare stage preserved base diffs after rule failure ruleSet={} compareScope={} error={}",
                             ruleSetId, compareScopeId, ruleExec.error)
                     break
@@ -81,6 +86,7 @@ class RuleSetCompareScopeRuleStage {
                 if (batchDiffs) ruleDiffRows.addAll(batchDiffs)
             }
         }
+        ruleCount = activeRuleCount
 
         Dataset referenceDf = matchedPairDf ?: missingDiffDf
         Dataset ruleDiffDf = ReconciliationServices.buildRuleSetDiffDataset(referenceDf, ruleDiffRows)
@@ -104,6 +110,7 @@ class RuleSetCompareScopeRuleStage {
         return [
                 ruleSetId                 : ruleSetId,
                 compareScopeId            : compareScopeId,
+                compareScopeDescription   : compareScopeDescription,
                 objectType                : objectType,
                 file1Type                 : baseResult.file1Type,
                 file2Type                 : baseResult.file2Type,
@@ -135,6 +142,17 @@ class RuleSetCompareScopeRuleStage {
         return batch
     }
 
+    private static int countActiveRules(ExecutionContext ec, String ruleSetId) {
+        if (!ruleSetId) return 0
+        List rules = ec.entity.find("darpan.rule.Rule")
+                .condition("ruleSetId", ruleSetId)
+                .condition("enabled", "Y")
+                .disableAuthz()
+                .useCache(false)
+                .list() ?: []
+        return rules.size()
+    }
+
     private static int resolveRuleBatchSize(Object rawValue) {
         if (rawValue instanceof Number && ((Number) rawValue).intValue() > 0) {
             return ((Number) rawValue).intValue()
@@ -154,12 +172,13 @@ class RuleSetCompareScopeRuleStage {
         return ((List) rawValue).collect { Object value -> ReconciliationServices.normalize(value) }.findAll { it }
     }
 
-    private static String buildRuleStageWarning(String ruleSetId, String compareScopeId, List<Map<String, Object>> batch, Object error) {
+    private static String buildRuleStageWarning(String ruleSetId, String compareScopeDescription, List<Map<String, Object>> batch, Object error) {
         String primaryIds = batch.collect { Map<String, Object> row -> ReconciliationServices.normalize(row.primaryId) }
                 .findAll { it }
                 .take(5)
                 .join(", ")
         String batchToken = primaryIds ? " primaryIds=${primaryIds}" : ""
-        return "RuleSet ${ruleSetId} compareScope ${compareScopeId} rule execution failed; preserved base missing-object diffs.${batchToken} Error: ${ReconciliationServices.normalize(error)}"
+        String compareScopeLabel = ReconciliationServices.normalize(compareScopeDescription) ?: "compare scope"
+        return "RuleSet ${ruleSetId} compare scope '${compareScopeLabel}' rule execution failed; preserved base missing-object diffs.${batchToken} Error: ${ReconciliationServices.normalize(error)}"
     }
 }

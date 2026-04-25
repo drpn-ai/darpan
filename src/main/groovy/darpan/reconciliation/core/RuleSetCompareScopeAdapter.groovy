@@ -1,5 +1,6 @@
 package darpan.reconciliation.core
 
+import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.SparkSession
 import org.moqui.context.ExecutionContext
 import org.slf4j.Logger
@@ -24,6 +25,7 @@ class RuleSetCompareScopeAdapter {
         String file1Label = ReconciliationServices.normalize(context.get("file1Label"))
         String file2Label = ReconciliationServices.normalize(context.get("file2Label"))
         Boolean hasHeader = (Boolean) context.get("hasHeader")
+        Boolean allowDuplicateCompareIds = (Boolean) context.get("allowDuplicateCompareIds")
         String sparkMaster = ReconciliationServices.normalize(context.get("sparkMaster")) ?: "local[*]"
         String sparkAppName = ReconciliationServices.normalize(context.get("sparkAppName")) ?: "RuleSetCompareScopePreparation"
 
@@ -43,8 +45,9 @@ class RuleSetCompareScopeAdapter {
             throw new IllegalArgumentException("Compare scope ${compareScopeId} was not found")
         }
         String scopeRuleSetId = ReconciliationServices.normalize(compareScope.ruleSetId)
+        String compareScopeLabel = ReconciliationServices.compareScopeDisplayName(compareScope.compareScopeId, compareScope.description)
         if (scopeRuleSetId != ruleSetId) {
-            throw new IllegalArgumentException("Compare scope ${compareScopeId} belongs to RuleSet ${scopeRuleSetId}, not ${ruleSetId}")
+            throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' belongs to RuleSet ${scopeRuleSetId}, not ${ruleSetId}")
         }
 
         List sources = ec.entity.find("darpan.rule.RuleSetCompareSource")
@@ -53,23 +56,23 @@ class RuleSetCompareScopeAdapter {
                 .useCache(true)
                 .list()
         if (!sources) {
-            throw new IllegalArgumentException("Compare scope ${compareScopeId} has no source definitions")
+            throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' has no source definitions")
         }
 
         Map<String, Object> sourceBySide = [:]
         sources.each { source ->
             String fileSide = ReconciliationServices.normalize(source.fileSide)?.toUpperCase()
             if (!(fileSide in ["FILE_1", "FILE_2"])) {
-                throw new IllegalArgumentException("Compare scope ${compareScopeId} has unsupported fileSide ${source.fileSide}. Supported values: FILE_1, FILE_2")
+                throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' has unsupported fileSide ${source.fileSide}. Supported values: FILE_1, FILE_2")
             }
             if (sourceBySide.containsKey(fileSide)) {
-                throw new IllegalArgumentException("Compare scope ${compareScopeId} has more than one source for ${fileSide}")
+                throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' has more than one source for ${fileSide}")
             }
             sourceBySide[fileSide] = source
         }
 
         if (!sourceBySide.FILE_1 || !sourceBySide.FILE_2) {
-            throw new IllegalArgumentException("Compare scope ${compareScopeId} must define both FILE_1 and FILE_2 sources")
+            throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' must define both FILE_1 and FILE_2 sources")
         }
 
         Map<String, Object> file1Config = buildSideConfig(sourceBySide.FILE_1, file1FileTypeEnumId, file1SchemaFileName)
@@ -81,21 +84,21 @@ class RuleSetCompareScopeAdapter {
         String file1Type = resolveFileTypeCode(ec, (String) file1Config.fileTypeEnumId) ?: detectFileTypeFromName(file1SafeName)
         String file2Type = resolveFileTypeCode(ec, (String) file2Config.fileTypeEnumId) ?: detectFileTypeFromName(file2SafeName)
         if (!file1Type) {
-            processingWarnings.add("File type auto-detected as CSV for ${file1SafeName} because compare scope ${compareScopeId} has no FILE_1 fileTypeEnumId")
+            processingWarnings.add("File type auto-detected as CSV for ${file1SafeName} because compare scope '${compareScopeLabel}' has no FILE_1 fileTypeEnumId")
             file1Type = "CSV"
         }
         if (!file2Type) {
-            processingWarnings.add("File type auto-detected as CSV for ${file2SafeName} because compare scope ${compareScopeId} has no FILE_2 fileTypeEnumId")
+            processingWarnings.add("File type auto-detected as CSV for ${file2SafeName} because compare scope '${compareScopeLabel}' has no FILE_2 fileTypeEnumId")
             file2Type = "CSV"
         }
 
         file1Type = file1Type.toUpperCase()
         file2Type = file2Type.toUpperCase()
-        validateSupportedFileType(compareScopeId, "FILE_1", file1Type)
-        validateSupportedFileType(compareScopeId, "FILE_2", file2Type)
+        validateSupportedFileType(compareScopeLabel, "FILE_1", file1Type)
+        validateSupportedFileType(compareScopeLabel, "FILE_2", file2Type)
 
-        Map<String, Object> file1IdSpec = buildCompareSourceIdSpec(compareScopeId, "FILE_1", file1Type, file1Config, processingWarnings)
-        Map<String, Object> file2IdSpec = buildCompareSourceIdSpec(compareScopeId, "FILE_2", file2Type, file2Config, processingWarnings)
+        Map<String, Object> file1IdSpec = buildCompareSourceIdSpec(compareScopeLabel, "FILE_1", file1Type, file1Config, processingWarnings)
+        Map<String, Object> file2IdSpec = buildCompareSourceIdSpec(compareScopeLabel, "FILE_2", file2Type, file2Config, processingWarnings)
 
         String resolvedFile1Label = file1Label ?: resolveEnumLabel(ec, (String) file1Config.systemEnumId, "File 1")
         String resolvedFile2Label = file2Label ?: resolveEnumLabel(ec, (String) file2Config.systemEnumId, "File 2")
@@ -117,12 +120,18 @@ class RuleSetCompareScopeAdapter {
                 ec, spark, file2Location, file2Type, file2IdSpec, hasHeader != null ? hasHeader : true,
                 resolvedFile2Label, validationErrors, (String) file2Config.schemaFileName)
 
-        ReconciliationServices.validateUniqueCompareIds((org.apache.spark.sql.Dataset) ingest1.dataDf, compareScopeId, "FILE_1", resolvedFile1Label)
-        ReconciliationServices.validateUniqueCompareIds((org.apache.spark.sql.Dataset) ingest2.dataDf, compareScopeId, "FILE_2", resolvedFile2Label)
+        if (allowDuplicateCompareIds == Boolean.TRUE) {
+            ingest1 = collapseDuplicateCompareIdsForBaseDiffOnly(ingest1, compareScopeLabel, "FILE_1", resolvedFile1Label, processingWarnings)
+            ingest2 = collapseDuplicateCompareIdsForBaseDiffOnly(ingest2, compareScopeLabel, "FILE_2", resolvedFile2Label, processingWarnings)
+        } else {
+            ReconciliationServices.validateUniqueCompareIds((Dataset) ingest1.dataDf, compareScopeLabel, "FILE_1", resolvedFile1Label)
+            ReconciliationServices.validateUniqueCompareIds((Dataset) ingest2.dataDf, compareScopeLabel, "FILE_2", resolvedFile2Label)
+        }
 
         return [
                 ruleSetId        : ruleSetId,
                 compareScopeId   : compareScopeId,
+                compareScopeDescription: compareScopeLabel,
                 objectType       : ReconciliationServices.normalize(compareScope.objectType),
                 file1Type        : file1Type,
                 file2Type        : file2Type,
@@ -145,6 +154,28 @@ class RuleSetCompareScopeAdapter {
         ]
     }
 
+    private static Map<String, Object> collapseDuplicateCompareIdsForBaseDiffOnly(Map<String, Object> ingest,
+                                                                                  String compareScopeLabel,
+                                                                                  String fileSide,
+                                                                                  String fileLabel,
+                                                                                  List<String> processingWarnings) {
+        Dataset dataDf = (Dataset) ingest?.dataDf
+        List duplicateRows = ReconciliationServices.findDuplicateCompareIdRows(dataDf)
+        if (!duplicateRows) return ingest
+
+        String sideCode = ReconciliationServices.normalize(fileSide) ?: "FILE"
+        String label = ReconciliationServices.normalize(fileLabel) ?: sideCode
+        String examples = ReconciliationServices.buildDuplicateCompareIdExamples(duplicateRows)
+        processingWarnings.add(
+                "Compare scope '${ReconciliationServices.normalize(compareScopeLabel) ?: 'compare scope'}' ${sideCode} (${label}) collapsed duplicate primaryId values for base diff only because this RuleSet run has no active rules: ${examples}."
+        )
+
+        Dataset collapsedDataDf = ReconciliationServices.collapseDuplicateCompareIds(dataDf)
+        ingest.dataDf = collapsedDataDf
+        ingest.idDf = collapsedDataDf.select("compare_id").distinct()
+        return ingest
+    }
+
     private static Map<String, Object> buildSideConfig(def source, String fileTypeEnumIdOverride, String schemaFileNameOverride) {
         return [
                 fileSide            : ReconciliationServices.normalize(source.fileSide)?.toUpperCase(),
@@ -157,11 +188,11 @@ class RuleSetCompareScopeAdapter {
         ]
     }
 
-    private static Map<String, Object> buildCompareSourceIdSpec(String compareScopeId, String fileSide, String fileType,
+    private static Map<String, Object> buildCompareSourceIdSpec(String compareScopeLabel, String fileSide, String fileType,
                                                                 Map<String, Object> sourceConfig, List<String> processingWarnings) {
         String rawPrimaryIdExpression = ReconciliationServices.normalize(sourceConfig.primaryIdExpression)
         if (!rawPrimaryIdExpression) {
-            throw new IllegalArgumentException("Compare scope ${compareScopeId} ${fileSide} is missing primaryIdExpression")
+            throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' ${fileSide} is missing primaryIdExpression")
         }
 
         Map<String, Object> primarySplit = ReconciliationServices.splitIdExpression(rawPrimaryIdExpression)
@@ -169,18 +200,18 @@ class RuleSetCompareScopeAdapter {
         String configuredNormalizer = ReconciliationServices.resolveIdNormalizer((String) sourceConfig.idValueNormalizer)
         String finalNormalizer = configuredNormalizer ?: inlineNormalizer
         if (configuredNormalizer && inlineNormalizer && configuredNormalizer != inlineNormalizer) {
-            processingWarnings.add("Compare scope ${compareScopeId} ${fileSide} normalizer ${configuredNormalizer} overrides inline normalizer ${inlineNormalizer}")
+            processingWarnings.add("Compare scope '${compareScopeLabel}' ${fileSide} normalizer ${configuredNormalizer} overrides inline normalizer ${inlineNormalizer}")
         }
 
         String baseExpression = ReconciliationServices.normalize(primarySplit.idExpr)
         if ("JSON".equals(fileType)) {
             baseExpression = combineJsonRootAndPrimaryExpression((String) sourceConfig.recordRootExpression, baseExpression)
         } else if ("CSV".equals(fileType) && ReconciliationServices.normalize(sourceConfig.recordRootExpression)) {
-            processingWarnings.add("Compare scope ${compareScopeId} ${fileSide} ignores recordRootExpression for CSV input")
+            processingWarnings.add("Compare scope '${compareScopeLabel}' ${fileSide} ignores recordRootExpression for CSV input")
         }
 
         if (!baseExpression) {
-            throw new IllegalArgumentException("Compare scope ${compareScopeId} ${fileSide} resolved an empty primary ID expression")
+            throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' ${fileSide} resolved an empty primary ID expression")
         }
 
         String expressionWithNormalizer = finalNormalizer ? "${baseExpression}|${finalNormalizer}" : baseExpression
@@ -231,9 +262,9 @@ class RuleSetCompareScopeAdapter {
         return normalized
     }
 
-    private static void validateSupportedFileType(String compareScopeId, String fileSide, String fileType) {
+    private static void validateSupportedFileType(String compareScopeLabel, String fileSide, String fileType) {
         if (!(fileType in ["CSV", "JSON"])) {
-            throw new IllegalArgumentException("Compare scope ${compareScopeId} ${fileSide} resolved unsupported file type ${fileType}. Supported values: CSV, JSON")
+            throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' ${fileSide} resolved unsupported file type ${fileType}. Supported values: CSV, JSON")
         }
     }
 

@@ -8,27 +8,27 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
 
-class PilotAccessSupportTests {
+class TenantAccessSupportTests {
 
     @Test
-    void buildAccessScopeTreatsAdminGroupMemberWithoutCompanyMembershipAsCompanyScopedWithoutActiveCompany() {
+    void buildAccessScopeTreatsAdminGroupMemberWithoutTenantMembershipAsTenantScopedWithoutActiveTenant() {
         FinderStub adminFinder = new FinderStub(oneResult: [userGroupId: "ADMIN", userId: "EX_ADMIN"])
         def ec = executionContext(
                 user: new UserStub(userId: "EX_ADMIN"),
                 entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupMember": adminFinder])
         )
 
-        Map<String, Object> scope = PilotAccessSupport.buildAccessScope(ec)
+        Map<String, Object> scope = TenantAccessSupport.buildAccessScope(ec)
 
         assertTrue(scope.isSuperAdmin as boolean)
-        assertEquals("COMPANY", scope.scopeType)
+        assertEquals("TENANT", scope.scopeType)
         assertEquals(null, scope.customerScopeId)
-        assertEquals(null, scope.activeCompanyUserGroupId)
-        assertEquals([], scope.availableCompanies)
+        assertEquals(null, scope.activeTenantUserGroupId)
+        assertEquals([], scope.availableTenants)
     }
 
     @Test
-    void buildAccessScopeUsesConfiguredCompaniesForAdminWithoutMemberships() {
+    void buildAccessScopeUsesConfiguredTenantsForAdminWithoutMemberships() {
         FinderStub adminFinder = new FinderStub(oneResult: [userGroupId: "ADMIN", userId: "EX_ADMIN"])
         FinderStub companyGroupFinder = new FinderStub(listResult: [
                 [userGroupId: "GORJANA", description: "Gorjana", groupTypeEnumId: "UgtDarpanCompany"],
@@ -36,7 +36,7 @@ class PilotAccessSupportTests {
         ])
         def ec = executionContext(
                 user: new UserStub(userId: "EX_ADMIN", preferences: [
-                        (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
                 entity: new EntityFacadeStub(finders: [
                         "moqui.security.UserGroupMember": adminFinder,
@@ -44,21 +44,21 @@ class PilotAccessSupportTests {
                 ])
         )
 
-        Map<String, Object> scope = PilotAccessSupport.buildAccessScope(ec)
+        Map<String, Object> scope = TenantAccessSupport.buildAccessScope(ec)
 
         assertTrue(scope.isSuperAdmin as boolean)
-        assertEquals("COMPANY", scope.scopeType)
+        assertEquals("TENANT", scope.scopeType)
         assertEquals("KREWE", scope.customerScopeId)
-        assertEquals("KREWE", scope.activeCompanyUserGroupId)
-        assertEquals("Krewe", scope.activeCompanyLabel)
+        assertEquals("KREWE", scope.activeTenantUserGroupId)
+        assertEquals("Krewe", scope.activeTenantLabel)
         assertEquals([
                 [userGroupId: "GORJANA", label: "Gorjana"],
                 [userGroupId: "KREWE", label: "Krewe"],
-        ], scope.availableCompanies)
+        ], scope.availableTenants)
     }
 
     @Test
-    void canAccessCompanyRecordRequiresActiveCompanyMatchForSuperAdmin() {
+    void canAccessTenantRecordRequiresActiveTenantMatchForSuperAdmin() {
         FinderStub adminFinder = new FinderStub(oneResult: [userGroupId: "ADMIN", userId: "EX_ADMIN"])
         FinderStub companyGroupFinder = new FinderStub(listResult: [
                 [userGroupId: "GORJANA", description: "Gorjana", groupTypeEnumId: "UgtDarpanCompany"],
@@ -66,7 +66,7 @@ class PilotAccessSupportTests {
         ])
         def ec = executionContext(
                 user: new UserStub(userId: "EX_ADMIN", preferences: [
-                        (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
                 entity: new EntityFacadeStub(finders: [
                         "moqui.security.UserGroupMember": adminFinder,
@@ -74,85 +74,111 @@ class PilotAccessSupportTests {
                 ])
         )
 
-        boolean wrongCompanyAllowed = PilotAccessSupport.canAccessCompanyRecord(ec, [companyUserGroupId: "GORJANA"])
-        boolean activeCompanyAllowed = PilotAccessSupport.canAccessCompanyRecord(ec, [companyUserGroupId: "KREWE"])
+        boolean wrongTenantAllowed = TenantAccessSupport.canAccessTenantRecord(ec, [companyUserGroupId: "GORJANA"])
+        boolean activeTenantAllowed = TenantAccessSupport.canAccessTenantRecord(ec, [companyUserGroupId: "KREWE"])
 
-        assertFalse(wrongCompanyAllowed)
-        assertTrue(activeCompanyAllowed)
+        assertFalse(wrongTenantAllowed)
+        assertTrue(activeTenantAllowed)
     }
 
     @Test
-    void buildAccessScopeUsesPreferredCompanyWhenMembershipIsValid() {
+    void buildAccessScopeUsesPreferredTenantWhenMembershipIsValid() {
         FinderStub companyFinder = new FinderStub(listResult: [
                 [userGroupId: "ACME", userId: "EX_USER", description: "Acme", groupTypeEnumId: "UgtDarpanCompany"],
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
         ])
         def ec = executionContext(
                 user: new UserStub(userId: "EX_USER", preferences: [
-                        (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
                 entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupAndMember": companyFinder])
         )
 
-        Map<String, Object> scope = PilotAccessSupport.buildAccessScope(ec)
+        Map<String, Object> scope = TenantAccessSupport.buildAccessScope(ec)
 
         assertFalse(scope.isSuperAdmin as boolean)
-        assertEquals("COMPANY", scope.scopeType)
+        assertEquals("TENANT", scope.scopeType)
         assertEquals("KREWE", scope.customerScopeId)
-        assertEquals("KREWE", scope.activeCompanyUserGroupId)
-        assertEquals("Krewe", scope.activeCompanyLabel)
+        assertEquals("KREWE", scope.activeTenantUserGroupId)
+        assertEquals("Krewe", scope.activeTenantLabel)
         assertEquals([
                 [userGroupId: "ACME", label: "Acme"],
                 [userGroupId: "KREWE", label: "Krewe"],
-        ], scope.availableCompanies)
+        ], scope.availableTenants)
     }
 
     @Test
-    void buildAccessScopeFallsBackToFirstAvailableCompanyWhenPreferenceIsInvalid() {
+    void buildAccessScopeFallsBackToFirstAvailableTenantWhenPreferenceIsInvalid() {
         FinderStub companyFinder = new FinderStub(listResult: [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
                 [userGroupId: "ACME", userId: "EX_USER", description: "Acme", groupTypeEnumId: "UgtDarpanCompany"],
         ])
         def ec = executionContext(
                 user: new UserStub(userId: "EX_USER", preferences: [
-                        (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "MISSING",
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "MISSING",
                 ]),
                 entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupAndMember": companyFinder])
         )
 
-        Map<String, Object> scope = PilotAccessSupport.buildAccessScope(ec)
+        Map<String, Object> scope = TenantAccessSupport.buildAccessScope(ec)
 
         assertEquals("ACME", scope.customerScopeId)
-        assertEquals("ACME", scope.activeCompanyUserGroupId)
-        assertEquals("Acme", scope.activeCompanyLabel)
+        assertEquals("ACME", scope.activeTenantUserGroupId)
+        assertEquals("Acme", scope.activeTenantLabel)
+    }
+
+    @Test
+    void buildAccessScopeUsesPermissionAssignmentsForTheSelectedTenant() {
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "GORJANA", userId: "EX_USER", description: "Gorjana", groupTypeEnumId: "UgtDarpanCompany"],
+                [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        FinderStub permissionFinder = new FinderStub(listResult: [
+                [tenantUserGroupId: "GORJANA", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID],
+                [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID],
+        ])
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_USER", preferences: [
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
+                ]),
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupAndMember"                     : companyFinder,
+                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionFinder,
+                ])
+        )
+
+        Map<String, Object> scope = TenantAccessSupport.buildAccessScope(ec)
+
+        assertEquals([TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID], scope.activeTenantPermissionGroupIds)
+        assertFalse(scope.canEditActiveTenantData as boolean)
     }
 
     @Test
     void resolveGenericOutputLocationUsesCustomerScopedFolderForNonAdmin() {
         FinderStub companyFinder = new FinderStub(listResult: [
-                [userGroupId: "KREWE", userId: "pilot.customer", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+                [userGroupId: "KREWE", userId: "test.customer", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
         ])
         def ec = executionContext(
-                user: new UserStub(userId: "pilot.customer", preferences: [
-                        (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+                user: new UserStub(userId: "test.customer", preferences: [
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
                 entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupAndMember": companyFinder])
         )
 
-        String outputLocation = PilotAccessSupport.resolveGenericOutputLocation(ec)
+        String outputLocation = TenantAccessSupport.resolveGenericOutputLocation(ec)
 
-        assertEquals("runtime://tmp/reconciliation/generic/company/KREWE/output", outputLocation)
+        assertEquals("runtime://tmp/reconciliation/generic/tenant/KREWE/output", outputLocation)
     }
 
     @Test
-    void resolveGenericOutputLocationUsesCompanyScopedFolderForAdminWithActiveCompany() {
+    void resolveGenericOutputLocationUsesTenantScopedFolderForAdminWithActiveTenant() {
         FinderStub adminFinder = new FinderStub(oneResult: [userGroupId: "ADMIN", userId: "EX_ADMIN"])
         FinderStub companyGroupFinder = new FinderStub(listResult: [
                 [userGroupId: "KREWE", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
         ])
         def ec = executionContext(
                 user: new UserStub(userId: "EX_ADMIN", preferences: [
-                        (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
                 entity: new EntityFacadeStub(finders: [
                         "moqui.security.UserGroupMember": adminFinder,
@@ -160,9 +186,9 @@ class PilotAccessSupportTests {
                 ])
         )
 
-        String outputLocation = PilotAccessSupport.resolveGenericOutputLocation(ec)
+        String outputLocation = TenantAccessSupport.resolveGenericOutputLocation(ec)
 
-        assertEquals("runtime://tmp/reconciliation/generic/company/KREWE/output", outputLocation)
+        assertEquals("runtime://tmp/reconciliation/generic/tenant/KREWE/output", outputLocation)
     }
 
     @Test
@@ -173,7 +199,7 @@ class PilotAccessSupportTests {
                 message: message
         )
 
-        PilotAccessSupport.requireOwnedRecordAccess(ec, [ownerUserId: "CUSTOMER_B"],
+        TenantAccessSupport.requireOwnedRecordAccess(ec, [ownerUserId: "CUSTOMER_B"],
                 "Schema not found", "Schema is not available in your customer scope.")
 
         assertTrue(message.hasError())
@@ -181,33 +207,33 @@ class PilotAccessSupportTests {
     }
 
     @Test
-    void requireCompanyRecordAccessRejectsCrossCompanyRecord() {
+    void requireTenantRecordAccessRejectsCrossTenantRecord() {
         MessageFacadeStub message = new MessageFacadeStub()
         FinderStub companyFinder = new FinderStub(listResult: [
                 [userGroupId: "KREWE", userId: "CUSTOMER_A", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
         ])
         def ec = executionContext(
                 user: new UserStub(userId: "CUSTOMER_A", preferences: [
-                        (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
                 ]),
                 entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupAndMember": companyFinder]),
                 message: message
         )
 
-        PilotAccessSupport.requireCompanyRecordAccess(ec, [companyUserGroupId: "ACME"],
-                "Schema not found", "Schema is not available in your active company.")
+        TenantAccessSupport.requireTenantRecordAccess(ec, [companyUserGroupId: "ACME"],
+                "Schema not found", "Schema is not available in your active tenant.")
 
         assertTrue(message.hasError())
-        assertEquals(["Schema is not available in your active company."], message.errors)
+        assertEquals(["Schema is not available in your active tenant."], message.errors)
     }
 
     @Test
-    void assignCompanyOwnershipOnCreateUsesActiveCompanyAndCreator() {
+    void assignTenantOwnershipOnCreateUsesActiveTenantAndCreator() {
         FinderStub companyFinder = new FinderStub(listResult: [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
         ])
         UserStub user = new UserStub(userId: "EX_USER", preferences: [
-                (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+                (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
         ])
         def ec = executionContext(
                 user: user,
@@ -215,14 +241,14 @@ class PilotAccessSupportTests {
         )
         Map<String, Object> newValue = [:]
 
-        PilotAccessSupport.assignCompanyOwnershipOnCreate(newValue, ec)
+        TenantAccessSupport.assignTenantOwnershipOnCreate(newValue, ec)
 
         assertEquals("KREWE", newValue.companyUserGroupId)
         assertEquals("EX_USER", newValue.createdByUserId)
     }
 
     @Test
-    void saveActiveCompanyPersistsRequestedCompanyWhenMembershipIsValid() {
+    void saveActiveTenantPersistsRequestedTenantWhenMembershipIsValid() {
         FinderStub companyFinder = new FinderStub(listResult: [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
         ])
@@ -232,36 +258,60 @@ class PilotAccessSupportTests {
                 entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupAndMember": companyFinder])
         )
 
-        boolean saved = PilotAccessSupport.saveActiveCompany(ec, "KREWE")
+        boolean saved = TenantAccessSupport.saveActiveTenant(ec, "KREWE")
 
         assertTrue(saved)
-        assertEquals("KREWE", user.preferences[PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY])
+        assertEquals("KREWE", user.preferences[TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY])
     }
 
     @Test
-    void buildAccessScopeSyncsActiveCompanyIntoUserContext() {
+    void buildAccessScopeSyncsActiveTenantIntoUserContext() {
         FinderStub companyFinder = new FinderStub(listResult: [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
         ])
+        FinderStub permissionFinder = new FinderStub(listResult: [
+                [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID],
+        ])
         UserStub user = new UserStub(userId: "EX_USER", preferences: [
-                (PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY): "KREWE",
+                (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
         ])
         def ec = executionContext(
                 user: user,
-                entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupAndMember": companyFinder])
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupAndMember"                     : companyFinder,
+                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionFinder,
+                ])
         )
 
-        PilotAccessSupport.buildAccessScope(ec)
+        TenantAccessSupport.buildAccessScope(ec)
 
-        assertEquals("KREWE", user.context.activeCompanyUserGroupId)
-        assertEquals("Krewe", user.context.activeCompanyLabel)
-        assertEquals(["KREWE"], user.context.availableCompanyUserGroupIds)
+        assertEquals("KREWE", user.context.activeTenantUserGroupId)
+        assertEquals("Krewe", user.context.activeTenantLabel)
+        assertEquals(["KREWE"], user.context.availableTenantUserGroupIds)
+        assertEquals([TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID], user.context.activeTenantPermissionGroupIds)
+        assertTrue(user.context.canEditActiveTenantData as boolean)
         assertFalse(user.context.isSuperAdmin as boolean)
-        assertEquals("COMPANY", user.context.scopeType)
+        assertEquals("TENANT", user.context.scopeType)
     }
 
     @Test
-    void saveActiveCompanyAllowsAdminWhenCompanyIsConfigured() {
+    void canEditActiveTenantDataRequiresExplicitEditorAssignment() {
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_USER", preferences: [
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
+                ]),
+                entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupAndMember": companyFinder])
+        )
+
+        assertFalse(TenantAccessSupport.canEditActiveTenantData(ec))
+        assertEquals([], TenantAccessSupport.currentActiveTenantPermissionGroupIds(ec))
+    }
+
+    @Test
+    void saveActiveTenantAllowsAdminWhenTenantIsConfigured() {
         FinderStub adminFinder = new FinderStub(oneResult: [userGroupId: "ADMIN", userId: "EX_ADMIN"])
         FinderStub companyGroupFinder = new FinderStub(listResult: [
                 [userGroupId: "GORJANA", description: "Gorjana", groupTypeEnumId: "UgtDarpanCompany"],
@@ -275,14 +325,14 @@ class PilotAccessSupportTests {
                 ])
         )
 
-        boolean saved = PilotAccessSupport.saveActiveCompany(ec, "GORJANA")
+        boolean saved = TenantAccessSupport.saveActiveTenant(ec, "GORJANA")
 
         assertTrue(saved)
-        assertEquals("GORJANA", user.preferences[PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY])
+        assertEquals("GORJANA", user.preferences[TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY])
     }
 
     @Test
-    void saveActiveCompanyRejectsRequestedCompanyOutsideUserMembership() {
+    void saveActiveTenantRejectsRequestedTenantOutsideUserMembership() {
         MessageFacadeStub message = new MessageFacadeStub()
         FinderStub companyFinder = new FinderStub(listResult: [
                 [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
@@ -294,11 +344,37 @@ class PilotAccessSupportTests {
                 message: message
         )
 
-        boolean saved = PilotAccessSupport.saveActiveCompany(ec, "OTHER")
+        boolean saved = TenantAccessSupport.saveActiveTenant(ec, "OTHER")
 
         assertFalse(saved)
-        assertEquals(null, user.preferences[PilotAccessSupport.ACTIVE_COMPANY_PREFERENCE_KEY])
-        assertEquals([PilotAccessSupport.ACTIVE_COMPANY_UNAVAILABLE_MESSAGE], message.errors)
+        assertEquals(null, user.preferences[TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY])
+        assertEquals([TenantAccessSupport.ACTIVE_TENANT_UNAVAILABLE_MESSAGE], message.errors)
+    }
+
+    @Test
+    void requireActiveTenantWriteAccessRejectsReadOnlyTenantRole() {
+        MessageFacadeStub message = new MessageFacadeStub()
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        FinderStub permissionFinder = new FinderStub(listResult: [
+                [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID],
+        ])
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_USER", preferences: [
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
+                ]),
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupAndMember"                     : companyFinder,
+                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionFinder,
+                ]),
+                message: message
+        )
+
+        boolean allowed = TenantAccessSupport.requireActiveTenantWriteAccess(ec, "View only tenant.")
+
+        assertFalse(allowed)
+        assertEquals(["View only tenant."], message.errors)
     }
 
     private static Expando executionContext(Map overrides = [:]) {
@@ -373,7 +449,10 @@ class PilotAccessSupportTests {
         }
 
         List list() {
-            return listResult
+            return listResult.findAll { Object row ->
+                if (!(row instanceof Map)) return true
+                conditions.every { String field, Object value -> row[field] == value }
+            }
         }
     }
 }

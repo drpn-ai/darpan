@@ -15,7 +15,7 @@ The JSON reconciliation feature allows you to compare two JSON files using ID-ba
 
 ### `ReconciliationGenericServices.reconcile#GenericFiles`
 
-Primary entry point for uploads. It stages files, then delegates to the RuleSet compare-scope pipeline when `ruleSetId` is provided. The `reconciliationMappingId` path remains only as a deprecated migration bridge for older callers.
+Primary entry point for uploads. It stages files, then delegates to the RuleSet compare-scope pipeline when `ruleSetId` is provided. During migration it can still fall back to the mapping bridge when only `reconciliationMappingId` is provided.
 
 **Input Parameters:**
 - `file1` (FileItem, required): First file (CSV or JSON)
@@ -23,7 +23,7 @@ Primary entry point for uploads. It stages files, then delegates to the RuleSet 
 - `ruleSetId` (preferred): RuleSet to run through the compare-scope + DRL path
 - `compareScopeId` (optional): Compare-scope override; required only when a RuleSet has multiple scopes
 - `file1SystemEnumId` / `file2SystemEnumId` (optional in RuleSet mode, required in mapping mode): source-system identifiers
-- `reconciliationMappingId` (deprecated migration bridge): legacy mapping input retained temporarily for old callers
+- `reconciliationMappingId` (migration bridge): legacy mapping input retained temporarily for old callers
 - `sparkMaster` (optional): Spark master URL (default: "local[*]")
 
 Additional pilot-compatible input mode:
@@ -44,16 +44,11 @@ Behavior notes:
 - RuleSet mode writes one generated JSON artifact that contains both missing-object rows and rule-generated rows.
 - In RuleSet mode, `onlyInFile1Count` maps to IDs present only in file 1 (`missingInFile2Count` from the compare-scope service), and `onlyInFile2Count` maps to IDs present only in file 2 (`missingInFile1Count`).
 - If the RuleSet defines exactly one compare scope, Generic routing resolves it automatically. When a RuleSet has multiple scopes, `compareScopeId` is required.
-- New setup should use `ruleSetId` plus `compareScopeId`. The mapping route remains available only as a deprecated migration bridge until final removal.
-
-Facade/PWA notes:
-- `facade.ReconciliationFacadeServices.list#PilotRuleSetCompareScopes` lists the RuleSet compare-scope rows that drive the Generic PWA selector.
-- `facade.ReconciliationFacadeServices.run#PilotGenericDiff` now accepts either `ruleSetId` plus optional `compareScopeId` or legacy `reconciliationMappingId`.
-- `facade.ReconciliationFacadeServices.list#PilotGeneratedOutputs` now filters by `ruleSetId` and `compareScopeId` as well as `reconciliationMappingId`, so the RuleSet workflow can load saved history and latest-result cards without mapping IDs.
+- The mapping route remains available only as a migration bridge until the later cutover tickets remove it.
 
 ### `ReconciliationAutomationServices.poll#SftpAndReconcile`
 
-SFTP automation stages remote files and now routes through the same RuleSet compare-scope pipeline as Generic reconciliation when `ruleSetId` is provided. Older automation jobs can continue to use `reconciliationMappingId` only until they are migrated.
+SFTP automation stages remote files and now routes through the same RuleSet compare-scope pipeline as Generic reconciliation when `ruleSetId` is provided. Older automation jobs can continue to use `reconciliationMappingId` temporarily until they are migrated.
 
 **Inputs (key):** `ruleSetId`, optional `compareScopeId`, temporary `reconciliationMappingId`, `file1SftpServerId`, `file2SftpServerId`, optional `file1SystemEnumId`/`file2SystemEnumId`, optional file-type/schema overrides, `file1RemotePath`, `file2RemotePath`, `stageLocation`, `outputLocation`, `sparkMaster`, `sparkAppName`.
 
@@ -61,23 +56,13 @@ SFTP automation stages remote files and now routes through the same RuleSet comp
 
 ### `ReconciliationCoreServices.reconcile#FilesByMapping`
 
-Deprecated shared mapping bridge used by older Generic uploads and older SFTP automation jobs. It normalizes staged file locations, resolves mapping metadata (types, schemas, ID fields), and hands everything to the unified comparator.
+Shared mapping bridge used by older Generic uploads and older SFTP automation jobs. It normalizes staged file locations, resolves mapping metadata (types, schemas, ID fields), and hands everything to the unified comparator.
 
 **Inputs (key):** `reconciliationMappingId`, `file1Location`, `file2Location`, `file1SystemEnumId`, `file2SystemEnumId`, optional `file1Name`/`file2Name`, `file1FileTypeEnumId`/`file2FileTypeEnumId`, `file1SchemaFileName`/`file2SchemaFileName`, `hasHeader`, `outputLocation`, `sparkMaster`, `sparkAppName`.
 
 **Outputs (key):** `file1Type`, `file2Type`, `reconciliationType`, `diffLocation`, `diffFileName`, `differenceCount`, `onlyInFile1Count`, `onlyInFile2Count`, `validationErrors`, `processingWarnings`.
 
-This service remains the Generic/SFTP migration bridge. New RuleSet-backed Generic and SFTP runs should use `reconcile#RuleSetCompareScope` instead, and existing Mapping rows should be migrated with `migrate#MappingsToRuleSetScopes`.
-
-### `ReconciliationMigrationServices.migrate#MappingsToRuleSetScopes`
-
-Idempotent migration service that translates deprecated `ReconciliationMapping` rows into `RuleSet`, `RuleSetCompareScope`, and `RuleSetCompareSource` configuration. It can also rewrite legacy SFTP service-job parameters from `reconciliationMappingId` to `ruleSetId` plus `compareScopeId`.
-
-**Inputs (key):** optional `reconciliationMappingId`, `dryRun` (default `true`), `rewriteSftpJobParams` (default `true`).
-
-**Outputs (key):** `applied`, `mappingsScanned`, `ruleSetsCreated`, `compareScopesCreated`, `sourcesCreated`, `jobsUpdated`, `warnings`.
-
-Use `dryRun=true` first to capture the planned Mapping-to-RuleSet conversion. In apply mode, reruns are idempotent: existing migrated RuleSets/scopes/sources are reused and already-rewritten SFTP jobs are left unchanged.
+This service remains the Generic/SFTP migration bridge. New RuleSet-backed Generic and SFTP runs should use `reconcile#RuleSetCompareScope` instead.
 
 ### `ReconciliationCoreServices.prepare#RuleSetCompareScope`
 
@@ -191,7 +176,7 @@ The `compareJsonPath` parameter uses JSONPath syntax to extract ID values from y
 
 When a schema is provided and you pass a simple key (like `id` or `$.id`), the resolver expands it to the full JSONPath. For array-root schemas this becomes `$[*].id`.
 
-When source ID formats differ between systems, configure an ID normalizer per `RuleSetCompareSource`. The older mapping-member `idValueNormalizer` field remains only for migration and temporary legacy bridge execution.
+When source ID formats differ between systems, configure an ID normalizer per mapping member (`idValueNormalizer`) in Mapping Builder/Editor. In the compare-scope adapter path, the same normalizer behavior is configured per `RuleSetCompareSource`.
 For backward compatibility, inline syntax with `|NORMALIZER` in `idFieldExpression` is still supported.
 
 For compare-scope JSON sources, extraction can also be split into:
@@ -236,8 +221,6 @@ System 2 ID expression: $[*].shopifyProductId
 ## Output Format
 
 The reconciliation output is a JSON file with the following structure:
-
-`metadata.timestamp` is written as an ISO-8601 UTC string.
 
 ```json
 {

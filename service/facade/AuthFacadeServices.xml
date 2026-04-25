@@ -7,10 +7,10 @@
         <description>Create an authenticated session from username/password and return the explicit Moqui login-key token darpan-ui sends on later requests.</description>
         <in-parameters>
             <parameter name="username" required="true">
-                <description>Account username used for pilot login.</description>
+                <description>Account username used for login.</description>
             </parameter>
             <parameter name="password" required="true">
-                <description>Account password used for pilot login.</description>
+                <description>Account password used for login.</description>
             </parameter>
         </in-parameters>
         <out-parameters>
@@ -48,12 +48,14 @@
                 <parameter name="timeZone" type="String"/>
                 <parameter name="scopeType" type="String"/>
                 <parameter name="customerScopeId" type="String"/>
-                <parameter name="activeCompanyUserGroupId" type="String"/>
-                <parameter name="activeCompanyLabel" type="String"/>
-                <parameter name="availableCompanies">
+                <parameter name="activeTenantUserGroupId" type="String"/>
+                <parameter name="activeTenantLabel" type="String"/>
+                <parameter name="availableTenants">
                     <parameter name="userGroupId" type="String"/>
                     <parameter name="label" type="String"/>
                 </parameter>
+                <parameter name="activeTenantPermissionGroupIds" type="List"/>
+                <parameter name="canEditActiveTenantData" type="Boolean"/>
                 <parameter name="isSuperAdmin" type="Boolean"/>
             </parameter>
         </out-parameters>
@@ -84,19 +86,21 @@
                 <parameter name="timeZone" type="String"/>
                 <parameter name="scopeType" type="String"/>
                 <parameter name="customerScopeId" type="String"/>
-                <parameter name="activeCompanyUserGroupId" type="String"/>
-                <parameter name="activeCompanyLabel" type="String"/>
-                <parameter name="availableCompanies">
+                <parameter name="activeTenantUserGroupId" type="String"/>
+                <parameter name="activeTenantLabel" type="String"/>
+                <parameter name="availableTenants">
                     <parameter name="userGroupId" type="String"/>
                     <parameter name="label" type="String"/>
                 </parameter>
+                <parameter name="activeTenantPermissionGroupIds" type="List"/>
+                <parameter name="canEditActiveTenantData" type="Boolean"/>
                 <parameter name="isSuperAdmin" type="Boolean"/>
             </parameter>
         </out-parameters>
         <actions>
             <set field="authenticated" from="darpan.facade.common.FacadeSupport.normalize(ec.user.userId) != null"/>
             <if condition="authenticated">
-                <set field="sessionInfo" from="darpan.facade.common.PilotAccessSupport.buildSessionInfo(ec)"/>
+                <set field="sessionInfo" from="darpan.facade.common.TenantAccessSupport.buildSessionInfo(ec)"/>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -104,23 +108,23 @@
         </actions>
     </service>
 
-    <service verb="save" noun="ActiveCompany" allow-remote="true" authenticate="true">
-        <description>Persist the authenticated user's active company selection and return refreshed session metadata.</description>
+    <service verb="save" noun="ActiveTenant" allow-remote="true" authenticate="true">
+        <description>Persist the authenticated user's active tenant selection and return refreshed session metadata.</description>
         <in-parameters>
-            <parameter name="activeCompanyUserGroupId" required="true">
-                <description>User-group id for the company the user wants to work in.</description>
+            <parameter name="activeTenantUserGroupId" required="true">
+                <description>User-group id for the tenant the user wants to work in.</description>
             </parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean">
-                <description>True when the active-company update completed without facade errors.</description>
+                <description>True when the active-tenant update completed without facade errors.</description>
             </parameter>
             <parameter name="messages">
-                <description>Informational messages emitted during active-company handling.</description>
+                <description>Informational messages emitted during active-tenant handling.</description>
                 <parameter name="message"/>
             </parameter>
             <parameter name="errors">
-                <description>Errors returned while validating or saving the active company.</description>
+                <description>Errors returned while validating or saving the active tenant.</description>
                 <parameter name="error"/>
             </parameter>
             <parameter name="authenticated" type="Boolean">
@@ -134,24 +138,26 @@
                 <parameter name="timeZone" type="String"/>
                 <parameter name="scopeType" type="String"/>
                 <parameter name="customerScopeId" type="String"/>
-                <parameter name="activeCompanyUserGroupId" type="String"/>
-                <parameter name="activeCompanyLabel" type="String"/>
-                <parameter name="availableCompanies">
+                <parameter name="activeTenantUserGroupId" type="String"/>
+                <parameter name="activeTenantLabel" type="String"/>
+                <parameter name="availableTenants">
                     <parameter name="userGroupId" type="String"/>
                     <parameter name="label" type="String"/>
                 </parameter>
+                <parameter name="activeTenantPermissionGroupIds" type="List"/>
+                <parameter name="canEditActiveTenantData" type="Boolean"/>
                 <parameter name="isSuperAdmin" type="Boolean"/>
             </parameter>
         </out-parameters>
         <actions>
             <set field="authenticated" from="darpan.facade.common.FacadeSupport.normalize(ec.user.userId) != null"/>
             <if condition="authenticated">
-                <set field="activeCompanySaved" from="darpan.facade.common.PilotAccessSupport.saveActiveCompany(ec, activeCompanyUserGroupId)"/>
-                <set field="sessionInfo" from="darpan.facade.common.PilotAccessSupport.buildSessionInfo(ec)"/>
+                <set field="activeTenantSaved" from="darpan.facade.common.TenantAccessSupport.saveActiveTenant(ec, activeTenantUserGroupId)"/>
+                <set field="sessionInfo" from="darpan.facade.common.TenantAccessSupport.buildSessionInfo(ec)"/>
             </if>
             <if condition="!authenticated">
                 <script><![CDATA[
-                    ec.message.addError("Authentication required to change the active company.")
+                    ec.message.addError("Authentication required to change the active tenant.")
                 ]]></script>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>

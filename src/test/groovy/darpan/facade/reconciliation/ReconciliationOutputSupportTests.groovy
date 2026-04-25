@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertIterableEquals
 import static org.junit.jupiter.api.Assertions.assertTrue
 
-class PilotReconciliationSupportTests {
+class ReconciliationOutputSupportTests {
 
     @Test
     void renderDifferencesCsvEscapesStructuredFields() {
@@ -34,7 +34,7 @@ class PilotReconciliationSupportTests {
                 ]
         ]
 
-        String csv = PilotReconciliationSupport.renderDifferencesCsv(diffDocument)
+        String csv = ReconciliationOutputSupport.renderDifferencesCsv(diffDocument)
         List<String> lines = csv.readLines()
 
         assertEquals("type,id,presentIn,missingIn,note,data", lines.first())
@@ -73,7 +73,7 @@ class PilotReconciliationSupportTests {
                 ]
         ]
 
-        String csv = PilotReconciliationSupport.renderDifferencesCsv(diffDocument)
+        String csv = ReconciliationOutputSupport.renderDifferencesCsv(diffDocument)
         List<String> lines = csv.readLines()
 
         assertEquals("diffType,primaryId,field,file1Value,file2Value,presentIn,missingIn,ruleId,severity,message,data", lines.first())
@@ -105,7 +105,7 @@ class PilotReconciliationSupportTests {
                 ]
         ]
 
-        Map<String, Object> row = PilotReconciliationSupport.buildGeneratedOutputDescriptor(
+        Map<String, Object> row = ReconciliationOutputSupport.buildGeneratedOutputDescriptor(
                 "order-id-diff-20260330.json",
                 diffDocument,
                 2048L,
@@ -115,8 +115,6 @@ class PilotReconciliationSupportTests {
         assertEquals("order-id-diff-20260330.json", row.fileName)
         assertEquals("json", row.sourceFormat)
         assertIterableEquals(["json", "csv"], row.availableFormats as List<String>)
-        assertEquals("mapping", row.runType)
-        assertEquals("Order ID", row.runName)
         assertEquals("KREWE", row.companyUserGroupId)
         assertEquals("OrderIdMap", row.reconciliationMappingId)
         assertEquals("Order ID", row.mappingName)
@@ -130,47 +128,6 @@ class PilotReconciliationSupportTests {
     }
 
     @Test
-    void buildGeneratedOutputDescriptorExposesRuleSetMetadata() {
-        Map<String, Object> diffDocument = [
-                metadata: [
-                        companyUserGroupId     : "KREWE",
-                        ruleSetId              : "DARPAN_TEST_PRODUCT_COMPARE_RS",
-                        ruleSetName            : "Product Compare",
-                        compareScopeId         : "DARPAN_TEST_PRODUCT_JSON_SCOPE",
-                        compareScopeDescription: "Products",
-                        objectType             : "PRODUCT",
-                        reconciliation         : "JSON",
-                        file1Label             : "SHOPIFY",
-                        file2Label             : "OMS"
-                ],
-                summary : [
-                        totalDifferences            : 4,
-                        onlyInFile1Count            : 1,
-                        onlyInFile2Count            : 1,
-                        missingObjectDifferenceCount: 2,
-                        ruleDifferenceCount         : 2
-                ]
-        ]
-
-        Map<String, Object> row = PilotReconciliationSupport.buildGeneratedOutputDescriptor(
-                "product-diff-20260422.json",
-                diffDocument,
-                1024L,
-                Timestamp.valueOf("2026-04-22 12:00:00")
-        )
-
-        assertEquals("ruleset", row.runType)
-        assertEquals("Products", row.runName)
-        assertEquals("DARPAN_TEST_PRODUCT_COMPARE_RS", row.ruleSetId)
-        assertEquals("Product Compare", row.ruleSetName)
-        assertEquals("DARPAN_TEST_PRODUCT_JSON_SCOPE", row.compareScopeId)
-        assertEquals("Products", row.compareScopeDescription)
-        assertEquals("PRODUCT", row.objectType)
-        assertEquals(2L, row.missingObjectDifferenceCount)
-        assertEquals(2L, row.ruleDifferenceCount)
-    }
-
-    @Test
     void matchesGeneratedOutputDescriptorHonorsMappingIdFilter() {
         Map<String, Object> descriptor = [
                 fileName               : "gorjana-order-diff.json",
@@ -181,58 +138,20 @@ class PilotReconciliationSupportTests {
                 reconciliationType     : "JSON"
         ]
 
-        assertTrue(PilotReconciliationSupport.matchesGeneratedOutputDescriptor(
+        assertTrue(ReconciliationOutputSupport.matchesGeneratedOutputDescriptor(
                 descriptor,
                 "GorjanaOrderReconciliation-260407095913",
                 null
         ))
-        assertFalse(PilotReconciliationSupport.matchesGeneratedOutputDescriptor(
+        assertFalse(ReconciliationOutputSupport.matchesGeneratedOutputDescriptor(
                 descriptor,
                 "GorjanaOrderReconciliation",
                 null
         ))
-        assertTrue(PilotReconciliationSupport.matchesGeneratedOutputDescriptor(
+        assertTrue(ReconciliationOutputSupport.matchesGeneratedOutputDescriptor(
                 descriptor,
                 "GorjanaOrderReconciliation-260407095913",
                 "shopify"
-        ))
-    }
-
-    @Test
-    void matchesGeneratedOutputDescriptorHonorsRuleSetAndCompareScopeFilters() {
-        Map<String, Object> descriptor = [
-                fileName               : "product-diff.json",
-                runType                : "ruleset",
-                ruleSetId              : "DARPAN_TEST_PRODUCT_COMPARE_RS",
-                ruleSetName            : "Product Compare",
-                compareScopeId         : "DARPAN_TEST_PRODUCT_JSON_SCOPE",
-                compareScopeDescription: "Products",
-                objectType             : "PRODUCT",
-                file1Label             : "SHOPIFY",
-                file2Label             : "OMS",
-                reconciliationType     : "JSON"
-        ]
-
-        assertTrue(PilotReconciliationSupport.matchesGeneratedOutputDescriptor(
-                descriptor,
-                null,
-                "DARPAN_TEST_PRODUCT_COMPARE_RS",
-                "DARPAN_TEST_PRODUCT_JSON_SCOPE",
-                null
-        ))
-        assertFalse(PilotReconciliationSupport.matchesGeneratedOutputDescriptor(
-                descriptor,
-                null,
-                "DARPAN_TEST_OTHER_RS",
-                "DARPAN_TEST_PRODUCT_JSON_SCOPE",
-                null
-        ))
-        assertTrue(PilotReconciliationSupport.matchesGeneratedOutputDescriptor(
-                descriptor,
-                null,
-                "DARPAN_TEST_PRODUCT_COMPARE_RS",
-                "DARPAN_TEST_PRODUCT_JSON_SCOPE",
-                "product"
         ))
     }
 
@@ -245,11 +164,11 @@ class PilotReconciliationSupportTests {
                 reconciliationMappingId: null
         ]
 
-        assertFalse(PilotReconciliationSupport.matchesGeneratedOutputDescriptor(
+        assertFalse(ReconciliationOutputSupport.matchesGeneratedOutputDescriptor(
                 descriptor,
                 "GorjanaOrderReconciliation-260407095913",
                 null
         ))
-        assertTrue(PilotReconciliationSupport.matchesGeneratedOutputDescriptor(descriptor, null, "legacy"))
+        assertTrue(ReconciliationOutputSupport.matchesGeneratedOutputDescriptor(descriptor, null, "legacy"))
     }
 }

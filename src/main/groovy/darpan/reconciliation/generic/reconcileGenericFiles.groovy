@@ -1,4 +1,4 @@
-import darpan.facade.common.PilotAccessSupport
+import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.core.ReconciliationServices
 import org.apache.spark.sql.Dataset
 import org.slf4j.LoggerFactory
@@ -47,6 +47,15 @@ def resolveMappingName = { String mappingId ->
             .one()
     return normalize(mapping?.mappingName)
 }
+def resolveRuleSet = { String ruleSetId ->
+    String normalized = normalize(ruleSetId)
+    if (!normalized) return null
+    return ec.entity.find("darpan.rule.RuleSet")
+            .condition("ruleSetId", normalized)
+            .disableAuthz()
+            .useCache(true)
+            .one()
+}
 
 String providedFile1Name = normalize(file1Name)
 String providedFile2Name = normalize(file2Name)
@@ -71,7 +80,7 @@ if (!ruleSetIdValue && (!requestedFile1SystemEnumId || !requestedFile2SystemEnum
     throw new IllegalArgumentException("file1SystemEnumId and file2SystemEnumId are required when using reconciliationMappingId")
 }
 
-String tempLoc = PilotAccessSupport.resolveGenericTempLocation(ec)
+String tempLoc = TenantAccessSupport.resolveGenericTempLocation(ec)
 def baseDirRef = ec.resource.getLocationReference(tempLoc)
 if (baseDirRef == null) {
     throw new IllegalStateException("Unable to resolve generic reconciliation temp directory: ${tempLoc}")
@@ -101,6 +110,8 @@ String outputLocationValue = tempLoc + "/output"
 String sparkMasterToUse = sparkMaster ?: (ec.resource.properties["spark.master"] ?: "local[*]")
 String sparkAppNameToUse = sparkAppName ?: "GenericReconciliation"
 String mappingNameValue = resolveMappingName(mappingIdValue)
+def ruleSetValue = resolveRuleSet(ruleSetIdValue)
+String ruleSetNameValue = normalize(ruleSetValue?.ruleSetName) ?: ruleSetIdValue
 
 if (ruleSetIdValue) {
     Map compareScopeConfig = ReconciliationServices.resolveRuleSetCompareScopeConfig(
@@ -137,9 +148,15 @@ if (ruleSetIdValue) {
     validationErrors = (reconcileResult.validationErrors ?: []) as List
     processingWarnings = (reconcileResult.processingWarnings ?: []) as List
 
-    String defaultBaseName = "${safeToken(compareScopeConfig.compareScopeId as String, safeToken(ruleSetIdValue, 'ruleset'))}-diff-${timestamp}.json"
+    String compareScopeNameToken = safeToken(compareScopeConfig.compareScopeDescription as String,
+            safeToken(compareScopeConfig.compareScopeId as String, safeToken(ruleSetIdValue, 'ruleset')))
+    String defaultBaseName = "${compareScopeNameToken}-diff-${timestamp}.json"
     Map outputMetadata = [
-            timestamp                : ReconciliationServices.formatTimestampIso(ec.user.nowTimestamp),
+            timestamp                : ec.user.nowTimestamp?.toString(),
+            companyUserGroupId       : normalize(ruleSetValue?.companyUserGroupId),
+            savedRunId               : ruleSetIdValue,
+            savedRunName             : ruleSetNameValue,
+            savedRunType             : "ruleset",
             file1Label               : compareScopeConfig.file1Label,
             file2Label               : compareScopeConfig.file2Label,
             file1Type                : file1Type,
@@ -148,7 +165,7 @@ if (ruleSetIdValue) {
             reconciliationMappingId  : mappingIdValue,
             reconciliationMappingName: mappingNameValue,
             ruleSetId                : ruleSetIdValue,
-            ruleSetName              : compareScopeConfig.ruleSetName,
+            ruleSetName              : ruleSetNameValue,
             compareScopeId           : compareScopeConfig.compareScopeId,
             compareScopeDescription  : compareScopeConfig.compareScopeDescription,
             objectType               : reconcileResult.objectType

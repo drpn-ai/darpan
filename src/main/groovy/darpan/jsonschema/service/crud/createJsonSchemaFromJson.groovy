@@ -231,6 +231,7 @@ if (schemaTitle) schemaMap.title = schemaTitle
 
 // Use provided schemaName directly, fallback to json filename
 String nameToSave = schemaTitle ?: jsonFile.getName()
+String descriptionToSave = normalizeString(description) ?: schemaTitle ?: nameToSave
 
 // --------------------------------------------------------------------------------
 // Unique naming logic centralized in JsonSchemaUtil
@@ -257,7 +258,7 @@ if (existingSchema) {
     def newSchema = ec.entity.makeValue("darpan.reconciliation.JsonSchema")
     newSchema.schemaName = nameToSave
     newSchema.schemaText = schemaJson
-    newSchema.description = description
+    newSchema.description = descriptionToSave
     newSchema.statusId = "Active"
     newSchema.createdDate = ec.user.nowTimestamp
     newSchema.lastUpdatedStamp = ec.user.nowTimestamp

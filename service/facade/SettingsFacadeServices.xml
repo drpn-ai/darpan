@@ -21,7 +21,7 @@
         </out-parameters>
         <actions>
             <set field="options" from="[]"/>
-            <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireSuperAdmin(ec, 'Pilot settings are restricted to super-admin users.')"/>
+            <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec, 'Settings are restricted to super-admin users.')"/>
             <set field="enumTypeIdSafe" from="darpan.facade.common.FacadeSupport.normalize(enumTypeId)"/>
             <if condition="!ec.message.hasError() &amp;&amp; !enumTypeIdSafe">
                 <message error="true">enumTypeId is required</message>
@@ -31,7 +31,8 @@
                     <econdition field-name="enumTypeId" from="enumTypeIdSafe"/>
                     <order-by field-name="sequenceNum,description,enumId"/>
                 </entity-find>
-                <set field="options" from="(enumList ?: []).collect { item -> [enumId: item.enumId, enumCode: item.enumCode, description: item.description, sequenceNum: item.sequenceNum, label: darpan.facade.common.FacadeSupport.enumLabel(item)] }"/>
+                <set field="rawOptions" from="(enumList ?: []).collect { item -> [enumId: item.enumId, enumCode: item.enumCode, description: item.description, sequenceNum: item.sequenceNum, label: darpan.facade.common.FacadeSupport.enumLabel(item)] }"/>
+                <set field="options" from="darpan.facade.settings.SettingsFacadeSupport.deduplicateEnumOptions(enumTypeIdSafe, rawOptions)"/>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -61,7 +62,7 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireSuperAdmin(ec, 'Pilot settings are restricted to super-admin users.')"/>
+            <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec, 'Settings are restricted to super-admin users.')"/>
             <if condition="!ec.message.hasError()">
                 <set field="llmSettings" from="darpan.facade.settings.LlmSettingsSupport.buildReadSettings(ec, llmProvider)"/>
             </if>
@@ -96,7 +97,7 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireSuperAdmin(ec, 'Pilot settings are restricted to super-admin users.')"/>
+            <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec, 'Settings are restricted to super-admin users.')"/>
             <if condition="!ec.message.hasError()">
                 <set field="savePayload" from="darpan.facade.settings.LlmSettingsSupport.buildSavePayload(ec, llmProvider, llmApiKey, llmModel, llmBaseUrl, llmTimeoutSeconds, llmEnabled)"/>
                 <service-call name="store#moqui.service.message.SystemMessageRemote" in-map="savePayload.llmRemoteMap"/>
@@ -146,10 +147,11 @@
             <set field="pageIndexSafe" from="Math.max(0, darpan.facade.common.FacadeSupport.normalizeInt(pageIndex, 0))"/>
             <set field="pageSizeSafe" from="Math.max(1, Math.min(200, darpan.facade.common.FacadeSupport.normalizeInt(pageSize, 20)))"/>
             <set field="searchLower" from="darpan.facade.common.FacadeSupport.normalize(query)?.toLowerCase()"/>
+            <set field="activeTenantUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <set field="servers" from="[]"/>
             <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
             <set field="sftpServerFinder" from="ec.entity.find('darpan.reconciliation.SftpServer').orderBy('description,sftpServerId').useCache(false)"/>
-            <set field="rows" from="(sftpServerFinder.list() ?: []).collect { item -> [sftpServerId: item.sftpServerId, description: item.description, companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.PilotAccessSupport.resolveCompanyLabelForUserGroupId(ec, item.companyUserGroupId), host: item.host, port: item.port, username: item.username, remoteAttributes: item.remoteAttributes ?: 'Y', hasPassword: item.password ? true : false, hasPrivateKey: item.privateKey ? true : false] }"/>
+            <set field="rows" from="(activeTenantUserGroupId ? sftpServerFinder.condition('companyUserGroupId', activeTenantUserGroupId).list() : []).collect { item -> [sftpServerId: item.sftpServerId, description: item.description, companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, item.companyUserGroupId), host: item.host, port: item.port, username: item.username, remoteAttributes: item.remoteAttributes ?: 'Y', hasPassword: item.password ? true : false, hasPrivateKey: item.privateKey ? true : false] }"/>
             <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.sftpServerId, row.description, row.host, row.username].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
             <set field="totalCount" from="filteredRows.size()"/>
             <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>
@@ -213,13 +215,16 @@
             <if condition="!ec.message.hasError()">
                 <set field="existingServer" from="ec.entity.find('darpan.reconciliation.SftpServer').condition('sftpServerId', sftpServerIdValue).useCache(false).one()"/>
                 <if condition="existingServer">
-                    <set field="ignoreServerAccess" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, existingServer, &quot;SFTP server '${sftpServerIdValue}' was not found.&quot;, &quot;SFTP server '${sftpServerIdValue}' is not available in your active company.&quot;)"/>
+                    <set field="ignoreServerAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, existingServer, &quot;SFTP server '${sftpServerIdValue}' was not found.&quot;, &quot;SFTP server '${sftpServerIdValue}' is not available in your active tenant.&quot;)"/>
                 </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for SFTP settings.')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="serverMap" from="[sftpServerId: sftpServerIdValue, description: descriptionValue, companyUserGroupId: existingServer?.companyUserGroupId, createdByUserId: existingServer?.createdByUserId, host: hostValue, port: portValue, username: usernameValue, remoteAttributes: remoteAttributesValue, password: passwordValue ?: existingServer?.password, privateKey: privateKeyValue ?: existingServer?.privateKey]"/>
                 <if condition="existingServer == null || !existingServer.companyUserGroupId">
-                    <set field="ignoreCompanyAssignment" from="darpan.facade.common.PilotAccessSupport.assignCompanyOwnershipOnCreate(serverMap, ec)"/>
+                    <set field="ignoreCompanyAssignment" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(serverMap, ec)"/>
                 </if>
                 <if condition="!ec.message.hasError()">
                     <service-call name="store#darpan.reconciliation.SftpServer" in-map="serverMap"/>
@@ -276,10 +281,11 @@
             <set field="pageIndexSafe" from="Math.max(0, darpan.facade.common.FacadeSupport.normalizeInt(pageIndex, 0))"/>
             <set field="pageSizeSafe" from="Math.max(1, Math.min(200, darpan.facade.common.FacadeSupport.normalizeInt(pageSize, 20)))"/>
             <set field="searchLower" from="darpan.facade.common.FacadeSupport.normalize(query)?.toLowerCase()"/>
+            <set field="activeTenantUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <set field="authConfigs" from="[]"/>
             <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
             <set field="nsAuthConfigFinder" from="ec.entity.find('darpan.reconciliation.NsAuthConfig').orderBy('description,nsAuthConfigId').useCache(false)"/>
-            <set field="rows" from="(nsAuthConfigFinder.list() ?: []).collect { item -> [nsAuthConfigId: item.nsAuthConfigId, description: item.description, companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.PilotAccessSupport.resolveCompanyLabelForUserGroupId(ec, item.companyUserGroupId), authType: item.authType ?: 'NONE', username: item.username, tokenUrl: item.tokenUrl, clientId: item.clientId, certId: item.certId, scope: item.scope ?: 'restlets rest_webservices', isActive: item.isActive ?: 'Y', hasPassword: item.password ? true : false, hasApiToken: item.apiToken ? true : false, hasPrivateKeyPem: item.privateKeyPem ? true : false] }"/>
+            <set field="rows" from="(activeTenantUserGroupId ? nsAuthConfigFinder.condition('companyUserGroupId', activeTenantUserGroupId).list() : []).collect { item -> [nsAuthConfigId: item.nsAuthConfigId, description: item.description, companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, item.companyUserGroupId), authType: item.authType ?: 'NONE', username: item.username, tokenUrl: item.tokenUrl, clientId: item.clientId, certId: item.certId, scope: item.scope ?: 'restlets rest_webservices', isActive: item.isActive ?: 'Y', hasPassword: item.password ? true : false, hasApiToken: item.apiToken ? true : false, hasPrivateKeyPem: item.privateKeyPem ? true : false] }"/>
             <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.nsAuthConfigId, row.description, row.authType, row.username].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
             <set field="totalCount" from="filteredRows.size()"/>
             <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>
@@ -352,8 +358,11 @@
             <if condition="!ec.message.hasError()">
                 <set field="existingAuth" from="ec.entity.find('darpan.reconciliation.NsAuthConfig').condition('nsAuthConfigId', nsAuthConfigIdValue).useCache(false).one()"/>
                 <if condition="existingAuth">
-                    <set field="ignoreAuthAccess" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, existingAuth, &quot;NS Auth config '${nsAuthConfigIdValue}' was not found.&quot;, &quot;NS Auth config '${nsAuthConfigIdValue}' is not available in your active company.&quot;)"/>
+                    <set field="ignoreAuthAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, existingAuth, &quot;NS Auth config '${nsAuthConfigIdValue}' was not found.&quot;, &quot;NS Auth config '${nsAuthConfigIdValue}' is not available in your active tenant.&quot;)"/>
                 </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for NetSuite auth settings.')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <if condition="nsAuthTypeValue == 'OAUTH2_M2M_JWT' &amp;&amp; !nsTokenUrlValue">
@@ -375,7 +384,7 @@
             <if condition="!ec.message.hasError()">
                 <set field="authMap" from="[nsAuthConfigId: nsAuthConfigIdValue, description: nsAuthDescriptionValue, companyUserGroupId: existingAuth?.companyUserGroupId, createdByUserId: existingAuth?.createdByUserId, authType: nsAuthTypeValue, username: nsUsernameValue, tokenUrl: nsTokenUrlValue, clientId: nsClientIdValue, certId: nsCertIdValue, scope: nsScopeValue, isActive: nsIsActiveValue, password: nsPasswordValue ?: existingAuth?.password, apiToken: nsApiTokenValue ?: existingAuth?.apiToken, privateKeyPem: nsPrivateKeyPemValue ?: existingAuth?.privateKeyPem]"/>
                 <if condition="existingAuth == null || !existingAuth.companyUserGroupId">
-                    <set field="ignoreCompanyAssignment" from="darpan.facade.common.PilotAccessSupport.assignCompanyOwnershipOnCreate(authMap, ec)"/>
+                    <set field="ignoreCompanyAssignment" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(authMap, ec)"/>
                 </if>
                 <if condition="!ec.message.hasError()">
                     <service-call name="store#darpan.reconciliation.NsAuthConfig" in-map="authMap"/>
@@ -427,14 +436,15 @@
             <set field="pageIndexSafe" from="Math.max(0, darpan.facade.common.FacadeSupport.normalizeInt(pageIndex, 0))"/>
             <set field="pageSizeSafe" from="Math.max(1, Math.min(200, darpan.facade.common.FacadeSupport.normalizeInt(pageSize, 20)))"/>
             <set field="searchLower" from="darpan.facade.common.FacadeSupport.normalize(query)?.toLowerCase()"/>
+            <set field="activeTenantUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <set field="restletConfigs" from="[]"/>
             <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
             <set field="authConfigFinder" from="ec.entity.find('darpan.reconciliation.NsAuthConfig').useCache(false)"/>
-            <set field="authConfigList" from="authConfigFinder.list()"/>
+            <set field="authConfigList" from="activeTenantUserGroupId ? authConfigFinder.condition('companyUserGroupId', activeTenantUserGroupId).list() : []"/>
             <set field="restletConfigFinder" from="ec.entity.find('darpan.reconciliation.NsRestletConfig').orderBy('description,nsRestletConfigId').useCache(false)"/>
-            <set field="nsRestletConfigList" from="restletConfigFinder.list()"/>
+            <set field="nsRestletConfigList" from="activeTenantUserGroupId ? restletConfigFinder.condition('companyUserGroupId', activeTenantUserGroupId).list() : []"/>
             <set field="authById" from="(authConfigList ?: []).collectEntries { item -> [(item.nsAuthConfigId): [description: item.description, authType: item.authType, isActive: item.isActive ?: 'Y']] }"/>
-            <set field="rows" from="(nsRestletConfigList ?: []).collect { item -> def authMeta = authById[item.nsAuthConfigId]; [nsRestletConfigId: item.nsRestletConfigId, description: item.description, companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.PilotAccessSupport.resolveCompanyLabelForUserGroupId(ec, item.companyUserGroupId), endpointUrl: item.endpointUrl, httpMethod: item.httpMethod ?: 'POST', nsAuthConfigId: item.nsAuthConfigId, authDescription: authMeta?.description, authType: authMeta?.authType, authIsActive: authMeta?.isActive ?: 'Y', headersJson: item.headersJson, connectTimeoutSeconds: item.connectTimeoutSeconds ?: 30, readTimeoutSeconds: item.readTimeoutSeconds ?: 60, isActive: item.isActive ?: 'Y'] }"/>
+            <set field="rows" from="(nsRestletConfigList ?: []).collect { item -> def authMeta = authById[item.nsAuthConfigId]; [nsRestletConfigId: item.nsRestletConfigId, description: item.description, companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, item.companyUserGroupId), endpointUrl: item.endpointUrl, httpMethod: item.httpMethod ?: 'POST', nsAuthConfigId: item.nsAuthConfigId, authDescription: authMeta?.description, authType: authMeta?.authType, authIsActive: authMeta?.isActive ?: 'Y', headersJson: item.headersJson, connectTimeoutSeconds: item.connectTimeoutSeconds ?: 30, readTimeoutSeconds: item.readTimeoutSeconds ?: 60, isActive: item.isActive ?: 'Y'] }"/>
             <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.nsRestletConfigId, row.description, row.endpointUrl, row.nsAuthConfigId, row.authType].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
             <set field="totalCount" from="filteredRows.size()"/>
             <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>
@@ -511,7 +521,7 @@
             <if condition="!ec.message.hasError()">
                 <set field="existingEndpoint" from="ec.entity.find('darpan.reconciliation.NsRestletConfig').condition('nsRestletConfigId', nsRestletConfigIdValue).useCache(false).one()"/>
                 <if condition="existingEndpoint">
-                    <set field="ignoreEndpointAccess" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, existingEndpoint, &quot;NS endpoint config '${nsRestletConfigIdValue}' was not found.&quot;, &quot;NS endpoint config '${nsRestletConfigIdValue}' is not available in your active company.&quot;)"/>
+                    <set field="ignoreEndpointAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, existingEndpoint, &quot;NS endpoint config '${nsRestletConfigIdValue}' was not found.&quot;, &quot;NS endpoint config '${nsRestletConfigIdValue}' is not available in your active tenant.&quot;)"/>
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
@@ -523,13 +533,16 @@
                     <message error="true">NsAuthConfig ${nsAuthConfigIdValue} is inactive.</message>
                 </if>
                 <if condition="authCfg">
-                    <set field="ignoreAuthCfgAccess" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, authCfg, &quot;NsAuthConfig ${nsAuthConfigIdValue} not found.&quot;, &quot;NsAuthConfig ${nsAuthConfigIdValue} is not available in your active company.&quot;)"/>
+                    <set field="ignoreAuthCfgAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, authCfg, &quot;NsAuthConfig ${nsAuthConfigIdValue} not found.&quot;, &quot;NsAuthConfig ${nsAuthConfigIdValue} is not available in your active tenant.&quot;)"/>
                 </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for NetSuite endpoint settings.')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="endpointMap" from="[nsRestletConfigId: nsRestletConfigIdValue, description: nsDescriptionValue, companyUserGroupId: existingEndpoint?.companyUserGroupId ?: authCfg?.companyUserGroupId, createdByUserId: existingEndpoint?.createdByUserId, endpointUrl: nsEndpointUrlValue, httpMethod: nsHttpMethodValue, nsAuthConfigId: nsAuthConfigIdValue, headersJson: nsHeadersJsonValue, connectTimeoutSeconds: nsConnectTimeoutValue, readTimeoutSeconds: nsReadTimeoutValue, isActive: nsIsActiveValue, authType: null, username: null, password: null, apiToken: null, tokenUrl: null, clientId: null, certId: null, privateKeyPem: null, scope: null]"/>
                 <if condition="existingEndpoint == null || !existingEndpoint.companyUserGroupId">
-                    <set field="ignoreCompanyAssignment" from="darpan.facade.common.PilotAccessSupport.assignCompanyOwnershipOnCreate(endpointMap, ec)"/>
+                    <set field="ignoreCompanyAssignment" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(endpointMap, ec)"/>
                 </if>
                 <if condition="!ec.message.hasError()">
                     <service-call name="store#darpan.reconciliation.NsRestletConfig" in-map="endpointMap"/>
@@ -585,7 +598,7 @@
             <set field="searchLower" from="darpan.facade.common.FacadeSupport.normalize(query)?.toLowerCase()"/>
             <set field="configs" from="[]"/>
             <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
-            <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireSuperAdmin(ec, 'Pilot settings are restricted to super-admin users.')"/>
+            <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec, 'Settings are restricted to super-admin users.')"/>
             <if condition="!ec.message.hasError()">
                 <entity-find entity-name="darpan.reconciliation.HcReadDbConfig" list="hcReadDbConfigList" cache="false">
                     <order-by field-name="displayName,hcReadDbConfigId"/>
@@ -663,7 +676,7 @@
             <set field="isActiveValue" from="darpan.facade.common.FacadeSupport.normalizeBool(isActive, true) ? 'Y' : 'N'"/>
             <set field="portValue" from="darpan.facade.common.FacadeSupport.normalizeInt(port, 3306)"/>
             <set field="connectionPropertiesError" from="darpan.facade.settings.SettingsFacadeSupport.validateJsonObjectText(connectionPropertiesJsonValue, 'Connection Properties JSON')"/>
-            <set field="ignoreAccessCheck" from="darpan.facade.common.PilotAccessSupport.requireSuperAdmin(ec, 'Pilot settings are restricted to super-admin users.')"/>
+            <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec, 'Settings are restricted to super-admin users.')"/>
             <if condition="portValue &lt;= 0">
                 <message error="true">Port must be greater than 0.</message>
             </if>

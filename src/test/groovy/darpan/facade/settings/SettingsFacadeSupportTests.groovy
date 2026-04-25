@@ -3,6 +3,7 @@ package darpan.facade.settings
 import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertIterableEquals
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -37,6 +38,23 @@ class SettingsFacadeSupportTests {
 
         assertEquals("useSSL=false&serverTimezone=UTC", additional)
         assertEquals("jdbc:mysql://localhost:3306/inventory?useSSL=false&serverTimezone=UTC", jdbcUrl)
+    }
+
+    @Test
+    void deduplicateEnumOptionsPrefersCanonicalSystemIds() {
+        List<Map<String, Object>> options = [
+                [enumId: "DarSysOms", enumCode: "OMS", description: "OMS", sequenceNum: 1, label: "OMS"],
+                [enumId: "OMS", enumCode: "OMS", description: "OMS", sequenceNum: 1, label: "OMS"],
+                [enumId: "DarSysShopify", enumCode: "SHOPIFY", description: "Shopify", sequenceNum: 2, label: "SHOPIFY"],
+                [enumId: "SHOPIFY", enumCode: "SHOPIFY", description: "Shopify", sequenceNum: 2, label: "SHOPIFY"],
+                [enumId: "NETSUITE", enumCode: "NETSUITE", description: "NetSuite", sequenceNum: 3, label: "NETSUITE"],
+        ]
+
+        List<Map<String, Object>> deduplicated = SettingsFacadeSupport.deduplicateEnumOptions("DarpanSystemSource", options)
+
+        assertEquals(3, deduplicated.size())
+        assertIterableEquals(["OMS", "SHOPIFY", "NETSUITE"], deduplicated.collect { it.enumId })
+        assertIterableEquals(["OMS", "SHOPIFY", "NETSUITE"], deduplicated.collect { it.label })
     }
 
     static class EntityFacadeStub {

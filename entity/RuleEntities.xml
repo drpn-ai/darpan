@@ -9,11 +9,19 @@
         <field name="version" type="text-short"/>
         <field name="explosionPath" type="text-medium"/>
         <field name="primaryKeyPath" type="text-medium"/>
+        <field name="companyUserGroupId" type="id"/>
+        <field name="createdByUserId" type="id"/>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>
 
         <relationship type="many" related="darpan.rule.RuleSetCompareScope" short-alias="compareScopes">
             <key-map field-name="ruleSetId"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserGroup" fk-name="RULESET_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserAccount" fk-name="RULESET_CREATED_BY">
+            <key-map field-name="createdByUserId" related-field-name="userId"/>
         </relationship>
     </entity>
 
@@ -40,7 +48,7 @@
         <description>RuleSet-owned compare object definition for reconciliation, such as Product, Order, OrderLine, or InventoryItem.</description>
         <field name="compareScopeId" type="id" is-pk="true"/>
         <field name="ruleSetId" type="id" not-null="true"/>
-        <field name="objectType" type="text-short" not-null="true"/>
+        <field name="objectType" type="text-short"/>
         <field name="description" type="text-medium"/>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>

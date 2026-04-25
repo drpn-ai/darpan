@@ -5,14 +5,14 @@
             <before-request>
                 <actions>
                     <script><![CDATA[
-                        darpan.facade.common.PilotAccessSupport.syncUserContext(ec)
+                        darpan.facade.common.TenantAccessSupport.syncUserContext(ec)
                     ]]></script>
                 </actions>
             </before-request>
             <after-login>
                 <actions>
                     <script><![CDATA[
-                        darpan.facade.common.PilotAccessSupport.syncUserContext(ec)
+                        darpan.facade.common.TenantAccessSupport.syncUserContext(ec)
                     ]]></script>
                 </actions>
             </after-login>

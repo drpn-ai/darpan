@@ -57,6 +57,7 @@ class RuleSetCompareScopeServiceSmokeTests {
 
         assertEquals("DARPAN_TEST_COMPARE_RS", prepared.ruleSetId)
         assertEquals("DARPAN_TEST_ORDER_JSON_SCOPE", prepared.compareScopeId)
+        assertEquals("Smoke-test compare scope for nested JSON order IDs.", prepared.compareScopeDescription)
         assertEquals("ORDER", prepared.objectType)
         assertEquals("JSON", prepared.file1Type)
         assertEquals("JSON", prepared.file2Type)
@@ -215,12 +216,35 @@ class RuleSetCompareScopeServiceSmokeTests {
 
         assertTrue(result == null || result.isEmpty())
         assertTrue(ec.message.hasError())
-        assertTrue(ec.message.errors.any { String message -> message.contains("DARPAN_TEST_ORDER_JSON_SCOPE") })
+        assertTrue(ec.message.errors.any { String message -> message.contains("nested JSON order IDs") })
+        assertFalse(ec.message.errors.any { String message -> message.contains("DARPAN_TEST_ORDER_JSON_SCOPE") })
         assertTrue(ec.message.errors.any { String message -> message.contains("FILE_1") })
         assertTrue(ec.message.errors.any { String message -> message.contains("SHOPIFY") })
         assertTrue(ec.message.errors.any { String message -> message.contains("6470622478467") })
         assertTrue(ec.message.errors.any { String message -> message.contains("2 rows") })
         assertTrue(ec.message.errors.any { String message -> message.contains("primaryId must identify exactly one object per file side") })
+    }
+
+    @Test
+    void prepareCompareScopeReportsHelpfulErrorWhenCsvSourceDoesNotExposeConfiguredIdColumn() {
+        Map<String, Object> result = ec.service.sync()
+                .name("reconciliation.ReconciliationCoreServices.prepare#RuleSetCompareScope")
+                .parameters([
+                        ruleSetId      : "DARPAN_TEST_COMPARE_RS",
+                        compareScopeId : "DARPAN_TEST_ORDER_CSV_SCOPE",
+                        file1Location  : "component://darpan/data/test/test-orders-1.json",
+                        file2Location  : "component://darpan/data/test/test-orders-2.json",
+                        sparkMaster    : "local[1]",
+                        sparkAppName   : "RuleSetCompareScopeServiceSmokeTests"
+                ])
+                .disableAuthz()
+                .call()
+
+        assertTrue(result == null || result.isEmpty())
+        assertTrue(ec.message.hasError())
+        assertTrue(ec.message.errors.any { String message -> message.contains("expects CSV data") })
+        assertTrue(ec.message.errors.any { String message -> message.contains("test-orders-1.json") })
+        assertTrue(ec.message.errors.any { String message -> message.contains("looks like JSON") })
     }
 
     @Test
@@ -319,13 +343,14 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertEquals(2L, result.differenceCount)
         assertEquals(3L, result.matchedPairCount)
         assertEquals(0, result.firedRuleCount)
-        assertEquals(0, result.ruleCount)
+        assertEquals(1, result.ruleCount)
         assertTrue(((List) result.validationErrors).isEmpty())
         assertFalse(ec.message.hasError())
 
         List<String> warnings = ((List) result.processingWarnings).collect { Object value -> value?.toString() }
         assertTrue(warnings.any { String message -> message.contains("DARPAN_TEST_PRODUCT_BROKEN_RS") })
-        assertTrue(warnings.any { String message -> message.contains("DARPAN_TEST_PRODUCT_BROKEN_JSON_SCOPE") })
+        assertTrue(warnings.any { String message -> message.contains("broken DRL preservation behavior") })
+        assertFalse(warnings.any { String message -> message.contains("DARPAN_TEST_PRODUCT_BROKEN_JSON_SCOPE") })
         assertTrue(warnings.any { String message -> message.contains("preserved base missing-object diffs") })
 
         List<Map<String, Object>> diffs = collectRows((Dataset) result.diffDf)
@@ -333,6 +358,77 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertTrue(diffs.every { Map<String, Object> row ->
             row.diffType in ["MISSING_IN_FILE_1", "MISSING_IN_FILE_2"]
         })
+    }
+
+    @Test
+    void fullRuleSetCompareScopeServiceSkipsRuleExecutionCleanlyWhenNoRulesAreActive() {
+        Map<String, Object> result = ec.service.sync()
+                .name("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope")
+                .parameters([
+                        ruleSetId      : "DARPAN_TEST_COMPARE_RS",
+                        compareScopeId : "DARPAN_TEST_ORDER_JSON_SCOPE",
+                        file1Location  : "component://darpan/data/test/test-orders-1.json",
+                        file2Location  : "component://darpan/data/test/test-orders-2.json",
+                        sparkMaster    : "local[1]",
+                        sparkAppName   : "RuleSetCompareScopeServiceSmokeTests",
+                ])
+                .disableAuthz()
+                .call()
+
+        assertEquals("DARPAN_TEST_COMPARE_RS", result.ruleSetId)
+        assertEquals("DARPAN_TEST_ORDER_JSON_SCOPE", result.compareScopeId)
+        assertEquals(4L, result.differenceCount)
+        assertEquals(4L, result.missingObjectDifferenceCount)
+        assertEquals(0L, result.ruleDifferenceCount)
+        assertEquals(0, result.ruleCount)
+        assertEquals(0, result.firedRuleCount)
+        assertTrue(((List) result.validationErrors).isEmpty())
+        assertTrue(((List) result.processingWarnings).isEmpty())
+        assertFalse(ec.message.hasError())
+    }
+
+    @Test
+    void fullRuleSetCompareScopeServiceCollapsesDuplicatePrimaryIdsForBaseDiffOnlyRuns() {
+        Map<String, Object> result = ec.service.sync()
+                .name("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope")
+                .parameters([
+                        ruleSetId      : "DARPAN_TEST_COMPARE_RS",
+                        compareScopeId : "DARPAN_TEST_ORDER_JSON_SCOPE",
+                        file1Location  : "component://darpan/data/test/test-orders-duplicate-file1.json",
+                        file2Location  : "component://darpan/data/test/test-orders-2.json",
+                        sparkMaster    : "local[1]",
+                        sparkAppName   : "RuleSetCompareScopeServiceSmokeTests",
+                ])
+                .disableAuthz()
+                .call()
+
+        assertEquals("DARPAN_TEST_COMPARE_RS", result.ruleSetId)
+        assertEquals("DARPAN_TEST_ORDER_JSON_SCOPE", result.compareScopeId)
+        assertEquals(3L, result.differenceCount)
+        assertEquals(3L, result.missingObjectDifferenceCount)
+        assertEquals(0L, result.ruleDifferenceCount)
+        assertEquals(1L, result.matchedPairCount)
+        assertEquals(0, result.ruleCount)
+        assertEquals(0, result.firedRuleCount)
+        assertTrue(result.matchedPairDf == null)
+        assertTrue(((List) result.validationErrors).isEmpty())
+        assertFalse(ec.message.hasError())
+
+        List<String> warnings = ((List) result.processingWarnings).collect { Object value -> value?.toString() }
+        assertEquals(1, warnings.size())
+        assertTrue(warnings.any { String message -> message.contains("collapsed duplicate primaryId values for base diff only") })
+        assertTrue(warnings.any { String message -> message.contains("nested JSON order IDs") })
+        assertFalse(warnings.any { String message -> message.contains("DARPAN_TEST_ORDER_JSON_SCOPE") })
+        assertTrue(warnings.any { String message -> message.contains("FILE_1") })
+        assertTrue(warnings.any { String message -> message.contains("SHOPIFY") })
+        assertTrue(warnings.any { String message -> message.contains("6470622478467") })
+
+        List<Map<String, Object>> diffs = collectRows((Dataset) result.diffDf)
+        assertEquals(3, diffs.size())
+        assertIterableEquals(
+                ["6470622019715", "6470624804995", "6470625460355"],
+                diffs.collect { Map<String, Object> row -> row.primaryId?.toString() }.sort()
+        )
     }
 
     private static List<String> collectCompareIds(Dataset dataset) {

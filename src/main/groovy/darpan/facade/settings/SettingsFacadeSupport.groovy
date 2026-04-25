@@ -4,6 +4,8 @@ import darpan.facade.common.FacadeSupport
 import groovy.json.JsonSlurper
 
 class SettingsFacadeSupport {
+    static final String DARPAN_SYSTEM_SOURCE_ENUM_TYPE_ID = "DarpanSystemSource"
+
     static String validateJsonObjectText(String text, String label) {
         String normalized = FacadeSupport.normalize(text)
         if (!normalized) return null
@@ -57,6 +59,24 @@ class SettingsFacadeSupport {
         return jdbcUrl
     }
 
+    static List<Map<String, Object>> deduplicateEnumOptions(String enumTypeId, List<Map<String, Object>> rawOptions) {
+        List<Map<String, Object>> optionList = (rawOptions ?: []) as List<Map<String, Object>>
+        if (FacadeSupport.normalize(enumTypeId) != DARPAN_SYSTEM_SOURCE_ENUM_TYPE_ID) return optionList
+
+        LinkedHashMap<String, Map<String, Object>> preferredByKey = [:]
+        optionList.each { Map<String, Object> option ->
+            String dedupeKey = buildEnumOptionDedupeKey(option)
+            if (!dedupeKey) return
+
+            Map<String, Object> currentPreferred = preferredByKey[dedupeKey]
+            if (currentPreferred == null || shouldPreferEnumOption(option, currentPreferred)) {
+                preferredByKey[dedupeKey] = option
+            }
+        }
+
+        return preferredByKey.values() as List<Map<String, Object>>
+    }
+
     protected static String normalizeId(String rawValue) {
         return rawValue?.toLowerCase()?.replaceAll(/[^a-z0-9_-]+/, "_")?.replaceAll(/^_+|_+$/, "")
     }
@@ -64,5 +84,37 @@ class SettingsFacadeSupport {
     protected static String trimToLength(String value, int maxLength) {
         if (!value) return value
         return value.length() > maxLength ? value.substring(0, maxLength) : value
+    }
+
+    protected static String buildEnumOptionDedupeKey(Map<String, Object> option) {
+        return FacadeSupport.normalize(option?.enumCode) ?:
+                FacadeSupport.normalize(option?.label) ?:
+                FacadeSupport.normalize(option?.enumId)
+    }
+
+    protected static boolean shouldPreferEnumOption(Map<String, Object> candidate, Map<String, Object> currentPreferred) {
+        boolean candidateCanonical = isCanonicalEnumOption(candidate)
+        boolean currentCanonical = isCanonicalEnumOption(currentPreferred)
+        if (candidateCanonical != currentCanonical) return candidateCanonical
+
+        Integer candidateSequence = normalizeSequenceNumber(candidate?.sequenceNum)
+        Integer currentSequence = normalizeSequenceNumber(currentPreferred?.sequenceNum)
+        if (candidateSequence != currentSequence) return candidateSequence < currentSequence
+
+        String candidateId = FacadeSupport.normalize(candidate?.enumId) ?: ""
+        String currentId = FacadeSupport.normalize(currentPreferred?.enumId) ?: ""
+        return candidateId < currentId
+    }
+
+    protected static boolean isCanonicalEnumOption(Map<String, Object> option) {
+        String enumId = FacadeSupport.normalize(option?.enumId)
+        String enumCode = FacadeSupport.normalize(option?.enumCode)
+        return enumId != null && enumCode != null && enumId == enumCode
+    }
+
+    protected static Integer normalizeSequenceNumber(Object rawValue) {
+        if (rawValue instanceof Number) return rawValue.intValue()
+        Integer parsed = FacadeSupport.normalizeInt(rawValue, Integer.MAX_VALUE)
+        return parsed != null ? parsed : Integer.MAX_VALUE
     }
 }

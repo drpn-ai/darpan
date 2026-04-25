@@ -10,8 +10,8 @@
         <subscreens-item name="Editor" location="component://darpan/screen/Reconciliation/JsonSchema/JsonSchemaEditor.xml" menu-include="false"/>
     </subscreens>
     <pre-actions>
-        <if condition="!darpan.facade.common.PilotAccessSupport.isSuperAdmin(ec)">
-            <return error="true" message="Pilot administration screens are restricted to super-admin users."/>
+        <if condition="!darpan.facade.common.TenantAccessSupport.isSuperAdmin(ec)">
+            <return error="true" message="Reconciliation administration screens are restricted to super-admin users."/>
         </if>
     </pre-actions>
 

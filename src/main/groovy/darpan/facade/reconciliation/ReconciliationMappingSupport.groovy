@@ -1,13 +1,13 @@
 package darpan.facade.reconciliation
 
 import darpan.facade.common.FacadeSupport
-import darpan.facade.common.PilotAccessSupport
+import darpan.facade.common.TenantAccessSupport
 import groovy.json.JsonSlurper
 import jsonschema.common.JsonSchemaUtil
 
-class PilotMappingSupport {
+class ReconciliationMappingSupport {
 
-    static boolean ensurePilotMappingTables(def ec) {
+    static boolean ensureMappingTables(def ec) {
         [
                 "darpan.reconciliation.JsonSchema",
                 "darpan.mapping.ReconciliationMapping",
@@ -16,7 +16,7 @@ class PilotMappingSupport {
         return true
     }
 
-    static String generatePilotMappingId(def ec, String rawName) {
+    static String generateMappingId(def ec, String rawName) {
         String mappingIdBase = rawName?.replaceAll('[^A-Za-z0-9]', '')
         if (!mappingIdBase) mappingIdBase = "Mapping"
         if (mappingIdBase.length() > 38) mappingIdBase = mappingIdBase.substring(0, 38)
@@ -35,16 +35,16 @@ class PilotMappingSupport {
         return mappingIdValue
     }
 
-    static List<Map<String, Object>> buildEditablePilotMappingMembers(def ec, List mappingMembers) {
+    static List<Map<String, Object>> buildEditableMappingMembers(def ec, List mappingMembers) {
         return (mappingMembers ?: []).collect { member ->
             String schemaName = FacadeSupport.normalize(member?.schemaFileName)
             def schema = resolveSavedSchemaRecord(ec, schemaName, false)
             if (schema != null) {
-                PilotAccessSupport.requireCompanyRecordAccess(
+                TenantAccessSupport.requireTenantRecordAccess(
                         ec,
                         schema,
                         "Schema '${schemaName}' was not found.",
-                        "Schema '${schemaName}' is not available in your active company."
+                        "Schema '${schemaName}' is not available in your active tenant."
                 )
             }
 
@@ -59,7 +59,7 @@ class PilotMappingSupport {
         }
     }
 
-    static List<String> collectPilotReadinessIssues(def ec, List mappingMembers) {
+    static List<String> collectReadinessIssues(def ec, List mappingMembers) {
         List members = mappingMembers ?: []
         if (members.isEmpty()) return ["The mapping does not contain any system members."]
         return members.collectMany { member -> collectMemberIssues(ec, member) }.unique()
@@ -85,8 +85,8 @@ class PilotMappingSupport {
             issues.add("${systemLabel} schema '${schemaFileName}' is not saved in Darpan.")
             return issues
         }
-        if (!PilotAccessSupport.canAccessCompanyRecord(ec, schema)) {
-            issues.add("${systemLabel} schema '${schemaFileName}' is not available in your active company.")
+        if (!TenantAccessSupport.canAccessTenantRecord(ec, schema)) {
+            issues.add("${systemLabel} schema '${schemaFileName}' is not available in your active tenant.")
             return issues
         }
 
@@ -98,14 +98,14 @@ class PilotMappingSupport {
 
         String propertyName = extractJsonPropertyName(idFieldExpression)
         if (!propertyName || !isResolvableJsonIdExpression(idFieldExpression, schemaText)) {
-            issues.add("${systemLabel} id field '${normalizePilotJsonIdExpression(idFieldExpression) ?: normalizeBaseIdFieldExpression(idFieldExpression)}' is not present in schema '${schemaFileName}'.")
+            issues.add("${systemLabel} id field '${normalizeMappingJsonIdExpression(idFieldExpression) ?: normalizeBaseIdFieldExpression(idFieldExpression)}' is not present in schema '${schemaFileName}'.")
         }
 
         return issues
     }
 
     static boolean isResolvableJsonIdExpression(String idFieldExpression, String schemaText) {
-        String normalizedExpression = normalizePilotJsonIdExpression(idFieldExpression)
+        String normalizedExpression = normalizeMappingJsonIdExpression(idFieldExpression)
         if (!normalizedExpression || !schemaText?.trim()) return false
 
         def schemaDocument = new JsonSlurper().parseText(schemaText)
@@ -126,7 +126,7 @@ class PilotMappingSupport {
         return separatorIndex >= 0 ? normalize(normalized.substring(0, separatorIndex)) : normalized
     }
 
-    static String normalizePilotJsonIdExpression(String rawExpression) {
+    static String normalizeMappingJsonIdExpression(String rawExpression) {
         String normalized = normalizeBaseIdFieldExpression(rawExpression)
         if (!normalized) return null
 
@@ -154,11 +154,11 @@ class PilotMappingSupport {
 
     static String normalizeEditableFieldPath(Object rawExpression) {
         String rawValue = rawExpression?.toString()
-        return normalizePilotJsonIdExpression(rawValue) ?: normalizeBaseIdFieldExpression(rawValue)
+        return normalizeMappingJsonIdExpression(rawValue) ?: normalizeBaseIdFieldExpression(rawValue)
     }
 
     protected static String extractJsonPropertyName(String rawExpression) {
-        String normalized = normalizePilotJsonIdExpression(rawExpression)
+        String normalized = normalizeMappingJsonIdExpression(rawExpression)
         if (!normalized) return null
         if (!normalized.startsWith('$')) return normalized
 
@@ -178,7 +178,7 @@ class PilotMappingSupport {
     }
 
     protected static List<String> tokenizeJsonPath(String rawExpression) {
-        String normalized = normalizePilotJsonIdExpression(rawExpression)
+        String normalized = normalizeMappingJsonIdExpression(rawExpression)
         if (!normalized?.startsWith('$')) return []
 
         String path = normalized.substring(1).trim()

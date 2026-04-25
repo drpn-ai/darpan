@@ -2,8 +2,328 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="create" noun="PilotMapping" allow-remote="true" authenticate="true">
-        <description>Create a pilot reconciliation mapping from two saved JSON schemas and selected id field paths.</description>
+    <service verb="create" noun="RuleSetRun" allow-remote="true" authenticate="true">
+        <description>Create a tenant-scoped saved run backed by one RuleSet compare scope and zero or more initial rules.</description>
+        <in-parameters>
+            <parameter name="runName" required="true"/>
+            <parameter name="description"/>
+            <parameter name="file1SystemEnumId" required="true"/>
+            <parameter name="file1FileTypeEnumId"/>
+            <parameter name="file1SchemaFileName"/>
+            <parameter name="file1RecordRootExpression"/>
+            <parameter name="file1PrimaryIdExpression" required="true"/>
+            <parameter name="file2SystemEnumId" required="true"/>
+            <parameter name="file2FileTypeEnumId"/>
+            <parameter name="file2SchemaFileName"/>
+            <parameter name="file2RecordRootExpression"/>
+            <parameter name="file2PrimaryIdExpression" required="true"/>
+            <parameter name="rules" type="List">
+                <parameter name="ruleId"/>
+                <parameter name="sequenceNum" type="Integer"/>
+                <parameter name="ruleText"/>
+                <parameter name="ruleLogic"/>
+                <parameter name="ruleType"/>
+                <parameter name="expression"/>
+                <parameter name="enabled"/>
+                <parameter name="severity"/>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="savedRun">
+                <parameter name="savedRunId"/>
+                <parameter name="runName"/>
+                <parameter name="description"/>
+                <parameter name="companyUserGroupId"/>
+                <parameter name="companyLabel"/>
+                <parameter name="runType"/>
+                <parameter name="ruleSetId"/>
+                <parameter name="compareScopeId"/>
+                <parameter name="requiresSystemSelection" type="Boolean"/>
+                <parameter name="defaultFile1SystemEnumId"/>
+                <parameter name="defaultFile2SystemEnumId"/>
+                <parameter name="systemOptions">
+                    <parameter name="fileSide"/>
+                    <parameter name="enumId"/>
+                    <parameter name="enumCode"/>
+                    <parameter name="description"/>
+                    <parameter name="label"/>
+                    <parameter name="fileTypeEnumId"/>
+                    <parameter name="fileTypeLabel"/>
+                    <parameter name="idFieldExpression"/>
+                    <parameter name="schemaFileName"/>
+                </parameter>
+                <parameter name="rules">
+                    <parameter name="ruleId"/>
+                    <parameter name="sequenceNum" type="Integer"/>
+                    <parameter name="ruleText"/>
+                    <parameter name="ruleLogic"/>
+                    <parameter name="ruleType"/>
+                    <parameter name="expression"/>
+                    <parameter name="enabled"/>
+                    <parameter name="severity"/>
+                    <parameter name="file1FieldPath"/>
+                    <parameter name="file2FieldPath"/>
+                    <parameter name="operator"/>
+                    <parameter name="preActions">
+                        <parameter name="fieldSide"/>
+                        <parameter name="action"/>
+                    </parameter>
+                </parameter>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="runNameValue" from="darpan.facade.common.FacadeSupport.normalize(runName)"/>
+            <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
+            <set field="file1SystemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SystemEnumId)"/>
+            <set field="file1FileTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1FileTypeEnumId) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID"/>
+            <set field="file1SchemaFileNameValue" from="darpan.facade.common.FacadeSupport.normalize(file1SchemaFileName)"/>
+            <set field="file1RecordRootExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file1RecordRootExpression)"/>
+            <set field="file1PrimaryIdExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file1PrimaryIdExpression)"/>
+            <set field="file2SystemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SystemEnumId)"/>
+            <set field="file2FileTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2FileTypeEnumId) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID"/>
+            <set field="file2SchemaFileNameValue" from="darpan.facade.common.FacadeSupport.normalize(file2SchemaFileName)"/>
+            <set field="file2RecordRootExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file2RecordRootExpression)"/>
+            <set field="file2PrimaryIdExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file2PrimaryIdExpression)"/>
+            <set field="ruleEntries" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.normalizeRuleEntries(rules)"/>
+
+            <if condition="!runNameValue">
+                <message error="true">runName is required</message>
+            </if>
+            <if condition="!file1SystemEnumIdValue">
+                <message error="true">file1SystemEnumId is required</message>
+            </if>
+            <if condition="!file2SystemEnumIdValue">
+                <message error="true">file2SystemEnumId is required</message>
+            </if>
+            <if condition="!file1PrimaryIdExpressionValue">
+                <message error="true">file1PrimaryIdExpression is required</message>
+            </if>
+            <if condition="!file2PrimaryIdExpressionValue">
+                <message error="true">file2PrimaryIdExpression is required</message>
+            </if>
+            <if condition="file1SystemEnumIdValue &amp;&amp; file2SystemEnumIdValue &amp;&amp; file1SystemEnumIdValue == file2SystemEnumIdValue">
+                <message error="true">file1SystemEnumId and file2SystemEnumId must be different</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
+            </if>
+
+            <if condition="!ec.message.hasError()">
+                <set field="file1System" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file1SystemEnumIdValue)"/>
+                <set field="file2System" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2SystemEnumIdValue)"/>
+                <set field="file1FileType" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file1FileTypeEnumIdValue)"/>
+                <set field="file2FileType" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2FileTypeEnumIdValue)"/>
+                <if condition="file1System == null">
+                    <message error="true">file1SystemEnumId '${file1SystemEnumIdValue}' is not valid</message>
+                </if>
+                <if condition="file2System == null">
+                    <message error="true">file2SystemEnumId '${file2SystemEnumIdValue}' is not valid</message>
+                </if>
+                <if condition="file1FileType == null">
+                    <message error="true">file1FileTypeEnumId '${file1FileTypeEnumIdValue}' is not valid</message>
+                </if>
+                <if condition="file2FileType == null">
+                    <message error="true">file2FileTypeEnumId '${file2FileTypeEnumIdValue}' is not valid</message>
+                </if>
+            </if>
+
+            <if condition="!ec.message.hasError()">
+                <set field="file1UsesJson" from="darpan.facade.common.FacadeSupport.normalize(file1FileType?.enumCode)?.toUpperCase() == 'JSON'"/>
+                <set field="file2UsesJson" from="darpan.facade.common.FacadeSupport.normalize(file2FileType?.enumCode)?.toUpperCase() == 'JSON'"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson &amp;&amp; !file1SchemaFileNameValue">
+                <message error="true">file1SchemaFileName is required for JSON source 1</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson &amp;&amp; !file2SchemaFileNameValue">
+                <message error="true">file2SchemaFileName is required for JSON source 2</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson">
+                <set field="file1Schema" from="jsonschema.common.JsonSchemaUtil.resolveSchemaRecord(ec, null, file1SchemaFileNameValue, file1SchemaFileNameValue, false)"/>
+                <set field="ignoreFile1SchemaAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file1Schema, &quot;file1SchemaFileName '${file1SchemaFileNameValue}' was not found&quot;, 'file1 schema is not available in your active tenant.')"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson">
+                <set field="file2Schema" from="jsonschema.common.JsonSchemaUtil.resolveSchemaRecord(ec, null, file2SchemaFileNameValue, file2SchemaFileNameValue, false)"/>
+                <set field="ignoreFile2SchemaAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file2Schema, &quot;file2SchemaFileName '${file2SchemaFileNameValue}' was not found&quot;, 'file2 schema is not available in your active tenant.')"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson &amp;&amp; file1Schema?.systemEnumId != file1SystemEnumIdValue">
+                <message error="true">file1SchemaFileName '${file1SchemaFileNameValue}' belongs to system ${file1Schema?.systemEnumId}, not ${file1SystemEnumIdValue}</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson &amp;&amp; file2Schema?.systemEnumId != file2SystemEnumIdValue">
+                <message error="true">file2SchemaFileName '${file2SchemaFileNameValue}' belongs to system ${file2Schema?.systemEnumId}, not ${file2SystemEnumIdValue}</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson &amp;&amp; !darpan.facade.reconciliation.ReconciliationMappingSupport.isResolvableJsonIdExpression(file1PrimaryIdExpressionValue, file1Schema?.schemaText as String)">
+                <message error="true">file1PrimaryIdExpression '${file1PrimaryIdExpressionValue}' is not present in schema '${file1SchemaFileNameValue}'</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson &amp;&amp; !darpan.facade.reconciliation.ReconciliationMappingSupport.isResolvableJsonIdExpression(file2PrimaryIdExpressionValue, file2Schema?.schemaText as String)">
+                <message error="true">file2PrimaryIdExpression '${file2PrimaryIdExpressionValue}' is not present in schema '${file2SchemaFileNameValue}'</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="resolvedFile1PrimaryIdExpressionValue" from="file1UsesJson ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.normalizeJsonPrimaryIdExpression(file1PrimaryIdExpressionValue) : file1PrimaryIdExpressionValue"/>
+                <set field="resolvedFile2PrimaryIdExpressionValue" from="file2UsesJson ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.normalizeJsonPrimaryIdExpression(file2PrimaryIdExpressionValue) : file2PrimaryIdExpressionValue"/>
+            </if>
+
+            <if condition="!ec.message.hasError()">
+                <set field="nowTs" from="ec.user.nowTimestamp"/>
+                <set field="ruleSetIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.generateRuleSetId(ec, runNameValue)"/>
+                <set field="compareScopeIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.generateCompareScopeId(ec, ruleSetIdValue, 'COMPARE_SCOPE')"/>
+                <set field="ruleSetValue" from="[ruleSetId: ruleSetIdValue, ruleSetName: runNameValue, description: descriptionValue, version: '1.0', createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                <set field="ignoreTenantOwnership" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(ruleSetValue, ec)"/>
+                <set field="ignoreCompareScopeColumnContract" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.ensureRuleSetCompareScopeObjectTypeNullable(ec)"/>
+            </if>
+
+            <if condition="!ec.message.hasError()">
+                <service-call name="create#darpan.rule.RuleSet" in-map="ruleSetValue" disable-authz="true"/>
+                <service-call name="create#darpan.rule.RuleSetCompareScope"
+                        disable-authz="true"
+                        in-map="[compareScopeId: compareScopeIdValue, ruleSetId: ruleSetIdValue, description: descriptionValue ?: 'Compare scope for ' + runNameValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                <service-call name="create#darpan.rule.RuleSetCompareSource"
+                        disable-authz="true"
+                        in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_1', systemEnumId: file1SystemEnumIdValue, fileTypeEnumId: file1FileTypeEnumIdValue, schemaFileName: file1SchemaFileNameValue, recordRootExpression: file1RecordRootExpressionValue, primaryIdExpression: resolvedFile1PrimaryIdExpressionValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                <service-call name="create#darpan.rule.RuleSetCompareSource"
+                        disable-authz="true"
+                        in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', systemEnumId: file2SystemEnumIdValue, fileTypeEnumId: file2FileTypeEnumIdValue, schemaFileName: file2SchemaFileNameValue, recordRootExpression: file2RecordRootExpressionValue, primaryIdExpression: resolvedFile2PrimaryIdExpressionValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+            </if>
+
+            <if condition="!ec.message.hasError() &amp;&amp; !ruleEntries.isEmpty()">
+                <iterate list="ruleEntries" entry="ruleEntry">
+                    <service-call name="reconciliation.ReconciliationRuleEngineServices.save#Rule"
+                            disable-authz="true"
+                            in-map="[ruleSetId: ruleSetIdValue, ruleId: ruleEntry.ruleId, sequenceNum: ruleEntry.sequenceNum, ruleText: ruleEntry.ruleText, ruleLogic: ruleEntry.ruleLogic, ruleType: ruleEntry.ruleType, expression: ruleEntry.expression, enabled: ruleEntry.enabled, severity: ruleEntry.severity, validateOnSave: false]"/>
+                </iterate>
+                <service-call name="reconciliation.ReconciliationRuleEngineServices.compile#RuleSet"
+                        disable-authz="true"
+                        in-map="[ruleSetId: ruleSetIdValue, useCache: false, forceRebuild: true]"
+                        out-map="compileResult"/>
+                <if condition="compileResult.error">
+                    <message error="true">RuleSet ${ruleSetIdValue} could not be compiled: ${compileResult.error}</message>
+                </if>
+            </if>
+
+            <if condition="!ec.message.hasError()">
+                <set field="resolvedSavedRun" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.resolveRuleSetRun(ec, ruleSetIdValue)"/>
+                <set field="savedRun" from="resolvedSavedRun.savedRun"/>
+                <message>Created RuleSet saved run ${runNameValue}.</message>
+            </if>
+
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="create" noun="CsvRun" allow-remote="true" authenticate="true">
+        <description>Create a tenant-scoped CSV saved run backed by one RuleSet compare scope.</description>
+        <in-parameters>
+            <parameter name="runName" required="true"/>
+            <parameter name="description"/>
+            <parameter name="file1SystemEnumId" required="true"/>
+            <parameter name="file2SystemEnumId" required="true"/>
+            <parameter name="file1CompareColumn" required="true"/>
+            <parameter name="file2CompareColumn" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="savedRun">
+                <parameter name="savedRunId"/>
+                <parameter name="runName"/>
+                <parameter name="description"/>
+                <parameter name="companyUserGroupId"/>
+                <parameter name="companyLabel"/>
+                <parameter name="runType"/>
+                <parameter name="ruleSetId"/>
+                <parameter name="compareScopeId"/>
+                <parameter name="requiresSystemSelection" type="Boolean"/>
+                <parameter name="defaultFile1SystemEnumId"/>
+                <parameter name="defaultFile2SystemEnumId"/>
+                <parameter name="systemOptions">
+                    <parameter name="fileSide"/>
+                    <parameter name="enumId"/>
+                    <parameter name="enumCode"/>
+                    <parameter name="description"/>
+                    <parameter name="label"/>
+                    <parameter name="fileTypeEnumId"/>
+                    <parameter name="fileTypeLabel"/>
+                    <parameter name="idFieldExpression"/>
+                    <parameter name="schemaFileName"/>
+                </parameter>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="runNameValue" from="darpan.facade.common.FacadeSupport.normalize(runName)"/>
+            <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
+            <set field="file1SystemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SystemEnumId)"/>
+            <set field="file2SystemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SystemEnumId)"/>
+            <set field="file1CompareColumnValue" from="darpan.facade.common.FacadeSupport.normalize(file1CompareColumn)"/>
+            <set field="file2CompareColumnValue" from="darpan.facade.common.FacadeSupport.normalize(file2CompareColumn)"/>
+            <if condition="!runNameValue">
+                <message error="true">runName is required</message>
+            </if>
+            <if condition="!file1SystemEnumIdValue">
+                <message error="true">file1SystemEnumId is required</message>
+            </if>
+            <if condition="!file2SystemEnumIdValue">
+                <message error="true">file2SystemEnumId is required</message>
+            </if>
+            <if condition="!file1CompareColumnValue">
+                <message error="true">file1CompareColumn is required</message>
+            </if>
+            <if condition="!file2CompareColumnValue">
+                <message error="true">file2CompareColumn is required</message>
+            </if>
+            <if condition="file1SystemEnumIdValue &amp;&amp; file2SystemEnumIdValue &amp;&amp; file1SystemEnumIdValue == file2SystemEnumIdValue">
+                <message error="true">file1SystemEnumId and file2SystemEnumId must be different</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="file1System" from="ec.entity.find('moqui.basic.Enumeration').condition('enumId', file1SystemEnumIdValue).useCache(true).one()"/>
+                <set field="file2System" from="ec.entity.find('moqui.basic.Enumeration').condition('enumId', file2SystemEnumIdValue).useCache(true).one()"/>
+                <if condition="file1System == null">
+                    <message error="true">file1SystemEnumId '${file1SystemEnumIdValue}' is not valid</message>
+                </if>
+                <if condition="file2System == null">
+                    <message error="true">file2SystemEnumId '${file2SystemEnumIdValue}' is not valid</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="nowTs" from="ec.user.nowTimestamp"/>
+                <set field="ruleSetIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.generateCsvRuleSetId(ec, runNameValue)"/>
+                <set field="compareScopeIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.generateCompareScopeId(ec, ruleSetIdValue, 'CSV_SCOPE')"/>
+                <set field="ruleSetValue" from="[ruleSetId: ruleSetIdValue, ruleSetName: runNameValue, description: descriptionValue, version: '1.0', createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                <set field="ignoreTenantOwnership" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(ruleSetValue, ec)"/>
+                <set field="ignoreCompareScopeColumnContract" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.ensureRuleSetCompareScopeObjectTypeNullable(ec)"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <service-call name="create#darpan.rule.RuleSet" in-map="ruleSetValue" disable-authz="true"/>
+                <service-call name="create#darpan.rule.RuleSetCompareScope"
+                        disable-authz="true"
+                        in-map="[compareScopeId: compareScopeIdValue, ruleSetId: ruleSetIdValue, description: descriptionValue ?: 'CSV compare scope for ' + runNameValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                <service-call name="create#darpan.rule.RuleSetCompareSource"
+                        disable-authz="true"
+                        in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_1', systemEnumId: file1SystemEnumIdValue, fileTypeEnumId: 'DftCsv', primaryIdExpression: file1CompareColumnValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                <service-call name="create#darpan.rule.RuleSetCompareSource"
+                        disable-authz="true"
+                        in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', systemEnumId: file2SystemEnumIdValue, fileTypeEnumId: 'DftCsv', primaryIdExpression: file2CompareColumnValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="resolvedSavedRun" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.resolveRuleSetRun(ec, ruleSetIdValue)"/>
+                <set field="savedRun" from="resolvedSavedRun.savedRun"/>
+                <message>Created CSV saved run ${runNameValue}.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="create" noun="Mapping" allow-remote="true" authenticate="true">
+        <description>Create a reconciliation mapping from two saved JSON schemas and selected id field paths.</description>
         <in-parameters>
             <parameter name="mappingName" required="true"/>
             <parameter name="schema1Id" required="true"/>
@@ -32,9 +352,9 @@
             <set field="mappingNameValue" from="darpan.facade.common.FacadeSupport.normalize(mappingName)"/>
             <set field="schema1IdValue" from="darpan.facade.common.FacadeSupport.normalize(schema1Id)"/>
             <set field="schema2IdValue" from="darpan.facade.common.FacadeSupport.normalize(schema2Id)"/>
-            <set field="schema1FieldPathValue" from="darpan.facade.reconciliation.PilotMappingSupport.normalizePilotJsonIdExpression(schema1FieldPath)"/>
-            <set field="schema2FieldPathValue" from="darpan.facade.reconciliation.PilotMappingSupport.normalizePilotJsonIdExpression(schema2FieldPath)"/>
-            <set field="ignoreTableEnsure" from="darpan.facade.reconciliation.PilotMappingSupport.ensurePilotMappingTables(ec)"/>
+            <set field="schema1FieldPathValue" from="darpan.facade.reconciliation.ReconciliationMappingSupport.normalizeMappingJsonIdExpression(schema1FieldPath)"/>
+            <set field="schema2FieldPathValue" from="darpan.facade.reconciliation.ReconciliationMappingSupport.normalizeMappingJsonIdExpression(schema2FieldPath)"/>
+            <set field="ignoreTableEnsure" from="darpan.facade.reconciliation.ReconciliationMappingSupport.ensureMappingTables(ec)"/>
             <if condition="!mappingNameValue">
                 <message error="true">mappingName is required</message>
             </if>
@@ -56,8 +376,11 @@
             <if condition="!ec.message.hasError()">
                 <set field="schema1" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schema1IdValue).useCache(false).one()"/>
                 <set field="schema2" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schema2IdValue).useCache(false).one()"/>
-                <set field="ignoreAccessCheck1" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, schema1, &quot;Schema not found for schema1Id '${schema1IdValue}'&quot;, 'Schema 1 is not available in your active company.')"/>
-                <set field="ignoreAccessCheck2" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, schema2, &quot;Schema not found for schema2Id '${schema2IdValue}'&quot;, 'Schema 2 is not available in your active company.')"/>
+                <set field="ignoreAccessCheck1" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema1, &quot;Schema not found for schema1Id '${schema1IdValue}'&quot;, 'Schema 1 is not available in your active tenant.')"/>
+                <set field="ignoreAccessCheck2" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema2, &quot;Schema not found for schema2Id '${schema2IdValue}'&quot;, 'Schema 2 is not available in your active tenant.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="schema1SystemEnumId" from="darpan.facade.common.FacadeSupport.normalize(schema1?.systemEnumId)"/>
@@ -74,17 +397,20 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="nowTs" from="ec.user.nowTimestamp"/>
-                <set field="mappingIdValue" from="darpan.facade.reconciliation.PilotMappingSupport.generatePilotMappingId(ec, mappingNameValue)"/>
+                <set field="mappingIdValue" from="darpan.facade.reconciliation.ReconciliationMappingSupport.generateMappingId(ec, mappingNameValue)"/>
                 <set field="newMappingMap" from="[reconciliationMappingId: mappingIdValue, mappingName: mappingNameValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
-                <set field="ignoreCompanyAssignment" from="darpan.facade.common.PilotAccessSupport.assignCompanyOwnershipOnCreate(newMappingMap, ec)"/>
+                <set field="ignoreCompanyAssignment" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(newMappingMap, ec)"/>
                 <if condition="!ec.message.hasError()">
                     <service-call name="create#darpan.mapping.ReconciliationMapping"
+                            disable-authz="true"
                             in-map="newMappingMap"
                             out-map="mappingCreateResult"/>
                     <service-call name="create#darpan.mapping.ReconciliationMappingMember"
+                            disable-authz="true"
                             in-map="[mappingMemberId: mappingIdValue + '-1', reconciliationMappingId: mappingIdValue, systemEnumId: schema1.systemEnumId, fileTypeEnumId: 'DftJson', idFieldExpression: schema1FieldPathValue, systemFieldName: schema1FieldPathValue, schemaFileName: schema1.schemaName, createdDate: nowTs]"
                             out-map="mappingMember1Result"/>
                     <service-call name="create#darpan.mapping.ReconciliationMappingMember"
+                            disable-authz="true"
                             in-map="[mappingMemberId: mappingIdValue + '-2', reconciliationMappingId: mappingIdValue, systemEnumId: schema2.systemEnumId, fileTypeEnumId: 'DftJson', idFieldExpression: schema2FieldPathValue, systemFieldName: schema2FieldPathValue, schemaFileName: schema2.schemaName, createdDate: nowTs]"
                             out-map="mappingMember2Result"/>
                     <set field="savedMapping" from="[reconciliationMappingId: mappingIdValue, mappingName: mappingNameValue, companyUserGroupId: newMappingMap.companyUserGroupId, createdByUserId: newMappingMap.createdByUserId, file1SystemEnumId: schema1SystemEnumId, file2SystemEnumId: schema2SystemEnumId, file1SchemaName: schema1.schemaName, file2SchemaName: schema2.schemaName, file1FieldPath: schema1FieldPathValue, file2FieldPath: schema2FieldPathValue]"/>
@@ -97,9 +423,502 @@
         </actions>
     </service>
 
-    <service verb="list" noun="PilotMappings" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/listPilotMappings.groovy">
-        <description>List pilot-safe mapping options and their system pairs for darpan-ui generic diff flow.</description>
+    <service verb="save" noun="RuleSetRun" allow-remote="true" authenticate="true">
+        <description>Update configuration and, when provided, the executable rules for a tenant-scoped RuleSet-backed saved run.</description>
+        <in-parameters>
+            <parameter name="savedRunId" required="true"/>
+            <parameter name="runName" required="true"/>
+            <parameter name="description"/>
+            <parameter name="file1SystemEnumId" required="true"/>
+            <parameter name="file1FileTypeEnumId"/>
+            <parameter name="file1SchemaFileName"/>
+            <parameter name="file1RecordRootExpression"/>
+            <parameter name="file1PrimaryIdExpression" required="true"/>
+            <parameter name="file2SystemEnumId" required="true"/>
+            <parameter name="file2FileTypeEnumId"/>
+            <parameter name="file2SchemaFileName"/>
+            <parameter name="file2RecordRootExpression"/>
+            <parameter name="file2PrimaryIdExpression" required="true"/>
+            <parameter name="rules" type="List">
+                <parameter name="ruleId"/>
+                <parameter name="sequenceNum" type="Integer"/>
+                <parameter name="ruleText"/>
+                <parameter name="ruleLogic"/>
+                <parameter name="ruleType"/>
+                <parameter name="expression"/>
+                <parameter name="enabled"/>
+                <parameter name="severity"/>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="savedRun">
+                <parameter name="savedRunId"/>
+                <parameter name="runName"/>
+                <parameter name="description"/>
+                <parameter name="companyUserGroupId"/>
+                <parameter name="companyLabel"/>
+                <parameter name="runType"/>
+                <parameter name="ruleSetId"/>
+                <parameter name="compareScopeId"/>
+                <parameter name="requiresSystemSelection" type="Boolean"/>
+                <parameter name="defaultFile1SystemEnumId"/>
+                <parameter name="defaultFile2SystemEnumId"/>
+                <parameter name="systemOptions">
+                    <parameter name="fileSide"/>
+                    <parameter name="enumId"/>
+                    <parameter name="enumCode"/>
+                    <parameter name="description"/>
+                    <parameter name="label"/>
+                    <parameter name="fileTypeEnumId"/>
+                    <parameter name="fileTypeLabel"/>
+                    <parameter name="idFieldExpression"/>
+                    <parameter name="schemaFileName"/>
+                </parameter>
+                <parameter name="rules">
+                    <parameter name="ruleId"/>
+                    <parameter name="sequenceNum" type="Integer"/>
+                    <parameter name="ruleText"/>
+                    <parameter name="ruleLogic"/>
+                    <parameter name="ruleType"/>
+                    <parameter name="expression"/>
+                    <parameter name="enabled"/>
+                    <parameter name="severity"/>
+                    <parameter name="file1FieldPath"/>
+                    <parameter name="file2FieldPath"/>
+                    <parameter name="operator"/>
+                    <parameter name="preActions">
+                        <parameter name="fieldSide"/>
+                        <parameter name="action"/>
+                    </parameter>
+                </parameter>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="savedRunIdValue" from="darpan.facade.common.FacadeSupport.normalize(savedRunId)"/>
+            <set field="runNameValue" from="darpan.facade.common.FacadeSupport.normalize(runName)"/>
+            <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
+            <set field="file1SystemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SystemEnumId)"/>
+            <set field="file1FileTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1FileTypeEnumId) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID"/>
+            <set field="file1SchemaFileNameValue" from="darpan.facade.common.FacadeSupport.normalize(file1SchemaFileName)"/>
+            <set field="file1RecordRootExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file1RecordRootExpression)"/>
+            <set field="file1PrimaryIdExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file1PrimaryIdExpression)"/>
+            <set field="file2SystemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SystemEnumId)"/>
+            <set field="file2FileTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2FileTypeEnumId) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID"/>
+            <set field="file2SchemaFileNameValue" from="darpan.facade.common.FacadeSupport.normalize(file2SchemaFileName)"/>
+            <set field="file2RecordRootExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file2RecordRootExpression)"/>
+            <set field="file2PrimaryIdExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file2PrimaryIdExpression)"/>
+            <set field="rulesProvided" from="rules instanceof Collection"/>
+            <set field="ruleEntries" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.normalizeRuleEntries(rules)"/>
+
+            <if condition="!savedRunIdValue">
+                <message error="true">savedRunId is required</message>
+            </if>
+            <if condition="!runNameValue">
+                <message error="true">runName is required</message>
+            </if>
+            <if condition="!file1SystemEnumIdValue">
+                <message error="true">file1SystemEnumId is required</message>
+            </if>
+            <if condition="!file2SystemEnumIdValue">
+                <message error="true">file2SystemEnumId is required</message>
+            </if>
+            <if condition="!file1PrimaryIdExpressionValue">
+                <message error="true">file1PrimaryIdExpression is required</message>
+            </if>
+            <if condition="!file2PrimaryIdExpressionValue">
+                <message error="true">file2PrimaryIdExpression is required</message>
+            </if>
+            <if condition="file1SystemEnumIdValue &amp;&amp; file2SystemEnumIdValue &amp;&amp; file1SystemEnumIdValue == file2SystemEnumIdValue">
+                <message error="true">file1SystemEnumId and file2SystemEnumId must be different</message>
+            </if>
+
+            <if condition="!ec.message.hasError()">
+                <set field="resolvedSavedRun" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.resolveRuleSetRun(ec, savedRunIdValue)"/>
+                <if condition="resolvedSavedRun.error">
+                    <message error="true">${resolvedSavedRun.error}</message>
+                </if>
+                <if condition="!resolvedSavedRun.error &amp;&amp; resolvedSavedRun.savedRun == null">
+                    <message error="true">RuleSet saved run '${savedRunIdValue}' was not found.</message>
+                </if>
+            </if>
+
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
+                <set field="ruleSet" from="resolvedSavedRun.ruleSet"/>
+                <set field="compareScope" from="resolvedSavedRun.compareScope"/>
+                <set field="sourceBySide" from="resolvedSavedRun.sourceBySide"/>
+                <set field="file1Source" from="sourceBySide['FILE_1']"/>
+                <set field="file2Source" from="sourceBySide['FILE_2']"/>
+            </if>
+
+            <if condition="!ec.message.hasError()">
+                <set field="file1System" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file1SystemEnumIdValue)"/>
+                <set field="file2System" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2SystemEnumIdValue)"/>
+                <set field="file1FileType" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file1FileTypeEnumIdValue)"/>
+                <set field="file2FileType" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2FileTypeEnumIdValue)"/>
+                <if condition="file1System == null">
+                    <message error="true">file1SystemEnumId '${file1SystemEnumIdValue}' is not valid</message>
+                </if>
+                <if condition="file2System == null">
+                    <message error="true">file2SystemEnumId '${file2SystemEnumIdValue}' is not valid</message>
+                </if>
+                <if condition="file1FileType == null">
+                    <message error="true">file1FileTypeEnumId '${file1FileTypeEnumIdValue}' is not valid</message>
+                </if>
+                <if condition="file2FileType == null">
+                    <message error="true">file2FileTypeEnumId '${file2FileTypeEnumIdValue}' is not valid</message>
+                </if>
+            </if>
+
+            <if condition="!ec.message.hasError()">
+                <set field="file1UsesJson" from="darpan.facade.common.FacadeSupport.normalize(file1FileType?.enumCode)?.toUpperCase() == 'JSON'"/>
+                <set field="file2UsesJson" from="darpan.facade.common.FacadeSupport.normalize(file2FileType?.enumCode)?.toUpperCase() == 'JSON'"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson &amp;&amp; !file1SchemaFileNameValue">
+                <message error="true">file1SchemaFileName is required for JSON source 1</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson &amp;&amp; !file2SchemaFileNameValue">
+                <message error="true">file2SchemaFileName is required for JSON source 2</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson">
+                <set field="file1Schema" from="jsonschema.common.JsonSchemaUtil.resolveSchemaRecord(ec, null, file1SchemaFileNameValue, file1SchemaFileNameValue, false)"/>
+                <set field="ignoreFile1SchemaAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file1Schema, &quot;file1SchemaFileName '${file1SchemaFileNameValue}' was not found&quot;, 'file1 schema is not available in your active tenant.')"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson">
+                <set field="file2Schema" from="jsonschema.common.JsonSchemaUtil.resolveSchemaRecord(ec, null, file2SchemaFileNameValue, file2SchemaFileNameValue, false)"/>
+                <set field="ignoreFile2SchemaAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file2Schema, &quot;file2SchemaFileName '${file2SchemaFileNameValue}' was not found&quot;, 'file2 schema is not available in your active tenant.')"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson &amp;&amp; file1Schema?.systemEnumId != file1SystemEnumIdValue">
+                <message error="true">file1SchemaFileName '${file1SchemaFileNameValue}' belongs to system ${file1Schema?.systemEnumId}, not ${file1SystemEnumIdValue}</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson &amp;&amp; file2Schema?.systemEnumId != file2SystemEnumIdValue">
+                <message error="true">file2SchemaFileName '${file2SchemaFileNameValue}' belongs to system ${file2Schema?.systemEnumId}, not ${file2SystemEnumIdValue}</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson &amp;&amp; !darpan.facade.reconciliation.ReconciliationMappingSupport.isResolvableJsonIdExpression(file1PrimaryIdExpressionValue, file1Schema?.schemaText as String)">
+                <message error="true">file1PrimaryIdExpression '${file1PrimaryIdExpressionValue}' is not present in schema '${file1SchemaFileNameValue}'</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson &amp;&amp; !darpan.facade.reconciliation.ReconciliationMappingSupport.isResolvableJsonIdExpression(file2PrimaryIdExpressionValue, file2Schema?.schemaText as String)">
+                <message error="true">file2PrimaryIdExpression '${file2PrimaryIdExpressionValue}' is not present in schema '${file2SchemaFileNameValue}'</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="resolvedFile1PrimaryIdExpressionValue" from="file1UsesJson ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.normalizeJsonPrimaryIdExpression(file1PrimaryIdExpressionValue) : file1PrimaryIdExpressionValue"/>
+                <set field="resolvedFile2PrimaryIdExpressionValue" from="file2UsesJson ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.normalizeJsonPrimaryIdExpression(file2PrimaryIdExpressionValue) : file2PrimaryIdExpressionValue"/>
+            </if>
+
+            <if condition="!ec.message.hasError()">
+                <set field="nowTs" from="ec.user.nowTimestamp"/>
+                <set field="ignoreRuleSetName" from="ruleSet.set('ruleSetName', runNameValue)"/>
+                <set field="ignoreRuleSetDescription" from="ruleSet.set('description', descriptionValue)"/>
+                <set field="ignoreRuleSetUpdatedDate" from="ruleSet.set('lastUpdatedDate', nowTs)"/>
+                <set field="ignoreRuleSetUpdate" from="ruleSet.update()"/>
+
+                <set field="ignoreCompareScopeDescription" from="compareScope.set('description', descriptionValue ?: 'Compare scope for ' + runNameValue)"/>
+                <set field="ignoreCompareScopeUpdatedDate" from="compareScope.set('lastUpdatedDate', nowTs)"/>
+                <set field="ignoreCompareScopeUpdate" from="compareScope.update()"/>
+
+                <set field="ignoreFile1System" from="file1Source.set('systemEnumId', file1SystemEnumIdValue)"/>
+                <set field="ignoreFile1FileType" from="file1Source.set('fileTypeEnumId', file1FileTypeEnumIdValue)"/>
+                <set field="ignoreFile1Schema" from="file1Source.set('schemaFileName', file1SchemaFileNameValue)"/>
+                <set field="ignoreFile1Root" from="file1Source.set('recordRootExpression', file1RecordRootExpressionValue)"/>
+                <set field="ignoreFile1PrimaryId" from="file1Source.set('primaryIdExpression', resolvedFile1PrimaryIdExpressionValue)"/>
+                <set field="ignoreFile1UpdatedDate" from="file1Source.set('lastUpdatedDate', nowTs)"/>
+                <set field="ignoreFile1Update" from="file1Source.update()"/>
+
+                <set field="ignoreFile2System" from="file2Source.set('systemEnumId', file2SystemEnumIdValue)"/>
+                <set field="ignoreFile2FileType" from="file2Source.set('fileTypeEnumId', file2FileTypeEnumIdValue)"/>
+                <set field="ignoreFile2Schema" from="file2Source.set('schemaFileName', file2SchemaFileNameValue)"/>
+                <set field="ignoreFile2Root" from="file2Source.set('recordRootExpression', file2RecordRootExpressionValue)"/>
+                <set field="ignoreFile2PrimaryId" from="file2Source.set('primaryIdExpression', resolvedFile2PrimaryIdExpressionValue)"/>
+                <set field="ignoreFile2UpdatedDate" from="file2Source.set('lastUpdatedDate', nowTs)"/>
+                <set field="ignoreFile2Update" from="file2Source.update()"/>
+
+                <if condition="rulesProvided">
+                    <set field="existingRuleList" from="ec.entity.find('darpan.rule.Rule').condition('ruleSetId', savedRunIdValue).useCache(false).list() ?: []"/>
+                    <set field="savedRuleIds" from="[]"/>
+                    <iterate list="ruleEntries" entry="ruleEntry">
+                        <service-call name="reconciliation.ReconciliationRuleEngineServices.save#Rule"
+                                disable-authz="true"
+                                in-map="[ruleSetId: savedRunIdValue, ruleId: ruleEntry.ruleId, sequenceNum: ruleEntry.sequenceNum, ruleText: ruleEntry.ruleText, ruleLogic: ruleEntry.ruleLogic, ruleType: ruleEntry.ruleType, expression: ruleEntry.expression, enabled: ruleEntry.enabled, severity: ruleEntry.severity, validateOnSave: false]"
+                                out-map="savedRule"/>
+                        <set field="ignoreSavedRuleId" from="savedRuleIds.add(savedRule.ruleId)"/>
+                    </iterate>
+                    <iterate list="existingRuleList" entry="existingRule">
+                        <if condition="!savedRuleIds.contains(existingRule.ruleId)">
+                            <service-call name="delete#darpan.rule.Rule" in-map="[ruleId: existingRule.ruleId]" disable-authz="true"/>
+                        </if>
+                    </iterate>
+                    <if condition="!ruleEntries.isEmpty()">
+                        <service-call name="reconciliation.ReconciliationRuleEngineServices.compile#RuleSet"
+                                disable-authz="true"
+                                in-map="[ruleSetId: savedRunIdValue, useCache: false, forceRebuild: true]"
+                                out-map="compileResult"/>
+                        <if condition="compileResult.error">
+                            <message error="true">RuleSet ${savedRunIdValue} could not be compiled: ${compileResult.error}</message>
+                        </if>
+                    </if>
+                </if>
+                <set field="ignoreRuleSetCacheClear" from="reconciliation.rule.RuleEngineSupport.invalidateRuleSetCache(ec, savedRunIdValue)"/>
+                <set field="updatedSavedRun" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.resolveRuleSetRun(ec, savedRunIdValue)"/>
+                <set field="savedRun" from="updatedSavedRun.savedRun"/>
+                <message>Saved RuleSet run ${runNameValue}.</message>
+            </if>
+
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="list" noun="SavedRuns" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/listSavedRuns.groovy">
+        <description>List saved runs across legacy mappings and RuleSet-backed CSV runs.</description>
+        <in-parameters>
+            <parameter name="query"/>
+            <parameter name="pageIndex" type="Integer" default-value="0"/>
+            <parameter name="pageSize" type="Integer" default-value="20"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="pagination">
+                <parameter name="pageIndex" type="Integer"/>
+                <parameter name="pageSize" type="Integer"/>
+                <parameter name="totalCount" type="Integer"/>
+                <parameter name="pageCount" type="Integer"/>
+            </parameter>
+            <parameter name="pinnedSavedRunIds" type="List"/>
+            <parameter name="savedRuns">
+                <parameter name="savedRunId"/>
+                <parameter name="runName"/>
+                <parameter name="description"/>
+                <parameter name="companyUserGroupId"/>
+                <parameter name="companyLabel"/>
+                <parameter name="runType"/>
+                <parameter name="reconciliationMappingId"/>
+                <parameter name="ruleSetId"/>
+                <parameter name="compareScopeId"/>
+                <parameter name="requiresSystemSelection" type="Boolean"/>
+                <parameter name="defaultFile1SystemEnumId"/>
+                <parameter name="defaultFile2SystemEnumId"/>
+                <parameter name="systemOptions">
+                    <parameter name="fileSide"/>
+                    <parameter name="enumId"/>
+                    <parameter name="enumCode"/>
+                    <parameter name="description"/>
+                    <parameter name="label"/>
+                    <parameter name="fileTypeEnumId"/>
+                    <parameter name="fileTypeLabel"/>
+                    <parameter name="idFieldExpression"/>
+                    <parameter name="schemaFileName"/>
+                </parameter>
+                <parameter name="rules">
+                    <parameter name="ruleId"/>
+                    <parameter name="sequenceNum" type="Integer"/>
+                    <parameter name="ruleText"/>
+                    <parameter name="ruleLogic"/>
+                    <parameter name="ruleType"/>
+                    <parameter name="expression"/>
+                    <parameter name="enabled"/>
+                    <parameter name="severity"/>
+                    <parameter name="file1FieldPath"/>
+                    <parameter name="file2FieldPath"/>
+                    <parameter name="operator"/>
+                    <parameter name="preActions">
+                        <parameter name="fieldSide"/>
+                        <parameter name="action"/>
+                    </parameter>
+                </parameter>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="save" noun="SavedRunName" allow-remote="true" authenticate="true">
+        <description>Rename one tenant-scoped saved run without changing its source or rule configuration.</description>
+        <in-parameters>
+            <parameter name="savedRunId" required="true"/>
+            <parameter name="runName" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="savedRun">
+                <parameter name="savedRunId"/>
+                <parameter name="runName"/>
+                <parameter name="description"/>
+                <parameter name="companyUserGroupId"/>
+                <parameter name="companyLabel"/>
+                <parameter name="runType"/>
+                <parameter name="reconciliationMappingId"/>
+                <parameter name="ruleSetId"/>
+                <parameter name="compareScopeId"/>
+                <parameter name="requiresSystemSelection" type="Boolean"/>
+                <parameter name="defaultFile1SystemEnumId"/>
+                <parameter name="defaultFile2SystemEnumId"/>
+                <parameter name="systemOptions">
+                    <parameter name="fileSide"/>
+                    <parameter name="enumId"/>
+                    <parameter name="enumCode"/>
+                    <parameter name="description"/>
+                    <parameter name="label"/>
+                    <parameter name="fileTypeEnumId"/>
+                    <parameter name="fileTypeLabel"/>
+                    <parameter name="idFieldExpression"/>
+                    <parameter name="schemaFileName"/>
+                </parameter>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="savedRunIdValue" from="darpan.facade.common.FacadeSupport.normalize(savedRunId)"/>
+            <set field="runNameValue" from="darpan.facade.common.FacadeSupport.normalize(runName)"/>
+            <if condition="!savedRunIdValue">
+                <message error="true">savedRunId is required</message>
+            </if>
+            <if condition="!runNameValue">
+                <message error="true">runName is required</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="mapping" from="ec.entity.find('darpan.mapping.ReconciliationMapping').condition('reconciliationMappingId', savedRunIdValue).useCache(false).one()"/>
+                <set field="ruleSet" from="mapping == null ? ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', savedRunIdValue).useCache(false).one() : null"/>
+                <if condition="mapping == null &amp;&amp; ruleSet == null">
+                    <message error="true">Saved run '${savedRunIdValue}' was not found.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; mapping != null">
+                <set field="ignoreMappingAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, mapping, &quot;Saved run '${savedRunIdValue}' was not found.&quot;, 'Saved run is not available in your active tenant.')"/>
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; ruleSet != null">
+                <set field="ignoreRuleSetAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, ruleSet, &quot;Saved run '${savedRunIdValue}' was not found.&quot;, 'Saved run is not available in your active tenant.')"/>
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="nowTs" from="ec.user.nowTimestamp"/>
+                <if condition="mapping != null">
+                    <set field="ignoreMappingName" from="mapping.set('mappingName', runNameValue)"/>
+                    <set field="ignoreMappingUpdatedDate" from="mapping.set('lastUpdatedDate', nowTs)"/>
+                    <set field="ignoreMappingUpdate" from="mapping.update()"/>
+                </if>
+                <if condition="ruleSet != null">
+                    <set field="ignoreRuleSetName" from="ruleSet.set('ruleSetName', runNameValue)"/>
+                    <set field="ignoreRuleSetUpdatedDate" from="ruleSet.set('lastUpdatedDate', nowTs)"/>
+                    <set field="ignoreRuleSetUpdate" from="ruleSet.update()"/>
+                    <set field="ignoreRuleSetCacheClear" from="reconciliation.rule.RuleEngineSupport.invalidateRuleSetCache(ec, savedRunIdValue)"/>
+                </if>
+                <set field="savedRun" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.collectSavedRunRows(ec).find { it.savedRunId == savedRunIdValue }"/>
+                <message>Saved run ${runNameValue}.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="delete" noun="SavedRun" allow-remote="true" authenticate="true">
+        <description>Delete one tenant-scoped saved run and generated outputs created for it.</description>
+        <in-parameters>
+            <parameter name="savedRunId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="deleted" type="Boolean"/>
+            <parameter name="deletedSavedRunId"/>
+            <parameter name="deletedRunType"/>
+            <parameter name="deletedGeneratedOutputCount" type="Integer"/>
+            <parameter name="deletedRuleCount" type="Integer"/>
+            <parameter name="deletedCompareScopeCount" type="Integer"/>
+            <parameter name="deletedCompareSourceCount" type="Integer"/>
+            <parameter name="deletedMappingMemberCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="savedRunIdValue" from="darpan.facade.common.FacadeSupport.normalize(savedRunId)"/>
+            <set field="deleted" from="false"/>
+            <set field="deletedGeneratedOutputCount" from="0"/>
+            <set field="deletedRuleCount" from="0"/>
+            <set field="deletedCompareScopeCount" from="0"/>
+            <set field="deletedCompareSourceCount" from="0"/>
+            <set field="deletedMappingMemberCount" from="0"/>
+
+            <if condition="!savedRunIdValue">
+                <message error="true">savedRunId is required</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
+            </if>
+
+            <if condition="!ec.message.hasError()">
+                <set field="ruleSetRun" from="ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', savedRunIdValue).useCache(false).one()"/>
+                <set field="mappingRun" from="ruleSetRun ? null : ec.entity.find('darpan.mapping.ReconciliationMapping').condition('reconciliationMappingId', savedRunIdValue).useCache(false).one()"/>
+                <if condition="ruleSetRun">
+                    <set field="ignoreRuleSetAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, ruleSetRun, &quot;Saved run '${savedRunIdValue}' was not found&quot;, 'Saved run is not available in your active tenant.')"/>
+                    <set field="deletedRunType" from="'ruleset'"/>
+                </if>
+                <if condition="!ruleSetRun &amp;&amp; mappingRun">
+                    <set field="ignoreMappingAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, mappingRun, &quot;Saved run '${savedRunIdValue}' was not found&quot;, 'Saved run is not available in your active tenant.')"/>
+                    <set field="deletedRunType" from="'mapping'"/>
+                </if>
+                <if condition="!ruleSetRun &amp;&amp; !mappingRun">
+                    <message error="true">Saved run '${savedRunIdValue}' was not found</message>
+                </if>
+            </if>
+
+            <if condition="!ec.message.hasError()">
+                <service-call name="facade.ReconciliationFacadeServices.list#GeneratedOutputs"
+                        in-map="[savedRunId: savedRunIdValue, pageIndex: 0, pageSize: 200]"
+                        out-map="generatedOutputList"/>
+                <set field="generatedOutputsToDelete" from="generatedOutputList.generatedOutputs ?: []"/>
+                <iterate list="generatedOutputsToDelete" entry="generatedOutput">
+                    <if condition="generatedOutput.fileName">
+                        <service-call name="reconciliation.ReconciliationGenericServices.delete#GeneratedOutputFile"
+                                in-map="[filename: generatedOutput.fileName]"
+                                out-map="deleteGeneratedOutputResult"/>
+                        <if condition="deleteGeneratedOutputResult.deleted">
+                            <set field="deletedGeneratedOutputCount" from="deletedGeneratedOutputCount + 1"/>
+                        </if>
+                    </if>
+                </iterate>
+            </if>
+
+            <if condition="!ec.message.hasError() &amp;&amp; ruleSetRun">
+                <service-call name="reconciliation.ReconciliationRuleEngineServices.delete#RuleSet"
+                        disable-authz="true"
+                        in-map="[ruleSetId: savedRunIdValue, forceDeleteRules: true]"
+                        out-map="deleteRuleSetResult"/>
+                <set field="deletedRuleCount" from="deleteRuleSetResult.deletedRuleCount ?: 0"/>
+                <set field="deletedCompareScopeCount" from="deleteRuleSetResult.deletedCompareScopeCount ?: 0"/>
+                <set field="deletedCompareSourceCount" from="deleteRuleSetResult.deletedCompareSourceCount ?: 0"/>
+                <set field="deleted" from="true"/>
+            </if>
+
+            <if condition="!ec.message.hasError() &amp;&amp; mappingRun">
+                <set field="deletedMappingMemberCount" from="ec.entity.find('darpan.mapping.ReconciliationMappingMember').condition('reconciliationMappingId', savedRunIdValue).useCache(false).deleteAll()"/>
+                <service-call name="delete#darpan.mapping.ReconciliationMapping" in-map="[reconciliationMappingId: savedRunIdValue]" disable-authz="true"/>
+                <set field="deleted" from="true"/>
+            </if>
+
+            <if condition="!ec.message.hasError()">
+                <set field="currentPinnedSavedRunIds" from="darpan.facade.reconciliation.ReconciliationDashboardPreferenceSupport.listPinnedSavedRunIds(ec, null)"/>
+                <set field="pinnedSavedRunIdsAfterDelete" from="currentPinnedSavedRunIds.findAll { it != savedRunIdValue }"/>
+                <set field="ignorePinnedSavedRuns" from="darpan.facade.reconciliation.ReconciliationDashboardPreferenceSupport.savePinnedSavedRunIds(ec, pinnedSavedRunIdsAfterDelete, null)"/>
+                <set field="deletedSavedRunId" from="savedRunIdValue"/>
+                <message>Deleted saved run ${savedRunIdValue}.</message>
+            </if>
+
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="list" noun="Mappings" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/listMappings.groovy">
+        <description>List mapping options and their system pairs for darpan-ui generic diff flow.</description>
         <in-parameters>
             <parameter name="query"/>
             <parameter name="pageIndex" type="Integer" default-value="0"/>
@@ -139,49 +958,8 @@
         </out-parameters>
     </service>
 
-    <service verb="list" noun="PilotRuleSetCompareScopes" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/listPilotRuleSetCompareScopes.groovy">
-        <description>List RuleSet compare scopes and their file-side system definitions for the darpan-ui generic diff flow.</description>
-        <in-parameters>
-            <parameter name="query"/>
-            <parameter name="pageIndex" type="Integer" default-value="0"/>
-            <parameter name="pageSize" type="Integer" default-value="20"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="ok" type="Boolean"/>
-            <parameter name="messages"><parameter name="message"/></parameter>
-            <parameter name="errors"><parameter name="error"/></parameter>
-            <parameter name="pagination">
-                <parameter name="pageIndex" type="Integer"/>
-                <parameter name="pageSize" type="Integer"/>
-                <parameter name="totalCount" type="Integer"/>
-                <parameter name="pageCount" type="Integer"/>
-            </parameter>
-            <parameter name="compareScopes">
-                <parameter name="ruleSetId"/>
-                <parameter name="ruleSetName"/>
-                <parameter name="ruleSetDescription"/>
-                <parameter name="compareScopeId"/>
-                <parameter name="compareScopeDescription"/>
-                <parameter name="objectType"/>
-                <parameter name="file1SystemEnumId"/>
-                <parameter name="file1SystemLabel"/>
-                <parameter name="file1FileTypeEnumId"/>
-                <parameter name="file1FileTypeLabel"/>
-                <parameter name="file1PrimaryIdExpression"/>
-                <parameter name="file1SchemaFileName"/>
-                <parameter name="file2SystemEnumId"/>
-                <parameter name="file2SystemLabel"/>
-                <parameter name="file2FileTypeEnumId"/>
-                <parameter name="file2FileTypeLabel"/>
-                <parameter name="file2PrimaryIdExpression"/>
-                <parameter name="file2SchemaFileName"/>
-            </parameter>
-        </out-parameters>
-    </service>
-
-    <service verb="get" noun="PilotMapping" allow-remote="true" authenticate="true">
-        <description>Load one pilot mapping with editable schema and field details for darpan-ui settings workflows.</description>
+    <service verb="get" noun="Mapping" allow-remote="true" authenticate="true">
+        <description>Load one mapping with editable schema and field details for darpan-ui settings workflows.</description>
         <in-parameters>
             <parameter name="reconciliationMappingId" required="true"/>
         </in-parameters>
@@ -189,7 +967,7 @@
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages"><parameter name="message"/></parameter>
             <parameter name="errors"><parameter name="error"/></parameter>
-            <parameter name="pilotMapping">
+            <parameter name="mapping">
                 <parameter name="reconciliationMappingId"/>
                 <parameter name="mappingName"/>
                 <parameter name="companyUserGroupId"/>
@@ -206,7 +984,7 @@
         </out-parameters>
         <actions>
             <set field="mappingIdValue" from="darpan.facade.common.FacadeSupport.normalize(reconciliationMappingId)"/>
-            <set field="ignoreTableEnsure" from="darpan.facade.reconciliation.PilotMappingSupport.ensurePilotMappingTables(ec)"/>
+            <set field="ignoreTableEnsure" from="darpan.facade.reconciliation.ReconciliationMappingSupport.ensureMappingTables(ec)"/>
             <if condition="!mappingIdValue">
                 <message error="true">reconciliationMappingId is required</message>
             </if>
@@ -217,7 +995,7 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreMappingAccess" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, mapping, &quot;Mapping '${mappingIdValue}' was not found.&quot;, &quot;Mapping '${mappingIdValue}' is not available in your active company.&quot;)"/>
+                <set field="ignoreMappingAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, mapping, &quot;Mapping '${mappingIdValue}' was not found.&quot;, &quot;Mapping '${mappingIdValue}' is not available in your active tenant.&quot;)"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="members" from="ec.entity.find('darpan.mapping.ReconciliationMappingMember').condition('reconciliationMappingId', mappingIdValue).orderBy('mappingMemberId').useCache(false).list() ?: []"/>
@@ -226,16 +1004,16 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="pilotReadinessIssues" from="darpan.facade.reconciliation.PilotMappingSupport.collectPilotReadinessIssues(ec, members)"/>
-                <if condition="!pilotReadinessIssues.isEmpty()">
-                    <message error="true">Mapping '${mappingIdValue}' requires saved schemas before it can be edited. ${pilotReadinessIssues.join(' ')}</message>
+                <set field="mappingReadinessIssues" from="darpan.facade.reconciliation.ReconciliationMappingSupport.collectReadinessIssues(ec, members)"/>
+                <if condition="!mappingReadinessIssues.isEmpty()">
+                    <message error="true">Mapping '${mappingIdValue}' requires saved schemas before it can be edited. ${mappingReadinessIssues.join(' ')}</message>
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="resolvedMembers" from="darpan.facade.reconciliation.PilotMappingSupport.buildEditablePilotMappingMembers(ec, members)"/>
+                <set field="resolvedMembers" from="darpan.facade.reconciliation.ReconciliationMappingSupport.buildEditableMappingMembers(ec, members)"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="pilotMapping" from="[reconciliationMappingId: mapping.reconciliationMappingId, mappingName: mapping.mappingName, companyUserGroupId: mapping.companyUserGroupId, createdByUserId: mapping.createdByUserId, members: resolvedMembers]"/>
+                <set field="mapping" from="[reconciliationMappingId: mapping.reconciliationMappingId, mappingName: mapping.mappingName, companyUserGroupId: mapping.companyUserGroupId, createdByUserId: mapping.createdByUserId, members: resolvedMembers]"/>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -243,8 +1021,8 @@
         </actions>
     </service>
 
-    <service verb="save" noun="PilotMapping" allow-remote="true" authenticate="true">
-        <description>Update an existing two-source pilot mapping for darpan-ui settings workflows.</description>
+    <service verb="save" noun="Mapping" allow-remote="true" authenticate="true">
+        <description>Update an existing two-source mapping for darpan-ui settings workflows.</description>
         <in-parameters>
             <parameter name="reconciliationMappingId" required="true"/>
             <parameter name="mappingName" required="true"/>
@@ -275,9 +1053,9 @@
             <set field="mappingNameValue" from="darpan.facade.common.FacadeSupport.normalize(mappingName)"/>
             <set field="schema1IdValue" from="darpan.facade.common.FacadeSupport.normalize(schema1Id)"/>
             <set field="schema2IdValue" from="darpan.facade.common.FacadeSupport.normalize(schema2Id)"/>
-            <set field="schema1FieldPathValue" from="darpan.facade.reconciliation.PilotMappingSupport.normalizeEditableFieldPath(schema1FieldPath)"/>
-            <set field="schema2FieldPathValue" from="darpan.facade.reconciliation.PilotMappingSupport.normalizeEditableFieldPath(schema2FieldPath)"/>
-            <set field="ignoreTableEnsure" from="darpan.facade.reconciliation.PilotMappingSupport.ensurePilotMappingTables(ec)"/>
+            <set field="schema1FieldPathValue" from="darpan.facade.reconciliation.ReconciliationMappingSupport.normalizeEditableFieldPath(schema1FieldPath)"/>
+            <set field="schema2FieldPathValue" from="darpan.facade.reconciliation.ReconciliationMappingSupport.normalizeEditableFieldPath(schema2FieldPath)"/>
+            <set field="ignoreTableEnsure" from="darpan.facade.reconciliation.ReconciliationMappingSupport.ensureMappingTables(ec)"/>
             <if condition="!mappingIdValue">
                 <message error="true">reconciliationMappingId is required</message>
             </if>
@@ -306,7 +1084,7 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreMappingAccess" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, mapping, &quot;Mapping '${mappingIdValue}' was not found.&quot;, &quot;Mapping '${mappingIdValue}' is not available in your active company.&quot;)"/>
+                <set field="ignoreMappingAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, mapping, &quot;Mapping '${mappingIdValue}' was not found.&quot;, &quot;Mapping '${mappingIdValue}' is not available in your active tenant.&quot;)"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="existingMembers" from="ec.entity.find('darpan.mapping.ReconciliationMappingMember').condition('reconciliationMappingId', mappingIdValue).orderBy('mappingMemberId').useCache(false).list() ?: []"/>
@@ -317,8 +1095,11 @@
             <if condition="!ec.message.hasError()">
                 <set field="schema1" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schema1IdValue).useCache(false).one()"/>
                 <set field="schema2" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schema2IdValue).useCache(false).one()"/>
-                <set field="ignoreAccessCheck1" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, schema1, &quot;Schema not found for schema1Id '${schema1IdValue}'&quot;, 'Schema 1 is not available in your active company.')"/>
-                <set field="ignoreAccessCheck2" from="darpan.facade.common.PilotAccessSupport.requireCompanyRecordAccess(ec, schema2, &quot;Schema not found for schema2Id '${schema2IdValue}'&quot;, 'Schema 2 is not available in your active company.')"/>
+                <set field="ignoreAccessCheck1" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema1, &quot;Schema not found for schema1Id '${schema1IdValue}'&quot;, 'Schema 1 is not available in your active tenant.')"/>
+                <set field="ignoreAccessCheck2" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema2, &quot;Schema not found for schema2Id '${schema2IdValue}'&quot;, 'Schema 2 is not available in your active tenant.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="schema1SystemEnumId" from="darpan.facade.common.FacadeSupport.normalize(schema1?.systemEnumId)"/>
@@ -375,13 +1156,25 @@
         </out-parameters>
     </service>
 
-    <service verb="run" noun="PilotGenericDiff" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/runPilotGenericDiff.groovy">
-        <description>Run the pilot generic diff flow using text-based file payloads suitable for darpan-ui JSON-RPC calls.</description>
+    <service verb="save" noun="DashboardPinnedSavedRuns" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/saveDashboardPinnedSavedRuns.groovy">
+        <description>Persist dashboard pinned saved runs for the authenticated user.</description>
         <in-parameters>
-            <parameter name="reconciliationMappingId"/>
-            <parameter name="ruleSetId"/>
-            <parameter name="compareScopeId"/>
+            <parameter name="pinnedSavedRunIds" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="pinnedSavedRunIds" type="List"/>
+        </out-parameters>
+    </service>
+
+    <service verb="run" noun="GenericDiff" type="script" transaction="ignore" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/runGenericDiff.groovy">
+        <description>Run the generic diff flow using text-based file payloads suitable for darpan-ui JSON-RPC calls.</description>
+        <in-parameters>
+            <parameter name="reconciliationMappingId" required="true"/>
             <parameter name="file1Name" required="true"/>
             <parameter name="file1Text" required="true" allow-html="any"/>
             <parameter name="file2Name" required="true"/>
@@ -397,15 +1190,8 @@
             <parameter name="messages"><parameter name="message"/></parameter>
             <parameter name="errors"><parameter name="error"/></parameter>
             <parameter name="runResult">
-                <parameter name="runType"/>
-                <parameter name="runName"/>
                 <parameter name="reconciliationMappingId"/>
                 <parameter name="mappingName"/>
-                <parameter name="ruleSetId"/>
-                <parameter name="ruleSetName"/>
-                <parameter name="compareScopeId"/>
-                <parameter name="compareScopeDescription"/>
-                <parameter name="objectType"/>
                 <parameter name="file1Name"/>
                 <parameter name="file2Name"/>
                 <parameter name="file1SystemEnumId"/>
@@ -419,24 +1205,15 @@
                     <parameter name="sourceFormat"/>
                     <parameter name="availableFormats" type="List"/>
                     <parameter name="preferredDownloadFormat"/>
-                    <parameter name="runType"/>
-                    <parameter name="runName"/>
                     <parameter name="companyUserGroupId"/>
                     <parameter name="reconciliationMappingId"/>
                     <parameter name="mappingName"/>
-                    <parameter name="ruleSetId"/>
-                    <parameter name="ruleSetName"/>
-                    <parameter name="compareScopeId"/>
-                    <parameter name="compareScopeDescription"/>
-                    <parameter name="objectType"/>
                     <parameter name="reconciliationType"/>
                     <parameter name="file1Label"/>
                     <parameter name="file2Label"/>
                     <parameter name="totalDifferences" type="Long"/>
                     <parameter name="onlyInFile1Count" type="Long"/>
                     <parameter name="onlyInFile2Count" type="Long"/>
-                    <parameter name="missingObjectDifferenceCount" type="Long"/>
-                    <parameter name="ruleDifferenceCount" type="Long"/>
                     <parameter name="createdDate" type="Timestamp"/>
                     <parameter name="sizeBytes" type="Long"/>
                 </parameter>
@@ -444,13 +1221,72 @@
         </out-parameters>
     </service>
 
-    <service verb="list" noun="PilotGeneratedOutputs" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/listPilotGeneratedOutputs.groovy">
-        <description>List generated pilot diff outputs within the current active-company scope.</description>
+    <service verb="run" noun="SavedRunDiff" type="script" transaction="ignore" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/runSavedRunDiff.groovy">
+        <description>Run a saved reconciliation flow backed by either a legacy mapping or a RuleSet compare scope.</description>
         <in-parameters>
+            <parameter name="savedRunId" required="true"/>
+            <parameter name="file1Name" required="true"/>
+            <parameter name="file1Text" required="true" allow-html="any"/>
+            <parameter name="file2Name" required="true"/>
+            <parameter name="file2Text" required="true" allow-html="any"/>
+            <parameter name="file1SystemEnumId"/>
+            <parameter name="file2SystemEnumId"/>
+            <parameter name="hasHeader" type="Boolean" default-value="true"/>
+            <parameter name="sparkMaster"/>
+            <parameter name="sparkAppName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="runResult">
+                <parameter name="savedRunId"/>
+                <parameter name="runName"/>
+                <parameter name="runType"/>
+                <parameter name="reconciliationMappingId"/>
+                <parameter name="ruleSetId"/>
+                <parameter name="compareScopeId"/>
+                <parameter name="file1Name"/>
+                <parameter name="file2Name"/>
+                <parameter name="file1SystemEnumId"/>
+                <parameter name="file1SystemLabel"/>
+                <parameter name="file2SystemEnumId"/>
+                <parameter name="file2SystemLabel"/>
+                <parameter name="validationErrors" type="List"/>
+                <parameter name="processingWarnings" type="List"/>
+                <parameter name="generatedOutput">
+                    <parameter name="fileName"/>
+                    <parameter name="sourceFormat"/>
+                    <parameter name="availableFormats" type="List"/>
+                    <parameter name="preferredDownloadFormat"/>
+                    <parameter name="companyUserGroupId"/>
+                    <parameter name="savedRunId"/>
+                    <parameter name="savedRunName"/>
+                    <parameter name="savedRunType"/>
+                    <parameter name="reconciliationMappingId"/>
+                    <parameter name="mappingName"/>
+                    <parameter name="ruleSetId"/>
+                    <parameter name="compareScopeId"/>
+                    <parameter name="reconciliationType"/>
+                    <parameter name="file1Label"/>
+                    <parameter name="file2Label"/>
+                    <parameter name="totalDifferences" type="Long"/>
+                    <parameter name="onlyInFile1Count" type="Long"/>
+                    <parameter name="onlyInFile2Count" type="Long"/>
+                    <parameter name="createdDate" type="Timestamp"/>
+                    <parameter name="sizeBytes" type="Long"/>
+                </parameter>
+            </parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="list" noun="GeneratedOutputs" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/listGeneratedOutputs.groovy">
+        <description>List generated reconciliation diff outputs within the current active-tenant scope.</description>
+        <in-parameters>
+            <parameter name="savedRunId"/>
             <parameter name="reconciliationMappingId"/>
-            <parameter name="ruleSetId"/>
-            <parameter name="compareScopeId"/>
             <parameter name="query"/>
             <parameter name="pageIndex" type="Integer" default-value="0"/>
             <parameter name="pageSize" type="Integer" default-value="20"/>
@@ -470,32 +1306,28 @@
                 <parameter name="sourceFormat"/>
                 <parameter name="availableFormats" type="List"/>
                 <parameter name="preferredDownloadFormat"/>
-                <parameter name="runType"/>
-                <parameter name="runName"/>
                 <parameter name="companyUserGroupId"/>
+                <parameter name="savedRunId"/>
+                <parameter name="savedRunName"/>
+                <parameter name="savedRunType"/>
                 <parameter name="reconciliationMappingId"/>
                 <parameter name="mappingName"/>
                 <parameter name="ruleSetId"/>
-                <parameter name="ruleSetName"/>
                 <parameter name="compareScopeId"/>
-                <parameter name="compareScopeDescription"/>
-                <parameter name="objectType"/>
                 <parameter name="reconciliationType"/>
                 <parameter name="file1Label"/>
                 <parameter name="file2Label"/>
                 <parameter name="totalDifferences" type="Long"/>
                 <parameter name="onlyInFile1Count" type="Long"/>
                 <parameter name="onlyInFile2Count" type="Long"/>
-                <parameter name="missingObjectDifferenceCount" type="Long"/>
-                <parameter name="ruleDifferenceCount" type="Long"/>
                 <parameter name="createdDate" type="Timestamp"/>
                 <parameter name="sizeBytes" type="Long"/>
             </parameter>
         </out-parameters>
     </service>
 
-    <service verb="get" noun="PilotGeneratedOutput" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/getPilotGeneratedOutput.groovy">
+    <service verb="get" noun="GeneratedOutput" type="script" allow-remote="true" authenticate="true"
+            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/getGeneratedOutput.groovy">
         <description>Retrieve a scoped generated diff output for direct download from darpan-ui.</description>
         <in-parameters>
             <parameter name="fileName" required="true"/>
@@ -511,14 +1343,13 @@
                 <parameter name="sourceFormat"/>
                 <parameter name="format"/>
                 <parameter name="contentType"/>
-                <parameter name="createdDate"/>
                 <parameter name="contentText" allow-html="true"/>
             </parameter>
         </out-parameters>
     </service>
 
-    <service verb="delete" noun="PilotGeneratedOutput" allow-remote="true" authenticate="true">
-        <description>Delete one scoped generated pilot diff output file.</description>
+    <service verb="delete" noun="GeneratedOutput" allow-remote="true" authenticate="true">
+        <description>Delete one scoped generated reconciliation diff output file.</description>
         <in-parameters>
             <parameter name="fileName" required="true"/>
         </in-parameters>
@@ -537,6 +1368,9 @@
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; (fileNameValue.contains('..') || fileNameValue.contains('/') || fileNameValue.indexOf((char) 92) >= 0)">
                 <message error="true">fileName is invalid</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for generated outputs.')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <service-call name="reconciliation.ReconciliationGenericServices.delete#GeneratedOutputFile"

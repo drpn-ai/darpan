@@ -5,31 +5,31 @@ import org.junit.jupiter.api.Test
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertTrue
 
-class PilotDashboardPreferenceSupportTests {
+class ReconciliationDashboardPreferenceSupportTests {
 
     @Test
     void pinnedPreferenceKeyFitsMoquiIdLimit() {
-        assertTrue(PilotDashboardPreferenceSupport.PINNED_MAPPING_PREFERENCE_KEY.size() <= 40)
+        assertTrue(ReconciliationDashboardPreferenceSupport.PINNED_MAPPING_PREFERENCE_KEY.size() <= 40)
     }
 
     @Test
     void parsesPinnedMappingIdsFromStoredJson() {
         assertEquals(
                 ["Map8", "Map1"],
-                PilotDashboardPreferenceSupport.parsePinnedReconciliationMappingIds('["Map8","Map1","Map8"," "]')
+                ReconciliationDashboardPreferenceSupport.parsePinnedReconciliationMappingIds('["Map8","Map1","Map8"," "]')
         )
     }
 
     @Test
     void returnsEmptyListForInvalidStoredJson() {
-        assertEquals([], PilotDashboardPreferenceSupport.parsePinnedReconciliationMappingIds("not-json"))
+        assertEquals([], ReconciliationDashboardPreferenceSupport.parsePinnedReconciliationMappingIds("not-json"))
     }
 
     @Test
     void normalizesIncomingPinnedMappingIds() {
         assertEquals(
                 ["Map8", "Map1"],
-                PilotDashboardPreferenceSupport.normalizePinnedReconciliationMappingIds([" Map8 ", "", "Map1", "Map8", null])
+                ReconciliationDashboardPreferenceSupport.normalizePinnedReconciliationMappingIds([" Map8 ", "", "Map1", "Map8", null])
         )
     }
 
@@ -37,7 +37,7 @@ class PilotDashboardPreferenceSupportTests {
     void filtersPinnedMappingIdsToKnownMappings() {
         assertEquals(
                 ["Map8", "Map1"],
-                PilotDashboardPreferenceSupport.filterPinnedReconciliationMappingIds(["Map8", "Unknown", "Map1"], ["Map8", "Map2", "Map1"] as Set<String>)
+                ReconciliationDashboardPreferenceSupport.filterPinnedReconciliationMappingIds(["Map8", "Unknown", "Map1"], ["Map8", "Map2", "Map1"] as Set<String>)
         )
     }
 }

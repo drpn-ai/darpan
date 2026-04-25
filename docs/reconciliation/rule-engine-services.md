@@ -58,6 +58,7 @@ This document describes the production RuleSet/Rule service contracts used by re
   - `delete#RuleSet`
 - Cache invalidation is tenant-scoped through `RuleEngineSupport`, so XML-backed CRUD and script-backed compile/execute share the same cache entries.
 - Rule parsing supports user-friendly condition text (for example: `status is Pending`).
+- Field-comparison rules may store expression JSON with structured `preActions`, currently entries like `{ "fieldSide": "file1", "action": "STRING_TO_INT" }` or `{ "fieldSide": "file2", "action": "STRING_TO_NUMBER" }`, so generated DRL can normalize selected field values before applying the operator.
 - Generated rules add `_matchedRuleIds` to matched fact maps.
 - Compiled DRL resources are written under a package-aligned resource path so Drools package validation succeeds for tenant-scoped RuleSets.
 

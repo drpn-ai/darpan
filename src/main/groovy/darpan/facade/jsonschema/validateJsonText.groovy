@@ -4,7 +4,7 @@ import com.networknt.schema.JsonSchemaFactory
 import com.networknt.schema.SpecVersion
 import com.networknt.schema.ValidationMessage
 import darpan.facade.common.FacadeSupport
-import darpan.facade.common.PilotAccessSupport
+import darpan.facade.common.TenantAccessSupport
 
 ObjectMapper mapper = new ObjectMapper()
 
@@ -31,7 +31,7 @@ if (!ec.message.hasError()) {
                 .useCache(false)
                 .one()
         }
-        PilotAccessSupport.requireCompanyRecordAccess(ec, schemaRecord, "Schema not found", "Schema is not available in your active company.")
+        TenantAccessSupport.requireTenantRecordAccess(ec, schemaRecord, "Schema not found", "Schema is not available in your active tenant.")
         if (ec.message.hasError()) {
             // error already recorded
         } else {

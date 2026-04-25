@@ -5,8 +5,9 @@ import groovy.json.JsonSlurper
 
 import java.util.Arrays
 
-class PilotDashboardPreferenceSupport {
+class ReconciliationDashboardPreferenceSupport {
     static final String PINNED_MAPPING_PREFERENCE_KEY = "darpan.dashboard.pinnedMappingIds"
+    static final String PINNED_SAVED_RUN_PREFERENCE_KEY = PINNED_MAPPING_PREFERENCE_KEY
 
     static List<String> parsePinnedReconciliationMappingIds(Object rawValue) {
         String normalized = rawValue?.toString()?.trim()
@@ -58,5 +59,33 @@ class PilotDashboardPreferenceSupport {
         )
         ec.user.setPreference(PINNED_MAPPING_PREFERENCE_KEY, JsonOutput.toJson(pinnedMappingIds))
         return pinnedMappingIds
+    }
+
+    static List<String> parsePinnedSavedRunIds(Object rawValue) {
+        return parsePinnedReconciliationMappingIds(rawValue)
+    }
+
+    static List<String> normalizePinnedSavedRunIds(Object rawValue) {
+        return normalizePinnedReconciliationMappingIds(rawValue)
+    }
+
+    static List<String> filterPinnedSavedRunIds(Collection<String> savedRunIds, Collection<String> validSavedRunIds) {
+        return filterPinnedReconciliationMappingIds(savedRunIds, validSavedRunIds)
+    }
+
+    static List<String> listPinnedSavedRunIds(def ec, Collection<String> validSavedRunIds = null) {
+        return filterPinnedSavedRunIds(
+                parsePinnedSavedRunIds(ec?.user?.getPreference(PINNED_SAVED_RUN_PREFERENCE_KEY)),
+                validSavedRunIds
+        )
+    }
+
+    static List<String> savePinnedSavedRunIds(def ec, Object requestedSavedRunIds, Collection<String> validSavedRunIds = null) {
+        List<String> pinnedSavedRunIds = filterPinnedSavedRunIds(
+                normalizePinnedSavedRunIds(requestedSavedRunIds),
+                validSavedRunIds
+        )
+        ec.user.setPreference(PINNED_SAVED_RUN_PREFERENCE_KEY, JsonOutput.toJson(pinnedSavedRunIds))
+        return pinnedSavedRunIds
     }
 }

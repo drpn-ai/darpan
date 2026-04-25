@@ -16,21 +16,22 @@ This document defines backend facade APIs used by `darpan-ui` during the pilot r
 ## Pilot Shared-Tenant Access Scope
 
 - `facade.AuthFacadeServices.login#Session` and `facade.AuthFacadeServices.get#SessionInfo` now return scope metadata inside `sessionInfo`.
-- `scopeType` is `COMPANY` for authenticated sessions, including super-admin sessions.
-- `activeCompanyUserGroupId` identifies the company group the user is currently working in.
-- `activeCompanyLabel` is the display label for that active company.
-- `availableCompanies[]` lists the user's switchable Darpan company groups.
-- `customerScopeId` remains in the payload temporarily as a compatibility alias for `activeCompanyUserGroupId` while downstream company-scoped surfaces are migrated off the older field name.
+- `scopeType` is `TENANT` for authenticated sessions, including super-admin sessions.
+- `activeTenantUserGroupId` identifies the tenant group the user is currently working in.
+- `activeTenantLabel` is the display label for that active tenant.
+- `availableTenants[]` lists the user's switchable Darpan tenant groups.
+- `customerScopeId` remains in the payload as a compatibility alias for `activeTenantUserGroupId`.
 - `isSuperAdmin` is `true` only when the current user belongs to the Moqui `ADMIN` group.
-- The active company preference is stored in `UserPreference` under `darpan.auth.activeCompanyUserGroupId`.
-- Only `UserGroup` rows tagged with the Darpan-specific `UgtDarpanCompany` group type are exposed as switchable companies.
+- The active tenant preference is stored in `UserPreference` under `darpan.auth.activeTenantUserGroupId`.
+- Only `UserGroup` rows tagged with the Darpan-specific `UgtDarpanCompany` group type are exposed as switchable tenants.
 - Current shared-tenant enforcement in this repo applies to:
-  - company-owned facade entities are filtered through Moqui `ArtifactAuthzFilter` / `EntityFilterSet` records bound to the PWA service authz path
-  - the active company is pushed into `ec.user.context.activeCompanyUserGroupId` during request/login setup so those filters apply without per-facade query conditions
-  - Wave 1 settings facades remain split: company-owned records (`SFTP`, `NetSuite auth`, `NetSuite endpoint`) are company-scoped, while global settings (`LLM`, `HcReadDbConfig`, enum/global admin settings) stay super-admin only
-  - Generic reconciliation outputs under `runtime://tmp/reconciliation/generic/**` are company-scoped when an active company exists
+  - tenant-owned facade entities are filtered through Moqui `ArtifactAuthzFilter` / `EntityFilterSet` records bound to the PWA service authz path
+  - the active tenant is pushed into `ec.user.context.activeTenantUserGroupId` during request/login setup so those filters can apply consistently on authenticated facade reads
+  - Wave 1 settings list facades also apply explicit `companyUserGroupId = activeTenantUserGroupId` conditions so connection dashboards do not depend only on artifact-level filters
+  - Wave 1 settings facades remain split: tenant-owned records (`SFTP`, `NetSuite auth`, `NetSuite endpoint`) are tenant-scoped, while global settings (`LLM`, `HcReadDbConfig`, enum/global admin settings) stay super-admin only
+  - Generic reconciliation outputs under `runtime://tmp/reconciliation/generic/**` are tenant-scoped when an active tenant exists
   - Legacy backend reconciliation and settings screens: authenticated super-admin only for the pilot release
-- This auth contract is the foundation for later issues that move the remaining runs/results surfaces onto the same company ownership model.
+- This auth contract is the foundation for later issues that move the remaining runs/results surfaces onto the same tenant ownership model.
 
 ## Artifact Authorization Requirement
 
@@ -48,7 +49,7 @@ The recommended coarse access split is:
 - `DARPAN_FACADE_APP_USER` on `DARPAN_FACADE_APP` for `DARPAN_USER`
 - `DARPAN_FACADE_APP_ADMIN` on `DARPAN_FACADE_APP` for `ADMIN`
 - `DARPAN_APP_ADMIN` on `DARPAN_APP` for the legacy backend screens
-- both facade authz rows should attach the same `ArtifactAuthzFilter` so company-owned facade reads stay scoped to `ec.user.context.activeCompanyUserGroupId` for admins and non-admin users alike
+- both facade authz rows should attach the same `ArtifactAuthzFilter` so tenant-owned facade reads stay scoped to `ec.user.context.activeTenantUserGroupId` for admins and non-admin users alike
 
 Without the dedicated facade authz, authenticated users can still get errors like:
 `User <id> is not authorized for All on Service facade.SettingsFacadeServices.list#SftpServers`.
@@ -58,7 +59,7 @@ Without the dedicated facade authz, authenticated users can still get errors lik
 ### `facade.AuthFacadeServices`
 - `login#Session`
 - `get#SessionInfo`
-- `save#ActiveCompany`
+- `save#ActiveTenant`
 - `logout#Session`
 
 ## Pilot Stateless Auth Behavior
@@ -67,7 +68,7 @@ Without the dedicated facade authz, authenticated users can still get errors lik
 - The frontend must send that token on later requests through the `login_key` request header.
 - Token lifetime is aligned to `user-facade/login-key@expire-hours` from Moqui config. The default remains 144 hours, exposed as `authTokenExpiresInSeconds`.
 - `get#SessionInfo` authenticates from the `login_key` header when present and does not depend on `/Login`, `moquiSessionToken`, or browser session-cookie bootstrap.
-- `save#ActiveCompany` requires an authenticated request, validates that the requested company belongs to the current user, persists that selection in `UserPreference`, and returns refreshed `sessionInfo`.
+- `save#ActiveTenant` requires an authenticated request, validates that the requested tenant belongs to the current user, persists that selection in `UserPreference`, and returns refreshed `sessionInfo`.
 - `logout#Session` revokes the matching `moqui.security.UserLoginKey` and terminates the authenticated session.
 - The UI contract is intentionally small: `authenticated`, `sessionInfo`, and the explicit token fields returned from `login#Session`.
 
@@ -86,8 +87,10 @@ Without the dedicated facade authz, authenticated users can still get errors lik
 
 Shared-tenant rule:
 
-- `list#SftpServers`, `save#SftpServer`, `list#NsAuthConfigs`, `save#NsAuthConfig`, `list#NsRestletConfigs`, and `save#NsRestletConfig` are company-scoped through `companyUserGroupId`.
+- `list#SftpServers`, `save#SftpServer`, `list#NsAuthConfigs`, `save#NsAuthConfig`, `list#NsRestletConfigs`, and `save#NsRestletConfig` are tenant-scoped through `companyUserGroupId`.
+- the three list services now explicitly query the active tenant in addition to the shared `ArtifactAuthzFilter`, so saved settings pages only receive rows that match the current tenant selection.
 - `list#EnumOptions`, `get#LlmSettings`, `save#LlmSettings`, `list#HcReadDbConfigs`, and `save#HcReadDbConfig` remain super-admin only.
+- `list#EnumOptions` now deduplicates `DarpanSystemSource` rows by logical system code and prefers canonical enum ids such as `OMS` over legacy duplicates such as `DarSysOms`.
 
 ### `facade.JsonSchemaFacadeServices`
 - `list#JsonSchemas`
@@ -103,13 +106,16 @@ Shared-tenant rule:
 
 - JSON schemas created through the facade are stamped with `companyUserGroupId` and `createdByUserId`.
 - Schema payloads now expose `systemEnumId`/`systemLabel` directly from `DarpanSystemSource`.
-- Authenticated users, including super-admin users, can only list, load, update, validate against, flatten, and delete schemas in their active company.
+- Authenticated users, including super-admin users, can only list, load, update, validate against, flatten, and delete schemas in their active tenant.
+- `list#JsonSchemas` now excludes legacy unscoped rows and cross-tenant rows that `get#JsonSchema` would reject, so the library only shows schemas the active tenant can actually open.
 - Legacy rows without `companyUserGroupId` remain effectively admin-only until they are assigned.
 
 ### `facade.ReconciliationFacadeServices`
+- `create#RuleSetRun`
+- `save#RuleSetRun`
+- `create#CsvRun`
 - `create#PilotMapping`
 - `list#PilotMappings`
-- `list#PilotRuleSetCompareScopes`
 - `get#PilotMapping`
 - `save#PilotMapping`
 - `save#DashboardPinnedMappings`
@@ -120,18 +126,26 @@ Shared-tenant rule:
 
 Pilot release contract notes:
 
+- `create#RuleSetRun` creates a tenant-scoped saved run backed by one `RuleSet`, one `RuleSetCompareScope`, two `RuleSetCompareSource` rows, and zero or more initial rules. This is the create-flow contract when the UI needs to define the run and its RuleSet during setup.
+- `save#RuleSetRun` updates an existing RuleSet-backed saved run: display name, description, the two compare sources, schema filenames, primary ID expressions, and, when `rules` is provided, the child `Rule` rows before recompiling the RuleSet.
+- Rule payload expression JSON may include structured `preActions`, with each entry identifying a `fieldSide` (`file1` or `file2`) and an `action` such as `STRING_TO_INT` or `STRING_TO_NUMBER`; those are returned with saved-run rule summaries so the rule-maker UI can reopen the same per-field pre-operator normalization choices.
+- `create#RuleSetRun` must allow a basic-diff-only saved run with no initial DRL. In that case the saved run executes only the base missing-object and matched-pair compare stages until rules are added later.
+- `create#RuleSetRun` no longer asks the user for a compared-object type and does not stamp a hidden default. New compare scopes are created without an `objectType` value unless later internal logic sets one explicitly.
+- `create#RuleSetRun` and `create#CsvRun` also repair stale local database contracts where `RuleSetCompareScope.OBJECT_TYPE` is still `NOT NULL`, so create-flow inserts stay compatible with older developer databases after the field became optional.
+- For JSON sources, `create#RuleSetRun` now expects a saved schema name (`file1SchemaFileName` / `file2SchemaFileName`) plus a schema-backed ID field path. The create flow should not ask the user for a free-form JSON record-root step.
+- `create#CsvRun` remains the narrow quick-create path for CSV compare-column setups, but it is no longer the only intended run-creation contract.
+- `delete#SavedRun` deletes one tenant-scoped saved run by `savedRunId`. For RuleSet-backed runs it deletes generated outputs, `RuleSetCompareSource`, `RuleSetCompareScope`, child `Rule`, and `RuleSet` records. For mapping-backed runs it deletes generated outputs, mapping members, and the mapping.
 - `create#PilotMapping` accepts two saved schema IDs plus selected field paths and persists a JSON-backed pilot mapping using `ReconciliationMapping` and `ReconciliationMappingMember`.
 - `create#PilotMapping` normalizes schema-flattener field paths into pilot-safe JSON ID expressions so newly-created mappings remain visible in `list#PilotMappings` and executable by the mapping-backed run flow.
 - `get#PilotMapping` only returns saved mappings whose members still resolve to saved schemas, and includes the editable schema IDs/names needed by the PWA runs settings workflow.
 - `save#PilotMapping` updates an existing two-source mapping from the PWA runs settings workflow and preserves the existing mapping/member record IDs while refreshing schema and field selections.
-- The active Generic pilot workflow now defaults to RuleSet compare scopes. The facade keeps `reconciliationMappingId` only as a temporary bridge for older launch points while the rest of the cutover lands.
+- The active pilot remains mapping-based for this release. The facade contract uses `reconciliationMappingId` rather than `ruleSetId`.
 - `list#PilotMappings` now also returns `pinnedReconciliationMappingIds`, a user-scoped ordered list of saved dashboard pins backed by Moqui `UserPreference`.
-- `list#PilotRuleSetCompareScopes` returns the RuleSet, compare-scope, object-type, file-side system labels, and primary-ID expressions the PWA needs to drive the RuleSet selector flow.
 - `save#DashboardPinnedMappings` accepts `pinnedReconciliationMappingIds` and persists that ordered list for the authenticated user, so pinned runs survive browser/profile/origin changes after login.
-- `run#PilotGenericDiff` is JSON-RPC friendly for `darpan-ui`; it accepts `file1Name`/`file1Text` and `file2Name`/`file2Text`, and now supports either `ruleSetId` plus optional `compareScopeId` or legacy `reconciliationMappingId`.
-- `list#PilotGeneratedOutputs` accepts optional `reconciliationMappingId`, `ruleSetId`, and `compareScopeId`, and filters saved outputs against the stored metadata for that run scope.
+- `run#PilotGenericDiff` is JSON-RPC friendly for `darpan-ui`; it accepts `file1Name`/`file1Text` and `file2Name`/`file2Text` instead of raw multipart `FileItem` uploads.
+- `list#PilotGeneratedOutputs` accepts optional `reconciliationMappingId` and only returns generated outputs whose stored metadata matches that mapping when the filter is provided.
 - The underlying reconciliation engine still writes a scoped JSON diff file under `runtime://tmp/reconciliation/generic/**`.
-- `get#PilotGeneratedOutput` can return that stored JSON directly or convert it to CSV on demand for the pilot UI download action, and now also returns a stable file-backed `createdDate` so the PWA result page does not depend on parsing raw `Timestamp.toString()` metadata.
+- `get#PilotGeneratedOutput` can return that stored JSON directly or convert it to CSV on demand for the pilot UI download action.
 
 Shared-tenant rule:
 
@@ -139,8 +153,8 @@ Shared-tenant rule:
 - `create#PilotMapping` lets authenticated pilot users create a new JSON-backed mapping from schemas they can access through the facade.
 - All pilot mappings must keep saved schemas on every member; mappings that lose those saved-schema references are excluded from list/edit/run flows until fixed.
 - `list#PilotMappings` tolerates legacy display-format JSON field paths already saved by the wizard so existing mappings are not hidden from the dashboard.
-- Generated output storage resolves through the active company so list/get/delete only touch the current company-scoped output directory.
-- Super-admin sessions still retain admin capabilities, but company-sensitive output access now follows the same active-company selection when company memberships exist.
+- Generated output storage resolves through the active tenant so list/get/delete only touch the current tenant-scoped output directory.
+- Super-admin sessions still retain admin capabilities, but tenant-sensitive output access now follows the same active-tenant selection when tenant memberships exist.
 
 ## Response Envelope
 
@@ -196,11 +210,11 @@ Settings list success shape:
       "username": "pilot.user",
       "locale": "en-US",
       "timeZone": "Asia/Kolkata",
-      "scopeType": "COMPANY",
+      "scopeType": "TENANT",
       "customerScopeId": "KREWE",
-      "activeCompanyUserGroupId": "KREWE",
-      "activeCompanyLabel": "Krewe",
-      "availableCompanies": [
+      "activeTenantUserGroupId": "KREWE",
+      "activeTenantLabel": "Krewe",
+      "availableTenants": [
         {
           "userGroupId": "ACME",
           "label": "Acme"
@@ -230,10 +244,10 @@ Login response example with explicit auth token:
     "sessionInfo": {
       "userId": "EXAMPLE_USER",
       "username": "pilot.user",
-      "scopeType": "COMPANY",
+      "scopeType": "TENANT",
       "customerScopeId": "KREWE",
-      "activeCompanyUserGroupId": "KREWE",
-      "activeCompanyLabel": "Krewe"
+      "activeTenantUserGroupId": "KREWE",
+      "activeTenantLabel": "Krewe"
     },
     "authToken": "plain-login-key-value",
     "authTokenType": "LOGIN_KEY",

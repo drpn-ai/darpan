@@ -1,7 +1,7 @@
 import darpan.facade.common.FacadeSupport
-import darpan.facade.common.PilotAccessSupport
-import darpan.facade.reconciliation.PilotDashboardPreferenceSupport
-import darpan.facade.reconciliation.PilotMappingSupport
+import darpan.facade.common.TenantAccessSupport
+import darpan.facade.reconciliation.ReconciliationDashboardPreferenceSupport
+import darpan.facade.reconciliation.ReconciliationMappingSupport
 
 int page = Math.max(0, FacadeSupport.normalizeInt(pageIndex, 0))
 int size = Math.max(1, Math.min(200, FacadeSupport.normalizeInt(pageSize, 20)))
@@ -26,8 +26,8 @@ def mappingFinder = ec.entity.find("darpan.mapping.ReconciliationMapping")
             .condition("reconciliationMappingId", mapping.reconciliationMappingId)
             .useCache(false)
             .list() ?: []
-    List<String> pilotReadinessIssues = PilotMappingSupport.collectPilotReadinessIssues(ec, mappingMembers)
-    if (pilotReadinessIssues.isEmpty()) {
+    List<String> mappingReadinessIssues = ReconciliationMappingSupport.collectReadinessIssues(ec, mappingMembers)
+    if (mappingReadinessIssues.isEmpty()) {
         List<Map> systemOptions = mappingMembers.collect { member ->
             def systemEnum = findEnum(member.systemEnumId as String)
             def fileTypeEnum = findEnum(member.fileTypeEnumId as String)
@@ -54,7 +54,7 @@ def mappingFinder = ec.entity.find("darpan.mapping.ReconciliationMapping")
                 mappingName             : mapping.mappingName,
                 description             : mapping.description,
                 companyUserGroupId      : mapping.companyUserGroupId,
-                companyLabel            : PilotAccessSupport.resolveCompanyLabelForUserGroupId(ec, mapping.companyUserGroupId),
+                companyLabel            : TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, mapping.companyUserGroupId),
                 requiresSystemSelection : systemIds.size() != 2,
                 defaultFile1SystemEnumId: systemIds.size() >= 2 ? systemIds[0] : null,
                 defaultFile2SystemEnumId: systemIds.size() >= 2 ? systemIds[1] : null,
@@ -80,7 +80,7 @@ int totalCount = rows.size()
 int fromIndex = Math.min(page * size, totalCount)
 int toIndex = Math.min(fromIndex + size, totalCount)
 mappings = rows.subList(fromIndex, toIndex)
-pinnedReconciliationMappingIds = PilotDashboardPreferenceSupport.listPinnedReconciliationMappingIds(ec, availableMappingIds)
+pinnedReconciliationMappingIds = ReconciliationDashboardPreferenceSupport.listPinnedReconciliationMappingIds(ec, availableMappingIds)
 pagination = [
         pageIndex : page,
         pageSize  : size,

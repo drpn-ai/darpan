@@ -37,6 +37,7 @@
             <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
             <set field="overwriteMode" from="darpan.facade.common.FacadeSupport.normalizeBool(overwrite, false)"/>
             <set field="nameToSave" from="darpan.facade.common.FacadeSupport.normalize(schemaName) ?: schemaUpload.fileName"/>
+            <set field="displayDescriptionValue" from="descriptionValue ?: nameToSave"/>
             <if condition="schemaUpload.error">
                 <message error="true">${schemaUpload.error}</message>
             </if>
@@ -54,7 +55,7 @@
                 </if>
                 <if condition="existingSchema == null">
                     <service-call name="create#darpan.reconciliation.JsonSchema"
-                            in-map="[schemaName: finalName, schemaText: schemaUpload.text, description: descriptionValue, statusId: 'Active']"
+                            in-map="[schemaName: finalName, schemaText: schemaUpload.text, description: displayDescriptionValue, statusId: 'Active']"
                             out-map="createSchemaResult"/>
                     <set field="jsonSchemaId" from="createSchemaResult.jsonSchemaId"/>
                 </if>

@@ -138,6 +138,7 @@
             <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
             <set field="schemaIdValue" from="darpan.facade.common.FacadeSupport.normalize(jsonSchemaId)"/>
             <set field="requestedSystemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(systemEnumId)"/>
+            <set field="displayDescriptionValue" from="descriptionValue ?: schemaNameValue"/>
             <set field="overwriteMode" from="darpan.facade.common.FacadeSupport.normalizeBool(overwrite, false)"/>
             <set field="hasSystemEnumIdInput" from="context.containsKey('systemEnumId')"/>
             <set field="systemEnumIdValue" from="hasSystemEnumIdInput ? requestedSystemEnumIdValue : null"/>
@@ -182,7 +183,7 @@
                 <set field="savedSchemaEntity" from="existingSchema"/>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; !existingSchema">
-                <set field="newSchemaMap" from="[schemaName: resolvedName, schemaText: schemaTextValue, description: descriptionValue, systemEnumId: systemEnumIdValue, statusId: 'Active', createdDate: ec.user.nowTimestamp, lastUpdatedStamp: ec.user.nowTimestamp]"/>
+                <set field="newSchemaMap" from="[schemaName: resolvedName, schemaText: schemaTextValue, description: displayDescriptionValue, systemEnumId: systemEnumIdValue, statusId: 'Active', createdDate: ec.user.nowTimestamp, lastUpdatedStamp: ec.user.nowTimestamp]"/>
                 <set field="ignoreCompanyAssignment" from="darpan.facade.common.PilotAccessSupport.assignCompanyOwnershipOnCreate(newSchemaMap, ec)"/>
                 <if condition="!ec.message.hasError()">
                     <service-call name="create#darpan.reconciliation.JsonSchema" in-map="newSchemaMap" out-map="createSchemaResult"/>

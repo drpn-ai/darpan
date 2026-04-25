@@ -262,6 +262,7 @@ schemaMap.title = finalSchemaName
 
 String schemaJson = JsonOutput.toJson(schemaMap)
 String descriptionText = normalizeString(description)
+String createDescriptionText = descriptionText ?: requestedSchemaName
 boolean hasDescriptionInput = description != null
 
 if (existingSchema) {
@@ -276,7 +277,7 @@ if (existingSchema) {
     def newSchema = ec.entity.makeValue("darpan.reconciliation.JsonSchema")
     newSchema.schemaName = finalSchemaName
     newSchema.schemaText = schemaJson
-    newSchema.description = descriptionText
+    newSchema.description = createDescriptionText
     newSchema.systemEnumId = resolvedSystemEnumId
     newSchema.statusId = "Active"
     newSchema.createdDate = ec.user.nowTimestamp

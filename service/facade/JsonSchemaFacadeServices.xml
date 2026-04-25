@@ -37,11 +37,12 @@
             <set field="pageIndexSafe" from="Math.max(0, darpan.facade.common.FacadeSupport.normalizeInt(pageIndex, 0))"/>
             <set field="pageSizeSafe" from="Math.max(1, Math.min(200, darpan.facade.common.FacadeSupport.normalizeInt(pageSize, 20)))"/>
             <set field="searchLower" from="darpan.facade.common.FacadeSupport.normalize(query)?.toLowerCase()"/>
+            <set field="activeCompanyUserGroupId" from="darpan.facade.common.PilotAccessSupport.currentActiveCompanyUserGroupId(ec)"/>
             <set field="schemas" from="[]"/>
             <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
             <set field="ignoreTableEnsure" from="jsonschema.common.JsonSchemaUtil.ensureJsonSchemaTable(ec)"/>
             <set field="schemaFinder" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('statusId', 'Active').orderBy('-lastUpdatedStamp').useCache(false)"/>
-            <set field="rows" from="(schemaFinder.list() ?: []).collect { item -> [jsonSchemaId: item.jsonSchemaId, schemaName: item.schemaName, description: item.description, systemEnumId: darpan.facade.common.FacadeSupport.normalize(item.systemEnumId), systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, item.systemEnumId, null, true), companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.PilotAccessSupport.resolveCompanyLabelForUserGroupId(ec, item.companyUserGroupId), createdByUserId: item.createdByUserId, statusId: item.statusId, createdDate: item.createdDate, lastUpdatedStamp: item.lastUpdatedStamp] }"/>
+            <set field="rows" from="(activeCompanyUserGroupId ? schemaFinder.condition('companyUserGroupId', activeCompanyUserGroupId).list() : []).collect { item -> [jsonSchemaId: item.jsonSchemaId, schemaName: item.schemaName, description: item.description, systemEnumId: darpan.facade.common.FacadeSupport.normalize(item.systemEnumId), systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, item.systemEnumId, null, true), companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.PilotAccessSupport.resolveCompanyLabelForUserGroupId(ec, item.companyUserGroupId), createdByUserId: item.createdByUserId, statusId: item.statusId, createdDate: item.createdDate, lastUpdatedStamp: item.lastUpdatedStamp] }"/>
             <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.schemaName, row.description].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
             <set field="totalCount" from="filteredRows.size()"/>
             <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>

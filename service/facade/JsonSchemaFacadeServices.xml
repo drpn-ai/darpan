@@ -73,7 +73,7 @@
                 <parameter name="ownerUserId"/>
                 <parameter name="companyUserGroupId"/>
                 <parameter name="createdByUserId"/>
-                <parameter name="schemaText" allow-html="true"/>
+                <parameter name="schemaText" allow-html="any"/>
                 <parameter name="statusId"/>
                 <parameter name="createdDate" type="Timestamp"/>
                 <parameter name="lastUpdatedStamp" type="Timestamp"/>
@@ -112,7 +112,7 @@
             <parameter name="schemaName"/>
             <parameter name="description"/>
             <parameter name="systemEnumId"/>
-            <parameter name="schemaText" required="true" allow-html="true"/>
+            <parameter name="schemaText" required="true" allow-html="any"/>
             <parameter name="overwrite" type="Boolean" default-value="false"/>
         </in-parameters>
         <out-parameters>
@@ -204,13 +204,13 @@
             location="component://darpan/src/main/groovy/darpan/facade/jsonschema/inferJsonSchemaFromText.groovy">
         <description>Infer schema from JSON text and return flattened editor field rows.</description>
         <in-parameters>
-            <parameter name="jsonText" required="true" allow-html="true"/>
+            <parameter name="jsonText" required="true" allow-html="any"/>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages"><parameter name="message"/></parameter>
             <parameter name="errors"><parameter name="error"/></parameter>
-            <parameter name="jsonSchemaString" allow-html="true"/>
+            <parameter name="jsonSchemaString" allow-html="any"/>
             <parameter name="fieldList" type="List"/>
         </out-parameters>
     </service>
@@ -219,7 +219,7 @@
             location="component://darpan/src/main/groovy/darpan/facade/jsonschema/validateJsonText.groovy">
         <description>Validate JSON text against a saved schema.</description>
         <in-parameters>
-            <parameter name="jsonText" required="true" allow-html="true"/>
+            <parameter name="jsonText" required="true" allow-html="any"/>
             <parameter name="jsonSchemaId"/>
             <parameter name="schemaName"/>
         </in-parameters>
@@ -243,7 +243,7 @@
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages"><parameter name="message"/></parameter>
             <parameter name="errors"><parameter name="error"/></parameter>
-            <parameter name="jsonSchemaString" allow-html="true"/>
+            <parameter name="jsonSchemaString" allow-html="any"/>
             <parameter name="fieldList" type="List"/>
         </out-parameters>
         <actions>

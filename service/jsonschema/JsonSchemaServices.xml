@@ -70,7 +70,7 @@
             <parameter name="jsonSchemaId"/>
             <parameter name="filename"/><!-- Deprecated -->
             <parameter name="schemaName"/>
-            <parameter name="jsonText" required="true" allow-html="true"/>
+            <parameter name="jsonText" required="true" allow-html="any"/>
         </in-parameters>
         <out-parameters>
             <parameter name="jsonSchemaId"/>
@@ -111,7 +111,7 @@
         </in-parameters>
         <out-parameters>
             <parameter name="resultList" type="List"/>
-            <parameter name="jsonSchemaString"/>
+            <parameter name="jsonSchemaString" allow-html="any"/>
         </out-parameters>
     </service>
 
@@ -216,7 +216,7 @@
         </in-parameters>
         <out-parameters>
             <parameter name="fieldList" type="List"/>
-            <parameter name="jsonSchemaString"/>
+            <parameter name="jsonSchemaString" allow-html="any"/>
         </out-parameters>
     </service>
 

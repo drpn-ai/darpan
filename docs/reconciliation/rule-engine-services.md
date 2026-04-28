@@ -14,7 +14,7 @@ This document describes the production RuleSet/Rule service contracts used by re
   - `runtime/component/darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy`
   - `compile#RuleSet`
   - `execute#RuleSet`
-  - `execute#RuleSetJson`
+  - `execute#RuleSetMatchedPairs`
   - `save#Rule`
 - Shared helper for cache and ID orchestration:
   - `runtime/component/darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineSupport.groovy`
@@ -27,9 +27,6 @@ This document describes the production RuleSet/Rule service contracts used by re
 - `reconciliation.ReconciliationRuleEngineServices.execute#RuleSet`
   - Inputs: `ruleSetId`, `dataList` (`List`), `returnAllFacts` (default `false`)
   - Outputs: `results`, `matchedResults`, `firedRuleCount`, `ruleCount`, `warnings`, `error`
-- `reconciliation.ReconciliationRuleEngineServices.execute#RuleSetJson`
-  - Inputs: `ruleSetId`, `jsonData`, `returnAllFacts` (default `false`)
-  - Outputs: same as `execute#RuleSet`
 - `reconciliation.ReconciliationRuleEngineServices.execute#RuleSetMatchedPairs`
   - Inputs: `ruleSetId`, `dataList` (`List` of matched-pair facts), `returnAllFacts` (default `false`)
   - Outputs: `diffResults`, `matchedResults`, `firedRuleCount`, `ruleCount`, `warnings`, `error`
@@ -61,6 +58,15 @@ This document describes the production RuleSet/Rule service contracts used by re
 - Field-comparison rules may store expression JSON with structured `preActions`, currently entries like `{ "fieldSide": "file1", "action": "STRING_TO_INT" }` or `{ "fieldSide": "file2", "action": "STRING_TO_NUMBER" }`, so generated DRL can normalize selected field values before applying the operator.
 - Generated rules add `_matchedRuleIds` to matched fact maps.
 - Compiled DRL resources are written under a package-aligned resource path so Drools package validation succeeds for tenant-scoped RuleSets.
+- RuleSet execution services are file type agnostic. Callers must parse CSV, JSON, or other source payloads into compare-ready `dataList` facts before calling `execute#RuleSet` or `execute#RuleSetMatchedPairs`.
+
+Example generic execution call:
+
+```xml
+<service-call name="reconciliation.ReconciliationRuleEngineServices.execute#RuleSet"
+        in-map="[ruleSetId:ruleSetId, dataList:dataList, returnAllFacts:false]"
+        out-map="executionOut"/>
+```
 
 ## Matched-pair contract
 

@@ -27,19 +27,43 @@
 
     <transition name="testRules">
         <actions>
-            <service-call name="reconciliation.ReconciliationRuleEngineServices.execute#RuleSetJson" in-map="[ruleSetId:ruleSetId, jsonData:jsonData, returnAllFacts:returnAllFacts]" out-map="testOut"/>
+            <script><![CDATA[
+                context.testOut = null
+                context.testReturnAllFacts = false
+                if (returnAllFacts instanceof Boolean) {
+                    context.testReturnAllFacts = (Boolean) returnAllFacts
+                } else if (returnAllFacts != null) {
+                    String rawReturnAll = returnAllFacts.toString().trim().toLowerCase()
+                    context.testReturnAllFacts = ["y", "yes", "true", "1"].contains(rawReturnAll)
+                }
+
+                context.testDataList = []
+                String rawJsonData = jsonData?.toString()?.trim()
+                if (rawJsonData) {
+                    try {
+                        Object parsed = new groovy.json.JsonSlurper().parseText(rawJsonData)
+                        if (parsed instanceof List) {
+                            context.testDataList = (parsed as List).collect { Object row ->
+                                (row instanceof Map) ? new LinkedHashMap((Map) row) : [value: row]
+                            }
+                        } else if (parsed instanceof Map) {
+                            context.testDataList = [new LinkedHashMap((Map) parsed)]
+                        } else {
+                            context.testDataList = [[value: parsed]]
+                        }
+                    } catch (Exception e) {
+                        context.testOut = [error: "Invalid test data JSON: ${e.message}"]
+                    }
+                }
+            ]]></script>
+            <if condition="!testOut">
+                <service-call name="reconciliation.ReconciliationRuleEngineServices.execute#RuleSet" in-map="[ruleSetId:ruleSetId, dataList:testDataList, returnAllFacts:testReturnAllFacts]" out-map="testOut"/>
+            </if>
             <script><![CDATA[
                 String sessionKey = "ruleEngineTestOut_" + ruleSetId
-                boolean returnAll = false
-                if (returnAllFacts instanceof Boolean) {
-                    returnAll = (Boolean) returnAllFacts
-                } else if (returnAllFacts != null) {
-                    String raw = returnAllFacts.toString().trim().toLowerCase()
-                    returnAll = ["y", "yes", "true", "1"].contains(raw)
-                }
                 Map sessionPayload = [
                         jsonData      : jsonData,
-                        returnAllFacts: returnAll,
+                        returnAllFacts: testReturnAllFacts,
                         results       : (testOut.results ?: []),
                         matchedResults: (testOut.matchedResults ?: []),
                         warnings      : (testOut.warnings ?: []),

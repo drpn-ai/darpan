@@ -1,6 +1,5 @@
 package reconciliation.rule
 
-import groovy.json.JsonSlurper
 import groovy.transform.Field
 import org.kie.api.KieServices
 import org.kie.api.builder.KieBuilder
@@ -342,34 +341,6 @@ def executeRuleSet() {
 
 def executeRules() {
     return executeRuleSet()
-}
-
-def executeRuleSetJson() {
-    String jsonData = normalize(context.jsonData)
-    if (!jsonData) {
-        context.dataList = []
-        context.returnAllFacts = normalizeBool(context.returnAllFacts, false)
-        return executeRuleSet()
-    }
-
-    try {
-        Object parsed = new JsonSlurper().parseText(jsonData)
-        List<Map> dataList = []
-        if (parsed instanceof List) {
-            dataList = (parsed as List).collect { Object row ->
-                (row instanceof Map) ? new LinkedHashMap((Map) row) : [value: row]
-            }
-        } else if (parsed instanceof Map) {
-            dataList.add(new LinkedHashMap((Map) parsed))
-        } else {
-            dataList.add([value: parsed])
-        }
-        context.dataList = dataList
-        context.returnAllFacts = normalizeBool(context.returnAllFacts, false)
-        return executeRuleSet()
-    } catch (Exception e) {
-        return [error: "Invalid JSON Data: ${e.message}"]
-    }
 }
 
 def executeRuleSetMatchedPairs() {

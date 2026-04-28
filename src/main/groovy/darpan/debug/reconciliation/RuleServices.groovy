@@ -274,31 +274,3 @@ def executeRules() {
         return [error: "Rule execution failed: ${e.message}"]
     }
 }
-
-def executeRuleSetJson() {
-    String jsonData = normalize(context.jsonData)
-    if (!jsonData) {
-        context.dataList = []
-        context.returnAllFacts = normalizeBool(context.returnAllFacts, false)
-        return executeRules()
-    }
-
-    try {
-        Object parsed = new groovy.json.JsonSlurper().parseText(jsonData)
-        List<Map> dataList = []
-        if (parsed instanceof List) {
-            dataList = (parsed as List).collect { Object row ->
-                (row instanceof Map) ? (Map) row : [value: row]
-            }
-        } else if (parsed instanceof Map) {
-            dataList.add(parsed as Map)
-        } else {
-            dataList.add([value: parsed])
-        }
-        context.dataList = dataList
-        context.returnAllFacts = normalizeBool(context.returnAllFacts, false)
-        return executeRules()
-    } catch (Exception e) {
-        return [error: "Invalid JSON Data: ${e.message}"]
-    }
-}

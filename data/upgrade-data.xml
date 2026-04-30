@@ -2,7 +2,8 @@
 <!--
 Current release-scoped upgrade data for Darpan.
 
-This file is the load target for ./gradlew loadDarpanUpgradeData.
+This file is the Docker startup load target for MoquiStart load with
+types=darpan-seed and location=component://darpan/data/upgrade-data.xml.
 During release preflight, the existing file is archived under
 data/releases/<previous-version>/upgrade-data.xml and this file is replaced
 with the upgrade records for the tag being prepared.

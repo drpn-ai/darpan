@@ -36,7 +36,7 @@
 - Backend checks complete: yes. `:runtime:component:darpan:compileGroovy` passed through `run_backend_checks.sh`.
 - File-path persistence checks complete: yes. On `2026-04-29`, focused backend tests passed for `DataManagerSupportTests`, `ReconciliationOutputSupportTests`, and `GenericReconciliationServiceSmokeTests`.
 - Current serial backend compile complete: yes. On `2026-04-29`, `./gradlew :runtime:component:darpan:compileGroovy` passed.
-- Docker entrypoint upgrade-data hook complete: yes. `docker/entrypoint.sh` runs `./gradlew loadDarpanUpgradeData` before starting Moqui unless `DARPAN_LOAD_UPGRADE_DATA=N`.
+- Docker entrypoint upgrade-data hook complete: yes. `docker/entrypoint.sh` runs MoquiStart `load` from the expanded WAR before starting Moqui unless `DARPAN_LOAD_UPGRADE_DATA=N`.
 - UI checks complete: no.
 - Release-pack validation complete: attempted; blocked because open release issues are not zero and final ref-based upgrade-data validation requires committed refs.
 - Upgrade XML well-formedness checked: yes.

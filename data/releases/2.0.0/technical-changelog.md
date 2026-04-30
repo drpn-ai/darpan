@@ -69,7 +69,7 @@ This file is the engineer-facing companion to the user release notes. Keep it cu
 - Candidate upgrade records live in `upgrade-data-review.md` and `upgrade-data.xml`.
 - `SecuritySeedData.xml` is the source of truth for Darpan facade access, active-company filtering, tenant group types, and reusable tenant permission groups.
 - `upgrade-data.xml` excludes smoke-test fixtures and demo tenant/user memberships from production upgrade data.
-- Docker startup now invokes `./gradlew loadDarpanUpgradeData` before Moqui starts, with `DARPAN_LOAD_UPGRADE_DATA=N` available as an opt-out.
+- Docker startup now invokes MoquiStart `load` from the expanded WAR before Moqui starts, with `DARPAN_LOAD_UPGRADE_DATA=N` available as an opt-out.
 - UI package and lockfile versions are set to `2.0.0` for local candidate testing.
 
 ## Validation and rollout notes

@@ -38,7 +38,7 @@ Release `2.0.0` covers:
 
 - Backend facade access now depends on the Darpan facade artifact group and active-company entity filter setup introduced after `1.1.1`.
 - Run artifacts are written under `runtime://datamanager/reconciliation-runs/{runId}/{timestamp}/`; the source and result relative paths are stored on `ReconciliationRunResult` as `file1DataManagerPath`, `file2DataManagerPath`, and `resultDataManagerPath`.
-- The Docker entrypoint runs `./gradlew loadDarpanUpgradeData` before Moqui starts so approved current upgrade data is loaded during container startup; set `DARPAN_LOAD_UPGRADE_DATA=N` to skip that startup load when an environment manages upgrades separately.
+- The Docker entrypoint runs MoquiStart `load` from the expanded WAR before Moqui starts so approved current upgrade data is loaded during container startup; set `DARPAN_LOAD_UPGRADE_DATA=N` to skip that startup load when an environment manages upgrades separately.
 - Tenant/company group types, reusable tenant permission groups, and active-company preference keys are part of the candidate data review.
 - The production upgrade data excludes RuleSet compare-scope smoke fixtures and demo tenant/user memberships.
 - UI and backend should ship together because the frontend now assumes active-company/session contracts and saved-run/ruleset result contracts that are not present in `1.1.1`.

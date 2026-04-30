@@ -23,7 +23,14 @@ $SLEEP
 
 if [ "${DARPAN_LOAD_UPGRADE_DATA:-Y}" != "N" ]; then
   echo "Loading Darpan upgrade data"
-  (cd /moqui-framework && ./gradlew loadDarpanUpgradeData)
+  DARPAN_UPGRADE_DATA_TYPES="${DARPAN_UPGRADE_DATA_TYPES:-darpan-seed}"
+  DARPAN_UPGRADE_DATA_LOCATION="${DARPAN_UPGRADE_DATA_LOCATION:-component://darpan/data/upgrade-data.xml}"
+  load_args=(load "conf=$CONF_FILE" "types=$DARPAN_UPGRADE_DATA_TYPES" "location=$DARPAN_UPGRADE_DATA_LOCATION")
+  if [ -n "${DARPAN_UPGRADE_DATA_LOAD_ARGS:-}" ]; then
+    extra_load_args=($DARPAN_UPGRADE_DATA_LOAD_ARGS)
+    load_args+=("${extra_load_args[@]}")
+  fi
+  (cd /moqui-deploy && java $JAVA_OPTS -cp . MoquiStart "${load_args[@]}")
 fi
 
 screen -dmS Moqui java $JAVA_OPTS -cp . MoquiStart port=8080 conf=$CONF_FILE

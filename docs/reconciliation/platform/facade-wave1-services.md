@@ -29,7 +29,7 @@ This document defines backend facade APIs used by `darpan-ui` during the pilot r
   - the active tenant is pushed into `ec.user.context.activeTenantUserGroupId` during request/login setup so those filters can apply consistently on authenticated facade reads
   - Wave 1 settings list facades also apply explicit `companyUserGroupId = activeTenantUserGroupId` conditions so connection dashboards do not depend only on artifact-level filters
   - Wave 1 settings facades remain split: tenant-owned records (`SFTP`, `NetSuite auth`, `NetSuite endpoint`) are tenant-scoped, while global settings (`LLM`, `HcReadDbConfig`, enum/global admin settings) stay super-admin only
-  - Generic reconciliation outputs under `runtime://tmp/reconciliation/generic/**` are tenant-scoped when an active tenant exists
+  - Generic reconciliation outputs under `runtime://datamanager/reconciliation-runs/**` are filtered by generated-output metadata for the active tenant; legacy tmp outputs remain tenant-scoped by folder path during migration
   - Legacy backend reconciliation and settings screens: authenticated super-admin only for the pilot release
 - This auth contract is the foundation for later issues that move the remaining runs/results surfaces onto the same tenant ownership model.
 
@@ -90,6 +90,7 @@ Shared-tenant rule:
 - `list#SftpServers`, `save#SftpServer`, `list#NsAuthConfigs`, `save#NsAuthConfig`, `list#NsRestletConfigs`, and `save#NsRestletConfig` are tenant-scoped through `companyUserGroupId`.
 - the three list services now explicitly query the active tenant in addition to the shared `ArtifactAuthzFilter`, so saved settings pages only receive rows that match the current tenant selection.
 - `list#EnumOptions`, `get#LlmSettings`, `save#LlmSettings`, `list#HcReadDbConfigs`, and `save#HcReadDbConfig` remain super-admin only.
+- `HcReadDbConfig` is intentionally global/admin-only in this phase, not active-tenant scoped. It stores external read-database connection settings that may be shared by runtime jobs, so non-admin tenant users cannot list or save those records through the facade.
 - `list#EnumOptions` now deduplicates `DarpanSystemSource` rows by logical system code and prefers canonical enum ids such as `OMS` over legacy duplicates such as `DarSysOms`.
 
 ### `facade.JsonSchemaFacadeServices`
@@ -144,8 +145,8 @@ Pilot release contract notes:
 - `save#DashboardPinnedMappings` accepts `pinnedReconciliationMappingIds` and persists that ordered list for the authenticated user, so pinned runs survive browser/profile/origin changes after login.
 - `run#PilotGenericDiff` is JSON-RPC friendly for `darpan-ui`; it accepts `file1Name`/`file1Text` and `file2Name`/`file2Text` instead of raw multipart `FileItem` uploads.
 - `list#PilotGeneratedOutputs` accepts optional `reconciliationMappingId` and only returns generated outputs whose stored metadata matches that mapping when the filter is provided.
-- The underlying reconciliation engine still writes a scoped JSON diff file under `runtime://tmp/reconciliation/generic/**`.
-- `get#PilotGeneratedOutput` can return that stored JSON directly or convert it to CSV on demand for the pilot UI download action.
+- The underlying Generic reconciliation engine persists source files and result JSON under `runtime://datamanager/reconciliation-runs/{runId}/{timestamp}/`, writes a `darpan.reconciliation.ReconciliationRunResult` row with `file1DataManagerPath`, `file2DataManagerPath`, and `resultDataManagerPath`, and returns generated-output `fileName` values as safe data-manager relative paths.
+- `get#PilotGeneratedOutput` can return that stored JSON directly or convert it to CSV on demand for the pilot UI download action; callers should pass the `fileName` returned by list/run responses.
 
 Shared-tenant rule:
 

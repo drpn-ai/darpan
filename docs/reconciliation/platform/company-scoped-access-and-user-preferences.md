@@ -87,6 +87,16 @@ Current write-capability rule:
 - `DARPAN_COMPANY_VIEW_ONLY` keeps the active tenant read-only while still allowing tenant-scoped reads
 - if no explicit editor assignment exists for the active tenant, tenant membership stays read-only by default
 
+Production setup rule:
+
+- create tenant groups as `moqui.security.UserGroup` rows with `groupTypeEnumId="UgtDarpanCompany"`
+- add each selectable user through `moqui.security.UserGroupMember`
+- assign edit or view-only capability through `darpan.auth.TenantUserPermissionGroupMember`
+- do not use `DARPAN_USER`, `ADMIN`, or `ALL_USERS` as tenant data scopes
+- verify the session contract through `login#Session`, `get#SessionInfo`, or `save#ActiveTenant` before creating tenant-owned settings
+
+For the production setup matrix and operational verification steps, see [Production Settings Surfaces](production-settings-surfaces.md).
+
 ## User-Level Preferences
 
 Pins should remain user-scoped and should not depend on the active tenant.
@@ -126,6 +136,7 @@ Phase 1 top-level records:
 
 - `JsonSchema`
 - `ReconciliationMapping`
+- `ReconciliationRunResult`
 - `SftpServer`
 - `NsAuthConfig`
 - `NsRestletConfig`
@@ -138,6 +149,8 @@ Visibility rules for normal users:
 - records from other tenants are not visible
 - new records are created in the active tenant
 - view-only active-tenant sessions can still read tenant-scoped records but cannot create, update, run, or delete them
+- generated output result files are shared tenant evidence: `list#GeneratedOutputs`, `get#GeneratedOutput`, and `delete#GeneratedOutput` resolve tenant ownership from `ReconciliationRunResult.companyUserGroupId` first and only fall back to generated-output JSON metadata for migration files
+- dashboard pins stay user-level; a pinned saved-run/result target should render only when the underlying run or generated output is visible in the active tenant
 
 Admin behavior:
 
@@ -145,6 +158,7 @@ Admin behavior:
 - keep the active tenant selector visible so super-admin users can choose from all configured Darpan tenants
 - apply the same active-tenant read filtering to super-admin users as every other authenticated user
 - stamp new tenant-scoped records with the active tenant even for super-admin
+- keep global/admin-only Settings, including AI/LLM provider settings, enum/global settings, app-wide operational config, and `HcReadDbConfig`, outside tenant editor permissions
 
 ## Auth and Session Contract
 
@@ -158,6 +172,7 @@ The auth/session contract should shift from user-owned scope to active-tenant sc
 - `availableTenants[]`
 - `activeTenantPermissionGroupIds[]`
 - `canEditActiveTenantData`
+- `isSuperAdmin`
 
 A new authenticated facade service should allow the frontend to switch active tenant and return refreshed session metadata.
 
@@ -232,3 +247,4 @@ Do not introduce `ALL_USERS` as a fallback shared data scope.
 - The last active tenant is stored in `UserPreference`
 - Phase 1 tenant-scoped scope is limited to `RUN`, `SCHEMA`, `RESULTS`, `SFTP`, and `NETSUITE`
 - Global settings outside that scope are intentionally deferred
+- `HcReadDbConfig` is intentionally deferred until it has explicit tenant ownership and migration design

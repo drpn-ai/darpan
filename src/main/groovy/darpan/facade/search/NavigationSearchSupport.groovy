@@ -346,13 +346,15 @@ class NavigationSearchSupport {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
 
-        String outputLocation = TenantAccessSupport.resolveGenericOutputLocation(ec)
-        File outputDir = ec.resource.getLocationReference(outputLocation)?.getFile()
-        if (outputDir == null || !outputDir.exists()) return []
+        List<Map<String, Object>> outputFiles = ReconciliationOutputSupport.listGeneratedOutputFiles(ec)
+        if (!outputFiles) return []
 
-        return (outputDir.listFiles() ?: [] as File[])
-                .findAll { File file -> file.isFile() && ReconciliationOutputSupport.isSupportedOutputFile(file.name) }
-                .collectMany { File file ->
+        return outputFiles.collectMany { Map<String, Object> outputFile ->
+                    File file = (File) outputFile.file
+                    String outputFileName = FacadeSupport.normalize(outputFile.fileName)
+                    if (file == null || !file.exists() || !file.isFile() || !outputFileName) return []
+                    if (!ReconciliationOutputSupport.canAccessGeneratedOutputFile(ec, file, outputFileName)) return []
+
                     Map outputDocument = [:]
                     if (ReconciliationOutputSupport.sourceFormatForFile(file.name) == "json") {
                         try {
@@ -363,11 +365,14 @@ class NavigationSearchSupport {
                     }
 
                     Map<String, Object> descriptor = ReconciliationOutputSupport.buildGeneratedOutputDescriptor(
-                            file.name,
+                            outputFileName,
                             outputDocument,
                             file.length(),
                             new Timestamp(file.lastModified())
                     )
+                    if (outputFile.runResult?.reconciliationRunResultId) {
+                        descriptor.reconciliationRunResultId = outputFile.runResult.reconciliationRunResultId
+                    }
                     String descriptorCompany = FacadeSupport.normalize(descriptor.companyUserGroupId)
                     if (descriptorCompany && descriptorCompany != activeTenantUserGroupId) return []
 

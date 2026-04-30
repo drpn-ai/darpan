@@ -21,5 +21,10 @@ export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+$JAVA_TOOL_OPTIONS }--add-exports
 
 $SLEEP
 
+if [ "${DARPAN_LOAD_UPGRADE_DATA:-Y}" != "N" ]; then
+  echo "Loading Darpan upgrade data"
+  (cd /moqui-framework && ./gradlew loadDarpanUpgradeData)
+fi
+
 screen -dmS Moqui java $JAVA_OPTS -cp . MoquiStart port=8080 conf=$CONF_FILE
 tail -F runtime/log/moqui.log

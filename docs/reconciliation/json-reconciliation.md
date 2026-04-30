@@ -36,12 +36,16 @@ These optional parameters allow a remote facade to pass UTF-8 file payloads from
 **Output:**
 - `reconciliationType`: "CSV", "JSON", or "MIXED"
 - `differenceCount`: Total differences found
-- `diffLocation` / `diffFileName`: Path to the generated results
+- `diffLocation`: Absolute path to the generated result file
+- `diffFileName`: Data-manager relative path to the generated result file
+- `reconciliationRunResultId`: Persisted run-result manifest ID for the source and result artifacts
 - `validationErrors`: Any schema validation errors found
 - `processingWarnings`: Any normalization fallbacks that were applied
 
 Behavior notes:
 - RuleSet mode writes one generated JSON artifact that contains both missing-object rows and rule-generated rows.
+- Generic uploads now persist the source files and result under `runtime://datamanager/reconciliation-runs/{runId}/{timestamp}/`. The file names are `{runId}_file1{ext}`, `{runId}_file2{ext}`, and `{runId}_result.json`; `runId` is the `ruleSetId` when present, otherwise the `reconciliationMappingId`.
+- Each completed run creates a `darpan.reconciliation.ReconciliationRunResult` row. `resultDataManagerPath` stores the same safe relative path returned as `diffFileName`; `file1DataManagerPath` and `file2DataManagerPath` store the uploaded source artifacts.
 - In RuleSet mode, `onlyInFile1Count` maps to IDs present only in file 1 (`missingInFile2Count` from the compare-scope service), and `onlyInFile2Count` maps to IDs present only in file 2 (`missingInFile1Count`).
 - If the RuleSet defines exactly one compare scope, Generic routing resolves it automatically. When a RuleSet has multiple scopes, `compareScopeId` is required.
 - The mapping route remains available only as a migration bridge until the later cutover tickets remove it.
@@ -151,15 +155,15 @@ Single reconciliation engine for all file type combinations. It converts CSV/JSO
 
 ### `ReconciliationGenericServices.delete#GeneratedOutputFile`
 
-Deletes a single generated output file from `runtime://tmp/reconciliation/generic/output`.
+Deletes a single generated output file from `runtime://datamanager/reconciliation-runs/**` using the safe relative path returned by `list#GeneratedOutputs`. Legacy basename-only files under `runtime://tmp/reconciliation/generic/output` remain deletable during migration.
 
-**Inputs (key):** `filename` (required), optional `outputLocation`.
+**Inputs (key):** `filename` (required; safe data-manager relative path or legacy basename), optional deprecated `outputLocation`.
 
 **Outputs (key):** `deleted`, `deletedFileName`, `statusMessage`.
 
 ### `ReconciliationGenericServices.purge#GeneratedOutputFiles`
 
-Purges generated output files older than retention policy from `runtime://tmp/reconciliation/generic/output`.
+Purges generated result files older than the retention policy from `runtime://datamanager/reconciliation-runs/**`. Source artifacts in the run folder are retained. Supplying `outputLocation` keeps the legacy direct-directory purge behavior for explicit maintenance jobs.
 
 **Inputs (key):** `retentionDays` (default `15`), optional `outputLocation`.
 

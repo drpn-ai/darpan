@@ -65,7 +65,10 @@
                 <description>Location of generated diff file</description>
             </parameter>
             <parameter name="diffFileName">
-                <description>Name of generated diff file</description>
+                <description>Data-manager relative path of generated diff file</description>
+            </parameter>
+            <parameter name="reconciliationRunResultId">
+                <description>Persisted reconciliation run result manifest ID for generated artifacts.</description>
             </parameter>
             <parameter name="differenceCount" type="Integer">
                 <description>Total number of differences found</description>
@@ -83,13 +86,13 @@
 
     <service verb="delete" noun="GeneratedOutputFile" type="script" transaction="ignore" authenticate="true"
             location="component://darpan/src/main/groovy/darpan/reconciliation/generic/deleteGeneratedOutputFile.groovy">
-        <description>Delete one generated reconciliation output file from the generic output directory.</description>
+        <description>Delete one generated reconciliation output file from data-manager or the legacy generic output directory.</description>
         <in-parameters>
             <parameter name="filename" required="true">
-                <description>Exact filename to delete (no path separators).</description>
+                <description>Safe generated-output filename or data-manager relative path to delete.</description>
             </parameter>
             <parameter name="outputLocation">
-                <description>Optional output directory override. Defaults to generic reconciliation output.</description>
+                <description>Deprecated; generated output deletion resolves the current data-manager path first.</description>
             </parameter>
         </in-parameters>
         <out-parameters>
@@ -99,15 +102,15 @@
         </out-parameters>
     </service>
 
-    <service verb="purge" noun="GeneratedOutputFiles" type="script" transaction="ignore" authenticate="true"
+    <service verb="purge" noun="GeneratedOutputFiles" type="script" transaction="ignore" authenticate="false"
             location="component://darpan/src/main/groovy/darpan/reconciliation/generic/purgeGeneratedOutputFiles.groovy">
-        <description>Purge generated reconciliation output files older than the configured retention period.</description>
+        <description>Purge generated reconciliation result files older than the configured retention period.</description>
         <in-parameters>
             <parameter name="retentionDays" type="Integer" default-value="15">
                 <description>Delete files whose last-modified timestamp is retentionDays or older.</description>
             </parameter>
             <parameter name="outputLocation">
-                <description>Optional output directory override. Defaults to generic reconciliation output.</description>
+                <description>Optional output directory override. Defaults to data-manager reconciliation run results.</description>
             </parameter>
         </in-parameters>
         <out-parameters>

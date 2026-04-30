@@ -1,13 +1,19 @@
+import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
+import darpan.facade.reconciliation.ReconciliationOutputSupport
+import groovy.io.FileType
 import org.slf4j.LoggerFactory
 
 def logger = LoggerFactory.getLogger("darpan.reconciliation.generic.PurgeGeneratedOutputFiles")
 
 def normalize = { val -> val?.toString()?.trim() }
 
-def resolveOutputLocation = { -> "runtime://tmp/reconciliation/generic/output" }
+def resolveOutputLocation = { -> DataManagerSupport.resolveReconciliationRunsLocation(ec) }
 
-TenantAccessSupport.requireSuperAdmin(ec, "Only super-admin users may purge reconciliation outputs.")
+String currentUserId = TenantAccessSupport.currentUserId(ec)
+if (currentUserId && currentUserId != "_NA_") {
+    TenantAccessSupport.requireSuperAdmin(ec, "Only super-admin users may purge reconciliation outputs.")
+}
 
 if (ec.message.hasError()) {
     retentionDays = retentionDays == null ? 15 : retentionDays
@@ -31,7 +37,11 @@ if (resolvedRetentionDays < 0) {
     throw new IllegalArgumentException("retentionDays must be 0 or greater")
 }
 
-String resolvedOutputLocation = TenantAccessSupport.resolveScopedRuntimeLocation(ec, normalize(outputLocation) ?: resolveOutputLocation())
+String outputLocationValue = normalize(outputLocation)
+boolean usingDefaultOutputLocation = !outputLocationValue
+String resolvedOutputLocation = usingDefaultOutputLocation ?
+        resolveOutputLocation() :
+        TenantAccessSupport.resolveScopedRuntimeLocation(ec, outputLocationValue)
 def outputDirRef = ec.resource.getLocationReference(resolvedOutputLocation)
 
 long cutoffMillis = ec.user.nowTimestamp.getTime() - (resolvedRetentionDays * 24L * 60L * 60L * 1000L)
@@ -40,40 +50,56 @@ int deletedRows = 0
 int retained = 0
 List<Map> failed = []
 
+def scanOutputFile = { String fileName, long lastModified, Closure<Boolean> deleteFile ->
+    if (!fileName) return
+    String lowerName = fileName.toLowerCase()
+    if (usingDefaultOutputLocation) {
+        if (!ReconciliationOutputSupport.isGeneratedResultFile(fileName)) return
+    } else if (!(lowerName.endsWith(".csv") || lowerName.endsWith(".json"))) {
+        return
+    }
+
+    scanned++
+    if (lastModified > cutoffMillis) {
+        retained++
+        return
+    }
+
+    try {
+        boolean deletedOk = deleteFile.call()
+        if (deletedOk) {
+            deletedRows++
+        } else {
+            failed.add([fileName: fileName, errorMessage: "Delete returned false"])
+        }
+    } catch (Exception e) {
+        failed.add([fileName: fileName, errorMessage: e.message ?: "Delete failed"])
+    }
+}
+def scanEntry = { entry ->
+    if (!entry.isFile()) return
+
+    scanOutputFile(entry.getFileName(), entry.getLastModified() ?: 0L) {
+        def entryFile = entry.getFile()
+        if (entryFile != null) return entryFile.delete()
+        if (entry.metaClass.respondsTo(entry, "delete")) return entry.delete()
+        return false
+    }
+}
+def scanFile = { File file ->
+    if (!file.isFile()) return
+    scanOutputFile(file.name, file.lastModified()) { -> file.delete() }
+}
+
 if (outputDirRef != null && outputDirRef.getExists()) {
-    def entries = outputDirRef.getDirectoryEntries() ?: []
-    entries.each { entry ->
-        if (!entry.isFile()) return
-
-        String fileName = entry.getFileName()
-        if (!fileName) return
-        String lowerName = fileName.toLowerCase()
-        if (!(lowerName.endsWith(".csv") || lowerName.endsWith(".json"))) return
-
-        scanned++
-        long lastModified = entry.getLastModified() ?: 0L
-        if (lastModified > cutoffMillis) {
-            retained++
-            return
+    File outputDirFile = outputDirRef.getFile()
+    if (usingDefaultOutputLocation && outputDirFile?.exists()) {
+        outputDirFile.eachFileRecurse(FileType.FILES) { File file ->
+            scanFile(file)
         }
-
-        try {
-            boolean deletedOk = false
-            def entryFile = entry.getFile()
-            if (entryFile != null) {
-                deletedOk = entryFile.delete()
-            } else if (entry.metaClass.respondsTo(entry, "delete")) {
-                deletedOk = entry.delete()
-            }
-
-            if (deletedOk) {
-                deletedRows++
-            } else {
-                failed.add([fileName: fileName, errorMessage: "Delete returned false"])
-            }
-        } catch (Exception e) {
-            failed.add([fileName: fileName, errorMessage: e.message ?: "Delete failed"])
-        }
+    } else {
+        def entries = outputDirRef.getDirectoryEntries() ?: []
+        entries.each { entry -> scanEntry(entry) }
     }
 }
 

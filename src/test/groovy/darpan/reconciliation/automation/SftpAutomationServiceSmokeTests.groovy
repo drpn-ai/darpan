@@ -18,6 +18,7 @@ import java.nio.file.Path
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -196,6 +197,81 @@ class SftpAutomationServiceSmokeTests {
         assertTrue(sftpEnvironment.hasFile("shopify.test", 22, "/incoming/archive/orders-1.csv"))
         assertTrue(sftpEnvironment.hasFile("oms.test", 22, "/incoming/archive/orders-2.csv"))
         assertTrue(sftpEnvironment.hasFile("shopify.test", 22, "/incoming/${result.diffFileName}"))
+    }
+
+    @Test
+    void tenantScopedAutomationRejectsCrossTenantSftpServer() {
+        def server = findSftpServer("GORJANA_TEST_SFTP")
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException) {
+            SftpAutomationSupport.requireSftpServerAccess(ec, server, [
+                    runScopeEnumId      : "DARPAN_SFTP_TENANT",
+                    runTenantUserGroupId: "KREWE",
+                    allowAdminSftp      : false
+            ], "file1")
+        }
+
+        assertTrue(error.message.contains("GORJANA_TEST_SFTP"), error.message)
+        assertTrue(error.message.contains("not available to tenant KREWE"), error.message)
+    }
+
+    @Test
+    void tenantScopedAutomationRejectsAdminSftpServer() {
+        def server = findSftpServer("ADMIN_TEST_SFTP")
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException) {
+            SftpAutomationSupport.requireSftpServerAccess(ec, server, [
+                    runScopeEnumId      : "DARPAN_SFTP_TENANT",
+                    runTenantUserGroupId: "KREWE",
+                    allowAdminSftp      : false
+            ], "file1")
+        }
+
+        assertTrue(error.message.contains("Admin SFTP Server ADMIN_TEST_SFTP"), error.message)
+        assertTrue(error.message.contains("not available to tenant-scoped automation"), error.message)
+    }
+
+    @Test
+    void tenantScopedAutomationAllowsTenantGroupSftpServer() {
+        def server = findSftpServer("SHARED_TEST_SFTP")
+
+        SftpAutomationSupport.requireSftpServerAccess(ec, server, [
+                runScopeEnumId      : "DARPAN_SFTP_TENANT",
+                runTenantUserGroupId: "KREWE",
+                allowAdminSftp      : false
+        ], "file1")
+
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+    }
+
+    @Test
+    void adminScopedAutomationRequiresExplicitAdminSftpOptIn() {
+        def server = findSftpServer("ADMIN_TEST_SFTP")
+
+        IllegalArgumentException missingOptIn = assertThrows(IllegalArgumentException) {
+            SftpAutomationSupport.requireSftpServerAccess(ec, server, [
+                    runScopeEnumId      : "DARPAN_SFTP_ADMIN",
+                    runTenantUserGroupId: null,
+                    allowAdminSftp      : false
+            ], "file1")
+        }
+        assertTrue(missingOptIn.message.contains("allowAdminSftp must be true"), missingOptIn.message)
+
+        SftpAutomationSupport.requireSftpServerAccess(ec, server, [
+                runScopeEnumId      : "DARPAN_SFTP_ADMIN",
+                runTenantUserGroupId: null,
+                allowAdminSftp      : true
+        ], "file1")
+
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+    }
+
+    private Object findSftpServer(String sftpServerId) {
+        return ec.entity.find("darpan.reconciliation.SftpServer")
+                .condition("sftpServerId", sftpServerId)
+                .disableAuthz()
+                .useCache(false)
+                .one()
     }
 
     private String readFixtureText(String relativePath) {

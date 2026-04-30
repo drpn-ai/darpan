@@ -31,6 +31,7 @@ class ReconciliationSmokeTestSupport {
         System.setProperty("moqui.runtime", runtimePath)
         System.setProperty("moqui_runtime", runtimePath)
         System.setProperty("entity_ds_url", "jdbc:h2:${testDbPath};lock_timeout=30000")
+        System.setProperty("darpan.data.manager.location", "runtime://tmp/test-data-manager/${safeTestToken}")
         resetDirectory(atomikosLogPath)
         System.setProperty("com.atomikos.icatch.log_base_dir", atomikosLogPath.toString())
         System.setProperty("com.atomikos.icatch.log_base_name", safeTestToken)
@@ -59,6 +60,7 @@ class ReconciliationSmokeTestSupport {
             assert ec.user.loginAnonymousIfNoUser()
         }
         ec.message.clearErrors()
+        ec.resource.properties["darpan.data.manager.location"] = "runtime://tmp/test-data-manager/${safeTestToken}"
         return ec
     }
 
@@ -68,6 +70,7 @@ class ReconciliationSmokeTestSupport {
             Moqui.destroyActiveExecutionContextFactory()
         }
         clearTransactionalDatasourceRegistration()
+        System.clearProperty("darpan.data.manager.location")
     }
 
     static void loadSeedData(ExecutionContext ec, String... locations) {
@@ -372,9 +375,34 @@ class ReconciliationSmokeTestSupport {
     }
 
     static void seedSftpServerFixtures(ExecutionContext ec) {
+        upsertEntity(ec, "moqui.basic.EnumerationType", [enumTypeId: "DarpanSftpScope"], [
+                enumTypeId : "DarpanSftpScope",
+                description: "Darpan SFTP server scope"
+        ])
+        upsertEntity(ec, "moqui.basic.Enumeration", [enumId: "DARPAN_SFTP_TENANT"], [
+                enumId     : "DARPAN_SFTP_TENANT",
+                enumTypeId : "DarpanSftpScope",
+                description: "Tenant-owned SFTP server"
+        ])
+        upsertEntity(ec, "moqui.basic.Enumeration", [enumId: "DARPAN_SFTP_TENANT_GROUP"], [
+                enumId     : "DARPAN_SFTP_TENANT_GROUP",
+                enumTypeId : "DarpanSftpScope",
+                description: "SFTP server shared across explicitly assigned tenant groups"
+        ])
+        upsertEntity(ec, "moqui.basic.Enumeration", [enumId: "DARPAN_SFTP_ADMIN"], [
+                enumId     : "DARPAN_SFTP_ADMIN",
+                enumTypeId : "DarpanSftpScope",
+                description: "Admin/platform-owned SFTP server"
+        ])
+        upsertEntity(ec, "moqui.security.UserGroup", [userGroupId: "GORJANA"], [
+                userGroupId     : "GORJANA",
+                description     : "Gorjana",
+                groupTypeEnumId : TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID
+        ])
         upsertEntityValue(ec, "darpan.reconciliation.SftpServer", [sftpServerId: "SHOPIFY_TEST_SFTP"], [
                 sftpServerId     : "SHOPIFY_TEST_SFTP",
                 description      : "Smoke-test Shopify SFTP server",
+                scopeEnumId      : "DARPAN_SFTP_TENANT",
                 companyUserGroupId: TEST_COMPANY_USER_GROUP_ID,
                 createdByUserId  : TEST_COMPANY_USER_ID,
                 host             : "shopify.test",
@@ -386,6 +414,7 @@ class ReconciliationSmokeTestSupport {
         upsertEntityValue(ec, "darpan.reconciliation.SftpServer", [sftpServerId: "OMS_TEST_SFTP"], [
                 sftpServerId     : "OMS_TEST_SFTP",
                 description      : "Smoke-test OMS SFTP server",
+                scopeEnumId      : "DARPAN_SFTP_TENANT",
                 companyUserGroupId: TEST_COMPANY_USER_GROUP_ID,
                 createdByUserId  : TEST_COMPANY_USER_ID,
                 host             : "oms.test",
@@ -393,6 +422,45 @@ class ReconciliationSmokeTestSupport {
                 username         : "oms-user",
                 password         : "oms-pass",
                 remoteAttributes : "N"
+        ])
+        upsertEntityValue(ec, "darpan.reconciliation.SftpServer", [sftpServerId: "GORJANA_TEST_SFTP"], [
+                sftpServerId     : "GORJANA_TEST_SFTP",
+                description      : "Smoke-test Gorjana SFTP server",
+                scopeEnumId      : "DARPAN_SFTP_TENANT",
+                companyUserGroupId: "GORJANA",
+                createdByUserId  : TEST_COMPANY_USER_ID,
+                host             : "gorjana.test",
+                port             : 22,
+                username         : "gorjana-user",
+                password         : "gorjana-pass",
+                remoteAttributes : "N"
+        ])
+        upsertEntityValue(ec, "darpan.reconciliation.SftpServer", [sftpServerId: "ADMIN_TEST_SFTP"], [
+                sftpServerId     : "ADMIN_TEST_SFTP",
+                description      : "Smoke-test admin SFTP server",
+                scopeEnumId      : "DARPAN_SFTP_ADMIN",
+                host             : "admin.test",
+                port             : 22,
+                username         : "admin-user",
+                password         : "admin-pass",
+                remoteAttributes : "N"
+        ])
+        upsertEntityValue(ec, "darpan.reconciliation.SftpServer", [sftpServerId: "SHARED_TEST_SFTP"], [
+                sftpServerId     : "SHARED_TEST_SFTP",
+                description      : "Smoke-test shared tenant-group SFTP server",
+                scopeEnumId      : "DARPAN_SFTP_TENANT_GROUP",
+                host             : "shared.test",
+                port             : 22,
+                username         : "shared-user",
+                password         : "shared-pass",
+                remoteAttributes : "N"
+        ])
+        upsertEntityValue(ec, "darpan.reconciliation.SftpServerTenantAccess", [
+                sftpServerId      : "SHARED_TEST_SFTP",
+                tenantUserGroupId : TEST_COMPANY_USER_GROUP_ID
+        ], [
+                sftpServerId      : "SHARED_TEST_SFTP",
+                tenantUserGroupId : TEST_COMPANY_USER_GROUP_ID
         ])
     }
 

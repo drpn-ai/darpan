@@ -171,4 +171,25 @@ class ReconciliationOutputSupportTests {
         ))
         assertTrue(ReconciliationOutputSupport.matchesGeneratedOutputDescriptor(descriptor, null, "legacy"))
     }
+
+    @Test
+    void generatedOutputPathsAllowSafeDataManagerRelativePathsOnly() {
+        assertTrue(ReconciliationOutputSupport.isSafeOutputPath(
+                "reconciliation-runs/OrderId/20260428-120000000/OrderId_result.json"
+        ))
+        assertFalse(ReconciliationOutputSupport.isSafeOutputPath("../OrderId_result.json"))
+        assertFalse(ReconciliationOutputSupport.isSafeOutputPath("/tmp/OrderId_result.json"))
+        assertFalse(ReconciliationOutputSupport.isSafeOutputPath("reconciliation-runs/OrderId/20260428-120000000/OrderId_file1.csv"))
+    }
+
+    @Test
+    void generatedOutputAccessFailsClosedWithoutActiveTenantForDataManagerPaths() {
+        def anonymousEc = [user: [userId: null]]
+
+        assertFalse(ReconciliationOutputSupport.canAccessGeneratedOutputFile(
+                anonymousEc,
+                new File("OrderId_result.json"),
+                "reconciliation-runs/OrderId/20260428-120000000/OrderId_result.json"
+        ))
+    }
 }

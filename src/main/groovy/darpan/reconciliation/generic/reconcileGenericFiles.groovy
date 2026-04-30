@@ -1,3 +1,4 @@
+import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.core.ReconciliationServices
 import org.apache.spark.sql.Dataset
@@ -9,10 +10,6 @@ import java.nio.charset.StandardCharsets
 def logger = LoggerFactory.getLogger("darpan.reconciliation.generic.GenericReconciliation")
 
 def normalize = { it?.toString()?.trim() }
-def safeToken = { String raw, String fallback ->
-    String normalized = normalize(raw)?.replaceAll(/[^A-Za-z0-9_-]/, "-")
-    return normalized ?: fallback
-}
 def saveFileItem = { fileItem, targetRef ->
     File targetFile = targetRef.getFile()
     if (targetFile != null) {
@@ -56,6 +53,35 @@ def resolveRuleSet = { String ruleSetId ->
             .useCache(true)
             .one()
 }
+def persistRunResult = { Map<String, Object> fields ->
+    String resultPath = DataManagerSupport.normalizeRelativePath(fields.resultDataManagerPath)
+    if (!resultPath) return null
+
+    return ec.transaction.runUseOrBegin(30, "Error saving reconciliation run result", {
+        def runResultValue = ec.entity.makeValue("darpan.reconciliation.ReconciliationRunResult")
+        runResultValue.savedRunId = normalize(fields.savedRunId)
+        runResultValue.savedRunType = normalize(fields.savedRunType)
+        runResultValue.reconciliationRunId = normalize(fields.reconciliationRunId)
+        runResultValue.reconciliationMappingId = normalize(fields.reconciliationMappingId)
+        runResultValue.ruleSetId = normalize(fields.ruleSetId)
+        runResultValue.compareScopeId = normalize(fields.compareScopeId)
+        runResultValue.companyUserGroupId = normalize(fields.companyUserGroupId) ?: TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+        runResultValue.createdByUserId = TenantAccessSupport.currentUserId(ec)
+        runResultValue.file1Name = normalize(fields.file1Name)
+        runResultValue.file1DataManagerPath = DataManagerSupport.normalizeRelativePath(fields.file1DataManagerPath)
+        runResultValue.file2Name = normalize(fields.file2Name)
+        runResultValue.file2DataManagerPath = DataManagerSupport.normalizeRelativePath(fields.file2DataManagerPath)
+        runResultValue.resultDataManagerPath = resultPath
+        runResultValue.reconciliationType = normalize(fields.reconciliationType)
+        runResultValue.differenceCount = fields.differenceCount
+        runResultValue.onlyInFile1Count = fields.onlyInFile1Count
+        runResultValue.onlyInFile2Count = fields.onlyInFile2Count
+        runResultValue.createdDate = ec.user.nowTimestamp
+        runResultValue.setSequencedIdPrimary()
+        runResultValue.create()
+        return runResultValue.reconciliationRunResultId
+    })
+}
 
 String providedFile1Name = normalize(file1Name)
 String providedFile2Name = normalize(file2Name)
@@ -80,23 +106,26 @@ if (!ruleSetIdValue && (!requestedFile1SystemEnumId || !requestedFile2SystemEnum
     throw new IllegalArgumentException("file1SystemEnumId and file2SystemEnumId are required when using reconciliationMappingId")
 }
 
-String tempLoc = TenantAccessSupport.resolveGenericTempLocation(ec)
-def baseDirRef = ec.resource.getLocationReference(tempLoc)
-if (baseDirRef == null) {
-    throw new IllegalStateException("Unable to resolve generic reconciliation temp directory: ${tempLoc}")
-}
-def inputDirRef = baseDirRef.makeDirectory("input")
-if (!inputDirRef.getExists()) {
-    File inputDirFile = inputDirRef.getFile()
-    if (inputDirFile != null && !inputDirFile.exists()) inputDirFile.mkdirs()
+String runIdValue = ruleSetIdValue ?: mappingIdValue
+String runToken = DataManagerSupport.safeToken(runIdValue, "run")
+String timestamp = DataManagerSupport.formatRunTimestamp(ec)
+String runArtifactLocation = DataManagerSupport.resolveReconciliationRunLocation(ec, runToken, timestamp)
+File runArtifactDir = DataManagerSupport.resolveDirectoryFile(ec, runArtifactLocation, true)
+if (runArtifactDir == null) {
+    throw new IllegalStateException("Unable to resolve reconciliation run data-manager directory: ${runArtifactLocation}")
 }
 
-String timestamp = ec.l10n.format(ec.user.nowTimestamp, "yyyyMMdd-HHmmssSSS")
 String file1SafeName = (providedFile1Name ?: file1?.getName())?.replaceAll("[^A-Za-z0-9._-]", "_") ?: "file1"
 String file2SafeName = (providedFile2Name ?: file2?.getName())?.replaceAll("[^A-Za-z0-9._-]", "_") ?: "file2"
+String resultFileName = DataManagerSupport.runArtifactFileName(runToken, "result", "result.json")
 
-def file1Ref = inputDirRef.makeFile(timestamp + "-file1-" + file1SafeName)
-def file2Ref = inputDirRef.makeFile(timestamp + "-file2-" + file2SafeName)
+def file1Ref = ec.resource.getLocationReference(DataManagerSupport.childLocation(runArtifactLocation,
+        DataManagerSupport.runArtifactFileName(runToken, "file1", file1SafeName)))
+def file2Ref = ec.resource.getLocationReference(DataManagerSupport.childLocation(runArtifactLocation,
+        DataManagerSupport.runArtifactFileName(runToken, "file2", file2SafeName)))
+if (file1Ref == null || file2Ref == null) {
+    throw new IllegalStateException("Unable to resolve reconciliation input artifact files under ${runArtifactLocation}")
+}
 
 if (file1) saveFileItem(file1, file1Ref)
 else saveTextPayload(file1TextValue, file1Ref)
@@ -106,7 +135,9 @@ else saveTextPayload(file2TextValue, file2Ref)
 
 String file1Location = file1Ref.getFile()?.getAbsolutePath() ?: file1Ref.getLocation()
 String file2Location = file2Ref.getFile()?.getAbsolutePath() ?: file2Ref.getLocation()
-String outputLocationValue = tempLoc + "/output"
+String file1DataManagerPath = DataManagerSupport.relativeDataManagerPath(ec, file1Ref.getFile())
+String file2DataManagerPath = DataManagerSupport.relativeDataManagerPath(ec, file2Ref.getFile())
+String outputLocationValue = runArtifactLocation
 String sparkMasterToUse = sparkMaster ?: (ec.resource.properties["spark.master"] ?: "local[*]")
 String sparkAppNameToUse = sparkAppName ?: "GenericReconciliation"
 String mappingNameValue = resolveMappingName(mappingIdValue)
@@ -148,9 +179,6 @@ if (ruleSetIdValue) {
     validationErrors = (reconcileResult.validationErrors ?: []) as List
     processingWarnings = (reconcileResult.processingWarnings ?: []) as List
 
-    String compareScopeNameToken = safeToken(compareScopeConfig.compareScopeDescription as String,
-            safeToken(compareScopeConfig.compareScopeId as String, safeToken(ruleSetIdValue, 'ruleset')))
-    String defaultBaseName = "${compareScopeNameToken}-diff-${timestamp}.json"
     Map outputMetadata = [
             timestamp                : ec.user.nowTimestamp?.toString(),
             companyUserGroupId       : normalize(ruleSetValue?.companyUserGroupId),
@@ -182,7 +210,7 @@ if (ruleSetIdValue) {
             (Dataset) reconcileResult.diffDf,
             outputLocationValue,
             null,
-            defaultBaseName,
+            resultFileName,
             outputMetadata,
             outputSummary,
             validationErrors,
@@ -190,7 +218,24 @@ if (ruleSetIdValue) {
     )
 
     diffLocation = outputInfo.diffLocation
-    diffFileName = outputInfo.diffFileName
+    diffFileName = DataManagerSupport.relativeDataManagerPath(ec, new File(diffLocation as String)) ?: outputInfo.diffFileName
+    reconciliationRunResultId = persistRunResult([
+            savedRunId              : ruleSetIdValue,
+            savedRunType            : "ruleset",
+            reconciliationMappingId : mappingIdValue,
+            ruleSetId               : ruleSetIdValue,
+            compareScopeId          : compareScopeConfig.compareScopeId,
+            companyUserGroupId      : ruleSetValue?.companyUserGroupId,
+            file1Name               : file1SafeName,
+            file1DataManagerPath    : file1DataManagerPath,
+            file2Name               : file2SafeName,
+            file2DataManagerPath    : file2DataManagerPath,
+            resultDataManagerPath   : diffFileName,
+            reconciliationType      : reconciliationType,
+            differenceCount         : differenceCount,
+            onlyInFile1Count        : onlyInFile1Count,
+            onlyInFile2Count        : onlyInFile2Count,
+    ])
     logger.info("Generic reconciliation complete via RuleSet path: ruleSet={} compareScope={} diff={} differences={}",
             ruleSetIdValue, compareScopeConfig.compareScopeId, diffFileName, differenceCount)
     return
@@ -213,6 +258,7 @@ Map reconcileResult = ec.service.sync()
                 file2Label             : system2Label,
                 hasHeader              : hasHeader,
                 outputLocation         : outputLocationValue,
+                outputFileName         : resultFileName,
                 sparkMaster            : sparkMasterToUse,
                 sparkAppName           : sparkAppNameToUse
         ])
@@ -222,12 +268,26 @@ file1Type = reconcileResult.file1Type
 file2Type = reconcileResult.file2Type
 reconciliationType = reconcileResult.reconciliationType
 diffLocation = reconcileResult.diffLocation
-diffFileName = reconcileResult.diffFileName
+diffFileName = diffLocation ? (DataManagerSupport.relativeDataManagerPath(ec, new File(diffLocation as String)) ?: reconcileResult.diffFileName) : reconcileResult.diffFileName
 differenceCount = reconcileResult.differenceCount
 onlyInFile1Count = reconcileResult.onlyInFile1Count
 onlyInFile2Count = reconcileResult.onlyInFile2Count
 validationErrors = reconcileResult.validationErrors ?: []
 processingWarnings = reconcileResult.processingWarnings ?: []
+reconciliationRunResultId = persistRunResult([
+        savedRunId             : mappingIdValue,
+        savedRunType           : "mapping",
+        reconciliationMappingId: mappingIdValue,
+        file1Name              : file1SafeName,
+        file1DataManagerPath   : file1DataManagerPath,
+        file2Name              : file2SafeName,
+        file2DataManagerPath   : file2DataManagerPath,
+        resultDataManagerPath  : diffFileName,
+        reconciliationType     : reconciliationType,
+        differenceCount        : differenceCount,
+        onlyInFile1Count       : onlyInFile1Count,
+        onlyInFile2Count       : onlyInFile2Count,
+])
 
 logger.info("Generic reconciliation complete via mapping bridge: mapping={} diff={} differences={}",
         mappingIdValue, diffFileName, differenceCount)

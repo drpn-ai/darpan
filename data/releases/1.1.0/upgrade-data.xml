@@ -4,7 +4,7 @@ Candidate release-scoped upgrade data for Darpan 1.1.0.
 Generated from backend compare range: v1.0.0..main
 Reviewed to keep only mandatory operator-facing records.
 -->
-<entity-facade-xml type="seed">
+<entity-facade-xml type="darpan-seed">
     <!-- Mandatory release-scoped records from data/SecuritySeedData.xml -->
     <moqui.security.ArtifactGroup artifactGroupId="DARPAN_AUTH_API" description="Darpan auth facade APIs"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_AUTH_API" artifactName="facade\.AuthFacadeServices\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y" inheritAuthz="Y"/>

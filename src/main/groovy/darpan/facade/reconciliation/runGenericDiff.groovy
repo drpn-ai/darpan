@@ -168,9 +168,20 @@ if (!ec.message.hasError()) {
                 ]
         ]
 
+        Map generatedOutput = ReconciliationOutputSupport.buildGeneratedOutputDescriptor(
+                serviceResult.diffFileName as String,
+                generatedOutputDocument,
+                sizeBytes,
+                createdDate
+        )
+        if (serviceResult.reconciliationRunResultId) {
+            generatedOutput.reconciliationRunResultId = serviceResult.reconciliationRunResultId
+        }
+
         runResult = [
                 reconciliationMappingId: mapping.reconciliationMappingId,
                 mappingName            : mapping.mappingName,
+                reconciliationRunResultId: serviceResult.reconciliationRunResultId,
                 file1Name              : inputFile1Name,
                 file2Name              : inputFile2Name,
                 file1SystemEnumId      : resolvedFile1SystemEnumId,
@@ -179,12 +190,7 @@ if (!ec.message.hasError()) {
                 file2SystemLabel       : file2Label,
                 validationErrors       : (serviceResult.validationErrors ?: []) as List,
                 processingWarnings     : (serviceResult.processingWarnings ?: []) as List,
-                generatedOutput        : ReconciliationOutputSupport.buildGeneratedOutputDescriptor(
-                        serviceResult.diffFileName as String,
-                        generatedOutputDocument,
-                        sizeBytes,
-                        createdDate
-                )
+                generatedOutput        : generatedOutput
         ]
     }
 }

@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="poll" noun="SftpAndReconcile" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/automation/pollSftpAndRunReconciliation.groovy" authenticate="anonymous-all">
+    <service verb="poll" noun="SftpAndReconcile" type="script" transaction="ignore"
+            location="component://darpan/src/main/groovy/darpan/reconciliation/automation/pollSftpAndRunReconciliation.groovy"
+            authenticate="anonymous-all">
         <description>Check configured SFTP locations for available files and run reconciliation through the RuleSet compare-scope pipeline or the temporary mapping bridge.</description>
         <in-parameters>
             <parameter name="ruleSetId">
@@ -47,6 +49,15 @@
             <parameter name="file2RemotePath">
                 <description>Remote path for file 2 (required if only referencing a server).</description>
             </parameter>
+            <parameter name="sftpRunScopeEnumId" default-value="DARPAN_SFTP_TENANT">
+                <description>Automation SFTP access scope. Use DARPAN_SFTP_TENANT for tenant jobs or DARPAN_SFTP_ADMIN for platform/admin jobs.</description>
+            </parameter>
+            <parameter name="runTenantUserGroupId">
+                <description>Tenant user-group id for scheduled tenant jobs. Defaults to the active tenant for authenticated runs.</description>
+            </parameter>
+            <parameter name="allowAdminSftp" type="Boolean" default-value="false">
+                <description>Explicit opt-in required before an admin/platform SFTP server may be used by an admin-scoped job.</description>
+            </parameter>
             <parameter name="archiveSubdir" default-value="archive">
                 <description>Folder name (under the remote/local directory) where consumed files will be moved.</description>
             </parameter>
@@ -56,7 +67,7 @@
                 <description>Where staged copies of SFTP files will be written before reconciliation.</description>
             </parameter>
             <parameter name="outputLocation">
-                <description>Override for reconciliation outputs. Defaults to a `reconciled` subfolder under the stage directory.</description>
+                <description>Override for reconciliation outputs. Defaults to the data-manager reconciliation run folder.</description>
             </parameter>
             <parameter name="sparkMaster"/>
             <parameter name="sparkAppName" default-value="SftpReconciliation"/>

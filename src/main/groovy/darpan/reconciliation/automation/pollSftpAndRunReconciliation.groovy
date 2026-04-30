@@ -150,6 +150,7 @@ String compareScopeIdValue = normalize(compareScopeId)
 String mappingIdValue = normalize(reconciliationMappingId)
 String requestedFile1SystemEnumId = normalize(file1SystemEnumId)
 String requestedFile2SystemEnumId = normalize(file2SystemEnumId)
+Map<String, Object> sftpRunScope = SftpAutomationSupport.resolveRunScope(ec, sftpRunScopeEnumId, runTenantUserGroupId, allowAdminSftp)
 
 if (!ruleSetIdValue && !mappingIdValue) {
     throw new IllegalArgumentException("Either ruleSetId or reconciliationMappingId is required")
@@ -203,8 +204,9 @@ def logMsg = { String msg ->
 }
 
 def remoteUploadPath = null
-def stageBasePath = stageLocation ?: "runtime://tmp/reconciliation/automation/input"
-def defaultOutputPath = stageBasePath.endsWith("/") ? (stageBasePath + "reconciled") : (stageBasePath + "/reconciled")
+String defaultRunToken = ruleSetIdValue ?: mappingIdValue ?: reconciliationRunId
+def defaultOutputPath = SftpAutomationSupport.resolveDefaultOutputLocation(ec, defaultRunToken, timestamp)
+def defaultRemoteUploadPath = SftpAutomationSupport.remotePathForRuntimeLocation(defaultOutputPath)
 def outputPathToUse = outputLocation ?: defaultOutputPath
 def runtimeRoot = ec.factory?.runtimePath
 if (outputPathToUse?.startsWith("/") && runtimeRoot && !outputPathToUse.startsWith(runtimeRoot)) {
@@ -245,14 +247,7 @@ if (ruleSetIdValue) {
 }
 
 def prepareFile = { String label, String systemEnumId, String sftpServerId, String overridePath ->
-    def server = ec.entity.find("darpan.reconciliation.SftpServer")
-            .condition("sftpServerId", sftpServerId)
-            .disableAuthz()
-            .useCache(true)
-            .one()
-    if (!server) {
-        throw new IllegalArgumentException("SFTP Server ${sftpServerId} not found for ${label}")
-    }
+    def server = SftpAutomationSupport.loadSftpServerForRun(ec, sftpServerId, sftpRunScope, label)
 
     def hostInfo = resolveHostAndPort(server.host, server.port, "Server ${sftpServerId}")
     def cleanHost = hostInfo.host
@@ -337,6 +332,7 @@ def prepareFile = { String label, String systemEnumId, String sftpServerId, Stri
 
         return [
                 found          : true,
+                server         : server,
                 source         : "sftp://${sftpConfig.host}:${sftpConfig.port}${sftpConfig.basePath}",
                 selectedName   : selection.name ?: selection.refPath,
                 stagedLocation : staged.location,
@@ -350,8 +346,17 @@ def prepareFile = { String label, String systemEnumId, String sftpServerId, Stri
     return [found: false, message: "Invalid SFTP configuration for ${label}"]
 }
 
-def file1Prep = prepareFile("file1", effectiveFile1SystemEnumId, file1SftpServerId, file1RemotePath)
-def file2Prep = prepareFile("file2", effectiveFile2SystemEnumId, file2SftpServerId, file2RemotePath)
+def file1Prep
+def file2Prep
+try {
+    file1Prep = prepareFile("file1", effectiveFile1SystemEnumId, file1SftpServerId, file1RemotePath)
+    file2Prep = prepareFile("file2", effectiveFile2SystemEnumId, file2SftpServerId, file2RemotePath)
+} catch (IllegalArgumentException e) {
+    ec.message.addError(e.message)
+    dataAvailable = false
+    statusMessage = messages.toString() + "\nResult: " + e.message
+    return
+}
 
 file1Source = file1Prep.source
 file2Source = file2Prep.source
@@ -496,16 +501,12 @@ try {
     }
 
     if (resultFile && (!resultFile.supportsExists() || resultFile.getExists())) {
-        def server = ec.entity.find("darpan.reconciliation.SftpServer")
-            .condition("sftpServerId", file1SftpServerId)
-            .disableAuthz()
-            .useCache(true)
-            .one()
+        def server = file1Prep.server ?: SftpAutomationSupport.loadSftpServerForRun(ec, file1SftpServerId, sftpRunScope, "result upload")
         if (server) {
             def hostInfo = resolveHostAndPort(server.host, server.port, "Server ${file1SftpServerId}")
             def cleanHost = hostInfo.host
             def cleanPort = hostInfo.port
-            def remoteResultDir = normalizePath(remoteUploadPath ?: file1BasePathUsed ?: hostInfo.basePath) ?: "/"
+            def remoteResultDir = normalizePath(remoteUploadPath ?: (outputLocation ? (file1BasePathUsed ?: hostInfo.basePath) : defaultRemoteUploadPath)) ?: "/"
             def cleanUser = normalize(server.username)
             def cleanPass = normalize(server.password)
             

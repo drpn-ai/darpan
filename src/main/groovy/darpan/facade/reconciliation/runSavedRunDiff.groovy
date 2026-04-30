@@ -63,12 +63,16 @@ def buildGeneratedOutputDescriptor = { Map serviceResult ->
             outputDocument = [:]
         }
     }
-    return ReconciliationOutputSupport.buildGeneratedOutputDescriptor(
+    Map descriptor = ReconciliationOutputSupport.buildGeneratedOutputDescriptor(
             serviceResult?.diffFileName as String,
             outputDocument,
             sizeBytes,
             createdDate
     )
+    if (serviceResult?.reconciliationRunResultId) {
+        descriptor.reconciliationRunResultId = serviceResult.reconciliationRunResultId
+    }
+    return descriptor
 }
 
 def mapping = null
@@ -108,6 +112,7 @@ if (!ec.message.hasError() && mapping != null) {
             runName              : mapping.mappingName,
             runType              : ReconciliationSavedRunSupport.RUN_TYPE_MAPPING,
             reconciliationMappingId: mapping.reconciliationMappingId,
+            reconciliationRunResultId: legacyRunResult.reconciliationRunResultId,
             ruleSetId            : null,
             compareScopeId       : null,
             compareScopeDescription: null,
@@ -168,6 +173,7 @@ if (!ec.message.hasError() && mapping == null) {
                         runName               : savedRun.runName,
                         runType               : savedRun.runType,
                         reconciliationMappingId: null,
+                        reconciliationRunResultId: serviceResult.reconciliationRunResultId,
                         ruleSetId             : savedRun.ruleSetId,
                         compareScopeId        : savedRun.compareScopeId,
                         compareScopeDescription: savedRun.compareScopeDescription,

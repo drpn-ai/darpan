@@ -36,4 +36,4 @@ Each result contains:
 - Saved runs route to `reconciliation-run-history`.
 - Generated run outputs route to `reconciliation-run-result`.
 
-Generated outputs are read from the active tenant's scoped output directory. If an output file includes a `companyUserGroupId` metadata value that does not match the active tenant, the search result is not returned.
+Generated outputs are discovered from `ReconciliationRunResult` rows first, then from legacy output files during migration. If an output file includes a `companyUserGroupId` metadata value that does not match the active tenant, the search result is not returned.

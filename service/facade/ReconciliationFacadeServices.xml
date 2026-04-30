@@ -883,6 +883,7 @@
                         </if>
                     </if>
                 </iterate>
+                <set field="ignoreRunResultDelete" from="ec.entity.find('darpan.reconciliation.ReconciliationRunResult').condition('savedRunId', savedRunIdValue).disableAuthz().useCache(false).deleteAll()"/>
             </if>
 
             <if condition="!ec.message.hasError() &amp;&amp; ruleSetRun">
@@ -1192,6 +1193,7 @@
             <parameter name="runResult">
                 <parameter name="reconciliationMappingId"/>
                 <parameter name="mappingName"/>
+                <parameter name="reconciliationRunResultId"/>
                 <parameter name="file1Name"/>
                 <parameter name="file2Name"/>
                 <parameter name="file1SystemEnumId"/>
@@ -1202,6 +1204,7 @@
                 <parameter name="processingWarnings" type="List"/>
                 <parameter name="generatedOutput">
                     <parameter name="fileName"/>
+                    <parameter name="reconciliationRunResultId"/>
                     <parameter name="sourceFormat"/>
                     <parameter name="availableFormats" type="List"/>
                     <parameter name="preferredDownloadFormat"/>
@@ -1245,6 +1248,7 @@
                 <parameter name="runName"/>
                 <parameter name="runType"/>
                 <parameter name="reconciliationMappingId"/>
+                <parameter name="reconciliationRunResultId"/>
                 <parameter name="ruleSetId"/>
                 <parameter name="compareScopeId"/>
                 <parameter name="file1Name"/>
@@ -1257,6 +1261,7 @@
                 <parameter name="processingWarnings" type="List"/>
                 <parameter name="generatedOutput">
                     <parameter name="fileName"/>
+                    <parameter name="reconciliationRunResultId"/>
                     <parameter name="sourceFormat"/>
                     <parameter name="availableFormats" type="List"/>
                     <parameter name="preferredDownloadFormat"/>
@@ -1303,6 +1308,7 @@
             </parameter>
             <parameter name="generatedOutputs">
                 <parameter name="fileName"/>
+                <parameter name="reconciliationRunResultId"/>
                 <parameter name="sourceFormat"/>
                 <parameter name="availableFormats" type="List"/>
                 <parameter name="preferredDownloadFormat"/>
@@ -1330,7 +1336,9 @@
             location="component://darpan/src/main/groovy/darpan/facade/reconciliation/getGeneratedOutput.groovy">
         <description>Retrieve a scoped generated diff output for direct download from darpan-ui.</description>
         <in-parameters>
-            <parameter name="fileName" required="true"/>
+            <parameter name="fileName" required="true">
+                <description>Generated-output file name or safe data-manager relative path returned by list#GeneratedOutputs.</description>
+            </parameter>
             <parameter name="format" default-value="json"/>
         </in-parameters>
         <out-parameters>
@@ -1351,7 +1359,9 @@
     <service verb="delete" noun="GeneratedOutput" allow-remote="true" authenticate="true">
         <description>Delete one scoped generated reconciliation diff output file.</description>
         <in-parameters>
-            <parameter name="fileName" required="true"/>
+            <parameter name="fileName" required="true">
+                <description>Generated-output file name or safe data-manager relative path returned by list#GeneratedOutputs.</description>
+            </parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -1366,8 +1376,14 @@
             <if condition="!fileNameValue">
                 <message error="true">fileName is required</message>
             </if>
-            <if condition="!ec.message.hasError() &amp;&amp; (fileNameValue.contains('..') || fileNameValue.contains('/') || fileNameValue.indexOf((char) 92) >= 0)">
+            <if condition="!ec.message.hasError() &amp;&amp; !darpan.facade.reconciliation.ReconciliationOutputSupport.isSafeOutputPath(fileNameValue)">
                 <message error="true">fileName is invalid</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="generatedOutputFile" from="darpan.facade.reconciliation.ReconciliationOutputSupport.resolveGeneratedOutputFile(ec, fileNameValue)"/>
+                <if condition="generatedOutputFile != null &amp;&amp; generatedOutputFile.exists() &amp;&amp; generatedOutputFile.isFile() &amp;&amp; !darpan.facade.reconciliation.ReconciliationOutputSupport.canAccessGeneratedOutputFile(ec, generatedOutputFile, fileNameValue)">
+                    <message error="true">Generated output '${fileNameValue}' is not available in your active tenant.</message>
+                </if>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for generated outputs.')"/>
@@ -1378,6 +1394,9 @@
                 <set field="deleted" from="deleteResult.deleted"/>
                 <set field="deletedFileName" from="deleteResult.deletedFileName ?: fileNameValue"/>
                 <set field="statusMessage" from="deleteResult.statusMessage"/>
+                <if condition="deleted">
+                    <set field="ignoreRunResultDelete" from="ec.entity.find('darpan.reconciliation.ReconciliationRunResult').condition('resultDataManagerPath', fileNameValue).disableAuthz().useCache(false).deleteAll()"/>
+                </if>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

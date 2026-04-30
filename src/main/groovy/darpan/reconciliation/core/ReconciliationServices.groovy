@@ -112,6 +112,7 @@ class ReconciliationServices {
             String file2LabelParam = (String) context.get("file2Label")
             String reconciliationMappingId = (String) context.get("reconciliationMappingId")
             String reconciliationMappingName = (String) context.get("reconciliationMappingName")
+            String companyUserGroupId = (String) context.get("companyUserGroupId")
             Boolean hasHeader = (Boolean) context.get("hasHeader")
             String outputLocation = (String) context.get("outputLocation") ?: "runtime://tmp/reconciliation/unified/output"
             String outputFileName = (String) context.get("outputFileName")
@@ -252,6 +253,7 @@ class ReconciliationServices {
                 file1Type: type1,
                 file2Type: type2,
                 reconciliation: reconciliationType,
+                companyUserGroupId: companyUserGroupId,
                 reconciliationMappingId: reconciliationMappingId,
                 reconciliationMappingName: reconciliationMappingName
             ]

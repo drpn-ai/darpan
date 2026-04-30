@@ -61,6 +61,7 @@
                 </if>
                 <set field="filename" from="finalName"/>
                 <set field="schemaName" from="finalName"/>
+                <set field="schemaDataManagerLocation" from="jsonschema.common.JsonSchemaUtil.persistSchemaText(ec, finalName, schemaUpload.text)"/>
             </if>
         </actions>
     </service>
@@ -98,6 +99,7 @@
                 <set field="ignoreSchemaText" from="existingSchema.set('schemaText', jsonTextValue)"/>
                 <set field="ignoreLastUpdated" from="existingSchema.set('lastUpdatedStamp', ec.user.nowTimestamp)"/>
                 <set field="ignoreSchemaUpdate" from="existingSchema.update()"/>
+                <set field="schemaDataManagerLocation" from="jsonschema.common.JsonSchemaUtil.persistSchemaText(ec, existingSchema.schemaName, jsonTextValue)"/>
                 <set field="jsonSchemaId" from="existingSchema.jsonSchemaId"/>
             </if>
         </actions>

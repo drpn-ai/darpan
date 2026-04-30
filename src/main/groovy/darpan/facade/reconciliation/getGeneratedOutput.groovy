@@ -1,12 +1,11 @@
 import darpan.facade.common.FacadeSupport
-import darpan.facade.common.TenantAccessSupport
 import darpan.facade.reconciliation.ReconciliationOutputSupport
 
 String fileNameValue = FacadeSupport.normalize(fileName)
 String requestedFormat = (FacadeSupport.normalize(format) ?: "json").toLowerCase()
 
 if (!fileNameValue) ec.message.addError("fileName is required")
-if (!ec.message.hasError() && (fileNameValue.contains("..") || fileNameValue.contains("/") || fileNameValue.contains("\\"))) {
+if (!ec.message.hasError() && !ReconciliationOutputSupport.isSafeOutputPath(fileNameValue)) {
     ec.message.addError("fileName is invalid")
 }
 
@@ -20,11 +19,11 @@ if (!ec.message.hasError() && !ReconciliationOutputSupport.availableFormatsForSo
 }
 
 if (!ec.message.hasError()) {
-    String outputLocation = TenantAccessSupport.resolveGenericOutputLocation(ec)
-    File outputDir = ec.resource.getLocationReference(outputLocation)?.getFile()
-    File generatedOutputFile = outputDir != null ? new File(outputDir, fileNameValue) : null
+    File generatedOutputFile = ReconciliationOutputSupport.resolveGeneratedOutputFile(ec, fileNameValue)
     if (generatedOutputFile == null || !generatedOutputFile.exists() || !generatedOutputFile.isFile()) {
         ec.message.addError("Generated output '${fileNameValue}' was not found.")
+    } else if (!ReconciliationOutputSupport.canAccessGeneratedOutputFile(ec, generatedOutputFile, fileNameValue)) {
+        ec.message.addError("Generated output '${fileNameValue}' is not available in your active tenant.")
     } else {
         String rawText = generatedOutputFile.getText("UTF-8")
         String contentText = rawText

@@ -13,9 +13,31 @@ Move reconciliation out of OMS into a standalone Moqui platform while keeping in
 - Configuration Service: store tenant-specific rules, schedules, and mapping configurations
 - Audit and Monitoring Service: record runs, rule versions used, and operational metrics
 
+## Production Tenant Settings Services
+
+Production multi-user setup depends on these current facade and entity contracts:
+
+| Service area | Current contract | Production setup note |
+| --- | --- | --- |
+| Auth/session | `facade.AuthFacadeServices.login#Session`, `get#SessionInfo`, and `save#ActiveTenant` return active-tenant metadata. | Verify `activeTenantUserGroupId`, `availableTenants`, `activeTenantPermissionGroupIds`, `canEditActiveTenantData`, and `isSuperAdmin` before configuring tenant-owned settings. |
+| Tenant membership | `moqui.security.UserGroup`, `moqui.security.UserGroupMember`, and `darpan.auth.TenantUserPermissionGroupMember`. | Use `UgtDarpanCompany` for tenants, `DARPAN_COMPANY_EDITOR` for write access, and `DARPAN_COMPANY_VIEW_ONLY` for read-only access. |
+| SFTP settings | `list#SftpServers` and `save#SftpServer`; data is stored in `darpan.reconciliation.SftpServer`. | Tenant-owned via `companyUserGroupId`; verify tenant A/B isolation and view-only save rejection. |
+| NetSuite auth | `list#NsAuthConfigs` and `save#NsAuthConfig`; data is stored in `darpan.reconciliation.NsAuthConfig`. | Tenant-owned via `companyUserGroupId`; credentials must not be shared globally across tenants. |
+| NetSuite endpoints | `list#NsRestletConfigs` and `save#NsRestletConfig`; data is stored in `darpan.reconciliation.NsRestletConfig`. | Tenant-owned via `companyUserGroupId`; endpoint save validates that the referenced auth config is visible in the active tenant. |
+| Schemas | JSON schema facade services use `darpan.reconciliation.JsonSchema`. | Tenant-owned via `companyUserGroupId`; `list#JsonSchemas` should only return active-tenant schemas. |
+| Saved runs and mappings | Reconciliation facade services use `darpan.mapping.ReconciliationMapping` and saved-run support. | Treat saved runs and mappings as tenant-level operational setup, not personal preferences. |
+| Results | Reconciliation output support uses `darpan.reconciliation.ReconciliationRunResult` first, with generated-output metadata as a fallback for migration files. | Results are tenant evidence shared by users in the same active tenant; verify result list/detail/delete does not cross active tenants. |
+| AI/LLM settings | `get#LlmSettings` and `save#LlmSettings`. | Super-admin only and admin-global in the current implementation. |
+| Enum/global settings | `list#EnumOptions`. | Super-admin only; do not delegate to tenant editors. |
+| Read DB config | `list#HcReadDbConfigs` and `save#HcReadDbConfig`. | Super-admin only and deferred for tenant production setup because the entity has no tenant ownership field today. |
+
 ## Current Repo Footprint
 
 - Configuration entities (Reconciliation, Run, RuleSet, etc): `runtime/component/darpan/entity/ReconciliationEntities.xml`
+- Tenant permission entity: `runtime/component/darpan/entity/AuthEntities.xml`
+- Tenant groups, permission groups, and active-tenant entity filters: `runtime/component/darpan/data/SecuritySeedData.xml`
+- Auth/session facade: `runtime/component/darpan/service/facade/AuthFacadeServices.xml`
+- Settings facade: `runtime/component/darpan/service/facade/SettingsFacadeServices.xml`
 - Sample reconciliation compare service: `runtime/component/darpan/service/debug/ReconciliationDebugServices.xml`
 - Inventory retrieval services (NS Restlet + read-only DB): `runtime/component/darpan/service/reconciliation/ReconciliationInventoryServices.xml`
 - Spark-based compare implementation: `runtime/component/darpan/src/main/groovy/darpan/debug/reconciliation/compareSampleOrderIds.groovy`
@@ -25,9 +47,15 @@ Move reconciliation out of OMS into a standalone Moqui platform while keeping in
 
 - Wave 1 authenticated facade APIs for `darpan-ui` (Settings + JSON Schema):
   `runtime/component/darpan/docs/reconciliation/platform/facade-wave1-services.md`
+- Production tenant settings setup and verification:
+  `runtime/component/darpan/docs/reconciliation/platform/production-settings-surfaces.md`
+- Tenant-scoped access and user-level preferences:
+  `runtime/component/darpan/docs/reconciliation/platform/company-scoped-access-and-user-preferences.md`
 
 ## Platform Boundaries
 
 - No direct reads from OMS or POS databases
 - All heavy computation occurs inside the platform database and services
 - Tenant isolation enforced at storage and rule execution levels
+- Tenant-scoped settings are shared tenant assets; pins and saved UI preferences remain user-level.
+- AI/LLM, enum/global, app-wide operational config, and `HcReadDbConfig` are not tenant-editor surfaces in the current implementation.

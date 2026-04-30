@@ -1,5 +1,8 @@
 package darpan.facade.reconciliation
 
+import darpan.facade.common.DataManagerSupport
+import darpan.facade.common.TenantAccessSupport
+import groovy.io.FileType
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
@@ -14,11 +17,133 @@ class ReconciliationOutputSupport {
         return lower == "json" || lower == "csv"
     }
 
+    static boolean isGeneratedResultFile(String fileName) {
+        String normalized = fileName?.toLowerCase() ?: ""
+        return isSupportedOutputFile(normalized) && normalized.contains("_result")
+    }
+
     static String sourceFormatForFile(String fileName) {
         String normalized = fileName?.toLowerCase() ?: ""
         if (normalized.endsWith(".csv")) return "csv"
         if (normalized.endsWith(".json")) return "json"
         return ""
+    }
+
+    static boolean isSafeOutputPath(Object rawFileName) {
+        String safePath = DataManagerSupport.normalizeRelativePath(rawFileName)
+        if (safePath == null || !isSupportedOutputFile(safePath)) return false
+        if (safePath.contains("/")) return isGeneratedResultFile(safePath)
+        return true
+    }
+
+    static File resolveGeneratedOutputFile(def ec, Object rawFileName) {
+        String safePath = DataManagerSupport.normalizeRelativePath(rawFileName)
+        if (!safePath) return null
+
+        File dataManagerFile = DataManagerSupport.resolveDataManagerFile(ec, safePath, false)
+        if (dataManagerFile?.exists() && dataManagerFile.isFile() && isGeneratedResultFile(dataManagerFile.name)) {
+            return dataManagerFile
+        }
+
+        if (!safePath.contains("/")) {
+            File legacyOutputDir = ec?.resource?.getLocationReference(TenantAccessSupport.resolveGenericOutputLocation(ec))?.getFile()
+            File legacyFile = legacyOutputDir != null ? new File(legacyOutputDir, safePath) : null
+            if (legacyFile?.exists() && legacyFile.isFile() && isSupportedOutputFile(legacyFile.name)) return legacyFile
+        }
+
+        return null
+    }
+
+    static boolean canAccessGeneratedOutputFile(def ec, File file, Object rawFileName) {
+        String safePath = DataManagerSupport.normalizeRelativePath(rawFileName)
+        if (!safePath?.contains("/")) return true
+
+        String activeTenantUserGroupId = normalize(TenantAccessSupport.currentActiveTenantUserGroupId(ec))
+        if (!activeTenantUserGroupId) return false
+
+        String outputCompanyUserGroupId = resolveGeneratedOutputTenantUserGroupId(ec, file, safePath)
+        return outputCompanyUserGroupId && outputCompanyUserGroupId == activeTenantUserGroupId
+    }
+
+    static String resolveGeneratedOutputTenantUserGroupId(def ec, File file, Object rawFileName) {
+        String safePath = DataManagerSupport.normalizeRelativePath(rawFileName)
+        if (!safePath) return null
+
+        def runResult = ec?.entity?.find("darpan.reconciliation.ReconciliationRunResult")
+                ?.condition("resultDataManagerPath", safePath)
+                ?.disableAuthz()
+                ?.useCache(false)
+                ?.one()
+        String runResultTenantUserGroupId = normalize(runResult?.companyUserGroupId)
+        if (runResultTenantUserGroupId) return runResultTenantUserGroupId
+
+        Map<String, Object> outputDocument = parseOutputDocument(file)
+        return normalize(outputDocument?.metadata instanceof Map ? outputDocument.metadata.companyUserGroupId : null)
+    }
+
+    static List<Map<String, Object>> listGeneratedOutputFiles(def ec) {
+        List<Map<String, Object>> outputFiles = []
+        Set<String> seenFileNames = [] as Set
+
+        def resultFinder = ec?.entity?.find("darpan.reconciliation.ReconciliationRunResult")
+        if (resultFinder != null) {
+            String activeTenantUserGroupId = normalize(TenantAccessSupport.currentActiveTenantUserGroupId(ec))
+            if (activeTenantUserGroupId) resultFinder.condition("companyUserGroupId", activeTenantUserGroupId)
+            if (resultFinder.metaClass.respondsTo(resultFinder, "disableAuthz")) resultFinder.disableAuthz()
+            if (resultFinder.metaClass.respondsTo(resultFinder, "useCache", Boolean)) resultFinder.useCache(false)
+            (resultFinder.list() ?: []).each { runResult ->
+                String fileName = DataManagerSupport.normalizeRelativePath(runResult.resultDataManagerPath)
+                File file = resolveGeneratedOutputFile(ec, fileName)
+                if (fileName && file?.exists() && file.isFile() && seenFileNames.add(fileName)) {
+                    outputFiles.add([
+                            file     : file,
+                            fileName : fileName,
+                            runResult: runResult,
+                    ])
+                }
+            }
+        }
+
+        File runsRoot = DataManagerSupport.resolveDirectoryFile(ec, DataManagerSupport.resolveReconciliationRunsLocation(ec), false)
+        if (runsRoot?.exists()) {
+            runsRoot.eachFileRecurse(FileType.FILES) { File file ->
+                if (isGeneratedResultFile(file.name)) {
+                    String fileName = DataManagerSupport.relativeDataManagerPath(ec, file)
+                    if (fileName && seenFileNames.add(fileName)) {
+                        outputFiles.add([
+                                file    : file,
+                                fileName: fileName
+                        ])
+                    }
+                }
+            }
+        }
+
+        File legacyOutputDir = ec?.resource?.getLocationReference(TenantAccessSupport.resolveGenericOutputLocation(ec))?.getFile()
+        if (legacyOutputDir?.exists()) {
+            (legacyOutputDir.listFiles() ?: [] as File[])
+                    .findAll { File file -> file.isFile() && isSupportedOutputFile(file.name) }
+                    .each { File file ->
+                        if (seenFileNames.add(file.name)) {
+                            outputFiles.add([
+                                    file    : file,
+                                    fileName: file.name
+                            ])
+                        }
+                    }
+        }
+
+        return outputFiles
+    }
+
+    static Map<String, Object> parseOutputDocument(File file) {
+        if (file == null || !file.exists() || !file.isFile()) return [:]
+        if (sourceFormatForFile(file.name) != "json") return [:]
+        try {
+            return parseGeneratedOutputText(file.getText("UTF-8"))
+        } catch (Exception ignored) {
+            return [:]
+        }
     }
 
     static List<String> availableFormatsForSource(String sourceFormat) {

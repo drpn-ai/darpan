@@ -12,7 +12,7 @@ class LlmSettingsSupportTests {
     void buildReadSettingsUsesActiveProviderAndPropertyFallbacks() {
         EntityFacadeStub entity = new EntityFacadeStub(recordsById: [
                 RULE_WORKSPACE_LLM_ACTIVE: [username: "GEMINI"],
-                GEMINI_RULE_WORKSPACE    : [remoteAttributes: "N"]
+                GEMINI_RULE_WORKSPACE    : [password: "stored-gemini-key", remoteAttributes: "N"]
         ])
         def ec = new Expando(
                 entity: entity,
@@ -31,7 +31,9 @@ class LlmSettingsSupportTests {
         assertEquals("https://gemini.example", settings.llmBaseUrl)
         assertEquals("90", settings.llmTimeoutSeconds)
         assertEquals("N", settings.llmEnabled)
-        assertFalse(settings.hasStoredLlmApiKey as boolean)
+        assertTrue(settings.hasStoredLlmApiKey as boolean)
+        assertFalse(settings.containsKey("llmApiKey"))
+        assertFalse(settings.containsKey("password"))
         assertEquals("GEMINI_API_KEY", settings.fallbackLlmKeyEnvName)
     }
 

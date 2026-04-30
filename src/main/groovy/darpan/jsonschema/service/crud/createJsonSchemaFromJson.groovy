@@ -2,6 +2,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 
+import jsonschema.common.JsonSchemaUtil
 import org.slf4j.LoggerFactory
 // --------------------------------------------------------------------------------
 // Unique naming logic inlined
@@ -272,6 +273,7 @@ if (existingSchema) {
 
 filename = nameToSave // Set output params
 schemaName = nameToSave
+schemaDataManagerLocation = JsonSchemaUtil.persistSchemaText(ec, nameToSave, schemaJson)
 
 
 logger.info("Saved generated JSON schema ${filename} to DB with ID ${jsonSchemaId}")

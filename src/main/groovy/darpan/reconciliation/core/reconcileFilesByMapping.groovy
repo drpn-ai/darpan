@@ -179,11 +179,17 @@ def file2Schema = file2Config.schemaFileName
 
 def file1Label = normalize(file1Label) ?: resolveEnumLabel(file1SystemEnumId, "File 1")
 def file2Label = normalize(file2Label) ?: resolveEnumLabel(file2SystemEnumId, "File 2")
+def mappingRecord = ec.entity.find("darpan.mapping.ReconciliationMapping")
+        .condition("reconciliationMappingId", reconciliationMappingId)
+        .disableAuthz()
+        .useCache(true)
+        .one()
 
 def reconType = "${file1Type}_${file2Type}"
 reconciliationType = (reconType == "CSV_CSV") ? "CSV" : (reconType == "JSON_JSON" ? "JSON" : "MIXED")
 
 def outputBase = outputLocation ?: "runtime://tmp/reconciliation/router/output"
+def outputFileNameValue = normalize(outputFileName)
 def sparkMasterToUse = sparkMaster ?: (ec.resource.properties['spark.master'] ?: "local[*]")
 def sparkAppNameToUse = sparkAppName ?: "ReconciliationRouter"
 validationErrors = []
@@ -205,8 +211,10 @@ def result = ec.service.sync()
                 file2Label            : file2Label,
                 hasHeader             : hasHeader,
                 outputLocation        : outputBase,
+                outputFileName        : outputFileNameValue,
                 reconciliationMappingId: reconciliationMappingId,
-                reconciliationMappingName: ec.entity.find("darpan.mapping.ReconciliationMapping").condition("reconciliationMappingId", reconciliationMappingId).disableAuthz().useCache(true).one()?.mappingName,
+                reconciliationMappingName: mappingRecord?.mappingName,
+                companyUserGroupId    : mappingRecord?.companyUserGroupId,
                 sparkMaster           : sparkMasterToUse,
                 sparkAppName          : sparkAppNameToUse,
                 processingWarnings    : processingWarnings

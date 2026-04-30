@@ -22,6 +22,8 @@ def mappingFinder = ec.entity.find("darpan.mapping.ReconciliationMapping")
         .useCache(false)
 
 (mappingFinder.list() ?: []).each { mapping ->
+    if (!TenantAccessSupport.canAccessTenantRecord(ec, mapping)) return
+
     List mappingMembers = ec.entity.find("darpan.mapping.ReconciliationMappingMember")
             .condition("reconciliationMappingId", mapping.reconciliationMappingId)
             .useCache(false)

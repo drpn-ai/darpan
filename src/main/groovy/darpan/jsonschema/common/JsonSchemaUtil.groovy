@@ -2,6 +2,7 @@ package jsonschema.common
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.JsonNode
+import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
 import org.moqui.context.ExecutionContext
 import org.slf4j.Logger
@@ -49,14 +50,40 @@ class JsonSchemaUtil {
             .condition("schemaName", nameKey).useCache(true).one()
         if (schema?.schemaText) return schema.schemaText
 
-        // 3. Fallback to legacy runtime schema files still referenced by seeded mappings.
+        // 3. Fallback to data-manager and legacy runtime schema files still referenced by seeded mappings.
         String safeName = cleanFileName(nameKey)
         if (!safeName) return null
+
+        String dataManagerSchemaText = loadSchemaTextFromLocation(ec, DataManagerSupport.resolveSchemaLocation(ec, safeName))
+        if (dataManagerSchemaText) return dataManagerSchemaText
+
+        String legacyDataManagerText = loadSchemaTextFromLocation(ec,
+                DataManagerSupport.childLocation(DataManagerSupport.childLocation(DataManagerSupport.resolveDataManagerLocation(ec), DataManagerSupport.SCHEMA_PATH), safeName))
+        if (legacyDataManagerText) return legacyDataManagerText
 
         def schemaRef = ec.resource.getLocationReference("runtime://schemas/json/${safeName}")
         if (schemaRef == null) return null
         if (schemaRef.supportsExists() && !schemaRef.getExists()) return null
 
+        String schemaText = schemaRef.getText()
+        return schemaText?.trim() ? schemaText : null
+    }
+
+    static String persistSchemaText(ExecutionContext ec, Object rawSchemaName, Object rawSchemaText) {
+        String schemaName = FacadeSupport.normalize(rawSchemaName)
+        String schemaText = rawSchemaText?.toString()
+        if (!schemaName || !FacadeSupport.normalize(schemaText)) return null
+
+        String location = DataManagerSupport.resolveSchemaLocation(ec, schemaName)
+        DataManagerSupport.writeText(ec, location, schemaText)
+        return location
+    }
+
+    protected static String loadSchemaTextFromLocation(ExecutionContext ec, String location) {
+        if (!location) return null
+        def schemaRef = ec.resource.getLocationReference(location)
+        if (schemaRef == null) return null
+        if (schemaRef.supportsExists() && !schemaRef.getExists()) return null
         String schemaText = schemaRef.getText()
         return schemaText?.trim() ? schemaText : null
     }

@@ -1,14 +1,17 @@
 package darpan.facade.reconciliation
 
+import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.context.ExecutionContext
 
 import java.nio.file.Path
+import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
@@ -18,6 +21,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class SavedRunsFacadeSmokeTests {
+    private static final String TEST_USER_ID = "TEST_CUSTOMER_USER"
+    private static final String SAME_TENANT_USER_ID = "TEST_KREWE_VIEWER"
+    private static final String OUTSIDE_TENANT_USER_ID = "TEST_GORJANA_EDITOR"
+    private static final String KREWE = "KREWE"
+    private static final String GORJANA = "GORJANA"
+    private static final Timestamp TEST_FROM_DATE = Timestamp.valueOf("2026-04-23 00:00:00")
+
     private ExecutionContext ec
 
     @BeforeAll
@@ -36,6 +46,9 @@ class SavedRunsFacadeSmokeTests {
     void clearErrors() {
         ec.message.clearErrors()
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
+        replaceTenantPermission(KREWE, TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID)
+        ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, KREWE)
+        ec.message.clearErrors()
     }
 
     @Test
@@ -131,6 +144,104 @@ class SavedRunsFacadeSmokeTests {
     }
 
     @Test
+    void generatedOutputsAreSharedWithinTenantAndDeniedAcrossTenants() {
+        Map<String, Object> runResult = createAndRunCsvSavedRun("CSV Tenant Shared Result")
+        String savedRunId = runResult.runResult.savedRunId as String
+        String outputFileName = runResult.runResult.generatedOutput.fileName as String
+        assertTrue(outputFileName.startsWith("reconciliation-runs/${savedRunId}/"))
+
+        loginAsTenantUser(
+                SAME_TENANT_USER_ID,
+                "test.krewe.viewer",
+                KREWE,
+                TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID
+        )
+
+        Map<String, Object> sameTenantListResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.list#GeneratedOutputs")
+                .parameters([
+                        savedRunId: savedRunId,
+                        pageIndex : 0,
+                        pageSize  : 10,
+                        query     : "",
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        List<Map<String, Object>> sameTenantOutputs = (List<Map<String, Object>>) (sameTenantListResult.generatedOutputs ?: [])
+        assertTrue(sameTenantOutputs.any { Map<String, Object> row -> row.fileName == outputFileName })
+
+        Map<String, Object> sameTenantGetResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.get#GeneratedOutput")
+                .parameters([fileName: outputFileName, format: "json"])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals(true, sameTenantGetResult.ok)
+        assertEquals(outputFileName, sameTenantGetResult.outputFile.fileName)
+
+        loginAsTenantUser(
+                OUTSIDE_TENANT_USER_ID,
+                "test.gorjana.editor",
+                GORJANA,
+                TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID
+        )
+
+        Map<String, Object> outsideTenantListResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.list#GeneratedOutputs")
+                .parameters([
+                        savedRunId: savedRunId,
+                        pageIndex : 0,
+                        pageSize  : 10,
+                        query     : "",
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertFalse(((List<Map<String, Object>>) (outsideTenantListResult.generatedOutputs ?: []))
+                .any { Map<String, Object> row -> row.fileName == outputFileName })
+
+        Map<String, Object> outsideTenantGetResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.get#GeneratedOutput")
+                .parameters([fileName: outputFileName, format: "json"])
+                .disableAuthz()
+                .call()
+
+        assertEquals(false, outsideTenantGetResult.ok)
+        assertTrue((outsideTenantGetResult.errors ?: []).join(" ").contains("active tenant"))
+
+        ec.message.clearErrors()
+        Map<String, Object> outsideTenantDeleteResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.delete#GeneratedOutput")
+                .parameters([fileName: outputFileName])
+                .disableAuthz()
+                .call()
+
+        assertEquals(false, outsideTenantDeleteResult.ok)
+        assertTrue((outsideTenantDeleteResult.errors ?: []).join(" ").contains("active tenant"))
+
+        ec.message.clearErrors()
+        loginAsTenantUser(
+                SAME_TENANT_USER_ID,
+                "test.krewe.viewer",
+                KREWE,
+                TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID
+        )
+
+        Map<String, Object> stillVisibleResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.get#GeneratedOutput")
+                .parameters([fileName: outputFileName, format: "json"])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals(true, stillVisibleResult.ok)
+    }
+
+    @Test
     void csvSavedRunRejectsJsonSchemaDocumentsBeforeSparkProjection() {
         Map<String, Object> createResult = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.create#CsvRun")
@@ -176,6 +287,65 @@ class SavedRunsFacadeSmokeTests {
         assertTrue(ec.message.errors.any { String message -> message.contains("expects CSV data") })
         assertTrue(ec.message.errors.any { String message -> message.contains("JSON Schema document") })
         assertTrue(ec.message.errors.any { String message -> message.contains("source data file") })
+    }
+
+    @Test
+    void mappingsListOnlyReturnsActiveTenantRows() {
+        seedCrossTenantMappingUsingReadableSchemas()
+
+        Map<String, Object> listResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.list#Mappings")
+                .parameters([
+                        pageIndex: 0,
+                        pageSize : 50,
+                        query    : "",
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        List<Map<String, Object>> mappings = (List<Map<String, Object>>) (listResult.mappings ?: [])
+        assertTrue(mappings.any { Map<String, Object> row -> row.reconciliationMappingId == "OrderIdSchemaMap" })
+        assertFalse(mappings.any { Map<String, Object> row -> row.reconciliationMappingId == "GORJANA_MAPPING_WITH_KREWE_SCHEMAS" })
+        assertTrue(mappings.every { Map<String, Object> row -> row.companyUserGroupId == KREWE })
+    }
+
+    @Test
+    void viewOnlyActiveTenantCanListButCannotRunSavedRuns() {
+        seedPermissionGroup(TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID, "Can view tenant-scoped Darpan data but cannot mutate it")
+        replaceTenantPermission(KREWE, TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID)
+        ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, KREWE)
+
+        Map<String, Object> listResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.list#SavedRuns")
+                .parameters([
+                        pageIndex: 0,
+                        pageSize : 20,
+                        query    : "",
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        List<Map<String, Object>> savedRuns = (List<Map<String, Object>>) (listResult.savedRuns ?: [])
+        assertTrue(savedRuns.any { Map<String, Object> row -> row.savedRunId == "OrderIdSchemaMap" })
+
+        ec.message.clearErrors()
+        Map<String, Object> runResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.run#SavedRunDiff")
+                .parameters([
+                        savedRunId: "OrderIdSchemaMap",
+                        file1Name : "orders-1.csv",
+                        file1Text : "order_id\nA100\n",
+                        file2Name : "orders-2.csv",
+                        file2Text : "order_id\nA200\n",
+                        hasHeader : true,
+                ])
+                .disableAuthz()
+                .call()
+
+        assertEquals(false, runResult.ok)
+        assertTrue((runResult.errors ?: []).join(" ").contains("view access"))
     }
 
     @Test
@@ -617,7 +787,7 @@ end'''
                 .disableAuthz()
                 .call()
 
-        assertFalse(ec.message.hasError())
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
         assertTrue(((List) (outputListResult.generatedOutputs ?: [])).any { Map<String, Object> row ->
             row.fileName == runResult.runResult.generatedOutput.fileName
         })
@@ -666,5 +836,174 @@ end'''
                 .call()
 
         assertTrue(((List) (postDeleteOutputListResult.generatedOutputs ?: [])).isEmpty())
+    }
+
+    private void seedCrossTenantMappingUsingReadableSchemas() {
+        upsertEntity("moqui.security.UserGroup", [userGroupId: GORJANA], [
+                userGroupId    : GORJANA,
+                description    : "Gorjana",
+                groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID,
+        ])
+        upsertEntity("darpan.mapping.ReconciliationMapping", [reconciliationMappingId: "GORJANA_MAPPING_WITH_KREWE_SCHEMAS"], [
+                reconciliationMappingId: "GORJANA_MAPPING_WITH_KREWE_SCHEMAS",
+                mappingName            : "Gorjana Cross Tenant Mapping",
+                description            : "Cross-tenant mapping that reuses active-tenant schemas",
+                companyUserGroupId     : GORJANA,
+                createdByUserId        : TEST_USER_ID,
+        ])
+        upsertEntity("darpan.mapping.ReconciliationMappingMember", [mappingMemberId: "GorjanaCrossTenantOms"], [
+                mappingMemberId        : "GorjanaCrossTenantOms",
+                reconciliationMappingId: "GORJANA_MAPPING_WITH_KREWE_SCHEMAS",
+                systemEnumId           : "OMS",
+                fileTypeEnumId         : "DftCsv",
+                schemaFileName         : "test-oms-order-id.schema.json",
+                idFieldExpression      : "order_id",
+        ])
+        upsertEntity("darpan.mapping.ReconciliationMappingMember", [mappingMemberId: "GorjanaCrossTenantShopify"], [
+                mappingMemberId        : "GorjanaCrossTenantShopify",
+                reconciliationMappingId: "GORJANA_MAPPING_WITH_KREWE_SCHEMAS",
+                systemEnumId           : "SHOPIFY",
+                fileTypeEnumId         : "DftCsv",
+                schemaFileName         : "test-shopify-order-id.schema.json",
+                idFieldExpression      : "order_id",
+        ])
+    }
+
+    private void seedPermissionGroup(String permissionGroupId, String description) {
+        upsertEntity("moqui.security.UserGroup", [userGroupId: permissionGroupId], [
+                userGroupId    : permissionGroupId,
+                description    : description,
+                groupTypeEnumId: TenantAccessSupport.DARPAN_PERMISSION_GROUP_TYPE_ENUM_ID,
+        ])
+    }
+
+    private void replaceTenantPermission(String tenantId, String permissionGroupId) {
+        boolean alreadyDisabled = ec.artifactExecution.disableAuthz()
+        ArtifactExecutionInfo aei = ec.artifactExecution.push(
+                "replaceSavedRunTenantPermission",
+                ArtifactExecutionInfo.AT_OTHER,
+                ArtifactExecutionInfo.AUTHZA_ALL,
+                false
+        )
+        ec.artifactExecution.setAnonymousAuthorizedAll()
+        try {
+            ec.entity.find(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME)
+                    .condition("tenantUserGroupId", tenantId)
+                    .condition("userId", TEST_USER_ID)
+                    .disableAuthz()
+                    .useCache(false)
+                    .list()
+                    .each { it.delete() }
+        } finally {
+            ec.artifactExecution.pop(aei)
+            if (!alreadyDisabled) ec.artifactExecution.enableAuthz()
+        }
+        upsertEntity(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [
+                tenantUserGroupId    : tenantId,
+                userId               : TEST_USER_ID,
+                permissionUserGroupId: permissionGroupId,
+                fromDate             : TEST_FROM_DATE,
+        ], [
+                tenantUserGroupId    : tenantId,
+                userId               : TEST_USER_ID,
+                permissionUserGroupId: permissionGroupId,
+                fromDate             : TEST_FROM_DATE,
+        ])
+    }
+
+    private Map<String, Object> createAndRunCsvSavedRun(String runName) {
+        loginAsTenantUser(
+                TEST_USER_ID,
+                "test.customer",
+                KREWE,
+                TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID
+        )
+
+        Map<String, Object> createResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#CsvRun")
+                .parameters([
+                        runName           : runName,
+                        file1SystemEnumId : "OMS",
+                        file2SystemEnumId : "SHOPIFY",
+                        file1CompareColumn: "order_id",
+                        file2CompareColumn: "order_id",
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+
+        Map<String, Object> runResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.run#SavedRunDiff")
+                .parameters([
+                        savedRunId: createResult.savedRun.savedRunId,
+                        file1Name : "orders-1.csv",
+                        file1Text : "order_id\nA100\nA200\nA300\n",
+                        file2Name : "orders-2.csv",
+                        file2Text : "order_id\nA200\nA300\nA400\n",
+                        hasHeader : true,
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        return runResult
+    }
+
+    private void loginAsTenantUser(String userId, String username, String tenantId, String permissionGroupId) {
+        seedPermissionGroup(permissionGroupId, permissionGroupId)
+        upsertEntity("moqui.security.UserGroup", [userGroupId: tenantId], [
+                userGroupId    : tenantId,
+                description    : tenantId,
+                groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID,
+        ])
+        upsertEntity("moqui.security.UserAccount", [userId: userId], [
+                userId        : userId,
+                username      : username,
+                userFullName  : username,
+                currentPassword: "",
+                disabled      : "N",
+        ])
+        upsertEntity("moqui.security.UserGroupMember", [
+                userGroupId: tenantId,
+                userId     : userId,
+                fromDate   : TEST_FROM_DATE,
+        ], [
+                userGroupId: tenantId,
+                userId     : userId,
+                fromDate   : TEST_FROM_DATE,
+        ])
+        upsertEntity(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME, [
+                tenantUserGroupId    : tenantId,
+                userId               : userId,
+                permissionUserGroupId: permissionGroupId,
+                fromDate             : TEST_FROM_DATE,
+        ], [
+                tenantUserGroupId    : tenantId,
+                userId               : userId,
+                permissionUserGroupId: permissionGroupId,
+                fromDate             : TEST_FROM_DATE,
+        ])
+
+        if (!ec.user.internalLoginUser(userId)) {
+            ec.user.internalLoginUser(username)
+        }
+        ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, tenantId)
+        ec.message.clearErrors()
+    }
+
+    private void upsertEntity(String entityName, Map<String, Object> pkFields, Map<String, Object> fields) {
+        def existing = ec.entity.find(entityName)
+                .condition(pkFields)
+                .disableAuthz()
+                .useCache(false)
+                .one()
+        if (existing != null) return
+
+        ec.service.sync()
+                .name("store#${entityName}")
+                .parameters(fields)
+                .disableAuthz()
+                .call()
     }
 }

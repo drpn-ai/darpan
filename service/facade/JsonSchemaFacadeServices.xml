@@ -195,6 +195,7 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
+                <set field="schemaDataManagerLocation" from="jsonschema.common.JsonSchemaUtil.persistSchemaText(ec, savedSchemaEntity?.schemaName, savedSchemaEntity?.schemaText)"/>
                 <set field="savedSystemEnumId" from="darpan.facade.common.FacadeSupport.normalize(savedSchemaEntity?.systemEnumId)"/>
                 <set field="savedSchema" from="[jsonSchemaId: savedSchemaEntity?.jsonSchemaId, schemaName: savedSchemaEntity?.schemaName, description: savedSchemaEntity?.description, systemEnumId: savedSystemEnumId, systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, savedSystemEnumId, null, true), ownerUserId: savedSchemaEntity?.ownerUserId, companyUserGroupId: savedSchemaEntity?.companyUserGroupId, createdByUserId: savedSchemaEntity?.createdByUserId, statusId: savedSchemaEntity?.statusId, lastUpdatedStamp: savedSchemaEntity?.lastUpdatedStamp]"/>
                 <message>Saved schema ${savedSchema.schemaName}.</message>

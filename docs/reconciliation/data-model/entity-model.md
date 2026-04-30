@@ -1,8 +1,8 @@
 # Reconciliation Configuration Entity Model
 
 This document maps the reconciliation configuration entities to their Moqui definitions in this repo.
-The model focuses on configuration and definition storage only. Execution, auditing, and result storage
-are intentionally out of scope.
+The model focuses on configuration, definition storage, and the run-result artifact manifest used to
+locate persisted source/result files. Full execution auditing remains out of scope.
 
 ## Source of Truth (Code)
 
@@ -198,6 +198,33 @@ Defines a single reconciliation check within a reconciliation.
 
 **Operational Note**
 - Reconciliation ownership is no longer modeled with dedicated party entities in component configuration.
+
+### ReconciliationRunResult (darpan.reconciliation.ReconciliationRunResult)
+Persists the artifact manifest for one run execution.
+
+**Purpose**
+- Stores the data-manager paths for the two uploaded source files and generated result
+- Links a UI saved run (`savedRunId`) to its persisted result artifact
+- Keeps tenant ownership on generated run data
+
+**Key Fields**
+- `reconciliationRunResultId`
+- `savedRunId`
+- `savedRunType` (`ruleset` or `mapping`)
+- `reconciliationRunId`
+- `reconciliationMappingId`
+- `ruleSetId`
+- `compareScopeId`
+- `companyUserGroupId`
+- `createdByUserId`
+- `file1DataManagerPath`
+- `file2DataManagerPath`
+- `resultDataManagerPath`
+- `reconciliationType`
+- `differenceCount`
+- `onlyInFile1Count`
+- `onlyInFile2Count`
+- `createdDate`
 
 ### DataDocument (moqui.entity.document.DataDocument)
 Defines a canonical data point used in reconciliation.
@@ -457,12 +484,12 @@ The current reconciliation baseline and planned target keep these responsibiliti
 
 ## What Is Out of Scope (By Design)
 
-- Execution tracking
+- Full execution tracking
 - Data pull results
-- Rule evaluation outcomes
+- Per-rule evaluation result storage
 - Alerts and notifications
 
-These concerns will be introduced in a separate execution-layer model.
+These concerns can be introduced in a separate execution-layer model.
 
 ## Future Enhancements
 

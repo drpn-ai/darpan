@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Current release-scoped upgrade data for Darpan.
+
+This file is the load target for ./gradlew loadDarpanUpgradeData.
+During release preflight, the existing file is archived under
+data/releases/<previous-version>/upgrade-data.xml and this file is replaced
+with the upgrade records for the tag being prepared.
+-->
+<entity-facade-xml type="darpan-seed">
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
+            artifactName="darpan.rule.RuleSet" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
+            artifactName="darpan.reconciliation.ReconciliationRunResult" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+
+    <moqui.security.EntityFilterSet entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            description="Filter Darpan tenant-owned rows by the active tenant in user context"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULE_SET"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.rule.RuleSet"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RUN_RESULT"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.ReconciliationRunResult"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+
+    <moqui.basic.Enumeration enumId="UgtDarpanPermission"
+            description="Darpan tenant permission groups"
+            enumTypeId="UserGroupType"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_COMPANY_EDITOR"
+            description="Can create, update, run, and delete tenant-scoped Darpan data"
+            groupTypeEnumId="UgtDarpanPermission"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_COMPANY_VIEW_ONLY"
+            description="Can view tenant-scoped Darpan data but cannot mutate it"
+            groupTypeEnumId="UgtDarpanPermission"/>
+    <moqui.basic.Enumeration enumId="UgtDarpanCompany"
+            description="Darpan tenant groups"
+            enumTypeId="UserGroupType"/>
+    <moqui.basic.Enumeration enumId="darpan.auth.activeTenantUserGroupId"
+            description="Preferred active tenant user group id"
+            enumTypeId="UserPreferenceKey"/>
+    <moqui.basic.Enumeration enumId="darpan.dashboard.pinnedMappingIds"
+            description="Pinned dashboard reconciliation mappings"
+            enumTypeId="UserPreferenceKey"/>
+</entity-facade-xml>

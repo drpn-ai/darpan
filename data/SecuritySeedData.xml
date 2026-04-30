@@ -19,9 +19,13 @@
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
             artifactName="darpan.mapping.ReconciliationMappingMember" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
+            artifactName="darpan.rule.RuleSet" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
             artifactName="darpan.rule.RuleSetCompareScope" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
             artifactName="darpan.rule.RuleSetCompareSource" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
+            artifactName="darpan.reconciliation.ReconciliationRunResult" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_APP_ADMIN" userGroupId="ADMIN"
             artifactGroupId="DARPAN_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
 
@@ -41,6 +45,14 @@
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RECON_MAPPING"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.mapping.ReconciliationMapping"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULE_SET"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.rule.RuleSet"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RUN_RESULT"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.ReconciliationRunResult"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_SFTP_SERVER"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
@@ -74,33 +86,21 @@
     <moqui.basic.Enumeration enumId="UgtDarpanCompany"
             description="Darpan tenant groups"
             enumTypeId="UserGroupType"/>
-    <moqui.security.UserGroup userGroupId="GORJANA"
-            description="Gorjana"
-            groupTypeEnumId="UgtDarpanCompany"/>
-    <moqui.security.UserGroup userGroupId="KREWE"
-            description="Krewe"
-            groupTypeEnumId="UgtDarpanCompany"/>
-    <moqui.security.UserGroupMember userGroupId="GORJANA"
-            userId="EX_JOHN_DOE"
-            fromDate="1265184000000"/>
-    <moqui.security.UserGroupMember userGroupId="KREWE"
-            userId="EX_JOHN_DOE"
-            fromDate="1265184000000"/>
-    <darpan.auth.TenantUserPermissionGroupMember tenantUserGroupId="GORJANA"
-            userId="EX_JOHN_DOE"
-            permissionUserGroupId="DARPAN_COMPANY_EDITOR"
-            fromDate="1265184000000"/>
-    <darpan.auth.TenantUserPermissionGroupMember tenantUserGroupId="KREWE"
-            userId="EX_JOHN_DOE"
-            permissionUserGroupId="DARPAN_COMPANY_VIEW_ONLY"
-            fromDate="1265184000000"/>
     <moqui.basic.Enumeration enumId="darpan.auth.activeTenantUserGroupId"
             description="Preferred active tenant user group id"
             enumTypeId="UserPreferenceKey"/>
-    <moqui.security.UserPreference userId="EX_JOHN_DOE"
-            preferenceKey="darpan.auth.activeTenantUserGroupId"
-            preferenceValue="GORJANA"/>
     <moqui.basic.Enumeration enumId="darpan.dashboard.pinnedMappingIds"
             description="Pinned dashboard reconciliation mappings"
             enumTypeId="UserPreferenceKey"/>
+    <moqui.basic.EnumerationType enumTypeId="DarpanSftpScope"
+            description="Darpan SFTP server scope"/>
+    <moqui.basic.Enumeration enumId="DARPAN_SFTP_TENANT"
+            description="Tenant-owned SFTP server"
+            enumTypeId="DarpanSftpScope"/>
+    <moqui.basic.Enumeration enumId="DARPAN_SFTP_TENANT_GROUP"
+            description="SFTP server shared across explicitly assigned tenant groups"
+            enumTypeId="DarpanSftpScope"/>
+    <moqui.basic.Enumeration enumId="DARPAN_SFTP_ADMIN"
+            description="Admin/platform-owned SFTP server"
+            enumTypeId="DarpanSftpScope"/>
 </entity-facade-xml>

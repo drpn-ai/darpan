@@ -1,5 +1,4 @@
 import darpan.facade.common.FacadeSupport
-import darpan.facade.common.TenantAccessSupport
 import darpan.facade.reconciliation.ReconciliationOutputSupport
 
 import java.sql.Timestamp
@@ -12,33 +11,31 @@ String search = FacadeSupport.normalize(query)?.toLowerCase()
 generatedOutputs = []
 pagination = [pageIndex: page, pageSize: size, totalCount: 0, pageCount: 1]
 
-String outputLocation = TenantAccessSupport.resolveGenericOutputLocation(ec)
-File outputDir = ec.resource.getLocationReference(outputLocation)?.getFile()
-
-if (outputDir?.exists()) {
+List<Map<String, Object>> outputFiles = ReconciliationOutputSupport.listGeneratedOutputFiles(ec)
+if (outputFiles) {
     List<Map> rows = []
-    (outputDir.listFiles() ?: [] as File[])
-            .findAll { File file -> file.isFile() && ReconciliationOutputSupport.isSupportedOutputFile(file.name) }
-            .sort { File left, File right -> Long.compare(right.lastModified(), left.lastModified()) }
-            .each { File file ->
-                Map outputDocument = [:]
-                if (ReconciliationOutputSupport.sourceFormatForFile(file.name) == "json") {
-                    try {
-                        outputDocument = ReconciliationOutputSupport.parseGeneratedOutputText(file.getText("UTF-8"))
-                    } catch (Exception ignored) {
-                        outputDocument = [:]
+    outputFiles
+            .sort { Map left, Map right -> Long.compare(((File) right.file).lastModified(), ((File) left.file).lastModified()) }
+            .each { Map outputFile ->
+                File file = (File) outputFile.file
+                String fileName = outputFile.fileName as String
+                if (ReconciliationOutputSupport.canAccessGeneratedOutputFile(ec, file, fileName)) {
+                    Map outputDocument = ReconciliationOutputSupport.parseOutputDocument(file)
+
+                    Map<String, Object> descriptor = ReconciliationOutputSupport.buildGeneratedOutputDescriptor(
+                            fileName,
+                            outputDocument,
+                            file.length(),
+                            new Timestamp(file.lastModified())
+                    )
+                    if (outputFile.runResult?.reconciliationRunResultId) {
+                        descriptor.reconciliationRunResultId = outputFile.runResult.reconciliationRunResultId
+                    }
+
+                    if (ReconciliationOutputSupport.matchesGeneratedOutputDescriptor(descriptor, savedRunIdFilter, search)) {
+                        rows.add(descriptor)
                     }
                 }
-
-                Map<String, Object> descriptor = ReconciliationOutputSupport.buildGeneratedOutputDescriptor(
-                        file.name,
-                        outputDocument,
-                        file.length(),
-                        new Timestamp(file.lastModified())
-                )
-
-                if (!ReconciliationOutputSupport.matchesGeneratedOutputDescriptor(descriptor, savedRunIdFilter, search)) return
-                rows.add(descriptor)
             }
 
     int totalCount = rows.size()

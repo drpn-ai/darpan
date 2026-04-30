@@ -4,6 +4,6 @@ Candidate release-scoped upgrade data for Darpan 1.1.1.
 Generated from backend compare range: v1.1.0..HEAD
 Review each record before loading into an environment.
 -->
-<entity-facade-xml type="seed">
+<entity-facade-xml type="darpan-seed">
     <!-- No added or modified candidate records were detected between the compared refs. -->
 </entity-facade-xml>

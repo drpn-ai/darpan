@@ -43,6 +43,48 @@
         </relationship>
     </entity>
 
+    <entity entity-name="ReconciliationRunResult" package="darpan.reconciliation" use="transactional" cache="never">
+        <description>Persisted artifact manifest for one reconciliation run execution.</description>
+        <field name="reconciliationRunResultId" type="id" is-pk="true"/>
+        <field name="savedRunId" type="id"/>
+        <field name="savedRunType" type="text-short"/>
+        <field name="reconciliationRunId" type="id"/>
+        <field name="reconciliationMappingId" type="id"/>
+        <field name="ruleSetId" type="id"/>
+        <field name="compareScopeId" type="id"/>
+        <field name="companyUserGroupId" type="id"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="file1Name" type="text-medium"/>
+        <field name="file1DataManagerPath" type="text-long"/>
+        <field name="file2Name" type="text-medium"/>
+        <field name="file2DataManagerPath" type="text-long"/>
+        <field name="resultDataManagerPath" type="text-long"/>
+        <field name="reconciliationType" type="text-short"/>
+        <field name="differenceCount" type="number-integer"/>
+        <field name="onlyInFile1Count" type="number-integer"/>
+        <field name="onlyInFile2Count" type="number-integer"/>
+        <field name="createdDate" type="date-time"/>
+
+        <relationship type="one" related="darpan.reconciliation.ReconciliationRun" fk-name="RECRES_RUN">
+            <key-map field-name="reconciliationRunId"/>
+        </relationship>
+        <relationship type="one" related="darpan.mapping.ReconciliationMapping" fk-name="RECRES_MAPPING">
+            <key-map field-name="reconciliationMappingId"/>
+        </relationship>
+        <relationship type="one" related="darpan.rule.RuleSet" fk-name="RECRES_RULESET">
+            <key-map field-name="ruleSetId"/>
+        </relationship>
+        <relationship type="one" related="darpan.rule.RuleSetCompareScope" fk-name="RECRES_SCOPE">
+            <key-map field-name="compareScopeId"/>
+        </relationship>
+        <relationship type="one" title="Company" related="moqui.security.UserGroup" fk-name="RECRES_COMPANY">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+        <relationship type="one" title="CreatedBy" related="moqui.security.UserAccount" fk-name="RECRES_CREATED_BY">
+            <key-map field-name="createdByUserId" related-field-name="userId"/>
+        </relationship>
+    </entity>
+
     <entity entity-name="RunDataDocument" package="darpan.reconciliation" use="configuration">
         <description>Associates DataDocuments with a reconciliation run.</description>
         <field name="reconciliationRunId" type="id" is-pk="true"/>
@@ -77,6 +119,7 @@
         <description>Simple SFTP server configuration for Reconciliation automation.</description>
         <field name="sftpServerId" type="id" is-pk="true"/>
         <field name="description" type="text-medium"/>
+        <field name="scopeEnumId" type="id"/>
         <field name="companyUserGroupId" type="id"/>
         <field name="createdByUserId" type="id"/>
         <field name="host" type="text-medium" cannot-be-null="true"/>
@@ -88,6 +131,25 @@
 
         <relationship type="one" title="Company" related="moqui.security.UserGroup">
             <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+        <relationship type="one" title="Scope" related="moqui.basic.Enumeration">
+            <key-map field-name="scopeEnumId" related-field-name="enumId"/>
+        </relationship>
+        <relationship type="many" related="darpan.reconciliation.SftpServerTenantAccess">
+            <key-map field-name="sftpServerId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="SftpServerTenantAccess" package="darpan.reconciliation" use="configuration">
+        <description>Tenant access assignment for a shared tenant-group SFTP server.</description>
+        <field name="sftpServerId" type="id" is-pk="true"/>
+        <field name="tenantUserGroupId" type="id" is-pk="true"/>
+
+        <relationship type="one" related="darpan.reconciliation.SftpServer">
+            <key-map field-name="sftpServerId"/>
+        </relationship>
+        <relationship type="one" title="Tenant" related="moqui.security.UserGroup">
+            <key-map field-name="tenantUserGroupId" related-field-name="userGroupId"/>
         </relationship>
     </entity>
 

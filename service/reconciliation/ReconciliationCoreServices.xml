@@ -58,6 +58,9 @@
             <parameter name="reconciliationMappingName">
                 <description>Optional mapping name used for naming outputs.</description>
             </parameter>
+            <parameter name="companyUserGroupId">
+                <description>Optional active company/tenant scope stamped into generated output metadata.</description>
+            </parameter>
             <parameter name="hasHeader" type="Boolean" default-value="true"/>
             <parameter name="outputLocation" default-value="runtime://tmp/reconciliation/unified/output"/>
             <parameter name="outputFileName"/>
@@ -224,6 +227,7 @@
             <parameter name="file2Label"/>
             <parameter name="hasHeader" type="Boolean" default-value="true"/>
             <parameter name="outputLocation" default-value="runtime://tmp/reconciliation/router/output"/>
+            <parameter name="outputFileName"/>
             <parameter name="sparkMaster" default-value="local[*]"/>
             <parameter name="sparkAppName" default-value="ReconciliationRouter"/>
         </in-parameters>

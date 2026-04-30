@@ -289,5 +289,6 @@ if (existingSchema) {
 
 schemaName = finalSchemaName
 filename = finalSchemaName
+schemaDataManagerLocation = JsonSchemaUtil.persistSchemaText(ec, finalSchemaName, schemaJson)
 
 logger.info("Saved refined schema '{}' (ID: {}) with {} fields", schemaName, jsonSchemaId, normalizedFields.size())

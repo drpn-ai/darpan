@@ -1,46 +1,83 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Current release-scoped upgrade data for Darpan.
-
-This file is the Docker startup load target for MoquiStart load with
-types=darpan-seed and location=component://darpan/data/upgrade-data.xml.
-During release preflight, the existing file is archived under
-data/releases/<previous-version>/upgrade-data.xml and this file is replaced
-with the upgrade records for the tag being prepared.
+Candidate release-scoped upgrade data for Darpan 2.0.0.
+Generated from backend compare range: v1.1.1..e1efc7c
+Records must also live in generic source data files under runtime/component/darpan/data/.
+Review each record before loading into an environment.
 -->
 <entity-facade-xml type="darpan-seed">
-    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
-            artifactName="darpan.rule.RuleSet" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
-    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
-            artifactName="darpan.reconciliation.ReconciliationRunResult" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
-
-    <moqui.security.EntityFilterSet entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
-            description="Filter Darpan tenant-owned rows by the active tenant in user context"/>
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULE_SET"
-            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
-            entityName="darpan.rule.RuleSet"
-            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RUN_RESULT"
-            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
-            entityName="darpan.reconciliation.ReconciliationRunResult"
-            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
-
-    <moqui.basic.Enumeration enumId="UgtDarpanPermission"
-            description="Darpan tenant permission groups"
-            enumTypeId="UserGroupType"/>
-    <moqui.security.UserGroup userGroupId="DARPAN_COMPANY_EDITOR"
-            description="Can create, update, run, and delete tenant-scoped Darpan data"
-            groupTypeEnumId="UgtDarpanPermission"/>
-    <moqui.security.UserGroup userGroupId="DARPAN_COMPANY_VIEW_ONLY"
-            description="Can view tenant-scoped Darpan data but cannot mutate it"
-            groupTypeEnumId="UgtDarpanPermission"/>
-    <moqui.basic.Enumeration enumId="UgtDarpanCompany"
-            description="Darpan tenant groups"
-            enumTypeId="UserGroupType"/>
-    <moqui.basic.Enumeration enumId="darpan.auth.activeTenantUserGroupId"
-            description="Preferred active tenant user group id"
-            enumTypeId="UserPreferenceKey"/>
-    <moqui.basic.Enumeration enumId="darpan.dashboard.pinnedMappingIds"
-            description="Pinned dashboard reconciliation mappings"
-            enumTypeId="UserPreferenceKey"/>
+    <!-- Added records from data/AutomationSeedData.xml -->
+    <moqui.basic.EnumerationType enumTypeId="AutomationExecStatus" description="Automation execution status"/>
+    <moqui.basic.EnumerationType enumTypeId="AutomationInputMode" description="Automation input mode"/>
+    <moqui.basic.EnumerationType enumTypeId="AutomationRelWindow" description="Automation relative date window"/>
+    <moqui.basic.EnumerationType enumTypeId="AutomationSourceType" description="Automation source type"/>
+    <moqui.basic.Enumeration enumId="AUT_IN_API_RANGE" enumTypeId="AutomationInputMode" enumCode="API_DATE_RANGE" description="API date-range extraction" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUT_IN_SFTP_FILES" enumTypeId="AutomationInputMode" enumCode="SFTP_FILES" description="SFTP file inputs" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="AUT_SRC_API" enumTypeId="AutomationSourceType" enumCode="API" description="API source" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUT_SRC_SFTP" enumTypeId="AutomationSourceType" enumCode="SFTP" description="SFTP source" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="AUT_STAT_FAILED" enumTypeId="AutomationExecStatus" enumCode="FAILED" description="Failed" sequenceNum="5"/>
+    <moqui.basic.Enumeration enumId="AUT_STAT_NO_DATA" enumTypeId="AutomationExecStatus" enumCode="NO_DATA" description="No input data available" sequenceNum="4"/>
+    <moqui.basic.Enumeration enumId="AUT_STAT_PENDING" enumTypeId="AutomationExecStatus" enumCode="PENDING" description="Pending execution" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUT_STAT_RUNNING" enumTypeId="AutomationExecStatus" enumCode="RUNNING" description="Running" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="AUT_STAT_SKIP_DUP" enumTypeId="AutomationExecStatus" enumCode="SKIPPED_DUPLICATE" description="Skipped duplicate" sequenceNum="6"/>
+    <moqui.basic.Enumeration enumId="AUT_STAT_SUCCESS" enumTypeId="AutomationExecStatus" enumCode="SUCCEEDED" description="Succeeded" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="AUT_WIN_CUSTOM" enumTypeId="AutomationRelWindow" enumCode="CUSTOM_RANGE" description="Custom date range" sequenceNum="7"/>
+    <moqui.basic.Enumeration enumId="AUT_WIN_LAST_DAYS" enumTypeId="AutomationRelWindow" enumCode="LAST_N_DAYS" description="Last N days" sequenceNum="4"/>
+    <moqui.basic.Enumeration enumId="AUT_WIN_LAST_MONTHS" enumTypeId="AutomationRelWindow" enumCode="LAST_N_MONTHS" description="Last N months" sequenceNum="6"/>
+    <moqui.basic.Enumeration enumId="AUT_WIN_LAST_WEEKS" enumTypeId="AutomationRelWindow" enumCode="LAST_N_WEEKS" description="Last N weeks" sequenceNum="5"/>
+    <moqui.basic.Enumeration enumId="AUT_WIN_PREV_DAY" enumTypeId="AutomationRelWindow" enumCode="PREVIOUS_DAY" description="Previous calendar day" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUT_WIN_PREV_MONTH" enumTypeId="AutomationRelWindow" enumCode="PREVIOUS_MONTH" description="Previous month" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="AUT_WIN_PREV_WEEK" enumTypeId="AutomationRelWindow" enumCode="PREVIOUS_WEEK" description="Previous calendar week" sequenceNum="2"/>
+    <!-- Added records from data/DarpanSystemSourceSeedData.xml -->
+    <moqui.basic.Enumeration enumId="OMS" enumTypeId="DarpanSystemSource" enumCode="HOTWAX" description="HotWax" sequenceNum="1"/>
+    <!-- Duplicate mapping enumerations and smoke-test RuleSet fixtures were reviewed and excluded from this production upgrade load. -->
+    <!-- Added records from data/ReconciliationJobSeedData.xml -->
+    <moqui.service.job.ServiceJobParameter jobName="scan_ReconciliationAutomations_5m" parameterName="limit" parameterValue="100"/>
+    <moqui.service.job.ServiceJob jobName="scan_ReconciliationAutomations_5m" description="Scan due reconciliation automations and execute scheduled windows." serviceName="reconciliation.ReconciliationAutomationServices.scan#DueAutomations" cronExpression="0 0/5 * * * ?" paused="N"/>
+    <!-- Added records from data/SecuritySeedData.xml -->
+    <moqui.basic.EnumerationType enumTypeId="DarpanSftpScope" description="Darpan SFTP server scope"/>
+    <moqui.basic.Enumeration enumId="DARPAN_SFTP_ADMIN" description="Admin/platform-owned SFTP server" enumTypeId="DarpanSftpScope"/>
+    <moqui.basic.Enumeration enumId="DARPAN_SFTP_TENANT_GROUP" description="SFTP server shared across explicitly assigned tenant groups" enumTypeId="DarpanSftpScope"/>
+    <moqui.basic.Enumeration enumId="DARPAN_SFTP_TENANT" description="Tenant-owned SFTP server" enumTypeId="DarpanSftpScope"/>
+    <moqui.basic.Enumeration enumId="UgtDarpanCompany" description="Darpan tenant groups" enumTypeId="UserGroupType"/>
+    <moqui.basic.Enumeration enumId="UgtDarpanPermission" description="Darpan tenant permission groups" enumTypeId="UserGroupType"/>
+    <moqui.basic.Enumeration enumId="darpan.auth.activeTenantUserGroupId" description="Preferred active tenant user group id" enumTypeId="UserPreferenceKey"/>
+    <moqui.basic.Enumeration enumId="darpan.dashboard.pinnedMappingIds" description="Pinned dashboard reconciliation mappings" enumTypeId="UserPreferenceKey"/>
+    <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_ADMIN" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"/>
+    <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_USER" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_FACADE_APP_ADMIN" userGroupId="ADMIN" artifactGroupId="DARPAN_FACADE_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_FACADE_APP_USER" userGroupId="DARPAN_USER" artifactGroupId="DARPAN_FACADE_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.auth.TenantSetting" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.reconciliation.ReconciliationAutomation" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.reconciliation.ReconciliationAutomationExecution" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.reconciliation.ReconciliationAutomationSource" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.reconciliation.ReconciliationRunResult" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.reconciliation.TenantNotificationSetting" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.rule.RuleSet" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.rule.RuleSetCompareScope" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.rule.RuleSetCompareSource" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_FACADE_APP" artifactName="facade\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroup artifactGroupId="DARPAN_FACADE_APP" description="Darpan facade APIs for the PWA"/>
+    <moqui.security.EntityFilterSet entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" description="Filter Darpan tenant-owned rows by the active tenant in user context"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUTOMATION_EXEC" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.ReconciliationAutomationExecution" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUTOMATION_SOURCE" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.ReconciliationAutomationSource" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUTOMATION" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.ReconciliationAutomation" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_JSON_SCHEMA" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.JsonSchema" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_NS_AUTH" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.NsAuthConfig" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_NS_RESTLET" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.NsRestletConfig" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RECON_MAPPING" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.mapping.ReconciliationMapping" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULE_SET" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.rule.RuleSet" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RUN_RESULT" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.ReconciliationRunResult" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_SFTP_SERVER" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.SftpServer" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_TENANT_NOTIF" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.TenantNotificationSetting" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_TENANT_SETTING" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.auth.TenantSetting" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_COMPANY_EDITOR" description="Can create, update, run, and delete tenant-scoped Darpan data" groupTypeEnumId="UgtDarpanPermission"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_COMPANY_VIEW_ONLY" description="Can view tenant-scoped Darpan data but cannot mutate it" groupTypeEnumId="UgtDarpanPermission"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_SUPER_ADMIN" description="Can view and edit every tenant and manage Darpan core configuration" groupTypeEnumId="UgtDarpanPermission"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_TENANT_ADMIN" description="Can view, run, create, update, and delete data for associated tenants" groupTypeEnumId="UgtDarpanPermission"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_TENANT_USER" description="Can view tenant pages, upload files, and run reconciliation for associated tenants" groupTypeEnumId="UgtDarpanPermission"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_USER" description="Darpan application users"/>
+    <!-- Added records from data/SystemMessageRemoteSeedData.xml -->
+    <moqui.service.message.SystemMessageRemote systemMessageRemoteId="HOTWAX_ORDERS_API" description="Orders API" sendUrl="{baseUrl}/rest/s1/oms/orders" sendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"/>
+    <moqui.service.message.SystemMessageRemote systemMessageRemoteId="SHOPIFY_REMOTE" description="Admin GraphQL Orders" sendUrl="https://{shop}.myshopify.com/admin/api/{apiVersion}/graphql.json" sendServiceName="facade.ShopifyFacadeServices.execute#ShopifyGraphql"/>
 </entity-facade-xml>

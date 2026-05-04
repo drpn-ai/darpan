@@ -4,85 +4,81 @@ This file is the engineer-facing companion to the user release notes. Keep it cu
 
 ## Versioning decision
 
-- `2.0.0` is the draft target because this cut changes enough product and integration surface to require major-release treatment: primary reconciliation execution moves to ruleset-backed saved runs, active-company scoping becomes a core session contract, facade/security setup expands, seeded auth data changes, and the UI route/workflow assumptions shift with the backend contracts.
-- This does not claim intentional breaking changes for every user path; it is a conservative major release because the combined blast radius is too large for a minor release.
-- Version metadata is aligned for local release-candidate testing. Backend `component.xml`, UI `package.json`, and UI `package-lock.json` now read `2.0.0`.
+- `2.0.0` is a major release candidate because the candidate changes the primary reconciliation execution model, active-tenant/session contract, facade/security setup, automation runtime surface, settings contracts, and frontend route assumptions together.
+- The previous release baseline is `v1.1.1` for both backend and UI.
+- Version metadata is aligned for release-candidate testing in backend `component.xml`, UI `package.json`, and UI `package-lock.json`.
 
 ## Source ranges
 
-- Backend: `v1.1.1..local 2.0.0 worktree` (`feature/dar-206` at `52f1ac0` plus uncommitted candidate changes)
-- UI: `v1.1.1..local 2.0.0 worktree` (`main` at `bafcd5b` plus uncommitted candidate changes)
+- Backend: `v1.1.1..e1efc7c`
+- UI: `v1.1.1..6a887e3`
+- Backend compare URL: `https://github.com/toaditi/darpan/compare/v1.1.1...e1efc7c`
+- UI compare URL: `https://github.com/toaditi/darpan-ui/compare/v1.1.1...6a887e3`
 
 ## Backend
 
 ### Added
-- RuleSet compare-scope entities, source definitions, compare adapters, diff stages, and rule-stage execution support for ruleset-backed reconciliation.
-- `ReconciliationRunResult` entity storage for saved-run artifact manifests, including uploaded source-file data-manager paths and generated result data-manager paths.
-- Data-manager path helpers for reconciliation run artifacts under `runtime://datamanager/reconciliation-runs/{runId}/{timestamp}/`.
-- Saved-run facade support for listing saved runs, running saved-run diffs, and reading generated outputs through the newer reconciliation contract.
-- Active-company session and tenant access support, including company membership, permission level, user preference, and entity-filter setup.
-- Navigation search facade support for the custom UI command/search surface.
-- Smoke-test coverage for saved runs, tenant filtering, navigation search, generic reconciliation, RuleSet compare scopes, SFTP automation, and output handling.
+- Automation entities, execution support, SFTP/API automation source contracts, scanner service/job seed data, and automation facade smoke tests.
+- Tenant notification support and tenant setup documentation for multi-user Darpan operation.
+- Facade helper classes for auth, JSON schema, automation, API windows, saved runs, and output handling.
+- Active-company entity filters for schemas, mappings, rulesets, run results, automations, tenant settings, tenant notifications, NetSuite settings, and SFTP servers.
+- Production seed records for Darpan permission groups, SFTP server scope enums, facade artifact authz, and Shopify/HotWax system message remotes.
 
 ### Changed
-- Generic reconciliation, SFTP automation, and mapping-backed flows now route through ruleset/saved-run contracts instead of pilot-only screens and services.
-- Generic reconciliation persists uploaded source artifacts and result JSON to the data-manager run folder and returns generated-output `fileName` values as safe data-manager relative paths.
-- Backend screens retain minimal compatibility paths while pointing users toward the ruleset-backed contracts.
-- Schema contracts now carry company scope and accept raw schema/sample payload text where user input legitimately includes literal angle brackets.
-- Dashboard preferences and pinned reconciliation records were renamed and reorganized around saved runs instead of pilot mappings.
+- Reconciliation facade services route saved-run and ruleset execution through helper classes instead of standalone debug/pilot scripts.
+- Generated reconciliation artifacts use stable data-manager paths and saved-run result manifests.
+- Settings facade behavior is tenant-aware and stamps tenant/user ownership for scoped settings records.
+- Docker entrypoint invokes the component-owned `loadDarpanUpgradeData` Gradle task using the component build file.
+- Documentation was reorganized around tenant setup, permissions, production settings, automation, and platform service contracts.
 
 ### Fixed
-- Schema lists are filtered by active company so users do not see records they cannot open.
-- Raw schema sample upload no longer rejects ordinary `<` and `>` text characters.
-- Saved generated output timestamp, retrieval, and manifest path behavior is stabilized for file-backed run results.
-- JSON-specific RuleSet execution service and debug-only call path are removed in favor of the generic RuleSet execution entrypoint.
+- Schema sample text and validation flows accept raw user input without the removed helper-script path.
+- Generated output path handling avoids debug-service and traversal-oriented access patterns.
+- SFTP automation scope is explicit for tenant/admin SFTP server usage.
+- HcReadDb/debug screens and debug-only Groovy services are removed from the release surface.
 
 ### Security
-- Darpan facade services are grouped under `DARPAN_FACADE_APP`, with artifact authorization for `ADMIN` and `DARPAN_USER`.
-- `DARPAN_ACTIVE_COMPANY_SCOPE` filters tenant-owned entities such as schemas, RuleSets, generated run results, NetSuite auth/restlet config, mappings, and SFTP servers by the active company in user context.
-- Production seed data defines reusable tenant group types and permission groups without granting demo users access to default tenants.
+- `DARPAN_FACADE_APP` governs facade service access for `ADMIN` and `DARPAN_USER`.
+- `DARPAN_ACTIVE_COMPANY_SCOPE` filters tenant-owned rows by `activeTenantUserGroupId`.
+- Tenant permission groups are separated from tenant identity groups.
+- The release upgrade load excludes smoke-test fixtures and demo user memberships.
 
 ## UI
 
 ### Added
-- Active company session switching in the shell and auth client.
-- Saved-run and ruleset-oriented reconciliation routes and result surfaces.
-- Darpan favicon asset.
+- Automation dashboard/workflow pages and tests.
+- Tenant, user, Shopify, OMS REST, and SFTP settings pages/workflows.
+- Shared list pagination, saved-run editor routing, user-display helpers, OMS Swagger helpers, and automation draft helpers.
+- Tenant-switching mockup documentation for the UI candidate.
 
 ### Changed
-- The UI auth/session client aligns with the backend active-company contract.
-- Workflow forms and selectors handle Enter progression and option selection more consistently.
-- Edit workflow pages suppress the multi-step progress treatment where it does not apply.
-- Saved run labels are softened for readability while preserving known acronyms.
+- Home/dashboard, route guards, auth client, and shell state align with active-tenant session behavior.
+- Reconciliation create, diff, ruleset editor, ruleset manager, run history, and run result pages align with saved-run/ruleset contracts.
+- Workflow forms and shared selects handle keyboard progression and selection consistently.
+- Runs settings use the shared workflow/static-page behavior instead of older LLM settings surfaces.
 
 ### Fixed
-- Reconciliation result rows that represent field mismatches no longer render as empty JSON objects.
-- Workflow dropdown selection now responds to keyboard Enter in the shared workflow components.
-- Edit-surface presentation is cleaned up so single-page edits do not appear as incomplete guided flows.
+- Result rows with field mismatches render useful detail instead of empty JSON objects.
+- Run history and run result surfaces handle missing/generated-output states more deliberately.
+- Schema wizard input and verification behavior is hardened around raw sample text and editable verification details.
 
 ### Security
-- The draft local UI diff includes a stricter Firebase Content-Security-Policy change, but that change is not part of the committed `origin/main` candidate used for this preflight. It must be reviewed separately before any hosted deploy.
-
+- UI route guards and auth tests now exercise active-tenant and login/session behavior.
+- Tenant/user/settings pages rely on backend tenant-scoped facade contracts; no client-side-only isolation is treated as sufficient.
 
 ## Data and configuration
 
-- Candidate upgrade records live in `upgrade-data-review.md` and `upgrade-data.xml`.
-- `SecuritySeedData.xml` is the source of truth for Darpan facade access, active-company filtering, tenant group types, and reusable tenant permission groups.
-- `upgrade-data.xml` excludes smoke-test fixtures and demo tenant/user memberships from production upgrade data.
-- Docker startup now invokes MoquiStart `load` from the expanded WAR before Moqui starts, with `DARPAN_LOAD_UPGRADE_DATA=N` available as an opt-out.
-- UI package and lockfile versions are set to `2.0.0` for local candidate testing.
+- Generic source data files under `runtime/component/darpan/data/*.xml` remain the source of truth for seed/config records.
+- `data/upgrade-data.xml` and `data/releases/2.0.0/upgrade-data.xml` contain the curated production upgrade subset generated from `v1.1.1..e1efc7c`.
+- `data/releases/1.1.1/upgrade-data.xml` archives the previous current upgrade data before the 2.0.0 current file was regenerated.
+- Candidate records from `ReconciliationCompareScopeFixtureData.xml` remain in `upgrade-data-review.md` for traceability but are excluded from the production load file.
 
 ## Validation and rollout notes
 
-- Roll out backend and UI together. The UI assumes backend active-company, saved-run, and ruleset result contracts introduced in the backend candidate.
-- Backend candidate is currently not on release `main`; merge/rebase policy must be resolved before cutting.
-- UI local checkout is dirty and behind `origin/main`; the current local worktree is the `2.0.0` candidate and must be committed before validation and tagging.
-- File-path persistence was verified on `2026-04-29` with focused backend tests for `DataManagerSupportTests`, `ReconciliationOutputSupportTests`, and `GenericReconciliationServiceSmokeTests`; serial `:runtime:component:darpan:compileGroovy` also passed.
-- Open non-archived bug issues found in Linear on `2026-04-30`: `DAR-227`, `DAR-228`, `DAR-229`, `DAR-232`, `DAR-233`, `DAR-92`, `DAR-142`, `DAR-143`, `DAR-144`, `DAR-145`.
-- Candidate compare references:
-  - Backend: `https://github.com/toaditi/darpan/compare/v1.1.1...52f1ac0`
-  - UI: `https://github.com/toaditi/darpan-ui/compare/v1.1.1...67745da`
-- Final release compare links should point at the actual `v2.0.0` tags after cutting.
+- Roll backend and UI together because the UI assumes backend contracts introduced after `v1.1.1`.
+- Do not tag while Linear still reports open non-archived Bug issues.
+- Full validation state is tracked in `release-checklist.md`; as of this prep pass, release-pack validation is intentionally blocked by open issue count.
+- Final compare links should be updated to `v1.1.1...v2.0.0` after actual tags are cut.
 
 ## References
 

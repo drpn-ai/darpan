@@ -19,9 +19,16 @@ class ReconciliationSavedRunSupport {
     static final String SYSTEM_SHOPIFY = "SHOPIFY"
     static final String SYSTEM_HOTWAX_OMS = "OMS"
     static final String SYSTEM_NETSUITE = "NETSUITE"
+    static final String SYSTEM_SAPI = "SAPI"
     static final String SOURCE_CONFIG_TYPE_SHOPIFY_AUTH = "SHOPIFY_AUTH"
     static final String SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST = "HOTWAX_OMS_REST"
     static final String SOURCE_CONFIG_TYPE_NETSUITE_AUTH = "NETSUITE_AUTH"
+    static final String HOTWAX_ORDERS_REMOTE_ID = "HOTWAX_ORDERS_API"
+    static final String HOTWAX_ORDERS_ENDPOINT_LABEL = "Orders API"
+    static final String HOTWAX_OMS_ORDERS_EXTRACT_SERVICE = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"
+    static final String SHOPIFY_ORDERS_REMOTE_ID = "SHOPIFY_REMOTE"
+    static final String SHOPIFY_ORDERS_ENDPOINT_LABEL = "Admin GraphQL Orders"
+    static final String SHOPIFY_GRAPHQL_EXECUTE_SERVICE = "facade.ShopifyFacadeServices.execute#ShopifyGraphql"
     static final int ENTITY_ID_MAX_LENGTH = 40
 
     static String generateCsvRuleSetId(def ec, String runName) {
@@ -686,7 +693,9 @@ class ReconciliationSavedRunSupport {
                     sourceTypeEnumId  : FacadeSupport.normalize(source.sourceTypeEnumId),
                     sourceTypeLabel   : sourceTypeEnum ? FacadeSupport.enumLabel(sourceTypeEnum) : null,
                     systemMessageRemoteId   : FacadeSupport.normalize(source.systemMessageRemoteId),
-                    systemMessageRemoteLabel: FacadeSupport.normalize(systemMessageRemote?.description) ?: FacadeSupport.normalize(systemMessageRemote?.systemMessageRemoteId),
+                    systemMessageRemoteLabel: FacadeSupport.normalize(systemMessageRemote?.description) ?:
+                            virtualSystemRemoteLabel(source.systemEnumId, source.systemMessageRemoteId, source.sourceConfigType) ?:
+                            FacadeSupport.normalize(systemMessageRemote?.systemMessageRemoteId),
                     nsRestletConfigId       : FacadeSupport.normalize(source.nsRestletConfigId),
                     nsRestletConfigLabel    : FacadeSupport.normalize(nsRestletConfig?.description) ?: FacadeSupport.normalize(nsRestletConfig?.nsRestletConfigId),
                     sourceConfigId          : FacadeSupport.normalize(source.sourceConfigId),
@@ -702,14 +711,124 @@ class ReconciliationSavedRunSupport {
         return enumValue ? FacadeSupport.enumLabel(enumValue) : (fallback ?: normalized)
     }
 
+    static boolean isVirtualHotWaxOrdersRemote(Object systemEnumId, Object systemMessageRemoteId, Object sourceConfigType) {
+        if (FacadeSupport.normalize(systemEnumId) != SYSTEM_HOTWAX_OMS) return false
+        if (FacadeSupport.normalize(systemMessageRemoteId) != HOTWAX_ORDERS_REMOTE_ID) return false
+        String normalizedSourceConfigType = FacadeSupport.normalize(sourceConfigType)
+        return !normalizedSourceConfigType || normalizedSourceConfigType == SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST
+    }
+
+    static String virtualSystemRemoteLabel(Object systemEnumId, Object systemMessageRemoteId, Object sourceConfigType) {
+        if (isVirtualHotWaxOrdersRemote(systemEnumId, systemMessageRemoteId, sourceConfigType)) {
+            return HOTWAX_ORDERS_ENDPOINT_LABEL
+        }
+        if (isVirtualShopifyOrdersRemote(systemEnumId, systemMessageRemoteId, sourceConfigType)) {
+            return SHOPIFY_ORDERS_ENDPOINT_LABEL
+        }
+        return null
+    }
+
+    static boolean isVirtualApiOrdersRemote(Object systemEnumId, Object systemMessageRemoteId, Object sourceConfigType) {
+        return isVirtualHotWaxOrdersRemote(systemEnumId, systemMessageRemoteId, sourceConfigType) ||
+                isVirtualShopifyOrdersRemote(systemEnumId, systemMessageRemoteId, sourceConfigType)
+    }
+
+    static def ensureVirtualHotWaxOrdersRemote(def ec, Object systemEnumId, Object systemMessageRemoteId, Object sourceConfigType) {
+        if (!isVirtualHotWaxOrdersRemote(systemEnumId, systemMessageRemoteId, sourceConfigType)) return null
+        def existing = ec.entity.find("moqui.service.message.SystemMessageRemote")
+                .condition("systemMessageRemoteId", HOTWAX_ORDERS_REMOTE_ID)
+                .disableAuthz()
+                .useCache(false)
+                .one()
+        if (existing) return existing
+
+        ec.service.sync()
+                .name("store#moqui.service.message.SystemMessageRemote")
+                .parameters([
+                        systemMessageRemoteId: HOTWAX_ORDERS_REMOTE_ID,
+                        description          : HOTWAX_ORDERS_ENDPOINT_LABEL,
+                        sendUrl              : "{baseUrl}/rest/s1/oms/orders",
+                        sendServiceName      : HOTWAX_OMS_ORDERS_EXTRACT_SERVICE,
+                ])
+                .disableAuthz()
+                .call()
+        return ec.entity.find("moqui.service.message.SystemMessageRemote")
+                .condition("systemMessageRemoteId", HOTWAX_ORDERS_REMOTE_ID)
+                .disableAuthz()
+                .useCache(false)
+                .one()
+    }
+
+    static boolean isVirtualShopifyOrdersRemote(Object systemEnumId, Object systemMessageRemoteId, Object sourceConfigType) {
+        if (FacadeSupport.normalize(systemEnumId) != SYSTEM_SHOPIFY) return false
+        if (FacadeSupport.normalize(systemMessageRemoteId) != SHOPIFY_ORDERS_REMOTE_ID) return false
+        String normalizedSourceConfigType = FacadeSupport.normalize(sourceConfigType)
+        return !normalizedSourceConfigType || normalizedSourceConfigType == SOURCE_CONFIG_TYPE_SHOPIFY_AUTH
+    }
+
+    static def ensureVirtualShopifyOrdersRemote(def ec, Object systemEnumId, Object systemMessageRemoteId, Object sourceConfigType) {
+        if (!isVirtualShopifyOrdersRemote(systemEnumId, systemMessageRemoteId, sourceConfigType)) return null
+        def existing = ec.entity.find("moqui.service.message.SystemMessageRemote")
+                .condition("systemMessageRemoteId", SHOPIFY_ORDERS_REMOTE_ID)
+                .disableAuthz()
+                .useCache(false)
+                .one()
+        if (existing) return existing
+
+        ec.service.sync()
+                .name("store#moqui.service.message.SystemMessageRemote")
+                .parameters([
+                        systemMessageRemoteId: SHOPIFY_ORDERS_REMOTE_ID,
+                        description          : SHOPIFY_ORDERS_ENDPOINT_LABEL,
+                        sendUrl              : "https://{shop}.myshopify.com/admin/api/{apiVersion}/graphql.json",
+                        sendServiceName      : SHOPIFY_GRAPHQL_EXECUTE_SERVICE,
+                ])
+                .disableAuthz()
+                .call()
+        return ec.entity.find("moqui.service.message.SystemMessageRemote")
+                .condition("systemMessageRemoteId", SHOPIFY_ORDERS_REMOTE_ID)
+                .disableAuthz()
+                .useCache(false)
+                .one()
+    }
+
+    static def ensureVirtualApiOrdersRemote(def ec, Object systemEnumId, Object systemMessageRemoteId, Object sourceConfigType) {
+        return ensureVirtualHotWaxOrdersRemote(ec, systemEnumId, systemMessageRemoteId, sourceConfigType) ?:
+                ensureVirtualShopifyOrdersRemote(ec, systemEnumId, systemMessageRemoteId, sourceConfigType)
+    }
+
     static def findEnum(def ec, Object enumId) {
         String normalized = FacadeSupport.normalize(enumId)
         if (!normalized) return null
         return ec.entity.find("moqui.basic.Enumeration")
                 .condition("enumId", normalized)
                 .disableAuthz()
-                .useCache(true)
+                .useCache(false)
                 .one()
+    }
+
+    static String canonicalSystemEnumId(Object systemEnumId) {
+        String normalized = FacadeSupport.normalize(systemEnumId)
+        if (!normalized) return null
+
+        String lookupKey = normalized.replaceAll(/[\s_-]/, "").toUpperCase()
+        switch (lookupKey) {
+            case "DARSYSOMS":
+            case "HOTWAX":
+            case "OMS":
+                return SYSTEM_HOTWAX_OMS
+            case "DARSYSSHOPIFY":
+            case "SHOPIFY":
+                return SYSTEM_SHOPIFY
+            case "DARSYSNETSUITE":
+            case "NETSUITE":
+                return SYSTEM_NETSUITE
+            case "DARSYSSAPI":
+            case "SAPI":
+                return SYSTEM_SAPI
+            default:
+                return normalized
+        }
     }
 
     static Map<String, Object> pagination(int page, int size, int totalCount) {

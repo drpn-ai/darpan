@@ -2,6 +2,7 @@ package darpan.facade.reconciliation
 
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
+import darpan.facade.settings.SettingsFacadeSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.SftpAutomationSupport
 import groovy.json.JsonOutput
@@ -24,6 +25,9 @@ class AutomationFacadeSupport {
     static final String SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST = "HOTWAX_OMS_REST"
     static final String SOURCE_CONFIG_TYPE_NETSUITE_AUTH = "NETSUITE_AUTH"
     static final String HOTWAX_ORDERS_REMOTE_ID = "HOTWAX_ORDERS_API"
+    static final String HOTWAX_ORDERS_ENDPOINT_LABEL = "Orders API"
+    static final String SHOPIFY_ORDERS_REMOTE_ID = "SHOPIFY_REMOTE"
+    static final String SHOPIFY_ORDERS_ENDPOINT_LABEL = "Admin GraphQL Orders"
     static final String HOTWAX_OMS_ORDERS_EXTRACT_SERVICE = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"
     static final String SHOPIFY_ORDERS_EXTRACT_SERVICE = "reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders"
     static final String SHOPIFY_GRAPHQL_EXECUTE_SERVICE = "facade.ShopifyFacadeServices.execute#ShopifyGraphql"
@@ -336,7 +340,7 @@ class AutomationFacadeSupport {
                 sftpServers      : listSftpServerOptions(ec),
                 sourceConfigs    : listSourceConfigOptions(ec),
                 nsRestletConfigs : listNsRestletOptions(ec),
-                systemRemotes    : listOmsRestSourceRemoteOptions(ec) + listSystemRemoteOptions(ec),
+                systemRemotes    : listOmsRestSourceRemoteOptions(ec) + listShopifySourceRemoteOptions(ec) + listSystemRemoteOptions(ec),
         ]
     }
 
@@ -647,7 +651,13 @@ class AutomationFacadeSupport {
                     .disableAuthz()
                     .useCache(false)
                     .one()
-            if (!remote) ec.message.addError("SystemMessageRemote ${source.systemMessageRemoteId} was not found for ${source.fileSide}.")
+            if (!remote && isVirtualApiOrdersRemote(source)) {
+                remote = ReconciliationSavedRunSupport.ensureVirtualApiOrdersRemote(
+                        ec, source.systemEnumId, source.systemMessageRemoteId, source.sourceConfigType)
+            }
+            if (!remote) {
+                ec.message.addError("SystemMessageRemote ${source.systemMessageRemoteId} was not found for ${source.fileSide}.")
+            }
         }
         if (source.nsRestletConfigId) {
             def restlet = ec.entity.find("darpan.reconciliation.NsRestletConfig")
@@ -923,7 +933,7 @@ class AutomationFacadeSupport {
                 .disableAuthz()
                 .useCache(true)
                 .list() ?: []
-        return options.collect { item ->
+        List<Map<String, Object>> mappedOptions = options.collect { item ->
             [
                     enumId     : readString(item, "enumId"),
                     enumCode   : readString(item, "enumCode"),
@@ -932,6 +942,7 @@ class AutomationFacadeSupport {
                     label      : FacadeSupport.enumLabel(item),
             ].findAll { it.value != null }
         } as List<Map<String, Object>>
+        return SettingsFacadeSupport.deduplicateEnumOptions(enumTypeId, mappedOptions)
     }
 
     protected static List<Map<String, Object>> listSftpServerOptions(def ec) {
@@ -1092,10 +1103,13 @@ class AutomationFacadeSupport {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
 
-        def omsRemote = findSystemRemoteForSystem(ec, OMS_SYSTEM_ENUM_ID)
-        String omsRemoteId = readString(omsRemote, "systemMessageRemoteId")
-        if (!omsRemoteId) return []
-        String endpointLabel = endpointLabelForSystem(OMS_SYSTEM_ENUM_ID, omsRemoteId, readString(omsRemote, "description"))
+        def omsRemote = ec.entity.find("moqui.service.message.SystemMessageRemote")
+                .condition("systemMessageRemoteId", HOTWAX_ORDERS_REMOTE_ID)
+                .disableAuthz()
+                .useCache(false)
+                .one()
+        String endpointLabel = endpointLabelForSystem(OMS_SYSTEM_ENUM_ID, HOTWAX_ORDERS_REMOTE_ID,
+                readString(omsRemote, "description") ?: HOTWAX_ORDERS_ENDPOINT_LABEL)
 
         try {
             List rows = ec.entity.find("darpan.hotwax.HotWaxOmsRestSourceConfig")
@@ -1110,7 +1124,7 @@ class AutomationFacadeSupport {
                 String configId = readString(item, "omsRestSourceConfigId")
                 String label = readString(item, "description") ?: configId
                 [
-                        systemMessageRemoteId: omsRemoteId,
+                        systemMessageRemoteId: HOTWAX_ORDERS_REMOTE_ID,
                         optionKey            : configId,
                         sourceConfigId       : configId,
                         sourceConfigType     : SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST,
@@ -1134,6 +1148,41 @@ class AutomationFacadeSupport {
         }
     }
 
+    protected static List<Map<String, Object>> listShopifySourceRemoteOptions(def ec) {
+        def shopifyRemote = ec.entity.find("moqui.service.message.SystemMessageRemote")
+                .condition("systemMessageRemoteId", SHOPIFY_ORDERS_REMOTE_ID)
+                .disableAuthz()
+                .useCache(false)
+                .one()
+        String endpointLabel = endpointLabelForSystem(SHOPIFY_SYSTEM_ENUM_ID, SHOPIFY_ORDERS_REMOTE_ID,
+                readString(shopifyRemote, "description") ?: SHOPIFY_ORDERS_ENDPOINT_LABEL)
+
+        return listShopifyAuthConfigOptions(ec).collect { Map<String, Object> sourceConfig ->
+            String sourceConfigId = readString(sourceConfig, "sourceConfigId")
+            [
+                    systemMessageRemoteId: SHOPIFY_ORDERS_REMOTE_ID,
+                    optionKey            : sourceConfigId,
+                    sourceConfigId       : sourceConfigId,
+                    sourceConfigType     : SOURCE_CONFIG_TYPE_SHOPIFY_AUTH,
+                    shopifyAuthConfigId  : sourceConfigId,
+                    sourceConfigLabel    : readString(sourceConfig, "label"),
+                    description          : endpointLabel,
+                    sendUrl              : maskUrl(readString(shopifyRemote, "sendUrl")),
+                    sendServiceName      : SHOPIFY_GRAPHQL_EXECUTE_SERVICE,
+                    systemEnumId         : SHOPIFY_SYSTEM_ENUM_ID,
+                    systemLabel          : enumLabel(ec, SHOPIFY_SYSTEM_ENUM_ID),
+                    dateFromParameterName: SHOPIFY_WINDOW_START_PARAMETER,
+                    dateToParameterName  : SHOPIFY_WINDOW_END_PARAMETER,
+                    primaryIdOptions     : primaryIdOptionsForSystem(SHOPIFY_SYSTEM_ENUM_ID),
+                    safeMetadataJson     : JsonOutput.toJson([
+                            extractServiceName: SHOPIFY_ORDERS_EXTRACT_SERVICE,
+                            parameters        : [shopifyAuthConfigId: sourceConfigId],
+                    ]),
+                    label                : endpointLabel,
+            ].findAll { it.value != null } as Map<String, Object>
+        } as List<Map<String, Object>>
+    }
+
     protected static List<Map<String, Object>> listSystemRemoteOptions(def ec) {
         List rows = ec.entity.find("moqui.service.message.SystemMessageRemote")
                 .orderBy("description,systemMessageRemoteId")
@@ -1147,33 +1196,8 @@ class AutomationFacadeSupport {
             if (!systemEnumId) return []
             String sendServiceName = readString(item, "sendServiceName")
             if (!isDirectApiSourceRemote(systemEnumId, sendServiceName)) return []
+            if (systemEnumId == SHOPIFY_SYSTEM_ENUM_ID) return []
             String endpointLabel = endpointLabelForSystem(systemEnumId, remoteId, label)
-            if (systemEnumId == SHOPIFY_SYSTEM_ENUM_ID) {
-                return listShopifyAuthConfigOptions(ec).collect { Map<String, Object> sourceConfig ->
-                    String sourceConfigId = readString(sourceConfig, "sourceConfigId")
-                    [
-                            systemMessageRemoteId: remoteId,
-                            optionKey            : sourceConfigId,
-                            sourceConfigId       : sourceConfigId,
-                            sourceConfigType     : SOURCE_CONFIG_TYPE_SHOPIFY_AUTH,
-                            shopifyAuthConfigId  : sourceConfigId,
-                            sourceConfigLabel    : readString(sourceConfig, "label"),
-                            description          : readString(item, "description"),
-                            sendUrl              : maskUrl(readString(item, "sendUrl")),
-                            sendServiceName      : sendServiceName,
-                            systemEnumId         : systemEnumId,
-                            systemLabel          : enumLabel(ec, systemEnumId),
-                            dateFromParameterName: SHOPIFY_WINDOW_START_PARAMETER,
-                            dateToParameterName  : SHOPIFY_WINDOW_END_PARAMETER,
-                            primaryIdOptions     : primaryIdOptionsForSystem(systemEnumId),
-                            safeMetadataJson     : JsonOutput.toJson([
-                                    extractServiceName: SHOPIFY_ORDERS_EXTRACT_SERVICE,
-                                    parameters        : [shopifyAuthConfigId: sourceConfigId],
-                            ]),
-                            label                : endpointLabel,
-                    ].findAll { it.value != null } as Map<String, Object>
-                } as List<Map<String, Object>>
-            }
             return [[
                     systemMessageRemoteId: remoteId,
                     description          : readString(item, "description"),
@@ -1190,9 +1214,31 @@ class AutomationFacadeSupport {
     protected static String endpointLabelForSystem(String systemEnumId, String remoteId, String fallbackLabel) {
         if (FacadeSupport.normalize(systemEnumId) == OMS_SYSTEM_ENUM_ID &&
                 FacadeSupport.normalize(remoteId) == HOTWAX_ORDERS_REMOTE_ID) {
-            return "Orders API"
+            return HOTWAX_ORDERS_ENDPOINT_LABEL
+        }
+        if (FacadeSupport.normalize(systemEnumId) == SHOPIFY_SYSTEM_ENUM_ID &&
+                FacadeSupport.normalize(remoteId) == SHOPIFY_ORDERS_REMOTE_ID) {
+            return SHOPIFY_ORDERS_ENDPOINT_LABEL
         }
         return FacadeSupport.normalize(fallbackLabel) ?: FacadeSupport.normalize(remoteId)
+    }
+
+    protected static boolean isVirtualApiOrdersRemote(Map<String, Object> source) {
+        return isVirtualHotWaxOrdersRemote(source) || isVirtualShopifyOrdersRemote(source)
+    }
+
+    protected static boolean isVirtualHotWaxOrdersRemote(Map<String, Object> source) {
+        if (FacadeSupport.normalize(source?.systemEnumId) != OMS_SYSTEM_ENUM_ID) return false
+        if (FacadeSupport.normalize(source?.systemMessageRemoteId) != HOTWAX_ORDERS_REMOTE_ID) return false
+        Map<String, Object> metadata = parseJsonMap(source?.safeMetadataJson)
+        return FacadeSupport.normalize(metadata.extractServiceName ?: metadata.serviceName) == HOTWAX_OMS_ORDERS_EXTRACT_SERVICE
+    }
+
+    protected static boolean isVirtualShopifyOrdersRemote(Map<String, Object> source) {
+        if (FacadeSupport.normalize(source?.systemEnumId) != SHOPIFY_SYSTEM_ENUM_ID) return false
+        if (FacadeSupport.normalize(source?.systemMessageRemoteId) != SHOPIFY_ORDERS_REMOTE_ID) return false
+        Map<String, Object> metadata = parseJsonMap(source?.safeMetadataJson)
+        return FacadeSupport.normalize(metadata.extractServiceName ?: metadata.serviceName) == SHOPIFY_ORDERS_EXTRACT_SERVICE
     }
 
     protected static boolean isDirectApiSourceRemote(String systemEnumId, String sendServiceName) {

@@ -95,7 +95,7 @@
         <actions>
             <set field="runNameValue" from="darpan.facade.common.FacadeSupport.normalize(runName)"/>
             <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
-            <set field="file1SystemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SystemEnumId)"/>
+            <set field="file1SystemEnumIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file1SystemEnumId)"/>
             <set field="file1SourceTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SourceTypeEnumId)"/>
             <set field="file1UsesApiSource" from="file1SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_API"/>
             <set field="file1SystemMessageRemoteIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SystemMessageRemoteId)"/>
@@ -106,7 +106,7 @@
             <set field="file1SchemaFileNameValue" from="darpan.facade.common.FacadeSupport.normalize(file1SchemaFileName)"/>
             <set field="file1RecordRootExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file1RecordRootExpression)"/>
             <set field="file1PrimaryIdExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file1PrimaryIdExpression)"/>
-            <set field="file2SystemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SystemEnumId)"/>
+            <set field="file2SystemEnumIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file2SystemEnumId)"/>
             <set field="file2SourceTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SourceTypeEnumId)"/>
             <set field="file2UsesApiSource" from="file2SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_API"/>
             <set field="file2SystemMessageRemoteIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SystemMessageRemoteId)"/>
@@ -168,6 +168,12 @@
                 <set field="file2SourceType" from="file2UsesApiSource ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2SourceTypeEnumIdValue) : null"/>
                 <set field="file1SystemMessageRemote" from="file1SystemMessageRemoteIdValue ? ec.entity.find('moqui.service.message.SystemMessageRemote').condition('systemMessageRemoteId', file1SystemMessageRemoteIdValue).useCache(false).one() : null"/>
                 <set field="file2SystemMessageRemote" from="file2SystemMessageRemoteIdValue ? ec.entity.find('moqui.service.message.SystemMessageRemote').condition('systemMessageRemoteId', file2SystemMessageRemoteIdValue).useCache(false).one() : null"/>
+                <if condition="file1SystemMessageRemoteIdValue &amp;&amp; file1SystemMessageRemote == null">
+                    <set field="file1SystemMessageRemote" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.ensureVirtualApiOrdersRemote(ec, file1SystemEnumIdValue, file1SystemMessageRemoteIdValue, file1SourceConfigTypeValue)"/>
+                </if>
+                <if condition="file2SystemMessageRemoteIdValue &amp;&amp; file2SystemMessageRemote == null">
+                    <set field="file2SystemMessageRemote" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.ensureVirtualApiOrdersRemote(ec, file2SystemEnumIdValue, file2SystemMessageRemoteIdValue, file2SourceConfigTypeValue)"/>
+                </if>
                 <set field="file1NsRestletConfig" from="file1NsRestletConfigIdValue ? ec.entity.find('darpan.reconciliation.NsRestletConfig').condition('nsRestletConfigId', file1NsRestletConfigIdValue).useCache(false).one() : null"/>
                 <set field="file2NsRestletConfig" from="file2NsRestletConfigIdValue ? ec.entity.find('darpan.reconciliation.NsRestletConfig').condition('nsRestletConfigId', file2NsRestletConfigIdValue).useCache(false).one() : null"/>
                 <if condition="file1System == null">
@@ -182,10 +188,10 @@
                 <if condition="!file2UsesApiSource &amp;&amp; file2FileType == null">
                     <message error="true">file2FileTypeEnumId '${file2FileTypeEnumIdValue}' is not valid</message>
                 </if>
-                <if condition="file1SystemMessageRemoteIdValue &amp;&amp; file1SystemMessageRemote == null">
+                <if condition="file1SystemMessageRemoteIdValue &amp;&amp; file1SystemMessageRemote == null &amp;&amp; !darpan.facade.reconciliation.ReconciliationSavedRunSupport.isVirtualApiOrdersRemote(file1SystemEnumIdValue, file1SystemMessageRemoteIdValue, file1SourceConfigTypeValue)">
                     <message error="true">file1SystemMessageRemoteId '${file1SystemMessageRemoteIdValue}' was not found</message>
                 </if>
-                <if condition="file2SystemMessageRemoteIdValue &amp;&amp; file2SystemMessageRemote == null">
+                <if condition="file2SystemMessageRemoteIdValue &amp;&amp; file2SystemMessageRemote == null &amp;&amp; !darpan.facade.reconciliation.ReconciliationSavedRunSupport.isVirtualApiOrdersRemote(file2SystemEnumIdValue, file2SystemMessageRemoteIdValue, file2SourceConfigTypeValue)">
                     <message error="true">file2SystemMessageRemoteId '${file2SystemMessageRemoteIdValue}' was not found</message>
                 </if>
                 <if condition="file1NsRestletConfigIdValue">
@@ -346,8 +352,8 @@
         <actions>
             <set field="runNameValue" from="darpan.facade.common.FacadeSupport.normalize(runName)"/>
             <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
-            <set field="file1SystemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SystemEnumId)"/>
-            <set field="file2SystemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SystemEnumId)"/>
+            <set field="file1SystemEnumIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file1SystemEnumId)"/>
+            <set field="file2SystemEnumIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file2SystemEnumId)"/>
             <set field="file1CompareColumnValue" from="darpan.facade.common.FacadeSupport.normalize(file1CompareColumn)"/>
             <set field="file2CompareColumnValue" from="darpan.facade.common.FacadeSupport.normalize(file2CompareColumn)"/>
             <if condition="!runNameValue">
@@ -372,8 +378,8 @@
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="file1System" from="ec.entity.find('moqui.basic.Enumeration').condition('enumId', file1SystemEnumIdValue).useCache(true).one()"/>
-                <set field="file2System" from="ec.entity.find('moqui.basic.Enumeration').condition('enumId', file2SystemEnumIdValue).useCache(true).one()"/>
+                <set field="file1System" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file1SystemEnumIdValue)"/>
+                <set field="file2System" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2SystemEnumIdValue)"/>
                 <if condition="file1System == null">
                     <message error="true">file1SystemEnumId '${file1SystemEnumIdValue}' is not valid</message>
                 </if>
@@ -608,7 +614,7 @@
             <set field="savedRunIdValue" from="darpan.facade.common.FacadeSupport.normalize(savedRunId)"/>
             <set field="runNameValue" from="darpan.facade.common.FacadeSupport.normalize(runName)"/>
             <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
-            <set field="file1SystemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SystemEnumId)"/>
+            <set field="file1SystemEnumIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file1SystemEnumId)"/>
             <set field="file1SourceTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SourceTypeEnumId)"/>
             <set field="file1UsesApiSource" from="file1SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_API"/>
             <set field="file1SystemMessageRemoteIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SystemMessageRemoteId)"/>
@@ -619,7 +625,7 @@
             <set field="file1SchemaFileNameValue" from="darpan.facade.common.FacadeSupport.normalize(file1SchemaFileName)"/>
             <set field="file1RecordRootExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file1RecordRootExpression)"/>
             <set field="file1PrimaryIdExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file1PrimaryIdExpression)"/>
-            <set field="file2SystemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SystemEnumId)"/>
+            <set field="file2SystemEnumIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file2SystemEnumId)"/>
             <set field="file2SourceTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SourceTypeEnumId)"/>
             <set field="file2UsesApiSource" from="file2SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_API"/>
             <set field="file2SystemMessageRemoteIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SystemMessageRemoteId)"/>
@@ -701,6 +707,12 @@
                 <set field="file2SourceType" from="file2UsesApiSource ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2SourceTypeEnumIdValue) : null"/>
                 <set field="file1SystemMessageRemote" from="file1SystemMessageRemoteIdValue ? ec.entity.find('moqui.service.message.SystemMessageRemote').condition('systemMessageRemoteId', file1SystemMessageRemoteIdValue).useCache(false).one() : null"/>
                 <set field="file2SystemMessageRemote" from="file2SystemMessageRemoteIdValue ? ec.entity.find('moqui.service.message.SystemMessageRemote').condition('systemMessageRemoteId', file2SystemMessageRemoteIdValue).useCache(false).one() : null"/>
+                <if condition="file1SystemMessageRemoteIdValue &amp;&amp; file1SystemMessageRemote == null">
+                    <set field="file1SystemMessageRemote" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.ensureVirtualApiOrdersRemote(ec, file1SystemEnumIdValue, file1SystemMessageRemoteIdValue, file1SourceConfigTypeValue)"/>
+                </if>
+                <if condition="file2SystemMessageRemoteIdValue &amp;&amp; file2SystemMessageRemote == null">
+                    <set field="file2SystemMessageRemote" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.ensureVirtualApiOrdersRemote(ec, file2SystemEnumIdValue, file2SystemMessageRemoteIdValue, file2SourceConfigTypeValue)"/>
+                </if>
                 <set field="file1NsRestletConfig" from="file1NsRestletConfigIdValue ? ec.entity.find('darpan.reconciliation.NsRestletConfig').condition('nsRestletConfigId', file1NsRestletConfigIdValue).useCache(false).one() : null"/>
                 <set field="file2NsRestletConfig" from="file2NsRestletConfigIdValue ? ec.entity.find('darpan.reconciliation.NsRestletConfig').condition('nsRestletConfigId', file2NsRestletConfigIdValue).useCache(false).one() : null"/>
                 <if condition="file1System == null">
@@ -715,10 +727,10 @@
                 <if condition="!file2UsesApiSource &amp;&amp; file2FileType == null">
                     <message error="true">file2FileTypeEnumId '${file2FileTypeEnumIdValue}' is not valid</message>
                 </if>
-                <if condition="file1SystemMessageRemoteIdValue &amp;&amp; file1SystemMessageRemote == null">
+                <if condition="file1SystemMessageRemoteIdValue &amp;&amp; file1SystemMessageRemote == null &amp;&amp; !darpan.facade.reconciliation.ReconciliationSavedRunSupport.isVirtualApiOrdersRemote(file1SystemEnumIdValue, file1SystemMessageRemoteIdValue, file1SourceConfigTypeValue)">
                     <message error="true">file1SystemMessageRemoteId '${file1SystemMessageRemoteIdValue}' was not found</message>
                 </if>
-                <if condition="file2SystemMessageRemoteIdValue &amp;&amp; file2SystemMessageRemote == null">
+                <if condition="file2SystemMessageRemoteIdValue &amp;&amp; file2SystemMessageRemote == null &amp;&amp; !darpan.facade.reconciliation.ReconciliationSavedRunSupport.isVirtualApiOrdersRemote(file2SystemEnumIdValue, file2SystemMessageRemoteIdValue, file2SourceConfigTypeValue)">
                     <message error="true">file2SystemMessageRemoteId '${file2SystemMessageRemoteIdValue}' was not found</message>
                 </if>
                 <if condition="file1NsRestletConfigIdValue">

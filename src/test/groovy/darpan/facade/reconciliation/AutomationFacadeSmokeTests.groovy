@@ -241,14 +241,77 @@ class AutomationFacadeSmokeTests {
     }
 
     @Test
+    void hotWaxEndpointOptionsDoNotDependOnSystemRemoteSeed() {
+        try {
+            def remote = findOne("moqui.service.message.SystemMessageRemote", [systemMessageRemoteId: "HOTWAX_ORDERS_API"])
+            if (remote) remote.delete()
+
+            Map<String, Object> optionsResult = callFacade("facade.ReconciliationFacadeServices.list#AutomationSourceOptions", [:])
+            assertTrue((Boolean) optionsResult.ok, optionsResult.errors?.toString())
+            assertTrue(((List<Map<String, Object>>) optionsResult.sourceConfigs).any {
+                it.sourceConfigId == "KREWE_OMS" && it.sourceConfigType == "HOTWAX_OMS_REST" && it.systemEnumId == "OMS"
+            })
+
+            Map<String, Object> omsSourceOption = ((List<Map<String, Object>>) optionsResult.systemRemotes).find {
+                it.optionKey == "KREWE_OMS"
+            }
+            assertNotNull(omsSourceOption)
+            assertEquals("HOTWAX_ORDERS_API", omsSourceOption.systemMessageRemoteId)
+            assertEquals("Orders API", omsSourceOption.label)
+            assertEquals("KREWE_OMS", omsSourceOption.sourceConfigId)
+            assertEquals("HOTWAX_OMS_REST", omsSourceOption.sourceConfigType)
+            assertEquals(AutomationFacadeSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE,
+                    ((Map) new JsonSlurper().parseText(omsSourceOption.safeMetadataJson as String)).extractServiceName)
+        } finally {
+            seedSystemRemotes()
+            ec.message.clearErrors()
+        }
+    }
+
+    @Test
+    void shopifyEndpointOptionsDoNotDependOnSystemRemoteSeed() {
+        try {
+            def remote = findOne("moqui.service.message.SystemMessageRemote", [systemMessageRemoteId: "SHOPIFY_REMOTE"])
+            if (remote) remote.delete()
+
+            Map<String, Object> optionsResult = callFacade("facade.ReconciliationFacadeServices.list#AutomationSourceOptions", [:])
+            assertTrue((Boolean) optionsResult.ok, optionsResult.errors?.toString())
+            assertTrue(((List<Map<String, Object>>) optionsResult.sourceConfigs).any {
+                it.sourceConfigId == "KREWE_SHOPIFY" && it.sourceConfigType == "SHOPIFY_AUTH" && it.systemEnumId == "SHOPIFY"
+            })
+
+            Map<String, Object> shopifySourceOption = ((List<Map<String, Object>>) optionsResult.systemRemotes).find {
+                it.optionKey == "KREWE_SHOPIFY"
+            }
+            assertNotNull(shopifySourceOption)
+            assertEquals("SHOPIFY_REMOTE", shopifySourceOption.systemMessageRemoteId)
+            assertEquals("Admin GraphQL Orders", shopifySourceOption.label)
+            assertEquals("KREWE_SHOPIFY", shopifySourceOption.sourceConfigId)
+            assertEquals("SHOPIFY_AUTH", shopifySourceOption.sourceConfigType)
+            assertEquals(AutomationFacadeSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE,
+                    ((Map) new JsonSlurper().parseText(shopifySourceOption.safeMetadataJson as String)).extractServiceName)
+        } finally {
+            seedSystemRemotes()
+            ec.message.clearErrors()
+        }
+    }
+
+    @Test
     void automationFacadeEnforcesTenantAndViewOnlyBoundaries() {
         Map<String, Object> saveResult = saveSftpAutomation("Tenant Guard SFTP")
         assertTrue((Boolean) saveResult.ok, saveResult.errors?.toString())
         String automationId = ((Map) saveResult.automation).automationId as String
 
+        seedLegacySystemSourceAliases()
+
         ec.message.clearErrors()
         Map<String, Object> optionsResult = callFacade("facade.ReconciliationFacadeServices.list#AutomationSourceOptions", [:])
         assertTrue((Boolean) optionsResult.ok, optionsResult.errors?.toString())
+        List<String> systemIds = ((List<Map<String, Object>>) optionsResult.systems).collect { it.enumId as String }
+        assertTrue(systemIds.contains("OMS"))
+        assertTrue(systemIds.contains("SHOPIFY"))
+        assertFalse(systemIds.contains("DarSysShopify"))
+        assertFalse(systemIds.contains("DarSysOms"))
         List<String> inputModeIds = ((List<Map<String, Object>>) optionsResult.inputModes).collect { it.enumId as String }
         assertEquals(["AUT_IN_API_RANGE", "AUT_IN_SFTP_FILES"] as Set, inputModeIds as Set)
         assertFalse(inputModeIds.contains("AUT_IN_SFTP_POLL"))
@@ -554,6 +617,23 @@ class AutomationFacadeSmokeTests {
                 accessToken        : "shpat_test",
                 isActive           : "Y",
                 canReadOrders      : "Y",
+        ])
+    }
+
+    private void seedLegacySystemSourceAliases() {
+        upsertEntityValue("moqui.basic.Enumeration", [enumId: "DarSysOms"], [
+                enumId     : "DarSysOms",
+                enumTypeId : "DarpanSystemSource",
+                enumCode   : "OMS",
+                description: "OMS",
+                sequenceNum: 1L,
+        ])
+        upsertEntityValue("moqui.basic.Enumeration", [enumId: "DarSysShopify"], [
+                enumId     : "DarSysShopify",
+                enumTypeId : "DarpanSystemSource",
+                enumCode   : "SHOPIFY",
+                description: "Shopify",
+                sequenceNum: 2L,
         ])
     }
 

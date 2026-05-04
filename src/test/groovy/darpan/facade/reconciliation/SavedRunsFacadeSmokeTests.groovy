@@ -144,6 +144,39 @@ class SavedRunsFacadeSmokeTests {
     }
 
     @Test
+    void ruleSetRunCreationCanonicalizesLegacySystemAliasesBeforePersistingCompareSources() {
+        deleteLegacySystemSourceAliases()
+        deleteRuleSetRunEntities("RS_RECON", "CS_RS_RECON_COMPARE_SCOPE")
+
+        Map<String, Object> createResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters([
+                        runName                 : "Recon",
+                        file1SystemEnumId       : "DarSysOms",
+                        file1FileTypeEnumId     : "DftCsv",
+                        file1PrimaryIdExpression: "order_id",
+                        file2SystemEnumId       : "DarSysShopify",
+                        file2FileTypeEnumId     : "DftCsv",
+                        file2PrimaryIdExpression: "order_id",
+                        rules                   : [],
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals("CS_RS_RECON_COMPARE_SCOPE", createResult.savedRun.compareScopeId)
+        assertEquals("OMS", createResult.savedRun.defaultFile1SystemEnumId)
+        assertEquals("SHOPIFY", createResult.savedRun.defaultFile2SystemEnumId)
+
+        List sources = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition("compareScopeId", createResult.savedRun.compareScopeId)
+                .useCache(false)
+                .list() ?: []
+        assertEquals("OMS", sources.find { it.fileSide == "FILE_1" }?.systemEnumId)
+        assertEquals("SHOPIFY", sources.find { it.fileSide == "FILE_2" }?.systemEnumId)
+    }
+
+    @Test
     void generatedOutputsAreSharedWithinTenantAndDeniedAcrossTenants() {
         Map<String, Object> runResult = createAndRunCsvSavedRun("CSV Tenant Shared Result")
         String savedRunId = runResult.runResult.savedRunId as String
@@ -535,11 +568,11 @@ end'''
                 description: "API source",
                 sequenceNum: 1,
         ])
-        upsertEntity("moqui.service.message.SystemMessageRemote", [systemMessageRemoteId: "OMS_REMOTE"], [
-                systemMessageRemoteId: "OMS_REMOTE",
-                description          : "OMS orders API",
-                sendUrl              : "https://oms.example.test/orders",
-        ])
+        ec.entity.find("moqui.service.message.SystemMessageRemote")
+                .condition("systemMessageRemoteId", "HOTWAX_ORDERS_API")
+                .disableAuthz()
+                .useCache(false)
+                .deleteAll()
         seedOmsRestSourceConfig(KREWE, "KREWE_OMS")
 
         Map<String, Object> createResult = ec.service.sync()
@@ -549,7 +582,7 @@ end'''
                         description               : "OMS API against Shopify upload",
                         file1SystemEnumId         : "OMS",
                         file1SourceTypeEnumId     : "AUT_SRC_API",
-                        file1SystemMessageRemoteId: "OMS_REMOTE",
+                        file1SystemMessageRemoteId: "HOTWAX_ORDERS_API",
                         file1SourceConfigId       : "KREWE_OMS",
                         file1SourceConfigType     : "HOTWAX_OMS_REST",
                         file1PrimaryIdExpression  : "\$.records[*].orderId",
@@ -562,13 +595,19 @@ end'''
                 .call()
 
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertNotNull(ec.entity.find("moqui.service.message.SystemMessageRemote")
+                .condition("systemMessageRemoteId", "HOTWAX_ORDERS_API")
+                .disableAuthz()
+                .useCache(false)
+                .one())
         assertEquals("Mixed API File Source", createResult.savedRun.runName)
 
         List<Map<String, Object>> systemOptions = (List<Map<String, Object>>) (createResult.savedRun.systemOptions ?: [])
         Map<String, Object> file1Option = systemOptions.find { it.fileSide == "FILE_1" }
         Map<String, Object> file2Option = systemOptions.find { it.fileSide == "FILE_2" }
         assertEquals("AUT_SRC_API", file1Option.sourceTypeEnumId)
-        assertEquals("OMS_REMOTE", file1Option.systemMessageRemoteId)
+        assertEquals("HOTWAX_ORDERS_API", file1Option.systemMessageRemoteId)
+        assertEquals("Orders API", file1Option.systemMessageRemoteLabel)
         assertEquals("KREWE_OMS", file1Option.sourceConfigId)
         assertEquals("HOTWAX_OMS_REST", file1Option.sourceConfigType)
         assertEquals("\$.records[*].orderId", file1Option.idFieldExpression)
@@ -582,7 +621,7 @@ end'''
         def file1Source = sources.find { it.fileSide == "FILE_1" }
         def file2Source = sources.find { it.fileSide == "FILE_2" }
         assertEquals("AUT_SRC_API", file1Source.sourceTypeEnumId)
-        assertEquals("OMS_REMOTE", file1Source.systemMessageRemoteId)
+        assertEquals("HOTWAX_ORDERS_API", file1Source.systemMessageRemoteId)
         assertEquals("KREWE_OMS", file1Source.sourceConfigId)
         assertEquals("HOTWAX_OMS_REST", file1Source.sourceConfigType)
         assertEquals("\$.records[*].orderId", file1Source.primaryIdExpression)
@@ -605,6 +644,68 @@ end'''
         assertFalse(ec.message.errors.any { String message -> message.contains("file1Name is required") })
         assertFalse(ec.message.errors.any { String message -> message.contains("file1Text is required") })
         ec.message.clearErrors()
+    }
+
+    @Test
+    void ruleSetRunSelfHealsMissingShopifyOrdersRemote() {
+        upsertEntity("moqui.basic.EnumerationType", [enumTypeId: "AutomationSourceType"], [
+                enumTypeId : "AutomationSourceType",
+                description: "Automation source type",
+        ])
+        upsertEntity("moqui.basic.Enumeration", [enumId: "AUT_SRC_API"], [
+                enumId    : "AUT_SRC_API",
+                enumTypeId: "AutomationSourceType",
+                enumCode  : "API",
+                description: "API source",
+                sequenceNum: 1,
+        ])
+        ec.entity.find("moqui.service.message.SystemMessageRemote")
+                .condition("systemMessageRemoteId", "SHOPIFY_REMOTE")
+                .disableAuthz()
+                .useCache(false)
+                .deleteAll()
+        seedShopifyAuthConfig(KREWE, "KREWE_SHOPIFY")
+
+        Map<String, Object> createResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters([
+                        runName                   : "Shopify API File Source",
+                        description               : "Shopify API against HotWax upload",
+                        file1SystemEnumId         : "SHOPIFY",
+                        file1SourceTypeEnumId     : "AUT_SRC_API",
+                        file1SystemMessageRemoteId: "SHOPIFY_REMOTE",
+                        file1SourceConfigId       : "KREWE_SHOPIFY",
+                        file1SourceConfigType     : "SHOPIFY_AUTH",
+                        file1PrimaryIdExpression  : "\$.records[*].id",
+                        file2SystemEnumId         : "OMS",
+                        file2FileTypeEnumId       : "DftCsv",
+                        file2PrimaryIdExpression  : "order_id",
+                        rules                     : [],
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertNotNull(ec.entity.find("moqui.service.message.SystemMessageRemote")
+                .condition("systemMessageRemoteId", "SHOPIFY_REMOTE")
+                .disableAuthz()
+                .useCache(false)
+                .one())
+        List<Map<String, Object>> systemOptions = (List<Map<String, Object>>) (createResult.savedRun.systemOptions ?: [])
+        Map<String, Object> file1Option = systemOptions.find { it.fileSide == "FILE_1" }
+        assertEquals("AUT_SRC_API", file1Option.sourceTypeEnumId)
+        assertEquals("SHOPIFY_REMOTE", file1Option.systemMessageRemoteId)
+        assertEquals("Admin GraphQL Orders", file1Option.systemMessageRemoteLabel)
+        assertEquals("KREWE_SHOPIFY", file1Option.sourceConfigId)
+        assertEquals("SHOPIFY_AUTH", file1Option.sourceConfigType)
+
+        def file1Source = (ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition("compareScopeId", createResult.savedRun.compareScopeId)
+                .condition("fileSide", "FILE_1")
+                .useCache(false)
+                .one())
+        assertEquals("SHOPIFY_REMOTE", file1Source.systemMessageRemoteId)
+        assertEquals("KREWE_SHOPIFY", file1Source.sourceConfigId)
     }
 
     @Test
@@ -1104,6 +1205,39 @@ end'''
         return runResult
     }
 
+    private void deleteLegacySystemSourceAliases() {
+        ["HOTWAX", "DarSysOms", "DarSysShopify", "DarSysNetSuite", "DarSysNetsuite", "DarSysSapi"].each { String enumId ->
+            ec.entity.find("moqui.basic.Enumeration")
+                    .condition("enumId", enumId)
+                    .disableAuthz()
+                    .useCache(false)
+                    .deleteAll()
+        }
+    }
+
+    private void deleteRuleSetRunEntities(String ruleSetId, String compareScopeId) {
+        ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition("compareScopeId", compareScopeId)
+                .disableAuthz()
+                .useCache(false)
+                .deleteAll()
+        ec.entity.find("darpan.rule.RuleSetCompareScope")
+                .condition("compareScopeId", compareScopeId)
+                .disableAuthz()
+                .useCache(false)
+                .deleteAll()
+        ec.entity.find("darpan.rule.Rule")
+                .condition("ruleSetId", ruleSetId)
+                .disableAuthz()
+                .useCache(false)
+                .deleteAll()
+        ec.entity.find("darpan.rule.RuleSet")
+                .condition("ruleSetId", ruleSetId)
+                .disableAuthz()
+                .useCache(false)
+                .deleteAll()
+    }
+
     private void seedOmsRestSourceConfig(String tenantId, String configId) {
         upsertEntity("darpan.hotwax.HotWaxOmsRestSourceConfig", [omsRestSourceConfigId: configId], [
                 omsRestSourceConfigId : configId,
@@ -1119,6 +1253,20 @@ end'''
                 canReadOrders         : "Y",
                 createdDate           : TEST_FROM_DATE,
                 lastUpdatedDate       : TEST_FROM_DATE,
+        ])
+    }
+
+    private void seedShopifyAuthConfig(String tenantId, String configId) {
+        upsertEntity("darpan.shopify.ShopifyAuthConfig", [shopifyAuthConfigId: configId], [
+                shopifyAuthConfigId: configId,
+                description        : "Krewe Shopify",
+                companyUserGroupId : tenantId,
+                createdByUserId    : TEST_USER_ID,
+                shopApiUrl         : "https://krewe.myshopify.com",
+                apiVersion         : "2026-01",
+                accessToken        : "shpat_test",
+                isActive           : "Y",
+                canReadOrders      : "Y",
         ])
     }
 

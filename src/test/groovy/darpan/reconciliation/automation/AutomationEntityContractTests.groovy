@@ -153,8 +153,12 @@ class AutomationEntityContractTests {
         assertOmsSystemSourceLabel(parse("data/MappingSeedData.xml"))
         assertOmsSystemSourceLabel(parse("data/ReconciliationCompareScopeFixtureData.xml"))
         def upgradeData = parse("data/upgrade-data.xml")
+        assertCanonicalSystemSourceRows(upgradeData)
         assertOmsSystemSourceLabel(upgradeData)
-        assertHotWaxAliasCleanup(upgradeData)
+        assertLegacySystemSourceAliasCleanup(upgradeData)
+        assertNoLegacySystemSourceRows(parse("data/DarpanSystemSourceSeedData.xml"))
+        assertNoLegacySystemSourceRows(parse("data/MappingSeedData.xml"))
+        assertNoLegacySystemSourceRows(parse("data/upgrade-data.xml"))
     }
 
     @Test
@@ -263,11 +267,36 @@ class AutomationEntityContractTests {
         assertEquals("HotWax", attr(oms, "description"))
     }
 
-    private static void assertHotWaxAliasCleanup(def root) {
-        def cleanup = nodes(root, "delete-moqui.basic.Enumeration").find {
-            attr(it, "enumId") == "HOTWAX"
+    private static void assertCanonicalSystemSourceRows(def root) {
+        Map<String, String> expectedDescriptions = [
+                OMS     : "HotWax",
+                SHOPIFY : "Shopify",
+                NETSUITE: "NetSuite",
+                SAPI    : "SAPI",
+        ]
+        expectedDescriptions.each { String enumId, String description ->
+            def row = nodes(root, "moqui.basic.Enumeration").find {
+                attr(it, "enumTypeId") == "DarpanSystemSource" && attr(it, "enumId") == enumId
+            }
+            assertNotNull(row, "Missing ${enumId} DarpanSystemSource enum")
+            assertEquals(description, attr(row, "description"))
         }
-        assertNotNull(cleanup, "Upgrade data should delete stale HOTWAX DarpanSystemSource aliases")
+    }
+
+    private static void assertLegacySystemSourceAliasCleanup(def root) {
+        List<String> staleEnumIds = ["HOTWAX", "DarSysOms", "DarSysShopify", "DarSysNetSuite", "DarSysNetsuite", "DarSysSapi"]
+        List<String> cleanupIds = nodes(root, "delete-moqui.basic.Enumeration").collect { attr(it, "enumId") }
+        staleEnumIds.each { String staleEnumId ->
+            assertTrue(cleanupIds.contains(staleEnumId), "Upgrade data should delete stale ${staleEnumId} DarpanSystemSource aliases")
+        }
+    }
+
+    private static void assertNoLegacySystemSourceRows(def root) {
+        List<String> staleEnumIds = ["HOTWAX", "DarSysOms", "DarSysShopify", "DarSysNetSuite", "DarSysNetsuite", "DarSysSapi"]
+        List<String> createdStaleIds = nodes(root, "moqui.basic.Enumeration").findAll {
+            attr(it, "enumTypeId") == "DarpanSystemSource" && staleEnumIds.contains(attr(it, "enumId"))
+        }.collect { attr(it, "enumId") }
+        assertTrue(createdStaleIds.isEmpty(), "Seed data should not create stale DarpanSystemSource aliases: ${createdStaleIds}")
     }
 
     private static void assertFields(def entityNode, Collection<String> expectedFields) {

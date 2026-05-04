@@ -29,7 +29,16 @@ Review each record before loading into an environment.
     <moqui.basic.Enumeration enumId="AUT_WIN_PREV_MONTH" enumTypeId="AutomationRelWindow" enumCode="PREVIOUS_MONTH" description="Previous month" sequenceNum="3"/>
     <moqui.basic.Enumeration enumId="AUT_WIN_PREV_WEEK" enumTypeId="AutomationRelWindow" enumCode="PREVIOUS_WEEK" description="Previous calendar week" sequenceNum="2"/>
     <!-- Added records from data/DarpanSystemSourceSeedData.xml -->
+    <delete-moqui.basic.Enumeration enumId="HOTWAX"/>
+    <delete-moqui.basic.Enumeration enumId="DarSysOms"/>
+    <delete-moqui.basic.Enumeration enumId="DarSysShopify"/>
+    <delete-moqui.basic.Enumeration enumId="DarSysNetSuite"/>
+    <delete-moqui.basic.Enumeration enumId="DarSysNetsuite"/>
+    <delete-moqui.basic.Enumeration enumId="DarSysSapi"/>
     <moqui.basic.Enumeration enumId="OMS" enumTypeId="DarpanSystemSource" enumCode="HOTWAX" description="HotWax" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="SHOPIFY" enumTypeId="DarpanSystemSource" enumCode="SHOPIFY" description="Shopify" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="NETSUITE" enumTypeId="DarpanSystemSource" enumCode="NETSUITE" description="NetSuite" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="SAPI" enumTypeId="DarpanSystemSource" enumCode="SAPI" description="SAPI" sequenceNum="4"/>
     <!-- Duplicate mapping enumerations and smoke-test RuleSet fixtures were reviewed and excluded from this production upgrade load. -->
     <!-- Added records from data/ReconciliationJobSeedData.xml -->
     <moqui.service.job.ServiceJobParameter jobName="scan_ReconciliationAutomations_5m" parameterName="limit" parameterValue="100"/>

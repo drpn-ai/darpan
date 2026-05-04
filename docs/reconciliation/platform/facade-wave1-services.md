@@ -12,6 +12,7 @@ This document defines backend facade APIs used by `darpan-ui` during the pilot r
 - Remaining services use `authenticate="true"`.
 - Frontend calls are expected through authenticated remote service invocation using the `login_key` request header after login.
 - These facade auth methods are thin adapters over Moqui's built-in login-key issuance and request authentication rather than a separate Darpan auth state machine.
+- Hosted frontend origins must be listed in `webapp_allow_origins` for browser preflight to reach `/rpc/json`; the production Docker defaults include the Darpan custom domains plus the Firebase app origins `hotwax-darpan-dev.web.app`, `hotwax-darpan-dev.firebaseapp.com`, `hc-darpan-uat.web.app`, `hc-darpan-uat.firebaseapp.com`, `hc-darpan.web.app`, and `hc-darpan.firebaseapp.com`.
 
 ## Pilot Shared-Tenant Access Scope
 

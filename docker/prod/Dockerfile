@@ -59,6 +59,7 @@ ENV Moqui_DB_HOST=
 ENV Moqui_DB_USER=
 ENV Moqui_DB_PASSWORD=
 ENV Moqui_DB_NAME=
+ENV Moqui_WEBAPP_ALLOW_ORIGINS="darpan-uat.hotwax.io,darpan.hotwax.io,hotwax-darpan-dev.web.app,hotwax-darpan-dev.firebaseapp.com,hc-darpan-uat.web.app,hc-darpan-uat.firebaseapp.com,hc-darpan.web.app,hc-darpan.firebaseapp.com"
 ENV WEBAPP_ALLOW_ORIGINS=
 ENV ELASTICSEARCH_HOST=
 ENV TIME_ZONE=

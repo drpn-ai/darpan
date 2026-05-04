@@ -644,6 +644,7 @@ class AutomationFacadeSupport {
         if (source.systemMessageRemoteId) {
             def remote = ec.entity.find("moqui.service.message.SystemMessageRemote")
                     .condition("systemMessageRemoteId", source.systemMessageRemoteId)
+                    .disableAuthz()
                     .useCache(false)
                     .one()
             if (!remote) ec.message.addError("SystemMessageRemote ${source.systemMessageRemoteId} was not found for ${source.fileSide}.")
@@ -919,6 +920,7 @@ class AutomationFacadeSupport {
         List options = ec.entity.find("moqui.basic.Enumeration")
                 .condition("enumTypeId", enumTypeId)
                 .orderBy("sequenceNum,description,enumId")
+                .disableAuthz()
                 .useCache(true)
                 .list() ?: []
         return options.collect { item ->
@@ -1135,6 +1137,7 @@ class AutomationFacadeSupport {
     protected static List<Map<String, Object>> listSystemRemoteOptions(def ec) {
         List rows = ec.entity.find("moqui.service.message.SystemMessageRemote")
                 .orderBy("description,systemMessageRemoteId")
+                .disableAuthz()
                 .useCache(false)
                 .list() ?: []
         return rows.collectMany { item ->
@@ -1219,6 +1222,7 @@ class AutomationFacadeSupport {
     protected static def findSystemRemoteForSystem(def ec, String systemEnumId) {
         List rows = ec.entity.find("moqui.service.message.SystemMessageRemote")
                 .orderBy("description,systemMessageRemoteId")
+                .disableAuthz()
                 .useCache(false)
                 .list() ?: []
         String normalizedSystemEnumId = FacadeSupport.normalize(systemEnumId)
@@ -1302,6 +1306,7 @@ class AutomationFacadeSupport {
         if (!enumId) return null
         return ec.entity.find("moqui.basic.Enumeration")
                 .condition("enumId", enumId)
+                .disableAuthz()
                 .useCache(true)
                 .one()
     }

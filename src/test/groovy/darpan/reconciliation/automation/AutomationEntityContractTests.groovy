@@ -157,6 +157,31 @@ class AutomationEntityContractTests {
         assertHotWaxAliasCleanup(upgradeData)
     }
 
+    @Test
+    void automationSourceOptionHelpersBypassEntityAuthzForInternalMetadataReads() {
+        String automationSource = readSource("src/main/groovy/darpan/facade/reconciliation/AutomationFacadeSupport.groovy")
+        assertAllFindsDisableAuthz(automationSource, "moqui.basic.Enumeration")
+        assertAllFindsDisableAuthz(automationSource, "moqui.service.message.SystemMessageRemote")
+
+        String savedRunSource = readSource("src/main/groovy/darpan/facade/reconciliation/ReconciliationSavedRunSupport.groovy")
+        [
+                "moqui.basic.Enumeration",
+                "moqui.service.message.SystemMessageRemote",
+                "darpan.mapping.ReconciliationMapping",
+                "darpan.mapping.ReconciliationMappingMember",
+                "darpan.rule.RuleSet",
+                "darpan.rule.RuleSetCompareScope",
+                "darpan.rule.RuleSetCompareSource",
+                "darpan.rule.Rule",
+                "darpan.shopify.ShopifyAuthConfig",
+                "darpan.hotwax.HotWaxOmsRestSourceConfig",
+                "darpan.reconciliation.NsAuthConfig",
+                "darpan.reconciliation.NsRestletConfig",
+        ].each { String entityName ->
+            assertAllFindsDisableAuthz(savedRunSource, entityName)
+        }
+    }
+
     private static void assertAutomationEnums(def root) {
         List<String> typeIds = nodes(root, "moqui.basic.EnumerationType").collect { attr(it, "enumTypeId") }
         REQUIRED_ENUMS_BY_TYPE.keySet().each { String enumTypeId ->
@@ -285,6 +310,27 @@ class AutomationEntityContractTests {
 
     private static def parse(String relativePath) {
         new XmlParser(false, false).parse(componentRoot().resolve(relativePath).toFile())
+    }
+
+    private static String readSource(String relativePath) {
+        return Files.readString(componentRoot().resolve(relativePath))
+    }
+
+    private static void assertAllFindsDisableAuthz(String source, String entityName) {
+        String needle = "ec.entity.find(\"${entityName}\")"
+        int index = source.indexOf(needle)
+        assertTrue(index >= 0, "Expected ${needle} in source")
+
+        while (index >= 0) {
+            int oneIndex = source.indexOf(".one()", index)
+            int listIndex = source.indexOf(".list()", index)
+            List<Integer> terminals = [oneIndex, listIndex].findAll { it >= 0 }
+            assertFalse(terminals.isEmpty(), "Expected ${needle} to terminate with one() or list()")
+            int terminal = terminals.min()
+            String chain = source.substring(index, terminal)
+            assertTrue(chain.contains(".disableAuthz()"), "Expected ${needle} read chain to call disableAuthz()")
+            index = source.indexOf(needle, index + needle.length())
+        }
     }
 
     private static Path componentRoot() {

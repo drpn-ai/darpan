@@ -310,6 +310,7 @@ class ReconciliationSavedRunSupport {
     static List<Map<String, Object>> collectMappingRows(def ec) {
         def mappingFinder = ec.entity.find("darpan.mapping.ReconciliationMapping")
                 .orderBy("mappingName,reconciliationMappingId")
+                .disableAuthz()
                 .useCache(false)
         List<Map<String, Object>> rows = []
 
@@ -318,6 +319,7 @@ class ReconciliationSavedRunSupport {
 
             List mappingMembers = ec.entity.find("darpan.mapping.ReconciliationMappingMember")
                     .condition("reconciliationMappingId", mapping.reconciliationMappingId)
+                    .disableAuthz()
                     .useCache(false)
                     .list() ?: []
             List<String> mappingReadinessIssues = ReconciliationMappingSupport.collectReadinessIssues(ec, mappingMembers)
@@ -369,6 +371,7 @@ class ReconciliationSavedRunSupport {
     static List<Map<String, Object>> collectRuleSetRows(def ec) {
         def ruleSetFinder = ec.entity.find("darpan.rule.RuleSet")
                 .orderBy("ruleSetName,ruleSetId")
+                .disableAuthz()
                 .useCache(false)
         List<Map<String, Object>> rows = []
 
@@ -387,6 +390,7 @@ class ReconciliationSavedRunSupport {
 
         def ruleSet = ec.entity.find("darpan.rule.RuleSet")
                 .condition("ruleSetId", savedRunId)
+                .disableAuthz()
                 .useCache(false)
                 .one()
         if (!ruleSet) return [savedRun: null, error: null]
@@ -397,6 +401,7 @@ class ReconciliationSavedRunSupport {
         List compareScopes = ec.entity.find("darpan.rule.RuleSetCompareScope")
                 .condition("ruleSetId", savedRunId)
                 .orderBy("compareScopeId")
+                .disableAuthz()
                 .useCache(false)
                 .list() ?: []
         if (compareScopes.size() != 1) {
@@ -407,6 +412,7 @@ class ReconciliationSavedRunSupport {
         String compareScopeLabel = compareScopeDisplayName(compareScope.compareScopeId, compareScope.description)
         List sources = ec.entity.find("darpan.rule.RuleSetCompareSource")
                 .condition("compareScopeId", compareScope.compareScopeId)
+                .disableAuthz()
                 .useCache(false)
                 .list() ?: []
         if (sources.size() != 2) {
@@ -468,6 +474,7 @@ class ReconciliationSavedRunSupport {
         List rules = ec.entity.find("darpan.rule.Rule")
                 .condition("ruleSetId", ruleSetId)
                 .orderBy("sequenceNum,ruleId")
+                .disableAuthz()
                 .useCache(false)
                 .list() ?: []
 
@@ -599,6 +606,7 @@ class ReconciliationSavedRunSupport {
     protected static void validateShopifyAuthConfig(def ec, String sourceLabel, String sourceConfigId) {
         def config = ec.entity.find("darpan.shopify.ShopifyAuthConfig")
                 .condition("shopifyAuthConfigId", sourceConfigId)
+                .disableAuthz()
                 .useCache(false)
                 .one()
         TenantAccessSupport.requireTenantRecordAccess(ec, config,
@@ -615,6 +623,7 @@ class ReconciliationSavedRunSupport {
     protected static void validateHotWaxOmsConfig(def ec, String sourceLabel, String sourceConfigId) {
         def config = ec.entity.find("darpan.hotwax.HotWaxOmsRestSourceConfig")
                 .condition("omsRestSourceConfigId", sourceConfigId)
+                .disableAuthz()
                 .useCache(false)
                 .one()
         TenantAccessSupport.requireTenantRecordAccess(ec, config,
@@ -631,6 +640,7 @@ class ReconciliationSavedRunSupport {
     protected static void validateNetSuiteAuthConfig(def ec, String sourceLabel, String sourceConfigId, def nsRestletConfig) {
         def config = ec.entity.find("darpan.reconciliation.NsAuthConfig")
                 .condition("nsAuthConfigId", sourceConfigId)
+                .disableAuthz()
                 .useCache(false)
                 .one()
         TenantAccessSupport.requireTenantRecordAccess(ec, config,
@@ -655,10 +665,12 @@ class ReconciliationSavedRunSupport {
             def sourceTypeEnum = findEnum(ec, source.sourceTypeEnumId)
             def systemMessageRemote = source.systemMessageRemoteId ? ec.entity.find("moqui.service.message.SystemMessageRemote")
                     .condition("systemMessageRemoteId", source.systemMessageRemoteId)
+                    .disableAuthz()
                     .useCache(false)
                     .one() : null
             def nsRestletConfig = source.nsRestletConfigId ? ec.entity.find("darpan.reconciliation.NsRestletConfig")
                     .condition("nsRestletConfigId", source.nsRestletConfigId)
+                    .disableAuthz()
                     .useCache(false)
                     .one() : null
             return [
@@ -695,6 +707,7 @@ class ReconciliationSavedRunSupport {
         if (!normalized) return null
         return ec.entity.find("moqui.basic.Enumeration")
                 .condition("enumId", normalized)
+                .disableAuthz()
                 .useCache(true)
                 .one()
     }

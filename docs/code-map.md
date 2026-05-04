@@ -29,6 +29,7 @@ This wiki lives in `runtime/component/darpan/docs/Home.md`. The Darpan component
 - Theme library: `runtime/component/darpan/theme-library/css/tokens.css`, `runtime/component/darpan/theme-library/css/components.css`, `runtime/component/darpan/theme-library/js/theme-runtime.js`, `runtime/component/darpan/theme-library/html/blocks.html`
 - Sample data inputs: `runtime/component/darpan/data/sample/omsData.json`, `runtime/component/darpan/data/sample/shopifyData.json`
 - Build config + organization guardrails: `runtime/component/darpan/build.gradle`
+- Docker production datasource config: `runtime/component/darpan/docker/MoquiProductionConf.xml`; the transactional datasource must keep `startup-add-missing="${entity_add_missing_startup}"` so deployed MySQL environments create newly introduced entity tables before upgrade-data load or user-facing finds run
 
 ## Framework References
 

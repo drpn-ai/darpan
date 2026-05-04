@@ -36,6 +36,7 @@ This is a prep pack only. The `v2.0.0` tag, GitHub release, Firebase deploy, and
 - Backend `component.xml`, UI `package.json`, and UI `package-lock.json` are aligned to `2.0.0`.
 - Backend and UI must ship together. The UI assumes backend active-tenant, automation, settings, saved-run, and ruleset result contracts introduced after `v1.1.1`.
 - Docker startup runs the component-owned `loadDarpanUpgradeData` task through `/moqui-framework/runtime/component/darpan/build.gradle` before Moqui starts unless `DARPAN_LOAD_UPGRADE_DATA=N`.
+- Docker image packaging now clones the `toaditi/darpan-hotwax` and `toaditi/shopify-darpan` runtime components alongside `darpan`, `netsuite-darpan`, `moqui-sftp`, and `moqui-atomikos` before `addRuntime` builds the deployable WAR.
 - The production upgrade load contains automation enums, the automation scanner job, the `OMS` system-source update to HotWax, Darpan facade/entity-filter security records, SFTP scope enums, and Shopify/HotWax system-message remotes.
 - Smoke-test RuleSet fixtures and duplicate source/file-type enumeration candidates were reviewed in `upgrade-data-review.md` and excluded from the production `upgrade-data.xml` load.
 

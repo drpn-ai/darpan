@@ -29,6 +29,7 @@ This file is the engineer-facing companion to the user release notes. Keep it cu
 - Generated reconciliation artifacts use stable data-manager paths and saved-run result manifests.
 - Settings facade behavior is tenant-aware and stamps tenant/user ownership for scoped settings records.
 - Docker entrypoint invokes the component-owned `loadDarpanUpgradeData` Gradle task using the component build file.
+- Docker image packaging now includes the `darpan-hotwax` and `shopify-darpan` runtime component repositories before the `addRuntime` WAR build.
 - Documentation was reorganized around tenant setup, permissions, production settings, automation, and platform service contracts.
 
 ### Fixed

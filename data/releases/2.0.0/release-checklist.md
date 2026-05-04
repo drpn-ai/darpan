@@ -38,6 +38,7 @@
 - XML well-formedness checked: yes. `xmllint --noout data/upgrade-data.xml data/releases/2.0.0/upgrade-data.xml data/releases/1.1.1/upgrade-data.xml` passed.
 - Backend checks complete: yes. `./gradlew :runtime:component:darpan:compileGroovy` passed.
 - UI checks complete: yes. `npm run check` passed, including lint, type-check, and 63 Vitest files / 443 tests.
+- Docker component inclusion checked: yes for source refs. `git ls-remote --heads` resolved `toaditi/darpan-hotwax main` and `toaditi/shopify-darpan main`; `docker buildx build --check -f docker/Dockerfile .` was attempted but could not connect to a running local Docker daemon.
 - Release-pack validation complete: attempted. `release_preflight.py validate --version 2.0.0 ...` failed only because the checklist records 15 open Bug issues instead of `Open release issues: 0`.
 - Live/deployed smoke coverage noted: not run in this prep-only pass.
 - Unverified items called out: yes.

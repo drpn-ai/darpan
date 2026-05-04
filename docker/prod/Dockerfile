@@ -6,10 +6,10 @@ ARG MOQUI_FRAMEWORK_REF=main
 ARG MOQUI_RUNTIME_REF=main
 ARG MOQUI_ATOMIKOS_REF=build-gradle-file
 ARG MOQUI_SFTP_REF=main
-ARG DARPAN_REF=main
-ARG DARPAN_HOTWAX_REF=main
-ARG SHOPIFY_DARPAN_REF=main
-ARG NETSUITE_DARPAN_REF=main
+ARG DARPAN_REF=2.0.1
+ARG DARPAN_HOTWAX_REF=0.1.0
+ARG SHOPIFY_DARPAN_REF=0.1.0
+ARG NETSUITE_DARPAN_REF=0.0.1
 
 RUN echo "machine github.com" > /root/.netrc
 RUN echo "login $GIT_USERNAME" >> /root/.netrc
@@ -49,7 +49,7 @@ RUN cp /moqui-framework/runtime/component/darpan/docker/prod/entrypoint.sh /moqu
 RUN chmod +x entrypoint.sh
 RUN jar -xvf /moqui-framework/moqui-plus-runtime.war
 
-ENV DB_LOAD="./gradlew loadProduction -Ptypes=seed,seed-initial,install,ext-seed,ext -Praw"
+ENV DB_LOAD="./gradlew loadProduction -Ptypes=seed,seed-initial,install,ext-seed,ext -Praw,darpan-seed-initial,darpan-seed"
 ENV JAVA_OPTS="-Xms512m -Xmx4096m"
 ENV CONF_FILE="/moqui-framework/runtime/conf/MoquiProductionConf.xml"
 ENV SLEEP="sleep 2"
@@ -59,7 +59,6 @@ ENV Moqui_DB_HOST=
 ENV Moqui_DB_USER=
 ENV Moqui_DB_PASSWORD=
 ENV Moqui_DB_NAME=
-ENV Moqui_WEBAPP_ALLOW_ORIGINS="darpan-uat.hotwax.io,hotwax-darpan-dev.web.app,hotwax-darpan-dev.firebaseapp.com"
 ENV WEBAPP_ALLOW_ORIGINS=
 ENV ELASTICSEARCH_HOST=
 ENV TIME_ZONE=

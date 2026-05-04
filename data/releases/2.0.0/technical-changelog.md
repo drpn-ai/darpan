@@ -71,7 +71,7 @@ This file is the engineer-facing companion to the user release notes. Keep it cu
 ## Data and configuration
 
 - Generic source data files under `runtime/component/darpan/data/*.xml` remain the source of truth for seed/config records.
-- `data/upgrade-data.xml` and `data/releases/2.0.0/upgrade-data.xml` contain the curated production upgrade subset generated from `v1.1.1..e1efc7c`.
+- `data/upgrade-data.xml` and `data/releases/2.0.0/upgrade-data.xml` contain the curated production upgrade subset generated from `v1.1.1..main`.
 - `data/releases/1.1.1/upgrade-data.xml` archives the previous current upgrade data before the 2.0.0 current file was regenerated.
 - Candidate records from `ReconciliationCompareScopeFixtureData.xml` remain in `upgrade-data-review.md` for traceability but are excluded from the production load file.
 

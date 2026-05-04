@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Temporary table-bootstrap data for environments missing the
+darpan.reconciliation.NsRestletConfig physical table.
+
+Load from the server with the Moqui loader using raw/use-try-insert.
+Do not load this through Tools -> Entity -> Data Import, because that route
+does a pre-insert find and fails when the table is missing.
+-->
+<entity-facade-xml type="darpan-seed">
+    <darpan.reconciliation.NsRestletConfig
+            nsRestletConfigId="__TABLE_BOOTSTRAP__"
+            description="Table bootstrap placeholder - do not use"
+            endpointUrl="https://localhost/darpan-table-bootstrap/ns-restlet-config"
+            httpMethod="POST"
+            connectTimeoutSeconds="30"
+            readTimeoutSeconds="60"
+            authType="NONE"
+            isActive="N"/>
+</entity-facade-xml>

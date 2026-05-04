@@ -10,9 +10,9 @@ This file is the engineer-facing companion to the user release notes. Keep it cu
 
 ## Source ranges
 
-- Backend: `v1.1.1..e1efc7c`
+- Backend: `v1.1.1..main`
 - UI: `v1.1.1..6a887e3`
-- Backend compare URL: `https://github.com/toaditi/darpan/compare/v1.1.1...e1efc7c`
+- Backend compare URL: `https://github.com/toaditi/darpan/compare/v1.1.1...main`
 - UI compare URL: `https://github.com/toaditi/darpan-ui/compare/v1.1.1...6a887e3`
 
 ## Backend
@@ -30,6 +30,7 @@ This file is the engineer-facing companion to the user release notes. Keep it cu
 - Settings facade behavior is tenant-aware and stamps tenant/user ownership for scoped settings records.
 - Docker entrypoint invokes the component-owned `loadDarpanUpgradeData` Gradle task using the component build file.
 - Docker image packaging now includes the `darpan-hotwax` and `shopify-darpan` runtime component repositories before the `addRuntime` WAR build.
+- A production Docker image layout was added under `docker/prod`, mirroring the Unigate config convention with a production Dockerfile and entrypoint.
 - Documentation was reorganized around tenant setup, permissions, production settings, automation, and platform service contracts.
 
 ### Fixed

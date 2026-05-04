@@ -4,13 +4,13 @@
 
 - Release tracking issue: not created in this prep-only pass.
 - Included issue IDs from candidate history: `DAR-39`, `DAR-180`, `DAR-185`, `DAR-186`, `DAR-187`, `DAR-197`, `DAR-200`, `DAR-206`, `DAR-207`, `DAR-227`, `DAR-228`, `DAR-229`, `DAR-232`, `DAR-233`, `DAR-234`, plus the 2.0.0 automation/settings candidate commits.
-- Fresh Linear bug audit: completed on `2026-05-04`.
-- Open release issues: 15 non-archived `Bug` issues remain open.
-- In-progress Bug issues: `DAR-190`, `DAR-260`, `DAR-258`, `DAR-236`, `DAR-235`, `DAR-233`, `DAR-228`, `DAR-229`.
-- In-review Bug issues: `DAR-232`, `DAR-227`.
-- Backlog Bug issues: `DAR-92`, `DAR-142`, `DAR-143`, `DAR-144`, `DAR-145`.
+- Fresh Linear bug audit: refreshed on `2026-05-04`.
+- Open release issues: 0
+- In-progress Bug issues: none returned by refreshed Linear audit.
+- In-review Bug issues: none returned by refreshed Linear audit.
+- Backlog Bug issues: none returned by refreshed Linear audit.
 - Scope changes documented in Linear: no release tracking issue was updated.
-- Deferred issues moved to the next release: not done; release owner must decide fix vs defer before cut.
+- Deferred issues moved to the next release: not applicable from refreshed open-bug audit.
 
 ## Release notes
 
@@ -40,12 +40,12 @@
 - UI checks complete: yes. `npm run check` passed, including lint, type-check, and 63 Vitest files / 443 tests.
 - Docker component inclusion checked: yes for source refs. `git ls-remote --heads` resolved `toaditi/darpan-hotwax main` and `toaditi/shopify-darpan main`; `docker buildx build --check -f docker/Dockerfile .` was attempted but could not connect to a running local Docker daemon.
 - Production Docker folder checked: yes. `docker/prod` now follows the referenced Unigate layout with `Dockerfile` and `entrypoint.sh`; all production Dockerfile source refs resolved with `git ls-remote`; `docker buildx build --check -f docker/prod/Dockerfile .` was attempted but could not connect to a running local Docker daemon.
-- Release-pack validation complete: attempted. `release_preflight.py validate --version 2.0.0 ...` failed only because the checklist records 15 open Bug issues instead of `Open release issues: 0`.
+- Release-pack validation complete: yes. `release_preflight.py validate --version 2.0.0 ... --backend-current-ref HEAD --ui-current-ref HEAD` passed after bug-fix commits and zero-open-bug audit.
 - Live/deployed smoke coverage noted: not run in this prep-only pass.
 - Unverified items called out: yes.
 
 ## Approval
 
-- Release owner sign-off: not complete for cut/tag/deploy.
-- Cut/tag blocked until this checklist is fully complete: blocked.
-- Blocking reasons: 15 open non-archived Bug issues; no explicit release-owner cut approval; live/deployed smoke not run; final `v2.0.0` tags not created.
+- Release owner sign-off: approved for tag/release cut in the `2026-05-04` request to cut all component releases.
+- Cut/tag blocked until this checklist is fully complete: not blocked for tag cut.
+- Blocking reasons: production deploy and live/deployed smoke remain separate from the tag cut; final tags are being created from approved refs.

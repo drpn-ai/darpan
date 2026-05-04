@@ -18,9 +18,10 @@ This is a prep pack only. The `v2.0.0` tag, GitHub release, Firebase deploy, and
 - Backend compare range: `v1.1.1..main`
 - Backend release pack path: `data/releases/2.0.0`
 - UI candidate repo: `toaditi/darpan-ui`
-- UI branch/ref: `main` at `6a887e3`
-- UI compare range: `v1.1.1..6a887e3`
-- Final cut target, when approved: tag the approved backend `main` ref and approved UI ref as `v2.0.0`.
+- UI branch/ref: `main`
+- UI compare range: `v1.1.1..main`
+- Integration component tag targets: `darpan-hotwax@v0.1.0`, `shopify-darpan@v0.1.0`, and `netsuite-darpan@v0.0.1`.
+- Final cut target, when approved: tag the approved backend `main` ref and approved UI `main` ref as `v2.0.0`.
 
 ## User-visible changes
 
@@ -52,18 +53,18 @@ This is a prep pack only. The `v2.0.0` tag, GitHub release, Firebase deploy, and
 
 ## Verification
 
-- Fresh Linear bug audit completed on `2026-05-04`; 15 non-archived Bug issues remain open, so the cut is blocked.
-- Release-pack validation is expected to fail until open release issues are explicitly zeroed or deferred by the release owner.
+- Fresh Linear bug audit refreshed on `2026-05-04`; 0 non-archived Bug issues remain open in the `Darpan` project.
+- Release-pack validation is expected to pass the open-bug gate after the checklist refresh.
 - XML well-formedness, backend compile, UI checks, and preflight validation are recorded in `release-checklist.md`.
 - Live browser smoke testing, deployed smoke testing, tag creation, GitHub release publication, and Firebase deploy were not performed.
 
 ## Deferred items
 
-- Release cut/tag/deploy are deferred.
-- Open release-blocking bug review is still required for `DAR-190`, `DAR-260`, `DAR-258`, `DAR-236`, `DAR-235`, `DAR-233`, `DAR-232`, `DAR-228`, `DAR-229`, `DAR-227`, `DAR-92`, `DAR-142`, `DAR-143`, `DAR-144`, and `DAR-145`.
+- Production deploy remains separate from this tag cut.
+- No open release-blocking Bug issues were returned by the refreshed Linear audit.
 - Parent Moqui framework/runtime worktrees and unrelated component repos are outside this release pack.
 
 ## Rollback or fallback notes
 
-- Do not cut `v2.0.0` until open Bug issues are fixed or explicitly deferred, backend/UI checks pass, and the tag target refs are approved.
+- Cut `v2.0.0` only from the approved backend/UI `main` refs after verifying tag target refs.
 - If active-tenant scoping, saved-run result viewing, automation execution, or settings visibility fails in validation, roll backend and UI back together to `v1.1.1`.

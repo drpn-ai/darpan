@@ -11,9 +11,9 @@ This file is the engineer-facing companion to the user release notes. Keep it cu
 ## Source ranges
 
 - Backend: `v1.1.1..main`
-- UI: `v1.1.1..6a887e3`
+- UI: `v1.1.1..main`
 - Backend compare URL: `https://github.com/toaditi/darpan/compare/v1.1.1...main`
-- UI compare URL: `https://github.com/toaditi/darpan-ui/compare/v1.1.1...6a887e3`
+- UI compare URL: `https://github.com/toaditi/darpan-ui/compare/v1.1.1...main`
 
 ## Backend
 

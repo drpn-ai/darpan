@@ -1,6 +1,6 @@
 <moqui-conf xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/moqui-conf-3.xsd">
 
-    <default-property name="webapp_allow_origins" value="darpan-uat.hotwax.io,darpan.hotwax.io,hotwax-darpan-dev.web.app,hotwax-darpan-dev.firebaseapp.com,hc-darpan-uat.web.app,hc-darpan-uat.firebaseapp.com,hc-darpan.web.app,hc-darpan.firebaseapp.com"/>
+    <default-property name="webapp_allow_origins" value="darpan-app-uat.hotwax.io,darpan-app.hotwax.io,darpan-uat.hotwax.io,darpan.hotwax.io,hotwax-darpan-dev.web.app,hotwax-darpan-dev.firebaseapp.com,hc-darpan-uat.web.app,hc-darpan-uat.firebaseapp.com,hc-darpan.web.app,hc-darpan.firebaseapp.com"/>
     <default-property name="entity_ds_db_conf" value="mysql"/>
     <default-property name="entity_ds_host" value="127.0.0.1"/>
     <default-property name="entity_ds_port" value="3306"/>

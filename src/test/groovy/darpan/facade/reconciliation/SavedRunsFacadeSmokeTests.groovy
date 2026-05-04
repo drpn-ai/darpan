@@ -181,6 +181,25 @@ class SavedRunsFacadeSmokeTests {
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())
         assertEquals(true, sameTenantGetResult.ok)
         assertEquals(outputFileName, sameTenantGetResult.outputFile.fileName)
+        assertEquals("FILES", sameTenantGetResult.outputFile.sourceDetails.mode)
+        List<Map<String, Object>> sourceFiles = (List<Map<String, Object>>) sameTenantGetResult.outputFile.sourceDetails.files
+        assertEquals(2, sourceFiles.size())
+        assertEquals("orders-1.csv", sourceFiles[0].fileName)
+        assertEquals("orders-2.csv", sourceFiles[1].fileName)
+        assertTrue((sourceFiles[0].filePath as String).startsWith("reconciliation-runs/${savedRunId}/"))
+
+        String sourceFilePath = sourceFiles[0].filePath as String
+        Map<String, Object> sameTenantSourceDownloadResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.get#GeneratedOutput")
+                .parameters([fileName: sourceFilePath, format: "csv"])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals(true, sameTenantSourceDownloadResult.ok)
+        assertEquals(sourceFilePath, sameTenantSourceDownloadResult.outputFile.fileName)
+        assertEquals("orders-1.csv", sameTenantSourceDownloadResult.outputFile.downloadFileName)
+        assertTrue((sameTenantSourceDownloadResult.outputFile.contentText as String).contains("A100"))
 
         loginAsTenantUser(
                 OUTSIDE_TENANT_USER_ID,
@@ -212,6 +231,16 @@ class SavedRunsFacadeSmokeTests {
 
         assertEquals(false, outsideTenantGetResult.ok)
         assertTrue((outsideTenantGetResult.errors ?: []).join(" ").contains("active tenant"))
+
+        ec.message.clearErrors()
+        Map<String, Object> outsideTenantSourceDownloadResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.get#GeneratedOutput")
+                .parameters([fileName: sourceFilePath, format: "csv"])
+                .disableAuthz()
+                .call()
+
+        assertEquals(false, outsideTenantSourceDownloadResult.ok)
+        assertTrue((outsideTenantSourceDownloadResult.errors ?: []).join(" ").contains("active tenant"))
 
         ec.message.clearErrors()
         Map<String, Object> outsideTenantDeleteResult = ec.service.sync()
@@ -491,6 +520,131 @@ end'''
         assertEquals(2L, runResult.runResult.generatedOutput.totalDifferences)
         assertEquals(1L, runResult.runResult.generatedOutput.onlyInFile1Count)
         assertEquals(1L, runResult.runResult.generatedOutput.onlyInFile2Count)
+    }
+
+    @Test
+    void ruleSetRunCanPersistApiAndFileSourcesForMixedCreateRunSetup() {
+        upsertEntity("moqui.basic.EnumerationType", [enumTypeId: "AutomationSourceType"], [
+                enumTypeId : "AutomationSourceType",
+                description: "Automation source type",
+        ])
+        upsertEntity("moqui.basic.Enumeration", [enumId: "AUT_SRC_API"], [
+                enumId    : "AUT_SRC_API",
+                enumTypeId: "AutomationSourceType",
+                enumCode  : "API",
+                description: "API source",
+                sequenceNum: 1,
+        ])
+        upsertEntity("moqui.service.message.SystemMessageRemote", [systemMessageRemoteId: "OMS_REMOTE"], [
+                systemMessageRemoteId: "OMS_REMOTE",
+                description          : "OMS orders API",
+                sendUrl              : "https://oms.example.test/orders",
+        ])
+        seedOmsRestSourceConfig(KREWE, "KREWE_OMS")
+
+        Map<String, Object> createResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters([
+                        runName                   : "Mixed API File Source",
+                        description               : "OMS API against Shopify upload",
+                        file1SystemEnumId         : "OMS",
+                        file1SourceTypeEnumId     : "AUT_SRC_API",
+                        file1SystemMessageRemoteId: "OMS_REMOTE",
+                        file1SourceConfigId       : "KREWE_OMS",
+                        file1SourceConfigType     : "HOTWAX_OMS_REST",
+                        file1PrimaryIdExpression  : "\$.records[*].orderId",
+                        file2SystemEnumId         : "SHOPIFY",
+                        file2FileTypeEnumId       : "DftCsv",
+                        file2PrimaryIdExpression  : "order_id",
+                        rules                     : [],
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals("Mixed API File Source", createResult.savedRun.runName)
+
+        List<Map<String, Object>> systemOptions = (List<Map<String, Object>>) (createResult.savedRun.systemOptions ?: [])
+        Map<String, Object> file1Option = systemOptions.find { it.fileSide == "FILE_1" }
+        Map<String, Object> file2Option = systemOptions.find { it.fileSide == "FILE_2" }
+        assertEquals("AUT_SRC_API", file1Option.sourceTypeEnumId)
+        assertEquals("OMS_REMOTE", file1Option.systemMessageRemoteId)
+        assertEquals("KREWE_OMS", file1Option.sourceConfigId)
+        assertEquals("HOTWAX_OMS_REST", file1Option.sourceConfigType)
+        assertEquals("\$.records[*].orderId", file1Option.idFieldExpression)
+        assertEquals("DftCsv", file2Option.fileTypeEnumId)
+        assertEquals("order_id", file2Option.idFieldExpression)
+
+        List sources = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition("compareScopeId", createResult.savedRun.compareScopeId)
+                .useCache(false)
+                .list() ?: []
+        def file1Source = sources.find { it.fileSide == "FILE_1" }
+        def file2Source = sources.find { it.fileSide == "FILE_2" }
+        assertEquals("AUT_SRC_API", file1Source.sourceTypeEnumId)
+        assertEquals("OMS_REMOTE", file1Source.systemMessageRemoteId)
+        assertEquals("KREWE_OMS", file1Source.sourceConfigId)
+        assertEquals("HOTWAX_OMS_REST", file1Source.sourceConfigType)
+        assertEquals("\$.records[*].orderId", file1Source.primaryIdExpression)
+        assertEquals("DftCsv", file2Source.fileTypeEnumId)
+        assertEquals("order_id", file2Source.primaryIdExpression)
+
+        ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.run#SavedRunDiff")
+                .parameters([
+                        savedRunId: createResult.savedRun.savedRunId,
+                        file2Name : "shopify-orders.csv",
+                        file2Text : "order_id\nA100\nA200\n",
+                        hasHeader : true,
+                ])
+                .disableAuthz()
+                .call()
+
+        assertTrue(ec.message.hasError())
+        assertTrue(ec.message.errors.any { String message -> message.contains("windowStartDate and windowEndDate are required") })
+        assertFalse(ec.message.errors.any { String message -> message.contains("file1Name is required") })
+        assertFalse(ec.message.errors.any { String message -> message.contains("file1Text is required") })
+        ec.message.clearErrors()
+    }
+
+    @Test
+    void apiRuleSetRunRequiresPrimaryIdExpressionBeforeCreatingCompareSources() {
+        upsertEntity("moqui.basic.Enumeration", [enumId: "AUT_SRC_API"], [
+                enumId    : "AUT_SRC_API",
+                enumTypeId: "AutomationSourceType",
+                enumCode  : "API",
+                description: "API source",
+                sequenceNum: 1,
+        ])
+        upsertEntity("moqui.service.message.SystemMessageRemote", [systemMessageRemoteId: "OMS_REMOTE"], [
+                systemMessageRemoteId: "OMS_REMOTE",
+                description          : "OMS orders API",
+                sendUrl              : "https://oms.example.test/orders",
+        ])
+
+        ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters([
+                        runName                   : "Missing API Primary ID",
+                        file1SystemEnumId         : "OMS",
+                        file1SourceTypeEnumId     : "AUT_SRC_API",
+                        file1SystemMessageRemoteId: "OMS_REMOTE",
+                        file2SystemEnumId         : "SHOPIFY",
+                        file2FileTypeEnumId       : "DftCsv",
+                        file2PrimaryIdExpression  : "order_id",
+                        rules                     : [],
+                ])
+                .disableAuthz()
+                .call()
+
+        assertTrue(ec.message.hasError())
+        assertTrue(ec.message.errors.any { String message -> message.contains("file1PrimaryIdExpression is required") })
+        assertEquals(0, ec.entity.find("darpan.rule.RuleSet")
+                .condition("ruleSetName", "Missing API Primary ID")
+                .disableAuthz()
+                .useCache(false)
+                .list()
+                .size())
     }
 
     @Test
@@ -948,6 +1102,24 @@ end'''
 
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())
         return runResult
+    }
+
+    private void seedOmsRestSourceConfig(String tenantId, String configId) {
+        upsertEntity("darpan.hotwax.HotWaxOmsRestSourceConfig", [omsRestSourceConfigId: configId], [
+                omsRestSourceConfigId : configId,
+                description           : "Krewe OMS Orders",
+                companyUserGroupId    : tenantId,
+                createdByUserId       : TEST_USER_ID,
+                baseUrl               : "https://oms.example.invalid",
+                ordersPath            : "/rest/s1/oms/orders",
+                authType              : "NONE",
+                connectTimeoutSeconds : 30L,
+                readTimeoutSeconds    : 60L,
+                isActive              : "Y",
+                canReadOrders         : "Y",
+                createdDate           : TEST_FROM_DATE,
+                lastUpdatedDate       : TEST_FROM_DATE,
+        ])
     }
 
     private void loginAsTenantUser(String userId, String username, String tenantId, String permissionGroupId) {

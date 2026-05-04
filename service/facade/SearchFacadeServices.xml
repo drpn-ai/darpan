@@ -2,8 +2,7 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="search" noun="NavigationTargets" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/search/searchNavigationTargets.groovy">
+    <service verb="search" noun="NavigationTargets" allow-remote="true" authenticate="true">
         <description>Search authorized Darpan records and return normalized navigation targets for Ask Darpan.</description>
         <in-parameters>
             <parameter name="query"/>
@@ -35,5 +34,13 @@
                 <parameter name="sourceType"/>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="searchResult" from="darpan.facade.search.NavigationSearchSupport.search(ec, query, types, pageIndex, pageSize)"/>
+            <set field="results" from="searchResult.results"/>
+            <set field="pagination" from="searchResult.pagination"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
     </service>
 </services>

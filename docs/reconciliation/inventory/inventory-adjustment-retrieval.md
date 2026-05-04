@@ -17,16 +17,10 @@ Go to `Settings` and configure:
   - Entity: `darpan.reconciliation.NsRestletConfig`
   - Stores endpoint URL, method (`POST`/`PUT`/`GET`), headers JSON, timeouts, and `nsAuthConfigId`.
   - Multiple endpoint configs can reference the same auth config.
-- `Settings -> Read DB`
-  - Entity: `darpan.reconciliation.HcReadDbConfig`
-  - Supports Host, Port, Database Name, Username/Password, Display Name, Additional Parameters, plus driver and reconciliation default table/column mapping.
-  - Seed reader profile is loaded from `runtime/component/darpan/data/ReconciliationInventorySeedData.xml` with ID `darpan-test-seed`.
-  - Seed RuleSets for testing are also loaded from the same file:
-    - SQL template RuleSet: `DARPAN_TEST_SQL_TEMPLATE_RS`
-    - Comparison RuleSet: `DARPAN_TEST_COMPARE_RS`
-  - Config ID can be entered manually or left blank; when blank, Darpan auto-generates a safe ID from Display Name/Host/Database.
-  - If `READ_DB_CONFIG` table is missing in a dev runtime, Darpan attempts to create it automatically on first save.
-  - JDBC URL is generated internally from Host/Port/Database/Additional Parameters.
+- Read DB connection details are supplied directly to the retrieval services. Darpan no longer stores reusable read-database connection profiles in Settings.
+- Seed RuleSets for testing are loaded from `runtime/component/darpan/data/ReconciliationInventorySeedData.xml`:
+  - SQL template RuleSet: `DARPAN_TEST_SQL_TEMPLATE_RS`
+  - Comparison RuleSet: `DARPAN_TEST_COMPARE_RS`
 
 Secrets (`password`, `apiToken`) are encrypted fields in entities.
 
@@ -44,9 +38,9 @@ Secrets (`password`, `apiToken`) are encrypted fields in entities.
     }
     ```
 - `reconciliation.ReconciliationInventoryServices.fetch#ReadDbRecords`
-  - Queries configured read-only DB for one `itemId` + `locationId` + date range.
-  - Accepts `readDbConfigId` (default: `darpan-test-seed`).
-  - Resolves table/column names from service input first, then `HcReadDbConfig`.
+  - Queries a read-only DB for one `itemId` + `locationId` + date range.
+  - Requires explicit `jdbcUrl`, `username`, `password`, `tableName`, `itemIdColumn`, `locationIdColumn`, and `transactionDateColumn` inputs.
+  - Supports optional `dbDriver` and `connectionPropertiesJson`.
   - SQL resolution options:
     - pass `sqlStatementTemplate` directly, or
     - pass `sqlRuleSetId` to resolve template through Rule Engine.
@@ -54,7 +48,7 @@ Secrets (`password`, `apiToken`) are encrypted fields in entities.
     - `useInventoryItemJoin=true` to expose a join-preference hint for SQL RuleSet logic.
 - `reconciliation.ReconciliationInventoryServices.retrieve#InventoryAdjustmentsByReference`
   - Reads staged reference file (CSV/JSON), extracts item/location pairs, then calls both services per pair.
-  - Production inputs must be provided explicitly (`referenceFileLocation`, `from`, `to`, `nsRestletConfigId`, `comparisonRuleSetId`, and one of `sqlRuleSetId` or `sqlStatementTemplate`); `readDbConfigId` defaults to `darpan-test-seed`.
+  - Production inputs must be provided explicitly (`referenceFileLocation`, `from`, `to`, `nsRestletConfigId`, read DB connection/table inputs, `comparisonRuleSetId`, and one of `sqlRuleSetId` or `sqlStatementTemplate`).
   - Supports separate source-field mapping per system:
     - `nsItemIdField`, `nsLocationIdField`
     - `readDbItemIdField`, `readDbLocationIdField`
@@ -79,7 +73,10 @@ Secrets (`password`, `apiToken`) are encrypted fields in entities.
     <parameter name="from" value="2026-02-23"/>
     <parameter name="to" value="2026-03-03"/>
     <parameter name="nsRestletConfigId" value="NS_INV_MAIN"/>
-    <parameter name="readDbConfigId" value="darpan-test-seed"/>
+    <parameter name="jdbcUrl" value="jdbc:mysql://localhost:3306/darpan_seed?useSSL=false"/>
+    <parameter name="username" value="reader"/>
+    <parameter name="password" value="reader"/>
+    <parameter name="dbDriver" value="com.mysql.cj.jdbc.Driver"/>
     <parameter name="comparisonRuleSetId" value="DARPAN_TEST_COMPARE_RS"/>
     <parameter name="tableName" value="inventory_item_detail"/>
     <parameter name="itemIdColumn" value="product_id"/>
@@ -105,7 +102,14 @@ Use this mapping when the CSV has NS and OMS item IDs in different columns (for 
     <parameter name="from" value="2026-02-23"/>
     <parameter name="to" value="2026-03-03"/>
     <parameter name="nsRestletConfigId" value="NS_INV_MAIN"/>
-    <parameter name="readDbConfigId" value="darpan-test-seed"/>
+    <parameter name="jdbcUrl" value="jdbc:mysql://localhost:3306/darpan_seed?useSSL=false"/>
+    <parameter name="username" value="reader"/>
+    <parameter name="password" value="reader"/>
+    <parameter name="dbDriver" value="com.mysql.cj.jdbc.Driver"/>
+    <parameter name="tableName" value="inventory_item_detail"/>
+    <parameter name="itemIdColumn" value="product_id"/>
+    <parameter name="locationIdColumn" value="facility_id"/>
+    <parameter name="transactionDateColumn" value="effective_date"/>
     <parameter name="comparisonRuleSetId" value="DARPAN_TEST_COMPARE_RS"/>
     <parameter name="compareStatusField" value="compareStatus"/>
     <parameter name="missingInNsStatus" value="MISSING_IN_NS"/>
@@ -152,7 +156,7 @@ end
   ```json
   {
     "processingWarnings": [
-      "JDBC URL was generated from host/port/databaseName for config darpan-test-seed."
+      "Used explicit JDBC driver connect fallback."
     ]
   }
   ```

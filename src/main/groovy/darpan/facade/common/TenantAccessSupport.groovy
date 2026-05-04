@@ -1,13 +1,39 @@
 package darpan.facade.common
 
+import java.time.ZoneId
+import java.time.DateTimeException
+import java.util.TimeZone
+
 class TenantAccessSupport {
     static final String ADMIN_USER_GROUP_ID = "ADMIN"
     static final String ALL_USERS_GROUP_ID = "ALL_USERS"
     static final String ACTIVE_TENANT_PREFERENCE_KEY = "darpan.auth.activeTenantUserGroupId"
+    static final String DISPLAY_NAME_PREFERENCE_KEY = "darpan.user.displayName"
+    static final String TENANT_SETTING_ENTITY_NAME = "darpan.auth.TenantSetting"
+    static final String DEFAULT_TIME_ZONE = "UTC"
     static final String DARPAN_COMPANY_GROUP_TYPE_ENUM_ID = "UgtDarpanCompany"
     static final String DARPAN_PERMISSION_GROUP_TYPE_ENUM_ID = "UgtDarpanPermission"
+    static final String DARPAN_SUPER_ADMIN_GROUP_ID = "DARPAN_SUPER_ADMIN"
+    static final String DARPAN_TENANT_ADMIN_GROUP_ID = "DARPAN_TENANT_ADMIN"
+    static final String DARPAN_TENANT_USER_GROUP_ID = "DARPAN_TENANT_USER"
     static final String DARPAN_COMPANY_EDITOR_GROUP_ID = "DARPAN_COMPANY_EDITOR"
     static final String DARPAN_COMPANY_VIEW_ONLY_GROUP_ID = "DARPAN_COMPANY_VIEW_ONLY"
+    static final List<String> SUPER_ADMIN_GROUP_IDS = [ADMIN_USER_GROUP_ID, DARPAN_SUPER_ADMIN_GROUP_ID].asImmutable()
+    static final List<String> TENANT_VIEW_PERMISSION_GROUP_IDS = [
+            DARPAN_TENANT_ADMIN_GROUP_ID,
+            DARPAN_TENANT_USER_GROUP_ID,
+            DARPAN_COMPANY_EDITOR_GROUP_ID,
+            DARPAN_COMPANY_VIEW_ONLY_GROUP_ID,
+    ].asImmutable()
+    static final List<String> TENANT_RUN_PERMISSION_GROUP_IDS = [
+            DARPAN_TENANT_ADMIN_GROUP_ID,
+            DARPAN_TENANT_USER_GROUP_ID,
+            DARPAN_COMPANY_EDITOR_GROUP_ID,
+    ].asImmutable()
+    static final List<String> TENANT_EDIT_PERMISSION_GROUP_IDS = [
+            DARPAN_TENANT_ADMIN_GROUP_ID,
+            DARPAN_COMPANY_EDITOR_GROUP_ID,
+    ].asImmutable()
     static final String TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME = "darpan.auth.TenantUserPermissionGroupMember"
     static final String SCOPE_TYPE_ANONYMOUS = "ANONYMOUS"
     static final String SCOPE_TYPE_TENANT = "TENANT"
@@ -40,7 +66,10 @@ class TenantAccessSupport {
                 activeTenantLabel          : null,
                 availableTenants          : [],
                 activeTenantPermissionGroupIds: [],
+                canViewActiveTenantData    : false,
+                canRunActiveTenantReconciliation: false,
                 canEditActiveTenantData    : false,
+                canManageDarpanCore        : false,
             ]
         }
 
@@ -55,7 +84,10 @@ class TenantAccessSupport {
             activeTenantLabel          : activeTenant?.label,
             availableTenants          : availableTenants,
             activeTenantPermissionGroupIds: activeTenantPermissionScope.permissionGroupIds,
+            canViewActiveTenantData    : activeTenantPermissionScope.canView,
+            canRunActiveTenantReconciliation: activeTenantPermissionScope.canRun,
             canEditActiveTenantData    : activeTenantPermissionScope.canEdit,
+            canManageDarpanCore        : superAdmin,
         ]
     }
 
@@ -63,20 +95,7 @@ class TenantAccessSupport {
         String userId = currentUserId(ec)
         if (!userId) return false
 
-        def finder = ec?.entity?.find("moqui.security.UserGroupMember")
-        if (finder == null) return false
-
-        finder.condition("userId", userId).condition("userGroupId", ADMIN_USER_GROUP_ID)
-        if (finder.metaClass.respondsTo(finder, "disableAuthz")) {
-            finder.disableAuthz()
-        }
-        if (finder.metaClass.respondsTo(finder, "conditionDate", String, String, Object)) {
-            finder.conditionDate("fromDate", "thruDate", ec?.user?.nowTimestamp)
-        }
-        if (finder.metaClass.respondsTo(finder, "useCache", Boolean)) {
-            finder.useCache(false)
-        }
-        return finder.one() != null
+        return SUPER_ADMIN_GROUP_IDS.any { String userGroupId -> hasActiveUserGroupMembership(ec, userGroupId) }
     }
 
     static boolean requireSuperAdmin(def ec, String message = "This operation requires super-admin access.") {
@@ -156,8 +175,30 @@ class TenantAccessSupport {
         return resolveActiveTenantPermissionScope(ec, activeTenantUserGroupId, superAdmin).canEdit == true
     }
 
+    static boolean canRunActiveTenantReconciliation(def ec) {
+        String activeTenantUserGroupId = currentActiveTenantUserGroupId(ec)
+        boolean superAdmin = isSuperAdmin(ec)
+        return resolveActiveTenantPermissionScope(ec, activeTenantUserGroupId, superAdmin).canRun == true
+    }
+
     static boolean hasActiveTenantWriteAccess(def ec) {
         return canEditActiveTenantData(ec)
+    }
+
+    static boolean hasActiveTenantRunAccess(def ec) {
+        return canRunActiveTenantReconciliation(ec)
+    }
+
+    static boolean requireActiveTenantRunAccess(def ec,
+            String readOnlyMessage = ACTIVE_TENANT_READ_ONLY_MESSAGE,
+            String missingCompanyMessage = ACTIVE_TENANT_WRITE_REQUIRED_MESSAGE) {
+        if (!currentActiveTenantUserGroupId(ec)) {
+            ec?.message?.addError(missingCompanyMessage)
+            return false
+        }
+        if (hasActiveTenantRunAccess(ec)) return true
+        ec?.message?.addError(readOnlyMessage)
+        return false
     }
 
     static boolean requireActiveTenantWriteAccess(def ec,
@@ -179,13 +220,118 @@ class TenantAccessSupport {
 
     static Map<String, Object> buildSessionInfo(def ec) {
         Map<String, Object> sessionInfo = [
-            userId  : ec?.user?.userId,
-            username: ec?.user?.username,
-            locale  : ec?.l10n?.locale?.toLanguageTag(),
-            timeZone: ec?.user?.userAccount?.timeZone ?: ec?.l10n?.timeZone,
+            userId       : ec?.user?.userId,
+            username     : ec?.user?.username,
+            displayName  : resolveDisplayName(ec),
+            locale       : ec?.l10n?.locale?.toLanguageTag(),
+            timeZone     : resolveActiveTenantTimeZone(ec),
+            lastLoginDate: resolveLastLoginDate(ec),
+            lastRun      : resolveLastRun(ec),
         ]
         applyScopeToSessionInfo(ec, sessionInfo)
         return sessionInfo
+    }
+
+    static boolean saveUserSettings(def ec, Object rawDisplayName) {
+        if (!currentUserId(ec)) {
+            ec?.message?.addError("Authentication required to save user settings.")
+            return false
+        }
+
+        String displayName = FacadeSupport.normalize(rawDisplayName)
+        ec?.user?.setPreference(DISPLAY_NAME_PREFERENCE_KEY, displayName)
+        return true
+    }
+
+    static Map<String, Object> readActiveTenantSettings(def ec) {
+        String tenantId = currentActiveTenantUserGroupId(ec)
+        if (!tenantId) return buildTenantSettingsResponse(ec, null, null)
+        return buildTenantSettingsResponse(ec, findTenantSettingsForTenant(ec, tenantId), tenantId)
+    }
+
+    static Map<String, Object> saveActiveTenantSettings(def ec, Object rawTimeZone) {
+        String tenantId = currentActiveTenantUserGroupId(ec)
+        if (!tenantId) {
+            ec?.message?.addError("Active tenant is required for tenant settings.")
+            return buildTenantSettingsResponse(ec, null, null)
+        }
+
+        requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for tenant settings.")
+        def existing = findTenantSettingsForTenant(ec, tenantId)
+        if (ec?.message?.hasError()) return buildTenantSettingsResponse(ec, existing, tenantId)
+
+        String timeZone = normalizeTimeZoneId(rawTimeZone)
+        String validationError = validateTimeZone(timeZone)
+        if (validationError) ec?.message?.addError(validationError)
+        if (ec?.message?.hasError()) return buildTenantSettingsResponse(ec, existing, tenantId)
+
+        def nowTs = ec?.user?.nowTimestamp
+        Map<String, Object> tenantSettingsMap = [
+                companyUserGroupId: tenantId,
+                createdByUserId   : FacadeSupport.normalize(existing?.createdByUserId) ?: currentUserId(ec),
+                timeZone          : timeZone,
+                createdDate       : existing?.createdDate ?: nowTs,
+                lastUpdatedDate   : nowTs,
+        ]
+
+        ec?.service?.sync()
+                ?.name("store#${TENANT_SETTING_ENTITY_NAME}".toString())
+                ?.parameters(tenantSettingsMap)
+                ?.call()
+
+        if (!ec?.message?.hasError()) ec?.message?.addMessage("Saved tenant settings.")
+        return buildTenantSettingsResponse(ec, findTenantSettingsForTenant(ec, tenantId), tenantId, tenantSettingsMap)
+    }
+
+    static String resolveActiveTenantTimeZone(def ec) {
+        String tenantId = currentActiveTenantUserGroupId(ec)
+        def tenantSettings = tenantId ? findTenantSettingsForTenant(ec, tenantId) : null
+        return resolveTenantSettingsTimeZone(tenantSettings, ec)
+    }
+
+    static String validateTimeZone(Object rawTimeZone) {
+        String timeZone = normalizeTimeZoneId(rawTimeZone)
+        if (!timeZone) return "Timezone is required."
+        try {
+            ZoneId.of(timeZone)
+            return null
+        } catch (DateTimeException ignored) {
+            return "Timezone is invalid."
+        }
+    }
+
+    protected static String resolveTenantSettingsTimeZone(def tenantSettings, def ec) {
+        return normalizeTimeZoneId(tenantSettings?.timeZone) ?:
+                normalizeTimeZoneId(ec?.user?.userAccount?.timeZone) ?:
+                normalizeTimeZoneId(ec?.l10n?.timeZone) ?:
+                DEFAULT_TIME_ZONE
+    }
+
+    protected static String normalizeTimeZoneId(Object rawTimeZone) {
+        if (rawTimeZone instanceof TimeZone) return FacadeSupport.normalize(rawTimeZone.ID)
+        return FacadeSupport.normalize(rawTimeZone)
+    }
+
+    protected static def findTenantSettingsForTenant(def ec, String tenantId) {
+        if (!tenantId) return null
+        return ec?.entity?.find(TENANT_SETTING_ENTITY_NAME)
+                ?.condition("companyUserGroupId", tenantId)
+                ?.disableAuthz()
+                ?.useCache(false)
+                ?.one()
+    }
+
+    protected static Map<String, Object> buildTenantSettingsResponse(def ec, def tenantSettings, String tenantId,
+            Map<String, Object> fallbackSettings = null) {
+        String resolvedTenantId = tenantId ?: FacadeSupport.normalize(fallbackSettings?.companyUserGroupId)
+        return [
+                companyUserGroupId: resolvedTenantId,
+                companyLabel      : resolveTenantLabelForUserGroupId(ec, resolvedTenantId),
+                timeZone          : resolveTenantSettingsTimeZone(tenantSettings ?: fallbackSettings, ec),
+                createdByUserId   : FacadeSupport.normalize(tenantSettings?.createdByUserId ?: fallbackSettings?.createdByUserId),
+                createdDate       : tenantSettings?.createdDate ?: fallbackSettings?.createdDate,
+                lastUpdatedDate   : tenantSettings?.lastUpdatedDate ?: fallbackSettings?.lastUpdatedDate,
+        ]
     }
 
     static boolean canAccessTenantRecord(def ec, def record, String companyField = "companyUserGroupId") {
@@ -340,6 +486,67 @@ class TenantAccessSupport {
         return FacadeSupport.normalize(ec?.user?.getPreference(ACTIVE_TENANT_PREFERENCE_KEY))
     }
 
+    protected static String resolveDisplayName(def ec) {
+        return FacadeSupport.normalize(ec?.user?.getPreference(DISPLAY_NAME_PREFERENCE_KEY))
+                ?: FacadeSupport.normalize(ec?.user?.userAccount?.userFullName)
+                ?: FacadeSupport.normalize(ec?.user?.username)
+                ?: currentUserId(ec)
+    }
+
+    protected static Object resolveLastLoginDate(def ec) {
+        String userId = currentUserId(ec)
+        if (!userId) return null
+
+        def finder = ec?.entity?.find("moqui.security.UserLoginHistory")
+        if (finder == null) return null
+
+        finder.condition("userId", userId).condition("successfulLogin", "Y")
+        if (finder.metaClass.respondsTo(finder, "disableAuthz")) {
+            finder.disableAuthz()
+        }
+        if (finder.metaClass.respondsTo(finder, "useCache", Boolean)) {
+            finder.useCache(false)
+        }
+        if (finder.metaClass.respondsTo(finder, "orderBy", String)) {
+            finder.orderBy("-fromDate")
+        }
+
+        def lastLogin = finder.metaClass.respondsTo(finder, "one") ? finder.one() : null
+        return lastLogin instanceof Map ? lastLogin.fromDate : lastLogin?.fromDate
+    }
+
+    protected static Map<String, Object> resolveLastRun(def ec) {
+        String userId = currentUserId(ec)
+        if (!userId) return null
+
+        def finder = ec?.entity?.find("darpan.reconciliation.ReconciliationRunResult")
+        if (finder == null) return null
+
+        finder.condition("createdByUserId", userId)
+        String activeTenantUserGroupId = currentActiveTenantUserGroupId(ec)
+        if (activeTenantUserGroupId) finder.condition("companyUserGroupId", activeTenantUserGroupId)
+        if (finder.metaClass.respondsTo(finder, "disableAuthz")) {
+            finder.disableAuthz()
+        }
+        if (finder.metaClass.respondsTo(finder, "useCache", Boolean)) {
+            finder.useCache(false)
+        }
+        if (finder.metaClass.respondsTo(finder, "orderBy", String)) {
+            finder.orderBy("-createdDate")
+        }
+
+        def lastRunResult = finder.metaClass.respondsTo(finder, "one") ? finder.one() : null
+        if (lastRunResult == null) return null
+
+        return [
+            reconciliationRunResultId: extractString(lastRunResult, "reconciliationRunResultId"),
+            savedRunId              : extractString(lastRunResult, "savedRunId"),
+            savedRunType            : extractString(lastRunResult, "savedRunType"),
+            reconciliationRunId     : extractString(lastRunResult, "reconciliationRunId"),
+            createdDate             : lastRunResult instanceof Map ? lastRunResult.createdDate : lastRunResult.createdDate,
+        ].findAll { it.value != null } as Map<String, Object>
+    }
+
     protected static List<String> listTenantPermissionGroupIds(def ec, String tenantUserGroupId) {
         String userId = currentUserId(ec)
         String normalizedTenantUserGroupId = FacadeSupport.normalize(tenantUserGroupId)
@@ -371,15 +578,43 @@ class TenantAccessSupport {
     protected static Map<String, Object> resolveActiveTenantPermissionScope(def ec, Object activeTenantUserGroupId, boolean superAdmin) {
         String normalizedActiveTenantUserGroupId = FacadeSupport.normalize(activeTenantUserGroupId)
         if (!normalizedActiveTenantUserGroupId) {
-            return [permissionGroupIds: [], canEdit: false]
+            return [permissionGroupIds: [], canView: false, canRun: false, canEdit: false]
         }
         if (superAdmin) {
-            return [permissionGroupIds: [DARPAN_COMPANY_EDITOR_GROUP_ID], canEdit: true]
+            return [
+                    permissionGroupIds: [DARPAN_SUPER_ADMIN_GROUP_ID, DARPAN_TENANT_ADMIN_GROUP_ID, DARPAN_TENANT_USER_GROUP_ID],
+                    canView           : true,
+                    canRun            : true,
+                    canEdit           : true,
+            ]
         }
 
         List<String> effectivePermissionGroupIds = listTenantPermissionGroupIds(ec, normalizedActiveTenantUserGroupId)
-        boolean canEdit = effectivePermissionGroupIds.contains(DARPAN_COMPANY_EDITOR_GROUP_ID)
-        return [permissionGroupIds: effectivePermissionGroupIds, canEdit: canEdit]
+        boolean canView = effectivePermissionGroupIds.any { String permissionGroupId -> permissionGroupId in TENANT_VIEW_PERMISSION_GROUP_IDS }
+        boolean canRun = effectivePermissionGroupIds.any { String permissionGroupId -> permissionGroupId in TENANT_RUN_PERMISSION_GROUP_IDS }
+        boolean canEdit = effectivePermissionGroupIds.any { String permissionGroupId -> permissionGroupId in TENANT_EDIT_PERMISSION_GROUP_IDS }
+        return [permissionGroupIds: effectivePermissionGroupIds, canView: canView, canRun: canRun, canEdit: canEdit]
+    }
+
+    protected static boolean hasActiveUserGroupMembership(def ec, String userGroupId) {
+        String userId = currentUserId(ec)
+        String normalizedUserGroupId = FacadeSupport.normalize(userGroupId)
+        if (!userId || !normalizedUserGroupId) return false
+
+        def finder = ec?.entity?.find("moqui.security.UserGroupMember")
+        if (finder == null) return false
+
+        finder.condition("userId", userId).condition("userGroupId", normalizedUserGroupId)
+        if (finder.metaClass.respondsTo(finder, "disableAuthz")) {
+            finder.disableAuthz()
+        }
+        if (finder.metaClass.respondsTo(finder, "conditionDate", String, String, Object)) {
+            finder.conditionDate("fromDate", "thruDate", ec?.user?.nowTimestamp)
+        }
+        if (finder.metaClass.respondsTo(finder, "useCache", Boolean)) {
+            finder.useCache(false)
+        }
+        return finder.one() != null
     }
 
     protected static void applyAccessScopeToUserContext(def ec, Map<String, Object> scope) {
@@ -391,7 +626,10 @@ class TenantAccessSupport {
             userContext.remove("activeTenantLabel")
             userContext.remove("availableTenantUserGroupIds")
             userContext.remove("activeTenantPermissionGroupIds")
+            userContext.remove("canViewActiveTenantData")
+            userContext.remove("canRunActiveTenantReconciliation")
             userContext.remove("canEditActiveTenantData")
+            userContext.remove("canManageDarpanCore")
             userContext.remove("isSuperAdmin")
             userContext.remove("scopeType")
             return
@@ -409,7 +647,10 @@ class TenantAccessSupport {
         userContext.activeTenantLabel = FacadeSupport.normalize(scope?.activeTenantLabel)
         userContext.availableTenantUserGroupIds = availableTenantUserGroupIds
         userContext.activeTenantPermissionGroupIds = activeTenantPermissionGroupIds
+        userContext.canViewActiveTenantData = scope?.canViewActiveTenantData == true
+        userContext.canRunActiveTenantReconciliation = scope?.canRunActiveTenantReconciliation == true
         userContext.canEditActiveTenantData = scope?.canEditActiveTenantData == true
+        userContext.canManageDarpanCore = scope?.canManageDarpanCore == true
         userContext.isSuperAdmin = scope?.isSuperAdmin == true
         userContext.scopeType = FacadeSupport.normalize(scope?.scopeType)
     }

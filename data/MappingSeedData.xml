@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <entity-facade-xml type="darpan-seed">
     <moqui.basic.EnumerationType enumTypeId="DarpanSystemSource" description="Darpan System Source"/>
-    <moqui.basic.Enumeration enumId="OMS" enumTypeId="DarpanSystemSource" enumCode="OMS" description="OMS" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="OMS" enumTypeId="DarpanSystemSource" enumCode="HOTWAX" description="HotWax" sequenceNum="1"/>
     <moqui.basic.Enumeration enumId="SHOPIFY" enumTypeId="DarpanSystemSource" enumCode="SHOPIFY" description="Shopify" sequenceNum="2"/>
 
     <moqui.basic.EnumerationType enumTypeId="DarpanFileType" description="File Types for Reconciliation"/>

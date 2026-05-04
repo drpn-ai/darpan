@@ -69,6 +69,104 @@ test {
 task cleanLib(type: Delete) { delete fileTree(dir: projectDir.absolutePath+'/lib', include: '*') }
 clean.dependsOn cleanLib
 
+String getDarpanPropertyOrEnv(String propertyName, String envName, String defaultValue) {
+    if (project.properties.containsKey(propertyName)) return project.property(propertyName).toString()
+
+    String envValue = System.getenv(envName)
+    return envValue ? envValue : defaultValue
+}
+
+List<String> splitDarpanArgs(String argString) {
+    String trimmedArgs = argString?.trim()
+    if (!trimmedArgs) return []
+    return trimmedArgs.split(/\s+/) as List<String>
+}
+
+List<String> getDarpanLoadPassthroughArgs() {
+    List<String> passthroughArgs = []
+
+    if (project.properties.containsKey('timeout')) passthroughArgs.add("timeout=${project.property('timeout')}")
+
+    [
+            'raw',
+            'no-fk-create',
+            'dummy-fks',
+            'use-try-insert',
+            'disable-eeca',
+            'disable-audit-log',
+            'disable-data-feed',
+            'no-run-es'
+    ].each { String flagName ->
+        if (project.properties.containsKey(flagName)) passthroughArgs.add(flagName)
+    }
+
+    passthroughArgs.addAll(splitDarpanArgs(getDarpanPropertyOrEnv('extraLoadArgs', 'DARPAN_UPGRADE_DATA_LOAD_ARGS', '')))
+    return passthroughArgs
+}
+
+List<String> getDarpanJavaExecArgs() {
+    List<String> javaArgs = [
+            '-server',
+            '--add-exports=java.base/sun.nio.ch=ALL-UNNAMED',
+            '--add-opens=java.base/java.nio=ALL-UNNAMED',
+            '--add-opens=java.base/java.lang.invoke=ALL-UNNAMED',
+            '--add-opens=java.base/java.util=ALL-UNNAMED'
+    ]
+    javaArgs.addAll(splitDarpanArgs(System.getenv('JAVA_OPTS') ?: ''))
+    return javaArgs.unique()
+}
+
+task loadDarpanUpgradeData(type: JavaExec) {
+    group = "Moqui"
+    description = "Load the current Darpan release upgrade data from runtime/component/darpan/data/upgrade-data.xml."
+
+    String moquiConfPath = getDarpanPropertyOrEnv(
+            'moquiConf',
+            'CONF_FILE',
+            new File(moquiDir, 'runtime/conf/MoquiProductionConf.xml').absolutePath
+    )
+    String moquiRuntimePath = getDarpanPropertyOrEnv(
+            'moquiRuntime',
+            'MOQUI_RUNTIME',
+            new File(moquiDir, 'runtime').absolutePath
+    )
+    File moquiWarFile = file(getDarpanPropertyOrEnv(
+            'moquiWar',
+            'MOQUI_WAR',
+            new File(moquiDir, 'moqui-plus-runtime.war').absolutePath
+    ))
+    String upgradeDataLocation = getDarpanPropertyOrEnv(
+            'upgradeDataLocation',
+            'DARPAN_UPGRADE_DATA_LOCATION',
+            'component://darpan/data/upgrade-data.xml'
+    )
+    String upgradeDataTypes = getDarpanPropertyOrEnv(
+            'types',
+            'DARPAN_UPGRADE_DATA_TYPES',
+            'darpan-seed'
+    )
+    List<String> loadArgs = [
+            moquiWarFile.absolutePath,
+            'load',
+            "conf=${moquiConfPath}",
+            "types=${upgradeDataTypes}",
+            "location=${upgradeDataLocation}"
+    ] + getDarpanLoadPassthroughArgs()
+
+    doFirst {
+        if (!moquiWarFile.exists()) {
+            throw new GradleException("Moqui runtime WAR not found at ${moquiWarFile.absolutePath}; run addRuntime before loadDarpanUpgradeData.")
+        }
+        logger.lifecycle("Loading Darpan upgrade data from [${upgradeDataLocation}] using [types=${upgradeDataTypes}]")
+    }
+
+    systemProperties = ['moqui.conf': moquiConfPath, 'moqui.runtime': moquiRuntimePath]
+    workingDir = moquiDir
+    jvmArgs getDarpanJavaExecArgs()
+    main = '-jar'
+    args = loadArgs
+}
+
 jar {
     destinationDirectory = file(projectDir.absolutePath + '/lib')
     archiveBaseName = jarBaseName
@@ -157,8 +255,7 @@ task verifyOrganization {
 
         List<File> productionFiles = fileTree(
                 dir: projectDir,
-                include: ["service/**/*.xml", "screen/**/*.xml", "src/main/groovy/darpan/**/*.groovy"],
-                exclude: ["service/debug/**", "screen/Debug.xml", "screen/Debug/**", "src/main/groovy/darpan/debug/**"]
+                include: ["service/**/*.xml", "screen/**/*.xml", "src/main/groovy/darpan/**/*.groovy"]
         ).files.sort { it.path }
 
         productionFiles.each { File sourceFile ->
@@ -188,8 +285,7 @@ task verifyOrganization {
 
         List<File> productionScreenAndServiceFiles = fileTree(
                 dir: projectDir,
-                include: ["service/**/*.xml", "screen/**/*.xml"],
-                exclude: ["service/debug/**", "screen/Debug.xml", "screen/Debug/**"]
+                include: ["service/**/*.xml", "screen/**/*.xml"]
         ).files.sort { it.path }
 
         productionScreenAndServiceFiles.each { File xmlFile ->

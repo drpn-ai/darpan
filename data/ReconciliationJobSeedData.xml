@@ -11,4 +11,16 @@
             jobName="purge_ReconciliationGeneratedFiles_daily"
             parameterName="retentionDays"
             parameterValue="15"/>
+
+    <moqui.service.job.ServiceJob
+            jobName="scan_ReconciliationAutomations_5m"
+            description="Scan due reconciliation automations and execute scheduled windows."
+            serviceName="reconciliation.ReconciliationAutomationServices.scan#DueAutomations"
+            cronExpression="0 0/5 * * * ?"
+            paused="N"/>
+
+    <moqui.service.job.ServiceJobParameter
+            jobName="scan_ReconciliationAutomations_5m"
+            parameterName="limit"
+            parameterValue="100"/>
 </entity-facade-xml>

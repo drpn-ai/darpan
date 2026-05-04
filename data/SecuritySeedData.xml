@@ -25,7 +25,17 @@
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
             artifactName="darpan.rule.RuleSetCompareSource" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
+            artifactName="darpan.auth.TenantSetting" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
             artifactName="darpan.reconciliation.ReconciliationRunResult" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
+            artifactName="darpan.reconciliation.TenantNotificationSetting" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
+            artifactName="darpan.reconciliation.ReconciliationAutomation" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
+            artifactName="darpan.reconciliation.ReconciliationAutomationSource" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
+            artifactName="darpan.reconciliation.ReconciliationAutomationExecution" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_APP_ADMIN" userGroupId="ADMIN"
             artifactGroupId="DARPAN_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
 
@@ -54,6 +64,26 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.reconciliation.ReconciliationRunResult"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_TENANT_SETTING"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.auth.TenantSetting"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_TENANT_NOTIF"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.TenantNotificationSetting"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUTOMATION"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.ReconciliationAutomation"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUTOMATION_SOURCE"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.ReconciliationAutomationSource"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUTOMATION_EXEC"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.ReconciliationAutomationExecution"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_SFTP_SERVER"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.reconciliation.SftpServer"
@@ -76,6 +106,15 @@
     <moqui.basic.Enumeration enumId="UgtDarpanPermission"
             description="Darpan tenant permission groups"
             enumTypeId="UserGroupType"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_SUPER_ADMIN"
+            description="Can view and edit every tenant and manage Darpan core configuration"
+            groupTypeEnumId="UgtDarpanPermission"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_TENANT_ADMIN"
+            description="Can view, run, create, update, and delete data for associated tenants"
+            groupTypeEnumId="UgtDarpanPermission"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_TENANT_USER"
+            description="Can view tenant pages, upload files, and run reconciliation for associated tenants"
+            groupTypeEnumId="UgtDarpanPermission"/>
     <moqui.security.UserGroup userGroupId="DARPAN_COMPANY_EDITOR"
             description="Can create, update, run, and delete tenant-scoped Darpan data"
             groupTypeEnumId="UgtDarpanPermission"/>

@@ -39,7 +39,7 @@ def resolveFilePath = { ExecutionContext context, String location ->
 }
 
 // --------------------------------------------------------------------------------
-// Helper: Validation Logic (Inlined from SchemaValidator)
+// Helper: stream validation logic kept local to avoid loading large JSON payloads at once.
 // --------------------------------------------------------------------------------
 ObjectMapper mapper = new ObjectMapper()
 

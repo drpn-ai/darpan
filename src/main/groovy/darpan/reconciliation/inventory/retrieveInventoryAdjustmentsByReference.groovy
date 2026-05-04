@@ -80,8 +80,11 @@ String readDbLocationIdFieldExpr = normalize(readDbLocationIdField) ?: defaultLo
 String fromDateStr = normalize(from)
 String toDateStr = normalize(to)
 String nsConfigId = normalize(nsRestletConfigId)
-String readDbConfigIdToUse = normalize(readDbConfigId)
-String readDbConfigIdForFetch = readDbConfigIdToUse
+String readDbJdbcUrlToUse = normalize(jdbcUrl)
+String readDbUsernameToUse = normalize(username)
+String readDbPasswordToUse = password != null ? password.toString() : null
+String readDbDriverToUse = normalize(dbDriver) ?: "com.mysql.cj.jdbc.Driver"
+String readDbConnectionPropertiesJsonToUse = normalize(connectionPropertiesJson)
 String sqlRuleSetIdToUse = normalize(sqlRuleSetId)
 String sqlStatementTemplateToUse = normalize(sqlStatementTemplate)
 String sqlTemplateNameToUse = normalize(sqlTemplateName)
@@ -101,7 +104,9 @@ if (!refLocation) throw new IllegalArgumentException("referenceFileLocation is r
 if (!fromDateStr) throw new IllegalArgumentException("from is required in yyyy-MM-dd format")
 if (!toDateStr) throw new IllegalArgumentException("to is required in yyyy-MM-dd format")
 if (!nsConfigId) throw new IllegalArgumentException("nsRestletConfigId is required")
-if (!readDbConfigIdToUse) throw new IllegalArgumentException("readDbConfigId is required")
+if (!readDbJdbcUrlToUse) throw new IllegalArgumentException("jdbcUrl is required")
+if (!readDbUsernameToUse) throw new IllegalArgumentException("username is required")
+if (readDbPasswordToUse == null) throw new IllegalArgumentException("password is required")
 if (!comparisonRuleSetIdToUse) throw new IllegalArgumentException("comparisonRuleSetId is required")
 if (!sqlRuleSetIdToUse && !sqlStatementTemplateToUse) {
     throw new IllegalArgumentException("Either sqlRuleSetId or sqlStatementTemplate is required for read DB SQL resolution")
@@ -272,7 +277,11 @@ try {
 
         try {
             def readDbResult = callService("reconciliation.ReconciliationInventoryServices.fetch#ReadDbRecords", [
-                    readDbConfigId       : readDbConfigIdForFetch,
+                    jdbcUrl              : readDbJdbcUrlToUse,
+                    username             : readDbUsernameToUse,
+                    password             : readDbPasswordToUse,
+                    dbDriver             : readDbDriverToUse,
+                    connectionPropertiesJson: readDbConnectionPropertiesJsonToUse,
                     itemId               : pairReadDbItemId,
                     locationId           : pairReadDbLocationId,
                     from                 : fromDateStr,
@@ -447,11 +456,11 @@ try {
     ]
     Map readDbDoc = [
             metadata: [
-                    source         : "READ_DB",
-                    readDbConfigId : readDbConfigIdForFetch,
-                    from           : fromDateStr,
-                    to             : toDateStr,
-                    generatedAt    : ec.user.nowTimestamp?.toString()
+                    source      : "READ_DB",
+                    tableName   : tableName,
+                    from        : fromDateStr,
+                    to          : toDateStr,
+                    generatedAt : ec.user.nowTimestamp?.toString()
             ],
             rows    : readDbPayloadByItem
     ]

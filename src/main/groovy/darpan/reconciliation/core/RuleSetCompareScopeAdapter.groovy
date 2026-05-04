@@ -302,10 +302,14 @@ class RuleSetCompareScopeAdapter {
                 .disableAuthz()
                 .useCache(true)
                 .one()
+        String description = ReconciliationServices.normalize(enumValue?.description)
+        if (ReconciliationServices.normalize(enumValue?.enumTypeId) == "DarpanSystemSource" &&
+                normalized == "OMS") {
+            return description ?: "HotWax"
+        }
+
         String code = ReconciliationServices.normalize(enumValue?.enumCode)
         if (code) return code
-
-        String description = ReconciliationServices.normalize(enumValue?.description)
         if (description) return description
 
         return normalized

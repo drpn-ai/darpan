@@ -25,6 +25,10 @@ class TenantAccessSupportTests {
         assertEquals(null, scope.customerScopeId)
         assertEquals(null, scope.activeTenantUserGroupId)
         assertEquals([], scope.availableTenants)
+        assertFalse(scope.canViewActiveTenantData as boolean)
+        assertFalse(scope.canRunActiveTenantReconciliation as boolean)
+        assertFalse(scope.canEditActiveTenantData as boolean)
+        assertTrue(scope.canManageDarpanCore as boolean)
     }
 
     @Test
@@ -55,6 +59,39 @@ class TenantAccessSupportTests {
                 [userGroupId: "GORJANA", label: "Gorjana"],
                 [userGroupId: "KREWE", label: "Krewe"],
         ], scope.availableTenants)
+        assertTrue(scope.canViewActiveTenantData as boolean)
+        assertTrue(scope.canRunActiveTenantReconciliation as boolean)
+        assertTrue(scope.canEditActiveTenantData as boolean)
+        assertTrue(scope.canManageDarpanCore as boolean)
+    }
+
+    @Test
+    void buildAccessScopeTreatsDarpanSuperAdminGroupAsSuperAdmin() {
+        FinderStub adminFinder = new FinderStub(oneResult: [
+                userGroupId: TenantAccessSupport.DARPAN_SUPER_ADMIN_GROUP_ID,
+                userId     : "EX_ADMIN",
+        ])
+        FinderStub companyGroupFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_ADMIN", preferences: [
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
+                ]),
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupMember": adminFinder,
+                        "moqui.security.UserGroup"      : companyGroupFinder,
+                ])
+        )
+
+        Map<String, Object> scope = TenantAccessSupport.buildAccessScope(ec)
+
+        assertTrue(scope.isSuperAdmin as boolean)
+        assertEquals("KREWE", scope.activeTenantUserGroupId)
+        assertTrue(scope.canViewActiveTenantData as boolean)
+        assertTrue(scope.canRunActiveTenantReconciliation as boolean)
+        assertTrue(scope.canEditActiveTenantData as boolean)
+        assertTrue(scope.canManageDarpanCore as boolean)
     }
 
     @Test
@@ -150,7 +187,63 @@ class TenantAccessSupportTests {
         Map<String, Object> scope = TenantAccessSupport.buildAccessScope(ec)
 
         assertEquals([TenantAccessSupport.DARPAN_COMPANY_VIEW_ONLY_GROUP_ID], scope.activeTenantPermissionGroupIds)
+        assertTrue(scope.canViewActiveTenantData as boolean)
+        assertFalse(scope.canRunActiveTenantReconciliation as boolean)
         assertFalse(scope.canEditActiveTenantData as boolean)
+    }
+
+    @Test
+    void buildAccessScopeAllowsTenantUserToRunButNotEditActiveTenantData() {
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        FinderStub permissionFinder = new FinderStub(listResult: [
+                [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID],
+        ])
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_USER", preferences: [
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
+                ]),
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupAndMember"                     : companyFinder,
+                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionFinder,
+                ])
+        )
+
+        Map<String, Object> scope = TenantAccessSupport.buildAccessScope(ec)
+
+        assertEquals([TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID], scope.activeTenantPermissionGroupIds)
+        assertTrue(scope.canViewActiveTenantData as boolean)
+        assertTrue(scope.canRunActiveTenantReconciliation as boolean)
+        assertFalse(scope.canEditActiveTenantData as boolean)
+        assertTrue(TenantAccessSupport.hasActiveTenantRunAccess(ec))
+        assertFalse(TenantAccessSupport.hasActiveTenantWriteAccess(ec))
+    }
+
+    @Test
+    void buildAccessScopeAllowsTenantAdminToRunAndEditActiveTenantData() {
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        FinderStub permissionFinder = new FinderStub(listResult: [
+                [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_TENANT_ADMIN_GROUP_ID],
+        ])
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_USER", preferences: [
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
+                ]),
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupAndMember"                     : companyFinder,
+                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionFinder,
+                ])
+        )
+
+        Map<String, Object> scope = TenantAccessSupport.buildAccessScope(ec)
+
+        assertEquals([TenantAccessSupport.DARPAN_TENANT_ADMIN_GROUP_ID], scope.activeTenantPermissionGroupIds)
+        assertTrue(scope.canViewActiveTenantData as boolean)
+        assertTrue(scope.canRunActiveTenantReconciliation as boolean)
+        assertTrue(scope.canEditActiveTenantData as boolean)
     }
 
     @Test
@@ -289,7 +382,10 @@ class TenantAccessSupportTests {
         assertEquals("Krewe", user.context.activeTenantLabel)
         assertEquals(["KREWE"], user.context.availableTenantUserGroupIds)
         assertEquals([TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID], user.context.activeTenantPermissionGroupIds)
+        assertTrue(user.context.canViewActiveTenantData as boolean)
+        assertTrue(user.context.canRunActiveTenantReconciliation as boolean)
         assertTrue(user.context.canEditActiveTenantData as boolean)
+        assertFalse(user.context.canManageDarpanCore as boolean)
         assertFalse(user.context.isSuperAdmin as boolean)
         assertEquals("TENANT", user.context.scopeType)
     }
@@ -311,6 +407,32 @@ class TenantAccessSupportTests {
     }
 
     @Test
+    void requireActiveTenantRunAccessAllowsTenantUserRole() {
+        MessageFacadeStub message = new MessageFacadeStub()
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        FinderStub permissionFinder = new FinderStub(listResult: [
+                [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID],
+        ])
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_USER", preferences: [
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
+                ]),
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupAndMember"                     : companyFinder,
+                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionFinder,
+                ]),
+                message: message
+        )
+
+        boolean allowed = TenantAccessSupport.requireActiveTenantRunAccess(ec, "Tenant cannot run reconciliation.")
+
+        assertTrue(allowed)
+        assertEquals([], message.errors)
+    }
+
+    @Test
     void saveActiveTenantAllowsAdminWhenTenantIsConfigured() {
         FinderStub adminFinder = new FinderStub(oneResult: [userGroupId: "ADMIN", userId: "EX_ADMIN"])
         FinderStub companyGroupFinder = new FinderStub(listResult: [
@@ -329,6 +451,91 @@ class TenantAccessSupportTests {
 
         assertTrue(saved)
         assertEquals("GORJANA", user.preferences[TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY])
+    }
+
+    @Test
+    void sessionInfoUsesActiveTenantTimezoneBeforeUserAccountTimezone() {
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        FinderStub tenantSettingsFinder = new FinderStub(oneResult: [
+                companyUserGroupId: "KREWE",
+                timeZone          : "Europe/London",
+        ])
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_USER", username: "test.user", userAccount: [timeZone: "Asia/Kolkata"], preferences: [
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
+                ]),
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupAndMember"       : companyFinder,
+                        (TenantAccessSupport.TENANT_SETTING_ENTITY_NAME): tenantSettingsFinder,
+                ])
+        )
+
+        Map<String, Object> sessionInfo = TenantAccessSupport.buildSessionInfo(ec)
+
+        assertEquals("Europe/London", sessionInfo.timeZone)
+    }
+
+    @Test
+    void saveActiveTenantSettingsStoresTimezoneForActiveTenant() {
+        Timestamp now = Timestamp.valueOf("2026-05-02 10:00:00")
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        FinderStub permissionFinder = new FinderStub(listResult: [
+                [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID],
+        ])
+        ServiceFacadeStub service = new ServiceFacadeStub()
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_USER", nowTimestamp: now, preferences: [
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
+                ]),
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupAndMember"                     : companyFinder,
+                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionFinder,
+                ]),
+                service: service
+        )
+
+        Map<String, Object> settings = TenantAccessSupport.saveActiveTenantSettings(ec, "Europe/London")
+
+        assertEquals("KREWE", settings.companyUserGroupId)
+        assertEquals("Europe/London", settings.timeZone)
+        assertEquals("store#darpan.auth.TenantSetting", service.lastCall.serviceName)
+        assertEquals("KREWE", service.lastCall.parametersMap.companyUserGroupId)
+        assertEquals("EX_USER", service.lastCall.parametersMap.createdByUserId)
+        assertEquals("Europe/London", service.lastCall.parametersMap.timeZone)
+        assertEquals(now, service.lastCall.parametersMap.createdDate)
+        assertEquals(now, service.lastCall.parametersMap.lastUpdatedDate)
+    }
+
+    @Test
+    void saveActiveTenantSettingsRejectsInvalidTimezone() {
+        MessageFacadeStub message = new MessageFacadeStub()
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        FinderStub permissionFinder = new FinderStub(listResult: [
+                [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID],
+        ])
+        ServiceFacadeStub service = new ServiceFacadeStub()
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_USER", preferences: [
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
+                ]),
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupAndMember"                     : companyFinder,
+                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionFinder,
+                ]),
+                message: message,
+                service: service
+        )
+
+        TenantAccessSupport.saveActiveTenantSettings(ec, "Not/AZone")
+
+        assertEquals(["Timezone is invalid."], message.errors)
+        assertEquals(null, service.lastCall)
     }
 
     @Test
@@ -377,20 +584,50 @@ class TenantAccessSupportTests {
         assertEquals(["View only tenant."], message.errors)
     }
 
+    @Test
+    void requireActiveTenantWriteAccessRejectsTenantUserRole() {
+        MessageFacadeStub message = new MessageFacadeStub()
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        FinderStub permissionFinder = new FinderStub(listResult: [
+                [tenantUserGroupId: "KREWE", userId: "EX_USER", permissionUserGroupId: TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID],
+        ])
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_USER", preferences: [
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "KREWE",
+                ]),
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupAndMember"                     : companyFinder,
+                        (TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME): permissionFinder,
+                ]),
+                message: message
+        )
+
+        boolean allowed = TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Tenant user cannot edit.")
+
+        assertFalse(allowed)
+        assertEquals(["Tenant user cannot edit."], message.errors)
+    }
+
     private static Expando executionContext(Map overrides = [:]) {
         return new Expando(
                 user: overrides.user ?: new UserStub(),
                 entity: overrides.entity ?: new EntityFacadeStub(),
                 message: overrides.message ?: new MessageFacadeStub(),
+                service: overrides.service ?: new ServiceFacadeStub(),
+                l10n: overrides.l10n ?: new Expando(timeZone: "UTC"),
                 resource: new Expando(properties: [:])
         )
     }
 
     static class UserStub {
         String userId
+        String username
         Timestamp nowTimestamp = new Timestamp(System.currentTimeMillis())
         Map<String, Object> preferences = [:]
         Map<String, Object> context = [:]
+        Object userAccount = new Expando(timeZone: "UTC")
 
         Object getPreference(String preferenceKey) {
             return preferences[preferenceKey]
@@ -406,6 +643,9 @@ class TenantAccessSupportTests {
 
         void addError(String error) {
             errors << error
+        }
+
+        void addMessage(String message) {
         }
 
         boolean hasError() {
@@ -453,6 +693,38 @@ class TenantAccessSupportTests {
                 if (!(row instanceof Map)) return true
                 conditions.every { String field, Object value -> row[field] == value }
             }
+        }
+
+        FinderStub disableAuthz() {
+            return this
+        }
+    }
+
+    static class ServiceFacadeStub {
+        ServiceCallStub lastCall
+
+        ServiceCallStub sync() {
+            lastCall = new ServiceCallStub()
+            return lastCall
+        }
+    }
+
+    static class ServiceCallStub {
+        String serviceName
+        Map<String, Object> parametersMap = [:]
+
+        ServiceCallStub name(String serviceName) {
+            this.serviceName = serviceName
+            return this
+        }
+
+        ServiceCallStub parameters(Map<String, Object> parametersMap) {
+            this.parametersMap = parametersMap
+            return this
+        }
+
+        Map<String, Object> call() {
+            return [:]
         }
     }
 }

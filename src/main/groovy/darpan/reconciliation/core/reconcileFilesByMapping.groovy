@@ -66,9 +66,12 @@ def resolveEnumLabel = { String enumId, String fallback ->
             .disableAuthz()
             .useCache(true)
             .one()
+    def description = normalize(enumValue?.description)
+    if (normalize(enumValue?.enumTypeId) == "DarpanSystemSource" && normalized == "OMS") {
+        return description ?: "HotWax"
+    }
     def code = normalize(enumValue?.enumCode)
     if (code) return code
-    def description = normalize(enumValue?.description)
     if (description) return description
     return normalized
 }

@@ -7,8 +7,8 @@
     <moqui.basic.Enumeration
             enumId="OMS"
             enumTypeId="DarpanSystemSource"
-            enumCode="OMS"
-            description="OMS"
+            enumCode="HOTWAX"
+            description="HotWax"
             sequenceNum="1"/>
 
     <moqui.basic.Enumeration

@@ -8,15 +8,25 @@
             <parameter name="runName" required="true"/>
             <parameter name="description"/>
             <parameter name="file1SystemEnumId" required="true"/>
+            <parameter name="file1SourceTypeEnumId"/>
+            <parameter name="file1SystemMessageRemoteId"/>
+            <parameter name="file1NsRestletConfigId"/>
+            <parameter name="file1SourceConfigId"/>
+            <parameter name="file1SourceConfigType"/>
             <parameter name="file1FileTypeEnumId"/>
             <parameter name="file1SchemaFileName"/>
             <parameter name="file1RecordRootExpression"/>
-            <parameter name="file1PrimaryIdExpression" required="true"/>
+            <parameter name="file1PrimaryIdExpression"/>
             <parameter name="file2SystemEnumId" required="true"/>
+            <parameter name="file2SourceTypeEnumId"/>
+            <parameter name="file2SystemMessageRemoteId"/>
+            <parameter name="file2NsRestletConfigId"/>
+            <parameter name="file2SourceConfigId"/>
+            <parameter name="file2SourceConfigType"/>
             <parameter name="file2FileTypeEnumId"/>
             <parameter name="file2SchemaFileName"/>
             <parameter name="file2RecordRootExpression"/>
-            <parameter name="file2PrimaryIdExpression" required="true"/>
+            <parameter name="file2PrimaryIdExpression"/>
             <parameter name="rules" type="List">
                 <parameter name="ruleId"/>
                 <parameter name="sequenceNum" type="Integer"/>
@@ -54,6 +64,14 @@
                     <parameter name="fileTypeLabel"/>
                     <parameter name="idFieldExpression"/>
                     <parameter name="schemaFileName"/>
+                    <parameter name="sourceTypeEnumId"/>
+                    <parameter name="sourceTypeLabel"/>
+                    <parameter name="systemMessageRemoteId"/>
+                    <parameter name="systemMessageRemoteLabel"/>
+                    <parameter name="nsRestletConfigId"/>
+                    <parameter name="nsRestletConfigLabel"/>
+                    <parameter name="sourceConfigId"/>
+                    <parameter name="sourceConfigType"/>
                 </parameter>
                 <parameter name="rules">
                     <parameter name="ruleId"/>
@@ -78,12 +96,24 @@
             <set field="runNameValue" from="darpan.facade.common.FacadeSupport.normalize(runName)"/>
             <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
             <set field="file1SystemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SystemEnumId)"/>
-            <set field="file1FileTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1FileTypeEnumId) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID"/>
+            <set field="file1SourceTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SourceTypeEnumId)"/>
+            <set field="file1UsesApiSource" from="file1SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_API"/>
+            <set field="file1SystemMessageRemoteIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SystemMessageRemoteId)"/>
+            <set field="file1NsRestletConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1NsRestletConfigId)"/>
+            <set field="file1SourceConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SourceConfigId)"/>
+            <set field="file1SourceConfigTypeValue" from="darpan.facade.common.FacadeSupport.normalize(file1SourceConfigType)"/>
+            <set field="file1FileTypeEnumIdValue" from="file1UsesApiSource ? null : (darpan.facade.common.FacadeSupport.normalize(file1FileTypeEnumId) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
             <set field="file1SchemaFileNameValue" from="darpan.facade.common.FacadeSupport.normalize(file1SchemaFileName)"/>
             <set field="file1RecordRootExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file1RecordRootExpression)"/>
             <set field="file1PrimaryIdExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file1PrimaryIdExpression)"/>
             <set field="file2SystemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SystemEnumId)"/>
-            <set field="file2FileTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2FileTypeEnumId) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID"/>
+            <set field="file2SourceTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SourceTypeEnumId)"/>
+            <set field="file2UsesApiSource" from="file2SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_API"/>
+            <set field="file2SystemMessageRemoteIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SystemMessageRemoteId)"/>
+            <set field="file2NsRestletConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2NsRestletConfigId)"/>
+            <set field="file2SourceConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SourceConfigId)"/>
+            <set field="file2SourceConfigTypeValue" from="darpan.facade.common.FacadeSupport.normalize(file2SourceConfigType)"/>
+            <set field="file2FileTypeEnumIdValue" from="file2UsesApiSource ? null : (darpan.facade.common.FacadeSupport.normalize(file2FileTypeEnumId) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
             <set field="file2SchemaFileNameValue" from="darpan.facade.common.FacadeSupport.normalize(file2SchemaFileName)"/>
             <set field="file2RecordRootExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file2RecordRootExpression)"/>
             <set field="file2PrimaryIdExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file2PrimaryIdExpression)"/>
@@ -107,6 +137,24 @@
             <if condition="file1SystemEnumIdValue &amp;&amp; file2SystemEnumIdValue &amp;&amp; file1SystemEnumIdValue == file2SystemEnumIdValue">
                 <message error="true">file1SystemEnumId and file2SystemEnumId must be different</message>
             </if>
+            <if condition="file1SourceTypeEnumIdValue &amp;&amp; !file1UsesApiSource">
+                <message error="true">file1SourceTypeEnumId '${file1SourceTypeEnumIdValue}' is not supported</message>
+            </if>
+            <if condition="file2SourceTypeEnumIdValue &amp;&amp; !file2UsesApiSource">
+                <message error="true">file2SourceTypeEnumId '${file2SourceTypeEnumIdValue}' is not supported</message>
+            </if>
+            <if condition="file1UsesApiSource &amp;&amp; !file1SystemMessageRemoteIdValue &amp;&amp; !file1NsRestletConfigIdValue">
+                <message error="true">file1 API source requires an endpoint</message>
+            </if>
+            <if condition="file2UsesApiSource &amp;&amp; !file2SystemMessageRemoteIdValue &amp;&amp; !file2NsRestletConfigIdValue">
+                <message error="true">file2 API source requires an endpoint</message>
+            </if>
+            <if condition="file1UsesApiSource &amp;&amp; file1SystemMessageRemoteIdValue &amp;&amp; file1NsRestletConfigIdValue">
+                <message error="true">file1 API source must use only one endpoint</message>
+            </if>
+            <if condition="file2UsesApiSource &amp;&amp; file2SystemMessageRemoteIdValue &amp;&amp; file2NsRestletConfigIdValue">
+                <message error="true">file2 API source must use only one endpoint</message>
+            </if>
             <if condition="!ec.message.hasError()">
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
             </if>
@@ -116,17 +164,51 @@
                 <set field="file2System" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2SystemEnumIdValue)"/>
                 <set field="file1FileType" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file1FileTypeEnumIdValue)"/>
                 <set field="file2FileType" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2FileTypeEnumIdValue)"/>
+                <set field="file1SourceType" from="file1UsesApiSource ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file1SourceTypeEnumIdValue) : null"/>
+                <set field="file2SourceType" from="file2UsesApiSource ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2SourceTypeEnumIdValue) : null"/>
+                <set field="file1SystemMessageRemote" from="file1SystemMessageRemoteIdValue ? ec.entity.find('moqui.service.message.SystemMessageRemote').condition('systemMessageRemoteId', file1SystemMessageRemoteIdValue).useCache(false).one() : null"/>
+                <set field="file2SystemMessageRemote" from="file2SystemMessageRemoteIdValue ? ec.entity.find('moqui.service.message.SystemMessageRemote').condition('systemMessageRemoteId', file2SystemMessageRemoteIdValue).useCache(false).one() : null"/>
+                <set field="file1NsRestletConfig" from="file1NsRestletConfigIdValue ? ec.entity.find('darpan.reconciliation.NsRestletConfig').condition('nsRestletConfigId', file1NsRestletConfigIdValue).useCache(false).one() : null"/>
+                <set field="file2NsRestletConfig" from="file2NsRestletConfigIdValue ? ec.entity.find('darpan.reconciliation.NsRestletConfig').condition('nsRestletConfigId', file2NsRestletConfigIdValue).useCache(false).one() : null"/>
                 <if condition="file1System == null">
                     <message error="true">file1SystemEnumId '${file1SystemEnumIdValue}' is not valid</message>
                 </if>
                 <if condition="file2System == null">
                     <message error="true">file2SystemEnumId '${file2SystemEnumIdValue}' is not valid</message>
                 </if>
-                <if condition="file1FileType == null">
+                <if condition="!file1UsesApiSource &amp;&amp; file1FileType == null">
                     <message error="true">file1FileTypeEnumId '${file1FileTypeEnumIdValue}' is not valid</message>
                 </if>
-                <if condition="file2FileType == null">
+                <if condition="!file2UsesApiSource &amp;&amp; file2FileType == null">
                     <message error="true">file2FileTypeEnumId '${file2FileTypeEnumIdValue}' is not valid</message>
+                </if>
+                <if condition="file1SystemMessageRemoteIdValue &amp;&amp; file1SystemMessageRemote == null">
+                    <message error="true">file1SystemMessageRemoteId '${file1SystemMessageRemoteIdValue}' was not found</message>
+                </if>
+                <if condition="file2SystemMessageRemoteIdValue &amp;&amp; file2SystemMessageRemote == null">
+                    <message error="true">file2SystemMessageRemoteId '${file2SystemMessageRemoteIdValue}' was not found</message>
+                </if>
+                <if condition="file1NsRestletConfigIdValue">
+                    <set field="ignoreFile1NsRestletAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file1NsRestletConfig, &quot;file1NsRestletConfigId '${file1NsRestletConfigIdValue}' was not found&quot;, 'file1 API endpoint is not available in your active tenant.')"/>
+                    <if condition="file1NsRestletConfig != null &amp;&amp; darpan.facade.common.FacadeSupport.normalize(file1NsRestletConfig.isActive) == 'N'">
+                        <message error="true">file1NsRestletConfigId '${file1NsRestletConfigIdValue}' is inactive</message>
+                    </if>
+                </if>
+                <if condition="file2NsRestletConfigIdValue">
+                    <set field="ignoreFile2NsRestletAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file2NsRestletConfig, &quot;file2NsRestletConfigId '${file2NsRestletConfigIdValue}' was not found&quot;, 'file2 API endpoint is not available in your active tenant.')"/>
+                    <if condition="file2NsRestletConfig != null &amp;&amp; darpan.facade.common.FacadeSupport.normalize(file2NsRestletConfig.isActive) == 'N'">
+                        <message error="true">file2NsRestletConfigId '${file2NsRestletConfigIdValue}' is inactive</message>
+                    </if>
+                </if>
+                <if condition="file1UsesApiSource">
+                    <set field="file1SourceConfigResolution" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.resolveApiSourceConfig(ec, 'file1', file1SystemEnumIdValue, file1SourceConfigIdValue, file1SourceConfigTypeValue, file1NsRestletConfig)"/>
+                    <set field="file1SourceConfigIdValue" from="file1SourceConfigResolution.sourceConfigId"/>
+                    <set field="file1SourceConfigTypeValue" from="file1SourceConfigResolution.sourceConfigType"/>
+                </if>
+                <if condition="file2UsesApiSource">
+                    <set field="file2SourceConfigResolution" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.resolveApiSourceConfig(ec, 'file2', file2SystemEnumIdValue, file2SourceConfigIdValue, file2SourceConfigTypeValue, file2NsRestletConfig)"/>
+                    <set field="file2SourceConfigIdValue" from="file2SourceConfigResolution.sourceConfigId"/>
+                    <set field="file2SourceConfigTypeValue" from="file2SourceConfigResolution.sourceConfigType"/>
                 </if>
             </if>
 
@@ -181,10 +263,10 @@
                         in-map="[compareScopeId: compareScopeIdValue, ruleSetId: ruleSetIdValue, description: descriptionValue ?: 'Compare scope for ' + runNameValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
                 <service-call name="create#darpan.rule.RuleSetCompareSource"
                         disable-authz="true"
-                        in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_1', systemEnumId: file1SystemEnumIdValue, fileTypeEnumId: file1FileTypeEnumIdValue, schemaFileName: file1SchemaFileNameValue, recordRootExpression: file1RecordRootExpressionValue, primaryIdExpression: resolvedFile1PrimaryIdExpressionValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                        in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_1', systemEnumId: file1SystemEnumIdValue, sourceTypeEnumId: file1SourceTypeEnumIdValue, systemMessageRemoteId: file1SystemMessageRemoteIdValue, nsRestletConfigId: file1NsRestletConfigIdValue, sourceConfigId: file1UsesApiSource ? file1SourceConfigIdValue : null, sourceConfigType: file1UsesApiSource ? file1SourceConfigTypeValue : null, fileTypeEnumId: file1FileTypeEnumIdValue, schemaFileName: file1UsesApiSource ? null : file1SchemaFileNameValue, recordRootExpression: file1UsesApiSource ? null : file1RecordRootExpressionValue, primaryIdExpression: resolvedFile1PrimaryIdExpressionValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
                 <service-call name="create#darpan.rule.RuleSetCompareSource"
                         disable-authz="true"
-                        in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', systemEnumId: file2SystemEnumIdValue, fileTypeEnumId: file2FileTypeEnumIdValue, schemaFileName: file2SchemaFileNameValue, recordRootExpression: file2RecordRootExpressionValue, primaryIdExpression: resolvedFile2PrimaryIdExpressionValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                        in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', systemEnumId: file2SystemEnumIdValue, sourceTypeEnumId: file2SourceTypeEnumIdValue, systemMessageRemoteId: file2SystemMessageRemoteIdValue, nsRestletConfigId: file2NsRestletConfigIdValue, sourceConfigId: file2UsesApiSource ? file2SourceConfigIdValue : null, sourceConfigType: file2UsesApiSource ? file2SourceConfigTypeValue : null, fileTypeEnumId: file2FileTypeEnumIdValue, schemaFileName: file2UsesApiSource ? null : file2SchemaFileNameValue, recordRootExpression: file2UsesApiSource ? null : file2RecordRootExpressionValue, primaryIdExpression: resolvedFile2PrimaryIdExpressionValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
             </if>
 
             <if condition="!ec.message.hasError() &amp;&amp; !ruleEntries.isEmpty()">
@@ -250,6 +332,14 @@
                     <parameter name="fileTypeLabel"/>
                     <parameter name="idFieldExpression"/>
                     <parameter name="schemaFileName"/>
+                    <parameter name="sourceTypeEnumId"/>
+                    <parameter name="sourceTypeLabel"/>
+                    <parameter name="systemMessageRemoteId"/>
+                    <parameter name="systemMessageRemoteLabel"/>
+                    <parameter name="nsRestletConfigId"/>
+                    <parameter name="nsRestletConfigLabel"/>
+                    <parameter name="sourceConfigId"/>
+                    <parameter name="sourceConfigType"/>
                 </parameter>
             </parameter>
         </out-parameters>
@@ -430,15 +520,25 @@
             <parameter name="runName" required="true"/>
             <parameter name="description"/>
             <parameter name="file1SystemEnumId" required="true"/>
+            <parameter name="file1SourceTypeEnumId"/>
+            <parameter name="file1SystemMessageRemoteId"/>
+            <parameter name="file1NsRestletConfigId"/>
+            <parameter name="file1SourceConfigId"/>
+            <parameter name="file1SourceConfigType"/>
             <parameter name="file1FileTypeEnumId"/>
             <parameter name="file1SchemaFileName"/>
             <parameter name="file1RecordRootExpression"/>
-            <parameter name="file1PrimaryIdExpression" required="true"/>
+            <parameter name="file1PrimaryIdExpression"/>
             <parameter name="file2SystemEnumId" required="true"/>
+            <parameter name="file2SourceTypeEnumId"/>
+            <parameter name="file2SystemMessageRemoteId"/>
+            <parameter name="file2NsRestletConfigId"/>
+            <parameter name="file2SourceConfigId"/>
+            <parameter name="file2SourceConfigType"/>
             <parameter name="file2FileTypeEnumId"/>
             <parameter name="file2SchemaFileName"/>
             <parameter name="file2RecordRootExpression"/>
-            <parameter name="file2PrimaryIdExpression" required="true"/>
+            <parameter name="file2PrimaryIdExpression"/>
             <parameter name="rules" type="List">
                 <parameter name="ruleId"/>
                 <parameter name="sequenceNum" type="Integer"/>
@@ -476,6 +576,14 @@
                     <parameter name="fileTypeLabel"/>
                     <parameter name="idFieldExpression"/>
                     <parameter name="schemaFileName"/>
+                    <parameter name="sourceTypeEnumId"/>
+                    <parameter name="sourceTypeLabel"/>
+                    <parameter name="systemMessageRemoteId"/>
+                    <parameter name="systemMessageRemoteLabel"/>
+                    <parameter name="nsRestletConfigId"/>
+                    <parameter name="nsRestletConfigLabel"/>
+                    <parameter name="sourceConfigId"/>
+                    <parameter name="sourceConfigType"/>
                 </parameter>
                 <parameter name="rules">
                     <parameter name="ruleId"/>
@@ -501,12 +609,24 @@
             <set field="runNameValue" from="darpan.facade.common.FacadeSupport.normalize(runName)"/>
             <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
             <set field="file1SystemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SystemEnumId)"/>
-            <set field="file1FileTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1FileTypeEnumId) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID"/>
+            <set field="file1SourceTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SourceTypeEnumId)"/>
+            <set field="file1UsesApiSource" from="file1SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_API"/>
+            <set field="file1SystemMessageRemoteIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SystemMessageRemoteId)"/>
+            <set field="file1NsRestletConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1NsRestletConfigId)"/>
+            <set field="file1SourceConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SourceConfigId)"/>
+            <set field="file1SourceConfigTypeValue" from="darpan.facade.common.FacadeSupport.normalize(file1SourceConfigType)"/>
+            <set field="file1FileTypeEnumIdValue" from="file1UsesApiSource ? null : (darpan.facade.common.FacadeSupport.normalize(file1FileTypeEnumId) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
             <set field="file1SchemaFileNameValue" from="darpan.facade.common.FacadeSupport.normalize(file1SchemaFileName)"/>
             <set field="file1RecordRootExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file1RecordRootExpression)"/>
             <set field="file1PrimaryIdExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file1PrimaryIdExpression)"/>
             <set field="file2SystemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SystemEnumId)"/>
-            <set field="file2FileTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2FileTypeEnumId) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID"/>
+            <set field="file2SourceTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SourceTypeEnumId)"/>
+            <set field="file2UsesApiSource" from="file2SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_API"/>
+            <set field="file2SystemMessageRemoteIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SystemMessageRemoteId)"/>
+            <set field="file2NsRestletConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2NsRestletConfigId)"/>
+            <set field="file2SourceConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SourceConfigId)"/>
+            <set field="file2SourceConfigTypeValue" from="darpan.facade.common.FacadeSupport.normalize(file2SourceConfigType)"/>
+            <set field="file2FileTypeEnumIdValue" from="file2UsesApiSource ? null : (darpan.facade.common.FacadeSupport.normalize(file2FileTypeEnumId) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
             <set field="file2SchemaFileNameValue" from="darpan.facade.common.FacadeSupport.normalize(file2SchemaFileName)"/>
             <set field="file2RecordRootExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file2RecordRootExpression)"/>
             <set field="file2PrimaryIdExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file2PrimaryIdExpression)"/>
@@ -525,14 +645,32 @@
             <if condition="!file2SystemEnumIdValue">
                 <message error="true">file2SystemEnumId is required</message>
             </if>
-            <if condition="!file1PrimaryIdExpressionValue">
+            <if condition="!file1UsesApiSource &amp;&amp; !file1PrimaryIdExpressionValue">
                 <message error="true">file1PrimaryIdExpression is required</message>
             </if>
-            <if condition="!file2PrimaryIdExpressionValue">
+            <if condition="!file2UsesApiSource &amp;&amp; !file2PrimaryIdExpressionValue">
                 <message error="true">file2PrimaryIdExpression is required</message>
             </if>
             <if condition="file1SystemEnumIdValue &amp;&amp; file2SystemEnumIdValue &amp;&amp; file1SystemEnumIdValue == file2SystemEnumIdValue">
                 <message error="true">file1SystemEnumId and file2SystemEnumId must be different</message>
+            </if>
+            <if condition="file1SourceTypeEnumIdValue &amp;&amp; !file1UsesApiSource">
+                <message error="true">file1SourceTypeEnumId '${file1SourceTypeEnumIdValue}' is not supported</message>
+            </if>
+            <if condition="file2SourceTypeEnumIdValue &amp;&amp; !file2UsesApiSource">
+                <message error="true">file2SourceTypeEnumId '${file2SourceTypeEnumIdValue}' is not supported</message>
+            </if>
+            <if condition="file1UsesApiSource &amp;&amp; !file1SystemMessageRemoteIdValue &amp;&amp; !file1NsRestletConfigIdValue">
+                <message error="true">file1 API source requires an endpoint</message>
+            </if>
+            <if condition="file2UsesApiSource &amp;&amp; !file2SystemMessageRemoteIdValue &amp;&amp; !file2NsRestletConfigIdValue">
+                <message error="true">file2 API source requires an endpoint</message>
+            </if>
+            <if condition="file1UsesApiSource &amp;&amp; file1SystemMessageRemoteIdValue &amp;&amp; file1NsRestletConfigIdValue">
+                <message error="true">file1 API source must use only one endpoint</message>
+            </if>
+            <if condition="file2UsesApiSource &amp;&amp; file2SystemMessageRemoteIdValue &amp;&amp; file2NsRestletConfigIdValue">
+                <message error="true">file2 API source must use only one endpoint</message>
             </if>
 
             <if condition="!ec.message.hasError()">
@@ -559,17 +697,51 @@
                 <set field="file2System" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2SystemEnumIdValue)"/>
                 <set field="file1FileType" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file1FileTypeEnumIdValue)"/>
                 <set field="file2FileType" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2FileTypeEnumIdValue)"/>
+                <set field="file1SourceType" from="file1UsesApiSource ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file1SourceTypeEnumIdValue) : null"/>
+                <set field="file2SourceType" from="file2UsesApiSource ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2SourceTypeEnumIdValue) : null"/>
+                <set field="file1SystemMessageRemote" from="file1SystemMessageRemoteIdValue ? ec.entity.find('moqui.service.message.SystemMessageRemote').condition('systemMessageRemoteId', file1SystemMessageRemoteIdValue).useCache(false).one() : null"/>
+                <set field="file2SystemMessageRemote" from="file2SystemMessageRemoteIdValue ? ec.entity.find('moqui.service.message.SystemMessageRemote').condition('systemMessageRemoteId', file2SystemMessageRemoteIdValue).useCache(false).one() : null"/>
+                <set field="file1NsRestletConfig" from="file1NsRestletConfigIdValue ? ec.entity.find('darpan.reconciliation.NsRestletConfig').condition('nsRestletConfigId', file1NsRestletConfigIdValue).useCache(false).one() : null"/>
+                <set field="file2NsRestletConfig" from="file2NsRestletConfigIdValue ? ec.entity.find('darpan.reconciliation.NsRestletConfig').condition('nsRestletConfigId', file2NsRestletConfigIdValue).useCache(false).one() : null"/>
                 <if condition="file1System == null">
                     <message error="true">file1SystemEnumId '${file1SystemEnumIdValue}' is not valid</message>
                 </if>
                 <if condition="file2System == null">
                     <message error="true">file2SystemEnumId '${file2SystemEnumIdValue}' is not valid</message>
                 </if>
-                <if condition="file1FileType == null">
+                <if condition="!file1UsesApiSource &amp;&amp; file1FileType == null">
                     <message error="true">file1FileTypeEnumId '${file1FileTypeEnumIdValue}' is not valid</message>
                 </if>
-                <if condition="file2FileType == null">
+                <if condition="!file2UsesApiSource &amp;&amp; file2FileType == null">
                     <message error="true">file2FileTypeEnumId '${file2FileTypeEnumIdValue}' is not valid</message>
+                </if>
+                <if condition="file1SystemMessageRemoteIdValue &amp;&amp; file1SystemMessageRemote == null">
+                    <message error="true">file1SystemMessageRemoteId '${file1SystemMessageRemoteIdValue}' was not found</message>
+                </if>
+                <if condition="file2SystemMessageRemoteIdValue &amp;&amp; file2SystemMessageRemote == null">
+                    <message error="true">file2SystemMessageRemoteId '${file2SystemMessageRemoteIdValue}' was not found</message>
+                </if>
+                <if condition="file1NsRestletConfigIdValue">
+                    <set field="ignoreFile1NsRestletAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file1NsRestletConfig, &quot;file1NsRestletConfigId '${file1NsRestletConfigIdValue}' was not found&quot;, 'file1 API endpoint is not available in your active tenant.')"/>
+                    <if condition="file1NsRestletConfig != null &amp;&amp; darpan.facade.common.FacadeSupport.normalize(file1NsRestletConfig.isActive) == 'N'">
+                        <message error="true">file1NsRestletConfigId '${file1NsRestletConfigIdValue}' is inactive</message>
+                    </if>
+                </if>
+                <if condition="file2NsRestletConfigIdValue">
+                    <set field="ignoreFile2NsRestletAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file2NsRestletConfig, &quot;file2NsRestletConfigId '${file2NsRestletConfigIdValue}' was not found&quot;, 'file2 API endpoint is not available in your active tenant.')"/>
+                    <if condition="file2NsRestletConfig != null &amp;&amp; darpan.facade.common.FacadeSupport.normalize(file2NsRestletConfig.isActive) == 'N'">
+                        <message error="true">file2NsRestletConfigId '${file2NsRestletConfigIdValue}' is inactive</message>
+                    </if>
+                </if>
+                <if condition="file1UsesApiSource">
+                    <set field="file1SourceConfigResolution" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.resolveApiSourceConfig(ec, 'file1', file1SystemEnumIdValue, file1SourceConfigIdValue, file1SourceConfigTypeValue, file1NsRestletConfig)"/>
+                    <set field="file1SourceConfigIdValue" from="file1SourceConfigResolution.sourceConfigId"/>
+                    <set field="file1SourceConfigTypeValue" from="file1SourceConfigResolution.sourceConfigType"/>
+                </if>
+                <if condition="file2UsesApiSource">
+                    <set field="file2SourceConfigResolution" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.resolveApiSourceConfig(ec, 'file2', file2SystemEnumIdValue, file2SourceConfigIdValue, file2SourceConfigTypeValue, file2NsRestletConfig)"/>
+                    <set field="file2SourceConfigIdValue" from="file2SourceConfigResolution.sourceConfigId"/>
+                    <set field="file2SourceConfigTypeValue" from="file2SourceConfigResolution.sourceConfigType"/>
                 </if>
             </if>
 
@@ -620,17 +792,27 @@
                 <set field="ignoreCompareScopeUpdate" from="compareScope.update()"/>
 
                 <set field="ignoreFile1System" from="file1Source.set('systemEnumId', file1SystemEnumIdValue)"/>
+                <set field="ignoreFile1SourceType" from="file1Source.set('sourceTypeEnumId', file1SourceTypeEnumIdValue)"/>
+                <set field="ignoreFile1SystemRemote" from="file1Source.set('systemMessageRemoteId', file1SystemMessageRemoteIdValue)"/>
+                <set field="ignoreFile1NsRestlet" from="file1Source.set('nsRestletConfigId', file1NsRestletConfigIdValue)"/>
+                <set field="ignoreFile1SourceConfigId" from="file1Source.set('sourceConfigId', file1UsesApiSource ? file1SourceConfigIdValue : null)"/>
+                <set field="ignoreFile1SourceConfigType" from="file1Source.set('sourceConfigType', file1UsesApiSource ? file1SourceConfigTypeValue : null)"/>
                 <set field="ignoreFile1FileType" from="file1Source.set('fileTypeEnumId', file1FileTypeEnumIdValue)"/>
-                <set field="ignoreFile1Schema" from="file1Source.set('schemaFileName', file1SchemaFileNameValue)"/>
-                <set field="ignoreFile1Root" from="file1Source.set('recordRootExpression', file1RecordRootExpressionValue)"/>
+                <set field="ignoreFile1Schema" from="file1Source.set('schemaFileName', file1UsesApiSource ? null : file1SchemaFileNameValue)"/>
+                <set field="ignoreFile1Root" from="file1Source.set('recordRootExpression', file1UsesApiSource ? null : file1RecordRootExpressionValue)"/>
                 <set field="ignoreFile1PrimaryId" from="file1Source.set('primaryIdExpression', resolvedFile1PrimaryIdExpressionValue)"/>
                 <set field="ignoreFile1UpdatedDate" from="file1Source.set('lastUpdatedDate', nowTs)"/>
                 <set field="ignoreFile1Update" from="file1Source.update()"/>
 
                 <set field="ignoreFile2System" from="file2Source.set('systemEnumId', file2SystemEnumIdValue)"/>
+                <set field="ignoreFile2SourceType" from="file2Source.set('sourceTypeEnumId', file2SourceTypeEnumIdValue)"/>
+                <set field="ignoreFile2SystemRemote" from="file2Source.set('systemMessageRemoteId', file2SystemMessageRemoteIdValue)"/>
+                <set field="ignoreFile2NsRestlet" from="file2Source.set('nsRestletConfigId', file2NsRestletConfigIdValue)"/>
+                <set field="ignoreFile2SourceConfigId" from="file2Source.set('sourceConfigId', file2UsesApiSource ? file2SourceConfigIdValue : null)"/>
+                <set field="ignoreFile2SourceConfigType" from="file2Source.set('sourceConfigType', file2UsesApiSource ? file2SourceConfigTypeValue : null)"/>
                 <set field="ignoreFile2FileType" from="file2Source.set('fileTypeEnumId', file2FileTypeEnumIdValue)"/>
-                <set field="ignoreFile2Schema" from="file2Source.set('schemaFileName', file2SchemaFileNameValue)"/>
-                <set field="ignoreFile2Root" from="file2Source.set('recordRootExpression', file2RecordRootExpressionValue)"/>
+                <set field="ignoreFile2Schema" from="file2Source.set('schemaFileName', file2UsesApiSource ? null : file2SchemaFileNameValue)"/>
+                <set field="ignoreFile2Root" from="file2Source.set('recordRootExpression', file2UsesApiSource ? null : file2RecordRootExpressionValue)"/>
                 <set field="ignoreFile2PrimaryId" from="file2Source.set('primaryIdExpression', resolvedFile2PrimaryIdExpressionValue)"/>
                 <set field="ignoreFile2UpdatedDate" from="file2Source.set('lastUpdatedDate', nowTs)"/>
                 <set field="ignoreFile2Update" from="file2Source.update()"/>
@@ -672,8 +854,7 @@
         </actions>
     </service>
 
-    <service verb="list" noun="SavedRuns" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/listSavedRuns.groovy">
+    <service verb="list" noun="SavedRuns" allow-remote="true" authenticate="true">
         <description>List saved runs across legacy mappings and RuleSet-backed CSV runs.</description>
         <in-parameters>
             <parameter name="query"/>
@@ -714,6 +895,14 @@
                     <parameter name="fileTypeLabel"/>
                     <parameter name="idFieldExpression"/>
                     <parameter name="schemaFileName"/>
+                    <parameter name="sourceTypeEnumId"/>
+                    <parameter name="sourceTypeLabel"/>
+                    <parameter name="systemMessageRemoteId"/>
+                    <parameter name="systemMessageRemoteLabel"/>
+                    <parameter name="nsRestletConfigId"/>
+                    <parameter name="nsRestletConfigLabel"/>
+                    <parameter name="sourceConfigId"/>
+                    <parameter name="sourceConfigType"/>
                 </parameter>
                 <parameter name="rules">
                     <parameter name="ruleId"/>
@@ -734,6 +923,15 @@
                 </parameter>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="savedRunResult" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.listSavedRuns(ec, query, pageIndex, pageSize)"/>
+            <set field="ok" from="savedRunResult.ok"/>
+            <set field="messages" from="savedRunResult.messages"/>
+            <set field="errors" from="savedRunResult.errors"/>
+            <set field="pagination" from="savedRunResult.pagination"/>
+            <set field="pinnedSavedRunIds" from="savedRunResult.pinnedSavedRunIds"/>
+            <set field="savedRuns" from="savedRunResult.savedRuns"/>
+        </actions>
     </service>
 
     <service verb="save" noun="SavedRunName" allow-remote="true" authenticate="true">
@@ -769,6 +967,14 @@
                     <parameter name="fileTypeLabel"/>
                     <parameter name="idFieldExpression"/>
                     <parameter name="schemaFileName"/>
+                    <parameter name="sourceTypeEnumId"/>
+                    <parameter name="sourceTypeLabel"/>
+                    <parameter name="systemMessageRemoteId"/>
+                    <parameter name="systemMessageRemoteLabel"/>
+                    <parameter name="nsRestletConfigId"/>
+                    <parameter name="nsRestletConfigLabel"/>
+                    <parameter name="sourceConfigId"/>
+                    <parameter name="sourceConfigType"/>
                 </parameter>
             </parameter>
         </out-parameters>
@@ -917,8 +1123,7 @@
         </actions>
     </service>
 
-    <service verb="list" noun="Mappings" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/listMappings.groovy">
+    <service verb="list" noun="Mappings" allow-remote="true" authenticate="true">
         <description>List mapping options and their system pairs for darpan-ui generic diff flow.</description>
         <in-parameters>
             <parameter name="query"/>
@@ -957,6 +1162,15 @@
                 </parameter>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="mappingResult" from="darpan.facade.reconciliation.ReconciliationMappingSupport.listMappings(ec, query, pageIndex, pageSize)"/>
+            <set field="ok" from="mappingResult.ok"/>
+            <set field="messages" from="mappingResult.messages"/>
+            <set field="errors" from="mappingResult.errors"/>
+            <set field="pagination" from="mappingResult.pagination"/>
+            <set field="pinnedReconciliationMappingIds" from="mappingResult.pinnedReconciliationMappingIds"/>
+            <set field="mappings" from="mappingResult.mappings"/>
+        </actions>
     </service>
 
     <service verb="get" noun="Mapping" allow-remote="true" authenticate="true">
@@ -1143,8 +1357,7 @@
         </actions>
     </service>
 
-    <service verb="save" noun="DashboardPinnedMappings" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/saveDashboardPinnedMappings.groovy">
+    <service verb="save" noun="DashboardPinnedMappings" allow-remote="true" authenticate="true">
         <description>Persist dashboard pinned reconciliation mappings for the authenticated user.</description>
         <in-parameters>
             <parameter name="pinnedReconciliationMappingIds" type="List"/>
@@ -1155,10 +1368,16 @@
             <parameter name="errors"><parameter name="error"/></parameter>
             <parameter name="pinnedReconciliationMappingIds" type="List"/>
         </out-parameters>
+        <actions>
+            <set field="validMappingIds" from="new java.util.LinkedHashSet((ec.entity.find('darpan.mapping.ReconciliationMapping').useCache(false).list() ?: []).collect { it.reconciliationMappingId as String }.findAll { it })"/>
+            <set field="pinnedReconciliationMappingIds" from="darpan.facade.reconciliation.ReconciliationDashboardPreferenceSupport.savePinnedReconciliationMappingIds(ec, pinnedReconciliationMappingIds, validMappingIds)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
     </service>
 
-    <service verb="save" noun="DashboardPinnedSavedRuns" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/saveDashboardPinnedSavedRuns.groovy">
+    <service verb="save" noun="DashboardPinnedSavedRuns" allow-remote="true" authenticate="true">
         <description>Persist dashboard pinned saved runs for the authenticated user.</description>
         <in-parameters>
             <parameter name="pinnedSavedRunIds" type="List"/>
@@ -1169,6 +1388,13 @@
             <parameter name="errors"><parameter name="error"/></parameter>
             <parameter name="pinnedSavedRunIds" type="List"/>
         </out-parameters>
+        <actions>
+            <set field="validSavedRunIds" from="new java.util.LinkedHashSet(darpan.facade.reconciliation.ReconciliationSavedRunSupport.collectSavedRunRows(ec).collect { it.savedRunId as String }.findAll { it })"/>
+            <set field="pinnedSavedRunIds" from="darpan.facade.reconciliation.ReconciliationDashboardPreferenceSupport.savePinnedSavedRunIds(ec, pinnedSavedRunIds, validSavedRunIds)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
     </service>
 
     <service verb="run" noun="GenericDiff" type="script" transaction="ignore" allow-remote="true" authenticate="true"
@@ -1176,10 +1402,10 @@
         <description>Run the generic diff flow using text-based file payloads suitable for darpan-ui JSON-RPC calls.</description>
         <in-parameters>
             <parameter name="reconciliationMappingId" required="true"/>
-            <parameter name="file1Name" required="true"/>
-            <parameter name="file1Text" required="true" allow-html="any"/>
-            <parameter name="file2Name" required="true"/>
-            <parameter name="file2Text" required="true" allow-html="any"/>
+            <parameter name="file1Name"/>
+            <parameter name="file1Text" allow-html="any"/>
+            <parameter name="file2Name"/>
+            <parameter name="file2Text" allow-html="any"/>
             <parameter name="file1SystemEnumId"/>
             <parameter name="file2SystemEnumId"/>
             <parameter name="hasHeader" type="Boolean" default-value="true"/>
@@ -1229,12 +1455,16 @@
         <description>Run a saved reconciliation flow backed by either a legacy mapping or a RuleSet compare scope.</description>
         <in-parameters>
             <parameter name="savedRunId" required="true"/>
-            <parameter name="file1Name" required="true"/>
-            <parameter name="file1Text" required="true" allow-html="any"/>
-            <parameter name="file2Name" required="true"/>
-            <parameter name="file2Text" required="true" allow-html="any"/>
+            <parameter name="file1Name"/>
+            <parameter name="file1Text" allow-html="any"/>
+            <parameter name="file2Name"/>
+            <parameter name="file2Text" allow-html="any"/>
             <parameter name="file1SystemEnumId"/>
             <parameter name="file2SystemEnumId"/>
+            <parameter name="windowStartDate" type="Timestamp"/>
+            <parameter name="windowEndDate" type="Timestamp"/>
+            <parameter name="windowStartLocalDate"/>
+            <parameter name="windowEndLocalDate"/>
             <parameter name="hasHeader" type="Boolean" default-value="true"/>
             <parameter name="sparkMaster"/>
             <parameter name="sparkAppName"/>
@@ -1286,8 +1516,325 @@
         </out-parameters>
     </service>
 
-    <service verb="list" noun="GeneratedOutputs" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/listGeneratedOutputs.groovy">
+    <service verb="list" noun="Automations" allow-remote="true" authenticate="true">
+        <description>List tenant-scoped reconciliation automations with dashboard-ready saved-run, source, schedule, last-execution, and permission summaries.</description>
+        <in-parameters>
+            <parameter name="query"/>
+            <parameter name="pageIndex" type="Integer" default-value="0"/>
+            <parameter name="pageSize" type="Integer" default-value="20"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="pagination">
+                <parameter name="pageIndex" type="Integer"/>
+                <parameter name="pageSize" type="Integer"/>
+                <parameter name="totalCount" type="Integer"/>
+                <parameter name="pageCount" type="Integer"/>
+            </parameter>
+            <parameter name="automations">
+                <parameter name="automationId"/>
+                <parameter name="automationName"/>
+                <parameter name="description"/>
+                <parameter name="companyUserGroupId"/>
+                <parameter name="companyLabel"/>
+                <parameter name="savedRunId"/>
+                <parameter name="savedRunName"/>
+                <parameter name="savedRunType"/>
+                <parameter name="ruleSetId"/>
+                <parameter name="compareScopeId"/>
+                <parameter name="reconciliationMappingId"/>
+                <parameter name="inputModeEnumId"/>
+                <parameter name="inputModeLabel"/>
+                <parameter name="inputModeCode"/>
+                <parameter name="sourceSummary"/>
+                <parameter name="scheduleExpr"/>
+                <parameter name="scheduleSummary"/>
+                <parameter name="timezone"/>
+                <parameter name="nextScheduledFireTime" type="Timestamp"/>
+                <parameter name="lastScheduledFireTime" type="Timestamp"/>
+                <parameter name="relativeWindowTypeEnumId"/>
+                <parameter name="relativeWindowLabel"/>
+                <parameter name="relativeWindowCount" type="Integer"/>
+                <parameter name="customWindowStartDate" type="Timestamp"/>
+                <parameter name="customWindowEndDate" type="Timestamp"/>
+                <parameter name="maxWindowDays" type="Integer"/>
+                <parameter name="splitWindowDays" type="Integer"/>
+                <parameter name="isActive"/>
+                <parameter name="active" type="Boolean"/>
+                <parameter name="executionCount" type="Integer"/>
+                <parameter name="lastExecution" type="Map"/>
+                <parameter name="permissions" type="Map"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="automationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.listAutomations(ec, context)"/>
+            <set field="ok" from="automationResult.ok"/>
+            <set field="messages" from="automationResult.messages"/>
+            <set field="errors" from="automationResult.errors"/>
+            <set field="pagination" from="automationResult.pagination"/>
+            <set field="automations" from="automationResult.automations"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Automation" allow-remote="true" authenticate="true">
+        <description>Get one tenant-scoped automation with editable source rows and dashboard summary fields.</description>
+        <in-parameters>
+            <parameter name="automationId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="automation" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="automationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.getAutomation(ec, context)"/>
+            <set field="ok" from="automationResult.ok"/>
+            <set field="messages" from="automationResult.messages"/>
+            <set field="errors" from="automationResult.errors"/>
+            <set field="automation" from="automationResult.automation"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="Automation" allow-remote="true" authenticate="true">
+        <description>Create or update a tenant-scoped automation against either an existing saved run or a newly-created saved run payload.</description>
+        <in-parameters>
+            <parameter name="automationId"/>
+            <parameter name="automationName" required="true"/>
+            <parameter name="description"/>
+            <parameter name="inputModeEnumId" required="true"/>
+            <parameter name="savedRunId"/>
+            <parameter name="savedRunType" default-value="ruleset"/>
+            <parameter name="savedRun" type="Map"/>
+            <parameter name="newSavedRun" type="Map"/>
+            <parameter name="scheduleExpr"/>
+            <parameter name="nextScheduledFireTime" type="Timestamp"/>
+            <parameter name="lastScheduledFireTime" type="Timestamp"/>
+            <parameter name="relativeWindowTypeEnumId"/>
+            <parameter name="relativeWindowCount" type="Integer"/>
+            <parameter name="customWindowStartDate" type="Timestamp"/>
+            <parameter name="customWindowEndDate" type="Timestamp"/>
+            <parameter name="maxWindowDays" type="Integer" default-value="28"/>
+            <parameter name="splitWindowDays" type="Integer" default-value="28"/>
+            <parameter name="windowTimeZone" default-value="UTC"/>
+            <parameter name="safeConfigJson" allow-html="true"/>
+            <parameter name="isActive" type="Boolean" default-value="true"/>
+            <parameter name="sources" type="List">
+                <parameter name="fileSide"/>
+                <parameter name="sourceTypeEnumId"/>
+                <parameter name="systemEnumId"/>
+                <parameter name="fileTypeEnumId"/>
+                <parameter name="schemaFileName"/>
+                <parameter name="recordRootExpression"/>
+                <parameter name="primaryIdExpression"/>
+                <parameter name="idValueNormalizer"/>
+                <parameter name="systemMessageRemoteId"/>
+                <parameter name="nsRestletConfigId"/>
+                <parameter name="sftpServerId"/>
+                <parameter name="remotePathTemplate"/>
+                <parameter name="fileNamePattern"/>
+                <parameter name="apiRequestTemplateJson" allow-html="true"/>
+                <parameter name="apiResponsePathExpression"/>
+                <parameter name="dateFromParameterName"/>
+                <parameter name="dateToParameterName"/>
+                <parameter name="safeMetadataJson" allow-html="true"/>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="automation" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="automationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.saveAutomation(ec, context)"/>
+            <set field="ok" from="automationResult.ok"/>
+            <set field="messages" from="automationResult.messages"/>
+            <set field="errors" from="automationResult.errors"/>
+            <set field="automation" from="automationResult.automation"/>
+        </actions>
+    </service>
+
+    <service verb="delete" noun="Automation" allow-remote="true" authenticate="true">
+        <description>Delete one tenant-scoped automation configuration, its source rows, and its execution history rows.</description>
+        <in-parameters>
+            <parameter name="automationId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="deleted" type="Boolean"/>
+            <parameter name="deletedAutomationId"/>
+            <parameter name="deletedSourceCount" type="Integer"/>
+            <parameter name="deletedExecutionCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="automationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.deleteAutomation(ec, context)"/>
+            <set field="ok" from="automationResult.ok"/>
+            <set field="messages" from="automationResult.messages"/>
+            <set field="errors" from="automationResult.errors"/>
+            <set field="deleted" from="automationResult.deleted"/>
+            <set field="deletedAutomationId" from="automationResult.deletedAutomationId"/>
+            <set field="deletedSourceCount" from="automationResult.deletedSourceCount"/>
+            <set field="deletedExecutionCount" from="automationResult.deletedExecutionCount"/>
+        </actions>
+    </service>
+
+    <service verb="pause" noun="Automation" allow-remote="true" authenticate="true">
+        <description>Pause one tenant-scoped automation by setting isActive to N.</description>
+        <in-parameters>
+            <parameter name="automationId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="automation" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="automationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.setAutomationActive(ec, context, false)"/>
+            <set field="ok" from="automationResult.ok"/>
+            <set field="messages" from="automationResult.messages"/>
+            <set field="errors" from="automationResult.errors"/>
+            <set field="automation" from="automationResult.automation"/>
+        </actions>
+    </service>
+
+    <service verb="resume" noun="Automation" allow-remote="true" authenticate="true">
+        <description>Resume one tenant-scoped automation by setting isActive to Y.</description>
+        <in-parameters>
+            <parameter name="automationId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="automation" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="automationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.setAutomationActive(ec, context, true)"/>
+            <set field="ok" from="automationResult.ok"/>
+            <set field="messages" from="automationResult.messages"/>
+            <set field="errors" from="automationResult.errors"/>
+            <set field="automation" from="automationResult.automation"/>
+        </actions>
+    </service>
+
+    <service verb="run" noun="AutomationNow" transaction="ignore" allow-remote="true" authenticate="true">
+        <description>Run one automation immediately after active-tenant ownership and run-permission validation.</description>
+        <in-parameters>
+            <parameter name="automationId" required="true"/>
+            <parameter name="scheduledFireTime" type="Timestamp"/>
+            <parameter name="windowStartDate" type="Timestamp"/>
+            <parameter name="windowEndDate" type="Timestamp"/>
+            <parameter name="hasHeader" type="Boolean" default-value="true"/>
+            <parameter name="outputLocation"/>
+            <parameter name="sparkMaster"/>
+            <parameter name="sparkAppName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="automation" type="Map"/>
+            <parameter name="runResult" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="automationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.runAutomationNow(ec, context)"/>
+            <set field="ok" from="automationResult.ok"/>
+            <set field="messages" from="automationResult.messages"/>
+            <set field="errors" from="automationResult.errors"/>
+            <set field="automation" from="automationResult.automation"/>
+            <set field="runResult" from="automationResult.runResult"/>
+        </actions>
+    </service>
+
+    <service verb="list" noun="AutomationExecutions" allow-remote="true" authenticate="true">
+        <description>List execution history for the active tenant, optionally filtered to one automation.</description>
+        <in-parameters>
+            <parameter name="automationId"/>
+            <parameter name="pageIndex" type="Integer" default-value="0"/>
+            <parameter name="pageSize" type="Integer" default-value="20"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="pagination">
+                <parameter name="pageIndex" type="Integer"/>
+                <parameter name="pageSize" type="Integer"/>
+                <parameter name="totalCount" type="Integer"/>
+                <parameter name="pageCount" type="Integer"/>
+            </parameter>
+            <parameter name="executions">
+                <parameter name="automationExecutionId"/>
+                <parameter name="automationId"/>
+                <parameter name="companyUserGroupId"/>
+                <parameter name="statusEnumId"/>
+                <parameter name="statusLabel"/>
+                <parameter name="scheduledDate" type="Timestamp"/>
+                <parameter name="startedDate" type="Timestamp"/>
+                <parameter name="completedDate" type="Timestamp"/>
+                <parameter name="resultFileName"/>
+                <parameter name="resultDataManagerPath"/>
+                <parameter name="reconciliationRunResultId"/>
+                <parameter name="file1RecordCount" type="Integer"/>
+                <parameter name="file2RecordCount" type="Integer"/>
+                <parameter name="differenceCount" type="Integer"/>
+                <parameter name="onlyInFile1Count" type="Integer"/>
+                <parameter name="onlyInFile2Count" type="Integer"/>
+                <parameter name="errorMessage"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="automationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.listAutomationExecutions(ec, context)"/>
+            <set field="ok" from="automationResult.ok"/>
+            <set field="messages" from="automationResult.messages"/>
+            <set field="errors" from="automationResult.errors"/>
+            <set field="pagination" from="automationResult.pagination"/>
+            <set field="executions" from="automationResult.executions"/>
+        </actions>
+    </service>
+
+    <service verb="list" noun="AutomationSourceOptions" allow-remote="true" authenticate="true">
+        <description>List active-tenant saved runs, SFTP servers, NetSuite endpoints, system remotes, and enum options needed by automation workflows.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="inputModes" type="List"/>
+            <parameter name="sourceTypes" type="List"/>
+            <parameter name="relativeWindows" type="List"/>
+            <parameter name="fileTypes" type="List"/>
+            <parameter name="systems" type="List"/>
+            <parameter name="savedRuns" type="List"/>
+            <parameter name="sftpServers" type="List"/>
+            <parameter name="sourceConfigs" type="List"/>
+            <parameter name="nsRestletConfigs" type="List"/>
+            <parameter name="systemRemotes" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="automationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.listAutomationSourceOptions(ec, context)"/>
+            <set field="ok" from="automationResult.ok"/>
+            <set field="messages" from="automationResult.messages"/>
+            <set field="errors" from="automationResult.errors"/>
+            <set field="inputModes" from="automationResult.inputModes"/>
+            <set field="sourceTypes" from="automationResult.sourceTypes"/>
+            <set field="relativeWindows" from="automationResult.relativeWindows"/>
+            <set field="fileTypes" from="automationResult.fileTypes"/>
+            <set field="systems" from="automationResult.systems"/>
+            <set field="savedRuns" from="automationResult.savedRuns"/>
+            <set field="sftpServers" from="automationResult.sftpServers"/>
+            <set field="sourceConfigs" from="automationResult.sourceConfigs"/>
+            <set field="nsRestletConfigs" from="automationResult.nsRestletConfigs"/>
+            <set field="systemRemotes" from="automationResult.systemRemotes"/>
+        </actions>
+    </service>
+
+    <service verb="list" noun="GeneratedOutputs" allow-remote="true" authenticate="true">
         <description>List generated reconciliation diff outputs within the current active-tenant scope.</description>
         <in-parameters>
             <parameter name="savedRunId"/>
@@ -1330,10 +1877,17 @@
                 <parameter name="sizeBytes" type="Long"/>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="generatedOutputResult" from="darpan.facade.reconciliation.ReconciliationOutputSupport.listGeneratedOutputs(ec, savedRunId, reconciliationMappingId, query, pageIndex, pageSize)"/>
+            <set field="ok" from="generatedOutputResult.ok"/>
+            <set field="messages" from="generatedOutputResult.messages"/>
+            <set field="errors" from="generatedOutputResult.errors"/>
+            <set field="pagination" from="generatedOutputResult.pagination"/>
+            <set field="generatedOutputs" from="generatedOutputResult.generatedOutputs"/>
+        </actions>
     </service>
 
-    <service verb="get" noun="GeneratedOutput" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/getGeneratedOutput.groovy">
+    <service verb="get" noun="GeneratedOutput" allow-remote="true" authenticate="true">
         <description>Retrieve a scoped generated diff output for direct download from darpan-ui.</description>
         <in-parameters>
             <parameter name="fileName" required="true">
@@ -1352,8 +1906,31 @@
                 <parameter name="format"/>
                 <parameter name="contentType"/>
                 <parameter name="contentText" allow-html="true"/>
+                <parameter name="sourceDetails">
+                    <parameter name="mode"/>
+                    <parameter name="dateRange">
+                        <parameter name="start"/>
+                        <parameter name="end"/>
+                    </parameter>
+                    <parameter name="files">
+                        <parameter name="side"/>
+                        <parameter name="label"/>
+                        <parameter name="fileName"/>
+                        <parameter name="filePath"/>
+                        <parameter name="downloadFileName"/>
+                        <parameter name="sourceFormat"/>
+                        <parameter name="canDownload" type="Boolean"/>
+                    </parameter>
+                </parameter>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="generatedOutputResult" from="darpan.facade.reconciliation.ReconciliationOutputSupport.getGeneratedOutput(ec, fileName, format)"/>
+            <set field="ok" from="generatedOutputResult.ok"/>
+            <set field="messages" from="generatedOutputResult.messages"/>
+            <set field="errors" from="generatedOutputResult.errors"/>
+            <set field="outputFile" from="generatedOutputResult.outputFile"/>
+        </actions>
     </service>
 
     <service verb="delete" noun="GeneratedOutput" allow-remote="true" authenticate="true">

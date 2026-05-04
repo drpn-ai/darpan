@@ -28,7 +28,7 @@ This document defines backend facade APIs used by `darpan-ui` during the pilot r
   - tenant-owned facade entities are filtered through Moqui `ArtifactAuthzFilter` / `EntityFilterSet` records bound to the PWA service authz path
   - the active tenant is pushed into `ec.user.context.activeTenantUserGroupId` during request/login setup so those filters can apply consistently on authenticated facade reads
   - Wave 1 settings list facades also apply explicit `companyUserGroupId = activeTenantUserGroupId` conditions so connection dashboards do not depend only on artifact-level filters
-  - Wave 1 settings facades remain split: tenant-owned records (`SFTP`, `NetSuite auth`, `NetSuite endpoint`) are tenant-scoped, while global settings (`LLM`, `HcReadDbConfig`, enum/global admin settings) stay super-admin only
+  - Wave 1 settings facades remain split: tenant-owned records (`SFTP`, `NetSuite auth`, `NetSuite endpoint`) are tenant-scoped, while global settings (`LLM`, enum/global admin settings) stay super-admin only
   - Generic reconciliation outputs under `runtime://datamanager/reconciliation-runs/**` are filtered by generated-output metadata for the active tenant; legacy tmp outputs remain tenant-scoped by folder path during migration
   - Legacy backend reconciliation and settings screens: authenticated super-admin only for the pilot release
 - This auth contract is the foundation for later issues that move the remaining runs/results surfaces onto the same tenant ownership model.
@@ -60,6 +60,8 @@ Without the dedicated facade authz, authenticated users can still get errors lik
 - `login#Session`
 - `get#SessionInfo`
 - `save#ActiveTenant`
+- `save#UserSettings`
+- `change#OwnPassword`
 - `logout#Session`
 
 ## Pilot Stateless Auth Behavior
@@ -69,6 +71,9 @@ Without the dedicated facade authz, authenticated users can still get errors lik
 - Token lifetime is aligned to `user-facade/login-key@expire-hours` from Moqui config. The default remains 144 hours, exposed as `authTokenExpiresInSeconds`.
 - `get#SessionInfo` authenticates from the `login_key` header when present and does not depend on `/Login`, `moquiSessionToken`, or browser session-cookie bootstrap.
 - `save#ActiveTenant` requires an authenticated request, validates that the requested tenant belongs to the current user, persists that selection in `UserPreference`, and returns refreshed `sessionInfo`.
+- `save#UserSettings` requires an authenticated request, persists user-level display name in `UserPreference`, and returns refreshed `sessionInfo`.
+- Session `timeZone` is resolved from the active tenant setting (`darpan.auth.TenantSetting`) with legacy user/account and locale fallback for tenants that have not saved a timezone yet.
+- `change#OwnPassword` requires an authenticated request and delegates to Moqui `org.moqui.impl.UserServices.update#Password` for current-password verification and password policy enforcement. No tenant permission data is required for a user to change their own password.
 - `logout#Session` revokes the matching `moqui.security.UserLoginKey` and terminates the authenticated session.
 - The UI contract is intentionally small: `authenticated`, `sessionInfo`, and the explicit token fields returned from `login#Session`.
 
@@ -76,21 +81,21 @@ Without the dedicated facade authz, authenticated users can still get errors lik
 - `list#EnumOptions`
 - `get#LlmSettings`
 - `save#LlmSettings`
+- `get#TenantSettings`
+- `save#TenantSettings`
 - `list#SftpServers`
 - `save#SftpServer`
 - `list#NsAuthConfigs`
 - `save#NsAuthConfig`
 - `list#NsRestletConfigs`
 - `save#NsRestletConfig`
-- `list#HcReadDbConfigs`
-- `save#HcReadDbConfig`
 
 Shared-tenant rule:
 
-- `list#SftpServers`, `save#SftpServer`, `list#NsAuthConfigs`, `save#NsAuthConfig`, `list#NsRestletConfigs`, and `save#NsRestletConfig` are tenant-scoped through `companyUserGroupId`.
+- `get#TenantSettings`, `save#TenantSettings`, `list#SftpServers`, `save#SftpServer`, `list#NsAuthConfigs`, `save#NsAuthConfig`, `list#NsRestletConfigs`, and `save#NsRestletConfig` are tenant-scoped through `companyUserGroupId`.
 - the three list services now explicitly query the active tenant in addition to the shared `ArtifactAuthzFilter`, so saved settings pages only receive rows that match the current tenant selection.
-- `list#EnumOptions`, `get#LlmSettings`, `save#LlmSettings`, `list#HcReadDbConfigs`, and `save#HcReadDbConfig` remain super-admin only.
-- `HcReadDbConfig` is intentionally global/admin-only in this phase, not active-tenant scoped. It stores external read-database connection settings that may be shared by runtime jobs, so non-admin tenant users cannot list or save those records through the facade.
+- `save#TenantSettings` requires active-tenant write access and stores timezone on `darpan.auth.TenantSetting`, not on the current user.
+- `list#EnumOptions`, `get#LlmSettings`, and `save#LlmSettings` remain super-admin only.
 - `list#EnumOptions` now deduplicates `DarpanSystemSource` rows by logical system code and prefers canonical enum ids such as `OMS` over legacy duplicates such as `DarSysOms`.
 
 ### `facade.JsonSchemaFacadeServices`
@@ -115,6 +120,15 @@ Shared-tenant rule:
 - `create#RuleSetRun`
 - `save#RuleSetRun`
 - `create#CsvRun`
+- `list#Automations`
+- `get#Automation`
+- `save#Automation`
+- `delete#Automation`
+- `pause#Automation`
+- `resume#Automation`
+- `run#AutomationNow`
+- `list#AutomationExecutions`
+- `list#AutomationSourceOptions`
 - `create#PilotMapping`
 - `list#PilotMappings`
 - `get#PilotMapping`
@@ -130,12 +144,24 @@ Pilot release contract notes:
 - `create#RuleSetRun` creates a tenant-scoped saved run backed by one `RuleSet`, one `RuleSetCompareScope`, two `RuleSetCompareSource` rows, and zero or more initial rules. This is the create-flow contract when the UI needs to define the run and its RuleSet during setup.
 - `save#RuleSetRun` updates an existing RuleSet-backed saved run: display name, description, the two compare sources, schema filenames, primary ID expressions, and, when `rules` is provided, the child `Rule` rows before recompiling the RuleSet.
 - Rule payload expression JSON may include structured `preActions`, with each entry identifying a `fieldSide` (`file1` or `file2`) and an `action` such as `STRING_TO_INT` or `STRING_TO_NUMBER`; those are returned with saved-run rule summaries so the rule-maker UI can reopen the same per-field pre-operator normalization choices.
+- Each `create#RuleSetRun` side may be either file-upload backed or API-backed. File-upload sides provide file type, optional JSON schema, and primary ID expression. API-backed sides provide `sourceTypeEnumId=AUT_SRC_API` plus either `systemMessageRemoteId` or `nsRestletConfigId`, and do not require file type or primary ID during run setup.
+- `run#SavedRunDiff` preserves the two-file payload for file-upload saved runs. When either RuleSet compare source is `AUT_SRC_API`, callers provide one `windowStartDate`/`windowEndDate` pair for the API side or sides; only file-backed sides still provide `fileName` and `fileText`. The facade stages API output and uploaded file text into the same run artifact folder before calling the RuleSet compare-scope engine.
+- `get#GeneratedOutput` returns `outputFile.sourceDetails` when the generated result is backed by a `ReconciliationRunResult` manifest. The details include `mode` (`FILES` or `API`), optional `dateRange.start`/`dateRange.end`, and a `files` list with `side`, display `label`, source `fileName`, safe `filePath`, `downloadFileName`, `sourceFormat`, and `canDownload`. The same service can download those source artifacts when the UI passes one of the returned `filePath` values and the source format.
 - `create#RuleSetRun` must allow a basic-diff-only saved run with no initial DRL. In that case the saved run executes only the base missing-object and matched-pair compare stages until rules are added later.
 - `create#RuleSetRun` no longer asks the user for a compared-object type and does not stamp a hidden default. New compare scopes are created without an `objectType` value unless later internal logic sets one explicitly.
 - `create#RuleSetRun` and `create#CsvRun` also repair stale local database contracts where `RuleSetCompareScope.OBJECT_TYPE` is still `NOT NULL`, so create-flow inserts stay compatible with older developer databases after the field became optional.
 - For JSON sources, `create#RuleSetRun` now expects a saved schema name (`file1SchemaFileName` / `file2SchemaFileName`) plus a schema-backed ID field path. The create flow should not ask the user for a free-form JSON record-root step.
 - `create#CsvRun` remains the narrow quick-create path for CSV compare-column setups, but it is no longer the only intended run-creation contract.
 - `delete#SavedRun` deletes one tenant-scoped saved run by `savedRunId`. For RuleSet-backed runs it deletes generated outputs, `RuleSetCompareSource`, `RuleSetCompareScope`, child `Rule`, and `RuleSet` records. For mapping-backed runs it deletes generated outputs, mapping members, and the mapping.
+- `list#Automations` returns dashboard-ready automation rows: saved-run names, input mode labels, source summaries, schedule summary/timezone, next scheduled fire time, latest execution status/counts, active state, and permission flags.
+- `get#Automation` returns one automation plus its editable source rows and saved-run summary.
+- `save#Automation` creates or updates `ReconciliationAutomation` plus exactly two `ReconciliationAutomationSource` rows. Callers may provide an existing `savedRunId`, or pass `savedRun`/`newSavedRun` with `createMode=csv` or RuleSet-run fields so the facade creates the saved run first.
+- API automation sources must use `AUT_SRC_API`, match the selected saved-run file side, and reference a configured `SystemMessageRemote` or active-tenant `NsRestletConfig`.
+- SFTP automation sources must use `AUT_SRC_SFTP`, match the selected saved-run file side, and reference SFTP server rows available to the active tenant through the same SFTP scope guard used by execution.
+- `pause#Automation` and `resume#Automation` only change `isActive`; `delete#Automation` removes the automation, source rows, and execution history rows, not saved runs or generated reconciliation outputs.
+- `run#AutomationNow` validates active-tenant ownership and run permission before delegating to `reconciliation.ReconciliationAutomationServices.execute#Automation`.
+- `list#AutomationExecutions` returns execution history scoped to the active tenant and optionally filtered by `automationId`.
+- `list#AutomationSourceOptions` returns saved runs, accessible SFTP servers, active-tenant NetSuite Restlet endpoints, system remotes, and enum options needed by the create/edit workflow without requiring the UI to issue N+1 lookup calls.
 - `create#PilotMapping` accepts two saved schema IDs plus selected field paths and persists a JSON-backed pilot mapping using `ReconciliationMapping` and `ReconciliationMappingMember`.
 - `create#PilotMapping` normalizes schema-flattener field paths into pilot-safe JSON ID expressions so newly-created mappings remain visible in `list#PilotMappings` and executable by the mapping-backed run flow.
 - `get#PilotMapping` only returns saved mappings whose members still resolve to saved schemas, and includes the editable schema IDs/names needed by the PWA runs settings workflow.
@@ -146,7 +172,7 @@ Pilot release contract notes:
 - `run#PilotGenericDiff` is JSON-RPC friendly for `darpan-ui`; it accepts `file1Name`/`file1Text` and `file2Name`/`file2Text` instead of raw multipart `FileItem` uploads.
 - `list#PilotGeneratedOutputs` accepts optional `reconciliationMappingId` and only returns generated outputs whose stored metadata matches that mapping when the filter is provided.
 - The underlying Generic reconciliation engine persists source files and result JSON under `runtime://datamanager/reconciliation-runs/{runId}/{timestamp}/`, writes a `darpan.reconciliation.ReconciliationRunResult` row with `file1DataManagerPath`, `file2DataManagerPath`, and `resultDataManagerPath`, and returns generated-output `fileName` values as safe data-manager relative paths.
-- `get#PilotGeneratedOutput` can return that stored JSON directly or convert it to CSV on demand for the pilot UI download action; callers should pass the `fileName` returned by list/run responses.
+- `get#PilotGeneratedOutput` can return that stored JSON directly or convert it to CSV on demand for the pilot UI download action; callers should pass the `fileName` returned by list/run responses. Source artifact downloads are limited to `filePath` values returned in `outputFile.sourceDetails.files`, so arbitrary files under the data-manager run folder are not exposed.
 
 Shared-tenant rule:
 
@@ -209,8 +235,17 @@ Settings list success shape:
     "sessionInfo": {
       "userId": "EXAMPLE_USER",
       "username": "pilot.user",
+      "displayName": "Aditi",
       "locale": "en-US",
       "timeZone": "Asia/Kolkata",
+      "lastLoginDate": "2026-04-30T14:14:00Z",
+      "lastRun": {
+        "reconciliationRunResultId": "RUN_RESULT_1",
+        "savedRunId": "ORDER_SYNC",
+        "savedRunType": "ruleset",
+        "reconciliationRunId": "RUN_1",
+        "createdDate": "2026-04-30T14:44:00Z"
+      },
       "scopeType": "TENANT",
       "customerScopeId": "KREWE",
       "activeTenantUserGroupId": "KREWE",
@@ -245,6 +280,7 @@ Login response example with explicit auth token:
     "sessionInfo": {
       "userId": "EXAMPLE_USER",
       "username": "pilot.user",
+      "displayName": "pilot.user",
       "scopeType": "TENANT",
       "customerScopeId": "KREWE",
       "activeTenantUserGroupId": "KREWE",

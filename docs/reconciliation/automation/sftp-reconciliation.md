@@ -1,8 +1,20 @@
 # SFTP-Driven Reconciliation Automation
 
-Service: `reconciliation.ReconciliationAutomationServices.poll#SftpAndReconcile`
+Services:
+- `facade.ReconciliationFacadeServices.list#Automations`
+- `facade.ReconciliationFacadeServices.get#Automation`
+- `facade.ReconciliationFacadeServices.save#Automation`
+- `facade.ReconciliationFacadeServices.run#AutomationNow`
+- `facade.ReconciliationFacadeServices.list#AutomationExecutions`
+- `facade.ReconciliationFacadeServices.list#AutomationSourceOptions`
+- `reconciliation.ReconciliationAutomationServices.run#SftpFileAutomation`
+- `reconciliation.ReconciliationAutomationServices.poll#SftpAndReconcile`
 
-The automation polls configured SFTP locations, stages the newest matching files locally, and then routes the staged files into one of two backend paths:
+Dashboard and workflow callers should use the facade services. `save#Automation` persists a tenant-owned `ReconciliationAutomation` plus one `FILE_1` and one `FILE_2` source row, while `list#Automations` and `get#Automation` return saved-run, schedule, source, latest-execution, and permission summaries ready for the UI.
+
+Saved automation rows execute through `run#SftpFileAutomation`. That service loads a `ReconciliationAutomation` with `inputModeEnumId=AUT_IN_SFTP_FILES`, reads its two `ReconciliationAutomationSource` rows, creates a `ReconciliationAutomationExecution`, and delegates all file access to `poll#SftpAndReconcile`.
+
+The poll service checks configured SFTP locations, stages the newest matching files locally, and then routes the staged files into one of two backend paths:
 
 - preferred RuleSet path: `reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope`
 - temporary migration bridge: `reconciliation.ReconciliationCoreServices.reconcile#FilesByMapping`
@@ -21,6 +33,20 @@ When `ruleSetId` is provided, SFTP automation now uses the same compare-scope + 
   - each mapping member still needs a saved `JsonSchema` row when the current mapping-readiness contract requires one
 
 ## Inputs (key parameters)
+For saved automation execution:
+- `automationId` – required. The automation must use `AUT_IN_SFTP_FILES`.
+- `sftpRunScopeEnumId`, `runTenantUserGroupId`, `allowAdminSftp` – passed through to the same centralized SFTP guard used by direct polling.
+- `scheduledDate` – optional timestamp recorded on the execution row.
+
+For each `ReconciliationAutomationSource` row in SFTP mode:
+- `fileSide` – one row for `FILE_1` and one row for `FILE_2`.
+- `sourceTypeEnumId` – must be `AUT_SRC_SFTP`.
+- `sftpServerId` and `remotePathTemplate` – required configured SFTP location.
+- `systemEnumId`, `fileTypeEnumId`, and `schemaFileName` – forwarded to the reconciliation runner when present.
+
+SFTP-file mode does not require or validate date-window fields. Those fields remain for API date-range automation.
+
+For direct polling:
 - `ruleSetId` – preferred. Enables the RuleSet compare-scope pipeline.
 - `compareScopeId` – optional compare-scope override; required only when the RuleSet has multiple compare scopes.
 - `reconciliationMappingId` – temporary legacy bridge for unmigrated jobs.
@@ -41,6 +67,8 @@ When `ruleSetId` is provided, SFTP automation now uses the same compare-scope + 
 - `sparkMaster`, `sparkAppName` – optional Spark overrides.
 
 ## Behavior
+- `run#SftpFileAutomation` records `AUT_STAT_RUNNING` when execution starts, `AUT_STAT_SUCCESS` when both files reconcile successfully, `AUT_STAT_NO_DATA` when one or both files are missing, and `AUT_STAT_FAILED` when configuration or guard validation fails.
+- Successful runs persist a `ReconciliationRunResult` and attach its id plus the result data-manager path to the automation execution.
 - Uses `SftpClient` from `moqui-sftp` to list and download the newest file. Returns `dataAvailable=false` if either side has no file.
 - If the configured host contains a path (e.g., `sftp://host:22/drop/`), that path is used as the default remote path unless you override with `fileXRemotePath`.
 - Strips any protocol prefix (e.g., `sftp://`, `ssh://`, `ftp://`) from configured hosts before connecting; prefer storing hosts without a scheme, but prefixed values now work.
@@ -73,12 +101,14 @@ When `ruleSetId` is provided, SFTP automation now uses the same compare-scope + 
 
 The service returns `dataAvailable=false` when no files are found so the job can be scheduled safely at short intervals without raising errors.
 
-## UI: SFTP Automation Screen
-- Navigate to **Reconciliation → SFTP Automation** to create/update schedules without editing XML.
-- File 1/2 sections: choose systems, SFTP remotes, optional file type (CSV/JSON) and schema overrides, plus remote path overrides.
-- Schedule section: pick cadence (minutes/hours/daily) or supply a cron expression, set output location, and pause/resume.
-- Advanced toggle: stage location defaults to `runtime://tmp/reconciliation/automation/input`; output defaults to the data-manager reconciliation run folder; archive folder name defaults to `archive`; Spark overrides are optional.
-- Existing jobs for this service are listed with edit/pause/resume actions; editing preloads parameters so you can adjust paths or cadence quickly.
+## UI: Automation Dashboard
+- Navigate to `/reconciliation/automations` to manage saved automations through the PWA.
+- The dashboard has one create action: **Create Automation**.
+- The workflow first asks whether the automation should use an existing saved run or create a new reconciliation run before automation setup.
+- For SFTP-file mode, the workflow asks for the saved run, input mode, one SFTP server and remote path per file side, schedule, and automation name.
+- SFTP-file mode does not show API date-window fields.
+- Existing automations are listed with run-now, history, edit, pause, and resume actions according to active-tenant permissions.
+- For direct service-job polling without saved automation rows, use `poll#SftpAndReconcile` with XML service-job parameters as shown above.
 
 ## UI: Settings Screen (SFTP credentials)
 - Navigate to **Settings → SFTP** to add/update `darpan.reconciliation.SftpServer` entries used by the automation screen.

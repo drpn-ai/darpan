@@ -15,6 +15,13 @@ class ReconciliationSavedRunSupport {
     static final String FILE_SIDE_1 = "FILE_1"
     static final String FILE_SIDE_2 = "FILE_2"
     static final String DEFAULT_FILE_TYPE_ENUM_ID = "DftCsv"
+    static final String SOURCE_TYPE_API = "AUT_SRC_API"
+    static final String SYSTEM_SHOPIFY = "SHOPIFY"
+    static final String SYSTEM_HOTWAX_OMS = "OMS"
+    static final String SYSTEM_NETSUITE = "NETSUITE"
+    static final String SOURCE_CONFIG_TYPE_SHOPIFY_AUTH = "SHOPIFY_AUTH"
+    static final String SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST = "HOTWAX_OMS_REST"
+    static final String SOURCE_CONFIG_TYPE_NETSUITE_AUTH = "NETSUITE_AUTH"
     static final int ENTITY_ID_MAX_LENGTH = 40
 
     static String generateCsvRuleSetId(def ec, String runName) {
@@ -280,6 +287,26 @@ class ReconciliationSavedRunSupport {
         }
     }
 
+    static Map<String, Object> listSavedRuns(def ec, Object query, Object pageIndex, Object pageSize) {
+        int page = Math.max(0, FacadeSupport.normalizeInt(pageIndex, 0))
+        int size = Math.max(1, Math.min(200, FacadeSupport.normalizeInt(pageSize, 20)))
+        String search = FacadeSupport.normalize(query)?.toLowerCase()
+
+        List<Map<String, Object>> rows = collectSavedRunRows(ec)
+        if (search) rows = rows.findAll { Map<String, Object> row -> savedRunMatches(row, search) }
+
+        Map<String, Object> pagination = pagination(page, size, rows.size())
+        List<Map<String, Object>> pagedRows = pageRows(rows, page, size)
+        Set<String> availableSavedRunIds = rows.collect { it.savedRunId as String }.findAll { it } as Set<String>
+
+        Map<String, Object> envelope = FacadeSupport.envelope(ec)
+        return envelope + [
+                savedRuns        : pagedRows,
+                pinnedSavedRunIds: ReconciliationDashboardPreferenceSupport.listPinnedSavedRunIds(ec, availableSavedRunIds),
+                pagination       : pagination,
+        ]
+    }
+
     static List<Map<String, Object>> collectMappingRows(def ec) {
         def mappingFinder = ec.entity.find("darpan.mapping.ReconciliationMapping")
                 .orderBy("mappingName,reconciliationMappingId")
@@ -515,6 +542,109 @@ class ReconciliationSavedRunSupport {
         }
     }
 
+    static Map<String, Object> resolveApiSourceConfig(def ec, String sourceLabel, Object rawSystemEnumId,
+            Object rawSourceConfigId, Object rawSourceConfigType, Object rawNsRestletConfig = null) {
+        String systemEnumId = FacadeSupport.normalize(rawSystemEnumId)
+        String sourceConfigId = FacadeSupport.normalize(rawSourceConfigId)
+        String sourceConfigType = FacadeSupport.normalize(rawSourceConfigType)
+        def nsRestletConfig = rawNsRestletConfig
+
+        if (!sourceConfigId && systemEnumId == SYSTEM_NETSUITE && nsRestletConfig) {
+            sourceConfigId = FacadeSupport.normalize(nsRestletConfig.nsAuthConfigId)
+        }
+
+        String expectedType = expectedSourceConfigType(systemEnumId)
+        if (expectedType && !sourceConfigId) {
+            ec.message.addError("${sourceLabel} API source requires sourceConfigId for ${systemEnumId}.")
+            return [sourceConfigId: null, sourceConfigType: null]
+        }
+        if (!sourceConfigId) return [sourceConfigId: null, sourceConfigType: null]
+
+        if (expectedType && sourceConfigType && sourceConfigType != expectedType) {
+            ec.message.addError("${sourceLabel} sourceConfigType '${sourceConfigType}' is not valid for ${systemEnumId}.")
+            return [sourceConfigId: sourceConfigId, sourceConfigType: sourceConfigType]
+        }
+        sourceConfigType = sourceConfigType ?: expectedType
+
+        switch (systemEnumId) {
+            case SYSTEM_SHOPIFY:
+                validateShopifyAuthConfig(ec, sourceLabel, sourceConfigId)
+                break
+            case SYSTEM_HOTWAX_OMS:
+                validateHotWaxOmsConfig(ec, sourceLabel, sourceConfigId)
+                break
+            case SYSTEM_NETSUITE:
+                validateNetSuiteAuthConfig(ec, sourceLabel, sourceConfigId, nsRestletConfig)
+                break
+            default:
+                break
+        }
+
+        return [sourceConfigId: sourceConfigId, sourceConfigType: sourceConfigType]
+    }
+
+    static String expectedSourceConfigType(Object rawSystemEnumId) {
+        switch (FacadeSupport.normalize(rawSystemEnumId)) {
+            case SYSTEM_SHOPIFY:
+                return SOURCE_CONFIG_TYPE_SHOPIFY_AUTH
+            case SYSTEM_HOTWAX_OMS:
+                return SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST
+            case SYSTEM_NETSUITE:
+                return SOURCE_CONFIG_TYPE_NETSUITE_AUTH
+            default:
+                return null
+        }
+    }
+
+    protected static void validateShopifyAuthConfig(def ec, String sourceLabel, String sourceConfigId) {
+        def config = ec.entity.find("darpan.shopify.ShopifyAuthConfig")
+                .condition("shopifyAuthConfigId", sourceConfigId)
+                .useCache(false)
+                .one()
+        TenantAccessSupport.requireTenantRecordAccess(ec, config,
+                "${sourceLabel} Shopify auth config '${sourceConfigId}' was not found.",
+                "${sourceLabel} Shopify auth config '${sourceConfigId}' is not available in your active tenant.")
+        if (config && FacadeSupport.normalize(config.isActive) == "N") {
+            ec.message.addError("${sourceLabel} Shopify auth config '${sourceConfigId}' is inactive.")
+        }
+        if (config && !FacadeSupport.normalizeBool(config.canReadOrders, false)) {
+            ec.message.addError("${sourceLabel} Shopify auth config '${sourceConfigId}' cannot read orders.")
+        }
+    }
+
+    protected static void validateHotWaxOmsConfig(def ec, String sourceLabel, String sourceConfigId) {
+        def config = ec.entity.find("darpan.hotwax.HotWaxOmsRestSourceConfig")
+                .condition("omsRestSourceConfigId", sourceConfigId)
+                .useCache(false)
+                .one()
+        TenantAccessSupport.requireTenantRecordAccess(ec, config,
+                "${sourceLabel} HotWax source config '${sourceConfigId}' was not found.",
+                "${sourceLabel} HotWax source config '${sourceConfigId}' is not available in your active tenant.")
+        if (config && FacadeSupport.normalize(config.isActive) == "N") {
+            ec.message.addError("${sourceLabel} HotWax source config '${sourceConfigId}' is inactive.")
+        }
+        if (config && !FacadeSupport.normalizeBool(config.canReadOrders, false)) {
+            ec.message.addError("${sourceLabel} HotWax source config '${sourceConfigId}' cannot read orders.")
+        }
+    }
+
+    protected static void validateNetSuiteAuthConfig(def ec, String sourceLabel, String sourceConfigId, def nsRestletConfig) {
+        def config = ec.entity.find("darpan.reconciliation.NsAuthConfig")
+                .condition("nsAuthConfigId", sourceConfigId)
+                .useCache(false)
+                .one()
+        TenantAccessSupport.requireTenantRecordAccess(ec, config,
+                "${sourceLabel} NetSuite auth config '${sourceConfigId}' was not found.",
+                "${sourceLabel} NetSuite auth config '${sourceConfigId}' is not available in your active tenant.")
+        if (config && FacadeSupport.normalize(config.isActive) == "N") {
+            ec.message.addError("${sourceLabel} NetSuite auth config '${sourceConfigId}' is inactive.")
+        }
+        String endpointAuthConfigId = FacadeSupport.normalize(nsRestletConfig?.nsAuthConfigId)
+        if (endpointAuthConfigId && endpointAuthConfigId != sourceConfigId) {
+            ec.message.addError("${sourceLabel} NetSuite endpoint is configured for ${endpointAuthConfigId}, not ${sourceConfigId}.")
+        }
+    }
+
     static List<Map<String, Object>> buildRuleSetSystemOptions(def ec, Map<String, Object> sourceBySide) {
         [FILE_SIDE_1, FILE_SIDE_2].collect { String fileSide ->
             def source = sourceBySide[fileSide]
@@ -522,6 +652,15 @@ class ReconciliationSavedRunSupport {
 
             def systemEnum = findEnum(ec, source.systemEnumId)
             def fileTypeEnum = findEnum(ec, source.fileTypeEnumId)
+            def sourceTypeEnum = findEnum(ec, source.sourceTypeEnumId)
+            def systemMessageRemote = source.systemMessageRemoteId ? ec.entity.find("moqui.service.message.SystemMessageRemote")
+                    .condition("systemMessageRemoteId", source.systemMessageRemoteId)
+                    .useCache(false)
+                    .one() : null
+            def nsRestletConfig = source.nsRestletConfigId ? ec.entity.find("darpan.reconciliation.NsRestletConfig")
+                    .condition("nsRestletConfigId", source.nsRestletConfigId)
+                    .useCache(false)
+                    .one() : null
             return [
                     fileSide          : fileSide,
                     enumId            : FacadeSupport.normalize(source.systemEnumId),
@@ -532,6 +671,14 @@ class ReconciliationSavedRunSupport {
                     fileTypeLabel     : fileTypeEnum ? FacadeSupport.enumLabel(fileTypeEnum) : null,
                     idFieldExpression : FacadeSupport.normalize(source.primaryIdExpression),
                     schemaFileName    : FacadeSupport.normalize(source.schemaFileName),
+                    sourceTypeEnumId  : FacadeSupport.normalize(source.sourceTypeEnumId),
+                    sourceTypeLabel   : sourceTypeEnum ? FacadeSupport.enumLabel(sourceTypeEnum) : null,
+                    systemMessageRemoteId   : FacadeSupport.normalize(source.systemMessageRemoteId),
+                    systemMessageRemoteLabel: FacadeSupport.normalize(systemMessageRemote?.description) ?: FacadeSupport.normalize(systemMessageRemote?.systemMessageRemoteId),
+                    nsRestletConfigId       : FacadeSupport.normalize(source.nsRestletConfigId),
+                    nsRestletConfigLabel    : FacadeSupport.normalize(nsRestletConfig?.description) ?: FacadeSupport.normalize(nsRestletConfig?.nsRestletConfigId),
+                    sourceConfigId          : FacadeSupport.normalize(source.sourceConfigId),
+                    sourceConfigType        : FacadeSupport.normalize(source.sourceConfigType),
             ]
         }.findAll { it != null } as List<Map<String, Object>>
     }
@@ -550,5 +697,40 @@ class ReconciliationSavedRunSupport {
                 .condition("enumId", normalized)
                 .useCache(true)
                 .one()
+    }
+
+    static Map<String, Object> pagination(int page, int size, int totalCount) {
+        return [
+                pageIndex : page,
+                pageSize  : size,
+                totalCount: totalCount,
+                pageCount : Math.max(1, Math.ceil(totalCount / (double) size) as int),
+        ]
+    }
+
+    static List<Map<String, Object>> pageRows(List<Map<String, Object>> rows, int page, int size) {
+        int totalCount = rows.size()
+        int fromIndex = Math.min(page * size, totalCount)
+        int toIndex = Math.min(fromIndex + size, totalCount)
+        return rows.subList(fromIndex, toIndex)
+    }
+
+    protected static boolean savedRunMatches(Map<String, Object> row, String search) {
+        return [
+                row.savedRunId,
+                row.runName,
+                row.description,
+                row.companyUserGroupId,
+                row.companyLabel,
+                row.runType,
+                row.reconciliationMappingId,
+                row.ruleSetId,
+                row.compareScopeId,
+                row.compareScopeDescription,
+                *(row.systemOptions instanceof Collection ? row.systemOptions.collect { it?.label } : []),
+                *(row.systemOptions instanceof Collection ? row.systemOptions.collect { it?.enumCode } : []),
+        ].any { Object value ->
+            value?.toString()?.toLowerCase()?.contains(search)
+        }
     }
 }

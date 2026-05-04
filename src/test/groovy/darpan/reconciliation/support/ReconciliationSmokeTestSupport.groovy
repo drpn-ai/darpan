@@ -540,8 +540,8 @@ class ReconciliationSmokeTestSupport {
         upsertEntity(ec, "moqui.basic.Enumeration", [enumId: "OMS"], [
                 enumId      : "OMS",
                 enumTypeId  : "DarpanSystemSource",
-                enumCode    : "OMS",
-                description : "OMS",
+                enumCode    : "HOTWAX",
+                description : "HotWax",
                 sequenceNum : 1
         ])
         upsertEntity(ec, "moqui.basic.Enumeration", [enumId: "SHOPIFY"], [

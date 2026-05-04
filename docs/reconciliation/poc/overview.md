@@ -2,8 +2,8 @@
 
 ## Implementation Anchors (Current Repo)
 
-- Service definition: `runtime/component/darpan/service/debug/ReconciliationDebugServices.xml` (`compare#SampleOrderIds`)
-- Script implementation: `runtime/component/darpan/src/main/groovy/darpan/debug/reconciliation/compareSampleOrderIds.groovy`
+- Service definition: `runtime/component/darpan/service/reconciliation/ReconciliationGenericServices.xml` (`reconcile#GenericFiles`)
+- Script implementation: `runtime/component/darpan/src/main/groovy/darpan/reconciliation/generic/reconcileGenericFiles.groovy`
 - Sample inputs: `runtime/component/darpan/data/sample/omsData.json`, `runtime/component/darpan/data/sample/shopifyData.json`
 
 ## 1. POC Objective
@@ -109,7 +109,7 @@ The output should be simple, inspectable, and easy to validate.
 3. Reconciliation logic runs
 4. Results are stored and exposed
 
-## 11. Pseudocode (compare#SampleOrderIds)
+## 11. Historical Pseudocode (Superseded By `reconcile#GenericFiles`)
 
 Inputs (defaults):
 - omsLocation = component://darpan/data/sample/omsBulkData.json

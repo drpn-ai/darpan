@@ -62,12 +62,15 @@
     </entity>
 
     <entity entity-name="RuleSetCompareSource" package="darpan.rule" use="configuration">
-        <description>One file-side source definition for a RuleSet compare scope, including schema, record root, primary ID expression, and optional ID normalizer.</description>
+        <description>One file-side source definition for a RuleSet compare scope, including file-upload or API source metadata.</description>
         <field name="compareScopeId" type="id" is-pk="true" not-null="true"/>
         <field name="fileSide" type="text-short" is-pk="true" not-null="true">
             <description>Logical file side for the compare scope: FILE_1 or FILE_2.</description>
         </field>
         <field name="systemEnumId" type="id" not-null="true"/>
+        <field name="sourceTypeEnumId" type="id">
+            <description>Optional source type for non-upload sources, such as AUT_SRC_API.</description>
+        </field>
         <field name="fileTypeEnumId" type="id">
             <description>Optional file type override, such as DftCsv or DftJson.</description>
         </field>
@@ -77,11 +80,23 @@
         <field name="recordRootExpression" type="text-medium">
             <description>Optional root/explosion expression used to locate the repeated object records before ID extraction.</description>
         </field>
-        <field name="primaryIdExpression" type="text-medium" not-null="true">
-            <description>Expression used to extract the primary compare ID from each object for this file side.</description>
+        <field name="primaryIdExpression" type="text-medium">
+            <description>Expression used to extract the primary compare ID from each uploaded object for this file side.</description>
         </field>
         <field name="idValueNormalizer" type="text-short">
             <description>Optional ID value normalizer (for example SHOPIFY_GID_TAIL) applied before compare.</description>
+        </field>
+        <field name="systemMessageRemoteId" type="id">
+            <description>Optional SystemMessageRemote endpoint used when the source is API-backed.</description>
+        </field>
+        <field name="nsRestletConfigId" type="id">
+            <description>Optional NetSuite RESTlet endpoint used when the source is API-backed.</description>
+        </field>
+        <field name="sourceConfigId" type="id">
+            <description>System-specific API source configuration selected before the endpoint, such as Shopify auth, HotWax OMS REST source, or NetSuite auth.</description>
+        </field>
+        <field name="sourceConfigType" type="text-short">
+            <description>Type discriminator for sourceConfigId, such as SHOPIFY_AUTH, HOTWAX_OMS_REST, or NETSUITE_AUTH.</description>
         </field>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>
@@ -94,6 +109,15 @@
         </relationship>
         <relationship type="one" title="FileType" related="moqui.basic.Enumeration" fk-name="RSCSR_FTYPE_ENUM">
             <key-map field-name="fileTypeEnumId" related-field-name="enumId"/>
+        </relationship>
+        <relationship type="one" title="SourceType" related="moqui.basic.Enumeration" fk-name="RSCSR_STYPE_ENUM">
+            <key-map field-name="sourceTypeEnumId" related-field-name="enumId"/>
+        </relationship>
+        <relationship type="one" related="moqui.service.message.SystemMessageRemote" fk-name="RSCSR_REMOTE">
+            <key-map field-name="systemMessageRemoteId"/>
+        </relationship>
+        <relationship type="one" related="darpan.reconciliation.NsRestletConfig" fk-name="RSCSR_NSREST">
+            <key-map field-name="nsRestletConfigId"/>
         </relationship>
     </entity>
 

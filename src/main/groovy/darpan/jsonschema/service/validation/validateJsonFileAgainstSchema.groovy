@@ -24,7 +24,7 @@ if (!schemaText) {
 JsonNode schemaNode = mapper.readTree(schemaText)
 
 // --------------------------------------------------------------------------------
-// Helper: Validation Logic (Inlined from SchemaValidator)
+// Helper: stream validation logic kept local to avoid loading large JSON payloads at once.
 // --------------------------------------------------------------------------------
 def isSchemaArray = { JsonNode sNode ->
     JsonNode typeNode = sNode.get("type")

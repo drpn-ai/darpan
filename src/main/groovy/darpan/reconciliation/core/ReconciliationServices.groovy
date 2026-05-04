@@ -37,6 +37,11 @@ class ReconciliationServices {
             .add("ruleId", DataTypes.StringType, true)
             .add("severity", DataTypes.StringType, true)
             .add("message", DataTypes.StringType, true)
+    private static final StructType EMPTY_COMPARE_ID_SCHEMA = new StructType()
+            .add("compare_id", DataTypes.StringType, true)
+    private static final StructType EMPTY_COMPARE_DATA_SCHEMA = new StructType()
+            .add("compare_id", DataTypes.StringType, true)
+            .add("data", DataTypes.createMapType(DataTypes.StringType, DataTypes.StringType), true)
 
     /**
      * Core Spark-based reconciliation of two ID DataFrames.
@@ -414,9 +419,12 @@ class ReconciliationServices {
                 .disableAuthz()
                 .useCache(true)
                 .one()
+        String description = normalize(enumValue?.description)
+        if (normalize(enumValue?.enumTypeId) == "DarpanSystemSource" && normalized == "OMS") {
+            return description ?: "HotWax"
+        }
         String code = normalize(enumValue?.enumCode)
         if (code) return code
-        String description = normalize(enumValue?.description)
         if (description) return description
         return normalized
     }
@@ -813,8 +821,9 @@ class ReconciliationServices {
         if (pathInfo.needsExplode) {
              String arrayPath = normalizeSparkPath(pathInfo.arrayPath as String)
              String fieldPath = normalizeSparkPath(pathInfo.fieldPath as String)
-             Dataset idDf = rawDf.selectExpr("explode(${arrayPath}) as exploded_item")
-                .selectExpr("exploded_item.${fieldPath} as compare_id")
+             Dataset explodedDf = rawDf.selectExpr("explode(${arrayPath}) as exploded_item")
+             if (!datasetHasRows(explodedDf)) return emptyCompareIdDataset(rawDf.sparkSession())
+             Dataset idDf = explodedDf.selectExpr("exploded_item.${fieldPath} as compare_id")
              return normalizeCompareIdDataset(idDf, idNormalizer).distinct()
         }
         String safePath = normalizeSparkPath(pathInfo.path as String)
@@ -826,13 +835,26 @@ class ReconciliationServices {
          if (pathInfo.needsExplode) {
              String arrayPath = normalizeSparkPath(pathInfo.arrayPath as String)
              String fieldPath = normalizeSparkPath(pathInfo.fieldPath as String)
-             Dataset dataDf = rawDf.selectExpr("explode(${arrayPath}) as exploded_item")
-                 .selectExpr("exploded_item.${fieldPath} as compare_id", "exploded_item as data")
+             Dataset explodedDf = rawDf.selectExpr("explode(${arrayPath}) as exploded_item")
+             if (!datasetHasRows(explodedDf)) return emptyCompareDataDataset(rawDf.sparkSession())
+             Dataset dataDf = explodedDf.selectExpr("exploded_item.${fieldPath} as compare_id", "exploded_item as data")
              return normalizeCompareIdDataset(dataDf, idNormalizer)
          }
          String safePath = normalizeSparkPath(pathInfo.path as String)
          Dataset dataDf = rawDf.selectExpr("${safePath} as compare_id", "struct(*) as data")
          return normalizeCompareIdDataset(dataDf, idNormalizer)
+    }
+
+    private static boolean datasetHasRows(Dataset df) {
+        return df != null && df.limit(1).count() > 0
+    }
+
+    private static Dataset emptyCompareIdDataset(SparkSession spark) {
+        return spark.createDataFrame(new ArrayList<Row>(), EMPTY_COMPARE_ID_SCHEMA)
+    }
+
+    private static Dataset emptyCompareDataDataset(SparkSession spark) {
+        return spark.createDataFrame(new ArrayList<Row>(), EMPTY_COMPARE_DATA_SCHEMA)
     }
     
     static Dataset buildCsvIdDf(Dataset rawDf, String fieldName, String idNormalizer, String label = null, boolean hasHeader = true) {

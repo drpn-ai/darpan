@@ -2,8 +2,7 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="login" noun="Session" type="script" allow-remote="true" authenticate="anonymous-all"
-            location="component://darpan/src/main/groovy/darpan/facade/auth/loginSession.groovy">
+    <service verb="login" noun="Session" allow-remote="true" authenticate="anonymous-all">
         <description>Create an authenticated session from username/password and return the explicit Moqui login-key token darpan-ui sends on later requests.</description>
         <in-parameters>
             <parameter name="username" required="true">
@@ -44,8 +43,17 @@
                 <description>Authenticated session metadata returned to darpan-ui.</description>
                 <parameter name="userId" type="String"/>
                 <parameter name="username" type="String"/>
+                <parameter name="displayName" type="String"/>
                 <parameter name="locale" type="String"/>
                 <parameter name="timeZone" type="String"/>
+                <parameter name="lastLoginDate" type="Timestamp"/>
+                <parameter name="lastRun">
+                    <parameter name="reconciliationRunResultId" type="String"/>
+                    <parameter name="savedRunId" type="String"/>
+                    <parameter name="savedRunType" type="String"/>
+                    <parameter name="reconciliationRunId" type="String"/>
+                    <parameter name="createdDate" type="Timestamp"/>
+                </parameter>
                 <parameter name="scopeType" type="String"/>
                 <parameter name="customerScopeId" type="String"/>
                 <parameter name="activeTenantUserGroupId" type="String"/>
@@ -55,10 +63,25 @@
                     <parameter name="label" type="String"/>
                 </parameter>
                 <parameter name="activeTenantPermissionGroupIds" type="List"/>
+                <parameter name="canViewActiveTenantData" type="Boolean"/>
+                <parameter name="canRunActiveTenantReconciliation" type="Boolean"/>
                 <parameter name="canEditActiveTenantData" type="Boolean"/>
+                <parameter name="canManageDarpanCore" type="Boolean"/>
                 <parameter name="isSuperAdmin" type="Boolean"/>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.loginSession(ec, username, password)"/>
+            <set field="ok" from="authResult.ok"/>
+            <set field="messages" from="authResult.messages"/>
+            <set field="errors" from="authResult.errors"/>
+            <set field="authenticated" from="authResult.authenticated"/>
+            <set field="authToken" from="authResult.authToken"/>
+            <set field="authTokenType" from="authResult.authTokenType"/>
+            <set field="authTokenHeaderName" from="authResult.authTokenHeaderName"/>
+            <set field="authTokenExpiresInSeconds" from="authResult.authTokenExpiresInSeconds"/>
+            <set field="sessionInfo" from="authResult.sessionInfo"/>
+        </actions>
     </service>
 
     <service verb="get" noun="SessionInfo" allow-remote="true" authenticate="anonymous-all">
@@ -82,8 +105,17 @@
                 <description>Authenticated session metadata returned to darpan-ui.</description>
                 <parameter name="userId" type="String"/>
                 <parameter name="username" type="String"/>
+                <parameter name="displayName" type="String"/>
                 <parameter name="locale" type="String"/>
                 <parameter name="timeZone" type="String"/>
+                <parameter name="lastLoginDate" type="Timestamp"/>
+                <parameter name="lastRun">
+                    <parameter name="reconciliationRunResultId" type="String"/>
+                    <parameter name="savedRunId" type="String"/>
+                    <parameter name="savedRunType" type="String"/>
+                    <parameter name="reconciliationRunId" type="String"/>
+                    <parameter name="createdDate" type="Timestamp"/>
+                </parameter>
                 <parameter name="scopeType" type="String"/>
                 <parameter name="customerScopeId" type="String"/>
                 <parameter name="activeTenantUserGroupId" type="String"/>
@@ -93,7 +125,10 @@
                     <parameter name="label" type="String"/>
                 </parameter>
                 <parameter name="activeTenantPermissionGroupIds" type="List"/>
+                <parameter name="canViewActiveTenantData" type="Boolean"/>
+                <parameter name="canRunActiveTenantReconciliation" type="Boolean"/>
                 <parameter name="canEditActiveTenantData" type="Boolean"/>
+                <parameter name="canManageDarpanCore" type="Boolean"/>
                 <parameter name="isSuperAdmin" type="Boolean"/>
             </parameter>
         </out-parameters>
@@ -134,8 +169,17 @@
                 <description>Refreshed authenticated session metadata returned to darpan-ui.</description>
                 <parameter name="userId" type="String"/>
                 <parameter name="username" type="String"/>
+                <parameter name="displayName" type="String"/>
                 <parameter name="locale" type="String"/>
                 <parameter name="timeZone" type="String"/>
+                <parameter name="lastLoginDate" type="Timestamp"/>
+                <parameter name="lastRun">
+                    <parameter name="reconciliationRunResultId" type="String"/>
+                    <parameter name="savedRunId" type="String"/>
+                    <parameter name="savedRunType" type="String"/>
+                    <parameter name="reconciliationRunId" type="String"/>
+                    <parameter name="createdDate" type="Timestamp"/>
+                </parameter>
                 <parameter name="scopeType" type="String"/>
                 <parameter name="customerScopeId" type="String"/>
                 <parameter name="activeTenantUserGroupId" type="String"/>
@@ -145,7 +189,10 @@
                     <parameter name="label" type="String"/>
                 </parameter>
                 <parameter name="activeTenantPermissionGroupIds" type="List"/>
+                <parameter name="canViewActiveTenantData" type="Boolean"/>
+                <parameter name="canRunActiveTenantReconciliation" type="Boolean"/>
                 <parameter name="canEditActiveTenantData" type="Boolean"/>
+                <parameter name="canManageDarpanCore" type="Boolean"/>
                 <parameter name="isSuperAdmin" type="Boolean"/>
             </parameter>
         </out-parameters>
@@ -166,8 +213,230 @@
         </actions>
     </service>
 
-    <service verb="logout" noun="Session" type="script" allow-remote="true" authenticate="anonymous-all"
-            location="component://darpan/src/main/groovy/darpan/facade/auth/logoutSession.groovy">
+    <service verb="save" noun="UserSettings" allow-remote="true" authenticate="true">
+        <description>Persist authenticated user-level settings and return refreshed session metadata.</description>
+        <in-parameters>
+            <parameter name="displayName">
+                <description>Optional user display name shown by darpan-ui instead of username.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean">
+                <description>True when the user settings update completed without facade errors.</description>
+            </parameter>
+            <parameter name="messages">
+                <description>Informational messages emitted during user-settings handling.</description>
+                <parameter name="message"/>
+            </parameter>
+            <parameter name="errors">
+                <description>Errors returned while validating or saving user settings.</description>
+                <parameter name="error"/>
+            </parameter>
+            <parameter name="authenticated" type="Boolean">
+                <description>True when the current request resolves to an authenticated session.</description>
+            </parameter>
+            <parameter name="sessionInfo">
+                <description>Refreshed authenticated session metadata returned to darpan-ui.</description>
+                <parameter name="userId" type="String"/>
+                <parameter name="username" type="String"/>
+                <parameter name="displayName" type="String"/>
+                <parameter name="locale" type="String"/>
+                <parameter name="timeZone" type="String"/>
+                <parameter name="lastLoginDate" type="Timestamp"/>
+                <parameter name="lastRun">
+                    <parameter name="reconciliationRunResultId" type="String"/>
+                    <parameter name="savedRunId" type="String"/>
+                    <parameter name="savedRunType" type="String"/>
+                    <parameter name="reconciliationRunId" type="String"/>
+                    <parameter name="createdDate" type="Timestamp"/>
+                </parameter>
+                <parameter name="scopeType" type="String"/>
+                <parameter name="customerScopeId" type="String"/>
+                <parameter name="activeTenantUserGroupId" type="String"/>
+                <parameter name="activeTenantLabel" type="String"/>
+                <parameter name="availableTenants">
+                    <parameter name="userGroupId" type="String"/>
+                    <parameter name="label" type="String"/>
+                </parameter>
+                <parameter name="activeTenantPermissionGroupIds" type="List"/>
+                <parameter name="canViewActiveTenantData" type="Boolean"/>
+                <parameter name="canRunActiveTenantReconciliation" type="Boolean"/>
+                <parameter name="canEditActiveTenantData" type="Boolean"/>
+                <parameter name="canManageDarpanCore" type="Boolean"/>
+                <parameter name="isSuperAdmin" type="Boolean"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="authenticated" from="darpan.facade.common.FacadeSupport.normalize(ec.user.userId) != null"/>
+            <if condition="authenticated">
+                <set field="userSettingsSaved" from="darpan.facade.common.TenantAccessSupport.saveUserSettings(ec, displayName)"/>
+                <set field="sessionInfo" from="darpan.facade.common.TenantAccessSupport.buildSessionInfo(ec)"/>
+            </if>
+            <if condition="!authenticated">
+                <script><![CDATA[
+                    ec.message.addError("Authentication required to save user settings.")
+                ]]></script>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="verify" noun="OwnPassword" allow-remote="true" authenticate="true">
+        <description>Verify the authenticated user's current password without mutating the password or issuing a new login token.</description>
+        <in-parameters>
+            <parameter name="currentPassword" required="true">
+                <description>The authenticated user's current password to verify before a self-service password change proceeds.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean">
+                <description>True when the current-password verification completed without facade errors.</description>
+            </parameter>
+            <parameter name="messages">
+                <description>Informational messages emitted during password verification.</description>
+                <parameter name="message"/>
+            </parameter>
+            <parameter name="errors">
+                <description>Errors returned while validating the current password.</description>
+                <parameter name="error"/>
+            </parameter>
+            <parameter name="authenticated" type="Boolean">
+                <description>True when the current request resolves to an authenticated session.</description>
+            </parameter>
+            <parameter name="passwordVerified" type="Boolean">
+                <description>True when the provided password matches the authenticated user's current password.</description>
+            </parameter>
+            <parameter name="sessionInfo">
+                <description>Refreshed authenticated session metadata returned to darpan-ui.</description>
+                <parameter name="userId" type="String"/>
+                <parameter name="username" type="String"/>
+                <parameter name="displayName" type="String"/>
+                <parameter name="locale" type="String"/>
+                <parameter name="timeZone" type="String"/>
+                <parameter name="lastLoginDate" type="Timestamp"/>
+                <parameter name="lastRun">
+                    <parameter name="reconciliationRunResultId" type="String"/>
+                    <parameter name="savedRunId" type="String"/>
+                    <parameter name="savedRunType" type="String"/>
+                    <parameter name="reconciliationRunId" type="String"/>
+                    <parameter name="createdDate" type="Timestamp"/>
+                </parameter>
+                <parameter name="scopeType" type="String"/>
+                <parameter name="customerScopeId" type="String"/>
+                <parameter name="activeTenantUserGroupId" type="String"/>
+                <parameter name="activeTenantLabel" type="String"/>
+                <parameter name="availableTenants">
+                    <parameter name="userGroupId" type="String"/>
+                    <parameter name="label" type="String"/>
+                </parameter>
+                <parameter name="activeTenantPermissionGroupIds" type="List"/>
+                <parameter name="canViewActiveTenantData" type="Boolean"/>
+                <parameter name="canRunActiveTenantReconciliation" type="Boolean"/>
+                <parameter name="canEditActiveTenantData" type="Boolean"/>
+                <parameter name="canManageDarpanCore" type="Boolean"/>
+                <parameter name="isSuperAdmin" type="Boolean"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.verifyOwnPassword(ec, currentPassword)"/>
+            <set field="ok" from="authResult.ok"/>
+            <set field="messages" from="authResult.messages"/>
+            <set field="errors" from="authResult.errors"/>
+            <set field="authenticated" from="authResult.authenticated"/>
+            <set field="passwordVerified" from="authResult.passwordVerified"/>
+            <set field="sessionInfo" from="authResult.sessionInfo"/>
+        </actions>
+    </service>
+
+    <service verb="change" noun="OwnPassword" allow-remote="true" authenticate="true">
+        <description>Change the authenticated user's own password using Moqui's standard password policy checks.</description>
+        <in-parameters>
+            <parameter name="currentPassword" required="true">
+                <description>The authenticated user's current password.</description>
+            </parameter>
+            <parameter name="newPassword" required="true">
+                <description>The new password requested by the authenticated user.</description>
+            </parameter>
+            <parameter name="newPasswordVerify" required="true">
+                <description>Confirmation value for the new password.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean">
+                <description>True when the password update completed without facade errors.</description>
+            </parameter>
+            <parameter name="messages">
+                <description>Informational messages emitted during password update handling.</description>
+                <parameter name="message"/>
+            </parameter>
+            <parameter name="errors">
+                <description>Errors returned while validating or changing the password.</description>
+                <parameter name="error"/>
+            </parameter>
+            <parameter name="authenticated" type="Boolean">
+                <description>True when the current request resolves to an authenticated session.</description>
+            </parameter>
+            <parameter name="passwordUpdated" type="Boolean">
+                <description>True when Moqui successfully changed the authenticated user's password.</description>
+            </parameter>
+            <parameter name="sessionInfo">
+                <description>Refreshed authenticated session metadata returned to darpan-ui.</description>
+                <parameter name="userId" type="String"/>
+                <parameter name="username" type="String"/>
+                <parameter name="displayName" type="String"/>
+                <parameter name="locale" type="String"/>
+                <parameter name="timeZone" type="String"/>
+                <parameter name="lastLoginDate" type="Timestamp"/>
+                <parameter name="lastRun">
+                    <parameter name="reconciliationRunResultId" type="String"/>
+                    <parameter name="savedRunId" type="String"/>
+                    <parameter name="savedRunType" type="String"/>
+                    <parameter name="reconciliationRunId" type="String"/>
+                    <parameter name="createdDate" type="Timestamp"/>
+                </parameter>
+                <parameter name="scopeType" type="String"/>
+                <parameter name="customerScopeId" type="String"/>
+                <parameter name="activeTenantUserGroupId" type="String"/>
+                <parameter name="activeTenantLabel" type="String"/>
+                <parameter name="availableTenants">
+                    <parameter name="userGroupId" type="String"/>
+                    <parameter name="label" type="String"/>
+                </parameter>
+                <parameter name="activeTenantPermissionGroupIds" type="List"/>
+                <parameter name="canViewActiveTenantData" type="Boolean"/>
+                <parameter name="canRunActiveTenantReconciliation" type="Boolean"/>
+                <parameter name="canEditActiveTenantData" type="Boolean"/>
+                <parameter name="canManageDarpanCore" type="Boolean"/>
+                <parameter name="isSuperAdmin" type="Boolean"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="authenticated" from="darpan.facade.common.FacadeSupport.normalize(ec.user.userId) != null"/>
+            <set field="passwordUpdated" from="false"/>
+            <if condition="authenticated">
+                <service-call name="org.moqui.impl.UserServices.update#Password" out-map="passwordUpdateOut">
+                    <field-map field-name="userId" from="ec.user.userId"/>
+                    <field-map field-name="oldPassword" from="currentPassword"/>
+                    <field-map field-name="newPassword"/>
+                    <field-map field-name="newPasswordVerify"/>
+                </service-call>
+                <set field="passwordUpdated" from="passwordUpdateOut.updateSuccessful == true &amp;&amp; !ec.message.hasError()"/>
+                <set field="sessionInfo" from="darpan.facade.common.TenantAccessSupport.buildSessionInfo(ec)"/>
+            </if>
+            <if condition="!authenticated">
+                <script><![CDATA[
+                    ec.message.addError("Authentication required to change password.")
+                ]]></script>
+            </if>
+            <set field="ok" from="passwordUpdated == true &amp;&amp; !ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="logout" noun="Session" allow-remote="true" authenticate="anonymous-all">
         <description>Revoke the explicit login-key token from the current request and terminate any active authenticated session.</description>
         <out-parameters>
             <parameter name="ok" type="Boolean">
@@ -188,5 +457,13 @@
                 <description>True when logout removed the matching `UserLoginKey` record for the supplied auth token.</description>
             </parameter>
         </out-parameters>
+        <actions>
+            <set field="authResult" from="darpan.facade.auth.AuthFacadeSupport.logoutSession(ec)"/>
+            <set field="ok" from="authResult.ok"/>
+            <set field="messages" from="authResult.messages"/>
+            <set field="errors" from="authResult.errors"/>
+            <set field="authenticated" from="authResult.authenticated"/>
+            <set field="authTokenRevoked" from="authResult.authTokenRevoked"/>
+        </actions>
     </service>
 </services>

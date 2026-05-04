@@ -180,6 +180,19 @@ class ReconciliationOutputSupportTests {
         assertFalse(ReconciliationOutputSupport.isSafeOutputPath("../OrderId_result.json"))
         assertFalse(ReconciliationOutputSupport.isSafeOutputPath("/tmp/OrderId_result.json"))
         assertFalse(ReconciliationOutputSupport.isSafeOutputPath("reconciliation-runs/OrderId/20260428-120000000/OrderId_file1.csv"))
+        assertFalse(ReconciliationOutputSupport.isSafeOutputPath("reconciliation-runs/RS_CSV_TENANT_SHARED_RESULT/20260428-120000000/RS_CSV_TENANT_SHARED_RESULT_file1.csv"))
+    }
+
+    @Test
+    void apiSourceDetailsModeAcceptsDateRangeMaps() {
+        Map<String, Object> dateRange = [
+                start: Timestamp.valueOf("2026-03-31 17:00:00"),
+                end  : Timestamp.valueOf("2026-04-30 17:00:00")
+        ]
+
+        assertTrue(ReconciliationOutputSupport.isApiSourceDetailsMode([:], dateRange))
+        assertTrue(ReconciliationOutputSupport.isApiSourceDetailsMode([sourceMode: "api"], null))
+        assertFalse(ReconciliationOutputSupport.isApiSourceDetailsMode([sourceMode: "files"], null))
     }
 
     @Test

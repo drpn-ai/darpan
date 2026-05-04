@@ -6,4 +6,16 @@
             sendUrl="jdbc:mysql://127.0.0.1:3306/ofbiz?useSSL=false&amp;allowPublicKeyRetrieval=true"
             username="root"
             password="greatest"/>
+
+    <moqui.service.message.SystemMessageRemote
+            systemMessageRemoteId="HOTWAX_ORDERS_API"
+            description="Orders API"
+            sendUrl="{baseUrl}/rest/s1/oms/orders"
+            sendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"/>
+
+    <moqui.service.message.SystemMessageRemote
+            systemMessageRemoteId="SHOPIFY_REMOTE"
+            description="Admin GraphQL Orders"
+            sendUrl="https://{shop}.myshopify.com/admin/api/{apiVersion}/graphql.json"
+            sendServiceName="facade.ShopifyFacadeServices.execute#ShopifyGraphql"/>
 </entity-facade-xml>

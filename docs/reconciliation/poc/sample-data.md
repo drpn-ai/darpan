@@ -19,8 +19,5 @@ The sample compare service reads JSON files from `runtime/component/darpan/data/
 
 ## Usage Notes
 
-- The service `compare#SampleOrderIds` (defined in `runtime/component/darpan/service/debug/ReconciliationDebugServices.xml`)
-  defaults to `omsBulkData.json` and `shopifyBulkData.json`.
-- Override `omsOrderIdField`, `shopifyOrderIdField`, or `orderIdField` to point at alternate fields.
-- The script (`runtime/component/darpan/src/main/groovy/darpan/debug/reconciliation/compareSampleOrderIds.groovy`) detects the bulk GraphQL shape
-  and falls back to a flat JSON array when the `data` wrapper is not present.
+- The old `compare#SampleOrderIds` debug service has been removed.
+- Use the production generic reconciliation services with explicit saved-run or mapping configuration for sample-data validation.

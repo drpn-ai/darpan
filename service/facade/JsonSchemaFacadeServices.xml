@@ -206,8 +206,7 @@
         </actions>
     </service>
 
-    <service verb="infer" noun="JsonSchemaFromText" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/jsonschema/inferJsonSchemaFromText.groovy">
+    <service verb="infer" noun="JsonSchemaFromText" allow-remote="true" authenticate="true">
         <description>Infer schema from JSON text and return flattened editor field rows.</description>
         <in-parameters>
             <parameter name="jsonText" required="true" allow-html="any"/>
@@ -219,10 +218,17 @@
             <parameter name="jsonSchemaString" allow-html="any"/>
             <parameter name="fieldList" type="List"/>
         </out-parameters>
+        <actions>
+            <set field="schemaResult" from="darpan.facade.jsonschema.JsonSchemaFacadeSupport.inferJsonSchemaFromText(ec, jsonText)"/>
+            <set field="ok" from="schemaResult.ok"/>
+            <set field="messages" from="schemaResult.messages"/>
+            <set field="errors" from="schemaResult.errors"/>
+            <set field="jsonSchemaString" from="schemaResult.jsonSchemaString"/>
+            <set field="fieldList" from="schemaResult.fieldList"/>
+        </actions>
     </service>
 
-    <service verb="validate" noun="JsonTextAgainstSchema" type="script" allow-remote="true" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/facade/jsonschema/validateJsonText.groovy">
+    <service verb="validate" noun="JsonTextAgainstSchema" allow-remote="true" authenticate="true">
         <description>Validate JSON text against a saved schema.</description>
         <in-parameters>
             <parameter name="jsonText" required="true" allow-html="any"/>
@@ -237,6 +243,15 @@
             <parameter name="errorCount" type="Integer"/>
             <parameter name="errorMessages" type="List"/>
         </out-parameters>
+        <actions>
+            <set field="schemaResult" from="darpan.facade.jsonschema.JsonSchemaFacadeSupport.validateJsonTextAgainstSchema(ec, jsonText, jsonSchemaId, schemaName)"/>
+            <set field="ok" from="schemaResult.ok"/>
+            <set field="messages" from="schemaResult.messages"/>
+            <set field="errors" from="schemaResult.errors"/>
+            <set field="valid" from="schemaResult.valid"/>
+            <set field="errorCount" from="schemaResult.errorCount"/>
+            <set field="errorMessages" from="schemaResult.errorMessages"/>
+        </actions>
     </service>
 
     <service verb="flatten" noun="JsonSchema" allow-remote="true" authenticate="true">

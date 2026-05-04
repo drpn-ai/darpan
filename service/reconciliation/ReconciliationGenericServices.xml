@@ -84,8 +84,7 @@
         </out-parameters>
     </service>
 
-    <service verb="delete" noun="GeneratedOutputFile" type="script" transaction="ignore" authenticate="true"
-            location="component://darpan/src/main/groovy/darpan/reconciliation/generic/deleteGeneratedOutputFile.groovy">
+    <service verb="delete" noun="GeneratedOutputFile" transaction="ignore" authenticate="true">
         <description>Delete one generated reconciliation output file from data-manager or the legacy generic output directory.</description>
         <in-parameters>
             <parameter name="filename" required="true">
@@ -100,6 +99,12 @@
             <parameter name="deletedFileName"/>
             <parameter name="statusMessage"/>
         </out-parameters>
+        <actions>
+            <set field="deleteResult" from="darpan.facade.reconciliation.ReconciliationOutputSupport.deleteGeneratedOutputFile(ec, filename)"/>
+            <set field="deleted" from="deleteResult.deleted"/>
+            <set field="deletedFileName" from="deleteResult.deletedFileName"/>
+            <set field="statusMessage" from="deleteResult.statusMessage"/>
+        </actions>
     </service>
 
     <service verb="purge" noun="GeneratedOutputFiles" type="script" transaction="ignore" authenticate="false"

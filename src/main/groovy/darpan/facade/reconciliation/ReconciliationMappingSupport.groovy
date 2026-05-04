@@ -65,6 +65,39 @@ class ReconciliationMappingSupport {
         return members.collectMany { member -> collectMemberIssues(ec, member) }.unique()
     }
 
+    static Map<String, Object> listMappings(def ec, Object query, Object pageIndex, Object pageSize) {
+        int page = Math.max(0, FacadeSupport.normalizeInt(pageIndex, 0))
+        int size = Math.max(1, Math.min(200, FacadeSupport.normalizeInt(pageSize, 20)))
+        String search = FacadeSupport.normalize(query)?.toLowerCase()
+
+        List<Map<String, Object>> allRows = ReconciliationSavedRunSupport.collectMappingRows(ec).collect { Map<String, Object> savedRunRow ->
+            [
+                    reconciliationMappingId : savedRunRow.reconciliationMappingId,
+                    mappingName             : savedRunRow.runName,
+                    description             : savedRunRow.description,
+                    companyUserGroupId      : savedRunRow.companyUserGroupId,
+                    companyLabel            : savedRunRow.companyLabel,
+                    requiresSystemSelection : savedRunRow.requiresSystemSelection,
+                    defaultFile1SystemEnumId: savedRunRow.defaultFile1SystemEnumId,
+                    defaultFile2SystemEnumId: savedRunRow.defaultFile2SystemEnumId,
+                    systemOptions           : savedRunRow.systemOptions,
+            ]
+        }
+        Set<String> availableMappingIds = allRows.collect { it.reconciliationMappingId as String }.findAll { it } as Set<String>
+
+        List<Map<String, Object>> rows = search ?
+                allRows.findAll { Map<String, Object> row -> mappingRowMatches(row, search) } :
+                allRows
+        Map<String, Object> pagination = ReconciliationSavedRunSupport.pagination(page, size, rows.size())
+
+        Map<String, Object> envelope = FacadeSupport.envelope(ec)
+        return envelope + [
+                mappings                        : ReconciliationSavedRunSupport.pageRows(rows, page, size),
+                pinnedReconciliationMappingIds : ReconciliationDashboardPreferenceSupport.listPinnedReconciliationMappingIds(ec, availableMappingIds),
+                pagination                      : pagination,
+        ]
+    }
+
     static List<String> collectMemberIssues(def ec, Object member) {
         String systemLabel = resolveSystemLabel(ec, normalize(member?.systemEnumId))
         String schemaFileName = normalize(member?.schemaFileName)
@@ -301,7 +334,7 @@ class ReconciliationMappingSupport {
                 .condition("enumId", enumId)
                 .useCache(true)
                 .one()
-        return normalize(enumValue?.enumCode) ?: normalize(enumValue?.description) ?: enumId
+        return darpan.facade.common.FacadeSupport.enumLabel(enumValue ?: [enumId: enumId])
     }
 
     protected static String normalize(Object value) {
@@ -312,5 +345,19 @@ class ReconciliationMappingSupport {
         String groupName = ec.entity.getEntityGroupName(entityName) ?: "default"
         def datasourceFactory = ec.entity.getDatasourceFactory(groupName)
         datasourceFactory?.checkAndAddTable(entityName)
+    }
+
+    protected static boolean mappingRowMatches(Map<String, Object> row, String search) {
+        return [
+                row.reconciliationMappingId,
+                row.mappingName,
+                row.description,
+                row.companyUserGroupId,
+                row.companyLabel,
+                *(row.systemOptions instanceof Collection ? row.systemOptions.collect { it?.label } : []),
+                *(row.systemOptions instanceof Collection ? row.systemOptions.collect { it?.enumCode } : []),
+        ].any { Object value ->
+            value?.toString()?.toLowerCase()?.contains(search)
+        }
     }
 }

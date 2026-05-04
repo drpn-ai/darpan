@@ -66,6 +66,12 @@
             <parameter name="stageLocation" default-value="runtime://tmp/reconciliation/automation/input">
                 <description>Where staged copies of SFTP files will be written before reconciliation.</description>
             </parameter>
+            <parameter name="pollIntervalMinutes" type="Integer">
+                <description>Retry interval in minutes when an expected SFTP file is not available yet.</description>
+            </parameter>
+            <parameter name="pollTimeoutMinutes" type="Integer">
+                <description>Maximum retry window in minutes before reporting that expected SFTP files were not found.</description>
+            </parameter>
             <parameter name="outputLocation">
                 <description>Override for reconciliation outputs. Defaults to the data-manager reconciliation run folder.</description>
             </parameter>
@@ -95,6 +101,154 @@
             <parameter name="validationErrors" type="List"/>
             <parameter name="processingWarnings" type="List"/>
         </out-parameters>
+    </service>
+
+    <service verb="run" noun="SftpFileAutomation" transaction="ignore" authenticate="anonymous-all">
+        <description>Run one saved SFTP-file automation, recording execution status and delegating file access to the centralized SFTP poll-and-reconcile service.</description>
+        <in-parameters>
+            <parameter name="automationId" required="true">
+                <description>ReconciliationAutomation row to execute. The automation must use AUT_IN_SFTP_FILES and two AUT_SRC_SFTP source rows.</description>
+            </parameter>
+            <parameter name="scheduledDate" type="Timestamp">
+                <description>Scheduled fire time to record on the execution row. Defaults to the current timestamp.</description>
+            </parameter>
+            <parameter name="sftpRunScopeEnumId" default-value="DARPAN_SFTP_TENANT">
+                <description>SFTP access scope passed through to the centralized SFTP guard.</description>
+            </parameter>
+            <parameter name="runTenantUserGroupId">
+                <description>Tenant user-group id for tenant-scoped scheduled runs. Defaults to the automation owner tenant.</description>
+            </parameter>
+            <parameter name="allowAdminSftp" type="Boolean" default-value="false">
+                <description>Explicit opt-in required before an admin-scoped automation may use admin SFTP.</description>
+            </parameter>
+            <parameter name="archiveSubdir" default-value="archive"/>
+            <parameter name="hasHeader" type="Boolean" default-value="true"/>
+            <parameter name="stageLocation" default-value="runtime://tmp/reconciliation/automation/input"/>
+            <parameter name="pollIntervalMinutes" type="Integer" default-value="10"/>
+            <parameter name="pollTimeoutMinutes" type="Integer" default-value="60"/>
+            <parameter name="outputLocation">
+                <description>Override for reconciliation outputs. Defaults to the data-manager reconciliation run folder.</description>
+            </parameter>
+            <parameter name="sparkMaster"/>
+            <parameter name="sparkAppName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="automationExecutionId"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="reconciliationRunResultId"/>
+            <parameter name="resultDataManagerPath"/>
+
+            <parameter name="dataAvailable" type="Boolean"/>
+            <parameter name="statusMessage"/>
+            <parameter name="pollAttemptCount" type="Integer"/>
+
+            <parameter name="file1Source"/>
+            <parameter name="file2Source"/>
+            <parameter name="file1SelectedName"/>
+            <parameter name="file2SelectedName"/>
+            <parameter name="file1StagedLocation"/>
+            <parameter name="file2StagedLocation"/>
+
+            <parameter name="file1Type"/>
+            <parameter name="file2Type"/>
+            <parameter name="reconciliationType"/>
+
+            <parameter name="diffLocation"/>
+            <parameter name="diffFileName"/>
+            <parameter name="differenceCount" type="Integer"/>
+            <parameter name="onlyInFile1Count" type="Integer"/>
+            <parameter name="onlyInFile2Count" type="Integer"/>
+            <parameter name="validationErrors" type="List"/>
+            <parameter name="processingWarnings" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="automationResult" from="darpan.reconciliation.automation.SftpAutomationSupport.runSftpFileAutomation(ec, context)"/>
+            <set field="automationExecutionId" from="automationResult.automationExecutionId"/>
+            <set field="statusEnumId" from="automationResult.statusEnumId"/>
+            <set field="reconciliationRunResultId" from="automationResult.reconciliationRunResultId"/>
+            <set field="resultDataManagerPath" from="automationResult.resultDataManagerPath"/>
+            <set field="dataAvailable" from="automationResult.dataAvailable"/>
+            <set field="statusMessage" from="automationResult.statusMessage"/>
+            <set field="pollAttemptCount" from="automationResult.pollAttemptCount"/>
+            <set field="file1Source" from="automationResult.file1Source"/>
+            <set field="file2Source" from="automationResult.file2Source"/>
+            <set field="file1SelectedName" from="automationResult.file1SelectedName"/>
+            <set field="file2SelectedName" from="automationResult.file2SelectedName"/>
+            <set field="file1StagedLocation" from="automationResult.file1StagedLocation"/>
+            <set field="file2StagedLocation" from="automationResult.file2StagedLocation"/>
+            <set field="file1Type" from="automationResult.file1Type"/>
+            <set field="file2Type" from="automationResult.file2Type"/>
+            <set field="reconciliationType" from="automationResult.reconciliationType"/>
+            <set field="diffLocation" from="automationResult.diffLocation"/>
+            <set field="diffFileName" from="automationResult.diffFileName"/>
+            <set field="differenceCount" from="automationResult.differenceCount"/>
+            <set field="onlyInFile1Count" from="automationResult.onlyInFile1Count"/>
+            <set field="onlyInFile2Count" from="automationResult.onlyInFile2Count"/>
+            <set field="validationErrors" from="automationResult.validationErrors"/>
+            <set field="processingWarnings" from="automationResult.processingWarnings"/>
+        </actions>
+    </service>
+
+    <service verb="execute" noun="Automation" transaction="ignore" authenticate="anonymous-all">
+        <description>Execute one automation by resolving its scheduled date window, creating/reusing idempotent child execution rows, extracting source files, and running the RuleSet compare-scope pipeline.</description>
+        <in-parameters>
+            <parameter name="automationId" required="true"/>
+            <parameter name="scheduledFireTime" type="Timestamp">
+                <description>Scheduled fire time used for idempotency. Defaults to the current timestamp for manual runs.</description>
+            </parameter>
+            <parameter name="windowStartDate" type="Timestamp">
+                <description>Required only for AUT_WIN_CUSTOM backfill runs.</description>
+            </parameter>
+            <parameter name="windowEndDate" type="Timestamp">
+                <description>Required only for AUT_WIN_CUSTOM backfill runs.</description>
+            </parameter>
+            <parameter name="nowTimestamp" type="Timestamp"/>
+            <parameter name="hasHeader" type="Boolean" default-value="true"/>
+            <parameter name="outputLocation"/>
+            <parameter name="sparkMaster"/>
+            <parameter name="sparkAppName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="automationId"/>
+            <parameter name="scheduledFireTime" type="Timestamp"/>
+            <parameter name="executedCount" type="Integer"/>
+            <parameter name="noDataCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="skippedDuplicateCount" type="Integer"/>
+            <parameter name="executionResults" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="automationResult" from="darpan.reconciliation.automation.AutomationExecutionSupport.executeAutomation(ec, context)"/>
+            <set field="automationId" from="automationResult.automationId"/>
+            <set field="scheduledFireTime" from="automationResult.scheduledFireTime"/>
+            <set field="executedCount" from="automationResult.executedCount"/>
+            <set field="noDataCount" from="automationResult.noDataCount"/>
+            <set field="failedCount" from="automationResult.failedCount"/>
+            <set field="skippedDuplicateCount" from="automationResult.skippedDuplicateCount"/>
+            <set field="executionResults" from="automationResult.executionResults"/>
+        </actions>
+    </service>
+
+    <service verb="scan" noun="DueAutomations" transaction="ignore" authenticate="anonymous-all">
+        <description>Find active automations with nextScheduledFireTime at or before now, call execute#Automation, and advance nextScheduledFireTime from the automation schedule expression.</description>
+        <in-parameters>
+            <parameter name="nowTimestamp" type="Timestamp"/>
+            <parameter name="limit" type="Integer" default-value="100"/>
+            <parameter name="outputLocation"/>
+            <parameter name="sparkMaster"/>
+            <parameter name="sparkAppName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="scanTimestamp" type="Timestamp"/>
+            <parameter name="dueCount" type="Integer"/>
+            <parameter name="scanResults" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="automationResult" from="darpan.reconciliation.automation.AutomationExecutionSupport.scanDueAutomations(ec, context)"/>
+            <set field="scanTimestamp" from="automationResult.scanTimestamp"/>
+            <set field="dueCount" from="automationResult.dueCount"/>
+            <set field="scanResults" from="automationResult.scanResults"/>
+        </actions>
     </service>
 
 </services>

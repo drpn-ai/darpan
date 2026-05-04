@@ -21,4 +21,23 @@
             <key-map field-name="permissionUserGroupId" related-field-name="userGroupId"/>
         </relationship>
     </entity>
+
+    <entity entity-name="TenantSetting" package="darpan.auth" use="configuration">
+        <description>Tenant-level settings shared by users operating in a Darpan tenant.</description>
+        <field name="companyUserGroupId" type="id" is-pk="true" not-null="true"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="timeZone" type="text-short" default="'UTC'">
+            <description>Timezone used for tenant-facing timestamp display and tenant workflow interpretation.</description>
+        </field>
+        <field name="createdDate" type="date-time"/>
+        <field name="lastUpdatedDate" type="date-time"/>
+
+        <relationship type="one" title="Company" related="moqui.security.UserGroup" fk-name="TENSET_COMPANY">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+        <relationship type="one-nofk" title="CreatedBy" related="moqui.security.UserAccount" short-alias="createdByUser">
+            <description>No FK in order to allow externally authenticated users.</description>
+            <key-map field-name="createdByUserId" related-field-name="userId"/>
+        </relationship>
+    </entity>
 </entities>

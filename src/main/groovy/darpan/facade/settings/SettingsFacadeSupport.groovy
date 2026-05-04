@@ -5,6 +5,8 @@ import groovy.json.JsonSlurper
 
 class SettingsFacadeSupport {
     static final String DARPAN_SYSTEM_SOURCE_ENUM_TYPE_ID = "DarpanSystemSource"
+    private static final String HOTWAX_SYSTEM_DEDUPE_KEY = "HOTWAX"
+    private static final String HOTWAX_CANONICAL_ENUM_ID = "OMS"
 
     static String validateJsonObjectText(String text, String label) {
         String normalized = FacadeSupport.normalize(text)
@@ -19,74 +21,39 @@ class SettingsFacadeSupport {
         }
     }
 
-    static Map<String, Object> resolveHcReadDbConfigId(def ec, String requestedId, String displayName, String host, String databaseName) {
-        String normalizedRequestedId = FacadeSupport.normalize(requestedId)
-        if (normalizedRequestedId) {
-            String normalized = normalizeId(normalizedRequestedId)
-            if (!normalized) return [configId: normalizedRequestedId, error: "Config ID must contain letters or numbers."]
-            return [configId: trimToLength(normalized, 40), error: null]
-        }
-
-        String seed = FacadeSupport.normalize(displayName) ?: "${FacadeSupport.normalize(host) ?: 'hc'}_${FacadeSupport.normalize(databaseName) ?: 'db'}"
-        String baseId = normalizeId(seed) ?: "hc_db"
-        baseId = trimToLength(baseId, 40)
-
-        String candidateId = baseId
-        int suffix = 1
-        while (ec?.entity?.find("darpan.reconciliation.HcReadDbConfig")
-                ?.condition("hcReadDbConfigId", candidateId)
-                ?.useCache(false)
-                ?.one()) {
-            suffix++
-            String suffixPart = "_${suffix}"
-            int maxBaseLength = Math.max(1, 40 - suffixPart.length())
-            String trimmedBase = baseId.length() > maxBaseLength ? baseId.substring(0, maxBaseLength) : baseId
-            candidateId = trimmedBase + suffixPart
-        }
-
-        return [configId: trimToLength(candidateId, 40), error: null]
-    }
-
-    static String normalizeAdditionalParameters(String additionalParameters) {
-        String normalized = FacadeSupport.normalize(additionalParameters)
-        if (normalized?.startsWith("?")) normalized = normalized.substring(1)
-        return normalized
-    }
-
-    static String buildMysqlJdbcUrl(String host, Integer port, String databaseName, String additionalParameters) {
-        String jdbcUrl = "jdbc:mysql://${host}:${port}/${databaseName}"
-        if (additionalParameters) jdbcUrl += "?${additionalParameters}"
-        return jdbcUrl
-    }
-
     static List<Map<String, Object>> deduplicateEnumOptions(String enumTypeId, List<Map<String, Object>> rawOptions) {
         List<Map<String, Object>> optionList = (rawOptions ?: []) as List<Map<String, Object>>
         if (FacadeSupport.normalize(enumTypeId) != DARPAN_SYSTEM_SOURCE_ENUM_TYPE_ID) return optionList
 
         LinkedHashMap<String, Map<String, Object>> preferredByKey = [:]
         optionList.each { Map<String, Object> option ->
-            String dedupeKey = buildEnumOptionDedupeKey(option)
+            Map<String, Object> normalizedOption = normalizeSystemSourceOption(option)
+            String dedupeKey = buildEnumOptionDedupeKey(normalizedOption)
             if (!dedupeKey) return
 
             Map<String, Object> currentPreferred = preferredByKey[dedupeKey]
-            if (currentPreferred == null || shouldPreferEnumOption(option, currentPreferred)) {
-                preferredByKey[dedupeKey] = option
+            if (currentPreferred == null || shouldPreferEnumOption(normalizedOption, currentPreferred)) {
+                preferredByKey[dedupeKey] = normalizedOption
             }
         }
 
         return preferredByKey.values() as List<Map<String, Object>>
     }
 
-    protected static String normalizeId(String rawValue) {
-        return rawValue?.toLowerCase()?.replaceAll(/[^a-z0-9_-]+/, "_")?.replaceAll(/^_+|_+$/, "")
-    }
+    protected static Map<String, Object> normalizeSystemSourceOption(Map<String, Object> option) {
+        if (!isHotWaxSystemOption(option)) return option
 
-    protected static String trimToLength(String value, int maxLength) {
-        if (!value) return value
-        return value.length() > maxLength ? value.substring(0, maxLength) : value
+        Map<String, Object> normalized = new LinkedHashMap<>(option ?: [:])
+        normalized.enumCode = "HOTWAX"
+        normalized.description = "HotWax"
+        normalized.label = "HotWax"
+        return normalized
     }
 
     protected static String buildEnumOptionDedupeKey(Map<String, Object> option) {
+        String logicalSystemKey = logicalSystemDedupeKey(option)
+        if (logicalSystemKey) return logicalSystemKey
+
         return FacadeSupport.normalize(option?.enumCode) ?:
                 FacadeSupport.normalize(option?.label) ?:
                 FacadeSupport.normalize(option?.enumId)
@@ -109,7 +76,28 @@ class SettingsFacadeSupport {
     protected static boolean isCanonicalEnumOption(Map<String, Object> option) {
         String enumId = FacadeSupport.normalize(option?.enumId)
         String enumCode = FacadeSupport.normalize(option?.enumCode)
+        String logicalSystemKey = logicalSystemDedupeKey(option)
+        if (logicalSystemKey == HOTWAX_SYSTEM_DEDUPE_KEY) return enumId == HOTWAX_CANONICAL_ENUM_ID
+
         return enumId != null && enumCode != null && enumId == enumCode
+    }
+
+    protected static String logicalSystemDedupeKey(Map<String, Object> option) {
+        return isHotWaxSystemOption(option) ? HOTWAX_SYSTEM_DEDUPE_KEY : null
+    }
+
+    protected static boolean isHotWaxSystemOption(Map<String, Object> option) {
+        List<String> values = [
+                FacadeSupport.normalize(option?.enumId),
+                FacadeSupport.normalize(option?.enumCode),
+                FacadeSupport.normalize(option?.label),
+                FacadeSupport.normalize(option?.description),
+        ].findAll { it } as List<String>
+
+        return values.any { String value ->
+            String normalized = value.toUpperCase(Locale.ROOT)
+            normalized == "OMS" || normalized == "HOTWAX"
+        }
     }
 
     protected static Integer normalizeSequenceNumber(Object rawValue) {

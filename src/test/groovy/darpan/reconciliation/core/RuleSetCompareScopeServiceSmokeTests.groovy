@@ -66,7 +66,7 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertEquals("SHOPIFY_GID_TAIL", prepared.file1IdNormalizer)
         assertEquals("TRAILING_DIGITS", prepared.file2IdNormalizer)
         assertEquals("SHOPIFY", prepared.file1Label)
-        assertEquals("OMS", prepared.file2Label)
+        assertEquals("HotWax", prepared.file2Label)
         assertTrue(((List) prepared.validationErrors).isEmpty())
         assertTrue(((List) prepared.processingWarnings).isEmpty())
         assertFalse(ec.message.hasError())
@@ -149,7 +149,7 @@ class RuleSetCompareScopeServiceSmokeTests {
         Map<String, Object> missingInFile1 = missingDiffs.find { Map<String, Object> row ->
             row.type == "MISSING_IN_FILE_1" && row.id == "6470624804995"
         }
-        assertEquals("OMS", missingInFile1.presentIn)
+        assertEquals("HotWax", missingInFile1.presentIn)
         assertEquals("SHOPIFY", missingInFile1.missingIn)
         assertTrue((missingInFile1.note as String).contains("missing in SHOPIFY"))
         assertTrue((missingInFile1.data as String).contains("6470624804995"))
@@ -158,8 +158,8 @@ class RuleSetCompareScopeServiceSmokeTests {
             row.type == "MISSING_IN_FILE_2" && row.id == "6470622019715"
         }
         assertEquals("SHOPIFY", missingInFile2.presentIn)
-        assertEquals("OMS", missingInFile2.missingIn)
-        assertTrue((missingInFile2.note as String).contains("missing in OMS"))
+        assertEquals("HotWax", missingInFile2.missingIn)
+        assertTrue((missingInFile2.note as String).contains("missing in HotWax"))
         assertTrue((missingInFile2.data as String).contains("6470622019715"))
 
         List<Map<String, Object>> matchedPairs = collectRows((Dataset) result.matchedPairDf)
@@ -197,6 +197,39 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertTrue(result.missingDiffDf instanceof Dataset)
         assertEquals(0L, ((Dataset) result.missingDiffDf).count())
         assertTrue(collectRows((Dataset) result.missingDiffDf).isEmpty())
+    }
+
+    @Test
+    void baseDiffStageTreatsEmptyJsonArrayAsNoRows() {
+        Map<String, Object> result = ec.service.sync()
+                .name("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScopeBaseDiff")
+                .parameters([
+                        ruleSetId      : "DARPAN_TEST_COMPARE_RS",
+                        compareScopeId : "DARPAN_TEST_ORDER_JSON_SCOPE",
+                        file1Location  : "component://darpan/data/test/test-orders-1.json",
+                        file2Location  : "component://darpan/data/test/test-orders-empty-records.json",
+                        sparkMaster    : "local[1]",
+                        sparkAppName   : "RuleSetCompareScopeServiceSmokeTests"
+                ])
+                .disableAuthz()
+                .call()
+
+        assertEquals("DARPAN_TEST_ORDER_JSON_SCOPE", result.compareScopeId)
+        assertEquals(0L, result.missingInFile1Count)
+        assertEquals(3L, result.missingInFile2Count)
+        assertEquals(3L, result.differenceCount)
+        assertEquals(0L, result.matchedPairCount)
+        assertTrue(((List) result.validationErrors).isEmpty())
+        assertTrue(((List) result.processingWarnings).isEmpty())
+        assertFalse(ec.message.hasError())
+
+        List<Map<String, Object>> missingDiffs = collectRows((Dataset) result.missingDiffDf)
+        assertEquals(3, missingDiffs.size())
+        assertTrue(missingDiffs.every { Map<String, Object> row -> row.type == "MISSING_IN_FILE_2" })
+        assertIterableEquals(
+                ["6470622019715", "6470622478467", "6470624575619"],
+                missingDiffs.collect { Map<String, Object> row -> row.id?.toString() }.sort()
+        )
     }
 
     @Test
@@ -287,7 +320,7 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertTrue(missingInFile1 != null)
         assertEquals("DARPAN_TEST_PRODUCT_JSON_SCOPE", missingInFile1.compareScopeId)
         assertEquals("PRODUCT", missingInFile1.objectType)
-        assertEquals("OMS", missingInFile1.presentIn)
+        assertEquals("HotWax", missingInFile1.presentIn)
         assertEquals("SHOPIFY", missingInFile1.missingIn)
         assertTrue((missingInFile1.data as String).contains("\"productId\":\"P500\""))
 
@@ -296,7 +329,7 @@ class RuleSetCompareScopeServiceSmokeTests {
         }
         assertTrue(missingInFile2 != null)
         assertEquals("SHOPIFY", missingInFile2.presentIn)
-        assertEquals("OMS", missingInFile2.missingIn)
+        assertEquals("HotWax", missingInFile2.missingIn)
         assertTrue((missingInFile2.data as String).contains("\"productId\":\"P300\""))
 
         Map<String, Object> skuDiff = diffs.find { Map<String, Object> row ->

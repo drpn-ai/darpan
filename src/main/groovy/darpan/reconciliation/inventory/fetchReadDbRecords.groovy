@@ -39,7 +39,11 @@ def clearErrors = {
 }
 def warningList = []
 
-String readDbConfigIdToUse = normalize(readDbConfigId)
+String jdbcUrlToUse = normalize(jdbcUrl)
+String usernameToUse = normalize(username)
+String passwordToUse = password != null ? password.toString() : null
+String dbDriverToUse = normalize(dbDriver) ?: "com.mysql.cj.jdbc.Driver"
+String connectionPropertiesJsonToUse = normalize(connectionPropertiesJson)
 String itemIdStr = normalize(itemId)
 String locationIdStr = normalize(locationId)
 String fromDateStr = normalize(from)
@@ -49,7 +53,9 @@ String inlineSqlTemplate = normalize(sqlStatementTemplate)
 String inlineSqlTemplateName = normalize(sqlTemplateName) ?: "INLINE_SQL_TEMPLATE"
 boolean useInventoryItemJoinFlag = normalizeBool(useInventoryItemJoin, false)
 
-if (!readDbConfigIdToUse) throw new IllegalArgumentException("readDbConfigId is required")
+if (!jdbcUrlToUse) throw new IllegalArgumentException("jdbcUrl is required")
+if (!usernameToUse) throw new IllegalArgumentException("username is required")
+if (passwordToUse == null) throw new IllegalArgumentException("password is required")
 if (!itemIdStr) throw new IllegalArgumentException("itemId is required")
 if (!locationIdStr) throw new IllegalArgumentException("locationId is required")
 if (!fromDateStr) throw new IllegalArgumentException("from is required in yyyy-MM-dd format")
@@ -62,55 +68,17 @@ LocalDate toDate = LocalDate.parse(toDateStr)
 if (toDate.isBefore(fromDate)) throw new IllegalArgumentException("to date must be greater than or equal to from date")
 LocalDate toDateExclusive = toDate.plusDays(1)
 
-def readDbConfig = ec.entity.find("darpan.reconciliation.HcReadDbConfig")
-        .condition("hcReadDbConfigId", readDbConfigIdToUse)
-        .useCache(false)
-        .one()
-if (!readDbConfig) throw new IllegalArgumentException("ReadDbConfig ${readDbConfigIdToUse} not found")
-if ((normalize(readDbConfig.isActive) ?: "Y").equalsIgnoreCase("N")) {
-    throw new IllegalArgumentException("ReadDbConfig ${readDbConfigIdToUse} is inactive")
-}
+String tableNameToUse = normalize(tableName)
+String itemIdColumnToUse = normalize(itemIdColumn)
+String locationIdColumnToUse = normalize(locationIdColumn)
+String txnDateColumnToUse = normalize(transactionDateColumn)
+String inventoryItemTableToUse = normalize(inventoryItemTable) ?: tableNameToUse
 
-String jdbcUrl = normalize(readDbConfig.jdbcUrl)
-String host = normalize(readDbConfig.host)
-String databaseName = normalize(readDbConfig.databaseName)
-String additionalParameters = normalize(readDbConfig.additionalParameters)
-int port = (readDbConfig.port ?: 3306) as int
-String username = normalize(readDbConfig.username)
-String password = readDbConfig.password?.toString()
-String dbDriver = normalize(readDbConfig.dbDriver) ?: "com.mysql.cj.jdbc.Driver"
-String requestTableName = normalize(tableName)
-String requestItemIdColumn = normalize(itemIdColumn)
-String requestLocationIdColumn = normalize(locationIdColumn)
-String requestTxnDateColumn = normalize(transactionDateColumn)
-String requestInventoryItemTable = normalize(inventoryItemTable)
-
-String configDefaultTableName = normalize(readDbConfig.defaultTableName)
-String configItemIdColumn = normalize(readDbConfig.itemIdColumn)
-String configLocationIdColumn = normalize(readDbConfig.locationIdColumn)
-String configTxnDateColumn = normalize(readDbConfig.transactionDateColumn)
-
-String tableNameToUse = requestTableName ?: configDefaultTableName
-String itemIdColumnToUse = requestItemIdColumn ?: configItemIdColumn
-String locationIdColumnToUse = requestLocationIdColumn ?: configLocationIdColumn
-String txnDateColumnToUse = requestTxnDateColumn ?: configTxnDateColumn
-String inventoryItemTableToUse = requestInventoryItemTable ?: tableNameToUse
-
-if (!tableNameToUse) throw new IllegalArgumentException("tableName is required (service input or readDbConfig defaultTableName)")
-if (!itemIdColumnToUse) throw new IllegalArgumentException("itemIdColumn is required (service input or readDbConfig itemIdColumn)")
-if (!locationIdColumnToUse) throw new IllegalArgumentException("locationIdColumn is required (service input or readDbConfig locationIdColumn)")
-if (!txnDateColumnToUse) throw new IllegalArgumentException("transactionDateColumn is required (service input or readDbConfig transactionDateColumn)")
+if (!tableNameToUse) throw new IllegalArgumentException("tableName is required")
+if (!itemIdColumnToUse) throw new IllegalArgumentException("itemIdColumn is required")
+if (!locationIdColumnToUse) throw new IllegalArgumentException("locationIdColumn is required")
+if (!txnDateColumnToUse) throw new IllegalArgumentException("transactionDateColumn is required")
 if (!inventoryItemTableToUse) inventoryItemTableToUse = tableNameToUse
-
-if (!jdbcUrl && host && databaseName) {
-    String cleanAdditional = additionalParameters?.replaceFirst(/^\?/, "")
-    jdbcUrl = "jdbc:mysql://${host}:${port}/${databaseName}" + (cleanAdditional ? "?${cleanAdditional}" : "")
-    warningList.add("JDBC URL was generated from host/port/databaseName for config ${readDbConfigIdToUse}.")
-}
-
-if (!jdbcUrl) throw new IllegalArgumentException("ReadDbConfig ${readDbConfigIdToUse} is missing jdbcUrl and host/databaseName")
-if (!username) throw new IllegalArgumentException("ReadDbConfig ${readDbConfigIdToUse} is missing username")
-if (password == null) throw new IllegalArgumentException("ReadDbConfig ${readDbConfigIdToUse} is missing password")
 
 def assertSqlIdentifier = { String value, String label ->
     if (!value) throw new IllegalArgumentException("${label} is required")
@@ -134,25 +102,24 @@ if (!inlineSqlTemplate && sqlRuleSetIdToUse) {
 }
 
 Properties props = new Properties()
-props.setProperty("user", username)
-props.setProperty("password", password)
+props.setProperty("user", usernameToUse)
+props.setProperty("password", passwordToUse)
 
-String connectionPropertiesJson = normalize(readDbConfig.connectionPropertiesJson)
-if (connectionPropertiesJson) {
-    def parsedProps = new JsonSlurper().parseText(connectionPropertiesJson)
+if (connectionPropertiesJsonToUse) {
+    def parsedProps = new JsonSlurper().parseText(connectionPropertiesJsonToUse)
     if (!(parsedProps instanceof Map)) {
-        throw new IllegalArgumentException("ReadDbConfig ${readDbConfigIdToUse} connectionPropertiesJson must be a JSON object")
+        throw new IllegalArgumentException("connectionPropertiesJson must be a JSON object")
     }
     parsedProps.each { key, value ->
         if (key != null && value != null) props.setProperty(key.toString(), value.toString())
     }
 }
 
-String safeJdbcUrl = jdbcUrl.replaceAll("(?i)(password=)[^&;]+", "\$1***")
-logger.info("Querying read-only DB config={} itemId={} locationId={} from={} to={} table={} url={}",
-        readDbConfigIdToUse, itemIdStr, locationIdStr, fromDateStr, toDateStr, tableNameToUse, safeJdbcUrl)
+String safeJdbcUrl = jdbcUrlToUse.replaceAll("(?i)(password=)[^&;]+", "\$1***")
+logger.info("Querying read-only DB itemId={} locationId={} from={} to={} table={} url={}",
+        itemIdStr, locationIdStr, fromDateStr, toDateStr, tableNameToUse, safeJdbcUrl)
 
-Class.forName(dbDriver)
+Class.forName(dbDriverToUse)
 
 clearErrors()
 Map sqlFact = [
@@ -255,23 +222,23 @@ PreparedStatement statement = null
 ResultSet resultSet = null
 try {
     try {
-        connection = DriverManager.getConnection(jdbcUrl, props)
+        connection = DriverManager.getConnection(jdbcUrlToUse, props)
     } catch (SQLException sqlEx) {
         String errMsg = normalize(sqlEx.message) ?: ""
         if (!errMsg.toLowerCase().contains("no suitable driver")) throw sqlEx
 
         // Some runtime classloader arrangements can prevent DriverManager from using
         // a loaded JDBC driver. Fall back to explicit driver.connect().
-        Class driverClass = Class.forName(dbDriver)
+        Class driverClass = Class.forName(dbDriverToUse)
         Object driverObj = driverClass.getDeclaredConstructor().newInstance()
         if (!(driverObj instanceof Driver)) {
-            throw new IllegalArgumentException("Configured dbDriver ${dbDriver} is not a java.sql.Driver")
+            throw new IllegalArgumentException("Configured dbDriver ${dbDriverToUse} is not a java.sql.Driver")
         }
-        connection = ((Driver) driverObj).connect(jdbcUrl, props)
+        connection = ((Driver) driverObj).connect(jdbcUrlToUse, props)
         if (connection == null) {
-            throw new IllegalArgumentException("No suitable driver found for ${jdbcUrl} using configured dbDriver ${dbDriver}")
+            throw new IllegalArgumentException("No suitable driver found for ${jdbcUrlToUse} using configured dbDriver ${dbDriverToUse}")
         }
-        warningList.add("Used explicit JDBC driver connect fallback for config ${readDbConfigIdToUse}.")
+        warningList.add("Used explicit JDBC driver connect fallback.")
     }
     statement = connection.prepareStatement(sql)
     statement.setObject(1, toTypedDbValue(itemIdStr))
@@ -303,5 +270,5 @@ try {
 }
 
 processingWarnings = InventoryWarningSupport.normalizeWarningTexts(warningList)
-logger.info("Read-only DB query success config={} itemId={} locationId={} records={}",
-        readDbConfigIdToUse, itemIdStr, locationIdStr, recordCount ?: 0)
+logger.info("Read-only DB query success itemId={} locationId={} records={}",
+        itemIdStr, locationIdStr, recordCount ?: 0)

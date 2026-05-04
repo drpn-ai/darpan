@@ -48,6 +48,10 @@ class FacadeSupport {
     }
 
     static String enumLabel(def item) {
+        if (item?.enumTypeId?.toString()?.trim() == "DarpanSystemSource" &&
+                item?.enumId?.toString()?.trim() == "OMS") {
+            return item?.description?.toString()?.trim() ?: "HotWax"
+        }
         return item?.enumCode?.toString()?.trim() ?: item?.description?.toString()?.trim() ?: item?.enumId?.toString()?.trim()
     }
 }

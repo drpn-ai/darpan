@@ -80,6 +80,20 @@ class SettingsFacadeTenantFilteringSmokeTests {
         List<Map<String, Object>> endpoints = (List<Map<String, Object>>) (endpointResult.restletConfigs ?: [])
         assertEquals(["KREWE_ENDPOINT"], endpoints.collect { Map<String, Object> row -> row.nsRestletConfigId })
         assertNoRawCredentialFields(endpoints)
+
+        ec.message.clearErrors()
+        Map<String, Object> notificationResult = getFacade("facade.SettingsFacadeServices.get#TenantNotificationSettings")
+        Map<String, Object> notificationSettings = (Map<String, Object>) notificationResult.tenantNotificationSettings
+        assertEquals(KREWE, notificationSettings.companyUserGroupId)
+        assertTrue(notificationSettings.googleChatConfigured as boolean)
+        assertTrue((notificationSettings.googleChatWebhookUrlMasked as String).contains("key=...&token=..."))
+        assertNoRawCredentialFields(notificationSettings)
+
+        ec.message.clearErrors()
+        Map<String, Object> tenantSettingsResult = getFacade("facade.SettingsFacadeServices.get#TenantSettings")
+        Map<String, Object> tenantSettings = (Map<String, Object>) tenantSettingsResult.tenantSettings
+        assertEquals(KREWE, tenantSettings.companyUserGroupId)
+        assertEquals("America/Los_Angeles", tenantSettings.timeZone)
     }
 
     @Test
@@ -141,6 +155,24 @@ class SettingsFacadeTenantFilteringSmokeTests {
         assertNull(findOne("darpan.reconciliation.SftpServer", [sftpServerId: "KREWE_VIEW_ONLY_CREATE"]))
 
         ec.message.clearErrors()
+        Map<String, Object> notificationResult = saveFacade("facade.SettingsFacadeServices.save#TenantNotificationSettings", [
+                googleChatWebhookUrl: "https://chat.googleapis.com/v1/spaces/KREWE_NEW/messages?key=blocked&token=blocked",
+                isActive            : "Y",
+        ])
+        assertFalse((Boolean) notificationResult.ok)
+        assertTrue((notificationResult.errors ?: []).join(" ").contains("view access"))
+        assertEquals("https://chat.googleapis.com/v1/spaces/KREWE_SPACE/messages?key=krewe-key&token=krewe-token",
+                findOne("darpan.reconciliation.TenantNotificationSetting", [companyUserGroupId: KREWE]).googleChatWebhookUrl)
+
+        ec.message.clearErrors()
+        Map<String, Object> tenantSettingsResult = saveFacade("facade.SettingsFacadeServices.save#TenantSettings", [
+                timeZone: "Europe/London",
+        ])
+        assertFalse((Boolean) tenantSettingsResult.ok)
+        assertTrue((tenantSettingsResult.errors ?: []).join(" ").contains("view access"))
+        assertEquals("America/Los_Angeles", findOne("darpan.auth.TenantSetting", [companyUserGroupId: KREWE]).timeZone)
+
+        ec.message.clearErrors()
         Map<String, Object> updateResult = saveFacade("facade.SettingsFacadeServices.save#NsAuthConfig", [
                 nsAuthConfigId: "KREWE_AUTH",
                 description   : "Blocked view-only update",
@@ -188,6 +220,40 @@ class SettingsFacadeTenantFilteringSmokeTests {
         ])
         assertTrue((Boolean) endpointResult.ok, endpointResult.errors?.toString())
         assertTenantOwnership("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "GORJANA_CREATED_ENDPOINT"])
+
+        ec.message.clearErrors()
+        Map<String, Object> tenantSettingsResult = saveFacade("facade.SettingsFacadeServices.save#TenantSettings", [
+                timeZone: "Europe/London",
+        ])
+        assertTrue((Boolean) tenantSettingsResult.ok, tenantSettingsResult.errors?.toString())
+        assertTenantOwnership("darpan.auth.TenantSetting", [companyUserGroupId: GORJANA])
+        assertEquals("Europe/London", findOne("darpan.auth.TenantSetting", [companyUserGroupId: GORJANA]).timeZone)
+    }
+
+    @Test
+    void tenantNotificationSettingsStayOnePerActiveTenant() {
+        ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, GORJANA)
+
+        Map<String, Object> saveResult = saveFacade("facade.SettingsFacadeServices.save#TenantNotificationSettings", [
+                googleChatWebhookUrl: "https://chat.googleapis.com/v1/spaces/GORJANA_NEW/messages?key=new-key&token=new-token",
+                isActive            : "Y",
+        ])
+        assertTrue((Boolean) saveResult.ok, saveResult.errors?.toString())
+        Map<String, Object> settings = (Map<String, Object>) saveResult.tenantNotificationSettings
+        assertEquals(GORJANA, settings.companyUserGroupId)
+        assertEquals(true, settings.googleChatConfigured)
+        assertTrue((settings.googleChatWebhookUrlMasked as String).contains("key=...&token=..."))
+        assertNoRawCredentialFields(settings)
+
+        List notificationRows = ec.entity.find("darpan.reconciliation.TenantNotificationSetting")
+                .condition("companyUserGroupId", GORJANA)
+                .disableAuthz()
+                .useCache(false)
+                .list()
+        assertEquals(1, notificationRows.size())
+        assertTenantOwnership("darpan.reconciliation.TenantNotificationSetting", [companyUserGroupId: GORJANA])
+        assertEquals("https://chat.googleapis.com/v1/spaces/GORJANA_NEW/messages?key=new-key&token=new-token",
+                notificationRows.first().googleChatWebhookUrl)
     }
 
     private void assertTenantVisibleRows(String tenantId, String expectedSftpId, String expectedAuthId, String expectedEndpointId) {
@@ -214,6 +280,28 @@ class SettingsFacadeTenantFilteringSmokeTests {
         assertEquals([expectedEndpointId], endpoints.collect { Map<String, Object> row -> row.nsRestletConfigId })
         assertTrue(endpoints.every { Map<String, Object> row -> row.companyUserGroupId == tenantId })
         assertTrue(endpoints.every { Map<String, Object> row -> row.nsAuthConfigId == expectedAuthId })
+
+        ec.message.clearErrors()
+        Map<String, Object> notificationResult = getFacade("facade.SettingsFacadeServices.get#TenantNotificationSettings")
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        Map<String, Object> notificationSettings = (Map<String, Object>) notificationResult.tenantNotificationSettings
+        assertEquals(tenantId, notificationSettings.companyUserGroupId)
+        assertTrue(notificationSettings.googleChatConfigured as boolean)
+
+        ec.message.clearErrors()
+        Map<String, Object> tenantSettingsResult = getFacade("facade.SettingsFacadeServices.get#TenantSettings")
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        Map<String, Object> tenantSettings = (Map<String, Object>) tenantSettingsResult.tenantSettings
+        assertEquals(tenantId, tenantSettings.companyUserGroupId)
+        assertEquals(tenantId == KREWE ? "America/Los_Angeles" : "America/New_York", tenantSettings.timeZone)
+    }
+
+    private Map<String, Object> getFacade(String serviceName) {
+        return (Map<String, Object>) ec.service.sync()
+                .name(serviceName)
+                .parameters([:])
+                .disableAuthz()
+                .call()
     }
 
     private Map<String, Object> listFacade(String serviceName) {
@@ -397,12 +485,43 @@ class SettingsFacadeTenantFilteringSmokeTests {
                 apiToken             : "legacy-gorjana-api-token",
                 privateKeyPem        : "legacy-gorjana-private-key",
         ])
+
+        upsertEntityValue("darpan.reconciliation.TenantNotificationSetting", [companyUserGroupId: KREWE], [
+                companyUserGroupId   : KREWE,
+                createdByUserId      : TEST_USER_ID,
+                googleChatWebhookUrl : "https://chat.googleapis.com/v1/spaces/KREWE_SPACE/messages?key=krewe-key&token=krewe-token",
+                isActive             : "Y",
+                createdDate          : TEST_FROM_DATE,
+                lastUpdatedDate      : TEST_FROM_DATE,
+        ])
+        upsertEntityValue("darpan.reconciliation.TenantNotificationSetting", [companyUserGroupId: GORJANA], [
+                companyUserGroupId   : GORJANA,
+                createdByUserId      : TEST_USER_ID,
+                googleChatWebhookUrl : "https://chat.googleapis.com/v1/spaces/GORJANA_SPACE/messages?key=gorjana-key&token=gorjana-token",
+                isActive             : "Y",
+                createdDate          : TEST_FROM_DATE,
+                lastUpdatedDate      : TEST_FROM_DATE,
+        ])
+        upsertEntityValue("darpan.auth.TenantSetting", [companyUserGroupId: KREWE], [
+                companyUserGroupId: KREWE,
+                createdByUserId   : TEST_USER_ID,
+                timeZone          : "America/Los_Angeles",
+                createdDate       : TEST_FROM_DATE,
+                lastUpdatedDate   : TEST_FROM_DATE,
+        ])
+        upsertEntityValue("darpan.auth.TenantSetting", [companyUserGroupId: GORJANA], [
+                companyUserGroupId: GORJANA,
+                createdByUserId   : TEST_USER_ID,
+                timeZone          : "America/New_York",
+                createdDate       : TEST_FROM_DATE,
+                lastUpdatedDate   : TEST_FROM_DATE,
+        ])
     }
 
     private static void assertNoRawCredentialFields(Object payload) {
         if (payload instanceof Map) {
             Map map = (Map) payload
-            ["password", "privateKey", "apiToken", "privateKeyPem", "llmApiKey"].each { String fieldName ->
+            ["password", "privateKey", "apiToken", "privateKeyPem", "llmApiKey", "googleChatWebhookUrl"].each { String fieldName ->
                 assertFalse(map.containsKey(fieldName), "Response must not expose ${fieldName}: ${map}")
             }
             map.values().each { Object value -> assertNoRawCredentialFields(value) }

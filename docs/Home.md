@@ -16,7 +16,6 @@ Welcome to the darpan wiki!
 - [reconciliation domain](domains/reconciliation/README.md)
 - [jsonschema domain](domains/jsonschema/README.md)
 - [rule-engine domain](domains/rule-engine/README.md)
-- [debug domain](domains/debug/README.md)
 
 ## Validation
 
@@ -28,7 +27,11 @@ Welcome to the darpan wiki!
 Platform
 - [overview](reconciliation/platform/overview.md)
 - [security](reconciliation/platform/security.md)
+- [tenant-setup](reconciliation/platform/tenant-setup.md)
+- [tenant-user-setup](reconciliation/platform/tenant-user-setup.md)
 - [services](reconciliation/platform/services.md)
+- [order-reconciliation-automation](reconciliation/automation/order-reconciliation-automation.md)
+- [sftp-reconciliation](reconciliation/automation/sftp-reconciliation.md)
 - [bom-cycle-check](reconciliation/bom-cycle-check.md)
 - [ui-mockups](reconciliation/ui-mockups.md)
 - [pwa-ui-aesthetic-guidelines](reconciliation/pwa-ui-aesthetic-guidelines.md)

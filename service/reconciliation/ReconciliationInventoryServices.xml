@@ -28,9 +28,13 @@
     </service>
 
     <service verb="fetch" noun="ReadDbRecords" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/inventory/fetchReadDbRecords.groovy">
-        <description>Fetch records from configured read-only database using direct SQL template or RuleSet-driven SQL resolution.</description>
+        <description>Fetch records from a read-only database using explicit connection inputs and direct SQL template or RuleSet-driven SQL resolution.</description>
         <in-parameters>
-            <parameter name="readDbConfigId" default-value="darpan-test-seed"/>
+            <parameter name="jdbcUrl" required="true"/>
+            <parameter name="username" required="true"/>
+            <parameter name="password" required="true"/>
+            <parameter name="dbDriver" default-value="com.mysql.cj.jdbc.Driver"/>
+            <parameter name="connectionPropertiesJson" allow-html="true"/>
             <parameter name="itemId" required="true"/>
             <parameter name="locationId" required="true"/>
             <parameter name="from" required="true">
@@ -39,10 +43,10 @@
             <parameter name="to" required="true">
                 <description>End date in yyyy-MM-dd format.</description>
             </parameter>
-            <parameter name="tableName"/>
-            <parameter name="itemIdColumn"/>
-            <parameter name="locationIdColumn"/>
-            <parameter name="transactionDateColumn"/>
+            <parameter name="tableName" required="true"/>
+            <parameter name="itemIdColumn" required="true"/>
+            <parameter name="locationIdColumn" required="true"/>
+            <parameter name="transactionDateColumn" required="true"/>
             <parameter name="inventoryItemTable">
                 <description>Optional join table used by SQL templates when join mode is enabled.</description>
             </parameter>
@@ -159,11 +163,15 @@
                 <description>End date in yyyy-MM-dd format.</description>
             </parameter>
             <parameter name="nsRestletConfigId" required="true"/>
-            <parameter name="readDbConfigId" default-value="darpan-test-seed"/>
-            <parameter name="tableName"/>
-            <parameter name="itemIdColumn"/>
-            <parameter name="locationIdColumn"/>
-            <parameter name="transactionDateColumn"/>
+            <parameter name="jdbcUrl" required="true"/>
+            <parameter name="username" required="true"/>
+            <parameter name="password" required="true"/>
+            <parameter name="dbDriver" default-value="com.mysql.cj.jdbc.Driver"/>
+            <parameter name="connectionPropertiesJson" allow-html="true"/>
+            <parameter name="tableName" required="true"/>
+            <parameter name="itemIdColumn" required="true"/>
+            <parameter name="locationIdColumn" required="true"/>
+            <parameter name="transactionDateColumn" required="true"/>
             <parameter name="inventoryItemTable">
                 <description>Optional join table passed through to fetch#ReadDbRecords when using detail/item join model.</description>
             </parameter>

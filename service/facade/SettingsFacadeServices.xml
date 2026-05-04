@@ -113,6 +113,111 @@
         </actions>
     </service>
 
+    <service verb="get" noun="TenantSettings" allow-remote="true" authenticate="true">
+        <description>Get active-tenant settings shared by users in the tenant.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="tenantSettings">
+                <parameter name="companyUserGroupId"/>
+                <parameter name="companyLabel"/>
+                <parameter name="timeZone"/>
+                <parameter name="createdByUserId"/>
+                <parameter name="createdDate" type="Timestamp"/>
+                <parameter name="lastUpdatedDate" type="Timestamp"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantSettings" from="darpan.facade.common.TenantAccessSupport.readActiveTenantSettings(ec)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="TenantSettings" allow-remote="true" authenticate="true">
+        <description>Save active-tenant settings shared by users in the tenant.</description>
+        <in-parameters>
+            <parameter name="timeZone" required="true">
+                <description>Timezone identifier for the active tenant, such as UTC or America/Los_Angeles.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="tenantSettings">
+                <parameter name="companyUserGroupId"/>
+                <parameter name="companyLabel"/>
+                <parameter name="timeZone"/>
+                <parameter name="createdByUserId"/>
+                <parameter name="createdDate" type="Timestamp"/>
+                <parameter name="lastUpdatedDate" type="Timestamp"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantSettings" from="darpan.facade.common.TenantAccessSupport.saveActiveTenantSettings(ec, timeZone)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="TenantNotificationSettings" allow-remote="true" authenticate="true">
+        <description>Get active-tenant notification settings with Google Chat webhook redaction.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="tenantNotificationSettings">
+                <parameter name="companyUserGroupId"/>
+                <parameter name="companyLabel"/>
+                <parameter name="googleChatConfigured" type="Boolean"/>
+                <parameter name="googleChatWebhookUrlMasked"/>
+                <parameter name="isActive"/>
+                <parameter name="createdByUserId"/>
+                <parameter name="createdDate" type="Timestamp"/>
+                <parameter name="lastUpdatedDate" type="Timestamp"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantNotificationSettings" from="darpan.reconciliation.notification.TenantNotificationSupport.readSettings(ec)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="TenantNotificationSettings" allow-remote="true" authenticate="true">
+        <description>Save one Google Chat run-completion webhook for the active tenant.</description>
+        <in-parameters>
+            <parameter name="googleChatWebhookUrl" allow-html="true"/>
+            <parameter name="isActive"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages"><parameter name="message"/></parameter>
+            <parameter name="errors"><parameter name="error"/></parameter>
+            <parameter name="tenantNotificationSettings">
+                <parameter name="companyUserGroupId"/>
+                <parameter name="companyLabel"/>
+                <parameter name="googleChatConfigured" type="Boolean"/>
+                <parameter name="googleChatWebhookUrlMasked"/>
+                <parameter name="isActive"/>
+                <parameter name="createdByUserId"/>
+                <parameter name="createdDate" type="Timestamp"/>
+                <parameter name="lastUpdatedDate" type="Timestamp"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantNotificationSettings" from="darpan.reconciliation.notification.TenantNotificationSupport.saveSettings(ec, googleChatWebhookUrl, isActive)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
     <service verb="list" noun="SftpServers" allow-remote="true" authenticate="true">
         <description>List SFTP server configs with secret redaction indicators.</description>
         <in-parameters>
@@ -556,163 +661,4 @@
         </actions>
     </service>
 
-    <service verb="list" noun="HcReadDbConfigs" allow-remote="true" authenticate="true">
-        <description>List external Read DB settings with redacted secret indicators.</description>
-        <in-parameters>
-            <parameter name="query"/>
-            <parameter name="pageIndex" type="Integer" default-value="0"/>
-            <parameter name="pageSize" type="Integer" default-value="20"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="ok" type="Boolean"/>
-            <parameter name="messages"><parameter name="message"/></parameter>
-            <parameter name="errors"><parameter name="error"/></parameter>
-            <parameter name="pagination">
-                <parameter name="pageIndex" type="Integer"/>
-                <parameter name="pageSize" type="Integer"/>
-                <parameter name="totalCount" type="Integer"/>
-                <parameter name="pageCount" type="Integer"/>
-            </parameter>
-            <parameter name="configs">
-                <parameter name="hcReadDbConfigId"/>
-                <parameter name="displayName"/>
-                <parameter name="host"/>
-                <parameter name="port" type="Integer"/>
-                <parameter name="databaseName"/>
-                <parameter name="additionalParameters"/>
-                <parameter name="jdbcUrl"/>
-                <parameter name="username"/>
-                <parameter name="dbDriver"/>
-                <parameter name="defaultTableName"/>
-                <parameter name="itemIdColumn"/>
-                <parameter name="locationIdColumn"/>
-                <parameter name="transactionDateColumn"/>
-                <parameter name="connectionPropertiesJson"/>
-                <parameter name="isActive"/>
-                <parameter name="hasPassword" type="Boolean"/>
-            </parameter>
-        </out-parameters>
-        <actions>
-            <set field="pageIndexSafe" from="Math.max(0, darpan.facade.common.FacadeSupport.normalizeInt(pageIndex, 0))"/>
-            <set field="pageSizeSafe" from="Math.max(1, Math.min(200, darpan.facade.common.FacadeSupport.normalizeInt(pageSize, 20)))"/>
-            <set field="searchLower" from="darpan.facade.common.FacadeSupport.normalize(query)?.toLowerCase()"/>
-            <set field="configs" from="[]"/>
-            <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
-            <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec, 'Settings are restricted to super-admin users.')"/>
-            <if condition="!ec.message.hasError()">
-                <entity-find entity-name="darpan.reconciliation.HcReadDbConfig" list="hcReadDbConfigList" cache="false">
-                    <order-by field-name="displayName,hcReadDbConfigId"/>
-                </entity-find>
-                <set field="rows" from="(hcReadDbConfigList ?: []).collect { item -> [hcReadDbConfigId: item.hcReadDbConfigId, displayName: item.displayName ?: item.description, host: item.host, port: item.port ?: 3306, databaseName: item.databaseName, additionalParameters: item.additionalParameters, jdbcUrl: item.jdbcUrl?.toString()?.replaceAll('(?i)(password=)[^&amp;;]+', '$1***'), username: item.username, dbDriver: item.dbDriver ?: 'com.mysql.cj.jdbc.Driver', defaultTableName: item.defaultTableName ?: 'inventory_item_detail', itemIdColumn: item.itemIdColumn ?: 'product_id', locationIdColumn: item.locationIdColumn ?: 'facility_id', transactionDateColumn: item.transactionDateColumn ?: 'effective_date', connectionPropertiesJson: item.connectionPropertiesJson, isActive: item.isActive ?: 'Y', hasPassword: item.password ? true : false] }"/>
-                <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.hcReadDbConfigId, row.displayName, row.host, row.databaseName, row.username].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
-                <set field="totalCount" from="filteredRows.size()"/>
-                <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>
-                <set field="toIndex" from="Math.min(fromIndex + pageSizeSafe, totalCount)"/>
-                <set field="configs" from="filteredRows.subList(fromIndex, toIndex)"/>
-                <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: totalCount, pageCount: Math.max(1, ((totalCount + pageSizeSafe - 1) / pageSizeSafe) as int)]"/>
-            </if>
-            <set field="ok" from="!ec.message.hasError()"/>
-            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
-            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
-        </actions>
-    </service>
-
-    <service verb="save" noun="HcReadDbConfig" allow-remote="true" authenticate="true">
-        <description>Create or update Read DB config; auto-generates config ID/JDBC URL when needed.</description>
-        <in-parameters>
-            <parameter name="hcReadDbConfigId"/>
-            <parameter name="displayName"/>
-            <parameter name="host" required="true"/>
-            <parameter name="port" type="Integer" default-value="3306"/>
-            <parameter name="databaseName" required="true"/>
-            <parameter name="username" required="true"/>
-            <parameter name="password"/>
-            <parameter name="additionalParameters"/>
-            <parameter name="dbDriver" default-value="com.mysql.cj.jdbc.Driver"/>
-            <parameter name="defaultTableName" default-value="inventory_item_detail"/>
-            <parameter name="itemIdColumn" default-value="product_id"/>
-            <parameter name="locationIdColumn" default-value="facility_id"/>
-            <parameter name="transactionDateColumn" default-value="effective_date"/>
-            <parameter name="connectionPropertiesJson" allow-html="true"/>
-            <parameter name="isActive"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="ok" type="Boolean"/>
-            <parameter name="messages"><parameter name="message"/></parameter>
-            <parameter name="errors"><parameter name="error"/></parameter>
-            <parameter name="savedConfig">
-                <parameter name="hcReadDbConfigId"/>
-                <parameter name="displayName"/>
-                <parameter name="host"/>
-                <parameter name="port" type="Integer"/>
-                <parameter name="databaseName"/>
-                <parameter name="additionalParameters"/>
-                <parameter name="jdbcUrl"/>
-                <parameter name="username"/>
-                <parameter name="dbDriver"/>
-                <parameter name="defaultTableName"/>
-                <parameter name="itemIdColumn"/>
-                <parameter name="locationIdColumn"/>
-                <parameter name="transactionDateColumn"/>
-                <parameter name="connectionPropertiesJson"/>
-                <parameter name="isActive"/>
-                <parameter name="hasPassword" type="Boolean"/>
-            </parameter>
-        </out-parameters>
-        <actions>
-            <set field="inputConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(hcReadDbConfigId)"/>
-            <set field="displayNameValue" from="darpan.facade.common.FacadeSupport.normalize(displayName)"/>
-            <set field="hostValue" from="darpan.facade.common.FacadeSupport.normalize(host)"/>
-            <set field="databaseNameValue" from="darpan.facade.common.FacadeSupport.normalize(databaseName)"/>
-            <set field="usernameValue" from="darpan.facade.common.FacadeSupport.normalize(username)"/>
-            <set field="passwordValue" from="darpan.facade.common.FacadeSupport.normalize(password)"/>
-            <set field="additionalParametersValue" from="darpan.facade.common.FacadeSupport.normalize(additionalParameters)"/>
-            <set field="dbDriverValue" from="darpan.facade.common.FacadeSupport.normalize(dbDriver) ?: 'com.mysql.cj.jdbc.Driver'"/>
-            <set field="defaultTableNameValue" from="darpan.facade.common.FacadeSupport.normalize(defaultTableName) ?: 'inventory_item_detail'"/>
-            <set field="itemIdColumnValue" from="darpan.facade.common.FacadeSupport.normalize(itemIdColumn) ?: 'product_id'"/>
-            <set field="locationIdColumnValue" from="darpan.facade.common.FacadeSupport.normalize(locationIdColumn) ?: 'facility_id'"/>
-            <set field="transactionDateColumnValue" from="darpan.facade.common.FacadeSupport.normalize(transactionDateColumn) ?: 'effective_date'"/>
-            <set field="connectionPropertiesJsonValue" from="darpan.facade.common.FacadeSupport.normalize(connectionPropertiesJson)"/>
-            <set field="isActiveValue" from="darpan.facade.common.FacadeSupport.normalizeBool(isActive, true) ? 'Y' : 'N'"/>
-            <set field="portValue" from="darpan.facade.common.FacadeSupport.normalizeInt(port, 3306)"/>
-            <set field="connectionPropertiesError" from="darpan.facade.settings.SettingsFacadeSupport.validateJsonObjectText(connectionPropertiesJsonValue, 'Connection Properties JSON')"/>
-            <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec, 'Settings are restricted to super-admin users.')"/>
-            <if condition="portValue &lt;= 0">
-                <message error="true">Port must be greater than 0.</message>
-            </if>
-            <if condition="!hostValue">
-                <message error="true">Host is required.</message>
-            </if>
-            <if condition="!databaseNameValue">
-                <message error="true">Database Name is required.</message>
-            </if>
-            <if condition="!usernameValue">
-                <message error="true">Username is required.</message>
-            </if>
-            <if condition="connectionPropertiesError">
-                <message error="true">${connectionPropertiesError}</message>
-            </if>
-            <set field="cleanAdditionalValue" from="darpan.facade.settings.SettingsFacadeSupport.normalizeAdditionalParameters(additionalParametersValue)"/>
-            <if condition="!ec.message.hasError()">
-                <set field="configIdResult" from="darpan.facade.settings.SettingsFacadeSupport.resolveHcReadDbConfigId(ec, inputConfigIdValue, displayNameValue, hostValue, databaseNameValue)"/>
-                <if condition="configIdResult.error">
-                    <message error="true">${configIdResult.error}</message>
-                </if>
-                <set field="resolvedConfigId" from="configIdResult.configId"/>
-                <set field="jdbcUrlValue" from="darpan.facade.settings.SettingsFacadeSupport.buildMysqlJdbcUrl(hostValue, portValue, databaseNameValue, cleanAdditionalValue)"/>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="existingConfig" from="ec.entity.find('darpan.reconciliation.HcReadDbConfig').condition('hcReadDbConfigId', resolvedConfigId).useCache(false).one()"/>
-                <set field="hcMap" from="[hcReadDbConfigId: resolvedConfigId, description: displayNameValue, displayName: displayNameValue, host: hostValue, port: portValue, databaseName: databaseNameValue, additionalParameters: cleanAdditionalValue, jdbcUrl: jdbcUrlValue, username: usernameValue, dbDriver: dbDriverValue, defaultTableName: defaultTableNameValue, itemIdColumn: itemIdColumnValue, locationIdColumn: locationIdColumnValue, transactionDateColumn: transactionDateColumnValue, connectionPropertiesJson: connectionPropertiesJsonValue, isActive: isActiveValue, password: passwordValue ?: existingConfig?.password]"/>
-                <service-call name="store#darpan.reconciliation.HcReadDbConfig" in-map="hcMap"/>
-                <set field="savedConfig" from="[hcReadDbConfigId: resolvedConfigId, displayName: displayNameValue, host: hostValue, port: portValue, databaseName: databaseNameValue, additionalParameters: cleanAdditionalValue, jdbcUrl: jdbcUrlValue, username: usernameValue, dbDriver: dbDriverValue, defaultTableName: defaultTableNameValue, itemIdColumn: itemIdColumnValue, locationIdColumn: locationIdColumnValue, transactionDateColumn: transactionDateColumnValue, connectionPropertiesJson: connectionPropertiesJsonValue, isActive: isActiveValue, hasPassword: !!darpan.facade.common.FacadeSupport.normalize(hcMap.password)]"/>
-                <if condition="!ec.message.hasError()">
-                    <message>Saved Read DB config ${resolvedConfigId}.</message>
-                </if>
-            </if>
-            <set field="ok" from="!ec.message.hasError()"/>
-            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
-            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
-        </actions>
-    </service>
 </services>

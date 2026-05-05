@@ -62,6 +62,7 @@ class ReconciliationOutputSupport {
         String safePath = DataManagerSupport.normalizeRelativePath(rawFileName)
         if (safePath == null || !isSupportedOutputFile(safePath)) return false
         if (!safePath.contains("/")) return isSafeOutputPath(safePath)
+        if (isSafeOutputPath(safePath)) return true
         return resolveRunResultForArtifactPath(ec, safePath) != null
     }
 

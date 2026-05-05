@@ -209,6 +209,20 @@ class ReconciliationOutputSupportTests {
     }
 
     @Test
+    void safeReadableArtifactPathAllowsResultFilesWithoutManifestLookup() {
+        def ecWithoutManifest = [entity: [find: { String entityName -> null }]]
+
+        assertTrue(ReconciliationOutputSupport.isSafeReadableArtifactPath(
+                ecWithoutManifest,
+                "reconciliation-runs/RS_API_ORDER_SYNC/20260505-195645688/RS_API_ORDER_SYNC_result.json"
+        ))
+        assertFalse(ReconciliationOutputSupport.isSafeReadableArtifactPath(
+                ecWithoutManifest,
+                "reconciliation-runs/RS_API_ORDER_SYNC/20260505-195645688/file1-api/shopify-orders.json"
+        ))
+    }
+
+    @Test
     void apiSourceDetailsModeAcceptsDateRangeMaps() {
         Map<String, Object> dateRange = [
                 start: Timestamp.valueOf("2026-03-31 17:00:00"),

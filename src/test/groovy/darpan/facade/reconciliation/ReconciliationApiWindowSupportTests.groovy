@@ -75,6 +75,56 @@ class ReconciliationApiWindowSupportTests {
     }
 
     @Test
+    void tenantCalendarWindowDefinesSharedOrderApiPeriodBeforeSourceDispatch() {
+        Map<String, Object> tenantWindow = ReconciliationApiWindowSupport.normalizeCalendarWindow(
+                timestamp("2026-05-04T00:00:00Z"),
+                timestamp("2026-05-05T00:00:00Z"),
+                "America/New_York",
+                "2026-05-04",
+                "2026-05-05"
+        )
+
+        Map<String, Object> shopifyWindow = ReconciliationApiWindowSupport.preserveExactWindow(
+                (Timestamp) tenantWindow.windowStartDate,
+                (Timestamp) tenantWindow.windowEndDate,
+                "UTC"
+        )
+        Map<String, Object> omsWindow = ReconciliationApiWindowSupport.preserveExactWindow(
+                (Timestamp) tenantWindow.windowStartDate,
+                (Timestamp) tenantWindow.windowEndDate,
+                "America/Los_Angeles"
+        )
+
+        assertEquals(timestamp("2026-05-04T04:00:00Z"), tenantWindow.windowStartDate)
+        assertEquals(timestamp("2026-05-05T04:00:00Z"), tenantWindow.windowEndDate)
+        assertEquals(timestamp("2026-05-04T04:00:00Z"), shopifyWindow.windowStartDate)
+        assertEquals(timestamp("2026-05-05T04:00:00Z"), shopifyWindow.windowEndDate)
+        assertEquals(timestamp("2026-05-04T04:00:00Z"), omsWindow.windowStartDate)
+        assertEquals(timestamp("2026-05-05T04:00:00Z"), omsWindow.windowEndDate)
+        assertEquals("UTC", shopifyWindow.timeZone)
+        assertEquals("America/Los_Angeles", omsWindow.timeZone)
+        assertTrue((Boolean) tenantWindow.calendarDateNormalized)
+        assertFalse((Boolean) shopifyWindow.calendarDateNormalized)
+        assertFalse((Boolean) omsWindow.calendarDateNormalized)
+        assertTrue((Boolean) shopifyWindow.exactWindowPreserved)
+        assertTrue((Boolean) omsWindow.exactWindowPreserved)
+    }
+
+    @Test
+    void exactTenantWindowIsPreservedEvenWhenItFallsOnUtcMidnight() {
+        Timestamp start = timestamp("2026-05-04T00:00:00Z")
+        Timestamp end = timestamp("2026-05-05T00:00:00Z")
+
+        Map<String, Object> window = ReconciliationApiWindowSupport.preserveExactWindow(start, end, "America/Los_Angeles")
+
+        assertEquals(start, window.windowStartDate)
+        assertEquals(end, window.windowEndDate)
+        assertEquals("America/Los_Angeles", window.timeZone)
+        assertFalse((Boolean) window.calendarDateNormalized)
+        assertTrue((Boolean) window.exactWindowPreserved)
+    }
+
+    @Test
     void nonMidnightInstantsArePreservedAsExactApiWindows() {
         Timestamp start = timestamp("2026-05-01T05:30:00Z")
         Timestamp end = timestamp("2026-05-01T06:30:00Z")

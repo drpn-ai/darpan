@@ -57,6 +57,17 @@ class ReconciliationApiWindowSupport {
         return result
     }
 
+    static Map<String, Object> preserveExactWindow(Timestamp windowStartDate, Timestamp windowEndDate, Object rawTimeZone) {
+        ZoneId zone = resolveZoneId(rawTimeZone)
+        return [
+                windowStartDate       : windowStartDate,
+                windowEndDate         : windowEndDate,
+                timeZone              : zone.id,
+                calendarDateNormalized: false,
+                exactWindowPreserved  : true,
+        ]
+    }
+
     private static ZoneId resolveZoneId(Object rawTimeZone) {
         String timeZone = ((rawTimeZone)?.toString()?.trim()) ?: TenantAccessSupport.DEFAULT_TIME_ZONE
         try {

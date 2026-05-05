@@ -246,43 +246,12 @@ def stageTextInput = { Object source, String fileSide, String inputName, String 
 def formatApiWindow = { Timestamp timestamp ->
     timestamp?.toInstant()?.toString()
 }
-def resolveShopifyTimeZone = { String configId, String label ->
-    def config = ec.entity.find("darpan.shopify.ShopifyAuthConfig")
-            .condition("shopifyAuthConfigId", configId)
-            .useCache(false)
-            .one()
-    if (config) {
-        TenantAccessSupport.requireTenantRecordAccess(
-                ec,
-                config,
-                "${label} Shopify auth config '${configId}' was not found.",
-                "${label} Shopify auth config '${configId}' is not available in your active tenant."
-        )
-    }
-    return ((config?.timeZone)?.toString()?.trim()) ?: TenantAccessSupport.resolveActiveTenantTimeZone(ec)
-}
-def resolveHotWaxTimeZone = { String configId, String label ->
-    def config = ec.entity.find("darpan.hotwax.HotWaxOmsRestSourceConfig")
-            .condition("omsRestSourceConfigId", configId)
-            .useCache(false)
-            .one()
-    if (config) {
-        TenantAccessSupport.requireTenantRecordAccess(
-                ec,
-                config,
-                "${label} OMS REST source config '${configId}' was not found.",
-                "${label} OMS REST source config '${configId}' is not available in your active tenant."
-        )
-    }
-    return ((config?.timeZone)?.toString()?.trim()) ?: TenantAccessSupport.resolveActiveTenantTimeZone(ec)
-}
-def resolveSourceApiWindow = { Object rawTimeZone ->
-    ReconciliationApiWindowSupport.normalizeCalendarWindow(
-            requestedWindowStartDateValue,
-            requestedWindowEndDateValue,
-            rawTimeZone,
-            windowStartLocalDateValue,
-            windowEndLocalDateValue
+Map<String, Object> tenantApiWindow = null
+def resolveTenantApiWindow = {
+    ReconciliationApiWindowSupport.preserveExactWindow(
+            windowStartDateValue,
+            windowEndDateValue,
+            TenantAccessSupport.resolveActiveTenantTimeZone(ec)
     )
 }
 def extractHotWaxSource = { Object source, String fileSide, String label, Map artifactContext ->
@@ -291,9 +260,8 @@ def extractHotWaxSource = { Object source, String fileSide, String label, Map ar
         ec.message.addError("${label} API source requires a HotWax OMS source config.")
         return [:]
     }
-    String sourceTimeZone = resolveHotWaxTimeZone(configId, label)
+    Map<String, Object> sourceApiWindow = tenantApiWindow ?: resolveTenantApiWindow()
     if (ec.message.hasError()) return [:]
-    Map<String, Object> sourceApiWindow = resolveSourceApiWindow(sourceTimeZone)
     Timestamp sourceWindowStartDate = (Timestamp) sourceApiWindow.windowStartDate
     Timestamp sourceWindowEndDate = (Timestamp) sourceApiWindow.windowEndDate
 
@@ -322,20 +290,20 @@ def extractShopifySource = { Object source, String fileSide, String label, Map a
         return [:]
     }
 
-    String sourceTimeZone = resolveShopifyTimeZone(configId, label)
+    Map<String, Object> sourceApiWindow = tenantApiWindow ?: resolveTenantApiWindow()
     if (ec.message.hasError()) return [:]
-    Map<String, Object> sourceApiWindow = resolveSourceApiWindow(sourceTimeZone)
     Timestamp sourceWindowStartDate = (Timestamp) sourceApiWindow.windowStartDate
     Timestamp sourceWindowEndDate = (Timestamp) sourceApiWindow.windowEndDate
 
     String token = sideToken(fileSide)
     String fileNameValue = ReconciliationOutputSupport.sanitizeUploadFileName("${label}-orders-api.json", "${token}-api.json")
     Map extraction = runInternalService("reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders", [
-            shopifyAuthConfigId: configId,
-            windowStart         : formatApiWindow(sourceWindowStartDate),
-            windowEnd           : formatApiWindow(sourceWindowEndDate),
-            outputLocation      : DataManagerSupport.childLocation(artifactContext.location as String, "${token}-api"),
-            fileName            : DataManagerSupport.runArtifactFileName(artifactContext.runToken, token, fileNameValue),
+            shopifyAuthConfigId   : configId,
+            windowStart           : formatApiWindow(sourceWindowStartDate),
+            windowEnd             : formatApiWindow(sourceWindowEndDate),
+            preserveWindowInstants: true,
+            outputLocation        : DataManagerSupport.childLocation(artifactContext.location as String, "${token}-api"),
+            fileName              : DataManagerSupport.runArtifactFileName(artifactContext.runToken, token, fileNameValue),
     ])
     ((List) (extraction.errors ?: [])).each { Object error -> ec.message.addError("${label}: ${error}") }
     if (ec.message.hasError()) return [:]
@@ -498,10 +466,12 @@ if (!ec.message.hasError() && mapping == null) {
             String file2Label = enumLabel(resolvedFile2SystemEnumId)
 
             if (hasApiInput) {
-                Map artifactContext = buildRunArtifactContext(savedRun.savedRunId as String)
-                Map file1Result = [:]
-                Map file2Result = [:]
-                String reconciliationRunResultId = persistRunResult([
+                tenantApiWindow = resolveTenantApiWindow()
+                if (!ec.message.hasError()) {
+                    Map artifactContext = buildRunArtifactContext(savedRun.savedRunId as String)
+                    Map file1Result = [:]
+                    Map file2Result = [:]
+                    String reconciliationRunResultId = persistRunResult([
                         savedRunId          : savedRun.savedRunId,
                         savedRunType        : savedRun.runType ?: ReconciliationSavedRunSupport.RUN_TYPE_RULESET,
                         ruleSetId           : savedRun.ruleSetId,
@@ -512,17 +482,17 @@ if (!ec.message.hasError() && mapping == null) {
                         statusEnumId        : ReconciliationOutputSupport.STATUS_RUNNING,
                         createdDate         : ec.user.nowTimestamp,
                         startedDate         : ec.user.nowTimestamp,
-                ])
-                try {
-                    file1Result = file1UsesApiSource ?
-                            extractApiSource(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, artifactContext) :
-                            stageTextInput(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, inputFile1Name, file1TextValue, artifactContext)
-                    file2Result = !ec.message.hasError() && file2UsesApiSource ?
-                            extractApiSource(file2Source, ReconciliationSavedRunSupport.FILE_SIDE_2, artifactContext) :
-                            !ec.message.hasError() ? stageTextInput(file2Source, ReconciliationSavedRunSupport.FILE_SIDE_2, inputFile2Name, file2TextValue, artifactContext) : [:]
+                    ])
+                    try {
+                        file1Result = file1UsesApiSource ?
+                                extractApiSource(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, artifactContext) :
+                                stageTextInput(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, inputFile1Name, file1TextValue, artifactContext)
+                        file2Result = !ec.message.hasError() && file2UsesApiSource ?
+                                extractApiSource(file2Source, ReconciliationSavedRunSupport.FILE_SIDE_2, artifactContext) :
+                                !ec.message.hasError() ? stageTextInput(file2Source, ReconciliationSavedRunSupport.FILE_SIDE_2, inputFile2Name, file2TextValue, artifactContext) : [:]
 
-                    if (!ec.message.hasError()) {
-                        Map serviceResult = runInternalService("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope", [
+                        if (!ec.message.hasError()) {
+                            Map serviceResult = runInternalService("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope", [
                                 ruleSetId          : savedRun.ruleSetId,
                                 compareScopeId     : savedRun.compareScopeId,
                                 file1Location      : file1Result.fileLocation,
@@ -538,13 +508,13 @@ if (!ec.message.hasError() && mapping == null) {
                                 hasHeader          : hasHeaderValue,
                                 sparkMaster        : sparkMaster,
                                 sparkAppName       : sparkAppName ?: "SavedRunDiff"
-                        ])
-                        if (!ec.message.hasError()) {
-                            writeRuleSetOutput(serviceResult, savedRun, file1Label, file2Label, artifactContext)
-                            String resultDataManagerPath = serviceResult.diffLocation ?
-                                    (DataManagerSupport.relativeDataManagerPath(ec, new File(serviceResult.diffLocation as String)) ?: serviceResult.diffFileName) :
-                                    serviceResult.diffFileName
-                            reconciliationRunResultId = persistRunResult([
+                            ])
+                            if (!ec.message.hasError()) {
+                                writeRuleSetOutput(serviceResult, savedRun, file1Label, file2Label, artifactContext)
+                                String resultDataManagerPath = serviceResult.diffLocation ?
+                                        (DataManagerSupport.relativeDataManagerPath(ec, new File(serviceResult.diffLocation as String)) ?: serviceResult.diffFileName) :
+                                        serviceResult.diffFileName
+                                reconciliationRunResultId = persistRunResult([
                                     reconciliationRunResultId: reconciliationRunResultId,
                                     savedRunId               : savedRun.savedRunId,
                                     savedRunType             : savedRun.runType ?: ReconciliationSavedRunSupport.RUN_TYPE_RULESET,
@@ -562,10 +532,10 @@ if (!ec.message.hasError() && mapping == null) {
                                     differenceCount          : serviceResult.differenceCount,
                                     onlyInFile1Count         : serviceResult.missingInFile2Count,
                                     onlyInFile2Count         : serviceResult.missingInFile1Count,
-                            ])
-                            serviceResult.reconciliationRunResultId = reconciliationRunResultId
-                            serviceResult.diffFileName = resultDataManagerPath
-                            runResult = [
+                                ])
+                                serviceResult.reconciliationRunResultId = reconciliationRunResultId
+                                serviceResult.diffFileName = resultDataManagerPath
+                                runResult = [
                                     savedRunId               : savedRun.savedRunId,
                                     runName                  : savedRun.runName,
                                     runType                  : savedRun.runType,
@@ -583,11 +553,11 @@ if (!ec.message.hasError() && mapping == null) {
                                     validationErrors         : (serviceResult.validationErrors ?: []) as List,
                                     processingWarnings       : (serviceResult.processingWarnings ?: []) as List,
                                     generatedOutput          : buildGeneratedOutputDescriptor(serviceResult),
-                            ]
+                                ]
+                            }
                         }
-                    }
-                } catch (Throwable t) {
-                    persistRunResult([
+                    } catch (Throwable t) {
+                        persistRunResult([
                             reconciliationRunResultId: reconciliationRunResultId,
                             file1Name                : file1Result.fileName,
                             file1DataManagerPath     : file1Result.dataManagerPath,
@@ -595,11 +565,11 @@ if (!ec.message.hasError() && mapping == null) {
                             file2DataManagerPath     : file2Result.dataManagerPath,
                             statusEnumId             : ReconciliationOutputSupport.STATUS_FAILED,
                             completedDate            : ec.user.nowTimestamp,
-                    ])
-                    throw t
-                } finally {
-                    if (reconciliationRunResultId && ec.message.hasError() && !runResult?.reconciliationRunResultId) {
-                        persistRunResult([
+                        ])
+                        throw t
+                    } finally {
+                        if (reconciliationRunResultId && ec.message.hasError() && !runResult?.reconciliationRunResultId) {
+                            persistRunResult([
                                 reconciliationRunResultId: reconciliationRunResultId,
                                 file1Name                : file1Result.fileName,
                                 file1DataManagerPath     : file1Result.dataManagerPath,
@@ -607,7 +577,8 @@ if (!ec.message.hasError() && mapping == null) {
                                 file2DataManagerPath     : file2Result.dataManagerPath,
                                 statusEnumId             : ReconciliationOutputSupport.STATUS_FAILED,
                                 completedDate            : ec.user.nowTimestamp,
-                        ])
+                            ])
+                        }
                     }
                 }
             } else {

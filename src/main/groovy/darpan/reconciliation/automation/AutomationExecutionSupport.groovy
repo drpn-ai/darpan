@@ -517,6 +517,7 @@ class AutomationExecutionSupport {
         String dateToParameterName = normalize(readField(source, "dateToParameterName")) ?: defaultDateToParameterName(serviceName)
         serviceParams[dateFromParameterName] = window.childWindowStartDate
         serviceParams[dateToParameterName] = window.childWindowEndDate
+        if (serviceName == SHOPIFY_ORDERS_EXTRACT_SERVICE) serviceParams.preserveWindowInstants = true
 
         def call = ec.service.sync().name(serviceName).parameters(serviceParams)
         if (call?.metaClass?.respondsTo(call, "disableAuthz")) call = call.disableAuthz()

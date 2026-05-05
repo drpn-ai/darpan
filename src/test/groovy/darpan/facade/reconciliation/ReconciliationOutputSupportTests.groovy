@@ -1,5 +1,7 @@
 package darpan.facade.reconciliation
 
+import darpan.facade.common.TenantAccessSupport
+
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 
@@ -324,6 +326,78 @@ class ReconciliationOutputSupportTests {
     }
 
     @Test
+    void sourceArtifactDownloadFallbackAllowsExposedSiblingFileWithoutRunResult(@TempDir File dataManagerRoot) {
+        String runFolderPath = "reconciliation-runs/RS_API_ORDER_SYNC/20260505-201713752"
+        String resultPath = "${runFolderPath}/RS_API_ORDER_SYNC_result.json"
+        String sourcePath = "${runFolderPath}/file1-api/RS_API_ORDER_SYNC_file1.json"
+        File runFolder = new File(dataManagerRoot, runFolderPath)
+        File file1Folder = new File(runFolder, "file1-api")
+        assertTrue(file1Folder.mkdirs())
+        new File(runFolder, "RS_API_ORDER_SYNC_result.json").text =
+                '{"metadata":{"companyUserGroupId":"GORJANA","sourceMode":"api","file1Label":"SHOPIFY","file2Label":"HotWax"},"differences":[]}'
+        File sourceFile = new File(file1Folder, "RS_API_ORDER_SYNC_file1.json")
+        sourceFile.text = '{"records":[]}'
+        new File(runFolder, "file2-api").mkdirs()
+        new File(runFolder, "file2-api/RS_API_ORDER_SYNC_file2.json").text = '{"records":[]}'
+        def ec = new Expando(
+                resource: new FakeResource(dataManagerRoot),
+                user    : new Expando(
+                        userId       : "editor",
+                        nowTimestamp : Timestamp.valueOf("2026-05-05 12:00:00"),
+                        getPreference: { String key ->
+                            key == TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY ? "GORJANA" : null
+                        }
+                ),
+                entity  : new FakeEntity([
+                        "darpan.reconciliation.ReconciliationRunResult": [],
+                        "moqui.security.UserGroupAndMember"            : [[
+                                userId         : "editor",
+                                groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID,
+                                userGroupId    : "GORJANA",
+                        ]],
+                        "moqui.security.UserGroupMember"               : [],
+                ])
+        )
+
+        assertNotNull(ReconciliationOutputSupport.buildGeneratedOutputSourceDetails(ec, resultPath, [
+                metadata: [sourceMode: "api", file1Label: "SHOPIFY", file2Label: "HotWax"],
+        ])?.files?.find { Map<String, Object> file -> file.filePath == sourcePath })
+        assertTrue(ReconciliationOutputSupport.isSafeReadableArtifactPath(ec, "runtime://datamanager/${sourcePath}"))
+        assertEquals(
+                sourceFile.canonicalPath,
+                ReconciliationOutputSupport.resolveGeneratedOutputArtifactFile(ec, "runtime://datamanager/${sourcePath}").canonicalPath
+        )
+        assertEquals("GORJANA", ReconciliationOutputSupport.resolveGeneratedOutputTenantUserGroupId(ec, sourceFile, sourcePath))
+        assertTrue(ReconciliationOutputSupport.canAccessGeneratedOutputFile(ec, sourceFile, sourcePath))
+        assertTrue(ReconciliationOutputSupport.canAccessGeneratedOutputFile(ec, sourceFile, "runtime://datamanager/${sourcePath}"))
+
+        def outsideTenantEc = new Expando(
+                resource: new FakeResource(dataManagerRoot),
+                user    : new Expando(
+                        userId       : "editor",
+                        nowTimestamp : Timestamp.valueOf("2026-05-05 12:00:00"),
+                        getPreference: { String key ->
+                            key == TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY ? "OTHER" : null
+                        }
+                ),
+                entity  : new FakeEntity([
+                        "darpan.reconciliation.ReconciliationRunResult": [],
+                        "moqui.security.UserGroupAndMember"            : [[
+                                userId         : "editor",
+                                groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID,
+                                userGroupId    : "OTHER",
+                        ]],
+                        "moqui.security.UserGroupMember"               : [],
+                ])
+        )
+        assertFalse(ReconciliationOutputSupport.canAccessGeneratedOutputFile(
+                outsideTenantEc,
+                sourceFile,
+                "runtime://datamanager/${sourcePath}"
+        ))
+    }
+
+    @Test
     void generatedOutputAccessFailsClosedWithoutActiveTenantForDataManagerPaths() {
         def anonymousEc = [user: [userId: null]]
 
@@ -400,6 +474,14 @@ class ReconciliationOutputSupportTests {
 
         Object one() {
             return rows.find { Map<String, Object> row ->
+                conditions.every { Map<String, Object> condition ->
+                    row[condition.fieldName as String] == condition.value
+                }
+            }
+        }
+
+        List<Map<String, Object>> list() {
+            return rows.findAll { Map<String, Object> row ->
                 conditions.every { Map<String, Object> condition ->
                     row[condition.fieldName as String] == condition.value
                 }

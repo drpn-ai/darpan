@@ -59,15 +59,16 @@ class ReconciliationOutputSupport {
     }
 
     static boolean isSafeReadableArtifactPath(def ec, Object rawFileName) {
-        String safePath = DataManagerSupport.normalizeRelativePath(rawFileName)
+        String safePath = normalizeDataManagerRelativePath(ec, rawFileName)
         if (safePath == null || !isSupportedOutputFile(safePath)) return false
         if (!safePath.contains("/")) return isSafeOutputPath(safePath)
         if (isSafeOutputPath(safePath)) return true
-        return resolveRunResultForArtifactPath(ec, safePath) != null
+        return resolveRunResultForArtifactPath(ec, safePath) != null ||
+                resolveSourceArtifactResultFile(ec, safePath) != null
     }
 
     static File resolveGeneratedOutputFile(def ec, Object rawFileName) {
-        String safePath = DataManagerSupport.normalizeRelativePath(rawFileName)
+        String safePath = normalizeDataManagerRelativePath(ec, rawFileName)
         if (!safePath) return null
 
         File dataManagerFile = DataManagerSupport.resolveDataManagerFile(ec, safePath, false)
@@ -88,16 +89,17 @@ class ReconciliationOutputSupport {
         File resultFile = resolveGeneratedOutputFile(ec, rawFileName)
         if (resultFile != null) return resultFile
 
-        String safePath = DataManagerSupport.normalizeRelativePath(rawFileName)
+        String safePath = normalizeDataManagerRelativePath(ec, rawFileName)
         if (!safePath?.contains("/") || !isSupportedOutputFile(safePath)) return null
-        if (resolveRunResultForArtifactPath(ec, safePath) == null) return null
+        if (resolveRunResultForArtifactPath(ec, safePath) == null &&
+                resolveSourceArtifactResultFile(ec, safePath) == null) return null
 
         File dataManagerFile = DataManagerSupport.resolveDataManagerFile(ec, safePath, false)
         return dataManagerFile?.exists() && dataManagerFile.isFile() ? dataManagerFile : null
     }
 
     static boolean canAccessGeneratedOutputFile(def ec, File file, Object rawFileName) {
-        String safePath = DataManagerSupport.normalizeRelativePath(rawFileName)
+        String safePath = normalizeDataManagerRelativePath(ec, rawFileName)
         if (!safePath?.contains("/")) return true
 
         String activeTenantUserGroupId = normalize(TenantAccessSupport.currentActiveTenantUserGroupId(ec))
@@ -136,6 +138,44 @@ class ReconciliationOutputSupport {
         candidates.add("/datamanager/${relativePath}".toString())
         candidates.add("/data-manager/${relativePath}".toString())
         return candidates as List<String>
+    }
+
+    protected static File resolveSourceArtifactResultFile(def ec, Object rawFileName) {
+        String safePath = normalizeDataManagerRelativePath(ec, rawFileName)
+        if (!safePath?.contains("/") || !isSupportedOutputFile(safePath) || isGeneratedResultFile(safePath)) return null
+
+        File sourceFile = DataManagerSupport.resolveDataManagerFile(ec, safePath, false)
+        if (sourceFile == null || !sourceFile.exists() || !sourceFile.isFile()) return null
+
+        String runFolderPath = resolveSourceArtifactRunFolderPath(safePath)
+        if (!runFolderPath) return null
+
+        File runFolder = DataManagerSupport.resolveDataManagerFile(ec, runFolderPath, false)
+        if (runFolder == null || !runFolder.exists() || !runFolder.isDirectory()) return null
+
+        List<File> resultFiles = (runFolder.listFiles() ?: [] as File[])
+                .findAll { File file -> file.isFile() && isGeneratedResultFile(file.name) }
+                .sort { File file -> file.name.toLowerCase() }
+        for (File resultFile : resultFiles) {
+            String resultPath = DataManagerSupport.relativeDataManagerPath(ec, resultFile)
+            Map<String, Object> sourceDetails =
+                    buildGeneratedOutputSourceDetailsFromArtifactFolder(ec, resultPath, parseOutputDocument(resultFile))
+            List<Map<String, Object>> files = sourceDetails?.files instanceof List ?
+                    (List<Map<String, Object>>) sourceDetails.files : []
+            if (files.any { Map<String, Object> fileDescriptor -> normalizeDataManagerRelativePath(ec, fileDescriptor.filePath) == safePath }) {
+                return resultFile
+            }
+        }
+        return null
+    }
+
+    protected static String resolveSourceArtifactRunFolderPath(String safePath) {
+        String parent = parentPath(safePath)
+        if (!parent) return ""
+
+        String parentName = fileNameFromPath(parent)?.toLowerCase()
+        if (parentName in ["file1", "file2", "file1-api", "file2-api"]) return parentPath(parent)
+        return parent
     }
 
     protected static String normalizeDataManagerRelativePath(def ec, Object rawPath) {
@@ -194,14 +234,15 @@ class ReconciliationOutputSupport {
     }
 
     static String resolveGeneratedOutputTenantUserGroupId(def ec, File file, Object rawFileName) {
-        String safePath = DataManagerSupport.normalizeRelativePath(rawFileName)
+        String safePath = normalizeDataManagerRelativePath(ec, rawFileName)
         if (!safePath) return null
 
         def runResult = resolveRunResultForArtifactPath(ec, safePath)
         String runResultTenantUserGroupId = normalize(runResult?.companyUserGroupId)
         if (runResultTenantUserGroupId) return runResultTenantUserGroupId
 
-        Map<String, Object> outputDocument = parseOutputDocument(file)
+        File tenantSourceFile = isGeneratedResultFile(safePath) ? file : (resolveSourceArtifactResultFile(ec, safePath) ?: file)
+        Map<String, Object> outputDocument = parseOutputDocument(tenantSourceFile)
         return normalize(outputDocument?.metadata instanceof Map ? outputDocument.metadata.companyUserGroupId : null)
     }
 

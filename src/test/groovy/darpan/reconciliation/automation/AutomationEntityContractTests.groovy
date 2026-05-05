@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 
 class AutomationEntityContractTests {
     private static final int MAX_ENUM_ID_LENGTH = 20
+    private static final String PREVIOUS_RELEASE_UPGRADE_DATA_PATH = "data/releases/2.0.3/upgrade-data.xml"
 
     private static final List<String> AUTOMATION_ENTITIES = [
             "darpan.reconciliation.ReconciliationAutomation",
@@ -137,27 +138,27 @@ class AutomationEntityContractTests {
     @Test
     void automationSeedAndUpgradeDataDefineRequiredEnums() {
         assertAutomationEnums(parse("data/AutomationSeedData.xml"))
-        assertAutomationEnums(parse("data/upgrade-data.xml"))
+        assertAutomationEnums(parse(PREVIOUS_RELEASE_UPGRADE_DATA_PATH))
     }
 
     @Test
     void automationEntitiesAreCoveredByTenantSecuritySeedAndUpgradeData() {
         assertSecurityCoverage(parse("data/SecuritySeedData.xml"))
-        assertSecurityCoverage(parse("data/upgrade-data.xml"))
+        assertSecurityCoverage(parse(PREVIOUS_RELEASE_UPGRADE_DATA_PATH))
     }
 
     @Test
     void automationScannerJobIsSeeded() {
         assertScannerJob(parse("data/ReconciliationJobSeedData.xml"))
-        assertScannerJob(parse("data/upgrade-data.xml"))
+        assertScannerJob(parse(PREVIOUS_RELEASE_UPGRADE_DATA_PATH))
     }
 
     @Test
     void apiSourceEndpointsAreSeededForCreateRunSetup() {
         assertHotWaxOrdersRemote(parse("data/SystemMessageRemoteSeedData.xml"))
-        assertHotWaxOrdersRemote(parse("data/upgrade-data.xml"))
+        assertHotWaxOrdersRemote(parse(PREVIOUS_RELEASE_UPGRADE_DATA_PATH))
         assertShopifyGraphqlOrdersRemote(parse("data/SystemMessageRemoteSeedData.xml"))
-        assertShopifyGraphqlOrdersRemote(parse("data/upgrade-data.xml"))
+        assertShopifyGraphqlOrdersRemote(parse(PREVIOUS_RELEASE_UPGRADE_DATA_PATH))
     }
 
     @Test
@@ -165,13 +166,13 @@ class AutomationEntityContractTests {
         assertOmsSystemSourceLabel(parse("data/DarpanSystemSourceSeedData.xml"))
         assertOmsSystemSourceLabel(parse("data/MappingSeedData.xml"))
         assertOmsSystemSourceLabel(parse("data/ReconciliationCompareScopeFixtureData.xml"))
-        def upgradeData = parse("data/upgrade-data.xml")
+        def upgradeData = parse(PREVIOUS_RELEASE_UPGRADE_DATA_PATH)
         assertCanonicalSystemSourceRows(upgradeData)
         assertOmsSystemSourceLabel(upgradeData)
         assertLegacySystemSourceAliasCleanup(upgradeData)
         assertNoLegacySystemSourceRows(parse("data/DarpanSystemSourceSeedData.xml"))
         assertNoLegacySystemSourceRows(parse("data/MappingSeedData.xml"))
-        assertNoLegacySystemSourceRows(parse("data/upgrade-data.xml"))
+        assertNoLegacySystemSourceRows(parse(PREVIOUS_RELEASE_UPGRADE_DATA_PATH))
     }
 
     @Test

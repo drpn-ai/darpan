@@ -71,6 +71,10 @@ class RuleEngineSupportTests {
             return this
         }
 
+        FinderStub disableAuthz() {
+            return this
+        }
+
         Object one() {
             return existingIds.contains(currentId) ? [ruleSetId: currentId] : null
         }

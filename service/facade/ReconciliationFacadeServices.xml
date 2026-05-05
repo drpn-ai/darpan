@@ -242,10 +242,16 @@
                 <set field="file2Schema" from="jsonschema.common.JsonSchemaUtil.resolveSchemaRecord(ec, null, file2SchemaFileNameValue, file2SchemaFileNameValue, false)"/>
                 <set field="ignoreFile2SchemaAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file2Schema, &quot;file2SchemaFileName '${file2SchemaFileNameValue}' was not found&quot;, 'file2 schema is not available in your active tenant.')"/>
             </if>
-            <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson &amp;&amp; file1Schema?.systemEnumId != file1SystemEnumIdValue">
+            <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson">
+                <set field="file1SchemaSystemEnumId" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file1Schema?.systemEnumId)"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson">
+                <set field="file2SchemaSystemEnumId" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file2Schema?.systemEnumId)"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson &amp;&amp; file1SchemaSystemEnumId != file1SystemEnumIdValue">
                 <message error="true">file1SchemaFileName '${file1SchemaFileNameValue}' belongs to system ${file1Schema?.systemEnumId}, not ${file1SystemEnumIdValue}</message>
             </if>
-            <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson &amp;&amp; file2Schema?.systemEnumId != file2SystemEnumIdValue">
+            <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson &amp;&amp; file2SchemaSystemEnumId != file2SystemEnumIdValue">
                 <message error="true">file2SchemaFileName '${file2SchemaFileNameValue}' belongs to system ${file2Schema?.systemEnumId}, not ${file2SystemEnumIdValue}</message>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson &amp;&amp; !darpan.facade.reconciliation.ReconciliationMappingSupport.isResolvableJsonIdExpression(file1PrimaryIdExpressionValue, file1Schema?.schemaText as String)">
@@ -485,8 +491,8 @@
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="schema1SystemEnumId" from="darpan.facade.common.FacadeSupport.normalize(schema1?.systemEnumId)"/>
-                <set field="schema2SystemEnumId" from="darpan.facade.common.FacadeSupport.normalize(schema2?.systemEnumId)"/>
+                <set field="schema1SystemEnumId" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(schema1?.systemEnumId)"/>
+                <set field="schema2SystemEnumId" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(schema2?.systemEnumId)"/>
                 <if condition="!schema1SystemEnumId">
                     <message error="true">Schema '${schema1?.schemaName}' is missing systemEnumId</message>
                 </if>
@@ -509,11 +515,11 @@
                             out-map="mappingCreateResult"/>
                     <service-call name="create#darpan.mapping.ReconciliationMappingMember"
                             disable-authz="true"
-                            in-map="[mappingMemberId: mappingIdValue + '-1', reconciliationMappingId: mappingIdValue, systemEnumId: schema1.systemEnumId, fileTypeEnumId: 'DftJson', idFieldExpression: schema1FieldPathValue, systemFieldName: schema1FieldPathValue, schemaFileName: schema1.schemaName, createdDate: nowTs]"
+                            in-map="[mappingMemberId: mappingIdValue + '-1', reconciliationMappingId: mappingIdValue, systemEnumId: schema1SystemEnumId, fileTypeEnumId: 'DftJson', idFieldExpression: schema1FieldPathValue, systemFieldName: schema1FieldPathValue, schemaFileName: schema1.schemaName, createdDate: nowTs]"
                             out-map="mappingMember1Result"/>
                     <service-call name="create#darpan.mapping.ReconciliationMappingMember"
                             disable-authz="true"
-                            in-map="[mappingMemberId: mappingIdValue + '-2', reconciliationMappingId: mappingIdValue, systemEnumId: schema2.systemEnumId, fileTypeEnumId: 'DftJson', idFieldExpression: schema2FieldPathValue, systemFieldName: schema2FieldPathValue, schemaFileName: schema2.schemaName, createdDate: nowTs]"
+                            in-map="[mappingMemberId: mappingIdValue + '-2', reconciliationMappingId: mappingIdValue, systemEnumId: schema2SystemEnumId, fileTypeEnumId: 'DftJson', idFieldExpression: schema2FieldPathValue, systemFieldName: schema2FieldPathValue, schemaFileName: schema2.schemaName, createdDate: nowTs]"
                             out-map="mappingMember2Result"/>
                     <set field="savedMapping" from="[reconciliationMappingId: mappingIdValue, mappingName: mappingNameValue, companyUserGroupId: newMappingMap.companyUserGroupId, createdByUserId: newMappingMap.createdByUserId, file1SystemEnumId: schema1SystemEnumId, file2SystemEnumId: schema2SystemEnumId, file1SchemaName: schema1.schemaName, file2SchemaName: schema2.schemaName, file1FieldPath: schema1FieldPathValue, file2FieldPath: schema2FieldPathValue]"/>
                     <message>Created reconciliation flow ${mappingNameValue}.</message>
@@ -787,10 +793,16 @@
                 <set field="file2Schema" from="jsonschema.common.JsonSchemaUtil.resolveSchemaRecord(ec, null, file2SchemaFileNameValue, file2SchemaFileNameValue, false)"/>
                 <set field="ignoreFile2SchemaAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file2Schema, &quot;file2SchemaFileName '${file2SchemaFileNameValue}' was not found&quot;, 'file2 schema is not available in your active tenant.')"/>
             </if>
-            <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson &amp;&amp; file1Schema?.systemEnumId != file1SystemEnumIdValue">
+            <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson">
+                <set field="file1SchemaSystemEnumId" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file1Schema?.systemEnumId)"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson">
+                <set field="file2SchemaSystemEnumId" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file2Schema?.systemEnumId)"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson &amp;&amp; file1SchemaSystemEnumId != file1SystemEnumIdValue">
                 <message error="true">file1SchemaFileName '${file1SchemaFileNameValue}' belongs to system ${file1Schema?.systemEnumId}, not ${file1SystemEnumIdValue}</message>
             </if>
-            <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson &amp;&amp; file2Schema?.systemEnumId != file2SystemEnumIdValue">
+            <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson &amp;&amp; file2SchemaSystemEnumId != file2SystemEnumIdValue">
                 <message error="true">file2SchemaFileName '${file2SchemaFileNameValue}' belongs to system ${file2Schema?.systemEnumId}, not ${file2SystemEnumIdValue}</message>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson &amp;&amp; !darpan.facade.reconciliation.ReconciliationMappingSupport.isResolvableJsonIdExpression(file1PrimaryIdExpressionValue, file1Schema?.schemaText as String)">
@@ -1341,8 +1353,8 @@
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="schema1SystemEnumId" from="darpan.facade.common.FacadeSupport.normalize(schema1?.systemEnumId)"/>
-                <set field="schema2SystemEnumId" from="darpan.facade.common.FacadeSupport.normalize(schema2?.systemEnumId)"/>
+                <set field="schema1SystemEnumId" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(schema1?.systemEnumId)"/>
+                <set field="schema2SystemEnumId" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(schema2?.systemEnumId)"/>
                 <if condition="!schema1SystemEnumId">
                     <message error="true">Schema '${schema1?.schemaName}' is missing systemEnumId</message>
                 </if>

@@ -177,6 +177,114 @@ class SavedRunsFacadeSmokeTests {
     }
 
     @Test
+    void jsonRuleSetRunAcceptsLegacySchemaSystemAliasesAndPersistsCanonicalSources() {
+        upsertLegacySystemSourceAliases()
+        String previousShopifySystemEnumId = updateJsonSchemaSystemEnumId("test-shopify-orders.schema.json", "DarSysShopify")
+        String previousOmsSystemEnumId = updateJsonSchemaSystemEnumId("test-oms-orders.schema.json", "DarSysOms")
+
+        try {
+            Map<String, Object> createResult = ec.service.sync()
+                    .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                    .parameters([
+                            runName                 : "JSON Legacy Schema Alias Compare",
+                            file1SystemEnumId       : "SHOPIFY",
+                            file1FileTypeEnumId     : "DftJson",
+                            file1SchemaFileName     : "test-shopify-orders.schema.json",
+                            file1PrimaryIdExpression: '$.data.orders.edges[0].node.id|SHOPIFY_GID_TAIL',
+                            file2SystemEnumId       : "OMS",
+                            file2FileTypeEnumId     : "DftJson",
+                            file2SchemaFileName     : "test-oms-orders.schema.json",
+                            file2PrimaryIdExpression: '$.orders[0].order_id',
+                            rules                   : [],
+                    ])
+                    .disableAuthz()
+                    .call()
+
+            assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+            assertEquals("SHOPIFY", createResult.savedRun.defaultFile1SystemEnumId)
+            assertEquals("OMS", createResult.savedRun.defaultFile2SystemEnumId)
+
+            List sources = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                    .condition("compareScopeId", createResult.savedRun.compareScopeId)
+                    .useCache(false)
+                    .list() ?: []
+            assertEquals("SHOPIFY", sources.find { it.fileSide == "FILE_1" }?.systemEnumId)
+            assertEquals("OMS", sources.find { it.fileSide == "FILE_2" }?.systemEnumId)
+        } finally {
+            updateJsonSchemaSystemEnumId("test-shopify-orders.schema.json", previousShopifySystemEnumId)
+            updateJsonSchemaSystemEnumId("test-oms-orders.schema.json", previousOmsSystemEnumId)
+            deleteLegacySystemSourceAliases()
+        }
+    }
+
+    @Test
+    void ruleSetRunResolverCanonicalizesLegacyStoredSystemAliasesForDefaultsAndApiMetadata() {
+        upsertAutomationSourceTypeApi()
+        upsertLegacySystemSourceAliases()
+        seedOmsRestSourceConfig(KREWE, "KREWE_OMS_LEGACY")
+
+        String savedRunId = null
+        String compareScopeId = null
+        try {
+            Map<String, Object> createResult = ec.service.sync()
+                    .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                    .parameters([
+                            runName                   : "Legacy Source Alias",
+                            file1SystemEnumId         : "OMS",
+                            file1SourceTypeEnumId     : "AUT_SRC_API",
+                            file1SystemMessageRemoteId: "HOTWAX_ORDERS_API",
+                            file1SourceConfigId       : "KREWE_OMS_LEGACY",
+                            file1PrimaryIdExpression  : "\$.records[*].orderId",
+                            file2SystemEnumId         : "SHOPIFY",
+                            file2FileTypeEnumId       : "DftCsv",
+                            file2PrimaryIdExpression  : "order_id",
+                            rules                     : [],
+                    ])
+                    .disableAuthz()
+                    .call()
+
+            assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+            savedRunId = createResult.savedRun.savedRunId as String
+            compareScopeId = createResult.savedRun.compareScopeId as String
+            updateCompareSourceSystemEnumId(compareScopeId, "FILE_1", "DarSysOms")
+            updateCompareSourceSystemEnumId(compareScopeId, "FILE_2", "DarSysShopify")
+
+            Map<String, Object> resolved = ReconciliationSavedRunSupport.resolveRuleSetRun(ec, savedRunId)
+            assertNull(resolved.error)
+            assertEquals("OMS", resolved.savedRun.defaultFile1SystemEnumId)
+            assertEquals("SHOPIFY", resolved.savedRun.defaultFile2SystemEnumId)
+            Map<String, Object> file1Option = ((List<Map<String, Object>>) resolved.savedRun.systemOptions).find { it.fileSide == "FILE_1" }
+            Map<String, Object> file2Option = ((List<Map<String, Object>>) resolved.savedRun.systemOptions).find { it.fileSide == "FILE_2" }
+            assertEquals("OMS", file1Option.enumId)
+            assertEquals("SHOPIFY", file2Option.enumId)
+            assertEquals("HOTWAX_OMS_REST", file1Option.sourceConfigType)
+        } finally {
+            if (savedRunId && compareScopeId) {
+                deleteRuleSetRunEntities(savedRunId, compareScopeId)
+            }
+            deleteLegacySystemSourceAliases()
+        }
+    }
+
+    @Test
+    void apiSourceConfigResolutionCanonicalizesLegacySystemAliases() {
+        seedOmsRestSourceConfig(KREWE, "KREWE_OMS_ALIAS")
+
+        Map<String, Object> resolution = ReconciliationSavedRunSupport.resolveApiSourceConfig(
+                ec,
+                "file1",
+                "DarSysOms",
+                "KREWE_OMS_ALIAS",
+                null,
+                null
+        )
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals("KREWE_OMS_ALIAS", resolution.sourceConfigId)
+        assertEquals("HOTWAX_OMS_REST", resolution.sourceConfigType)
+    }
+
+    @Test
     void generatedOutputsAreSharedWithinTenantAndDeniedAcrossTenants() {
         Map<String, Object> runResult = createAndRunCsvSavedRun("CSV Tenant Shared Result")
         String savedRunId = runResult.runResult.savedRunId as String
@@ -1262,6 +1370,48 @@ end'''
                     .useCache(false)
                     .deleteAll()
         }
+    }
+
+    private void upsertLegacySystemSourceAliases() {
+        upsertEntity("moqui.basic.Enumeration", [enumId: "DarSysOms"], [
+                enumId    : "DarSysOms",
+                enumTypeId: "DarpanSystemSource",
+                enumCode  : "HOTWAX",
+                description: "HotWax legacy alias",
+                sequenceNum: 1,
+        ])
+        upsertEntity("moqui.basic.Enumeration", [enumId: "DarSysShopify"], [
+                enumId    : "DarSysShopify",
+                enumTypeId: "DarpanSystemSource",
+                enumCode  : "SHOPIFY",
+                description: "Shopify legacy alias",
+                sequenceNum: 2,
+        ])
+    }
+
+    private String updateJsonSchemaSystemEnumId(String schemaName, String systemEnumId) {
+        def schema = ec.entity.find("darpan.reconciliation.JsonSchema")
+                .condition("schemaName", schemaName)
+                .disableAuthz()
+                .useCache(false)
+                .one()
+        assertNotNull(schema)
+        String previousSystemEnumId = schema.systemEnumId as String
+        schema.set("systemEnumId", systemEnumId)
+        schema.update()
+        return previousSystemEnumId
+    }
+
+    private void updateCompareSourceSystemEnumId(String compareScopeId, String fileSide, String systemEnumId) {
+        def source = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition("compareScopeId", compareScopeId)
+                .condition("fileSide", fileSide)
+                .disableAuthz()
+                .useCache(false)
+                .one()
+        assertNotNull(source)
+        source.set("systemEnumId", systemEnumId)
+        source.update()
     }
 
     private void deleteRuleSetRunEntities(String ruleSetId, String compareScopeId) {

@@ -467,8 +467,8 @@ class ReconciliationSavedRunSupport {
                 compareScopeId          : compareScope.compareScopeId,
                 compareScopeDescription : compareScopeDisplayName(compareScope.compareScopeId, compareScope.description),
                 requiresSystemSelection : false,
-                defaultFile1SystemEnumId: FacadeSupport.normalize(sourceBySide[FILE_SIDE_1]?.systemEnumId),
-                defaultFile2SystemEnumId: FacadeSupport.normalize(sourceBySide[FILE_SIDE_2]?.systemEnumId),
+                defaultFile1SystemEnumId: canonicalSystemEnumId(sourceBySide[FILE_SIDE_1]?.systemEnumId),
+                defaultFile2SystemEnumId: canonicalSystemEnumId(sourceBySide[FILE_SIDE_2]?.systemEnumId),
                 systemOptions           : resolvedSystemOptions,
                 rules                   : collectRuleRows(ec, ruleSet.ruleSetId),
         ]
@@ -558,7 +558,7 @@ class ReconciliationSavedRunSupport {
 
     static Map<String, Object> resolveApiSourceConfig(def ec, String sourceLabel, Object rawSystemEnumId,
             Object rawSourceConfigId, Object rawSourceConfigType, Object rawNsRestletConfig = null) {
-        String systemEnumId = FacadeSupport.normalize(rawSystemEnumId)
+        String systemEnumId = canonicalSystemEnumId(rawSystemEnumId)
         String sourceConfigId = FacadeSupport.normalize(rawSourceConfigId)
         String sourceConfigType = FacadeSupport.normalize(rawSourceConfigType)
         def nsRestletConfig = rawNsRestletConfig
@@ -598,7 +598,7 @@ class ReconciliationSavedRunSupport {
     }
 
     static String expectedSourceConfigType(Object rawSystemEnumId) {
-        switch (FacadeSupport.normalize(rawSystemEnumId)) {
+        switch (canonicalSystemEnumId(rawSystemEnumId)) {
             case SYSTEM_SHOPIFY:
                 return SOURCE_CONFIG_TYPE_SHOPIFY_AUTH
             case SYSTEM_HOTWAX_OMS:
@@ -667,7 +667,8 @@ class ReconciliationSavedRunSupport {
             def source = sourceBySide[fileSide]
             if (!source) return null
 
-            def systemEnum = findEnum(ec, source.systemEnumId)
+            String systemEnumId = canonicalSystemEnumId(source.systemEnumId)
+            def systemEnum = findEnum(ec, systemEnumId)
             def fileTypeEnum = findEnum(ec, source.fileTypeEnumId)
             def sourceTypeEnum = findEnum(ec, source.sourceTypeEnumId)
             def systemMessageRemote = source.systemMessageRemoteId ? ec.entity.find("moqui.service.message.SystemMessageRemote")
@@ -682,10 +683,10 @@ class ReconciliationSavedRunSupport {
                     .one() : null
             return [
                     fileSide          : fileSide,
-                    enumId            : FacadeSupport.normalize(source.systemEnumId),
+                    enumId            : systemEnumId,
                     enumCode          : FacadeSupport.normalize(systemEnum?.enumCode),
                     description       : FacadeSupport.normalize(systemEnum?.description),
-                    label             : resolveEnumLabel(ec, source.systemEnumId, source.systemEnumId as String),
+                    label             : resolveEnumLabel(ec, systemEnumId, source.systemEnumId as String),
                     fileTypeEnumId    : FacadeSupport.normalize(source.fileTypeEnumId),
                     fileTypeLabel     : fileTypeEnum ? FacadeSupport.enumLabel(fileTypeEnum) : null,
                     idFieldExpression : FacadeSupport.normalize(source.primaryIdExpression),
@@ -694,7 +695,7 @@ class ReconciliationSavedRunSupport {
                     sourceTypeLabel   : sourceTypeEnum ? FacadeSupport.enumLabel(sourceTypeEnum) : null,
                     systemMessageRemoteId   : FacadeSupport.normalize(source.systemMessageRemoteId),
                     systemMessageRemoteLabel: FacadeSupport.normalize(systemMessageRemote?.description) ?:
-                            virtualSystemRemoteLabel(source.systemEnumId, source.systemMessageRemoteId, source.sourceConfigType) ?:
+                            virtualSystemRemoteLabel(systemEnumId, source.systemMessageRemoteId, source.sourceConfigType) ?:
                             FacadeSupport.normalize(systemMessageRemote?.systemMessageRemoteId),
                     nsRestletConfigId       : FacadeSupport.normalize(source.nsRestletConfigId),
                     nsRestletConfigLabel    : FacadeSupport.normalize(nsRestletConfig?.description) ?: FacadeSupport.normalize(nsRestletConfig?.nsRestletConfigId),
@@ -712,7 +713,7 @@ class ReconciliationSavedRunSupport {
     }
 
     static boolean isVirtualHotWaxOrdersRemote(Object systemEnumId, Object systemMessageRemoteId, Object sourceConfigType) {
-        if (FacadeSupport.normalize(systemEnumId) != SYSTEM_HOTWAX_OMS) return false
+        if (canonicalSystemEnumId(systemEnumId) != SYSTEM_HOTWAX_OMS) return false
         if (FacadeSupport.normalize(systemMessageRemoteId) != HOTWAX_ORDERS_REMOTE_ID) return false
         String normalizedSourceConfigType = FacadeSupport.normalize(sourceConfigType)
         return !normalizedSourceConfigType || normalizedSourceConfigType == SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST
@@ -760,7 +761,7 @@ class ReconciliationSavedRunSupport {
     }
 
     static boolean isVirtualShopifyOrdersRemote(Object systemEnumId, Object systemMessageRemoteId, Object sourceConfigType) {
-        if (FacadeSupport.normalize(systemEnumId) != SYSTEM_SHOPIFY) return false
+        if (canonicalSystemEnumId(systemEnumId) != SYSTEM_SHOPIFY) return false
         if (FacadeSupport.normalize(systemMessageRemoteId) != SHOPIFY_ORDERS_REMOTE_ID) return false
         String normalizedSourceConfigType = FacadeSupport.normalize(sourceConfigType)
         return !normalizedSourceConfigType || normalizedSourceConfigType == SOURCE_CONFIG_TYPE_SHOPIFY_AUTH

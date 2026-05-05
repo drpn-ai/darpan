@@ -26,12 +26,12 @@ class LlmSettingsSupport {
     ]
 
     static String normalizeProvider(Object rawProvider) {
-        String provider = FacadeSupport.normalize(rawProvider)?.toUpperCase()
+        String provider = ((rawProvider)?.toString()?.trim())?.toUpperCase()
         return ALLOWED_PROVIDERS.contains(provider) ? provider : "OPENAI"
     }
 
     static String normalizeTimeout(Object rawTimeout, String defaultTimeout) {
-        String timeout = FacadeSupport.normalize(rawTimeout) ?: defaultTimeout
+        String timeout = ((rawTimeout)?.toString()?.trim()) ?: defaultTimeout
         return timeout ==~ /\d+/ ? timeout : defaultTimeout
     }
 
@@ -45,7 +45,7 @@ class LlmSettingsSupport {
                 ?.useCache(false)
                 ?.one()
         String activeProvider = normalizeProvider(activeProviderRec?.username)
-        String selectedProvider = FacadeSupport.normalize(rawProvider) ? normalizeProvider(rawProvider) : activeProvider
+        String selectedProvider = ((rawProvider)?.toString()?.trim()) ? normalizeProvider(rawProvider) : activeProvider
         Map<String, String> defaults = DEFAULT_BY_PROVIDER[selectedProvider]
 
         def llmRemote = ec?.entity?.find("moqui.service.message.SystemMessageRemote")
@@ -91,9 +91,9 @@ class LlmSettingsSupport {
                 llmTimeoutSeconds     : normalizeTimeout(llmRemote?.internalAppCode ?: providerContext.fallbackTimeout,
                         providerContext.defaults.timeout),
                 llmEnabled            : llmRemote?.remoteAttributes ?: "Y",
-                hasStoredLlmApiKey    : !!FacadeSupport.normalize(llmRemote?.password),
-                hasFallbackLlmApiKey  : !!FacadeSupport.normalize(providerContext.fallbackKey) &&
-                        !FacadeSupport.normalize(llmRemote?.password),
+                hasStoredLlmApiKey    : !!((llmRemote?.password)?.toString()?.trim()),
+                hasFallbackLlmApiKey  : !!((providerContext.fallbackKey)?.toString()?.trim()) &&
+                        !((llmRemote?.password)?.toString()?.trim()),
                 fallbackLlmKeyEnvName : providerContext.fallbackKeyEnvName,
         ]
     }
@@ -105,15 +105,16 @@ class LlmSettingsSupport {
         def existingProviderRemote = providerContext.llmRemote
         Map<String, String> defaults = providerContext.defaults as Map<String, String>
 
-        String modelToUse = FacadeSupport.normalize(llmModel) ?:
-                FacadeSupport.normalize(existingProviderRemote?.username) ?:
+        String modelToUse = ((llmModel)?.toString()?.trim()) ?:
+                ((existingProviderRemote?.username)?.toString()?.trim()) ?:
                 defaults.model
-        String baseUrlToUse = FacadeSupport.normalize(llmBaseUrl) ?:
-                FacadeSupport.normalize(existingProviderRemote?.sendUrl) ?:
+        String baseUrlToUse = ((llmBaseUrl)?.toString()?.trim()) ?:
+                ((existingProviderRemote?.sendUrl)?.toString()?.trim()) ?:
                 defaults.baseUrl
-        String timeoutToUse = normalizeTimeout(FacadeSupport.normalize(llmTimeoutSeconds) ?:
-                FacadeSupport.normalize(existingProviderRemote?.internalAppCode), defaults.timeout)
-        String remoteAttributes = FacadeSupport.normalizeBool(llmEnabled, true) ? "Y" : "N"
+        String timeoutToUse = normalizeTimeout(((llmTimeoutSeconds)?.toString()?.trim()) ?:
+                ((existingProviderRemote?.internalAppCode)?.toString()?.trim()), defaults.timeout)
+        String remoteAttributes = (llmEnabled == null ? true :
+                (llmEnabled instanceof Boolean ? llmEnabled : ["Y", "YES", "TRUE", "1", "ON"].contains(llmEnabled.toString().trim().toUpperCase(Locale.ROOT)))) ? "Y" : "N"
 
         Map<String, Object> llmRemoteMap = [
                 systemMessageRemoteId : "${provider}_RULE_WORKSPACE",
@@ -125,7 +126,7 @@ class LlmSettingsSupport {
                 sendServiceName       : provider,
         ]
 
-        String providedApiKey = FacadeSupport.normalize(llmApiKey)
+        String providedApiKey = ((llmApiKey)?.toString()?.trim())
         if (providedApiKey) {
             llmRemoteMap.password = providedApiKey
         } else if (existingProviderRemote?.password) {
@@ -148,7 +149,7 @@ class LlmSettingsSupport {
                         llmBaseUrl         : baseUrlToUse,
                         llmTimeoutSeconds  : timeoutToUse,
                         llmEnabled         : remoteAttributes,
-                        hasStoredLlmApiKey : !!FacadeSupport.normalize(llmRemoteMap.password),
+                        hasStoredLlmApiKey : !!((llmRemoteMap.password)?.toString()?.trim()),
                 ]
         ]
     }

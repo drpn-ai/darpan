@@ -59,11 +59,15 @@
         <field name="file2Name" type="text-medium"/>
         <field name="file2DataManagerPath" type="text-long"/>
         <field name="resultDataManagerPath" type="text-long"/>
+        <field name="statusEnumId" type="id" default="'AUT_STAT_SUCCESS'"/>
         <field name="reconciliationType" type="text-short"/>
         <field name="differenceCount" type="number-integer"/>
         <field name="onlyInFile1Count" type="number-integer"/>
         <field name="onlyInFile2Count" type="number-integer"/>
         <field name="createdDate" type="date-time"/>
+        <field name="startedDate" type="date-time"/>
+        <field name="completedDate" type="date-time"/>
+        <field name="lastUpdatedDate" type="date-time"/>
 
         <relationship type="one" related="darpan.reconciliation.ReconciliationRun" fk-name="RECRES_RUN">
             <key-map field-name="reconciliationRunId"/>
@@ -82,6 +86,9 @@
         </relationship>
         <relationship type="one" title="CreatedBy" related="moqui.security.UserAccount" fk-name="RECRES_CREATED_BY">
             <key-map field-name="createdByUserId" related-field-name="userId"/>
+        </relationship>
+        <relationship type="one" title="Status" related="moqui.basic.Enumeration" fk-name="RECRES_STATUS">
+            <key-map field-name="statusEnumId" related-field-name="enumId"/>
         </relationship>
     </entity>
 

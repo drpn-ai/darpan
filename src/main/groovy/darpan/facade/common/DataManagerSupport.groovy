@@ -9,16 +9,14 @@ class DataManagerSupport {
     static final String SCHEMA_PATH = "schemas/json"
 
     static String resolveDataManagerLocation(def ec) {
-        String configured = FacadeSupport.normalize(
-                ec?.resource?.properties?.get("darpan.data.manager.location") ?:
-                        ec?.resource?.properties?.get("darpan.data-manager.location") ?:
-                        ec?.resource?.properties?.get("data.manager.location") ?:
-                        ec?.resource?.properties?.get("data-manager.location") ?:
-                        System.getProperty("darpan.data.manager.location") ?:
-                        System.getProperty("darpan.data-manager.location") ?:
-                        System.getProperty("data.manager.location") ?:
-                        System.getProperty("data-manager.location")
-        )
+        String configured = (ec?.resource?.properties?.get("darpan.data.manager.location") ?:
+                ec?.resource?.properties?.get("darpan.data-manager.location") ?:
+                ec?.resource?.properties?.get("data.manager.location") ?:
+                ec?.resource?.properties?.get("data-manager.location") ?:
+                System.getProperty("darpan.data.manager.location") ?:
+                System.getProperty("darpan.data-manager.location") ?:
+                System.getProperty("data.manager.location") ?:
+                System.getProperty("data-manager.location"))?.toString()?.trim()
         return configured ?: DEFAULT_DATA_MANAGER_LOCATION
     }
 
@@ -57,7 +55,7 @@ class DataManagerSupport {
     }
 
     static String safeToken(Object rawValue, String fallback) {
-        String normalized = FacadeSupport.normalize(rawValue)
+        String normalized = ((rawValue)?.toString()?.trim())
         if (!normalized) return fallback
 
         String token = normalized.tokenize("/\\").last()
@@ -67,7 +65,7 @@ class DataManagerSupport {
     }
 
     static String normalizeRelativePath(Object rawPath) {
-        String normalized = FacadeSupport.normalize(rawPath)
+        String normalized = ((rawPath)?.toString()?.trim())
         if (!normalized) return null
         normalized = normalized.replace("\\", "/")
         if (normalized.startsWith("/") || normalized.contains("://")) return null
@@ -128,15 +126,15 @@ class DataManagerSupport {
     }
 
     static String childLocation(String base, String child) {
-        String normalizedBase = FacadeSupport.normalize(base)
-        String normalizedChild = FacadeSupport.normalize(child)
+        String normalizedBase = ((base)?.toString()?.trim())
+        String normalizedChild = ((child)?.toString()?.trim())
         if (!normalizedBase) return normalizedChild
         if (!normalizedChild) return normalizedBase
         return normalizedBase + (normalizedBase.endsWith("/") ? "" : "/") + normalizedChild
     }
 
     protected static String extensionFromName(Object rawName) {
-        String normalized = FacadeSupport.normalize(rawName)
+        String normalized = ((rawName)?.toString()?.trim())
         if (!normalized) return ""
         String fileName = normalized.tokenize("/\\").last()
         int dotIndex = fileName.lastIndexOf(".")

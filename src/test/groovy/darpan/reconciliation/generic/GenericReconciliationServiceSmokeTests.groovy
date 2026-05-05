@@ -13,6 +13,7 @@ import org.moqui.context.ExecutionContext
 
 import java.nio.file.Files
 import java.nio.file.Path
+import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
@@ -30,6 +31,7 @@ class GenericReconciliationServiceSmokeTests {
     void setup() {
         backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "reconciliation-generic-smoke")
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AutomationSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompareScopeFixtures(ec)
         ReconciliationSmokeTestSupport.seedSchemaBackedCsvMappingFixtures(ec)
     }
@@ -118,6 +120,58 @@ class GenericReconciliationServiceSmokeTests {
                     row.file1Value == "49.99" &&
                     row.file2Value == "59.99"
         })
+    }
+
+    @Test
+    void genericServiceUpdatesCallerCreatedRunningManifest() {
+        String precreatedRunResultId = "RUN_RESULT_GENERIC_PRECREATED"
+        ec.entity.find("darpan.reconciliation.ReconciliationRunResult")
+                .condition("reconciliationRunResultId", precreatedRunResultId)
+                .disableAuthz()
+                .useCache(false)
+                .deleteAll()
+
+        def runningManifest = ec.entity.makeValue("darpan.reconciliation.ReconciliationRunResult")
+        runningManifest.reconciliationRunResultId = precreatedRunResultId
+        runningManifest.savedRunId = "DARPAN_TEST_PRODUCT_COMPARE_RS"
+        runningManifest.savedRunType = "ruleset"
+        runningManifest.ruleSetId = "DARPAN_TEST_PRODUCT_COMPARE_RS"
+        runningManifest.compareScopeId = "DARPAN_TEST_PRODUCT_JSON_SCOPE"
+        runningManifest.companyUserGroupId = "KREWE"
+        runningManifest.createdByUserId = "TEST_CUSTOMER_USER"
+        runningManifest.statusEnumId = "AUT_STAT_RUNNING"
+        runningManifest.createdDate = Timestamp.valueOf("2026-05-05 10:00:00")
+        runningManifest.startedDate = Timestamp.valueOf("2026-05-05 10:00:00")
+        runningManifest.lastUpdatedDate = Timestamp.valueOf("2026-05-05 10:00:00")
+        runningManifest.create()
+
+        Map<String, Object> result = ec.service.sync()
+                .name("reconciliation.ReconciliationGenericServices.reconcile#GenericFiles")
+                .parameters([
+                        reconciliationRunResultId: precreatedRunResultId,
+                        ruleSetId                : "DARPAN_TEST_PRODUCT_COMPARE_RS",
+                        file1Name                : "products-1.json",
+                        file1Text                : readFixtureText("data/test/test-products-1.json"),
+                        file2Name                : "products-2.json",
+                        file2Text                : readFixtureText("data/test/test-products-2.json"),
+                        sparkMaster              : "local[1]",
+                        sparkAppName             : "GenericReconciliationServiceSmokeTests"
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals(precreatedRunResultId, result.reconciliationRunResultId)
+
+        def updatedManifest = ec.entity.find("darpan.reconciliation.ReconciliationRunResult")
+                .condition("reconciliationRunResultId", precreatedRunResultId)
+                .disableAuthz()
+                .useCache(false)
+                .one()
+        assertNotNull(updatedManifest)
+        assertEquals("AUT_STAT_SUCCESS", updatedManifest.statusEnumId)
+        assertEquals(result.diffFileName, updatedManifest.resultDataManagerPath)
+        assertNotNull(updatedManifest.completedDate)
     }
 
     @Test

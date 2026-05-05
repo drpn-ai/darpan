@@ -37,7 +37,7 @@ class ReconciliationMappingSupport {
 
     static List<Map<String, Object>> buildEditableMappingMembers(def ec, List mappingMembers) {
         return (mappingMembers ?: []).collect { member ->
-            String schemaName = FacadeSupport.normalize(member?.schemaFileName)
+            String schemaName = ((member?.schemaFileName)?.toString()?.trim())
             def schema = resolveSavedSchemaRecord(ec, schemaName, false)
             if (schema != null) {
                 TenantAccessSupport.requireTenantRecordAccess(
@@ -66,9 +66,11 @@ class ReconciliationMappingSupport {
     }
 
     static Map<String, Object> listMappings(def ec, Object query, Object pageIndex, Object pageSize) {
-        int page = Math.max(0, FacadeSupport.normalizeInt(pageIndex, 0))
-        int size = Math.max(1, Math.min(200, FacadeSupport.normalizeInt(pageSize, 20)))
-        String search = FacadeSupport.normalize(query)?.toLowerCase()
+        int page = Math.max(0, pageIndex instanceof Number ? pageIndex.intValue() :
+                (pageIndex?.toString()?.trim()?.isInteger() ? pageIndex.toString().trim().toInteger() : 0))
+        int size = Math.max(1, Math.min(200, pageSize instanceof Number ? pageSize.intValue() :
+                (pageSize?.toString()?.trim()?.isInteger() ? pageSize.toString().trim().toInteger() : 20)))
+        String search = ((query)?.toString()?.trim())?.toLowerCase()
 
         List<Map<String, Object>> allRows = ReconciliationSavedRunSupport.collectMappingRows(ec).collect { Map<String, Object> savedRunRow ->
             [

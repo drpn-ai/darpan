@@ -93,30 +93,30 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="runNameValue" from="darpan.facade.common.FacadeSupport.normalize(runName)"/>
-            <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
+            <set field="runNameValue" from="((runName)?.toString()?.trim())"/>
+            <set field="descriptionValue" from="((description)?.toString()?.trim())"/>
             <set field="file1SystemEnumIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file1SystemEnumId)"/>
-            <set field="file1SourceTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SourceTypeEnumId)"/>
+            <set field="file1SourceTypeEnumIdValue" from="((file1SourceTypeEnumId)?.toString()?.trim())"/>
             <set field="file1UsesApiSource" from="file1SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_API"/>
-            <set field="file1SystemMessageRemoteIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SystemMessageRemoteId)"/>
-            <set field="file1NsRestletConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1NsRestletConfigId)"/>
-            <set field="file1SourceConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SourceConfigId)"/>
-            <set field="file1SourceConfigTypeValue" from="darpan.facade.common.FacadeSupport.normalize(file1SourceConfigType)"/>
-            <set field="file1FileTypeEnumIdValue" from="file1UsesApiSource ? null : (darpan.facade.common.FacadeSupport.normalize(file1FileTypeEnumId) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
-            <set field="file1SchemaFileNameValue" from="darpan.facade.common.FacadeSupport.normalize(file1SchemaFileName)"/>
-            <set field="file1RecordRootExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file1RecordRootExpression)"/>
-            <set field="file1PrimaryIdExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file1PrimaryIdExpression)"/>
+            <set field="file1SystemMessageRemoteIdValue" from="((file1SystemMessageRemoteId)?.toString()?.trim())"/>
+            <set field="file1NsRestletConfigIdValue" from="((file1NsRestletConfigId)?.toString()?.trim())"/>
+            <set field="file1SourceConfigIdValue" from="((file1SourceConfigId)?.toString()?.trim())"/>
+            <set field="file1SourceConfigTypeValue" from="((file1SourceConfigType)?.toString()?.trim())"/>
+            <set field="file1FileTypeEnumIdValue" from="file1UsesApiSource ? null : (((file1FileTypeEnumId)?.toString()?.trim()) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
+            <set field="file1SchemaFileNameValue" from="((file1SchemaFileName)?.toString()?.trim())"/>
+            <set field="file1RecordRootExpressionValue" from="((file1RecordRootExpression)?.toString()?.trim())"/>
+            <set field="file1PrimaryIdExpressionValue" from="((file1PrimaryIdExpression)?.toString()?.trim())"/>
             <set field="file2SystemEnumIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file2SystemEnumId)"/>
-            <set field="file2SourceTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SourceTypeEnumId)"/>
+            <set field="file2SourceTypeEnumIdValue" from="((file2SourceTypeEnumId)?.toString()?.trim())"/>
             <set field="file2UsesApiSource" from="file2SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_API"/>
-            <set field="file2SystemMessageRemoteIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SystemMessageRemoteId)"/>
-            <set field="file2NsRestletConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2NsRestletConfigId)"/>
-            <set field="file2SourceConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SourceConfigId)"/>
-            <set field="file2SourceConfigTypeValue" from="darpan.facade.common.FacadeSupport.normalize(file2SourceConfigType)"/>
-            <set field="file2FileTypeEnumIdValue" from="file2UsesApiSource ? null : (darpan.facade.common.FacadeSupport.normalize(file2FileTypeEnumId) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
-            <set field="file2SchemaFileNameValue" from="darpan.facade.common.FacadeSupport.normalize(file2SchemaFileName)"/>
-            <set field="file2RecordRootExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file2RecordRootExpression)"/>
-            <set field="file2PrimaryIdExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file2PrimaryIdExpression)"/>
+            <set field="file2SystemMessageRemoteIdValue" from="((file2SystemMessageRemoteId)?.toString()?.trim())"/>
+            <set field="file2NsRestletConfigIdValue" from="((file2NsRestletConfigId)?.toString()?.trim())"/>
+            <set field="file2SourceConfigIdValue" from="((file2SourceConfigId)?.toString()?.trim())"/>
+            <set field="file2SourceConfigTypeValue" from="((file2SourceConfigType)?.toString()?.trim())"/>
+            <set field="file2FileTypeEnumIdValue" from="file2UsesApiSource ? null : (((file2FileTypeEnumId)?.toString()?.trim()) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
+            <set field="file2SchemaFileNameValue" from="((file2SchemaFileName)?.toString()?.trim())"/>
+            <set field="file2RecordRootExpressionValue" from="((file2RecordRootExpression)?.toString()?.trim())"/>
+            <set field="file2PrimaryIdExpressionValue" from="((file2PrimaryIdExpression)?.toString()?.trim())"/>
             <set field="ruleEntries" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.normalizeRuleEntries(rules)"/>
 
             <if condition="!runNameValue">
@@ -202,13 +202,13 @@
                 </if>
                 <if condition="file1NsRestletConfigIdValue">
                     <set field="ignoreFile1NsRestletAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file1NsRestletConfig, &quot;file1NsRestletConfigId '${file1NsRestletConfigIdValue}' was not found&quot;, 'file1 API endpoint is not available in your active tenant.')"/>
-                    <if condition="file1NsRestletConfig != null &amp;&amp; darpan.facade.common.FacadeSupport.normalize(file1NsRestletConfig.isActive) == 'N'">
+                    <if condition="file1NsRestletConfig != null &amp;&amp; ((file1NsRestletConfig.isActive)?.toString()?.trim()) == 'N'">
                         <message error="true">file1NsRestletConfigId '${file1NsRestletConfigIdValue}' is inactive</message>
                     </if>
                 </if>
                 <if condition="file2NsRestletConfigIdValue">
                     <set field="ignoreFile2NsRestletAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file2NsRestletConfig, &quot;file2NsRestletConfigId '${file2NsRestletConfigIdValue}' was not found&quot;, 'file2 API endpoint is not available in your active tenant.')"/>
-                    <if condition="file2NsRestletConfig != null &amp;&amp; darpan.facade.common.FacadeSupport.normalize(file2NsRestletConfig.isActive) == 'N'">
+                    <if condition="file2NsRestletConfig != null &amp;&amp; ((file2NsRestletConfig.isActive)?.toString()?.trim()) == 'N'">
                         <message error="true">file2NsRestletConfigId '${file2NsRestletConfigIdValue}' is inactive</message>
                     </if>
                 </if>
@@ -225,8 +225,8 @@
             </if>
 
             <if condition="!ec.message.hasError()">
-                <set field="file1UsesJson" from="darpan.facade.common.FacadeSupport.normalize(file1FileType?.enumCode)?.toUpperCase() == 'JSON'"/>
-                <set field="file2UsesJson" from="darpan.facade.common.FacadeSupport.normalize(file2FileType?.enumCode)?.toUpperCase() == 'JSON'"/>
+                <set field="file1UsesJson" from="((file1FileType?.enumCode)?.toString()?.trim())?.toUpperCase() == 'JSON'"/>
+                <set field="file2UsesJson" from="((file2FileType?.enumCode)?.toString()?.trim())?.toUpperCase() == 'JSON'"/>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson &amp;&amp; !file1SchemaFileNameValue">
                 <message error="true">file1SchemaFileName is required for JSON source 1</message>
@@ -362,12 +362,12 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="runNameValue" from="darpan.facade.common.FacadeSupport.normalize(runName)"/>
-            <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
+            <set field="runNameValue" from="((runName)?.toString()?.trim())"/>
+            <set field="descriptionValue" from="((description)?.toString()?.trim())"/>
             <set field="file1SystemEnumIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file1SystemEnumId)"/>
             <set field="file2SystemEnumIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file2SystemEnumId)"/>
-            <set field="file1CompareColumnValue" from="darpan.facade.common.FacadeSupport.normalize(file1CompareColumn)"/>
-            <set field="file2CompareColumnValue" from="darpan.facade.common.FacadeSupport.normalize(file2CompareColumn)"/>
+            <set field="file1CompareColumnValue" from="((file1CompareColumn)?.toString()?.trim())"/>
+            <set field="file2CompareColumnValue" from="((file2CompareColumn)?.toString()?.trim())"/>
             <if condition="!runNameValue">
                 <message error="true">runName is required</message>
             </if>
@@ -457,9 +457,9 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="mappingNameValue" from="darpan.facade.common.FacadeSupport.normalize(mappingName)"/>
-            <set field="schema1IdValue" from="darpan.facade.common.FacadeSupport.normalize(schema1Id)"/>
-            <set field="schema2IdValue" from="darpan.facade.common.FacadeSupport.normalize(schema2Id)"/>
+            <set field="mappingNameValue" from="((mappingName)?.toString()?.trim())"/>
+            <set field="schema1IdValue" from="((schema1Id)?.toString()?.trim())"/>
+            <set field="schema2IdValue" from="((schema2Id)?.toString()?.trim())"/>
             <set field="schema1FieldPathValue" from="darpan.facade.reconciliation.ReconciliationMappingSupport.normalizeMappingJsonIdExpression(schema1FieldPath)"/>
             <set field="schema2FieldPathValue" from="darpan.facade.reconciliation.ReconciliationMappingSupport.normalizeMappingJsonIdExpression(schema2FieldPath)"/>
             <set field="ignoreTableEnsure" from="darpan.facade.reconciliation.ReconciliationMappingSupport.ensureMappingTables(ec)"/>
@@ -623,31 +623,31 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="savedRunIdValue" from="darpan.facade.common.FacadeSupport.normalize(savedRunId)"/>
-            <set field="runNameValue" from="darpan.facade.common.FacadeSupport.normalize(runName)"/>
-            <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
+            <set field="savedRunIdValue" from="((savedRunId)?.toString()?.trim())"/>
+            <set field="runNameValue" from="((runName)?.toString()?.trim())"/>
+            <set field="descriptionValue" from="((description)?.toString()?.trim())"/>
             <set field="file1SystemEnumIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file1SystemEnumId)"/>
-            <set field="file1SourceTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SourceTypeEnumId)"/>
+            <set field="file1SourceTypeEnumIdValue" from="((file1SourceTypeEnumId)?.toString()?.trim())"/>
             <set field="file1UsesApiSource" from="file1SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_API"/>
-            <set field="file1SystemMessageRemoteIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SystemMessageRemoteId)"/>
-            <set field="file1NsRestletConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1NsRestletConfigId)"/>
-            <set field="file1SourceConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(file1SourceConfigId)"/>
-            <set field="file1SourceConfigTypeValue" from="darpan.facade.common.FacadeSupport.normalize(file1SourceConfigType)"/>
-            <set field="file1FileTypeEnumIdValue" from="file1UsesApiSource ? null : (darpan.facade.common.FacadeSupport.normalize(file1FileTypeEnumId) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
-            <set field="file1SchemaFileNameValue" from="darpan.facade.common.FacadeSupport.normalize(file1SchemaFileName)"/>
-            <set field="file1RecordRootExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file1RecordRootExpression)"/>
-            <set field="file1PrimaryIdExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file1PrimaryIdExpression)"/>
+            <set field="file1SystemMessageRemoteIdValue" from="((file1SystemMessageRemoteId)?.toString()?.trim())"/>
+            <set field="file1NsRestletConfigIdValue" from="((file1NsRestletConfigId)?.toString()?.trim())"/>
+            <set field="file1SourceConfigIdValue" from="((file1SourceConfigId)?.toString()?.trim())"/>
+            <set field="file1SourceConfigTypeValue" from="((file1SourceConfigType)?.toString()?.trim())"/>
+            <set field="file1FileTypeEnumIdValue" from="file1UsesApiSource ? null : (((file1FileTypeEnumId)?.toString()?.trim()) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
+            <set field="file1SchemaFileNameValue" from="((file1SchemaFileName)?.toString()?.trim())"/>
+            <set field="file1RecordRootExpressionValue" from="((file1RecordRootExpression)?.toString()?.trim())"/>
+            <set field="file1PrimaryIdExpressionValue" from="((file1PrimaryIdExpression)?.toString()?.trim())"/>
             <set field="file2SystemEnumIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file2SystemEnumId)"/>
-            <set field="file2SourceTypeEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SourceTypeEnumId)"/>
+            <set field="file2SourceTypeEnumIdValue" from="((file2SourceTypeEnumId)?.toString()?.trim())"/>
             <set field="file2UsesApiSource" from="file2SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_API"/>
-            <set field="file2SystemMessageRemoteIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SystemMessageRemoteId)"/>
-            <set field="file2NsRestletConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2NsRestletConfigId)"/>
-            <set field="file2SourceConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(file2SourceConfigId)"/>
-            <set field="file2SourceConfigTypeValue" from="darpan.facade.common.FacadeSupport.normalize(file2SourceConfigType)"/>
-            <set field="file2FileTypeEnumIdValue" from="file2UsesApiSource ? null : (darpan.facade.common.FacadeSupport.normalize(file2FileTypeEnumId) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
-            <set field="file2SchemaFileNameValue" from="darpan.facade.common.FacadeSupport.normalize(file2SchemaFileName)"/>
-            <set field="file2RecordRootExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file2RecordRootExpression)"/>
-            <set field="file2PrimaryIdExpressionValue" from="darpan.facade.common.FacadeSupport.normalize(file2PrimaryIdExpression)"/>
+            <set field="file2SystemMessageRemoteIdValue" from="((file2SystemMessageRemoteId)?.toString()?.trim())"/>
+            <set field="file2NsRestletConfigIdValue" from="((file2NsRestletConfigId)?.toString()?.trim())"/>
+            <set field="file2SourceConfigIdValue" from="((file2SourceConfigId)?.toString()?.trim())"/>
+            <set field="file2SourceConfigTypeValue" from="((file2SourceConfigType)?.toString()?.trim())"/>
+            <set field="file2FileTypeEnumIdValue" from="file2UsesApiSource ? null : (((file2FileTypeEnumId)?.toString()?.trim()) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
+            <set field="file2SchemaFileNameValue" from="((file2SchemaFileName)?.toString()?.trim())"/>
+            <set field="file2RecordRootExpressionValue" from="((file2RecordRootExpression)?.toString()?.trim())"/>
+            <set field="file2PrimaryIdExpressionValue" from="((file2PrimaryIdExpression)?.toString()?.trim())"/>
             <set field="rulesProvided" from="rules instanceof Collection"/>
             <set field="ruleEntries" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.normalizeRuleEntries(rules)"/>
 
@@ -753,13 +753,13 @@
                 </if>
                 <if condition="file1NsRestletConfigIdValue">
                     <set field="ignoreFile1NsRestletAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file1NsRestletConfig, &quot;file1NsRestletConfigId '${file1NsRestletConfigIdValue}' was not found&quot;, 'file1 API endpoint is not available in your active tenant.')"/>
-                    <if condition="file1NsRestletConfig != null &amp;&amp; darpan.facade.common.FacadeSupport.normalize(file1NsRestletConfig.isActive) == 'N'">
+                    <if condition="file1NsRestletConfig != null &amp;&amp; ((file1NsRestletConfig.isActive)?.toString()?.trim()) == 'N'">
                         <message error="true">file1NsRestletConfigId '${file1NsRestletConfigIdValue}' is inactive</message>
                     </if>
                 </if>
                 <if condition="file2NsRestletConfigIdValue">
                     <set field="ignoreFile2NsRestletAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file2NsRestletConfig, &quot;file2NsRestletConfigId '${file2NsRestletConfigIdValue}' was not found&quot;, 'file2 API endpoint is not available in your active tenant.')"/>
-                    <if condition="file2NsRestletConfig != null &amp;&amp; darpan.facade.common.FacadeSupport.normalize(file2NsRestletConfig.isActive) == 'N'">
+                    <if condition="file2NsRestletConfig != null &amp;&amp; ((file2NsRestletConfig.isActive)?.toString()?.trim()) == 'N'">
                         <message error="true">file2NsRestletConfigId '${file2NsRestletConfigIdValue}' is inactive</message>
                     </if>
                 </if>
@@ -776,8 +776,8 @@
             </if>
 
             <if condition="!ec.message.hasError()">
-                <set field="file1UsesJson" from="darpan.facade.common.FacadeSupport.normalize(file1FileType?.enumCode)?.toUpperCase() == 'JSON'"/>
-                <set field="file2UsesJson" from="darpan.facade.common.FacadeSupport.normalize(file2FileType?.enumCode)?.toUpperCase() == 'JSON'"/>
+                <set field="file1UsesJson" from="((file1FileType?.enumCode)?.toString()?.trim())?.toUpperCase() == 'JSON'"/>
+                <set field="file2UsesJson" from="((file2FileType?.enumCode)?.toString()?.trim())?.toUpperCase() == 'JSON'"/>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson &amp;&amp; !file1SchemaFileNameValue">
                 <message error="true">file1SchemaFileName is required for JSON source 1</message>
@@ -1015,8 +1015,8 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="savedRunIdValue" from="darpan.facade.common.FacadeSupport.normalize(savedRunId)"/>
-            <set field="runNameValue" from="darpan.facade.common.FacadeSupport.normalize(runName)"/>
+            <set field="savedRunIdValue" from="((savedRunId)?.toString()?.trim())"/>
+            <set field="runNameValue" from="((runName)?.toString()?.trim())"/>
             <if condition="!savedRunIdValue">
                 <message error="true">savedRunId is required</message>
             </if>
@@ -1079,7 +1079,7 @@
             <parameter name="deletedMappingMemberCount" type="Integer"/>
         </out-parameters>
         <actions>
-            <set field="savedRunIdValue" from="darpan.facade.common.FacadeSupport.normalize(savedRunId)"/>
+            <set field="savedRunIdValue" from="((savedRunId)?.toString()?.trim())"/>
             <set field="deleted" from="false"/>
             <set field="deletedGeneratedOutputCount" from="0"/>
             <set field="deletedRuleCount" from="0"/>
@@ -1234,7 +1234,7 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="mappingIdValue" from="darpan.facade.common.FacadeSupport.normalize(reconciliationMappingId)"/>
+            <set field="mappingIdValue" from="((reconciliationMappingId)?.toString()?.trim())"/>
             <set field="ignoreTableEnsure" from="darpan.facade.reconciliation.ReconciliationMappingSupport.ensureMappingTables(ec)"/>
             <if condition="!mappingIdValue">
                 <message error="true">reconciliationMappingId is required</message>
@@ -1300,10 +1300,10 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="mappingIdValue" from="darpan.facade.common.FacadeSupport.normalize(reconciliationMappingId)"/>
-            <set field="mappingNameValue" from="darpan.facade.common.FacadeSupport.normalize(mappingName)"/>
-            <set field="schema1IdValue" from="darpan.facade.common.FacadeSupport.normalize(schema1Id)"/>
-            <set field="schema2IdValue" from="darpan.facade.common.FacadeSupport.normalize(schema2Id)"/>
+            <set field="mappingIdValue" from="((reconciliationMappingId)?.toString()?.trim())"/>
+            <set field="mappingNameValue" from="((mappingName)?.toString()?.trim())"/>
+            <set field="schema1IdValue" from="((schema1Id)?.toString()?.trim())"/>
+            <set field="schema2IdValue" from="((schema2Id)?.toString()?.trim())"/>
             <set field="schema1FieldPathValue" from="darpan.facade.reconciliation.ReconciliationMappingSupport.normalizeEditableFieldPath(schema1FieldPath)"/>
             <set field="schema2FieldPathValue" from="darpan.facade.reconciliation.ReconciliationMappingSupport.normalizeEditableFieldPath(schema2FieldPath)"/>
             <set field="ignoreTableEnsure" from="darpan.facade.reconciliation.ReconciliationMappingSupport.ensureMappingTables(ec)"/>
@@ -1481,6 +1481,12 @@
                     <parameter name="onlyInFile2Count" type="Long"/>
                     <parameter name="createdDate" type="Timestamp"/>
                     <parameter name="sizeBytes" type="Long"/>
+                    <parameter name="statusEnumId"/>
+                    <parameter name="statusLabel"/>
+                    <parameter name="resultAvailable" type="Boolean"/>
+                    <parameter name="startedDate" type="Timestamp"/>
+                    <parameter name="completedDate" type="Timestamp"/>
+                    <parameter name="lastUpdatedDate" type="Timestamp"/>
                 </parameter>
             </parameter>
         </out-parameters>
@@ -1547,6 +1553,12 @@
                     <parameter name="onlyInFile2Count" type="Long"/>
                     <parameter name="createdDate" type="Timestamp"/>
                     <parameter name="sizeBytes" type="Long"/>
+                    <parameter name="statusEnumId"/>
+                    <parameter name="statusLabel"/>
+                    <parameter name="resultAvailable" type="Boolean"/>
+                    <parameter name="startedDate" type="Timestamp"/>
+                    <parameter name="completedDate" type="Timestamp"/>
+                    <parameter name="lastUpdatedDate" type="Timestamp"/>
                 </parameter>
             </parameter>
         </out-parameters>
@@ -1605,12 +1617,31 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="automationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.listAutomations(ec, context)"/>
-            <set field="ok" from="automationResult.ok"/>
-            <set field="messages" from="automationResult.messages"/>
-            <set field="errors" from="automationResult.errors"/>
-            <set field="pagination" from="automationResult.pagination"/>
-            <set field="automations" from="automationResult.automations"/>
+            <set field="page" from="Math.max(0, pageIndex instanceof Number ? pageIndex.intValue() : ((pageIndex)?.toString()?.trim()?.isInteger() ? pageIndex.toString().trim().toInteger() : 0))"/>
+            <set field="size" from="Math.max(1, Math.min(200, pageSize instanceof Number ? pageSize.intValue() : ((pageSize)?.toString()?.trim()?.isInteger() ? pageSize.toString().trim().toInteger() : 20)))"/>
+            <set field="search" from="((query)?.toString()?.trim())?.toLowerCase()"/>
+            <set field="activeTenantUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="automationRecords" from="[]"/>
+            <if condition="activeTenantUserGroupId">
+                <set field="automationRecords" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('companyUserGroupId', activeTenantUserGroupId).orderBy('automationName,automationId').disableAuthz().useCache(false).list() ?: []"/>
+            </if>
+            <set field="automationIds" from="automationRecords.collect { automationRecord -> ((automationRecord.automationId)?.toString()?.trim()) }.findAll { it }"/>
+            <set field="sourceRows" from="automationIds ? ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', 'in', automationIds).orderBy('automationId,fileSide').disableAuthz().useCache(false).list() ?: [] : []"/>
+            <set field="executionRecords" from="automationIds ? ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', 'in', automationIds).orderBy('automationId,-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [] : []"/>
+            <set field="sourcesByAutomationId" from="sourceRows.groupBy { sourceRow -> ((sourceRow.automationId)?.toString()?.trim()) }"/>
+            <set field="executionsByAutomationId" from="executionRecords.groupBy { executionRecord -> ((executionRecord.automationId)?.toString()?.trim()) }"/>
+            <set field="automationRows" from="automationRecords.collect { automationRecord -> darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationRow(ec, automationRecord, false, sourcesByAutomationId[((automationRecord.automationId)?.toString()?.trim())] ?: [], darpan.facade.reconciliation.AutomationFacadeSupport.collapseExecutionHistory(executionsByAutomationId[((automationRecord.automationId)?.toString()?.trim())] ?: [])) }"/>
+            <if condition="search">
+                <set field="automationRows" from="automationRows.findAll { row -> [row.automationId, row.automationName, row.description, row.savedRunId, row.savedRunName, row.inputModeLabel, row.sourceSummary, row.scheduleSummary, row.timezone, row.lastExecution?.statusLabel].any { value -> value?.toString()?.toLowerCase()?.contains(search) } }"/>
+            </if>
+            <set field="totalCount" from="automationRows.size()"/>
+            <set field="fromIndex" from="Math.min(page * size, totalCount)"/>
+            <set field="toIndex" from="Math.min(fromIndex + size, totalCount)"/>
+            <set field="automations" from="automationRows.subList(fromIndex, toIndex)"/>
+            <set field="pagination" from="[pageIndex: page, pageSize: size, totalCount: totalCount, pageCount: Math.max(1, Math.ceil(totalCount / (double) size) as int)]"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 
@@ -1626,11 +1657,24 @@
             <parameter name="automation" type="Map"/>
         </out-parameters>
         <actions>
-            <set field="automationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.getAutomation(ec, context)"/>
-            <set field="ok" from="automationResult.ok"/>
-            <set field="messages" from="automationResult.messages"/>
-            <set field="errors" from="automationResult.errors"/>
-            <set field="automation" from="automationResult.automation"/>
+            <set field="automationIdValue" from="((automationId)?.toString()?.trim())"/>
+            <if condition="!automationIdValue">
+                <message error="true">automationId is required</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="automationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', automationIdValue).disableAuthz().useCache(false).one()"/>
+                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, automationRecord)">
+                    <message error="true">Automation '${automationIdValue}' was not found.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="automationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', automationIdValue).orderBy('fileSide').disableAuthz().useCache(false).list() ?: []"/>
+                <set field="automationExecutions" from="darpan.facade.reconciliation.AutomationFacadeSupport.collapseExecutionHistory(ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).orderBy('-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [])"/>
+                <set field="automation" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationRow(ec, automationRecord, true, automationSources, automationExecutions)"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 
@@ -1676,6 +1720,10 @@
                 <parameter name="dateFromParameterName"/>
                 <parameter name="dateToParameterName"/>
                 <parameter name="safeMetadataJson" allow-html="true"/>
+                <parameter name="optionKey"/>
+                <parameter name="sourceConfigId"/>
+                <parameter name="shopifyAuthConfigId"/>
+                <parameter name="omsRestSourceConfigId"/>
             </parameter>
         </in-parameters>
         <out-parameters>
@@ -1685,11 +1733,174 @@
             <parameter name="automation" type="Map"/>
         </out-parameters>
         <actions>
-            <set field="automationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.saveAutomation(ec, context)"/>
-            <set field="ok" from="automationResult.ok"/>
-            <set field="messages" from="automationResult.messages"/>
-            <set field="errors" from="automationResult.errors"/>
-            <set field="automation" from="automationResult.automation"/>
+            <set field="automationIdValue" from="((automationId)?.toString()?.trim())"/>
+            <set field="automationNameValue" from="((automationName)?.toString()?.trim())"/>
+            <set field="descriptionValue" from="((description)?.toString()?.trim())"/>
+            <set field="inputModeEnumIdValue" from="((inputModeEnumId)?.toString()?.trim())"/>
+            <set field="savedRunIdValue" from="((savedRunId)?.toString()?.trim())"/>
+            <set field="savedRunTypeValue" from="((savedRunType)?.toString()?.trim())?.toLowerCase() ?: 'ruleset'"/>
+            <set field="scheduleExprValue" from="((scheduleExpr)?.toString()?.trim())"/>
+            <set field="relativeWindowTypeEnumIdValue" from="((relativeWindowTypeEnumId)?.toString()?.trim())"/>
+            <set field="windowTimeZoneValue" from="((windowTimeZone)?.toString()?.trim()) ?: 'UTC'"/>
+            <set field="safeConfigJsonValue" from="darpan.facade.reconciliation.AutomationFacadeSupport.canonicalJsonText(ec, safeConfigJson, 'safeConfigJson')"/>
+            <set field="sourceList" from="sources ?: []"/>
+            <set field="sourceEntries" from="[]"/>
+            <iterate list="sourceList" entry="source">
+                <set field="sourceEntry" from="[
+                        fileSide: ((source.fileSide)?.toString()?.trim())?.toUpperCase(),
+                        sourceTypeEnumId: ((source.sourceTypeEnumId)?.toString()?.trim()),
+                        systemEnumId: ((source.systemEnumId)?.toString()?.trim()),
+                        fileTypeEnumId: ((source.fileTypeEnumId)?.toString()?.trim()),
+                        schemaFileName: ((source.schemaFileName)?.toString()?.trim()),
+                        recordRootExpression: ((source.recordRootExpression)?.toString()?.trim()),
+                        primaryIdExpression: ((source.primaryIdExpression)?.toString()?.trim()),
+                        idValueNormalizer: ((source.idValueNormalizer)?.toString()?.trim()),
+                        systemMessageRemoteId: ((source.systemMessageRemoteId)?.toString()?.trim()),
+                        nsRestletConfigId: ((source.nsRestletConfigId)?.toString()?.trim()),
+                        sftpServerId: ((source.sftpServerId)?.toString()?.trim()),
+                        remotePathTemplate: ((source.remotePathTemplate)?.toString()?.trim()),
+                        fileNamePattern: ((source.fileNamePattern)?.toString()?.trim()),
+                        apiRequestTemplateJson: darpan.facade.reconciliation.AutomationFacadeSupport.canonicalJsonText(ec, source.apiRequestTemplateJson, 'apiRequestTemplateJson'),
+                        apiResponsePathExpression: ((source.apiResponsePathExpression)?.toString()?.trim()),
+                        dateFromParameterName: ((source.dateFromParameterName)?.toString()?.trim()),
+                        dateToParameterName: ((source.dateToParameterName)?.toString()?.trim()),
+                        safeMetadataJson: darpan.facade.reconciliation.AutomationFacadeSupport.canonicalJsonText(ec, source.safeMetadataJson, 'safeMetadataJson'),
+                        optionKey: ((source.optionKey)?.toString()?.trim()),
+                        sourceConfigId: ((source.sourceConfigId)?.toString()?.trim()),
+                        shopifyAuthConfigId: ((source.shopifyAuthConfigId)?.toString()?.trim()),
+                        omsRestSourceConfigId: ((source.omsRestSourceConfigId)?.toString()?.trim())
+                ].findAll { it.value != null }"/>
+                <set field="ignoreSourceEntryAdd" from="sourceEntries.add(sourceEntry)"/>
+            </iterate>
+            <if condition="!automationNameValue">
+                <message error="true">automationName is required</message>
+            </if>
+            <if condition="!(inputModeEnumIdValue in [darpan.facade.reconciliation.AutomationFacadeSupport.INPUT_MODE_API_RANGE, darpan.facade.reconciliation.AutomationFacadeSupport.INPUT_MODE_SFTP_FILES])">
+                <message error="true">inputModeEnumId must be ${darpan.facade.reconciliation.AutomationFacadeSupport.INPUT_MODE_API_RANGE} or ${darpan.facade.reconciliation.AutomationFacadeSupport.INPUT_MODE_SFTP_FILES}</message>
+            </if>
+            <if condition="!scheduleExprValue">
+                <message error="true">scheduleExpr is required</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; automationIdValue">
+                <set field="automationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', automationIdValue).disableAuthz().useCache(false).one()"/>
+                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, automationRecord)">
+                    <message error="true">Automation '${automationIdValue}' was not found.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for automation changes.')"/>
+            </if>
+            <set field="saveAutomationInput" from="[
+                    automationId: automationIdValue,
+                    automationName: automationNameValue,
+                    description: descriptionValue,
+                    inputModeEnumId: inputModeEnumIdValue,
+                    savedRunId: savedRunIdValue,
+                    savedRunType: savedRunTypeValue,
+                    savedRun: savedRun,
+                    newSavedRun: newSavedRun,
+                    scheduleExpr: scheduleExprValue,
+                    nextScheduledFireTime: nextScheduledFireTime,
+                    lastScheduledFireTime: lastScheduledFireTime,
+                    relativeWindowTypeEnumId: relativeWindowTypeEnumIdValue,
+                    relativeWindowCount: relativeWindowCount,
+                    customWindowStartDate: customWindowStartDate,
+                    customWindowEndDate: customWindowEndDate,
+                    maxWindowDays: maxWindowDays,
+                    splitWindowDays: splitWindowDays,
+                    windowTimeZone: windowTimeZoneValue,
+                    safeConfigJson: safeConfigJsonValue,
+                    isActive: isActive,
+                    sourceEntries: sourceEntries
+            ]"/>
+            <if condition="!ec.message.hasError()">
+                <set field="prepareAutomationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.prepareAutomationSave(ec, saveAutomationInput)"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="automationFields" from="prepareAutomationResult.automationFields"/>
+                <set field="sourceEntries" from="prepareAutomationResult.sourceEntries ?: []"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; automationRecord">
+                <set field="ignoreSetName" from="automationRecord.set('automationName', automationFields.automationName)"/>
+                <set field="ignoreSetDescription" from="automationRecord.set('description', automationFields.description)"/>
+                <set field="ignoreSetInputMode" from="automationRecord.set('inputModeEnumId', automationFields.inputModeEnumId)"/>
+                <set field="ignoreSetSavedRun" from="automationRecord.set('savedRunId', automationFields.savedRunId)"/>
+                <set field="ignoreSetSavedRunType" from="automationRecord.set('savedRunType', automationFields.savedRunType)"/>
+                <set field="ignoreSetReconciliationRun" from="automationRecord.set('reconciliationRunId', automationFields.reconciliationRunId)"/>
+                <set field="ignoreSetMapping" from="automationRecord.set('reconciliationMappingId', automationFields.reconciliationMappingId)"/>
+                <set field="ignoreSetRuleSet" from="automationRecord.set('ruleSetId', automationFields.ruleSetId)"/>
+                <set field="ignoreSetCompareScope" from="automationRecord.set('compareScopeId', automationFields.compareScopeId)"/>
+                <set field="ignoreSetSchedule" from="automationRecord.set('scheduleExpr', automationFields.scheduleExpr)"/>
+                <set field="ignoreSetNextFire" from="automationRecord.set('nextScheduledFireTime', automationFields.nextScheduledFireTime)"/>
+                <set field="ignoreSetLastFire" from="automationRecord.set('lastScheduledFireTime', automationFields.lastScheduledFireTime)"/>
+                <set field="ignoreSetRelWindow" from="automationRecord.set('relativeWindowTypeEnumId', automationFields.relativeWindowTypeEnumId)"/>
+                <set field="ignoreSetRelCount" from="automationRecord.set('relativeWindowCount', automationFields.relativeWindowCount)"/>
+                <set field="ignoreSetCustomStart" from="automationRecord.set('customWindowStartDate', automationFields.customWindowStartDate)"/>
+                <set field="ignoreSetCustomEnd" from="automationRecord.set('customWindowEndDate', automationFields.customWindowEndDate)"/>
+                <set field="ignoreSetMaxWindow" from="automationRecord.set('maxWindowDays', automationFields.maxWindowDays)"/>
+                <set field="ignoreSetSplitWindow" from="automationRecord.set('splitWindowDays', automationFields.splitWindowDays)"/>
+                <set field="ignoreSetTimeZone" from="automationRecord.set('windowTimeZone', automationFields.windowTimeZone)"/>
+                <set field="ignoreSetSafeConfig" from="automationRecord.set('safeConfigJson', automationFields.safeConfigJson)"/>
+                <set field="ignoreSetIsActive" from="automationRecord.set('isActive', automationFields.isActive)"/>
+                <set field="ignoreSetUpdatedDate" from="automationRecord.set('lastUpdatedDate', automationFields.lastUpdatedDate)"/>
+                <set field="ignoreAutomationUpdate" from="automationRecord.update()"/>
+                <set field="savedAutomationId" from="automationIdValue"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; !automationRecord">
+                <set field="automationCreateMap" from="new java.util.LinkedHashMap(automationFields)"/>
+                <set field="ignoreAutomationIdPut" from="automationIdValue ? automationCreateMap.put('automationId', automationIdValue) : null"/>
+                <set field="ignoreCreatedDatePut" from="automationCreateMap.put('createdDate', automationFields.lastUpdatedDate ?: ec.user.nowTimestamp)"/>
+                <set field="ignoreTenantOwnership" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(automationCreateMap, ec)"/>
+                <if condition="!ec.message.hasError()">
+                    <service-call name="create#darpan.reconciliation.ReconciliationAutomation"
+                            disable-authz="true"
+                            in-map="automationCreateMap"
+                            out-map="createAutomationResult"/>
+                    <set field="savedAutomationId" from="createAutomationResult.automationId ?: automationCreateMap.automationId"/>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="sourceUpdatedDate" from="ec.user.nowTimestamp"/>
+                <set field="ignoreDeleteAutomationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', savedAutomationId).disableAuthz().useCache(false).deleteAll()"/>
+                <iterate list="sourceEntries" entry="sourceEntry">
+                    <set field="sourceCreateMap" from="[
+                            automationId: savedAutomationId,
+                            fileSide: sourceEntry.fileSide,
+                            companyUserGroupId: darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec),
+                            createdByUserId: darpan.facade.common.TenantAccessSupport.currentUserId(ec),
+                            sourceTypeEnumId: sourceEntry.sourceTypeEnumId,
+                            systemEnumId: sourceEntry.systemEnumId,
+                            fileTypeEnumId: sourceEntry.fileTypeEnumId,
+                            schemaFileName: sourceEntry.schemaFileName,
+                            recordRootExpression: sourceEntry.recordRootExpression,
+                            primaryIdExpression: sourceEntry.primaryIdExpression,
+                            idValueNormalizer: sourceEntry.idValueNormalizer,
+                            systemMessageRemoteId: sourceEntry.systemMessageRemoteId,
+                            nsRestletConfigId: sourceEntry.nsRestletConfigId,
+                            sftpServerId: sourceEntry.sftpServerId,
+                            remotePathTemplate: sourceEntry.remotePathTemplate,
+                            fileNamePattern: sourceEntry.fileNamePattern,
+                            apiRequestTemplateJson: sourceEntry.apiRequestTemplateJson,
+                            apiResponsePathExpression: sourceEntry.apiResponsePathExpression,
+                            dateFromParameterName: sourceEntry.dateFromParameterName,
+                            dateToParameterName: sourceEntry.dateToParameterName,
+                            safeMetadataJson: sourceEntry.safeMetadataJson,
+                            createdDate: sourceUpdatedDate,
+                            lastUpdatedDate: sourceUpdatedDate
+                    ].findAll { it.value != null }"/>
+                    <service-call name="create#darpan.reconciliation.ReconciliationAutomationSource"
+                            disable-authz="true"
+                            in-map="sourceCreateMap"/>
+                </iterate>
+                <set field="automationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', savedAutomationId).disableAuthz().useCache(false).one()"/>
+                <set field="automationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', savedAutomationId).orderBy('fileSide').disableAuthz().useCache(false).list() ?: []"/>
+                <set field="automationExecutions" from="darpan.facade.reconciliation.AutomationFacadeSupport.collapseExecutionHistory(ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', savedAutomationId).orderBy('-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [])"/>
+                <set field="automation" from="automationRecord ? darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationRow(ec, automationRecord, true, automationSources, automationExecutions) : null"/>
+                <message>Saved automation ${automation?.automationName ?: savedAutomationId}.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 
@@ -1708,14 +1919,34 @@
             <parameter name="deletedExecutionCount" type="Integer"/>
         </out-parameters>
         <actions>
-            <set field="automationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.deleteAutomation(ec, context)"/>
-            <set field="ok" from="automationResult.ok"/>
-            <set field="messages" from="automationResult.messages"/>
-            <set field="errors" from="automationResult.errors"/>
-            <set field="deleted" from="automationResult.deleted"/>
-            <set field="deletedAutomationId" from="automationResult.deletedAutomationId"/>
-            <set field="deletedSourceCount" from="automationResult.deletedSourceCount"/>
-            <set field="deletedExecutionCount" from="automationResult.deletedExecutionCount"/>
+            <set field="automationIdValue" from="((automationId)?.toString()?.trim())"/>
+            <set field="deleted" from="false"/>
+            <set field="deletedAutomationId" from="null"/>
+            <set field="deletedSourceCount" from="0"/>
+            <set field="deletedExecutionCount" from="0"/>
+            <if condition="!automationIdValue">
+                <message error="true">automationId is required</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for automation changes.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="automationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', automationIdValue).disableAuthz().useCache(false).one()"/>
+                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, automationRecord)">
+                    <message error="true">Automation '${automationIdValue}' was not found.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="deletedSourceCount" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', automationIdValue).disableAuthz().useCache(false).deleteAll()"/>
+                <set field="deletedExecutionCount" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).disableAuthz().useCache(false).deleteAll()"/>
+                <set field="ignoreAutomationDelete" from="automationRecord.delete()"/>
+                <set field="deleted" from="true"/>
+                <set field="deletedAutomationId" from="automationIdValue"/>
+                <message>Deleted automation ${automationIdValue}.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 
@@ -1731,11 +1962,31 @@
             <parameter name="automation" type="Map"/>
         </out-parameters>
         <actions>
-            <set field="automationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.setAutomationActive(ec, context, false)"/>
-            <set field="ok" from="automationResult.ok"/>
-            <set field="messages" from="automationResult.messages"/>
-            <set field="errors" from="automationResult.errors"/>
-            <set field="automation" from="automationResult.automation"/>
+            <set field="automationIdValue" from="((automationId)?.toString()?.trim())"/>
+            <if condition="!automationIdValue">
+                <message error="true">automationId is required</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for automation changes.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="automationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', automationIdValue).disableAuthz().useCache(false).one()"/>
+                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, automationRecord)">
+                    <message error="true">Automation '${automationIdValue}' was not found.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreSetInactive" from="automationRecord.set('isActive', 'N')"/>
+                <set field="ignoreUpdatedDate" from="automationRecord.set('lastUpdatedDate', ec.user.nowTimestamp)"/>
+                <set field="ignoreAutomationUpdate" from="automationRecord.update()"/>
+                <set field="automationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', automationIdValue).orderBy('fileSide').disableAuthz().useCache(false).list() ?: []"/>
+                <set field="automationExecutions" from="darpan.facade.reconciliation.AutomationFacadeSupport.collapseExecutionHistory(ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).orderBy('-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [])"/>
+                <set field="automation" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationRow(ec, automationRecord, true, automationSources, automationExecutions)"/>
+                <message>Paused automation ${automationIdValue}.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 
@@ -1751,11 +2002,31 @@
             <parameter name="automation" type="Map"/>
         </out-parameters>
         <actions>
-            <set field="automationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.setAutomationActive(ec, context, true)"/>
-            <set field="ok" from="automationResult.ok"/>
-            <set field="messages" from="automationResult.messages"/>
-            <set field="errors" from="automationResult.errors"/>
-            <set field="automation" from="automationResult.automation"/>
+            <set field="automationIdValue" from="((automationId)?.toString()?.trim())"/>
+            <if condition="!automationIdValue">
+                <message error="true">automationId is required</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for automation changes.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="automationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', automationIdValue).disableAuthz().useCache(false).one()"/>
+                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, automationRecord)">
+                    <message error="true">Automation '${automationIdValue}' was not found.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreSetActive" from="automationRecord.set('isActive', 'Y')"/>
+                <set field="ignoreUpdatedDate" from="automationRecord.set('lastUpdatedDate', ec.user.nowTimestamp)"/>
+                <set field="ignoreAutomationUpdate" from="automationRecord.update()"/>
+                <set field="automationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', automationIdValue).orderBy('fileSide').disableAuthz().useCache(false).list() ?: []"/>
+                <set field="automationExecutions" from="darpan.facade.reconciliation.AutomationFacadeSupport.collapseExecutionHistory(ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).orderBy('-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [])"/>
+                <set field="automation" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationRow(ec, automationRecord, true, automationSources, automationExecutions)"/>
+                <message>Resumed automation ${automationIdValue}.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 
@@ -1779,12 +2050,45 @@
             <parameter name="runResult" type="Map"/>
         </out-parameters>
         <actions>
-            <set field="automationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.runAutomationNow(ec, context)"/>
-            <set field="ok" from="automationResult.ok"/>
-            <set field="messages" from="automationResult.messages"/>
-            <set field="errors" from="automationResult.errors"/>
-            <set field="automation" from="automationResult.automation"/>
-            <set field="runResult" from="automationResult.runResult"/>
+            <set field="automationIdValue" from="((automationId)?.toString()?.trim())"/>
+            <set field="sparkAppNameValue" from="((sparkAppName)?.toString()?.trim()) ?: 'AutomationFacadeRunNow'"/>
+            <set field="outputLocationValue" from="((outputLocation)?.toString()?.trim())"/>
+            <set field="sparkMasterValue" from="((sparkMaster)?.toString()?.trim())"/>
+            <if condition="!automationIdValue">
+                <message error="true">automationId is required</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreRunAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access for automation runs.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="automationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', automationIdValue).disableAuthz().useCache(false).one()"/>
+                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, automationRecord)">
+                    <message error="true">Automation '${automationIdValue}' was not found.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="executeAutomationInput" from="[
+                        automationId: automationIdValue,
+                        scheduledFireTime: scheduledFireTime ?: ec.user.nowTimestamp,
+                        windowStartDate: windowStartDate,
+                        windowEndDate: windowEndDate,
+                        hasHeader: hasHeader,
+                        outputLocation: outputLocationValue,
+                        sparkMaster: sparkMasterValue,
+                        sparkAppName: sparkAppNameValue
+                ].findAll { it.value != null }"/>
+                <service-call name="reconciliation.ReconciliationAutomationServices.execute#Automation"
+                        disable-authz="true"
+                        in-map="executeAutomationInput"
+                        out-map="runResult"/>
+                <set field="refreshedAutomationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', automationIdValue).disableAuthz().useCache(false).one()"/>
+                <set field="automationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', automationIdValue).orderBy('fileSide').disableAuthz().useCache(false).list() ?: []"/>
+                <set field="automationExecutions" from="darpan.facade.reconciliation.AutomationFacadeSupport.collapseExecutionHistory(ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).orderBy('-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [])"/>
+                <set field="automation" from="refreshedAutomationRecord ? darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationRow(ec, refreshedAutomationRecord, true, automationSources, automationExecutions) : null"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 
@@ -1826,12 +2130,35 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="automationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.listAutomationExecutions(ec, context)"/>
-            <set field="ok" from="automationResult.ok"/>
-            <set field="messages" from="automationResult.messages"/>
-            <set field="errors" from="automationResult.errors"/>
-            <set field="pagination" from="automationResult.pagination"/>
-            <set field="executions" from="automationResult.executions"/>
+            <set field="page" from="Math.max(0, pageIndex instanceof Number ? pageIndex.intValue() : ((pageIndex)?.toString()?.trim()?.isInteger() ? pageIndex.toString().trim().toInteger() : 0))"/>
+            <set field="size" from="Math.max(1, Math.min(200, pageSize instanceof Number ? pageSize.intValue() : ((pageSize)?.toString()?.trim()?.isInteger() ? pageSize.toString().trim().toInteger() : 20)))"/>
+            <set field="automationIdValue" from="((automationId)?.toString()?.trim())"/>
+            <if condition="automationIdValue">
+                <set field="automationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', automationIdValue).disableAuthz().useCache(false).one()"/>
+                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, automationRecord)">
+                    <message error="true">Automation '${automationIdValue}' was not found.</message>
+                </if>
+            </if>
+            <set field="executionRows" from="[]"/>
+            <if condition="!ec.message.hasError()">
+                <set field="activeTenantUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+                <set field="executionFinder" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').orderBy('-createdDate,-scheduledDate,-automationExecutionId').disableAuthz().useCache(false)"/>
+                <if condition="activeTenantUserGroupId">
+                    <set field="ignoreTenantCondition" from="executionFinder.condition('companyUserGroupId', activeTenantUserGroupId)"/>
+                </if>
+                <if condition="automationIdValue">
+                    <set field="ignoreAutomationCondition" from="executionFinder.condition('automationId', automationIdValue)"/>
+                </if>
+                <set field="executionRows" from="darpan.facade.reconciliation.AutomationFacadeSupport.collapseExecutionHistory(executionFinder.list() ?: []).collect { execution -> darpan.facade.reconciliation.AutomationFacadeSupport.buildExecutionRow(ec, execution) }"/>
+            </if>
+            <set field="totalCount" from="executionRows.size()"/>
+            <set field="fromIndex" from="Math.min(page * size, totalCount)"/>
+            <set field="toIndex" from="Math.min(fromIndex + size, totalCount)"/>
+            <set field="executions" from="executionRows.subList(fromIndex, toIndex)"/>
+            <set field="pagination" from="[pageIndex: page, pageSize: size, totalCount: totalCount, pageCount: Math.max(1, Math.ceil(totalCount / (double) size) as int)]"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 
@@ -1853,20 +2180,19 @@
             <parameter name="systemRemotes" type="List"/>
         </out-parameters>
         <actions>
-            <set field="automationResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.listAutomationSourceOptions(ec, context)"/>
-            <set field="ok" from="automationResult.ok"/>
-            <set field="messages" from="automationResult.messages"/>
-            <set field="errors" from="automationResult.errors"/>
-            <set field="inputModes" from="automationResult.inputModes"/>
-            <set field="sourceTypes" from="automationResult.sourceTypes"/>
-            <set field="relativeWindows" from="automationResult.relativeWindows"/>
-            <set field="fileTypes" from="automationResult.fileTypes"/>
-            <set field="systems" from="automationResult.systems"/>
-            <set field="savedRuns" from="automationResult.savedRuns"/>
-            <set field="sftpServers" from="automationResult.sftpServers"/>
-            <set field="sourceConfigs" from="automationResult.sourceConfigs"/>
-            <set field="nsRestletConfigs" from="automationResult.nsRestletConfigs"/>
-            <set field="systemRemotes" from="automationResult.systemRemotes"/>
+            <set field="inputModes" from="darpan.facade.reconciliation.AutomationFacadeSupport.listEnumOptions(ec, 'AutomationInputMode').findAll { it.enumId in darpan.facade.reconciliation.AutomationFacadeSupport.SUPPORTED_INPUT_MODES }"/>
+            <set field="sourceTypes" from="darpan.facade.reconciliation.AutomationFacadeSupport.listEnumOptions(ec, 'AutomationSourceType')"/>
+            <set field="relativeWindows" from="darpan.facade.reconciliation.AutomationFacadeSupport.listEnumOptions(ec, 'AutomationRelWindow')"/>
+            <set field="fileTypes" from="darpan.facade.reconciliation.AutomationFacadeSupport.listEnumOptions(ec, 'DarpanFileType')"/>
+            <set field="systems" from="darpan.facade.reconciliation.AutomationFacadeSupport.listEnumOptions(ec, 'DarpanSystemSource')"/>
+            <set field="savedRuns" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.collectSavedRunRows(ec)"/>
+            <set field="sftpServers" from="darpan.facade.reconciliation.AutomationFacadeSupport.listSftpServerOptions(ec)"/>
+            <set field="sourceConfigs" from="darpan.facade.reconciliation.AutomationFacadeSupport.listSourceConfigOptions(ec)"/>
+            <set field="nsRestletConfigs" from="darpan.facade.reconciliation.AutomationFacadeSupport.listNsRestletOptions(ec)"/>
+            <set field="systemRemotes" from="darpan.facade.reconciliation.AutomationFacadeSupport.listOmsRestSourceRemoteOptions(ec) + darpan.facade.reconciliation.AutomationFacadeSupport.listShopifySourceRemoteOptions(ec) + darpan.facade.reconciliation.AutomationFacadeSupport.listSystemRemoteOptions(ec)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 
@@ -1911,6 +2237,12 @@
                 <parameter name="onlyInFile2Count" type="Long"/>
                 <parameter name="createdDate" type="Timestamp"/>
                 <parameter name="sizeBytes" type="Long"/>
+                <parameter name="statusEnumId"/>
+                <parameter name="statusLabel"/>
+                <parameter name="resultAvailable" type="Boolean"/>
+                <parameter name="startedDate" type="Timestamp"/>
+                <parameter name="completedDate" type="Timestamp"/>
+                <parameter name="lastUpdatedDate" type="Timestamp"/>
             </parameter>
         </out-parameters>
         <actions>
@@ -1985,7 +2317,7 @@
             <parameter name="statusMessage"/>
         </out-parameters>
         <actions>
-            <set field="fileNameValue" from="darpan.facade.common.FacadeSupport.normalize(fileName)"/>
+            <set field="fileNameValue" from="((fileName)?.toString()?.trim())"/>
             <if condition="!fileNameValue">
                 <message error="true">fileName is required</message>
             </if>

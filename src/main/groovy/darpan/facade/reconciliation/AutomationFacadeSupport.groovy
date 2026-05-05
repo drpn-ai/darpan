@@ -47,319 +47,60 @@ class AutomationFacadeSupport {
             [fieldPath: "\$.records[*].name", label: "Order name", type: "String"],
     ].asImmutable()
 
-    static Map<String, Object> listAutomations(def ec, Map params = [:]) {
+    static Map<String, Object> prepareAutomationSave(def ec, Map params = [:]) {
         Map input = params ?: [:]
-        int page = Math.max(0, FacadeSupport.normalizeInt(input.pageIndex, 0))
-        int size = Math.max(1, Math.min(200, FacadeSupport.normalizeInt(input.pageSize, 20)))
-        String search = FacadeSupport.normalize(input.query)?.toLowerCase()
-
-        List<Map<String, Object>> rows = collectAutomationRows(ec)
-        if (search) {
-            rows = rows.findAll { Map<String, Object> row ->
-                [
-                        row.automationId,
-                        row.automationName,
-                        row.description,
-                        row.savedRunId,
-                        row.savedRunName,
-                        row.inputModeLabel,
-                        row.sourceSummary,
-                        row.scheduleSummary,
-                        row.timezone,
-                        row.lastExecution?.statusLabel,
-                ].any { Object value -> value?.toString()?.toLowerCase()?.contains(search) }
-            }
-        }
-
-        int totalCount = rows.size()
-        int fromIndex = Math.min(page * size, totalCount)
-        int toIndex = Math.min(fromIndex + size, totalCount)
-        return FacadeSupport.envelope(ec) + [
-                automations: rows.subList(fromIndex, toIndex),
-                pagination : [
-                        pageIndex : page,
-                        pageSize  : size,
-                        totalCount: totalCount,
-                        pageCount : Math.max(1, Math.ceil(totalCount / (double) size) as int),
-                ],
-        ]
-    }
-
-    static Map<String, Object> getAutomation(def ec, Map params = [:]) {
-        String automationId = FacadeSupport.normalize(params?.automationId)
-        if (!automationId) ec.message.addError("automationId is required")
-
-        Map<String, Object> automation = null
-        if (!ec.message.hasError()) {
-            def record = findAutomation(ec, automationId)
-            if (!record) {
-                ec.message.addError("Automation '${automationId}' was not found.")
-            } else {
-                automation = buildAutomationRow(ec, record, true)
-            }
-        }
-
-        return FacadeSupport.envelope(ec) + [automation: automation]
-    }
-
-    static Map<String, Object> saveAutomation(def ec, Map params = [:]) {
-        Map input = params ?: [:]
-        String automationId = FacadeSupport.normalize(input.automationId)
-        def existing = automationId ? findAutomationRaw(ec, automationId) : null
-        if (existing) {
-            TenantAccessSupport.requireTenantRecordAccess(ec, existing,
-                    "Automation '${automationId}' was not found.",
-                    "Automation '${automationId}' is not available in your active tenant.")
-        }
-        if (!ec.message.hasError()) {
-            TenantAccessSupport.requireActiveTenantWriteAccess(ec,
-                    "Your active tenant only has view access for automation changes.")
-        }
-
-        String automationName = FacadeSupport.normalize(input.automationName)
-        String inputModeEnumId = FacadeSupport.normalize(input.inputModeEnumId)
-        String scheduleExpr = FacadeSupport.normalize(input.scheduleExpr)
-        if (!automationName) ec.message.addError("automationName is required")
-        if (!(inputModeEnumId in [INPUT_MODE_API_RANGE, INPUT_MODE_SFTP_FILES])) {
-            ec.message.addError("inputModeEnumId must be ${INPUT_MODE_API_RANGE} or ${INPUT_MODE_SFTP_FILES}")
-        }
-        if (!scheduleExpr) ec.message.addError("scheduleExpr is required")
+        String automationName = input.automationName as String
+        String inputModeEnumId = input.inputModeEnumId as String
+        String scheduleExpr = input.scheduleExpr as String
 
         Map<String, Object> savedRunResolution = !ec.message.hasError() ? resolveSavedRunForSave(ec, input) : [:]
-        String safeConfigJsonValue = null
-        List<Map<String, Object>> sourceEntries = []
-        if (!ec.message.hasError()) {
-            try {
-                safeConfigJsonValue = normalizeJsonText(input.safeConfigJson, "safeConfigJson")
-                sourceEntries = normalizeSourceEntries(input.sources)
-                sourceEntries = applyApiSourceMetadataDefaults(ec, sourceEntries)
-            } catch (IllegalArgumentException e) {
-                ec.message.addError(e.message)
-            }
-        }
+        List<Map<String, Object>> sourceEntries = (input.sourceEntries instanceof Collection ?
+                ((Collection<Map<String, Object>>) input.sourceEntries) : []) as List<Map<String, Object>>
+        if (!ec.message.hasError()) sourceEntries = applyApiSourceMetadataDefaults(ec, sourceEntries)
         if (!ec.message.hasError()) {
             validateSources(ec, inputModeEnumId, sourceEntries, savedRunResolution.savedRun as Map)
         }
 
-        def automationValue = null
+        Map<String, Object> automationFields = null
         if (!ec.message.hasError()) {
             Timestamp now = nowTimestamp(ec)
-            automationValue = existing ?: ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomation")
-            if (automationId) automationValue.set("automationId", automationId)
-            automationValue.set("automationName", automationName)
-            automationValue.set("description", FacadeSupport.normalize(input.description))
-            automationValue.set("inputModeEnumId", inputModeEnumId)
-            automationValue.set("savedRunId", savedRunResolution.savedRunId)
-            automationValue.set("savedRunType", savedRunResolution.savedRunType)
-            automationValue.set("reconciliationRunId", FacadeSupport.normalize(input.reconciliationRunId))
-            automationValue.set("reconciliationMappingId", savedRunResolution.reconciliationMappingId)
-            automationValue.set("ruleSetId", savedRunResolution.ruleSetId)
-            automationValue.set("compareScopeId", savedRunResolution.compareScopeId)
-            automationValue.set("scheduleExpr", scheduleExpr)
-            automationValue.set("nextScheduledFireTime", toTimestamp(input.nextScheduledFireTime) ?:
-                    resolveNextFireTime(input, now))
-            automationValue.set("lastScheduledFireTime", toTimestamp(input.lastScheduledFireTime))
-            automationValue.set("relativeWindowTypeEnumId", FacadeSupport.normalize(input.relativeWindowTypeEnumId))
-            automationValue.set("relativeWindowCount", FacadeSupport.normalizeInt(input.relativeWindowCount, null))
-            automationValue.set("customWindowStartDate", toTimestamp(input.customWindowStartDate))
-            automationValue.set("customWindowEndDate", toTimestamp(input.customWindowEndDate))
-            automationValue.set("maxWindowDays", FacadeSupport.normalizeInt(input.maxWindowDays, 28))
-            automationValue.set("splitWindowDays", FacadeSupport.normalizeInt(input.splitWindowDays, 28))
-            automationValue.set("windowTimeZone", FacadeSupport.normalize(input.windowTimeZone) ?: "UTC")
-            automationValue.set("safeConfigJson", safeConfigJsonValue)
-            automationValue.set("isActive", FacadeSupport.normalizeBool(input.isActive, true) ? "Y" : "N")
-            automationValue.set("lastUpdatedDate", now)
-            if (!existing) {
-                TenantAccessSupport.assignTenantOwnershipOnCreate(automationValue, ec)
-                automationValue.set("createdDate", now)
-                if (!automationId) automationValue.setSequencedIdPrimary()
-                if (!ec.message.hasError()) automationValue.create()
-            } else {
-                automationValue.update()
-            }
-        }
-
-        if (!ec.message.hasError() && automationValue) {
-            String savedAutomationId = readString(automationValue, "automationId")
-            replaceSources(ec, savedAutomationId, sourceEntries)
-            automationValue = findAutomation(ec, savedAutomationId)
-            ec.message.addMessage("Saved automation ${readString(automationValue, "automationName")}.")
+            automationFields = [
+                    automationName        : automationName,
+                    description           : input.description,
+                    inputModeEnumId       : inputModeEnumId,
+                    savedRunId            : savedRunResolution.savedRunId,
+                    savedRunType          : savedRunResolution.savedRunType,
+                    reconciliationRunId   : input.reconciliationRunId,
+                    reconciliationMappingId: savedRunResolution.reconciliationMappingId,
+                    ruleSetId             : savedRunResolution.ruleSetId,
+                    compareScopeId        : savedRunResolution.compareScopeId,
+                    scheduleExpr          : scheduleExpr,
+                    nextScheduledFireTime : toTimestamp(input.nextScheduledFireTime) ?:
+                            resolveNextFireTime(input, now),
+                    lastScheduledFireTime : toTimestamp(input.lastScheduledFireTime),
+                    relativeWindowTypeEnumId: input.relativeWindowTypeEnumId,
+                    relativeWindowCount   : input.relativeWindowCount,
+                    customWindowStartDate : toTimestamp(input.customWindowStartDate),
+                    customWindowEndDate   : toTimestamp(input.customWindowEndDate),
+                    maxWindowDays         : input.maxWindowDays,
+                    splitWindowDays       : input.splitWindowDays,
+                    windowTimeZone        : input.windowTimeZone ?: "UTC",
+                    safeConfigJson        : input.safeConfigJson,
+                    isActive              : input.isActive == false ? "N" : "Y",
+                    lastUpdatedDate       : now,
+            ] as Map<String, Object>
         }
 
         return FacadeSupport.envelope(ec) + [
-                automation: !ec.message.hasError() && automationValue ? buildAutomationRow(ec, automationValue, true) : null,
+                automationFields: !ec.message.hasError() ? automationFields : null,
+                sourceEntries   : !ec.message.hasError() ? sourceEntries : [],
         ]
     }
 
-    static Map<String, Object> deleteAutomation(def ec, Map params = [:]) {
-        String automationId = FacadeSupport.normalize(params?.automationId)
-        if (!automationId) ec.message.addError("automationId is required")
-        if (!ec.message.hasError()) {
-            TenantAccessSupport.requireActiveTenantWriteAccess(ec,
-                    "Your active tenant only has view access for automation changes.")
-        }
-
-        int deletedSourceCount = 0
-        int deletedExecutionCount = 0
-        boolean deleted = false
-        if (!ec.message.hasError()) {
-            def automation = findAutomation(ec, automationId)
-            if (!automation) {
-                ec.message.addError("Automation '${automationId}' was not found.")
-            } else {
-                deletedSourceCount = ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource")
-                        .condition("automationId", automationId)
-                        .disableAuthz()
-                        .useCache(false)
-                        .deleteAll()
-                deletedExecutionCount = ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution")
-                        .condition("automationId", automationId)
-                        .disableAuthz()
-                        .useCache(false)
-                        .deleteAll()
-                automation.delete()
-                deleted = true
-                ec.message.addMessage("Deleted automation ${automationId}.")
-            }
-        }
-
-        return FacadeSupport.envelope(ec) + [
-                deleted              : deleted,
-                deletedAutomationId  : deleted ? automationId : null,
-                deletedSourceCount   : deletedSourceCount,
-                deletedExecutionCount: deletedExecutionCount,
-        ]
-    }
-
-    static Map<String, Object> setAutomationActive(def ec, Map params = [:], boolean active) {
-        String automationId = FacadeSupport.normalize(params?.automationId)
-        if (!automationId) ec.message.addError("automationId is required")
-        if (!ec.message.hasError()) {
-            TenantAccessSupport.requireActiveTenantWriteAccess(ec,
-                    "Your active tenant only has view access for automation changes.")
-        }
-
-        def automation = null
-        if (!ec.message.hasError()) {
-            automation = findAutomation(ec, automationId)
-            if (!automation) {
-                ec.message.addError("Automation '${automationId}' was not found.")
-            } else {
-                automation.set("isActive", active ? "Y" : "N")
-                automation.set("lastUpdatedDate", nowTimestamp(ec))
-                automation.update()
-                ec.message.addMessage("${active ? "Resumed" : "Paused"} automation ${automationId}.")
-            }
-        }
-
-        return FacadeSupport.envelope(ec) + [
-                automation: !ec.message.hasError() && automation ? buildAutomationRow(ec, automation, true) : null,
-        ]
-    }
-
-    static Map<String, Object> runAutomationNow(def ec, Map params = [:]) {
-        String automationId = FacadeSupport.normalize(params?.automationId)
-        if (!automationId) ec.message.addError("automationId is required")
-        if (!ec.message.hasError()) {
-            TenantAccessSupport.requireActiveTenantRunAccess(ec,
-                    "Your active tenant only has view access for automation runs.")
-        }
-
-        Map<String, Object> runResult = null
-        Map<String, Object> automationRow = null
-        if (!ec.message.hasError()) {
-            def automation = findAutomation(ec, automationId)
-            if (!automation) {
-                ec.message.addError("Automation '${automationId}' was not found.")
-            } else {
-                Map<String, Object> executeParams = [
-                        automationId      : automationId,
-                        scheduledFireTime : toTimestamp(params?.scheduledFireTime) ?: nowTimestamp(ec),
-                        windowStartDate   : toTimestamp(params?.windowStartDate),
-                        windowEndDate     : toTimestamp(params?.windowEndDate),
-                        hasHeader         : params?.containsKey("hasHeader") ? params.hasHeader : Boolean.TRUE,
-                        outputLocation    : FacadeSupport.normalize(params?.outputLocation),
-                        sparkMaster       : FacadeSupport.normalize(params?.sparkMaster),
-                        sparkAppName      : FacadeSupport.normalize(params?.sparkAppName) ?: "AutomationFacadeRunNow",
-                ].findAll { it.value != null } as Map<String, Object>
-                runResult = callExecuteAutomation(ec, executeParams)
-                automationRow = buildAutomationRow(ec, findAutomation(ec, automationId), true)
-            }
-        }
-
-        return FacadeSupport.envelope(ec) + [
-                automation: automationRow,
-                runResult : runResult,
-        ]
-    }
-
-    static Map<String, Object> listAutomationExecutions(def ec, Map params = [:]) {
-        Map input = params ?: [:]
-        int page = Math.max(0, FacadeSupport.normalizeInt(input.pageIndex, 0))
-        int size = Math.max(1, Math.min(200, FacadeSupport.normalizeInt(input.pageSize, 20)))
-        String automationId = FacadeSupport.normalize(input.automationId)
-        if (automationId && !findAutomation(ec, automationId)) {
-            ec.message.addError("Automation '${automationId}' was not found.")
-        }
-
-        List<Map<String, Object>> rows = []
-        if (!ec.message.hasError()) {
-            String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
-            def finder = ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution")
-                    .orderBy("-createdDate,-scheduledDate,-automationExecutionId")
-                    .disableAuthz()
-                    .useCache(false)
-            if (activeTenantUserGroupId) finder.condition("companyUserGroupId", activeTenantUserGroupId)
-            if (automationId) finder.condition("automationId", automationId)
-            rows = collapseExecutionHistory(finder.list() ?: [])
-                    .collect { execution -> buildExecutionRow(ec, execution) }
-        }
-
-        int totalCount = rows.size()
-        int fromIndex = Math.min(page * size, totalCount)
-        int toIndex = Math.min(fromIndex + size, totalCount)
-        return FacadeSupport.envelope(ec) + [
-                executions: rows.subList(fromIndex, toIndex),
-                pagination: [
-                        pageIndex : page,
-                        pageSize  : size,
-                        totalCount: totalCount,
-                        pageCount : Math.max(1, Math.ceil(totalCount / (double) size) as int),
-                ],
-        ]
-    }
-
-    static Map<String, Object> listAutomationSourceOptions(def ec, Map params = [:]) {
-        return FacadeSupport.envelope(ec) + [
-                inputModes       : listEnumOptions(ec, "AutomationInputMode").findAll { it.enumId in SUPPORTED_INPUT_MODES },
-                sourceTypes      : listEnumOptions(ec, "AutomationSourceType"),
-                relativeWindows  : listEnumOptions(ec, "AutomationRelWindow"),
-                fileTypes        : listEnumOptions(ec, "DarpanFileType"),
-                systems          : listEnumOptions(ec, "DarpanSystemSource"),
-                savedRuns        : ReconciliationSavedRunSupport.collectSavedRunRows(ec),
-                sftpServers      : listSftpServerOptions(ec),
-                sourceConfigs    : listSourceConfigOptions(ec),
-                nsRestletConfigs : listNsRestletOptions(ec),
-                systemRemotes    : listOmsRestSourceRemoteOptions(ec) + listShopifySourceRemoteOptions(ec) + listSystemRemoteOptions(ec),
-        ]
-    }
-
-    protected static List<Map<String, Object>> collectAutomationRows(def ec) {
-        String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
-        if (!activeTenantUserGroupId) return []
-        List automations = ec.entity.find("darpan.reconciliation.ReconciliationAutomation")
-                .condition("companyUserGroupId", activeTenantUserGroupId)
-                .orderBy("automationName,automationId")
-                .disableAuthz()
-                .useCache(false)
-                .list() ?: []
-        return automations.collect { automation -> buildAutomationRow(ec, automation, false) } as List<Map<String, Object>>
-    }
-
-    protected static Map<String, Object> buildAutomationRow(def ec, def automation, boolean includeSources) {
+    static Map<String, Object> buildAutomationRow(def ec, def automation, boolean includeSources, List sources, List executions) {
         String automationId = readString(automation, "automationId")
-        List sources = loadSources(ec, automationId)
-        List executions = loadExecutions(ec, automationId)
+        List sourceRows = sources ?: []
+        List executionRows = executions ?: []
         Map<String, Object> savedRun = resolveSavedRunSummary(ec, automation)
         String inputModeEnumId = readString(automation, "inputModeEnumId")
         String isActive = readString(automation, "isActive") ?: "Y"
@@ -378,7 +119,7 @@ class AutomationFacadeSupport {
                 inputModeEnumId       : inputModeEnumId,
                 inputModeLabel        : enumLabel(ec, inputModeEnumId),
                 inputModeCode         : enumCode(ec, inputModeEnumId),
-                sourceSummary         : buildSourceSummary(ec, inputModeEnumId, sources),
+                sourceSummary         : buildSourceSummary(ec, inputModeEnumId, sourceRows),
                 scheduleExpr          : readString(automation, "scheduleExpr"),
                 scheduleSummary       : buildScheduleSummary(automation),
                 timezone              : readString(automation, "windowTimeZone") ?: "UTC",
@@ -393,14 +134,14 @@ class AutomationFacadeSupport {
                 splitWindowDays       : readField(automation, "splitWindowDays"),
                 isActive              : isActive,
                 active                : isActive != "N",
-                lastExecution         : executions ? buildExecutionRow(ec, executions.first()) : null,
-                executionCount        : executions.size(),
+                lastExecution         : executionRows ? buildExecutionRow(ec, executionRows.first()) : null,
+                executionCount        : executionRows.size(),
                 permissions           : buildPermissions(ec, isActive),
                 createdDate           : readField(automation, "createdDate"),
                 lastUpdatedDate       : readField(automation, "lastUpdatedDate"),
         ].findAll { it.value != null } as Map<String, Object>
         if (includeSources) {
-            row.sources = sources.collect { source -> buildSourceRow(ec, source) }
+            row.sources = sourceRows.collect { source -> buildSourceRow(ec, source) }
             row.savedRun = savedRun
         }
         return row
@@ -420,7 +161,7 @@ class AutomationFacadeSupport {
         ]
     }
 
-    protected static Map<String, Object> buildExecutionRow(def ec, def execution) {
+    static Map<String, Object> buildExecutionRow(def ec, def execution) {
         String statusEnumId = readString(execution, "statusEnumId")
         Map<String, String> resultFields = executionResultFields(ec, execution)
         return [
@@ -478,7 +219,7 @@ class AutomationFacadeSupport {
     }
 
     protected static String fileNameFromPath(Object rawPath) {
-        String normalized = FacadeSupport.normalize(rawPath)
+        String normalized = ((rawPath)?.toString()?.trim())
         if (!normalized) return null
         return normalized.tokenize("/\\").last()
     }
@@ -519,8 +260,8 @@ class AutomationFacadeSupport {
     protected static Map<String, Object> resolveSavedRunForSave(def ec, Map input) {
         Map savedRunPayload = (input.savedRun instanceof Map ? input.savedRun :
                 input.newSavedRun instanceof Map ? input.newSavedRun : null) as Map
-        if (!FacadeSupport.normalize(input.savedRunId) && savedRunPayload) {
-            String createMode = FacadeSupport.normalize(savedRunPayload.createMode)?.toLowerCase()
+        if (!((input.savedRunId)?.toString()?.trim()) && savedRunPayload) {
+            String createMode = ((savedRunPayload.createMode)?.toString()?.trim())?.toLowerCase()
             String serviceName = createMode == "csv" ?
                     "facade.ReconciliationFacadeServices.create#CsvRun" :
                     "facade.ReconciliationFacadeServices.create#RuleSetRun"
@@ -536,8 +277,8 @@ class AutomationFacadeSupport {
             input.savedRunType = ((Map) createResult.savedRun)?.runType ?: "ruleset"
         }
 
-        String savedRunId = FacadeSupport.normalize(input.savedRunId)
-        String savedRunType = FacadeSupport.normalize(input.savedRunType)?.toLowerCase() ?: "ruleset"
+        String savedRunId = ((input.savedRunId)?.toString()?.trim())
+        String savedRunType = ((input.savedRunType)?.toString()?.trim())?.toLowerCase() ?: "ruleset"
         if (!savedRunId) ec.message.addError("savedRunId or savedRun is required")
         if (!(savedRunType in ["ruleset", "mapping"])) ec.message.addError("savedRunType must be ruleset or mapping")
         if (ec.message.hasError()) return [:]
@@ -608,9 +349,9 @@ class AutomationFacadeSupport {
                 it.fileSide == fileSide
             }
         }
-        String expectedSystemEnumId = FacadeSupport.normalize(matchingOption?.enumId)
-        if (!expectedSystemEnumId && fileSide == FILE_SIDE_1) expectedSystemEnumId = FacadeSupport.normalize(savedRun.defaultFile1SystemEnumId)
-        if (!expectedSystemEnumId && fileSide == FILE_SIDE_2) expectedSystemEnumId = FacadeSupport.normalize(savedRun.defaultFile2SystemEnumId)
+        String expectedSystemEnumId = ((matchingOption?.enumId)?.toString()?.trim())
+        if (!expectedSystemEnumId && fileSide == FILE_SIDE_1) expectedSystemEnumId = ((savedRun.defaultFile1SystemEnumId)?.toString()?.trim())
+        if (!expectedSystemEnumId && fileSide == FILE_SIDE_2) expectedSystemEnumId = ((savedRun.defaultFile2SystemEnumId)?.toString()?.trim())
         if (expectedSystemEnumId && source.systemEnumId && source.systemEnumId != expectedSystemEnumId) {
             ec.message.addError("${fileSide} systemEnumId ${source.systemEnumId} does not match saved run system ${expectedSystemEnumId}")
         }
@@ -677,55 +418,23 @@ class AutomationFacadeSupport {
 
     protected static void validateApiSourceMetadata(def ec, Map<String, Object> source) {
         Map<String, Object> metadata = parseJsonMap(source.safeMetadataJson)
-        String serviceName = FacadeSupport.normalize(metadata.extractServiceName ?: metadata.serviceName)
+        String serviceName = ((metadata.extractServiceName ?: metadata.serviceName)?.toString()?.trim())
         if (!serviceName) {
             ec.message.addError("${source.fileSide} API source requires safeMetadataJson.extractServiceName.")
             return
         }
         if (serviceName == HOTWAX_OMS_ORDERS_EXTRACT_SERVICE) {
             Map parameters = metadata.parameters instanceof Map ? (Map) metadata.parameters : [:]
-            if (!FacadeSupport.normalize(parameters.omsRestSourceConfigId)) {
+            if (!((parameters.omsRestSourceConfigId)?.toString()?.trim())) {
                 ec.message.addError("${source.fileSide} OMS API source requires safeMetadataJson.parameters.omsRestSourceConfigId.")
             }
         }
         if (serviceName == SHOPIFY_ORDERS_EXTRACT_SERVICE) {
             Map parameters = metadata.parameters instanceof Map ? (Map) metadata.parameters : [:]
-            if (!FacadeSupport.normalize(parameters.shopifyAuthConfigId)) {
+            if (!((parameters.shopifyAuthConfigId)?.toString()?.trim())) {
                 ec.message.addError("${source.fileSide} Shopify API source requires safeMetadataJson.parameters.shopifyAuthConfigId.")
             }
         }
-    }
-
-    protected static List<Map<String, Object>> normalizeSourceEntries(Object rawSources) {
-        Collection rawList = rawSources instanceof Collection ? (Collection) rawSources :
-                rawSources instanceof Map ? ((Map) rawSources).values() : []
-        return rawList.collect { Object raw ->
-            Map item = raw instanceof Map ? (Map) raw : [:]
-            [
-                    fileSide                 : FacadeSupport.normalize(item.fileSide)?.toUpperCase(),
-                    sourceTypeEnumId         : FacadeSupport.normalize(item.sourceTypeEnumId),
-                    systemEnumId             : FacadeSupport.normalize(item.systemEnumId),
-                    fileTypeEnumId           : FacadeSupport.normalize(item.fileTypeEnumId),
-                    schemaFileName           : FacadeSupport.normalize(item.schemaFileName),
-                    recordRootExpression     : FacadeSupport.normalize(item.recordRootExpression),
-                    primaryIdExpression      : FacadeSupport.normalize(item.primaryIdExpression),
-                    idValueNormalizer        : FacadeSupport.normalize(item.idValueNormalizer),
-                    systemMessageRemoteId    : FacadeSupport.normalize(item.systemMessageRemoteId),
-                    nsRestletConfigId        : FacadeSupport.normalize(item.nsRestletConfigId),
-                    sftpServerId             : FacadeSupport.normalize(item.sftpServerId),
-                    remotePathTemplate       : FacadeSupport.normalize(item.remotePathTemplate),
-                    fileNamePattern          : FacadeSupport.normalize(item.fileNamePattern),
-                    apiRequestTemplateJson   : normalizeJsonText(item.apiRequestTemplateJson, "apiRequestTemplateJson"),
-                    apiResponsePathExpression: FacadeSupport.normalize(item.apiResponsePathExpression),
-                    dateFromParameterName    : FacadeSupport.normalize(item.dateFromParameterName),
-                    dateToParameterName      : FacadeSupport.normalize(item.dateToParameterName),
-                    safeMetadataJson         : normalizeJsonText(item.safeMetadataJson, "safeMetadataJson"),
-                    optionKey                : FacadeSupport.normalize(item.optionKey),
-                    sourceConfigId           : FacadeSupport.normalize(item.sourceConfigId),
-                    shopifyAuthConfigId      : FacadeSupport.normalize(item.shopifyAuthConfigId),
-                    omsRestSourceConfigId    : FacadeSupport.normalize(item.omsRestSourceConfigId),
-            ].findAll { it.value != null } as Map<String, Object>
-        } as List<Map<String, Object>>
     }
 
     protected static List<Map<String, Object>> applyApiSourceMetadataDefaults(def ec, List<Map<String, Object>> sources) {
@@ -738,28 +447,28 @@ class AutomationFacadeSupport {
                     new LinkedHashMap<>((Map<String, Object>) metadata.parameters) : [:]
 
             if (enriched.systemEnumId == OMS_SYSTEM_ENUM_ID) {
-                String configId = FacadeSupport.normalize(parameters.omsRestSourceConfigId) ?:
-                        FacadeSupport.normalize(enriched.omsRestSourceConfigId) ?:
-                        FacadeSupport.normalize(enriched.sourceConfigId) ?:
-                        FacadeSupport.normalize(enriched.optionKey) ?:
+                String configId = ((parameters.omsRestSourceConfigId)?.toString()?.trim()) ?:
+                        ((enriched.omsRestSourceConfigId)?.toString()?.trim()) ?:
+                        ((enriched.sourceConfigId)?.toString()?.trim()) ?:
+                        ((enriched.optionKey)?.toString()?.trim()) ?:
                         findSingleActiveOmsRestSourceConfigId(ec)
                 if (configId) parameters.omsRestSourceConfigId = configId
 
-                String serviceName = FacadeSupport.normalize(metadata.extractServiceName ?: metadata.serviceName)
+                String serviceName = ((metadata.extractServiceName ?: metadata.serviceName)?.toString()?.trim())
                 if (!metadata.extractServiceName && configId) {
                     metadata.extractServiceName = serviceName ?: HOTWAX_OMS_ORDERS_EXTRACT_SERVICE
                 }
             }
 
             if (enriched.systemEnumId == SHOPIFY_SYSTEM_ENUM_ID) {
-                String configId = FacadeSupport.normalize(parameters.shopifyAuthConfigId) ?:
-                        FacadeSupport.normalize(enriched.shopifyAuthConfigId) ?:
-                        FacadeSupport.normalize(enriched.sourceConfigId) ?:
-                        FacadeSupport.normalize(enriched.optionKey) ?:
+                String configId = ((parameters.shopifyAuthConfigId)?.toString()?.trim()) ?:
+                        ((enriched.shopifyAuthConfigId)?.toString()?.trim()) ?:
+                        ((enriched.sourceConfigId)?.toString()?.trim()) ?:
+                        ((enriched.optionKey)?.toString()?.trim()) ?:
                         findSingleActiveShopifyAuthConfigId(ec)
                 if (configId) parameters.shopifyAuthConfigId = configId
 
-                String serviceName = FacadeSupport.normalize(metadata.extractServiceName ?: metadata.serviceName)
+                String serviceName = ((metadata.extractServiceName ?: metadata.serviceName)?.toString()?.trim())
                 if (!metadata.extractServiceName && configId) {
                     metadata.extractServiceName = serviceName ?: SHOPIFY_ORDERS_EXTRACT_SERVICE
                 }
@@ -767,7 +476,7 @@ class AutomationFacadeSupport {
 
             if (parameters) metadata.parameters = parameters
 
-            String resolvedServiceName = FacadeSupport.normalize(metadata.extractServiceName ?: metadata.serviceName)
+            String resolvedServiceName = ((metadata.extractServiceName ?: metadata.serviceName)?.toString()?.trim())
             switch (resolvedServiceName) {
                 case HOTWAX_OMS_ORDERS_EXTRACT_SERVICE:
                     enriched.dateFromParameterName = HOTWAX_OMS_WINDOW_START_PARAMETER
@@ -783,72 +492,7 @@ class AutomationFacadeSupport {
         } as List<Map<String, Object>>
     }
 
-    protected static void replaceSources(def ec, String automationId, List<Map<String, Object>> sources) {
-        ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource")
-                .condition("automationId", automationId)
-                .disableAuthz()
-                .useCache(false)
-                .deleteAll()
-        Timestamp now = nowTimestamp(ec)
-        sources.each { Map<String, Object> source ->
-            def sourceValue = ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomationSource")
-            sourceValue.set("automationId", automationId)
-            sourceValue.set("fileSide", source.fileSide)
-            sourceValue.set("companyUserGroupId", TenantAccessSupport.currentActiveTenantUserGroupId(ec))
-            sourceValue.set("createdByUserId", TenantAccessSupport.currentUserId(ec))
-            sourceValue.set("sourceTypeEnumId", source.sourceTypeEnumId)
-            sourceValue.set("systemEnumId", source.systemEnumId)
-            sourceValue.set("fileTypeEnumId", source.fileTypeEnumId)
-            sourceValue.set("schemaFileName", source.schemaFileName)
-            sourceValue.set("recordRootExpression", source.recordRootExpression)
-            sourceValue.set("primaryIdExpression", source.primaryIdExpression)
-            sourceValue.set("idValueNormalizer", source.idValueNormalizer)
-            sourceValue.set("systemMessageRemoteId", source.systemMessageRemoteId)
-            sourceValue.set("nsRestletConfigId", source.nsRestletConfigId)
-            sourceValue.set("sftpServerId", source.sftpServerId)
-            sourceValue.set("remotePathTemplate", source.remotePathTemplate)
-            sourceValue.set("fileNamePattern", source.fileNamePattern)
-            sourceValue.set("apiRequestTemplateJson", source.apiRequestTemplateJson)
-            sourceValue.set("apiResponsePathExpression", source.apiResponsePathExpression)
-            sourceValue.set("dateFromParameterName", source.dateFromParameterName)
-            sourceValue.set("dateToParameterName", source.dateToParameterName)
-            sourceValue.set("safeMetadataJson", source.safeMetadataJson)
-            sourceValue.set("createdDate", now)
-            sourceValue.set("lastUpdatedDate", now)
-            sourceValue.create()
-        }
-    }
-
-    protected static Map<String, Object> callExecuteAutomation(def ec, Map<String, Object> executeParams) {
-        return (ec.service.sync()
-                .name("reconciliation.ReconciliationAutomationServices.execute#Automation")
-                .parameters(executeParams)
-                .disableAuthz()
-                .call() ?: [:]) as Map<String, Object>
-    }
-
-    protected static List loadSources(def ec, String automationId) {
-        if (!automationId) return []
-        return ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource")
-                .condition("automationId", automationId)
-                .orderBy("fileSide")
-                .disableAuthz()
-                .useCache(false)
-                .list() ?: []
-    }
-
-    protected static List loadExecutions(def ec, String automationId) {
-        if (!automationId) return []
-        List executions = ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution")
-                .condition("automationId", automationId)
-                .orderBy("-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId")
-                .disableAuthz()
-                .useCache(false)
-                .list() ?: []
-        return collapseExecutionHistory(executions)
-    }
-
-    protected static List collapseExecutionHistory(List executions) {
+    static List collapseExecutionHistory(List executions) {
         List visibleExecutions = []
         Set<String> seenWindowKeys = [] as Set
         (executions ?: []).each { execution ->
@@ -874,20 +518,6 @@ class AutomationFacadeSupport {
         if (value == null) return ""
         if (value instanceof Date) return Long.toString(((Date) value).time)
         return value.toString()
-    }
-
-    protected static def findAutomation(def ec, String automationId) {
-        def automation = findAutomationRaw(ec, automationId)
-        return TenantAccessSupport.canAccessTenantRecord(ec, automation) ? automation : null
-    }
-
-    protected static def findAutomationRaw(def ec, String automationId) {
-        if (!automationId) return null
-        return ec.entity.find("darpan.reconciliation.ReconciliationAutomation")
-                .condition("automationId", automationId)
-                .disableAuthz()
-                .useCache(false)
-                .one()
     }
 
     protected static Map<String, Object> resolveSavedRunSummary(def ec, def automation) {
@@ -916,17 +546,17 @@ class AutomationFacadeSupport {
     }
 
     protected static Timestamp resolveNextFireTime(Map input, Timestamp now) {
-        String scheduleExpr = FacadeSupport.normalize(input.scheduleExpr)
+        String scheduleExpr = ((input.scheduleExpr)?.toString()?.trim())
         if (!scheduleExpr) return null
         Map automationMap = [
                 scheduleExpr          : scheduleExpr,
-                windowTimeZone        : FacadeSupport.normalize(input.windowTimeZone) ?: "UTC",
+                windowTimeZone        : ((input.windowTimeZone)?.toString()?.trim()) ?: "UTC",
                 lastScheduledFireTime : toTimestamp(input.lastScheduledFireTime),
         ]
         return AutomationExecutionSupport.resolveNextScheduledFireTime(automationMap, automationMap.lastScheduledFireTime as Timestamp, now)
     }
 
-    protected static List<Map<String, Object>> listEnumOptions(def ec, String enumTypeId) {
+    static List<Map<String, Object>> listEnumOptions(def ec, String enumTypeId) {
         List options = ec.entity.find("moqui.basic.Enumeration")
                 .condition("enumTypeId", enumTypeId)
                 .orderBy("sequenceNum,description,enumId")
@@ -945,7 +575,7 @@ class AutomationFacadeSupport {
         return SettingsFacadeSupport.deduplicateEnumOptions(enumTypeId, mappedOptions)
     }
 
-    protected static List<Map<String, Object>> listSftpServerOptions(def ec) {
+    static List<Map<String, Object>> listSftpServerOptions(def ec) {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
         List servers = ec.entity.find("darpan.reconciliation.SftpServer")
@@ -976,7 +606,7 @@ class AutomationFacadeSupport {
         } as List<Map<String, Object>>
     }
 
-    protected static List<Map<String, Object>> listSourceConfigOptions(def ec) {
+    static List<Map<String, Object>> listSourceConfigOptions(def ec) {
         return listOmsRestSourceConfigOptions(ec) + listShopifyAuthConfigOptions(ec) + listNsAuthConfigOptions(ec)
     }
 
@@ -1071,7 +701,7 @@ class AutomationFacadeSupport {
         } as List<Map<String, Object>>
     }
 
-    protected static List<Map<String, Object>> listNsRestletOptions(def ec) {
+    static List<Map<String, Object>> listNsRestletOptions(def ec) {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
         List rows = ec.entity.find("darpan.reconciliation.NsRestletConfig")
@@ -1099,7 +729,7 @@ class AutomationFacadeSupport {
         } as List<Map<String, Object>>
     }
 
-    protected static List<Map<String, Object>> listOmsRestSourceRemoteOptions(def ec) {
+    static List<Map<String, Object>> listOmsRestSourceRemoteOptions(def ec) {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
 
@@ -1148,7 +778,7 @@ class AutomationFacadeSupport {
         }
     }
 
-    protected static List<Map<String, Object>> listShopifySourceRemoteOptions(def ec) {
+    static List<Map<String, Object>> listShopifySourceRemoteOptions(def ec) {
         def shopifyRemote = ec.entity.find("moqui.service.message.SystemMessageRemote")
                 .condition("systemMessageRemoteId", SHOPIFY_ORDERS_REMOTE_ID)
                 .disableAuthz()
@@ -1183,7 +813,7 @@ class AutomationFacadeSupport {
         } as List<Map<String, Object>>
     }
 
-    protected static List<Map<String, Object>> listSystemRemoteOptions(def ec) {
+    static List<Map<String, Object>> listSystemRemoteOptions(def ec) {
         List rows = ec.entity.find("moqui.service.message.SystemMessageRemote")
                 .orderBy("description,systemMessageRemoteId")
                 .disableAuthz()
@@ -1212,15 +842,15 @@ class AutomationFacadeSupport {
     }
 
     protected static String endpointLabelForSystem(String systemEnumId, String remoteId, String fallbackLabel) {
-        if (FacadeSupport.normalize(systemEnumId) == OMS_SYSTEM_ENUM_ID &&
-                FacadeSupport.normalize(remoteId) == HOTWAX_ORDERS_REMOTE_ID) {
+        if (((systemEnumId)?.toString()?.trim()) == OMS_SYSTEM_ENUM_ID &&
+                ((remoteId)?.toString()?.trim()) == HOTWAX_ORDERS_REMOTE_ID) {
             return HOTWAX_ORDERS_ENDPOINT_LABEL
         }
-        if (FacadeSupport.normalize(systemEnumId) == SHOPIFY_SYSTEM_ENUM_ID &&
-                FacadeSupport.normalize(remoteId) == SHOPIFY_ORDERS_REMOTE_ID) {
+        if (((systemEnumId)?.toString()?.trim()) == SHOPIFY_SYSTEM_ENUM_ID &&
+                ((remoteId)?.toString()?.trim()) == SHOPIFY_ORDERS_REMOTE_ID) {
             return SHOPIFY_ORDERS_ENDPOINT_LABEL
         }
-        return FacadeSupport.normalize(fallbackLabel) ?: FacadeSupport.normalize(remoteId)
+        return ((fallbackLabel)?.toString()?.trim()) ?: ((remoteId)?.toString()?.trim())
     }
 
     protected static boolean isVirtualApiOrdersRemote(Map<String, Object> source) {
@@ -1228,22 +858,22 @@ class AutomationFacadeSupport {
     }
 
     protected static boolean isVirtualHotWaxOrdersRemote(Map<String, Object> source) {
-        if (FacadeSupport.normalize(source?.systemEnumId) != OMS_SYSTEM_ENUM_ID) return false
-        if (FacadeSupport.normalize(source?.systemMessageRemoteId) != HOTWAX_ORDERS_REMOTE_ID) return false
+        if (((source?.systemEnumId)?.toString()?.trim()) != OMS_SYSTEM_ENUM_ID) return false
+        if (((source?.systemMessageRemoteId)?.toString()?.trim()) != HOTWAX_ORDERS_REMOTE_ID) return false
         Map<String, Object> metadata = parseJsonMap(source?.safeMetadataJson)
-        return FacadeSupport.normalize(metadata.extractServiceName ?: metadata.serviceName) == HOTWAX_OMS_ORDERS_EXTRACT_SERVICE
+        return ((metadata.extractServiceName ?: metadata.serviceName)?.toString()?.trim()) == HOTWAX_OMS_ORDERS_EXTRACT_SERVICE
     }
 
     protected static boolean isVirtualShopifyOrdersRemote(Map<String, Object> source) {
-        if (FacadeSupport.normalize(source?.systemEnumId) != SHOPIFY_SYSTEM_ENUM_ID) return false
-        if (FacadeSupport.normalize(source?.systemMessageRemoteId) != SHOPIFY_ORDERS_REMOTE_ID) return false
+        if (((source?.systemEnumId)?.toString()?.trim()) != SHOPIFY_SYSTEM_ENUM_ID) return false
+        if (((source?.systemMessageRemoteId)?.toString()?.trim()) != SHOPIFY_ORDERS_REMOTE_ID) return false
         Map<String, Object> metadata = parseJsonMap(source?.safeMetadataJson)
-        return FacadeSupport.normalize(metadata.extractServiceName ?: metadata.serviceName) == SHOPIFY_ORDERS_EXTRACT_SERVICE
+        return ((metadata.extractServiceName ?: metadata.serviceName)?.toString()?.trim()) == SHOPIFY_ORDERS_EXTRACT_SERVICE
     }
 
     protected static boolean isDirectApiSourceRemote(String systemEnumId, String sendServiceName) {
-        String normalizedSystemEnumId = FacadeSupport.normalize(systemEnumId)
-        String normalizedServiceName = FacadeSupport.normalize(sendServiceName)
+        String normalizedSystemEnumId = ((systemEnumId)?.toString()?.trim())
+        String normalizedServiceName = ((sendServiceName)?.toString()?.trim())
         if (normalizedSystemEnumId == SHOPIFY_SYSTEM_ENUM_ID) {
             return normalizedServiceName == SHOPIFY_GRAPHQL_EXECUTE_SERVICE
         }
@@ -1251,7 +881,7 @@ class AutomationFacadeSupport {
     }
 
     protected static List<Map<String, Object>> primaryIdOptionsForSystem(String systemEnumId) {
-        switch (FacadeSupport.normalize(systemEnumId)) {
+        switch (((systemEnumId)?.toString()?.trim())) {
             case OMS_SYSTEM_ENUM_ID:
                 return HOTWAX_OMS_ORDER_PRIMARY_ID_OPTIONS
             case SHOPIFY_SYSTEM_ENUM_ID:
@@ -1259,29 +889,6 @@ class AutomationFacadeSupport {
             default:
                 return []
         }
-    }
-
-    protected static String findSystemRemoteIdForSystem(def ec, String systemEnumId) {
-        return readString(findSystemRemoteForSystem(ec, systemEnumId), "systemMessageRemoteId")
-    }
-
-    protected static def findSystemRemoteForSystem(def ec, String systemEnumId) {
-        List rows = ec.entity.find("moqui.service.message.SystemMessageRemote")
-                .orderBy("description,systemMessageRemoteId")
-                .disableAuthz()
-                .useCache(false)
-                .list() ?: []
-        String normalizedSystemEnumId = FacadeSupport.normalize(systemEnumId)
-        if (normalizedSystemEnumId == OMS_SYSTEM_ENUM_ID) {
-            def hotwaxOrdersRemote = rows.find { item ->
-                readString(item, "systemMessageRemoteId") == HOTWAX_ORDERS_REMOTE_ID
-            }
-            if (hotwaxOrdersRemote) return hotwaxOrdersRemote
-        }
-        def match = rows.find { item ->
-            inferSystemEnumId(readString(item, "systemMessageRemoteId"), readString(item, "description")) == normalizedSystemEnumId
-        }
-        return match
     }
 
     protected static String findSingleActiveOmsRestSourceConfigId(def ec) {
@@ -1357,19 +964,20 @@ class AutomationFacadeSupport {
                 .one()
     }
 
-    protected static String normalizeJsonText(Object rawValue, String label) {
-        String value = FacadeSupport.normalize(rawValue)
+    static String canonicalJsonText(def ec, Object rawValue, String label) {
+        String value = ((rawValue)?.toString()?.trim())
         if (!value) return null
         try {
             Object parsed = new JsonSlurper().parseText(value)
             return JsonOutput.toJson(parsed)
         } catch (Exception e) {
-            throw new IllegalArgumentException("${label} must be valid JSON")
+            ec.message.addError("${label} must be valid JSON")
+            return null
         }
     }
 
     protected static Map<String, Object> parseJsonMap(Object rawValue) {
-        String value = FacadeSupport.normalize(rawValue)
+        String value = ((rawValue)?.toString()?.trim())
         if (!value) return [:]
         Object parsed = new JsonSlurper().parseText(value)
         return parsed instanceof Map ? new LinkedHashMap<>((Map<String, Object>) parsed) : [:]
@@ -1383,7 +991,7 @@ class AutomationFacadeSupport {
         if (rawValue == null) return null
         if (rawValue instanceof Timestamp) return (Timestamp) rawValue
         if (rawValue instanceof Date) return new Timestamp(((Date) rawValue).time)
-        String value = FacadeSupport.normalize(rawValue)
+        String value = ((rawValue)?.toString()?.trim())
         if (!value) return null
         try {
             return Timestamp.from(Instant.parse(value))
@@ -1397,7 +1005,7 @@ class AutomationFacadeSupport {
     }
 
     protected static String readString(def record, String fieldName) {
-        return FacadeSupport.normalize(readField(record, fieldName))
+        return readField(record, fieldName)?.toString()?.trim()
     }
 
     protected static Object readField(def record, String fieldName) {

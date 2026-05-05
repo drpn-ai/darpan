@@ -39,8 +39,8 @@ Production multi-user setup depends on these current facade and entity contracts
 - Tenant groups, permission groups, and active-tenant entity filters: `runtime/component/darpan/data/SecuritySeedData.xml`
 - Auth/session facade: `runtime/component/darpan/service/facade/AuthFacadeServices.xml`
 - Settings facade: `runtime/component/darpan/service/facade/SettingsFacadeServices.xml`
-- Inventory retrieval services (NS Restlet + read-only DB): `runtime/component/darpan/service/reconciliation/ReconciliationInventoryServices.xml`
 - Spark-based compare services: `runtime/component/darpan/service/reconciliation/ReconciliationCoreServices.xml`, `runtime/component/darpan/service/reconciliation/ReconciliationGenericServices.xml`
+- NetSuite inventory retrieval lives in `runtime/component/netsuite-darpan/service/reconciliation/NetSuiteInventoryServices.xml`; Darpan no longer carries inventory retrieval wrappers.
 - Sample input data: `runtime/component/darpan/data/sample/omsData.json`, `runtime/component/darpan/data/sample/shopifyData.json`
 
 ## UI Facade Contracts (Wave 1)

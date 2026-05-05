@@ -67,12 +67,12 @@
             <parameter name="updated" type="Boolean"/>
         </out-parameters>
         <actions>
-            <set field="requestedRuleSetIdValue" from="darpan.facade.common.FacadeSupport.normalize(ruleSetId)"/>
-            <set field="ruleSetNameValue" from="darpan.facade.common.FacadeSupport.normalize(ruleSetName)"/>
-            <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
-            <set field="versionValue" from="darpan.facade.common.FacadeSupport.normalize(version) ?: '1.0'"/>
-            <set field="explosionPathValue" from="darpan.facade.common.FacadeSupport.normalize(explosionPath)"/>
-            <set field="primaryKeyPathValue" from="darpan.facade.common.FacadeSupport.normalize(primaryKeyPath)"/>
+            <set field="requestedRuleSetIdValue" from="((ruleSetId)?.toString()?.trim())"/>
+            <set field="ruleSetNameValue" from="((ruleSetName)?.toString()?.trim())"/>
+            <set field="descriptionValue" from="((description)?.toString()?.trim())"/>
+            <set field="versionValue" from="((version)?.toString()?.trim()) ?: '1.0'"/>
+            <set field="explosionPathValue" from="((explosionPath)?.toString()?.trim())"/>
+            <set field="primaryKeyPathValue" from="((primaryKeyPath)?.toString()?.trim())"/>
             <set field="resolvedRuleSet" from="reconciliation.rule.RuleEngineSupport.resolveRuleSetId(ec, requestedRuleSetIdValue, ruleSetNameValue)"/>
             <if condition="resolvedRuleSet.error">
                 <message error="true">${resolvedRuleSet.error}</message>
@@ -161,7 +161,7 @@
         <actions>
             <set field="ruleSetValidation" from="reconciliation.rule.RuleEngineSupport.validateProvidedId(ruleSetId, 'ruleSetId')"/>
             <set field="ruleSetId" from="ruleSetValidation.value"/>
-            <set field="forceDeleteRulesValue" from="darpan.facade.common.FacadeSupport.normalizeBool(forceDeleteRules, false)"/>
+            <set field="forceDeleteRulesValue" from="forceDeleteRules != null ? forceDeleteRules : false"/>
             <if condition="ruleSetValidation.error">
                 <message error="true">${ruleSetValidation.error}</message>
             </if>
@@ -205,7 +205,7 @@
             <parameter name="ruleSetId"/>
         </out-parameters>
         <actions>
-            <set field="ruleSetId" from="darpan.facade.common.FacadeSupport.normalize(ruleSetId)"/>
+            <set field="ruleSetId" from="((ruleSetId)?.toString()?.trim())"/>
             <set field="cacheCleared" from="reconciliation.rule.RuleEngineSupport.invalidateRuleSetCache(ec, ruleSetId)"/>
             <if condition="ruleSetId">
                 <message>Cleared cache for RuleSet ${ruleSetId}.</message>

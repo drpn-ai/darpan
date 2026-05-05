@@ -35,9 +35,11 @@ class NavigationSearchSupport {
     ] as Set<String>
 
     static Map<String, Object> search(def ec, Object rawQuery, Object rawTypes, Object rawPageIndex, Object rawPageSize) {
-        int page = Math.max(0, FacadeSupport.normalizeInt(rawPageIndex, 0))
-        int size = Math.max(1, Math.min(MAX_PAGE_SIZE, FacadeSupport.normalizeInt(rawPageSize, 20)))
-        String query = FacadeSupport.normalize(rawQuery)
+        int page = Math.max(0, rawPageIndex instanceof Number ? rawPageIndex.intValue() :
+                (rawPageIndex?.toString()?.trim()?.isInteger() ? rawPageIndex.toString().trim().toInteger() : 0))
+        int size = Math.max(1, Math.min(MAX_PAGE_SIZE, rawPageSize instanceof Number ? rawPageSize.intValue() :
+                (rawPageSize?.toString()?.trim()?.isInteger() ? rawPageSize.toString().trim().toInteger() : 20)))
+        String query = ((rawQuery)?.toString()?.trim())
         List<String> queryTokens = tokenize(query)
 
         Map<String, Object> emptyResult = [
@@ -68,11 +70,11 @@ class NavigationSearchSupport {
             if (scoreCompare != 0) return scoreCompare
             int typeCompare = typeOrder(left.type as String) <=> typeOrder(right.type as String)
             if (typeCompare != 0) return typeCompare
-            String leftLabel = FacadeSupport.normalize(left.label) ?: ""
-            String rightLabel = FacadeSupport.normalize(right.label) ?: ""
+            String leftLabel = ((left.label)?.toString()?.trim()) ?: ""
+            String rightLabel = ((right.label)?.toString()?.trim()) ?: ""
             int labelCompare = leftLabel <=> rightLabel
             if (labelCompare != 0) return labelCompare
-            return (FacadeSupport.normalize(left.resultId) ?: "") <=> (FacadeSupport.normalize(right.resultId) ?: "")
+            return (((left.resultId)?.toString()?.trim()) ?: "") <=> (((right.resultId)?.toString()?.trim()) ?: "")
         } as List<Map<String, Object>>
 
         int totalCount = scoredResults.size()
@@ -97,8 +99,8 @@ class NavigationSearchSupport {
                 .list() ?: []
 
         return rows.collect { item ->
-            String id = FacadeSupport.normalize(item.sftpServerId)
-            String label = FacadeSupport.normalize(item.description) ?: id
+            String id = ((item.sftpServerId)?.toString()?.trim())
+            String label = ((item.description)?.toString()?.trim()) ?: id
             target(
                     "data:sftp-server:${id}",
                     TYPE_SFTP_SERVER,
@@ -142,9 +144,9 @@ class NavigationSearchSupport {
                 .list() ?: []
 
         return rows.collect { item ->
-            String id = FacadeSupport.normalize(item.nsAuthConfigId)
-            String label = FacadeSupport.normalize(item.description) ?: id
-            String authType = FacadeSupport.normalize(item.authType) ?: "NONE"
+            String id = ((item.nsAuthConfigId)?.toString()?.trim())
+            String label = ((item.description)?.toString()?.trim()) ?: id
+            String authType = ((item.authType)?.toString()?.trim()) ?: "NONE"
             target(
                     "data:netsuite-auth:${id}",
                     TYPE_NETSUITE_AUTH,
@@ -186,9 +188,9 @@ class NavigationSearchSupport {
                 .condition("companyUserGroupId", activeTenantUserGroupId)
                 .useCache(false)
                 .list() ?: []).collectEntries { auth ->
-            [(FacadeSupport.normalize(auth.nsAuthConfigId)): [
-                    description: FacadeSupport.normalize(auth.description),
-                    authType   : FacadeSupport.normalize(auth.authType) ?: "NONE",
+            [(((auth.nsAuthConfigId)?.toString()?.trim())): [
+                    description: ((auth.description)?.toString()?.trim()),
+                    authType   : ((auth.authType)?.toString()?.trim()) ?: "NONE",
             ]]
         } as Map<String, Map<String, Object>>
 
@@ -199,16 +201,16 @@ class NavigationSearchSupport {
                 .list() ?: []
 
         return rows.collect { item ->
-            String id = FacadeSupport.normalize(item.nsRestletConfigId)
-            String authId = FacadeSupport.normalize(item.nsAuthConfigId)
+            String id = ((item.nsRestletConfigId)?.toString()?.trim())
+            String authId = ((item.nsAuthConfigId)?.toString()?.trim())
             Map<String, Object> authMeta = authById[authId] ?: [:]
-            String label = FacadeSupport.normalize(item.description) ?: id
-            String method = FacadeSupport.normalize(item.httpMethod) ?: "POST"
+            String label = ((item.description)?.toString()?.trim()) ?: id
+            String method = ((item.httpMethod)?.toString()?.trim()) ?: "POST"
             target(
                     "data:netsuite-endpoint:${id}",
                     TYPE_NETSUITE_ENDPOINT,
                     "Edit NetSuite Endpoint: ${label}",
-                    "${method} ${FacadeSupport.normalize(item.endpointUrl) ?: "NetSuite endpoint"}",
+                    "${method} ${((item.endpointUrl)?.toString()?.trim()) ?: "NetSuite endpoint"}",
                     "settings-netsuite-endpoints-edit",
                     "/settings/netsuite/endpoints/edit/${encodePathSegment(id)}",
                     [nsRestletConfigId: id],
@@ -256,14 +258,14 @@ class NavigationSearchSupport {
                 .list() ?: []
 
         return rows.collect { item ->
-            String id = FacadeSupport.normalize(item.jsonSchemaId)
-            String label = FacadeSupport.normalize(item.schemaName) ?: id
+            String id = ((item.jsonSchemaId)?.toString()?.trim())
+            String label = ((item.schemaName)?.toString()?.trim()) ?: id
             String systemLabel = JsonSchemaUtil.resolveSystemLabel(ec, item.systemEnumId, null, true)
             target(
                     "data:schema:${id}",
                     TYPE_SCHEMA,
                     "Open Schema: ${label}",
-                    FacadeSupport.normalize(item.description) ?: (systemLabel ? "${systemLabel} schema." : "Open the schema editor."),
+                    ((item.description)?.toString()?.trim()) ?: (systemLabel ? "${systemLabel} schema." : "Open the schema editor."),
                     "schemas-editor",
                     "/schemas/editor/${encodePathSegment(id)}",
                     [jsonSchemaId: id],
@@ -294,16 +296,16 @@ class NavigationSearchSupport {
 
     protected static List<Map<String, Object>> collectSavedRunTargets(def ec) {
         return ReconciliationSavedRunSupport.collectSavedRunRows(ec).collect { Map<String, Object> row ->
-            String id = FacadeSupport.normalize(row.savedRunId)
-            String label = FacadeSupport.normalize(row.runName) ?: id
+            String id = ((row.savedRunId)?.toString()?.trim())
+            String label = ((row.runName)?.toString()?.trim()) ?: id
             List systemLabels = row.systemOptions instanceof Collection ? row.systemOptions.collect { it?.label } : []
             List systemCodes = row.systemOptions instanceof Collection ? row.systemOptions.collect { it?.enumCode ?: it?.enumId } : []
             target(
                     "data:saved-run:${id}",
                     TYPE_SAVED_RUN,
                     "Open Run: ${label}",
-                    FacadeSupport.normalize(row.description) ?:
-                            (FacadeSupport.normalize(row.compareScopeDescription) ?: "Open saved run history."),
+                    ((row.description)?.toString()?.trim()) ?:
+                            (((row.compareScopeDescription)?.toString()?.trim()) ?: "Open saved run history."),
                     "reconciliation-run-history",
                     "/reconciliation/run-history/${encodePathSegment(id)}",
                     [savedRunId: id],
@@ -351,7 +353,7 @@ class NavigationSearchSupport {
 
         return outputFiles.collectMany { Map<String, Object> outputFile ->
                     File file = (File) outputFile.file
-                    String outputFileName = FacadeSupport.normalize(outputFile.fileName)
+                    String outputFileName = ((outputFile.fileName)?.toString()?.trim())
                     if (file == null || !file.exists() || !file.isFile() || !outputFileName) return []
                     if (!ReconciliationOutputSupport.canAccessGeneratedOutputFile(ec, file, outputFileName)) return []
 
@@ -373,17 +375,17 @@ class NavigationSearchSupport {
                     if (outputFile.runResult?.reconciliationRunResultId) {
                         descriptor.reconciliationRunResultId = outputFile.runResult.reconciliationRunResultId
                     }
-                    String descriptorCompany = FacadeSupport.normalize(descriptor.companyUserGroupId)
+                    String descriptorCompany = ((descriptor.companyUserGroupId)?.toString()?.trim())
                     if (descriptorCompany && descriptorCompany != activeTenantUserGroupId) return []
 
-                    String savedRunId = FacadeSupport.normalize(descriptor.savedRunId ?: descriptor.reconciliationMappingId ?: descriptor.ruleSetId)
-                    String fileName = FacadeSupport.normalize(descriptor.fileName)
+                    String savedRunId = ((descriptor.savedRunId ?: descriptor.reconciliationMappingId ?: descriptor.ruleSetId)?.toString()?.trim())
+                    String fileName = ((descriptor.fileName)?.toString()?.trim())
                     if (!savedRunId || !fileName) return []
 
-                    String label = FacadeSupport.normalize(descriptor.savedRunName ?: descriptor.mappingName) ?: fileName
+                    String label = ((descriptor.savedRunName ?: descriptor.mappingName)?.toString()?.trim()) ?: fileName
                     String diffText = descriptor.totalDifferences instanceof Number ? "${descriptor.totalDifferences} differences" : "Saved result"
-                    String file1Label = FacadeSupport.normalize(descriptor.file1Label)
-                    String file2Label = FacadeSupport.normalize(descriptor.file2Label)
+                    String file1Label = ((descriptor.file1Label)?.toString()?.trim())
+                    String file2Label = ((descriptor.file2Label)?.toString()?.trim())
                     List<String> systemLabelParts = [file1Label, file2Label].findAll { it } as List<String>
                     String description = systemLabelParts.size() == 2 ?
                             "${diffText} for ${systemLabelParts[0]} and ${systemLabelParts[1]}." :
@@ -398,7 +400,7 @@ class NavigationSearchSupport {
                             "/reconciliation/run-result/${encodePathSegment(savedRunId)}/${encodePathSegment(fileName)}",
                             [savedRunId: savedRunId, outputFileName: fileName],
                             [
-                                    runName         : FacadeSupport.normalize(descriptor.savedRunName ?: descriptor.mappingName),
+                                    runName         : ((descriptor.savedRunName ?: descriptor.mappingName)?.toString()?.trim()),
                                     file1SystemLabel: file1Label,
                                     file2SystemLabel: file2Label,
                             ].findAll { String key, Object value -> value },
@@ -500,7 +502,7 @@ class NavigationSearchSupport {
         if (rawTypes instanceof Collection) {
             rawCollection = (Collection) rawTypes
         } else {
-            String rawString = FacadeSupport.normalize(rawTypes)
+            String rawString = ((rawTypes)?.toString()?.trim())
             rawCollection = rawString ? rawString.split(/\s*,\s*/).toList() : []
         }
 
@@ -511,7 +513,7 @@ class NavigationSearchSupport {
     }
 
     protected static String canonicalType(Object rawType) {
-        String value = FacadeSupport.normalize(rawType)?.toLowerCase()?.replaceAll(/[_\s]+/, "-")
+        String value = ((rawType)?.toString()?.trim())?.toLowerCase()?.replaceAll(/[_\s]+/, "-")
         switch (value) {
             case TYPE_SCHEMA:
             case "json-schema":
@@ -559,7 +561,7 @@ class NavigationSearchSupport {
             if (item instanceof Collection) return (Collection) item
             return [item]
         }.collect { Object item ->
-            FacadeSupport.normalize(item)
+            ((item)?.toString()?.trim())
         }.findAll { it }.join(" ")
                 .toLowerCase()
                 .replaceAll(/[^a-z0-9]+/, " ")
@@ -571,7 +573,7 @@ class NavigationSearchSupport {
         Set<String> seen = [] as Set<String>
         List<String> normalized = []
         (values ?: []).flatten().each { Object value ->
-            String text = FacadeSupport.normalize(value)
+            String text = ((value)?.toString()?.trim())
             if (!text) return
             String key = text.toLowerCase()
             if (seen.contains(key)) return

@@ -45,7 +45,7 @@ These optional parameters allow a remote facade to pass UTF-8 file payloads from
 Behavior notes:
 - RuleSet mode writes one generated JSON artifact that contains both missing-object rows and rule-generated rows.
 - Generic uploads now persist the source files and result under `runtime://datamanager/reconciliation-runs/{runId}/{timestamp}/`. The file names are `{runId}_file1{ext}`, `{runId}_file2{ext}`, and `{runId}_result.json`; `runId` is the `ruleSetId` when present, otherwise the `reconciliationMappingId`.
-- Each completed run creates a `darpan.reconciliation.ReconciliationRunResult` row. `resultDataManagerPath` stores the same safe relative path returned as `diffFileName`; `file1DataManagerPath` and `file2DataManagerPath` store the uploaded source artifacts.
+- Each run creates a `darpan.reconciliation.ReconciliationRunResult` row. API-backed manual runs create the row with `statusEnumId=AUT_STAT_RUNNING` before extraction starts so run history can show active work; completion updates the same row to `AUT_STAT_SUCCESS` with `resultDataManagerPath`. `resultDataManagerPath` stores the same safe relative path returned as `diffFileName`; `file1DataManagerPath` and `file2DataManagerPath` store the source artifacts once they are available.
 - In RuleSet mode, `onlyInFile1Count` maps to IDs present only in file 1 (`missingInFile2Count` from the compare-scope service), and `onlyInFile2Count` maps to IDs present only in file 2 (`missingInFile1Count`).
 - If the RuleSet defines exactly one compare scope, Generic routing resolves it automatically. When a RuleSet has multiple scopes, `compareScopeId` is required.
 - The mapping route remains available only as a migration bridge until the later cutover tickets remove it.

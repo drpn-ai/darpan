@@ -6,7 +6,6 @@ import darpan.facade.reconciliation.ReconciliationOutputSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
 import darpan.reconciliation.core.ReconciliationServices
 import darpan.reconciliation.notification.TenantNotificationSupport
-import groovy.json.JsonOutput
 
 import java.sql.Timestamp
 import java.time.Instant
@@ -17,7 +16,7 @@ def toTimestampValue = { Object rawValue ->
     if (rawValue instanceof Timestamp) return rawValue
     if (rawValue instanceof Date) return new Timestamp(rawValue.time)
 
-    String normalized = FacadeSupport.normalize(rawValue)
+    String normalized = ((rawValue)?.toString()?.trim())
     if (!normalized) return null
     try {
         return Timestamp.from(Instant.parse(normalized))
@@ -38,16 +37,17 @@ def toTimestampValue = { Object rawValue ->
     throw new IllegalArgumentException("Invalid timestamp '${normalized}'")
 }
 
-String savedRunIdValue = FacadeSupport.normalize(savedRunId)
+String savedRunIdValue = ((savedRunId)?.toString()?.trim())
 String inputFile1Name = file1Name != null ? ReconciliationOutputSupport.sanitizeUploadFileName(file1Name as String, "file1") : null
 String inputFile2Name = file2Name != null ? ReconciliationOutputSupport.sanitizeUploadFileName(file2Name as String, "file2") : null
 String file1TextValue = file1Text?.toString()
 String file2TextValue = file2Text?.toString()
-String requestedFile1SystemEnumId = FacadeSupport.normalize(file1SystemEnumId)
-String requestedFile2SystemEnumId = FacadeSupport.normalize(file2SystemEnumId)
-boolean hasHeaderValue = FacadeSupport.normalizeBool(hasHeader, true)
-String windowStartLocalDateValue = FacadeSupport.normalize(windowStartLocalDate)
-String windowEndLocalDateValue = FacadeSupport.normalize(windowEndLocalDate)
+String requestedFile1SystemEnumId = ((file1SystemEnumId)?.toString()?.trim())
+String requestedFile2SystemEnumId = ((file2SystemEnumId)?.toString()?.trim())
+boolean hasHeaderValue = hasHeader == null ? true :
+        (hasHeader instanceof Boolean ? hasHeader : ["Y", "YES", "TRUE", "1", "ON"].contains(hasHeader.toString().trim().toUpperCase(Locale.ROOT)))
+String windowStartLocalDateValue = ((windowStartLocalDate)?.toString()?.trim())
+String windowEndLocalDateValue = ((windowEndLocalDate)?.toString()?.trim())
 Timestamp requestedWindowStartDateValue = null
 Timestamp requestedWindowEndDateValue = null
 Timestamp windowStartDateValue = null
@@ -100,10 +100,10 @@ def sideToken = { String fileSide ->
     fileSide == ReconciliationSavedRunSupport.FILE_SIDE_1 ? "file1" : "file2"
 }
 def isApiSource = { Object source ->
-    FacadeSupport.normalize(source?.sourceTypeEnumId) == ReconciliationSavedRunSupport.SOURCE_TYPE_API
+    ((source?.sourceTypeEnumId)?.toString()?.trim()) == ReconciliationSavedRunSupport.SOURCE_TYPE_API
 }
 def sourceLabel = { Object source, String fallback ->
-    enumLabel(FacadeSupport.normalize(source?.systemEnumId) ?: fallback)
+    enumLabel(((source?.systemEnumId)?.toString()?.trim()) ?: fallback)
 }
 def runInternalService = { String serviceName, Map params ->
     def call = ec.service.sync()
@@ -114,14 +114,14 @@ def runInternalService = { String serviceName, Map params ->
 }
 def resolveOutputFile = { Map serviceResult ->
     File outputFile = null
-    String diffLocationValue = FacadeSupport.normalize(serviceResult?.diffLocation)
+    String diffLocationValue = ((serviceResult?.diffLocation)?.toString()?.trim())
     if (diffLocationValue) {
         outputFile = diffLocationValue.startsWith("/") ?
                 new File(diffLocationValue) :
                 ec.resource.getLocationReference(diffLocationValue)?.getFile()
     }
     if ((outputFile == null || !outputFile.exists()) && serviceResult?.diffFileName) {
-        String diffFileNameValue = FacadeSupport.normalize(serviceResult.diffFileName)
+        String diffFileNameValue = ((serviceResult.diffFileName)?.toString()?.trim())
         if (diffFileNameValue?.contains("/")) {
             outputFile = DataManagerSupport.resolveDataManagerFile(ec, diffFileNameValue, false)
         }
@@ -160,30 +160,53 @@ def buildGeneratedOutputDescriptor = { Map serviceResult ->
 }
 def persistRunResult = { Map<String, Object> fields ->
     String resultPath = DataManagerSupport.normalizeRelativePath(fields.resultDataManagerPath)
-    if (!resultPath) return null
+    String existingRunResultId = ((fields.reconciliationRunResultId)?.toString()?.trim())
+    if (!resultPath && !existingRunResultId && !fields.statusEnumId) return null
 
     return ec.transaction.runUseOrBegin(30, "Error saving reconciliation run result", {
-        def runResultValue = ec.entity.makeValue("darpan.reconciliation.ReconciliationRunResult")
-        runResultValue.savedRunId = FacadeSupport.normalize(fields.savedRunId)
-        runResultValue.savedRunType = FacadeSupport.normalize(fields.savedRunType)
-        runResultValue.reconciliationRunId = FacadeSupport.normalize(fields.reconciliationRunId)
-        runResultValue.reconciliationMappingId = FacadeSupport.normalize(fields.reconciliationMappingId)
-        runResultValue.ruleSetId = FacadeSupport.normalize(fields.ruleSetId)
-        runResultValue.compareScopeId = FacadeSupport.normalize(fields.compareScopeId)
-        runResultValue.companyUserGroupId = FacadeSupport.normalize(fields.companyUserGroupId) ?: TenantAccessSupport.currentActiveTenantUserGroupId(ec)
-        runResultValue.createdByUserId = TenantAccessSupport.currentUserId(ec)
-        runResultValue.file1Name = FacadeSupport.normalize(fields.file1Name)
-        runResultValue.file1DataManagerPath = DataManagerSupport.normalizeRelativePath(fields.file1DataManagerPath)
-        runResultValue.file2Name = FacadeSupport.normalize(fields.file2Name)
-        runResultValue.file2DataManagerPath = DataManagerSupport.normalizeRelativePath(fields.file2DataManagerPath)
-        runResultValue.resultDataManagerPath = resultPath
-        runResultValue.reconciliationType = FacadeSupport.normalize(fields.reconciliationType)
-        runResultValue.differenceCount = fields.differenceCount
-        runResultValue.onlyInFile1Count = fields.onlyInFile1Count
-        runResultValue.onlyInFile2Count = fields.onlyInFile2Count
-        runResultValue.createdDate = ec.user.nowTimestamp
-        runResultValue.setSequencedIdPrimary()
-        runResultValue.create()
+        def runResultValue = existingRunResultId ?
+                ec.entity.find("darpan.reconciliation.ReconciliationRunResult")
+                        .condition("reconciliationRunResultId", existingRunResultId)
+                        .disableAuthz()
+                        .useCache(false)
+                        .one() :
+                null
+        boolean creating = runResultValue == null
+        if (creating) runResultValue = ec.entity.makeValue("darpan.reconciliation.ReconciliationRunResult")
+
+        [
+                savedRunId             : ((fields.savedRunId)?.toString()?.trim()),
+                savedRunType           : ((fields.savedRunType)?.toString()?.trim()),
+                reconciliationRunId     : ((fields.reconciliationRunId)?.toString()?.trim()),
+                reconciliationMappingId : ((fields.reconciliationMappingId)?.toString()?.trim()),
+                ruleSetId              : ((fields.ruleSetId)?.toString()?.trim()),
+                compareScopeId         : ((fields.compareScopeId)?.toString()?.trim()),
+                companyUserGroupId     : ((fields.companyUserGroupId)?.toString()?.trim()) ?: TenantAccessSupport.currentActiveTenantUserGroupId(ec),
+                createdByUserId        : TenantAccessSupport.currentUserId(ec),
+                file1Name              : ((fields.file1Name)?.toString()?.trim()),
+                file1DataManagerPath   : DataManagerSupport.normalizeRelativePath(fields.file1DataManagerPath),
+                file2Name              : ((fields.file2Name)?.toString()?.trim()),
+                file2DataManagerPath   : DataManagerSupport.normalizeRelativePath(fields.file2DataManagerPath),
+                resultDataManagerPath  : resultPath,
+                statusEnumId           : ((fields.statusEnumId)?.toString()?.trim()),
+                reconciliationType     : ((fields.reconciliationType)?.toString()?.trim()),
+                differenceCount        : fields.differenceCount,
+                onlyInFile1Count       : fields.onlyInFile1Count,
+                onlyInFile2Count       : fields.onlyInFile2Count,
+                startedDate            : fields.startedDate,
+                completedDate          : fields.completedDate,
+        ].each { entry ->
+            if (entry.value != null) runResultValue.set(entry.key as String, entry.value)
+        }
+        if (creating) {
+            runResultValue.createdDate = fields.createdDate ?: ec.user.nowTimestamp
+            runResultValue.lastUpdatedDate = ec.user.nowTimestamp
+            runResultValue.setSequencedIdPrimary()
+            runResultValue.create()
+        } else {
+            runResultValue.lastUpdatedDate = ec.user.nowTimestamp
+            runResultValue.update()
+        }
         return runResultValue.reconciliationRunResultId
     })
 }
@@ -204,8 +227,8 @@ def sourceResultForLocation = { Object source, String fileSide, String fileNameV
             fileLocation   : locationFile?.getAbsolutePath() ?: location,
             dataManagerPath: DataManagerSupport.relativeDataManagerPath(ec, locationFile),
             fileName       : fileNameValue,
-            fileTypeEnumId : FacadeSupport.normalize(source?.fileTypeEnumId) ?: "DftJson",
-            schemaFileName : FacadeSupport.normalize(source?.schemaFileName),
+            fileTypeEnumId : ((source?.fileTypeEnumId)?.toString()?.trim()) ?: "DftJson",
+            schemaFileName : ((source?.schemaFileName)?.toString()?.trim()),
             recordCount    : recordCount,
             fileSide       : fileSide,
     ].findAll { entry -> entry.value != null } as Map<String, Object>
@@ -236,7 +259,22 @@ def resolveShopifyTimeZone = { String configId, String label ->
                 "${label} Shopify auth config '${configId}' is not available in your active tenant."
         )
     }
-    return FacadeSupport.normalize(config?.timeZone) ?: TenantAccessSupport.resolveActiveTenantTimeZone(ec)
+    return ((config?.timeZone)?.toString()?.trim()) ?: TenantAccessSupport.resolveActiveTenantTimeZone(ec)
+}
+def resolveHotWaxTimeZone = { String configId, String label ->
+    def config = ec.entity.find("darpan.hotwax.HotWaxOmsRestSourceConfig")
+            .condition("omsRestSourceConfigId", configId)
+            .useCache(false)
+            .one()
+    if (config) {
+        TenantAccessSupport.requireTenantRecordAccess(
+                ec,
+                config,
+                "${label} OMS REST source config '${configId}' was not found.",
+                "${label} OMS REST source config '${configId}' is not available in your active tenant."
+        )
+    }
+    return ((config?.timeZone)?.toString()?.trim()) ?: TenantAccessSupport.resolveActiveTenantTimeZone(ec)
 }
 def resolveSourceApiWindow = { Object rawTimeZone ->
     ReconciliationApiWindowSupport.normalizeCalendarWindow(
@@ -248,165 +286,37 @@ def resolveSourceApiWindow = { Object rawTimeZone ->
     )
 }
 def extractHotWaxSource = { Object source, String fileSide, String label, Map artifactContext ->
-    String configId = FacadeSupport.normalize(source?.sourceConfigId)
+    String configId = ((source?.sourceConfigId)?.toString()?.trim())
     if (!configId) {
         ec.message.addError("${label} API source requires a HotWax OMS source config.")
         return [:]
     }
+    String sourceTimeZone = resolveHotWaxTimeZone(configId, label)
+    if (ec.message.hasError()) return [:]
+    Map<String, Object> sourceApiWindow = resolveSourceApiWindow(sourceTimeZone)
+    Timestamp sourceWindowStartDate = (Timestamp) sourceApiWindow.windowStartDate
+    Timestamp sourceWindowEndDate = (Timestamp) sourceApiWindow.windowEndDate
+
     Map extraction = runInternalService("reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders", [
             omsRestSourceConfigId: configId,
-            windowStart          : formatApiWindow(windowStartDateValue),
-            windowEnd            : formatApiWindow(windowEndDateValue),
+            windowStart          : formatApiWindow(sourceWindowStartDate),
+            windowEnd            : formatApiWindow(sourceWindowEndDate),
             outputLocation       : DataManagerSupport.childLocation(artifactContext.location as String, "${sideToken(fileSide)}-api"),
     ])
     ((List) (extraction.errors ?: [])).each { Object error -> ec.message.addError("${label}: ${error}") }
     if (ec.message.hasError()) return [:]
 
-    String extractedLocation = FacadeSupport.normalize(extraction.fileLocation)
+    String extractedLocation = ((extraction.fileLocation)?.toString()?.trim())
     if (!extractedLocation) {
         ec.message.addError("${label} API did not return an output file for the selected time period.")
         return [:]
     }
-    return sourceResultForLocation(source, fileSide, FacadeSupport.normalize(extraction.fileName) ?: "${sideToken(fileSide)}-api.json",
-            extractedLocation, FacadeSupport.normalizeInt(extraction.recordCount, null))
-}
-def normalizeShopifyOrderRecord = { Map<String, Object> record ->
-    Map<String, Object> normalizedRecord = new LinkedHashMap(record ?: [:])
-    String gid = FacadeSupport.normalize(normalizedRecord.id)
-    String legacyId = FacadeSupport.normalize(normalizedRecord.legacyResourceId)
-    if (!legacyId && gid) {
-        def matcher = gid =~ /(\d+)$/
-        if (matcher.find()) legacyId = matcher.group(1)
-    }
-    if (gid) normalizedRecord.shopifyGid = gid
-    if (legacyId) {
-        normalizedRecord.legacyResourceId = legacyId
-        normalizedRecord.id = legacyId
-    }
-    return normalizedRecord
-}
-def shopifyCompareId = { Map<String, Object> record ->
-    FacadeSupport.normalize(record?.id) ?: FacadeSupport.normalize(record?.legacyResourceId) ?: FacadeSupport.normalize(record?.shopifyGid)
-}
-def shopifyOrderSelection = {
-    return """id
-      legacyResourceId
-      name
-      createdAt
-      updatedAt
-      processedAt
-      email
-      cancelledAt
-      totalPrice
-      displayFinancialStatus
-      displayFulfillmentStatus
-      currencyCode
-      currentTotalPriceSet {
-        shopMoney {
-          amount
-          currencyCode
-        }
-      }
-      currentTotalTaxSet {
-        shopMoney {
-          amount
-          currencyCode
-        }
-      }
-      totalPriceSet {
-        shopMoney {
-          amount
-          currencyCode
-        }
-      }
-      subtotalPriceSet {
-        shopMoney {
-          amount
-          currencyCode
-        }
-      }"""
-}
-def buildShopifyOrderDateWindowQuery = {
-    return """query DarpanShopifyOrdersByDateWindow(\$search: String, \$after: String) {
-  orders(first: 100, after: \$after, query: \$search) {
-    edges {
-      cursor
-      node {
-        ${shopifyOrderSelection()}
-      }
-    }
-    pageInfo {
-      hasNextPage
-      endCursor
-    }
-  }
-}"""
-}
-def scanShopifyOrdersByDateWindow = { String configId, String label, Collection<String> allowedIds, Timestamp sourceWindowStartDate, Timestamp sourceWindowEndDate ->
-    Map<String, Map<String, Object>> recordsById = [:]
-    List<String> searchQueries = []
-    Set<String> allowedIdSet = allowedIds ?
-            (allowedIds.collect { Object id -> FacadeSupport.normalize(id) }.findAll { String id -> id } as LinkedHashSet<String>) :
-            null
-    List<Map<String, String>> dateFilterSets = [
-            [field: "created_at"],
-    ]
-    int maxPages = 20
-    String windowStartText = formatApiWindow(sourceWindowStartDate)
-    String windowEndText = formatApiWindow(sourceWindowEndDate)
-    String queryDocument = buildShopifyOrderDateWindowQuery()
-
-    for (Map<String, String> dateFilterSet : dateFilterSets) {
-        String afterCursor = null
-        int pageCount = 0
-        boolean hasMorePages = false
-        while (pageCount < maxPages) {
-            pageCount++
-            String searchQuery = "${dateFilterSet.field}:>=${windowStartText} ${dateFilterSet.field}:<${windowEndText}"
-            if (searchQuery) searchQueries.add(searchQuery)
-            Map executeResult = runInternalService("facade.ShopifyFacadeServices.execute#ShopifyGraphql", [
-                    shopifyAuthConfigId: configId,
-                    queryDocument      : queryDocument,
-                    variables          : [search: searchQuery, after: afterCursor],
-            ])
-            if (ec.message.hasError()) return [recordsById: recordsById, searchQueries: searchQueries, dateFilterSets: dateFilterSets, queriedStatuses: []]
-
-            Map graphqlResult = executeResult.graphqlResult instanceof Map ? (Map) executeResult.graphqlResult : [:]
-            if (graphqlResult.ok == false) {
-                ((List) (graphqlResult.errors ?: ["${label} GraphQL request failed."])).each { Object error ->
-                    ec.message.addError("${label}: ${error}")
-                }
-                return [recordsById: recordsById, searchQueries: searchQueries, dateFilterSets: dateFilterSets, queriedStatuses: []]
-            }
-
-            Map data = graphqlResult.data instanceof Map ? (Map) graphqlResult.data : [:]
-            Map orders = data.orders instanceof Map ? (Map) data.orders : [:]
-            List edges = orders.edges instanceof Collection ? (List) orders.edges : []
-            edges.each { Object edge ->
-                Object node = edge instanceof Map ? ((Map) edge).node : null
-                if (node instanceof Map) {
-                    Map<String, Object> record = normalizeShopifyOrderRecord((Map<String, Object>) node)
-                    String recordId = shopifyCompareId(record)
-                    if (recordId && (allowedIdSet == null || allowedIdSet.contains(recordId))) recordsById[recordId] = record
-                }
-            }
-
-            Map pageInfo = orders.pageInfo instanceof Map ? (Map) orders.pageInfo : [:]
-            hasMorePages = pageInfo.hasNextPage == true
-            if (!hasMorePages) break
-            afterCursor = FacadeSupport.normalize(pageInfo.endCursor)
-            if (!afterCursor) break
-        }
-        if (hasMorePages && pageCount >= maxPages) {
-            ec.message.addError("${label} API returned more than ${maxPages} pages for ${dateFilterSet.field} in the selected time period. Choose a smaller time period.")
-            return [recordsById: recordsById, searchQueries: searchQueries, dateFilterSets: dateFilterSets, queriedStatuses: []]
-        }
-    }
-
-    return [recordsById: recordsById, searchQueries: searchQueries, dateFilterSets: dateFilterSets, queriedStatuses: []]
+    return sourceResultForLocation(source, fileSide, ((extraction.fileName)?.toString()?.trim()) ?: "${sideToken(fileSide)}-api.json",
+            extractedLocation, extraction.recordCount instanceof Number ? extraction.recordCount.intValue() :
+                    (extraction.recordCount?.toString()?.trim()?.isInteger() ? extraction.recordCount.toString().trim().toInteger() : null))
 }
 def extractShopifySource = { Object source, String fileSide, String label, Map artifactContext ->
-    String configId = FacadeSupport.normalize(source?.sourceConfigId)
+    String configId = ((source?.sourceConfigId)?.toString()?.trim())
     if (!configId) {
         ec.message.addError("${label} API source requires a Shopify auth config.")
         return [:]
@@ -417,42 +327,31 @@ def extractShopifySource = { Object source, String fileSide, String label, Map a
     Map<String, Object> sourceApiWindow = resolveSourceApiWindow(sourceTimeZone)
     Timestamp sourceWindowStartDate = (Timestamp) sourceApiWindow.windowStartDate
     Timestamp sourceWindowEndDate = (Timestamp) sourceApiWindow.windowEndDate
-    String windowStartText = formatApiWindow(sourceWindowStartDate)
-    String windowEndText = formatApiWindow(sourceWindowEndDate)
-
-    Map dateWindowScan = scanShopifyOrdersByDateWindow(configId, label, null, sourceWindowStartDate, sourceWindowEndDate)
-    if (ec.message.hasError()) return [:]
-    Map<String, Map<String, Object>> recordsById = dateWindowScan.recordsById instanceof Map ?
-            (Map<String, Map<String, Object>>) dateWindowScan.recordsById :
-            [:]
-    List<Map<String, Object>> records = new ArrayList(recordsById.values())
 
     String token = sideToken(fileSide)
     String fileNameValue = ReconciliationOutputSupport.sanitizeUploadFileName("${label}-orders-api.json", "${token}-api.json")
-    String location = DataManagerSupport.childLocation(
-            DataManagerSupport.childLocation(artifactContext.location as String, "${token}-api"),
-            DataManagerSupport.runArtifactFileName(artifactContext.runToken, token, fileNameValue)
-    )
-    DataManagerSupport.writeText(ec, location, JsonOutput.toJson([
-            metadata: [
-                    sourceType                         : "SHOPIFY_GRAPHQL_ORDERS",
-                    extractionMode                     : "DATE_FILTER",
-                    shopifyAuthConfigId                : configId,
-                    sourceTimeZone                     : sourceApiWindow.timeZone,
-                    calendarDateNormalized             : sourceApiWindow.calendarDateNormalized,
-                    filterFields                       : ((List) (dateWindowScan.dateFilterSets ?: [])).collect { Map dateFilterSet -> dateFilterSet.field },
-                    searchQueries                      : ((List) (dateWindowScan.searchQueries ?: [])).unique(),
-                    windowStartUtc                     : windowStartText,
-                    windowEndUtc                       : windowEndText,
-                    extractedRecordCount               : records.size(),
-            ],
-            records : records,
-    ]))
-    return sourceResultForLocation(source, fileSide, fileNameValue, location, records.size())
+    Map extraction = runInternalService("reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders", [
+            shopifyAuthConfigId: configId,
+            windowStart         : formatApiWindow(sourceWindowStartDate),
+            windowEnd           : formatApiWindow(sourceWindowEndDate),
+            outputLocation      : DataManagerSupport.childLocation(artifactContext.location as String, "${token}-api"),
+            fileName            : DataManagerSupport.runArtifactFileName(artifactContext.runToken, token, fileNameValue),
+    ])
+    ((List) (extraction.errors ?: [])).each { Object error -> ec.message.addError("${label}: ${error}") }
+    if (ec.message.hasError()) return [:]
+
+    String extractedLocation = ((extraction.fileLocation)?.toString()?.trim())
+    if (!extractedLocation) {
+        ec.message.addError("${label} API did not return an output file for the selected time period.")
+        return [:]
+    }
+    return sourceResultForLocation(source, fileSide, ((extraction.fileName)?.toString()?.trim()) ?: fileNameValue,
+            extractedLocation, extraction.recordCount instanceof Number ? extraction.recordCount.intValue() :
+                    (extraction.recordCount?.toString()?.trim()?.isInteger() ? extraction.recordCount.toString().trim().toInteger() : null))
 }
 def extractApiSource = { Object source, String fileSide, Map artifactContext ->
     String label = sourceLabel(source, fileSide)
-    String sourceConfigType = FacadeSupport.normalize(source?.sourceConfigType)
+    String sourceConfigType = ((source?.sourceConfigType)?.toString()?.trim())
     switch (sourceConfigType) {
         case ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST:
             return extractHotWaxSource(source, fileSide, label, artifactContext)
@@ -573,8 +472,8 @@ if (!ec.message.hasError() && mapping == null) {
         boolean file2UsesApiSource = isApiSource(file2Source)
         boolean hasApiInput = file1UsesApiSource || file2UsesApiSource
 
-        String defaultFile1SystemEnumId = FacadeSupport.normalize(file1Source?.systemEnumId)
-        String defaultFile2SystemEnumId = FacadeSupport.normalize(file2Source?.systemEnumId)
+        String defaultFile1SystemEnumId = ((file1Source?.systemEnumId)?.toString()?.trim())
+        String defaultFile2SystemEnumId = ((file2Source?.systemEnumId)?.toString()?.trim())
         String resolvedFile1SystemEnumId = requestedFile1SystemEnumId ?: defaultFile1SystemEnumId
         String resolvedFile2SystemEnumId = requestedFile2SystemEnumId ?: defaultFile2SystemEnumId
         if (resolvedFile1SystemEnumId == resolvedFile2SystemEnumId) {
@@ -600,113 +499,187 @@ if (!ec.message.hasError() && mapping == null) {
 
             if (hasApiInput) {
                 Map artifactContext = buildRunArtifactContext(savedRun.savedRunId as String)
-                Map file1Result = file1UsesApiSource ?
-                        extractApiSource(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, artifactContext) :
-                        stageTextInput(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, inputFile1Name, file1TextValue, artifactContext)
-                Map file2Result = !ec.message.hasError() && file2UsesApiSource ?
-                        extractApiSource(file2Source, ReconciliationSavedRunSupport.FILE_SIDE_2, artifactContext) :
-                        !ec.message.hasError() ? stageTextInput(file2Source, ReconciliationSavedRunSupport.FILE_SIDE_2, inputFile2Name, file2TextValue, artifactContext) : [:]
+                Map file1Result = [:]
+                Map file2Result = [:]
+                String reconciliationRunResultId = persistRunResult([
+                        savedRunId          : savedRun.savedRunId,
+                        savedRunType        : savedRun.runType ?: ReconciliationSavedRunSupport.RUN_TYPE_RULESET,
+                        ruleSetId           : savedRun.ruleSetId,
+                        compareScopeId      : savedRun.compareScopeId,
+                        companyUserGroupId  : savedRun.companyUserGroupId,
+                        file1Name           : file1UsesApiSource ? null : inputFile1Name,
+                        file2Name           : file2UsesApiSource ? null : inputFile2Name,
+                        statusEnumId        : ReconciliationOutputSupport.STATUS_RUNNING,
+                        createdDate         : ec.user.nowTimestamp,
+                        startedDate         : ec.user.nowTimestamp,
+                ])
+                try {
+                    file1Result = file1UsesApiSource ?
+                            extractApiSource(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, artifactContext) :
+                            stageTextInput(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, inputFile1Name, file1TextValue, artifactContext)
+                    file2Result = !ec.message.hasError() && file2UsesApiSource ?
+                            extractApiSource(file2Source, ReconciliationSavedRunSupport.FILE_SIDE_2, artifactContext) :
+                            !ec.message.hasError() ? stageTextInput(file2Source, ReconciliationSavedRunSupport.FILE_SIDE_2, inputFile2Name, file2TextValue, artifactContext) : [:]
 
-                if (!ec.message.hasError()) {
-                    Map serviceResult = runInternalService("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope", [
-                            ruleSetId          : savedRun.ruleSetId,
-                            compareScopeId     : savedRun.compareScopeId,
-                            file1Location      : file1Result.fileLocation,
-                            file2Location      : file2Result.fileLocation,
-                            file1Name          : file1Result.fileName,
-                            file2Name          : file2Result.fileName,
-                            file1FileTypeEnumId: file1Result.fileTypeEnumId,
-                            file2FileTypeEnumId: file2Result.fileTypeEnumId,
-                            file1SchemaFileName: file1Result.schemaFileName,
-                            file2SchemaFileName: file2Result.schemaFileName,
-                            file1Label         : file1Label,
-                            file2Label         : file2Label,
-                            hasHeader          : hasHeaderValue,
-                            sparkMaster        : sparkMaster,
-                            sparkAppName       : sparkAppName ?: "SavedRunDiff"
-                    ])
                     if (!ec.message.hasError()) {
-                        writeRuleSetOutput(serviceResult, savedRun, file1Label, file2Label, artifactContext)
-                        String resultDataManagerPath = serviceResult.diffLocation ?
-                                (DataManagerSupport.relativeDataManagerPath(ec, new File(serviceResult.diffLocation as String)) ?: serviceResult.diffFileName) :
-                                serviceResult.diffFileName
-                        String reconciliationRunResultId = persistRunResult([
-                                savedRunId           : savedRun.savedRunId,
-                                savedRunType         : savedRun.runType ?: ReconciliationSavedRunSupport.RUN_TYPE_RULESET,
-                                ruleSetId            : savedRun.ruleSetId,
-                                compareScopeId       : savedRun.compareScopeId,
-                                companyUserGroupId   : savedRun.companyUserGroupId,
-                                file1Name            : file1Result.fileName,
-                                file1DataManagerPath : file1Result.dataManagerPath,
-                                file2Name            : file2Result.fileName,
-                                file2DataManagerPath : file2Result.dataManagerPath,
-                                resultDataManagerPath: resultDataManagerPath,
-                                reconciliationType   : serviceResult.reconciliationType ?: serviceResult.objectType,
-                                differenceCount      : serviceResult.differenceCount,
-                                onlyInFile1Count     : serviceResult.missingInFile2Count,
-                                onlyInFile2Count     : serviceResult.missingInFile1Count,
+                        Map serviceResult = runInternalService("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope", [
+                                ruleSetId          : savedRun.ruleSetId,
+                                compareScopeId     : savedRun.compareScopeId,
+                                file1Location      : file1Result.fileLocation,
+                                file2Location      : file2Result.fileLocation,
+                                file1Name          : file1Result.fileName,
+                                file2Name          : file2Result.fileName,
+                                file1FileTypeEnumId: file1Result.fileTypeEnumId,
+                                file2FileTypeEnumId: file2Result.fileTypeEnumId,
+                                file1SchemaFileName: file1Result.schemaFileName,
+                                file2SchemaFileName: file2Result.schemaFileName,
+                                file1Label         : file1Label,
+                                file2Label         : file2Label,
+                                hasHeader          : hasHeaderValue,
+                                sparkMaster        : sparkMaster,
+                                sparkAppName       : sparkAppName ?: "SavedRunDiff"
                         ])
-                        serviceResult.reconciliationRunResultId = reconciliationRunResultId
-                        serviceResult.diffFileName = resultDataManagerPath
-                        runResult = [
-                                savedRunId             : savedRun.savedRunId,
-                                runName                : savedRun.runName,
-                                runType                : savedRun.runType,
-                                reconciliationMappingId: null,
+                        if (!ec.message.hasError()) {
+                            writeRuleSetOutput(serviceResult, savedRun, file1Label, file2Label, artifactContext)
+                            String resultDataManagerPath = serviceResult.diffLocation ?
+                                    (DataManagerSupport.relativeDataManagerPath(ec, new File(serviceResult.diffLocation as String)) ?: serviceResult.diffFileName) :
+                                    serviceResult.diffFileName
+                            reconciliationRunResultId = persistRunResult([
+                                    reconciliationRunResultId: reconciliationRunResultId,
+                                    savedRunId               : savedRun.savedRunId,
+                                    savedRunType             : savedRun.runType ?: ReconciliationSavedRunSupport.RUN_TYPE_RULESET,
+                                    ruleSetId                : savedRun.ruleSetId,
+                                    compareScopeId           : savedRun.compareScopeId,
+                                    companyUserGroupId       : savedRun.companyUserGroupId,
+                                    file1Name                : file1Result.fileName,
+                                    file1DataManagerPath     : file1Result.dataManagerPath,
+                                    file2Name                : file2Result.fileName,
+                                    file2DataManagerPath     : file2Result.dataManagerPath,
+                                    resultDataManagerPath    : resultDataManagerPath,
+                                    statusEnumId             : ReconciliationOutputSupport.STATUS_SUCCEEDED,
+                                    completedDate            : ec.user.nowTimestamp,
+                                    reconciliationType       : serviceResult.reconciliationType ?: serviceResult.objectType,
+                                    differenceCount          : serviceResult.differenceCount,
+                                    onlyInFile1Count         : serviceResult.missingInFile2Count,
+                                    onlyInFile2Count         : serviceResult.missingInFile1Count,
+                            ])
+                            serviceResult.reconciliationRunResultId = reconciliationRunResultId
+                            serviceResult.diffFileName = resultDataManagerPath
+                            runResult = [
+                                    savedRunId               : savedRun.savedRunId,
+                                    runName                  : savedRun.runName,
+                                    runType                  : savedRun.runType,
+                                    reconciliationMappingId  : null,
+                                    reconciliationRunResultId: reconciliationRunResultId,
+                                    ruleSetId                : savedRun.ruleSetId,
+                                    compareScopeId           : savedRun.compareScopeId,
+                                    compareScopeDescription  : savedRun.compareScopeDescription,
+                                    file1Name                : file1Result.fileName,
+                                    file2Name                : file2Result.fileName,
+                                    file1SystemEnumId        : resolvedFile1SystemEnumId,
+                                    file1SystemLabel         : file1Label,
+                                    file2SystemEnumId        : resolvedFile2SystemEnumId,
+                                    file2SystemLabel         : file2Label,
+                                    validationErrors         : (serviceResult.validationErrors ?: []) as List,
+                                    processingWarnings       : (serviceResult.processingWarnings ?: []) as List,
+                                    generatedOutput          : buildGeneratedOutputDescriptor(serviceResult),
+                            ]
+                        }
+                    }
+                } catch (Throwable t) {
+                    persistRunResult([
+                            reconciliationRunResultId: reconciliationRunResultId,
+                            file1Name                : file1Result.fileName,
+                            file1DataManagerPath     : file1Result.dataManagerPath,
+                            file2Name                : file2Result.fileName,
+                            file2DataManagerPath     : file2Result.dataManagerPath,
+                            statusEnumId             : ReconciliationOutputSupport.STATUS_FAILED,
+                            completedDate            : ec.user.nowTimestamp,
+                    ])
+                    throw t
+                } finally {
+                    if (reconciliationRunResultId && ec.message.hasError() && !runResult?.reconciliationRunResultId) {
+                        persistRunResult([
                                 reconciliationRunResultId: reconciliationRunResultId,
-                                ruleSetId              : savedRun.ruleSetId,
-                                compareScopeId         : savedRun.compareScopeId,
-                                compareScopeDescription: savedRun.compareScopeDescription,
-                                file1Name              : file1Result.fileName,
-                                file2Name              : file2Result.fileName,
-                                file1SystemEnumId      : resolvedFile1SystemEnumId,
-                                file1SystemLabel       : file1Label,
-                                file2SystemEnumId      : resolvedFile2SystemEnumId,
-                                file2SystemLabel       : file2Label,
-                                validationErrors       : (serviceResult.validationErrors ?: []) as List,
-                                processingWarnings     : (serviceResult.processingWarnings ?: []) as List,
-                                generatedOutput        : buildGeneratedOutputDescriptor(serviceResult),
-                        ]
+                                file1Name                : file1Result.fileName,
+                                file1DataManagerPath     : file1Result.dataManagerPath,
+                                file2Name                : file2Result.fileName,
+                                file2DataManagerPath     : file2Result.dataManagerPath,
+                                statusEnumId             : ReconciliationOutputSupport.STATUS_FAILED,
+                                completedDate            : ec.user.nowTimestamp,
+                        ])
                     }
                 }
             } else {
-                Map serviceResult = ec.service.sync()
-                        .name("reconciliation.ReconciliationGenericServices.reconcile#GenericFiles")
-                        .parameters([
-                                ruleSetId        : savedRun.ruleSetId,
-                                compareScopeId   : savedRun.compareScopeId,
-                                file1Name        : inputFile1Name,
-                                file1Text        : file1TextValue,
-                                file2Name        : inputFile2Name,
-                                file2Text        : file2TextValue,
-                                file1SystemEnumId: resolvedFile1SystemEnumId,
-                                file2SystemEnumId: resolvedFile2SystemEnumId,
-                                hasHeader        : hasHeaderValue,
-                                sparkMaster      : sparkMaster,
-                                sparkAppName     : sparkAppName ?: "SavedRunDiff"
-                        ])
-                        .call()
+                String reconciliationRunResultId = persistRunResult([
+                        savedRunId          : savedRun.savedRunId,
+                        savedRunType        : savedRun.runType ?: ReconciliationSavedRunSupport.RUN_TYPE_RULESET,
+                        ruleSetId           : savedRun.ruleSetId,
+                        compareScopeId      : savedRun.compareScopeId,
+                        companyUserGroupId  : savedRun.companyUserGroupId,
+                        file1Name           : inputFile1Name,
+                        file2Name           : inputFile2Name,
+                        statusEnumId        : ReconciliationOutputSupport.STATUS_RUNNING,
+                        createdDate         : ec.user.nowTimestamp,
+                        startedDate         : ec.user.nowTimestamp,
+                ])
+                try {
+                    Map serviceResult = ec.service.sync()
+                            .name("reconciliation.ReconciliationGenericServices.reconcile#GenericFiles")
+                            .parameters([
+                                    reconciliationRunResultId: reconciliationRunResultId,
+                                    ruleSetId                : savedRun.ruleSetId,
+                                    compareScopeId           : savedRun.compareScopeId,
+                                    file1Name                : inputFile1Name,
+                                    file1Text                : file1TextValue,
+                                    file2Name                : inputFile2Name,
+                                    file2Text                : file2TextValue,
+                                    file1SystemEnumId        : resolvedFile1SystemEnumId,
+                                    file2SystemEnumId        : resolvedFile2SystemEnumId,
+                                    hasHeader                : hasHeaderValue,
+                                    sparkMaster              : sparkMaster,
+                                    sparkAppName             : sparkAppName ?: "SavedRunDiff"
+                            ])
+                            .call()
 
-                if (!ec.message.hasError()) {
-                    runResult = [
-                            savedRunId             : savedRun.savedRunId,
-                            runName                : savedRun.runName,
-                            runType                : savedRun.runType,
-                            reconciliationMappingId: null,
-                            reconciliationRunResultId: serviceResult.reconciliationRunResultId,
-                            ruleSetId              : savedRun.ruleSetId,
-                            compareScopeId         : savedRun.compareScopeId,
-                            compareScopeDescription: savedRun.compareScopeDescription,
-                            file1Name              : inputFile1Name,
-                            file2Name              : inputFile2Name,
-                            file1SystemEnumId      : resolvedFile1SystemEnumId,
-                            file1SystemLabel       : file1Label,
-                            file2SystemEnumId      : resolvedFile2SystemEnumId,
-                            file2SystemLabel       : file2Label,
-                            validationErrors       : (serviceResult.validationErrors ?: []) as List,
-                            processingWarnings     : (serviceResult.processingWarnings ?: []) as List,
-                            generatedOutput        : buildGeneratedOutputDescriptor(serviceResult),
-                    ]
+                    if (!ec.message.hasError()) {
+                        runResult = [
+                                savedRunId               : savedRun.savedRunId,
+                                runName                  : savedRun.runName,
+                                runType                  : savedRun.runType,
+                                reconciliationMappingId  : null,
+                                reconciliationRunResultId: serviceResult.reconciliationRunResultId,
+                                ruleSetId                : savedRun.ruleSetId,
+                                compareScopeId           : savedRun.compareScopeId,
+                                compareScopeDescription  : savedRun.compareScopeDescription,
+                                file1Name                : inputFile1Name,
+                                file2Name                : inputFile2Name,
+                                file1SystemEnumId        : resolvedFile1SystemEnumId,
+                                file1SystemLabel         : file1Label,
+                                file2SystemEnumId        : resolvedFile2SystemEnumId,
+                                file2SystemLabel         : file2Label,
+                                validationErrors         : (serviceResult.validationErrors ?: []) as List,
+                                processingWarnings       : (serviceResult.processingWarnings ?: []) as List,
+                                generatedOutput          : buildGeneratedOutputDescriptor(serviceResult),
+                        ]
+                    }
+                } catch (Throwable t) {
+                    if (reconciliationRunResultId) {
+                        persistRunResult([
+                                reconciliationRunResultId: reconciliationRunResultId,
+                                statusEnumId             : ReconciliationOutputSupport.STATUS_FAILED,
+                                completedDate            : ec.user.nowTimestamp,
+                        ])
+                    }
+                    throw t
+                } finally {
+                    if (reconciliationRunResultId && ec.message.hasError() && !runResult?.reconciliationRunResultId) {
+                        persistRunResult([
+                                reconciliationRunResultId: reconciliationRunResultId,
+                                statusEnumId             : ReconciliationOutputSupport.STATUS_FAILED,
+                                completedDate            : ec.user.nowTimestamp,
+                        ])
+                    }
                 }
             }
         }

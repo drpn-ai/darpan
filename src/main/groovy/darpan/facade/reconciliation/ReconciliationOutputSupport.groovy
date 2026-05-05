@@ -14,6 +14,21 @@ import java.sql.Timestamp
 class ReconciliationOutputSupport {
     static final List<String> LEGACY_CSV_COLUMNS = ["type", "id", "presentIn", "missingIn", "note", "data"]
     static final List<String> RULESET_CSV_COLUMNS = ["diffType", "primaryId", "field", "file1Value", "file2Value", "presentIn", "missingIn", "ruleId", "severity", "message", "data"]
+    static final String STATUS_PENDING = "AUT_STAT_PENDING"
+    static final String STATUS_RUNNING = "AUT_STAT_RUNNING"
+    static final String STATUS_SUCCEEDED = "AUT_STAT_SUCCESS"
+    static final String STATUS_FAILED = "AUT_STAT_FAILED"
+    static final String STATUS_NO_DATA = "AUT_STAT_NO_DATA"
+    static final String STATUS_SKIPPED_DUPLICATE = "AUT_STAT_SKIP_DUP"
+    protected static final Set<String> ACTIVE_STATUSES = [STATUS_PENDING, STATUS_RUNNING] as Set
+    protected static final Map<String, String> STATUS_LABELS = [
+            (STATUS_PENDING)          : "Pending execution",
+            (STATUS_RUNNING)          : "Running",
+            (STATUS_SUCCEEDED)        : "Succeeded",
+            (STATUS_FAILED)           : "Failed",
+            (STATUS_NO_DATA)          : "No input data available",
+            (STATUS_SKIPPED_DUPLICATE): "Skipped duplicate",
+    ]
     protected static final Logger logger = LoggerFactory.getLogger(ReconciliationOutputSupport.class)
 
     static boolean isSupportedOutputFile(String fileName) {
@@ -122,6 +137,7 @@ class ReconciliationOutputSupport {
     static List<Map<String, Object>> listGeneratedOutputFiles(def ec) {
         List<Map<String, Object>> outputFiles = []
         Set<String> seenFileNames = [] as Set
+        Set<String> seenRunResultIds = [] as Set
 
         def resultFinder = ec?.entity?.find("darpan.reconciliation.ReconciliationRunResult")
         if (resultFinder != null) {
@@ -131,12 +147,21 @@ class ReconciliationOutputSupport {
             if (resultFinder.metaClass.respondsTo(resultFinder, "useCache", Boolean)) resultFinder.useCache(false)
             (resultFinder.list() ?: []).each { runResult ->
                 String fileName = DataManagerSupport.normalizeRelativePath(runResult.resultDataManagerPath)
-                File file = resolveGeneratedOutputFile(ec, fileName)
+                File file = fileName ? resolveGeneratedOutputFile(ec, fileName) : null
                 if (fileName && file?.exists() && file.isFile() && seenFileNames.add(fileName)) {
                     outputFiles.add([
-                            file     : file,
-                            fileName : fileName,
-                            runResult: runResult,
+                            file       : file,
+                            fileName   : fileName,
+                            runResult  : runResult,
+                            createdDate: timestampValue(runResult.createdDate) ?: new Timestamp(file.lastModified()),
+                    ])
+                } else if (!fileName && shouldListRunResultWithoutFile(runResult) &&
+                        seenRunResultIds.add(normalize(runResult.reconciliationRunResultId) ?: "${normalize(runResult.savedRunId)}:${normalize(runResult.createdDate)}")) {
+                    outputFiles.add([
+                            file       : null,
+                            fileName   : "",
+                            runResult  : runResult,
+                            createdDate: timestampValue(runResult.createdDate ?: runResult.startedDate ?: runResult.lastUpdatedDate),
                     ])
                 }
             }
@@ -149,12 +174,13 @@ class ReconciliationOutputSupport {
                     String fileName = DataManagerSupport.relativeDataManagerPath(ec, file)
                     if (fileName && seenFileNames.add(fileName)) {
                         outputFiles.add([
-                                file    : file,
-                                fileName: fileName
+                                file       : file,
+                                fileName   : fileName,
+                                createdDate: new Timestamp(file.lastModified()),
                         ])
                     }
                 }
-            }
+        }
         }
 
         File legacyOutputDir = ec?.resource?.getLocationReference(TenantAccessSupport.resolveGenericOutputLocation(ec))?.getFile()
@@ -164,8 +190,9 @@ class ReconciliationOutputSupport {
                     .each { File file ->
                         if (seenFileNames.add(file.name)) {
                             outputFiles.add([
-                                    file    : file,
-                                    fileName: file.name
+                                    file       : file,
+                                    fileName   : file.name,
+                                    createdDate: new Timestamp(file.lastModified()),
                             ])
                         }
                     }
@@ -176,29 +203,28 @@ class ReconciliationOutputSupport {
 
     static Map<String, Object> listGeneratedOutputs(def ec, Object savedRunId, Object reconciliationMappingId,
             Object query, Object pageIndex, Object pageSize) {
-        int page = Math.max(0, FacadeSupport.normalizeInt(pageIndex, 0))
-        int size = Math.max(1, Math.min(200, FacadeSupport.normalizeInt(pageSize, 20)))
-        String savedRunIdFilter = FacadeSupport.normalize(savedRunId ?: reconciliationMappingId)
-        String search = FacadeSupport.normalize(query)?.toLowerCase()
+        int page = Math.max(0, pageIndex instanceof Number ? pageIndex.intValue() :
+                (pageIndex?.toString()?.trim()?.isInteger() ? pageIndex.toString().trim().toInteger() : 0))
+        int size = Math.max(1, Math.min(200, pageSize instanceof Number ? pageSize.intValue() :
+                (pageSize?.toString()?.trim()?.isInteger() ? pageSize.toString().trim().toInteger() : 20)))
+        String savedRunIdFilter = ((savedRunId ?: reconciliationMappingId)?.toString()?.trim())
+        String search = ((query)?.toString()?.trim())?.toLowerCase()
 
         List<Map<String, Object>> rows = []
         (listGeneratedOutputFiles(ec) ?: [])
-                .sort { Map left, Map right -> Long.compare(((File) right.file).lastModified(), ((File) left.file).lastModified()) }
+                .sort { Map left, Map right -> Long.compare(outputRowSortTime(right), outputRowSortTime(left)) }
                 .each { Map outputFile ->
                     File file = (File) outputFile.file
                     String fileName = outputFile.fileName as String
-                    if (canAccessGeneratedOutputFile(ec, file, fileName)) {
+                    if (file != null && canAccessGeneratedOutputFile(ec, file, fileName)) {
                         Map<String, Object> outputDocument = parseOutputDocument(file)
-                        Map<String, Object> descriptor = buildGeneratedOutputDescriptor(
-                                fileName,
-                                outputDocument,
-                                file.length(),
-                                new Timestamp(file.lastModified())
-                        )
-                        if (outputFile.runResult?.reconciliationRunResultId) {
-                            descriptor.reconciliationRunResultId = outputFile.runResult.reconciliationRunResultId
-                        }
+                        Map<String, Object> descriptor = outputFile.runResult ?
+                                buildRunResultDescriptor(ec, outputFile.runResult, file, outputDocument) :
+                                buildGeneratedOutputDescriptor(fileName, outputDocument, file.length(), new Timestamp(file.lastModified()))
 
+                        if (matchesGeneratedOutputDescriptor(descriptor, savedRunIdFilter, search)) rows.add(descriptor)
+                    } else if (file == null && outputFile.runResult != null && canAccessRunResult(ec, outputFile.runResult)) {
+                        Map<String, Object> descriptor = buildRunResultDescriptor(ec, outputFile.runResult, null, [:])
                         if (matchesGeneratedOutputDescriptor(descriptor, savedRunIdFilter, search)) rows.add(descriptor)
                     }
                 }
@@ -211,8 +237,8 @@ class ReconciliationOutputSupport {
     }
 
     static Map<String, Object> getGeneratedOutput(def ec, Object fileName, Object format) {
-        String fileNameValue = FacadeSupport.normalize(fileName)
-        String requestedFormat = (FacadeSupport.normalize(format) ?: "json").toLowerCase()
+        String fileNameValue = ((fileName)?.toString()?.trim())
+        String requestedFormat = (((format)?.toString()?.trim()) ?: "json").toLowerCase()
         Map<String, Object> outputFile = null
 
         if (!fileNameValue) ec.message.addError("fileName is required")
@@ -502,7 +528,48 @@ class ReconciliationOutputSupport {
                 onlyInFile2Count        : normalizeLong(summary.onlyInFile2Count ?: summary.onlyInJson2Count),
                 createdDate             : createdDate,
                 sizeBytes               : sizeBytes,
+                statusEnumId            : STATUS_SUCCEEDED,
+                statusLabel             : STATUS_LABELS[STATUS_SUCCEEDED],
+                resultAvailable         : true,
         ]
+    }
+
+    static Map<String, Object> buildRunResultDescriptor(def ec, def runResult, File resultFile,
+            Map<String, Object> outputDocument) {
+        String fileName = DataManagerSupport.normalizeRelativePath(runResult?.resultDataManagerPath)
+        boolean resultAvailable = fileName && resultFile?.exists() && resultFile.isFile()
+        Map<String, Object> descriptor = resultAvailable ?
+                buildGeneratedOutputDescriptor(fileName, outputDocument ?: [:], resultFile.length(), new Timestamp(resultFile.lastModified())) :
+                [
+                        fileName               : "",
+                        sourceFormat           : "",
+                        availableFormats       : [],
+                        preferredDownloadFormat: null,
+                        createdDate            : timestampValue(runResult?.createdDate ?: runResult?.startedDate ?: runResult?.lastUpdatedDate),
+                        sizeBytes              : 0L,
+                        resultAvailable        : false,
+                ]
+
+        String statusEnumId = normalize(runResult?.statusEnumId) ?: STATUS_SUCCEEDED
+        descriptor.reconciliationRunResultId = normalize(runResult?.reconciliationRunResultId)
+        descriptor.companyUserGroupId = descriptor.companyUserGroupId ?: normalize(runResult?.companyUserGroupId)
+        descriptor.savedRunId = descriptor.savedRunId ?: normalize(runResult?.savedRunId ?: runResult?.reconciliationMappingId ?: runResult?.ruleSetId)
+        descriptor.savedRunType = descriptor.savedRunType ?: normalize(runResult?.savedRunType)
+        descriptor.reconciliationMappingId = descriptor.reconciliationMappingId ?: normalize(runResult?.reconciliationMappingId)
+        descriptor.ruleSetId = descriptor.ruleSetId ?: normalize(runResult?.ruleSetId)
+        descriptor.compareScopeId = descriptor.compareScopeId ?: normalize(runResult?.compareScopeId)
+        descriptor.reconciliationType = descriptor.reconciliationType ?: normalize(runResult?.reconciliationType)
+        descriptor.totalDifferences = descriptor.totalDifferences ?: normalizeLong(runResult?.differenceCount)
+        descriptor.onlyInFile1Count = descriptor.onlyInFile1Count ?: normalizeLong(runResult?.onlyInFile1Count)
+        descriptor.onlyInFile2Count = descriptor.onlyInFile2Count ?: normalizeLong(runResult?.onlyInFile2Count)
+        descriptor.createdDate = descriptor.createdDate ?: timestampValue(runResult?.createdDate ?: runResult?.startedDate ?: runResult?.lastUpdatedDate)
+        descriptor.startedDate = timestampValue(runResult?.startedDate)
+        descriptor.completedDate = timestampValue(runResult?.completedDate)
+        descriptor.lastUpdatedDate = timestampValue(runResult?.lastUpdatedDate)
+        descriptor.statusEnumId = statusEnumId
+        descriptor.statusLabel = resolveStatusLabel(ec, statusEnumId)
+        descriptor.resultAvailable = resultAvailable
+        return descriptor
     }
 
     static boolean matchesGeneratedOutputDescriptor(Map<String, Object> descriptor, String savedRunId, String search) {
@@ -525,11 +592,52 @@ class ReconciliationOutputSupport {
                 descriptor?.compareScopeDescription,
                 descriptor?.file1Label,
                 descriptor?.file2Label,
-                descriptor?.reconciliationType
+                descriptor?.reconciliationType,
+                descriptor?.statusEnumId,
+                descriptor?.statusLabel
         ].any { value ->
             String normalizedValue = normalize(value)?.toLowerCase()
             normalizedValue?.contains(normalizedSearch)
         }
+    }
+
+    static boolean isActiveRunResultStatus(Object rawStatusEnumId) {
+        ACTIVE_STATUSES.contains(normalize(rawStatusEnumId))
+    }
+
+    protected static boolean shouldListRunResultWithoutFile(def runResult) {
+        return normalize(runResult?.reconciliationRunResultId) && isActiveRunResultStatus(runResult?.statusEnumId)
+    }
+
+    protected static boolean canAccessRunResult(def ec, def runResult) {
+        String activeTenantUserGroupId = normalize(TenantAccessSupport.currentActiveTenantUserGroupId(ec))
+        if (!activeTenantUserGroupId) return false
+        String resultTenantUserGroupId = normalize(runResult?.companyUserGroupId)
+        return resultTenantUserGroupId && resultTenantUserGroupId == activeTenantUserGroupId
+    }
+
+    protected static long outputRowSortTime(Map<String, Object> outputFile) {
+        File file = outputFile?.file instanceof File ? (File) outputFile.file : null
+        if (file?.exists()) return file.lastModified()
+        Timestamp timestamp = timestampValue(outputFile?.createdDate ?: outputFile?.runResult?.createdDate ?:
+                outputFile?.runResult?.startedDate ?: outputFile?.runResult?.lastUpdatedDate)
+        return timestamp?.time ?: 0L
+    }
+
+    protected static String resolveStatusLabel(def ec, String statusEnumId) {
+        String normalizedStatusEnumId = normalize(statusEnumId)
+        if (!normalizedStatusEnumId) return null
+
+        try {
+            def enumValue = ec?.entity?.find("moqui.basic.Enumeration")
+                    ?.condition("enumId", normalizedStatusEnumId)
+                    ?.useCache(true)
+                    ?.one()
+            if (enumValue) return FacadeSupport.enumLabel(enumValue)
+        } catch (Exception ignored) {
+        }
+
+        return STATUS_LABELS[normalizedStatusEnumId] ?: normalizedStatusEnumId
     }
 
     static String deriveDownloadFileName(String sourceFileName, String requestedFormat) {
@@ -608,6 +716,17 @@ class ReconciliationOutputSupport {
 
     protected static String normalize(Object value) {
         return value?.toString()?.trim()
+    }
+
+    protected static Timestamp timestampValue(Object value) {
+        if (value == null) return null
+        if (value instanceof Timestamp) return (Timestamp) value
+        if (value instanceof Date) return new Timestamp(value.time)
+        try {
+            return Timestamp.valueOf(value.toString())
+        } catch (Exception ignored) {
+            return null
+        }
     }
 
     protected static Map<String, Object> pagination(int page, int size, int totalCount) {

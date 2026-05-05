@@ -52,10 +52,11 @@ class TenantNotificationSupport {
         if (ec.message.hasError()) return buildSettingsResponse(ec, findSettingsForTenant(ec, tenantId), tenantId)
 
         def existing = findSettingsForTenant(ec, tenantId)
-        String webhookUrl = FacadeSupport.normalize(rawWebhookUrl)
-        String existingWebhookUrl = FacadeSupport.normalize(existing?.googleChatWebhookUrl)
+        String webhookUrl = ((rawWebhookUrl)?.toString()?.trim())
+        String existingWebhookUrl = ((existing?.googleChatWebhookUrl)?.toString()?.trim())
         String webhookUrlToSave = webhookUrl ?: existingWebhookUrl
-        boolean isActive = FacadeSupport.normalizeBool(rawIsActive, true)
+        boolean isActive = rawIsActive == null ? true :
+                (rawIsActive instanceof Boolean ? rawIsActive : ["Y", "YES", "TRUE", "1", "ON"].contains(rawIsActive.toString().trim().toUpperCase(Locale.ROOT)))
         if (isActive && !webhookUrlToSave) ec.message.addError("Google Chat webhook URL is required when notifications are enabled.")
 
         String validationError = validateGoogleChatWebhookUrl(webhookUrlToSave)
@@ -65,7 +66,7 @@ class TenantNotificationSupport {
         def nowTs = ec.user.nowTimestamp
         Map<String, Object> settingMap = [
                 companyUserGroupId   : tenantId,
-                createdByUserId      : FacadeSupport.normalize(existing?.createdByUserId) ?: TenantAccessSupport.currentUserId(ec),
+                createdByUserId      : ((existing?.createdByUserId)?.toString()?.trim()) ?: TenantAccessSupport.currentUserId(ec),
                 googleChatWebhookUrl : webhookUrlToSave,
                 isActive             : isActive ? "Y" : "N",
                 createdDate          : existing?.createdDate ?: nowTs,
@@ -82,7 +83,7 @@ class TenantNotificationSupport {
     }
 
     static String validateGoogleChatWebhookUrl(Object rawWebhookUrl) {
-        String webhookUrl = FacadeSupport.normalize(rawWebhookUrl)
+        String webhookUrl = ((rawWebhookUrl)?.toString()?.trim())
         if (!webhookUrl) return null
 
         URI uri
@@ -105,7 +106,7 @@ class TenantNotificationSupport {
     }
 
     static String maskGoogleChatWebhookUrl(Object rawWebhookUrl) {
-        String webhookUrl = FacadeSupport.normalize(rawWebhookUrl)
+        String webhookUrl = ((rawWebhookUrl)?.toString()?.trim())
         if (!webhookUrl) return null
 
         try {
@@ -122,13 +123,13 @@ class TenantNotificationSupport {
 
     static Map<String, Object> notifyRunCompleted(def ec, Map<String, Object> runResult) {
         Map<String, Object> context = buildRunResultContext(ec, runResult ?: [:])
-        String tenantId = FacadeSupport.normalize(context.companyUserGroupId)
-        String resultId = FacadeSupport.normalize(context.reconciliationRunResultId)
+        String tenantId = ((context.companyUserGroupId)?.toString()?.trim())
+        String resultId = ((context.reconciliationRunResultId)?.toString()?.trim())
         if (!tenantId) return [ok: true, attempted: false, skippedReason: "NO_TENANT"]
 
         def settings = findSettingsForTenant(ec, tenantId)
-        String webhookUrl = FacadeSupport.normalize(settings?.googleChatWebhookUrl)
-        boolean active = FacadeSupport.normalize(settings?.isActive) != "N"
+        String webhookUrl = ((settings?.googleChatWebhookUrl)?.toString()?.trim())
+        boolean active = ((settings?.isActive)?.toString()?.trim()) != "N"
         if (!settings || !active || !webhookUrl) {
             return [ok: true, attempted: false, skippedReason: "NOT_CONFIGURED"]
         }
@@ -160,13 +161,13 @@ class TenantNotificationSupport {
     }
 
     static Map<String, Object> buildRunCompletedPayload(def ec, Map<String, Object> context) {
-        String tenantLabel = FacadeSupport.normalize(context.companyLabel) ?:
+        String tenantLabel = ((context.companyLabel)?.toString()?.trim()) ?:
                 TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, context.companyUserGroupId)
-        String runName = FacadeSupport.normalize(context.runName) ?:
-                FacadeSupport.normalize(context.savedRunId) ?:
-                FacadeSupport.normalize(context.reconciliationRunId) ?:
+        String runName = ((context.runName)?.toString()?.trim()) ?:
+                ((context.savedRunId)?.toString()?.trim()) ?:
+                ((context.reconciliationRunId)?.toString()?.trim()) ?:
                 "reconciliation run"
-        String resultId = FacadeSupport.normalize(context.reconciliationRunResultId)
+        String resultId = ((context.reconciliationRunResultId)?.toString()?.trim())
         String resultUrl = buildRunResultUrl(ec, context)
         String file1SystemLabel = resolveFileSystemLabel(ec, context, "file1", null)
         String file2SystemLabel = resolveFileSystemLabel(ec, context, "file2", null)
@@ -182,18 +183,18 @@ class TenantNotificationSupport {
 
     protected static String buildRunResultUrl(def ec, Map<String, Object> context) {
         String appBaseUrl = resolveAppBaseUrl(ec)
-        String savedRunId = FacadeSupport.normalize(context.savedRunId) ?:
-                FacadeSupport.normalize(context.reconciliationMappingId) ?:
-                FacadeSupport.normalize(context.ruleSetId)
-        String outputFileName = FacadeSupport.normalize(context.resultDataManagerPath)
+        String savedRunId = ((context.savedRunId)?.toString()?.trim()) ?:
+                ((context.reconciliationMappingId)?.toString()?.trim()) ?:
+                ((context.ruleSetId)?.toString()?.trim())
+        String outputFileName = ((context.resultDataManagerPath)?.toString()?.trim())
         if (!appBaseUrl || !savedRunId || !outputFileName) return null
 
         String path = "/reconciliation/run-result/${encodePathSegment(savedRunId)}/${encodePathSegment(outputFileName)}"
         Map<String, String> queryParams = [
-                runName         : FacadeSupport.normalize(context.runName),
+                runName         : ((context.runName)?.toString()?.trim()),
                 file1SystemLabel: resolveFileSystemLabel(ec, context, "file1", null),
                 file2SystemLabel: resolveFileSystemLabel(ec, context, "file2", null),
-        ].findAll { entry -> FacadeSupport.normalize(entry.value) } as Map<String, String>
+        ].findAll { entry -> ((entry.value)?.toString()?.trim()) } as Map<String, String>
 
         String queryText = queryParams.collect { entry ->
             "${encodeQueryComponent(entry.key)}=${encodeQueryComponent(entry.value)}"
@@ -202,11 +203,11 @@ class TenantNotificationSupport {
     }
 
     protected static String resolveFileSystemLabel(def ec, Map<String, Object> context, String prefix, String fallback) {
-        String explicitLabel = FacadeSupport.normalize(context["${prefix}SystemLabel"]) ?:
-                FacadeSupport.normalize(context["${prefix}Label"])
+        String explicitLabel = ((context["${prefix}SystemLabel"])?.toString()?.trim()) ?:
+                ((context["${prefix}Label"])?.toString()?.trim())
         if (explicitLabel) return explicitLabel
 
-        String systemEnumId = FacadeSupport.normalize(context["${prefix}SystemEnumId"])
+        String systemEnumId = ((context["${prefix}SystemEnumId"])?.toString()?.trim())
         if (!systemEnumId) return fallback
 
         try {
@@ -217,21 +218,21 @@ class TenantNotificationSupport {
     }
 
     protected static String resolveAppBaseUrl(def ec) {
-        String rawBaseUrl = FacadeSupport.normalize(System.getenv(APP_BASE_URL_ENV)) ?:
-                FacadeSupport.normalize(ec?.resource?.properties?.get(APP_BASE_URL_PROPERTY)) ?:
+        String rawBaseUrl = System.getenv(APP_BASE_URL_ENV)?.toString()?.trim() ?:
+                ec?.resource?.properties?.get(APP_BASE_URL_PROPERTY)?.toString()?.trim() ?:
                 resolveFirstAllowedOrigin(ec) ?:
                 DEFAULT_APP_BASE_URL
         return normalizeAppBaseUrl(rawBaseUrl)
     }
 
     protected static String resolveFirstAllowedOrigin(def ec) {
-        String rawOrigins = FacadeSupport.normalize(ec?.resource?.properties?.get("webapp_allow_origins"))
+        String rawOrigins = ec?.resource?.properties?.get("webapp_allow_origins")?.toString()?.trim()
         if (!rawOrigins || rawOrigins == "*") return null
         return rawOrigins.split(",").collect { it.trim() }.find { it && it != "*" }
     }
 
     protected static String normalizeAppBaseUrl(Object rawBaseUrl) {
-        String value = FacadeSupport.normalize(rawBaseUrl)
+        String value = ((rawBaseUrl)?.toString()?.trim())
         if (!value) return null
         if (!value.startsWith("http://") && !value.startsWith("https://")) value = "https://${value}".toString()
         try {
@@ -273,7 +274,7 @@ class TenantNotificationSupport {
 
     protected static Map<String, Object> buildRunResultContext(def ec, Map<String, Object> input) {
         Map<String, Object> context = new LinkedHashMap<String, Object>(input)
-        String resultId = FacadeSupport.normalize(context.reconciliationRunResultId)
+        String resultId = ((context.reconciliationRunResultId)?.toString()?.trim())
         def runResultRecord = resultId ? ec?.entity?.find("darpan.reconciliation.ReconciliationRunResult")
                 ?.condition("reconciliationRunResultId", resultId)
                 ?.disableAuthz()
@@ -315,14 +316,14 @@ class TenantNotificationSupport {
     }
 
     protected static Map<String, Object> buildSettingsResponse(def ec, def setting, String tenantId) {
-        String webhookUrl = FacadeSupport.normalize(setting?.googleChatWebhookUrl)
+        String webhookUrl = ((setting?.googleChatWebhookUrl)?.toString()?.trim())
         return [
                 companyUserGroupId        : tenantId,
                 companyLabel              : TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, tenantId),
                 googleChatConfigured      : !!webhookUrl,
                 googleChatWebhookUrlMasked: maskGoogleChatWebhookUrl(webhookUrl),
-                isActive                  : FacadeSupport.normalize(setting?.isActive) ?: "N",
-                createdByUserId           : FacadeSupport.normalize(setting?.createdByUserId),
+                isActive                  : ((setting?.isActive)?.toString()?.trim()) ?: "N",
+                createdByUserId           : ((setting?.createdByUserId)?.toString()?.trim()),
                 createdDate               : setting?.createdDate,
                 lastUpdatedDate           : setting?.lastUpdatedDate,
         ]
@@ -347,7 +348,7 @@ class TenantNotificationSupport {
     protected static String toDisplayCount(Object value) {
         if (value == null) return "0"
         if (value instanceof Number) return ((Number) value).intValue().toString()
-        String normalized = FacadeSupport.normalize(value)
+        String normalized = ((value)?.toString()?.trim())
         return normalized ?: "0"
     }
 }

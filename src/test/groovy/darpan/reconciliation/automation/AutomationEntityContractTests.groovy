@@ -62,9 +62,22 @@ class AutomationEntityContractTests {
     @Test
     void automationEntitiesDefineTenantOwnedConfigurationSourcesAndExecutions() {
         def entities = parse("entity/ReconciliationEntities.xml").entity
+        def runResult = entity(entities, "ReconciliationRunResult")
         def automation = entity(entities, "ReconciliationAutomation")
         def source = entity(entities, "ReconciliationAutomationSource")
         def execution = entity(entities, "ReconciliationAutomationExecution")
+
+        assertFields(runResult, [
+                "reconciliationRunResultId", "savedRunId", "savedRunType", "reconciliationRunId",
+                "reconciliationMappingId", "ruleSetId", "compareScopeId", "companyUserGroupId",
+                "createdByUserId", "file1Name", "file1DataManagerPath", "file2Name",
+                "file2DataManagerPath", "resultDataManagerPath", "statusEnumId",
+                "reconciliationType", "differenceCount", "onlyInFile1Count", "onlyInFile2Count",
+                "createdDate", "startedDate", "completedDate", "lastUpdatedDate",
+        ])
+        assertEquals("true", attr(field(runResult, "reconciliationRunResultId"), "is-pk"))
+        assertEquals("'AUT_STAT_SUCCESS'", attr(field(runResult, "statusEnumId"), "default"))
+        assertRelationship(runResult, "Status", "moqui.basic.Enumeration", "statusEnumId", "enumId")
 
         assertFields(automation, [
                 "automationId", "automationName", "companyUserGroupId", "createdByUserId",

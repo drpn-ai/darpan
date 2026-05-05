@@ -63,9 +63,8 @@ DARPAN_USER
 
 - `authenticated=true`
 - `sessionInfo.isSuperAdmin=true`
-- `sessionInfo.canManageDarpanCore=true`
 
-Stop if the auth is not super-admin capable.
+Stop if the auth is not super-admin capable. `sessionInfo.canManageDarpanCore=true` is required for app-level settings, but it is not required for tenant-user setup.
 
 ## Path A: Admin UI or Internal User Service
 

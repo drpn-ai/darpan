@@ -133,7 +133,7 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="authenticated" from="darpan.facade.common.FacadeSupport.normalize(ec.user.userId) != null"/>
+            <set field="authenticated" from="((ec.user.userId)?.toString()?.trim()) != null"/>
             <if condition="authenticated">
                 <set field="sessionInfo" from="darpan.facade.common.TenantAccessSupport.buildSessionInfo(ec)"/>
             </if>
@@ -197,7 +197,7 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="authenticated" from="darpan.facade.common.FacadeSupport.normalize(ec.user.userId) != null"/>
+            <set field="authenticated" from="((ec.user.userId)?.toString()?.trim()) != null"/>
             <if condition="authenticated">
                 <set field="activeTenantSaved" from="darpan.facade.common.TenantAccessSupport.saveActiveTenant(ec, activeTenantUserGroupId)"/>
                 <set field="sessionInfo" from="darpan.facade.common.TenantAccessSupport.buildSessionInfo(ec)"/>
@@ -267,7 +267,7 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="authenticated" from="darpan.facade.common.FacadeSupport.normalize(ec.user.userId) != null"/>
+            <set field="authenticated" from="((ec.user.userId)?.toString()?.trim()) != null"/>
             <if condition="authenticated">
                 <set field="userSettingsSaved" from="darpan.facade.common.TenantAccessSupport.saveUserSettings(ec, displayName)"/>
                 <set field="sessionInfo" from="darpan.facade.common.TenantAccessSupport.buildSessionInfo(ec)"/>
@@ -413,7 +413,7 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="authenticated" from="darpan.facade.common.FacadeSupport.normalize(ec.user.userId) != null"/>
+            <set field="authenticated" from="((ec.user.userId)?.toString()?.trim()) != null"/>
             <set field="passwordUpdated" from="false"/>
             <if condition="authenticated">
                 <service-call name="org.moqui.impl.UserServices.update#Password" out-map="passwordUpdateOut">

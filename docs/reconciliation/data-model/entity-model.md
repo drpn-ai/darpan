@@ -278,6 +278,7 @@ Persists the artifact manifest for one run execution.
 - Stores the data-manager paths for the two uploaded source files and generated result
 - Links a UI saved run (`savedRunId`) to its persisted result artifact
 - Keeps tenant ownership on generated run data
+- Tracks run lifecycle status so history can show active API-backed extraction before a result file exists
 
 **Key Fields**
 - `reconciliationRunResultId`
@@ -292,11 +293,15 @@ Persists the artifact manifest for one run execution.
 - `file1DataManagerPath`
 - `file2DataManagerPath`
 - `resultDataManagerPath`
+- `statusEnumId` (`AUT_STAT_RUNNING`, `AUT_STAT_SUCCESS`, or `AUT_STAT_FAILED`)
 - `reconciliationType`
 - `differenceCount`
 - `onlyInFile1Count`
 - `onlyInFile2Count`
 - `createdDate`
+- `startedDate`
+- `completedDate`
+- `lastUpdatedDate`
 
 ### ReconciliationAutomation (darpan.reconciliation.ReconciliationAutomation)
 Defines a tenant-owned automation configuration for either API date-range extraction or SFTP file inputs.

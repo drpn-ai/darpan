@@ -21,8 +21,8 @@
         </out-parameters>
         <actions>
             <set field="options" from="[]"/>
-            <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec, 'Settings are restricted to super-admin users.')"/>
-            <set field="enumTypeIdSafe" from="darpan.facade.common.FacadeSupport.normalize(enumTypeId)"/>
+            <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireDarpanAdmin(ec, 'Settings are restricted to Darpan admin users.')"/>
+            <set field="enumTypeIdSafe" from="((enumTypeId)?.toString()?.trim())"/>
             <if condition="!ec.message.hasError() &amp;&amp; !enumTypeIdSafe">
                 <message error="true">enumTypeId is required</message>
             </if>
@@ -62,7 +62,7 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec, 'Settings are restricted to super-admin users.')"/>
+            <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireDarpanAdmin(ec, 'Settings are restricted to Darpan admin users.')"/>
             <if condition="!ec.message.hasError()">
                 <set field="llmSettings" from="darpan.facade.settings.LlmSettingsSupport.buildReadSettings(ec, llmProvider)"/>
             </if>
@@ -97,7 +97,7 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec, 'Settings are restricted to super-admin users.')"/>
+            <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireDarpanAdmin(ec, 'Settings are restricted to Darpan admin users.')"/>
             <if condition="!ec.message.hasError()">
                 <set field="savePayload" from="darpan.facade.settings.LlmSettingsSupport.buildSavePayload(ec, llmProvider, llmApiKey, llmModel, llmBaseUrl, llmTimeoutSeconds, llmEnabled)"/>
                 <service-call name="store#moqui.service.message.SystemMessageRemote" in-map="savePayload.llmRemoteMap"/>
@@ -193,7 +193,7 @@
         <description>Save one Google Chat run-completion webhook for the active tenant.</description>
         <in-parameters>
             <parameter name="googleChatWebhookUrl" allow-html="true"/>
-            <parameter name="isActive"/>
+            <parameter name="isActive" type="Boolean" default-value="true"/>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -249,9 +249,9 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="pageIndexSafe" from="Math.max(0, darpan.facade.common.FacadeSupport.normalizeInt(pageIndex, 0))"/>
-            <set field="pageSizeSafe" from="Math.max(1, Math.min(200, darpan.facade.common.FacadeSupport.normalizeInt(pageSize, 20)))"/>
-            <set field="searchLower" from="darpan.facade.common.FacadeSupport.normalize(query)?.toLowerCase()"/>
+            <set field="pageIndexSafe" from="Math.max(0, ((pageIndex != null ? pageIndex : 0) as Integer))"/>
+            <set field="pageSizeSafe" from="Math.max(1, Math.min(200, ((pageSize != null ? pageSize : 20) as Integer)))"/>
+            <set field="searchLower" from="((query)?.toString()?.trim())?.toLowerCase()"/>
             <set field="activeTenantUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <set field="servers" from="[]"/>
             <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
@@ -279,7 +279,7 @@
             <parameter name="username" required="true"/>
             <parameter name="password"/>
             <parameter name="privateKey" allow-html="true"/>
-            <parameter name="remoteAttributes"/>
+            <parameter name="remoteAttributes" type="Boolean" default-value="true"/>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -297,14 +297,14 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="sftpServerIdValue" from="darpan.facade.common.FacadeSupport.normalize(sftpServerId)"/>
-            <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
-            <set field="hostValue" from="darpan.facade.common.FacadeSupport.normalize(host)"/>
-            <set field="usernameValue" from="darpan.facade.common.FacadeSupport.normalize(username)"/>
-            <set field="passwordValue" from="darpan.facade.common.FacadeSupport.normalize(password)"/>
-            <set field="privateKeyValue" from="darpan.facade.common.FacadeSupport.normalize(privateKey)"/>
-            <set field="portValue" from="darpan.facade.common.FacadeSupport.normalizeInt(port, 22)"/>
-            <set field="remoteAttributesValue" from="darpan.facade.common.FacadeSupport.normalizeBool(remoteAttributes, true) ? 'Y' : 'N'"/>
+            <set field="sftpServerIdValue" from="((sftpServerId)?.toString()?.trim())"/>
+            <set field="descriptionValue" from="((description)?.toString()?.trim())"/>
+            <set field="hostValue" from="((host)?.toString()?.trim())"/>
+            <set field="usernameValue" from="((username)?.toString()?.trim())"/>
+            <set field="passwordValue" from="((password)?.toString()?.trim())"/>
+            <set field="privateKeyValue" from="((privateKey)?.toString()?.trim())"/>
+            <set field="portValue" from="port != null ? port : 22"/>
+            <set field="remoteAttributesValue" from="remoteAttributes != null ? (remoteAttributes ? 'Y' : 'N') : 'Y'"/>
             <if condition="!sftpServerIdValue">
                 <message error="true">Server ID is required.</message>
             </if>
@@ -333,11 +333,11 @@
                 </if>
                 <if condition="!ec.message.hasError()">
                     <service-call name="store#darpan.reconciliation.SftpServer" in-map="serverMap"/>
-                    <set field="savedServer" from="[sftpServerId: sftpServerIdValue, description: descriptionValue, host: hostValue, port: portValue, username: usernameValue, remoteAttributes: remoteAttributesValue, hasPassword: !!darpan.facade.common.FacadeSupport.normalize(serverMap.password), hasPrivateKey: !!darpan.facade.common.FacadeSupport.normalize(serverMap.privateKey)]"/>
-                    <if condition="!darpan.facade.common.FacadeSupport.normalize(serverMap.password) &amp;&amp; !darpan.facade.common.FacadeSupport.normalize(serverMap.privateKey)">
+                    <set field="savedServer" from="[sftpServerId: sftpServerIdValue, description: descriptionValue, host: hostValue, port: portValue, username: usernameValue, remoteAttributes: remoteAttributesValue, hasPassword: !!((serverMap.password)?.toString()?.trim()), hasPrivateKey: !!((serverMap.privateKey)?.toString()?.trim())]"/>
+                    <if condition="!((serverMap.password)?.toString()?.trim()) &amp;&amp; !((serverMap.privateKey)?.toString()?.trim())">
                         <message>Saved server without credentials. Add password or key before running automation.</message>
                     </if>
-                    <if condition="darpan.facade.common.FacadeSupport.normalize(serverMap.password) || darpan.facade.common.FacadeSupport.normalize(serverMap.privateKey)">
+                    <if condition="((serverMap.password)?.toString()?.trim()) || ((serverMap.privateKey)?.toString()?.trim())">
                         <message>Saved SFTP server ${sftpServerIdValue}.</message>
                     </if>
                 </if>
@@ -383,9 +383,9 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="pageIndexSafe" from="Math.max(0, darpan.facade.common.FacadeSupport.normalizeInt(pageIndex, 0))"/>
-            <set field="pageSizeSafe" from="Math.max(1, Math.min(200, darpan.facade.common.FacadeSupport.normalizeInt(pageSize, 20)))"/>
-            <set field="searchLower" from="darpan.facade.common.FacadeSupport.normalize(query)?.toLowerCase()"/>
+            <set field="pageIndexSafe" from="Math.max(0, ((pageIndex != null ? pageIndex : 0) as Integer))"/>
+            <set field="pageSizeSafe" from="Math.max(1, Math.min(200, ((pageSize != null ? pageSize : 20) as Integer)))"/>
+            <set field="searchLower" from="((query)?.toString()?.trim())?.toLowerCase()"/>
             <set field="activeTenantUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <set field="authConfigs" from="[]"/>
             <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
@@ -417,7 +417,7 @@
             <parameter name="certId"/>
             <parameter name="scope" default-value="restlets rest_webservices"/>
             <parameter name="privateKeyPem" allow-html="true"/>
-            <parameter name="isActive"/>
+            <parameter name="isActive" type="Boolean" default-value="true"/>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -439,18 +439,18 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="nsAuthConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(nsAuthConfigId)"/>
-            <set field="nsAuthDescriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
-            <set field="nsAuthTypeValue" from="darpan.facade.common.FacadeSupport.normalize(authType)?.toUpperCase() ?: 'NONE'"/>
-            <set field="nsUsernameValue" from="darpan.facade.common.FacadeSupport.normalize(username)"/>
-            <set field="nsPasswordValue" from="darpan.facade.common.FacadeSupport.normalize(password)"/>
-            <set field="nsApiTokenValue" from="darpan.facade.common.FacadeSupport.normalize(apiToken)"/>
-            <set field="nsTokenUrlValue" from="darpan.facade.common.FacadeSupport.normalize(tokenUrl)"/>
-            <set field="nsClientIdValue" from="darpan.facade.common.FacadeSupport.normalize(clientId)"/>
-            <set field="nsCertIdValue" from="darpan.facade.common.FacadeSupport.normalize(certId)"/>
-            <set field="nsScopeValue" from="darpan.facade.common.FacadeSupport.normalize(scope) ?: 'restlets rest_webservices'"/>
-            <set field="nsPrivateKeyPemValue" from="darpan.facade.common.FacadeSupport.normalize(privateKeyPem)"/>
-            <set field="nsIsActiveValue" from="darpan.facade.common.FacadeSupport.normalizeBool(isActive, true) ? 'Y' : 'N'"/>
+            <set field="nsAuthConfigIdValue" from="((nsAuthConfigId)?.toString()?.trim())"/>
+            <set field="nsAuthDescriptionValue" from="((description)?.toString()?.trim())"/>
+            <set field="nsAuthTypeValue" from="((authType)?.toString()?.trim())?.toUpperCase() ?: 'NONE'"/>
+            <set field="nsUsernameValue" from="((username)?.toString()?.trim())"/>
+            <set field="nsPasswordValue" from="((password)?.toString()?.trim())"/>
+            <set field="nsApiTokenValue" from="((apiToken)?.toString()?.trim())"/>
+            <set field="nsTokenUrlValue" from="((tokenUrl)?.toString()?.trim())"/>
+            <set field="nsClientIdValue" from="((clientId)?.toString()?.trim())"/>
+            <set field="nsCertIdValue" from="((certId)?.toString()?.trim())"/>
+            <set field="nsScopeValue" from="((scope)?.toString()?.trim()) ?: 'restlets rest_webservices'"/>
+            <set field="nsPrivateKeyPemValue" from="((privateKeyPem)?.toString()?.trim())"/>
+            <set field="nsIsActiveValue" from="isActive != null ? (isActive ? 'Y' : 'N') : 'Y'"/>
             <if condition="!nsAuthConfigIdValue">
                 <message error="true">Auth Config ID is required.</message>
             </if>
@@ -493,7 +493,7 @@
                 </if>
                 <if condition="!ec.message.hasError()">
                     <service-call name="store#darpan.reconciliation.NsAuthConfig" in-map="authMap"/>
-                    <set field="savedAuthConfig" from="[nsAuthConfigId: nsAuthConfigIdValue, description: nsAuthDescriptionValue, authType: nsAuthTypeValue, username: nsUsernameValue, tokenUrl: nsTokenUrlValue, clientId: nsClientIdValue, certId: nsCertIdValue, scope: nsScopeValue, isActive: nsIsActiveValue, hasPassword: !!darpan.facade.common.FacadeSupport.normalize(authMap.password), hasApiToken: !!darpan.facade.common.FacadeSupport.normalize(authMap.apiToken), hasPrivateKeyPem: !!darpan.facade.common.FacadeSupport.normalize(authMap.privateKeyPem)]"/>
+                    <set field="savedAuthConfig" from="[nsAuthConfigId: nsAuthConfigIdValue, description: nsAuthDescriptionValue, authType: nsAuthTypeValue, username: nsUsernameValue, tokenUrl: nsTokenUrlValue, clientId: nsClientIdValue, certId: nsCertIdValue, scope: nsScopeValue, isActive: nsIsActiveValue, hasPassword: !!((authMap.password)?.toString()?.trim()), hasApiToken: !!((authMap.apiToken)?.toString()?.trim()), hasPrivateKeyPem: !!((authMap.privateKeyPem)?.toString()?.trim())]"/>
                     <message>Saved NS Auth config ${nsAuthConfigIdValue}.</message>
                 </if>
             </if>
@@ -538,9 +538,9 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="pageIndexSafe" from="Math.max(0, darpan.facade.common.FacadeSupport.normalizeInt(pageIndex, 0))"/>
-            <set field="pageSizeSafe" from="Math.max(1, Math.min(200, darpan.facade.common.FacadeSupport.normalizeInt(pageSize, 20)))"/>
-            <set field="searchLower" from="darpan.facade.common.FacadeSupport.normalize(query)?.toLowerCase()"/>
+            <set field="pageIndexSafe" from="Math.max(0, ((pageIndex != null ? pageIndex : 0) as Integer))"/>
+            <set field="pageSizeSafe" from="Math.max(1, Math.min(200, ((pageSize != null ? pageSize : 20) as Integer)))"/>
+            <set field="searchLower" from="((query)?.toString()?.trim())?.toLowerCase()"/>
             <set field="activeTenantUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <set field="restletConfigs" from="[]"/>
             <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
@@ -573,7 +573,7 @@
             <parameter name="headersJson" allow-html="true"/>
             <parameter name="connectTimeoutSeconds" type="Integer" default-value="30"/>
             <parameter name="readTimeoutSeconds" type="Integer" default-value="60"/>
-            <parameter name="isActive"/>
+            <parameter name="isActive" type="Boolean" default-value="true"/>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -592,15 +592,15 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="nsRestletConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(nsRestletConfigId)"/>
-            <set field="nsDescriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
-            <set field="nsEndpointUrlValue" from="darpan.facade.common.FacadeSupport.normalize(endpointUrl)"/>
-            <set field="nsHttpMethodValue" from="darpan.facade.common.FacadeSupport.normalize(httpMethod)?.toUpperCase() ?: 'POST'"/>
-            <set field="nsAuthConfigIdValue" from="darpan.facade.common.FacadeSupport.normalize(nsAuthConfigId)"/>
-            <set field="nsHeadersJsonValue" from="darpan.facade.common.FacadeSupport.normalize(headersJson)"/>
-            <set field="nsConnectTimeoutValue" from="darpan.facade.common.FacadeSupport.normalizeInt(connectTimeoutSeconds, 30)"/>
-            <set field="nsReadTimeoutValue" from="darpan.facade.common.FacadeSupport.normalizeInt(readTimeoutSeconds, 60)"/>
-            <set field="nsIsActiveValue" from="darpan.facade.common.FacadeSupport.normalizeBool(isActive, true) ? 'Y' : 'N'"/>
+            <set field="nsRestletConfigIdValue" from="((nsRestletConfigId)?.toString()?.trim())"/>
+            <set field="nsDescriptionValue" from="((description)?.toString()?.trim())"/>
+            <set field="nsEndpointUrlValue" from="((endpointUrl)?.toString()?.trim())"/>
+            <set field="nsHttpMethodValue" from="((httpMethod)?.toString()?.trim())?.toUpperCase() ?: 'POST'"/>
+            <set field="nsAuthConfigIdValue" from="((nsAuthConfigId)?.toString()?.trim())"/>
+            <set field="nsHeadersJsonValue" from="((headersJson)?.toString()?.trim())"/>
+            <set field="nsConnectTimeoutValue" from="connectTimeoutSeconds != null ? connectTimeoutSeconds : 30"/>
+            <set field="nsReadTimeoutValue" from="readTimeoutSeconds != null ? readTimeoutSeconds : 60"/>
+            <set field="nsIsActiveValue" from="isActive != null ? (isActive ? 'Y' : 'N') : 'Y'"/>
             <set field="headersJsonError" from="darpan.facade.settings.SettingsFacadeSupport.validateJsonObjectText(nsHeadersJsonValue, 'Headers JSON')"/>
             <if condition="!nsRestletConfigIdValue">
                 <message error="true">Endpoint Config ID is required.</message>

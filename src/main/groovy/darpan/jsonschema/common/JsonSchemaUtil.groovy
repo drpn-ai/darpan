@@ -70,9 +70,9 @@ class JsonSchemaUtil {
     }
 
     static String persistSchemaText(ExecutionContext ec, Object rawSchemaName, Object rawSchemaText) {
-        String schemaName = FacadeSupport.normalize(rawSchemaName)
+        String schemaName = ((rawSchemaName)?.toString()?.trim())
         String schemaText = rawSchemaText?.toString()
-        if (!schemaName || !FacadeSupport.normalize(schemaText)) return null
+        if (!schemaName || !((schemaText)?.toString()?.trim())) return null
 
         String location = DataManagerSupport.resolveSchemaLocation(ec, schemaName)
         DataManagerSupport.writeText(ec, location, schemaText)
@@ -124,7 +124,7 @@ class JsonSchemaUtil {
     }
 
     static def findSystemEnum(def ec, Object rawSystemId, boolean useCache = true) {
-        String normalized = FacadeSupport.normalize(rawSystemId)
+        String normalized = ((rawSystemId)?.toString()?.trim())
         if (!normalized) return null
 
         return ec?.entity?.find("moqui.basic.Enumeration")
@@ -135,7 +135,7 @@ class JsonSchemaUtil {
     }
 
     static String resolveSystemLabel(def ec, Object rawSystemId, String fallback = null, boolean useCache = true) {
-        String normalized = FacadeSupport.normalize(rawSystemId)
+        String normalized = ((rawSystemId)?.toString()?.trim())
         if (!normalized) return fallback
 
         def systemEnum = findSystemEnum(ec, normalized, useCache)
@@ -150,7 +150,7 @@ class JsonSchemaUtil {
         }
 
         try {
-            String schemaName = FacadeSupport.normalize(schema.schemaName)
+            String schemaName = ((schema.schemaName)?.toString()?.trim())
             schema.delete()
             ec?.message?.addMessage("Deleted schema: ${schemaName}")
             return true
@@ -161,7 +161,7 @@ class JsonSchemaUtil {
     }
 
     static String validateJsonText(Object rawJsonText, String fieldName = "jsonText") {
-        String normalized = FacadeSupport.normalize(rawJsonText)
+        String normalized = ((rawJsonText)?.toString()?.trim())
         if (!normalized) return "${fieldName} is required"
 
         try {
@@ -185,16 +185,16 @@ class JsonSchemaUtil {
         }
 
         if (size <= 0L) {
-            return [fileName: FacadeSupport.normalize(fileItem?.getName()), text: null, error: "Uploaded ${fieldLabel} is empty"]
+            return [fileName: fileItem?.getName()?.toString()?.trim(), text: null, error: "Uploaded ${fieldLabel} is empty"]
         }
 
         String text = fileItem.getString("UTF-8")
-        if (!FacadeSupport.normalize(text)) {
-            return [fileName: FacadeSupport.normalize(fileItem?.getName()), text: null, error: "Uploaded ${fieldLabel} is empty"]
+        if (!((text)?.toString()?.trim())) {
+            return [fileName: fileItem?.getName()?.toString()?.trim(), text: null, error: "Uploaded ${fieldLabel} is empty"]
         }
 
         return [
-                fileName : FacadeSupport.normalize(fileItem?.getName()),
+                fileName : fileItem?.getName()?.toString()?.trim(),
                 text     : text,
                 error    : null
         ]
@@ -202,9 +202,9 @@ class JsonSchemaUtil {
 
     static def resolveSchemaRecord(def ec, Object rawJsonSchemaId, Object rawSchemaName = null,
             Object rawFilename = null, boolean useCache = false) {
-        String jsonSchemaId = FacadeSupport.normalize(rawJsonSchemaId)
-        String schemaName = FacadeSupport.normalize(rawSchemaName)
-        String filename = FacadeSupport.normalize(rawFilename)
+        String jsonSchemaId = ((rawJsonSchemaId)?.toString()?.trim())
+        String schemaName = ((rawSchemaName)?.toString()?.trim())
+        String filename = ((rawFilename)?.toString()?.trim())
 
         if (jsonSchemaId) {
             def schema = ec?.entity?.find(JSON_SCHEMA_ENTITY_NAME)

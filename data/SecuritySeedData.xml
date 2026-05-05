@@ -104,10 +104,13 @@
     <moqui.security.UserGroup userGroupId="DARPAN_USER"
             description="Darpan application users"/>
     <moqui.basic.Enumeration enumId="UgtDarpanPermission"
-            description="Darpan tenant permission groups"
+            description="Darpan permission groups"
             enumTypeId="UserGroupType"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_ADMIN"
+            description="Can manage Darpan app-level settings and core configuration"
+            groupTypeEnumId="UgtDarpanPermission"/>
     <moqui.security.UserGroup userGroupId="DARPAN_SUPER_ADMIN"
-            description="Can view and edit every tenant and manage Darpan core configuration"
+            description="Can view and edit every tenant and manage tenant and user setup"
             groupTypeEnumId="UgtDarpanPermission"/>
     <moqui.security.UserGroup userGroupId="DARPAN_TENANT_ADMIN"
             description="Can view, run, create, update, and delete data for associated tenants"

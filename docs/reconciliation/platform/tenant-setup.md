@@ -8,6 +8,8 @@ This tutorial shows how to set up a new Darpan tenant and assign users to the th
 - Tenant Admin
 - Tenant User
 
+Darpan Admin is a separate app-level settings capability. Add it only for users who should manage Darpan-wide settings such as AI providers and global enum/system options.
+
 Use this when onboarding a new customer, brand, or company tenant into a Darpan environment.
 
 ## Current Contract
@@ -28,7 +30,8 @@ The canonical role and capability matrix is [Darpan Permissions Matrix](permissi
 
 | Role | Required setup |
 | --- | --- |
-| Super Admin | `UserGroupMember(userId, "ADMIN")`, or both `UserGroupMember(userId, "DARPAN_SUPER_ADMIN")` and `UserGroupMember(userId, "DARPAN_USER")` for PWA facade access. Super Admin does not require per-tenant permission rows. |
+| Darpan Admin | `UserGroupMember(userId, "ADMIN")`, or both `UserGroupMember(userId, "DARPAN_ADMIN")` and `UserGroupMember(userId, "DARPAN_USER")` for PWA facade access. Grants app-level settings access, not tenant data access by itself. |
+| Super Admin | `UserGroupMember(userId, "ADMIN")`, or both `UserGroupMember(userId, "DARPAN_SUPER_ADMIN")` and `UserGroupMember(userId, "DARPAN_USER")` for PWA facade access. Super Admin does not require per-tenant permission rows and does not grant Darpan app-level settings unless the user also has Darpan Admin or Moqui `ADMIN`. |
 | Tenant Admin | `DARPAN_USER` membership, tenant group membership, and `TenantUserPermissionGroupMember(..., "DARPAN_TENANT_ADMIN")`. Legacy `DARPAN_COMPANY_EDITOR` still maps to Tenant Admin behavior during migration. |
 | Tenant User | `DARPAN_USER` membership, tenant group membership, and `TenantUserPermissionGroupMember(..., "DARPAN_TENANT_USER")`. This user can view, upload files, and run reconciliation, but cannot mutate settings, schemas, rules, saved runs, users, tenants, or platform settings. |
 
@@ -84,9 +87,8 @@ Call `facade.AuthFacadeServices.get#SessionInfo` and confirm:
 
 - `authenticated` is `true`
 - `sessionInfo.isSuperAdmin` is `true`
-- `sessionInfo.canManageDarpanCore` is `true`
 
-Stop if the auth does not have super-admin capability.
+Stop if the auth does not have super-admin capability. `sessionInfo.canManageDarpanCore=true` is additionally required only for Darpan app-level settings, not tenant setup.
 
 ### 3. Create the Tenant
 
@@ -173,7 +175,7 @@ Expected Tenant User response:
 Expected Super Admin response:
 
 - `isSuperAdmin=true`
-- `canManageDarpanCore=true`
+- `canManageDarpanCore=false` unless the same user also has `DARPAN_ADMIN` or Moqui `ADMIN`
 - can select every configured Darpan tenant
 
 ## Path B: Generic Data Load Setup
@@ -245,7 +247,7 @@ Create tenant-owned settings only after the active tenant is correct.
 | NetSuite endpoint | `facade.SettingsFacadeServices.save#NsRestletConfig` | Endpoint auth binding must be visible in the active tenant. |
 | Google Chat notifications | `facade.SettingsFacadeServices.save#TenantNotificationSettings` | Readback must return only masked webhook status. |
 
-Do not create tenant-specific LLM provider settings in the current data model. LLM and enum/global settings are super-admin-only platform settings.
+Do not create tenant-specific LLM provider settings in the current data model. LLM and enum/global settings are Darpan-admin-only app-level settings.
 
 ## Troubleshooting
 
@@ -255,6 +257,7 @@ Do not create tenant-specific LLM provider settings in the current data model. L
 | User can select tenant but cannot edit settings | Missing `TenantUserPermissionGroupMember` or assigned `DARPAN_TENANT_USER`. | Assign `DARPAN_TENANT_ADMIN` for edit access. |
 | Tenant User cannot run reconciliation | Assigned legacy `DARPAN_COMPANY_VIEW_ONLY` instead of `DARPAN_TENANT_USER`. | Use `DARPAN_TENANT_USER`; it has run/upload access without edit access. |
 | Super Admin cannot use the PWA | User has `DARPAN_SUPER_ADMIN` but lacks `DARPAN_USER` and Moqui `ADMIN`. | Add `DARPAN_USER`, or use Moqui `ADMIN` for full artifact access. |
+| Super Admin cannot edit AI/global settings | Super Admin no longer implies Darpan Admin. | Add `DARPAN_ADMIN` or use Moqui `ADMIN` for app-level settings access. |
 | Cross-tenant data appears | Tenant-owned rows are missing or have the wrong `companyUserGroupId`. | Backfill records to the correct tenant and verify entity filters/session context. |
 
 ## Handoff Checklist
@@ -266,5 +269,6 @@ Do not create tenant-specific LLM provider settings in the current data model. L
 - [ ] Every tenant user has the intended `TenantUserPermissionGroupMember`.
 - [ ] Tenant User uses `DARPAN_TENANT_USER`, not legacy view-only.
 - [ ] Super Admin has Moqui `ADMIN` or `DARPAN_SUPER_ADMIN` plus `DARPAN_USER`.
+- [ ] Darpan Admin has Moqui `ADMIN` or `DARPAN_ADMIN` plus `DARPAN_USER`.
 - [ ] `get#SessionInfo` verifies `availableTenants`, `activeTenantUserGroupId`, role flags, and run/edit/core capabilities.
 - [ ] Tenant-owned settings are created only while the intended tenant is active.

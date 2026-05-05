@@ -14,7 +14,7 @@ class JsonSchemaFacadeSupport {
     private static final ObjectMapper mapper = new ObjectMapper()
 
     static Map<String, Object> inferJsonSchemaFromText(def ec, Object jsonText) {
-        String jsonTextValue = FacadeSupport.normalize(jsonText)
+        String jsonTextValue = ((jsonText)?.toString()?.trim())
         String jsonSchemaString = null
         List<Map> fieldList = null
 
@@ -47,9 +47,9 @@ class JsonSchemaFacadeSupport {
     }
 
     static Map<String, Object> validateJsonTextAgainstSchema(def ec, Object jsonText, Object jsonSchemaId, Object schemaName) {
-        String jsonTextValue = FacadeSupport.normalize(jsonText)
-        String schemaId = FacadeSupport.normalize(jsonSchemaId)
-        String schemaNameValue = FacadeSupport.normalize(schemaName)
+        String jsonTextValue = ((jsonText)?.toString()?.trim())
+        String schemaId = ((jsonSchemaId)?.toString()?.trim())
+        String schemaNameValue = ((schemaName)?.toString()?.trim())
         Boolean valid = null
         Integer errorCount = null
         List<String> errorMessages = null

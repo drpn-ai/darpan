@@ -1,11 +1,15 @@
-FROM eclipse-temurin:17-jdk
+FROM 600735190428.dkr.ecr.us-east-1.amazonaws.com/maarg-base-os:OS-22.04-latest
+
 ARG GIT_USERNAME=
 ARG GIT_PASSWORD=
-
-RUN apt-get update \
-    && apt-get install -y git screen \
-    && rm -rf /var/lib/apt/lists/*
-
+ARG MOQUI_FRAMEWORK_REF=main
+ARG MOQUI_RUNTIME_REF=main
+ARG MOQUI_ATOMIKOS_REF=build-gradle-file
+ARG MOQUI_SFTP_REF=v1.2.3
+ARG DARPAN_REF=v2.1.0
+ARG DARPAN_HOTWAX_REF=v0.2.0
+ARG SHOPIFY_DARPAN_REF=v0.2.0
+ARG NETSUITE_DARPAN_REF=v0.1.0
 
 RUN echo "machine github.com" > /root/.netrc
 RUN echo "login $GIT_USERNAME" >> /root/.netrc
@@ -13,18 +17,18 @@ RUN echo "password $GIT_PASSWORD" >> /root/.netrc
 
 WORKDIR /
 
-RUN git clone --depth 1 -b "main" https://github.com/hotwax/moqui-framework.git
+RUN git clone --depth 1 -b "$MOQUI_FRAMEWORK_REF" https://github.com/hotwax/moqui-framework.git
 
 WORKDIR /moqui-framework
-RUN git clone --depth 1 -b "main" https://github.com/hotwax/moqui-runtime.git runtime
+RUN git clone --depth 1 -b "$MOQUI_RUNTIME_REF" https://github.com/hotwax/moqui-runtime.git runtime
 
 WORKDIR /moqui-framework/runtime/component
-RUN git clone --depth 1 -b "build-gradle-file" https://github.com/dixitdeepak/moqui-atomikos.git
-RUN git clone --depth 1 -b "main" https://github.com/hotwax/moqui-sftp.git
-RUN git clone --depth 1 -b "main" https://github.com/hotwax/darpan.git
-RUN git clone --depth 1 -b "main" https://github.com/toaditi/darpan-hotwax.git
-RUN git clone --depth 1 -b "main" https://github.com/toaditi/shopify-darpan.git
-RUN git clone --depth 1 -b "main" https://github.com/toaditi/netsuite-darpan.git
+RUN git clone --depth 1 -b "$MOQUI_ATOMIKOS_REF" https://github.com/dixitdeepak/moqui-atomikos.git
+RUN git clone --depth 1 -b "$MOQUI_SFTP_REF" https://github.com/hotwax/moqui-sftp.git
+RUN git clone --depth 1 -b "$DARPAN_REF" https://github.com/hotwax/darpan.git
+RUN git clone --depth 1 -b "$DARPAN_HOTWAX_REF" https://github.com/toaditi/darpan-hotwax.git
+RUN git clone --depth 1 -b "$SHOPIFY_DARPAN_REF" https://github.com/toaditi/shopify-darpan.git
+RUN git clone --depth 1 -b "$NETSUITE_DARPAN_REF" https://github.com/toaditi/netsuite-darpan.git
 
 RUN rm -rf /root/.netrc
 

@@ -36,45 +36,30 @@
             <if condition="!file1Location || !file2Location">
                 <return error="true" message="file1Location and file2Location are required"/>
             </if>
-            <script><![CDATA[
-                def normalize = { it?.toString()?.trim() }
-                def type1 = normalize(file1Type)?.toUpperCase()
-                def type2 = normalize(file2Type)?.toUpperCase()
-                if (!type1 || !type2) throw new IllegalArgumentException("file1Type and file2Type are required")
 
-                // Assign ID fields by type
-                def file1IdField = (type1 == "CSV") ? (csvIdField ?: "id") : null
-                def file2IdField = (type2 == "CSV") ? (csvIdField ?: "id") : null
-                def file1IdExpr = (type1 == "JSON") ? (jsonIdField ?: "\$.id") : null
-                def file2IdExpr = (type2 == "JSON") ? (jsonIdField ?: "\$.id") : null
-
-                // Assign schema to whichever file is JSON
-                def file1Schema = (type1 == "JSON") ? jsonSchemaFileName : null
-                def file2Schema = (type2 == "JSON") ? jsonSchemaFileName : null
-
-                context.unifiedParams = [
-                        file1Location      : file1Location,
-                        file2Location      : file2Location,
-                        file1Type          : type1,
-                        file2Type          : type2,
-                        file1IdField       : file1IdField,
-                        file2IdField       : file2IdField,
-                        file1IdExpression  : file1IdExpr,
-                        file2IdExpression  : file2IdExpr,
-                        file1SchemaFileName: file1Schema,
-                        file2SchemaFileName: file2Schema,
-                        file1Label         : file1Label,
-                        file2Label         : file2Label,
-                        hasHeader          : hasHeader,
-                        outputLocation     : outputLocation,
-                        outputFileName     : outputFileName,
-                        sparkMaster        : sparkMaster,
-                        sparkAppName       : sparkAppName
-                ]
-            ]]></script>
+            <set field="file1TypeValue" from="((file1Type)?.toString()?.trim())?.toUpperCase()"/>
+            <set field="file2TypeValue" from="((file2Type)?.toString()?.trim())?.toUpperCase()"/>
+            <if condition="!file1TypeValue || !file2TypeValue">
+                <return error="true" message="file1Type and file2Type are required"/>
+            </if>
+            <set field="file1IdFieldValue" from="file1TypeValue == 'CSV' ? (csvIdField ?: 'id') : null"/>
+            <set field="file2IdFieldValue" from="file2TypeValue == 'CSV' ? (csvIdField ?: 'id') : null"/>
+            <set field="file1IdExpressionValue" from="file1TypeValue == 'JSON' ? (jsonIdField ?: '$.id') : null"/>
+            <set field="file2IdExpressionValue" from="file2TypeValue == 'JSON' ? (jsonIdField ?: '$.id') : null"/>
+            <set field="file1SchemaFileNameValue" from="file1TypeValue == 'JSON' ? jsonSchemaFileName : null"/>
+            <set field="file2SchemaFileNameValue" from="file2TypeValue == 'JSON' ? jsonSchemaFileName : null"/>
 
             <service-call name="ReconciliationCoreServices.reconcile#UnifiedFiles"
-                    in-map="unifiedParams" out-map="unifiedOut"/>
+                    in-map="[file1Location:file1Location, file2Location:file2Location,
+                    file1Type:file1TypeValue, file2Type:file2TypeValue,
+                    file1IdField:file1IdFieldValue, file2IdField:file2IdFieldValue,
+                    file1IdExpression:file1IdExpressionValue, file2IdExpression:file2IdExpressionValue,
+                    file1SchemaFileName:file1SchemaFileNameValue, file2SchemaFileName:file2SchemaFileNameValue,
+                    file1Label:file1Label, file2Label:file2Label,
+                    hasHeader:hasHeader,
+                    outputLocation:outputLocation, outputFileName:outputFileName,
+                    sparkMaster:sparkMaster, sparkAppName:sparkAppName]"
+                    out-map="unifiedOut"/>
 
             <set field="diffLocation" from="unifiedOut.diffLocation"/>
             <set field="diffFileName" from="unifiedOut.diffFileName"/>

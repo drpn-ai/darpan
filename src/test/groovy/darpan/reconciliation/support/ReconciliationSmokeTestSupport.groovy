@@ -323,7 +323,7 @@ class ReconciliationSmokeTestSupport {
         upsertEntity(ec, "moqui.basic.Enumeration", [enumId: "UgtDarpanPermission"], [
                 enumId      : "UgtDarpanPermission",
                 enumTypeId  : "UserGroupType",
-                description : "Darpan tenant permission groups"
+                description : "Darpan permission groups"
         ])
         upsertEntity(ec, "moqui.basic.Enumeration", [enumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID], [
                 enumId      : TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID,
@@ -583,11 +583,9 @@ class ReconciliationSmokeTestSupport {
                     .useCache(false)
                     .one()
             if (existing == null) {
-                ec.service.sync()
-                        .name("store#${entityName}")
-                        .parameters(fields)
-                        .disableAuthz()
-                        .call()
+                ec.entity.makeValue(entityName)
+                        .setAll(fields)
+                        .create()
             }
         } finally {
             ec.artifactExecution.pop(aei)
@@ -611,11 +609,9 @@ class ReconciliationSmokeTestSupport {
                     .useCache(false)
                     .one()
             if (existing == null) {
-                ec.service.sync()
-                        .name("store#${entityName}")
-                        .parameters(fields)
-                        .disableAuthz()
-                        .call()
+                ec.entity.makeValue(entityName)
+                        .setAll(fields)
+                        .create()
             }
         } finally {
             ec.artifactExecution.pop(aei)

@@ -91,7 +91,7 @@ class AuthFacadeSupportTests {
         ])
         def ec = executionContext(message: message, user: user, entity: entity)
 
-        boolean authenticated = FacadeSupport.normalize(ec?.user?.userId) != null
+        boolean authenticated = ((ec?.user?.userId)?.toString()?.trim()) != null
         Map<String, Object> sessionInfo = authenticated ? (TenantAccessSupport.buildSessionInfo(ec) as Map<String, Object>) : null
         Map<String, Object> envelope = FacadeSupport.envelope(ec)
 
@@ -203,7 +203,7 @@ class AuthFacadeSupportTests {
         ])
         def ec = executionContext(message: message, user: user, entity: entity)
 
-        boolean authenticated = FacadeSupport.normalize(ec?.user?.userId) != null
+        boolean authenticated = ((ec?.user?.userId)?.toString()?.trim()) != null
         Map<String, Object> sessionInfo = authenticated ? (TenantAccessSupport.buildSessionInfo(ec) as Map<String, Object>) : null
         Map<String, Object> envelope = FacadeSupport.envelope(ec)
 
@@ -462,6 +462,9 @@ class AuthFacadeSupportTests {
         }
 
         Object one() {
+            if (oneResult instanceof Map && !conditions.every { String field, Object value -> oneResult[field] == value }) {
+                return null
+            }
             return oneResult
         }
 

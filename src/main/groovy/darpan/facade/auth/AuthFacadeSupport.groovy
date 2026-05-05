@@ -9,7 +9,7 @@ import org.apache.shiro.util.SimpleByteSource
 class AuthFacadeSupport {
 
     static Map<String, Object> loginSession(def ec, Object username, Object password) {
-        String usernameValue = FacadeSupport.normalize(username)
+        String usernameValue = ((username)?.toString()?.trim())
         String passwordValue = password?.toString()
 
         if (!usernameValue) ec.message.addError("username is required")
@@ -23,11 +23,11 @@ class AuthFacadeSupport {
             if (!loggedIn) ec.message.addError("Invalid username or password")
         }
 
-        String userId = FacadeSupport.normalize(ec?.user?.userId)
+        String userId = ((ec?.user?.userId)?.toString()?.trim())
         boolean authenticated = loggedIn && userId != null
 
         if (authenticated) {
-            issuedAuthToken = FacadeSupport.normalize(ec?.user?.getLoginKey())
+            issuedAuthToken = ec?.user?.getLoginKey()?.toString()?.trim()
             if (!issuedAuthToken) {
                 ec.message.addError("Unable to issue auth token")
                 ec.user.logoutUser()
@@ -55,7 +55,7 @@ class AuthFacadeSupport {
     static Map<String, Object> verifyOwnPassword(def ec, Object currentPassword) {
         String currentPasswordValue = currentPassword?.toString()
 
-        boolean authenticated = FacadeSupport.normalize(ec?.user?.userId) != null
+        boolean authenticated = ((ec?.user?.userId)?.toString()?.trim()) != null
         boolean passwordVerified = false
 
         if (!authenticated) {
@@ -70,7 +70,7 @@ class AuthFacadeSupport {
                         .one()
             }
 
-            String usernameValue = FacadeSupport.normalize(userAccount?.username) ?: FacadeSupport.normalize(ec?.user?.username)
+            String usernameValue = ((userAccount?.username)?.toString()?.trim()) ?: ((ec?.user?.username)?.toString()?.trim())
             if (usernameValue && userAccount?.currentPassword) {
                 def token = new UsernamePasswordToken(usernameValue, currentPasswordValue)
                 def salt = userAccount?.passwordSalt ? new SimpleByteSource((String) userAccount.passwordSalt) : null
@@ -107,7 +107,7 @@ class AuthFacadeSupport {
             }
         }
 
-        if (FacadeSupport.normalize(ec?.user?.userId) != null) {
+        if (((ec?.user?.userId)?.toString()?.trim()) != null) {
             ec.user.logoutUser()
         } else {
             def session = request?.getSession(false)
@@ -150,7 +150,7 @@ class AuthFacadeSupport {
     }
 
     protected static String normalizeTokenValue(Object value) {
-        String normalized = FacadeSupport.normalize(value)
+        String normalized = ((value)?.toString()?.trim())
         if (!normalized || "null".equalsIgnoreCase(normalized) || "undefined".equalsIgnoreCase(normalized)) return null
         return normalized
     }

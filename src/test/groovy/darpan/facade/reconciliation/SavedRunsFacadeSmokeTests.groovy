@@ -34,6 +34,7 @@ class SavedRunsFacadeSmokeTests {
     void setup() {
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "saved-runs-facade-smoke")
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AutomationSeedData.xml")
         ReconciliationSmokeTestSupport.seedSchemaBackedCsvMappingFixtures(ec)
     }
 
@@ -121,6 +122,17 @@ class SavedRunsFacadeSmokeTests {
         assertEquals(2L, runResult.runResult.generatedOutput.totalDifferences)
         assertEquals(1L, runResult.runResult.generatedOutput.onlyInFile1Count)
         assertEquals(1L, runResult.runResult.generatedOutput.onlyInFile2Count)
+
+        def manifest = ec.entity.find("darpan.reconciliation.ReconciliationRunResult")
+                .condition("reconciliationRunResultId", runResult.runResult.reconciliationRunResultId as String)
+                .disableAuthz()
+                .useCache(false)
+                .one()
+        assertNotNull(manifest)
+        assertEquals("AUT_STAT_SUCCESS", manifest.statusEnumId)
+        assertNotNull(manifest.startedDate)
+        assertNotNull(manifest.completedDate)
+        assertEquals(runResult.runResult.generatedOutput.fileName, manifest.resultDataManagerPath)
 
         Map<String, Object> outputListResult = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.list#GeneratedOutputs")

@@ -58,7 +58,7 @@ class ReconciliationApiWindowSupport {
     }
 
     private static ZoneId resolveZoneId(Object rawTimeZone) {
-        String timeZone = FacadeSupport.normalize(rawTimeZone) ?: TenantAccessSupport.DEFAULT_TIME_ZONE
+        String timeZone = ((rawTimeZone)?.toString()?.trim()) ?: TenantAccessSupport.DEFAULT_TIME_ZONE
         try {
             return ZoneId.of(timeZone)
         } catch (DateTimeException ignored) {
@@ -73,7 +73,7 @@ class ReconciliationApiWindowSupport {
         if (rawDate instanceof java.sql.Date) return ((java.sql.Date) rawDate).toLocalDate()
         if (rawDate instanceof Date) return rawDate.toInstant().atZone(ZoneOffset.UTC).toLocalDate()
 
-        String normalized = FacadeSupport.normalize(rawDate)
+        String normalized = ((rawDate)?.toString()?.trim())
         if (!normalized) return null
         try {
             return LocalDate.parse(normalized)

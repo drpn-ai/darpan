@@ -9,7 +9,7 @@ class SettingsFacadeSupport {
     private static final String HOTWAX_CANONICAL_ENUM_ID = "OMS"
 
     static String validateJsonObjectText(String text, String label) {
-        String normalized = FacadeSupport.normalize(text)
+        String normalized = ((text)?.toString()?.trim())
         if (!normalized) return null
 
         try {
@@ -23,7 +23,7 @@ class SettingsFacadeSupport {
 
     static List<Map<String, Object>> deduplicateEnumOptions(String enumTypeId, List<Map<String, Object>> rawOptions) {
         List<Map<String, Object>> optionList = (rawOptions ?: []) as List<Map<String, Object>>
-        if (FacadeSupport.normalize(enumTypeId) != DARPAN_SYSTEM_SOURCE_ENUM_TYPE_ID) return optionList
+        if (((enumTypeId)?.toString()?.trim()) != DARPAN_SYSTEM_SOURCE_ENUM_TYPE_ID) return optionList
 
         LinkedHashMap<String, Map<String, Object>> preferredByKey = [:]
         optionList.each { Map<String, Object> option ->
@@ -54,9 +54,9 @@ class SettingsFacadeSupport {
         String logicalSystemKey = logicalSystemDedupeKey(option)
         if (logicalSystemKey) return logicalSystemKey
 
-        return FacadeSupport.normalize(option?.enumCode) ?:
-                FacadeSupport.normalize(option?.label) ?:
-                FacadeSupport.normalize(option?.enumId)
+        return ((option?.enumCode)?.toString()?.trim()) ?:
+                ((option?.label)?.toString()?.trim()) ?:
+                ((option?.enumId)?.toString()?.trim())
     }
 
     protected static boolean shouldPreferEnumOption(Map<String, Object> candidate, Map<String, Object> currentPreferred) {
@@ -68,14 +68,14 @@ class SettingsFacadeSupport {
         Integer currentSequence = normalizeSequenceNumber(currentPreferred?.sequenceNum)
         if (candidateSequence != currentSequence) return candidateSequence < currentSequence
 
-        String candidateId = FacadeSupport.normalize(candidate?.enumId) ?: ""
-        String currentId = FacadeSupport.normalize(currentPreferred?.enumId) ?: ""
+        String candidateId = ((candidate?.enumId)?.toString()?.trim()) ?: ""
+        String currentId = ((currentPreferred?.enumId)?.toString()?.trim()) ?: ""
         return candidateId < currentId
     }
 
     protected static boolean isCanonicalEnumOption(Map<String, Object> option) {
-        String enumId = FacadeSupport.normalize(option?.enumId)
-        String enumCode = FacadeSupport.normalize(option?.enumCode)
+        String enumId = ((option?.enumId)?.toString()?.trim())
+        String enumCode = ((option?.enumCode)?.toString()?.trim())
         String logicalSystemKey = logicalSystemDedupeKey(option)
         if (logicalSystemKey == HOTWAX_SYSTEM_DEDUPE_KEY) return enumId == HOTWAX_CANONICAL_ENUM_ID
 
@@ -88,10 +88,10 @@ class SettingsFacadeSupport {
 
     protected static boolean isHotWaxSystemOption(Map<String, Object> option) {
         List<String> values = [
-                FacadeSupport.normalize(option?.enumId),
-                FacadeSupport.normalize(option?.enumCode),
-                FacadeSupport.normalize(option?.label),
-                FacadeSupport.normalize(option?.description),
+                ((option?.enumId)?.toString()?.trim()),
+                ((option?.enumCode)?.toString()?.trim()),
+                ((option?.label)?.toString()?.trim()),
+                ((option?.description)?.toString()?.trim()),
         ].findAll { it } as List<String>
 
         return values.any { String value ->
@@ -102,7 +102,8 @@ class SettingsFacadeSupport {
 
     protected static Integer normalizeSequenceNumber(Object rawValue) {
         if (rawValue instanceof Number) return rawValue.intValue()
-        Integer parsed = FacadeSupport.normalizeInt(rawValue, Integer.MAX_VALUE)
+        Integer parsed = rawValue instanceof Number ? rawValue.intValue() :
+                (rawValue?.toString()?.trim()?.isInteger() ? rawValue.toString().trim().toInteger() : Integer.MAX_VALUE)
         return parsed != null ? parsed : Integer.MAX_VALUE
     }
 }

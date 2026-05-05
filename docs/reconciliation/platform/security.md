@@ -39,12 +39,12 @@ Protect client data end-to-end and prevent cross-client leakage while keeping th
 - Tenant identity is represented by `moqui.security.UserGroup` rows with `groupTypeEnumId="UgtDarpanCompany"`.
 - User tenant association is represented by `moqui.security.UserGroupMember` and controls the tenant switcher for non-super-admin users.
 - Tenant-specific role assignment is represented by `darpan.auth.TenantUserPermissionGroupMember`.
-- The target product roles are Super Admin, Tenant Admin, and Tenant User.
+- The target tenant roles are Super Admin, Tenant Admin, and Tenant User. Darpan Admin is a separate app-level settings capability.
 - User login identity is represented by `moqui.security.UserAccount`; create or reset passwords only through approved user services, admin UI, or identity-provider flows.
-- Super-admin checks accept Moqui `ADMIN` and `DARPAN_SUPER_ADMIN`. A `DARPAN_SUPER_ADMIN` user still needs `DARPAN_USER` base app membership unless the user also has Moqui `ADMIN` artifact access. Tenant permission seed data includes `DARPAN_TENANT_ADMIN` and `DARPAN_TENANT_USER`.
+- Super-admin checks accept Moqui `ADMIN` and `DARPAN_SUPER_ADMIN`. Darpan app-admin checks accept Moqui `ADMIN` and `DARPAN_ADMIN`. A `DARPAN_SUPER_ADMIN` or `DARPAN_ADMIN` user still needs `DARPAN_USER` base app membership unless the user also has Moqui `ADMIN` artifact access. Tenant permission seed data includes `DARPAN_TENANT_ADMIN` and `DARPAN_TENANT_USER`.
 - Legacy `DARPAN_COMPANY_EDITOR` continues to grant Tenant Admin behavior, and legacy `DARPAN_COMPANY_VIEW_ONLY` remains view-only.
 - Tenant User is not the same as a pure view-only role: this user can upload files and run reconciliation, but cannot mutate saved runs, schemas, rules, settings, users, tenants, or Darpan core configuration.
-- Super-admin users can administer global settings and private Darpan management screens. Tenant-owned operational data still uses an active tenant unless a private admin screen intentionally aggregates across tenants.
+- Darpan-admin users can administer app-level settings and private Darpan core management screens. Super-admin users administer tenants and tenant-owned operational data through an active tenant unless a private admin screen intentionally aggregates across tenants.
 - When the target environment exposes tenant-management facade services, super-admin tenant setup should use authenticated Auth facade services:
   `list#Tenants`, `save#Tenant`, `save#TenantUser`, and `save#TenantUserPermissionGroup`.
   These services manage only `moqui.security.UserGroup`, `moqui.security.UserGroupMember`,
@@ -71,7 +71,7 @@ Protect client data end-to-end and prevent cross-client leakage while keeping th
 - Mask or tokenize sensitive fields when possible
 - Retention policies aligned to client agreements
 - Before handing a tenant to production users, verify active-tenant session metadata, SFTP isolation, NetSuite auth/endpoint isolation, schema/mapping/result isolation, and Tenant User mutation rejection.
-- Verify AI/LLM settings, enum/global settings, and app-wide operational config are available only to super-admin users.
+- Verify AI/LLM settings, enum/global settings, and app-wide operational config are available only to Darpan-admin users.
 
 ## Production Verification
 
@@ -80,7 +80,7 @@ The operational verification checklist lives in [Production Settings Surfaces](p
 - `get#SessionInfo` returns the intended `activeTenantUserGroupId`, `availableTenants`, `activeTenantPermissionGroupIds`, `canViewActiveTenantData`, `canRunActiveTenantReconciliation`, `canEditActiveTenantData`, `canManageDarpanCore`, and `isSuperAdmin`.
 - tenant A and tenant B cannot see each other's SFTP, NetSuite auth, NetSuite endpoint, schema, saved-run/mapping, or result records.
 - a Tenant User active tenant can list/read tenant records and run reconciliation, but cannot save settings or create/update/delete tenant configuration.
-- non-super-admin users cannot call `get#LlmSettings`, `save#LlmSettings`, or `list#EnumOptions`.
+- users without Darpan Admin access cannot call `get#LlmSettings`, `save#LlmSettings`, or `list#EnumOptions`.
 
 ## Next Steps
 

@@ -58,13 +58,13 @@ class ReconciliationSavedRunSupport {
             if (!(rawRule instanceof Map)) return
 
             Map rule = (Map) rawRule
-            String ruleId = FacadeSupport.normalize(rule.ruleId)
-            String ruleText = FacadeSupport.normalize(rule.ruleText)
-            String ruleLogic = FacadeSupport.normalize(rule.ruleLogic)
-            String ruleType = FacadeSupport.normalize(rule.ruleType)
-            String expression = FacadeSupport.normalize(rule.expression)
-            String enabled = FacadeSupport.normalize(rule.enabled)?.toUpperCase() == "N" ? "N" : "Y"
-            String severity = FacadeSupport.normalize(rule.severity)
+            String ruleId = ((rule.ruleId)?.toString()?.trim())
+            String ruleText = ((rule.ruleText)?.toString()?.trim())
+            String ruleLogic = ((rule.ruleLogic)?.toString()?.trim())
+            String ruleType = ((rule.ruleType)?.toString()?.trim())
+            String expression = ((rule.expression)?.toString()?.trim())
+            String enabled = ((rule.enabled)?.toString()?.trim())?.toUpperCase() == "N" ? "N" : "Y"
+            String severity = ((rule.severity)?.toString()?.trim())
             Integer providedSequenceNum = toSequenceNum(rule.sequenceNum)
 
             if (!ruleText && !ruleLogic) return
@@ -91,7 +91,7 @@ class ReconciliationSavedRunSupport {
             return ((Number) rawValue).intValue()
         }
 
-        String normalized = FacadeSupport.normalize(rawValue)
+        String normalized = ((rawValue)?.toString()?.trim())
         if (!normalized) return null
         try {
             return Integer.valueOf(normalized)
@@ -101,12 +101,12 @@ class ReconciliationSavedRunSupport {
     }
 
     static String normalizeJsonPrimaryIdExpression(Object rawExpression) {
-        String normalized = FacadeSupport.normalize(rawExpression)
+        String normalized = ((rawExpression)?.toString()?.trim())
         if (!normalized) return null
 
         int suffixIndex = normalized.indexOf("|")
-        String baseExpression = suffixIndex >= 0 ? FacadeSupport.normalize(normalized.substring(0, suffixIndex)) : normalized
-        String suffix = suffixIndex >= 0 ? FacadeSupport.normalize(normalized.substring(suffixIndex + 1)) : null
+        String baseExpression = suffixIndex >= 0 ? normalized.substring(0, suffixIndex)?.toString()?.trim() : normalized
+        String suffix = suffixIndex >= 0 ? normalized.substring(suffixIndex + 1)?.toString()?.trim() : null
 
         String normalizedBase = ReconciliationMappingSupport.normalizeMappingJsonIdExpression(baseExpression) ?: baseExpression
         return suffix ? "${normalizedBase}|${suffix}" : normalizedBase
@@ -133,11 +133,11 @@ class ReconciliationSavedRunSupport {
             Map<String, Object> columnMetadata = findColumn(metadata, connection?.catalog, schemaName, rawTableName, columnName)
             if (columnMetadata == null) return true
 
-            String isNullable = FacadeSupport.normalize(columnMetadata.isNullable)?.toUpperCase()
+            String isNullable = ((columnMetadata.isNullable)?.toString()?.trim())?.toUpperCase()
             if (isNullable == "YES") return true
 
-            String databaseProductName = FacadeSupport.normalize(metadata?.databaseProductName)?.toLowerCase()
-            String typeName = FacadeSupport.normalize(columnMetadata.typeName) ?: "VARCHAR"
+            String databaseProductName = ((metadata?.databaseProductName)?.toString()?.trim())?.toLowerCase()
+            String typeName = ((columnMetadata.typeName)?.toString()?.trim()) ?: "VARCHAR"
             int columnSize = columnMetadata.columnSize instanceof Number ? ((Number) columnMetadata.columnSize).intValue() : 0
             int decimalDigits = columnMetadata.decimalDigits instanceof Number ? ((Number) columnMetadata.decimalDigits).intValue() : 0
             String alterSql = buildDropNotNullSql(databaseProductName, tableName, columnName, typeName, columnSize, decimalDigits)
@@ -220,9 +220,9 @@ class ReconciliationSavedRunSupport {
     }
 
     protected static String buildCompareScopeId(def ec, String ruleSetId, String scopeKind) {
-        String normalizedRuleSetId = RuleEngineSupport.sanitizeIdToken(FacadeSupport.normalize(ruleSetId) ?: "RULE_SET", "RS")
+        String normalizedRuleSetId = RuleEngineSupport.sanitizeIdToken(((ruleSetId)?.toString()?.trim()) ?: "RULE_SET", "RS")
         if (!normalizedRuleSetId.startsWith("RS_")) normalizedRuleSetId = "RS_${normalizedRuleSetId}"
-        String scopeSuffix = RuleEngineSupport.sanitizeIdToken(FacadeSupport.normalize(scopeKind) ?: "COMPARE_SCOPE", "COMPARE_SCOPE")
+        String scopeSuffix = RuleEngineSupport.sanitizeIdToken(((scopeKind)?.toString()?.trim()) ?: "COMPARE_SCOPE", "COMPARE_SCOPE")
         String candidate = buildEntityId("CS", normalizedRuleSetId, scopeSuffix)
         int suffix = 1
 
@@ -239,9 +239,9 @@ class ReconciliationSavedRunSupport {
     }
 
     protected static String buildEntityId(String prefix, String bodyToken, String trailingToken = null, String collisionSuffix = null) {
-        String normalizedPrefix = FacadeSupport.normalize(prefix) ?: "ID"
-        String normalizedBodyToken = FacadeSupport.normalize(bodyToken) ?: "VALUE"
-        String normalizedTrailingToken = FacadeSupport.normalize(trailingToken)
+        String normalizedPrefix = ((prefix)?.toString()?.trim()) ?: "ID"
+        String normalizedBodyToken = ((bodyToken)?.toString()?.trim()) ?: "VALUE"
+        String normalizedTrailingToken = ((trailingToken)?.toString()?.trim())
         String normalizedCollisionSuffix = collisionSuffix ?: ""
 
         int reservedLength = normalizedPrefix.length() + 1 + normalizedCollisionSuffix.length()
@@ -259,13 +259,13 @@ class ReconciliationSavedRunSupport {
     }
 
     static String compareScopeDisplayName(Object compareScopeId, Object compareScopeDescription) {
-        String description = FacadeSupport.normalize(compareScopeDescription)
+        String description = ((compareScopeDescription)?.toString()?.trim())
         if (description) return description
-        return FacadeSupport.normalize(compareScopeId)
+        return ((compareScopeId)?.toString()?.trim())
     }
 
     static boolean savedRunIdExists(def ec, String savedRunId) {
-        String normalized = FacadeSupport.normalize(savedRunId)
+        String normalized = ((savedRunId)?.toString()?.trim())
         if (!normalized) return false
 
         return ec.entity.find("darpan.rule.RuleSet")
@@ -286,18 +286,20 @@ class ReconciliationSavedRunSupport {
         rows.addAll(collectRuleSetRows(ec))
 
         return rows.sort { Map<String, Object> left, Map<String, Object> right ->
-            String leftName = FacadeSupport.normalize(left.runName) ?: FacadeSupport.normalize(left.savedRunId) ?: ""
-            String rightName = FacadeSupport.normalize(right.runName) ?: FacadeSupport.normalize(right.savedRunId) ?: ""
+            String leftName = ((left.runName)?.toString()?.trim()) ?: ((left.savedRunId)?.toString()?.trim()) ?: ""
+            String rightName = ((right.runName)?.toString()?.trim()) ?: ((right.savedRunId)?.toString()?.trim()) ?: ""
             int nameCompare = leftName <=> rightName
             if (nameCompare != 0) return nameCompare
-            return (FacadeSupport.normalize(left.savedRunId) ?: "") <=> (FacadeSupport.normalize(right.savedRunId) ?: "")
+            return (((left.savedRunId)?.toString()?.trim()) ?: "") <=> (((right.savedRunId)?.toString()?.trim()) ?: "")
         }
     }
 
     static Map<String, Object> listSavedRuns(def ec, Object query, Object pageIndex, Object pageSize) {
-        int page = Math.max(0, FacadeSupport.normalizeInt(pageIndex, 0))
-        int size = Math.max(1, Math.min(200, FacadeSupport.normalizeInt(pageSize, 20)))
-        String search = FacadeSupport.normalize(query)?.toLowerCase()
+        int page = Math.max(0, pageIndex instanceof Number ? pageIndex.intValue() :
+                (pageIndex?.toString()?.trim()?.isInteger() ? pageIndex.toString().trim().toInteger() : 0))
+        int size = Math.max(1, Math.min(200, pageSize instanceof Number ? pageSize.intValue() :
+                (pageSize?.toString()?.trim()?.isInteger() ? pageSize.toString().trim().toInteger() : 20)))
+        String search = ((query)?.toString()?.trim())?.toLowerCase()
 
         List<Map<String, Object>> rows = collectSavedRunRows(ec)
         if (search) rows = rows.findAll { Map<String, Object> row -> savedRunMatches(row, search) }
@@ -336,15 +338,15 @@ class ReconciliationSavedRunSupport {
                 def systemEnum = findEnum(ec, member.systemEnumId)
                 def fileTypeEnum = findEnum(ec, member.fileTypeEnumId)
                 [
-                        enumId           : FacadeSupport.normalize(member.systemEnumId),
-                        enumCode         : FacadeSupport.normalize(systemEnum?.enumCode),
-                        description      : FacadeSupport.normalize(systemEnum?.description),
+                        enumId           : ((member.systemEnumId)?.toString()?.trim()),
+                        enumCode         : ((systemEnum?.enumCode)?.toString()?.trim()),
+                        description      : ((systemEnum?.description)?.toString()?.trim()),
                         label            : resolveEnumLabel(ec, member.systemEnumId, member.systemEnumId as String),
                         sequenceNum      : systemEnum?.sequenceNum ?: Integer.MAX_VALUE,
-                        fileTypeEnumId   : FacadeSupport.normalize(member.fileTypeEnumId),
+                        fileTypeEnumId   : ((member.fileTypeEnumId)?.toString()?.trim()),
                         fileTypeLabel    : fileTypeEnum ? FacadeSupport.enumLabel(fileTypeEnum) : null,
-                        idFieldExpression: FacadeSupport.normalize(member.idFieldExpression ?: member.systemFieldName),
-                        schemaFileName   : FacadeSupport.normalize(member.schemaFileName),
+                        idFieldExpression: ((member.idFieldExpression ?: member.systemFieldName)?.toString()?.trim()),
+                        schemaFileName   : ((member.schemaFileName)?.toString()?.trim()),
                 ]
             }.sort { Map<String, Object> left, Map<String, Object> right ->
                 (left.sequenceNum <=> right.sequenceNum) ?:
@@ -392,7 +394,7 @@ class ReconciliationSavedRunSupport {
     }
 
     static Map<String, Object> resolveRuleSetRun(def ec, Object rawSavedRunId) {
-        String savedRunId = FacadeSupport.normalize(rawSavedRunId)
+        String savedRunId = ((rawSavedRunId)?.toString()?.trim())
         if (!savedRunId) return [savedRun: null, error: null]
 
         def ruleSet = ec.entity.find("darpan.rule.RuleSet")
@@ -428,7 +430,7 @@ class ReconciliationSavedRunSupport {
 
         Map<String, Object> sourceBySide = [:]
         for (def source in sources) {
-            String fileSide = FacadeSupport.normalize(source.fileSide)?.toUpperCase()
+            String fileSide = ((source.fileSide)?.toString()?.trim())?.toUpperCase()
             if (!(fileSide in [FILE_SIDE_1, FILE_SIDE_2])) {
                 return [savedRun: null, error: "RuleSet ${savedRunId} compare scope '${compareScopeLabel}' has unsupported fileSide ${source.fileSide}."]
             }
@@ -457,9 +459,9 @@ class ReconciliationSavedRunSupport {
         List<Map<String, Object>> resolvedSystemOptions = systemOptions ?: buildRuleSetSystemOptions(ec, sourceBySide)
         return [
                 savedRunId              : ruleSet.ruleSetId,
-                runName                 : FacadeSupport.normalize(ruleSet.ruleSetName) ?: FacadeSupport.normalize(ruleSet.ruleSetId),
-                description             : FacadeSupport.normalize(ruleSet.description),
-                companyUserGroupId      : FacadeSupport.normalize(ruleSet.companyUserGroupId),
+                runName                 : ((ruleSet.ruleSetName)?.toString()?.trim()) ?: ((ruleSet.ruleSetId)?.toString()?.trim()),
+                description             : ((ruleSet.description)?.toString()?.trim()),
+                companyUserGroupId      : ((ruleSet.companyUserGroupId)?.toString()?.trim()),
                 companyLabel            : TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, ruleSet.companyUserGroupId),
                 runType                 : RUN_TYPE_RULESET,
                 reconciliationMappingId : null,
@@ -475,7 +477,7 @@ class ReconciliationSavedRunSupport {
     }
 
     static List<Map<String, Object>> collectRuleRows(def ec, Object rawRuleSetId) {
-        String ruleSetId = FacadeSupport.normalize(rawRuleSetId)
+        String ruleSetId = ((rawRuleSetId)?.toString()?.trim())
         if (!ruleSetId) return []
 
         List rules = ec.entity.find("darpan.rule.Rule")
@@ -488,17 +490,17 @@ class ReconciliationSavedRunSupport {
         return rules.collect { rule ->
             Map<String, Object> expressionData = parseRuleExpression(rule.expression)
             [
-                    ruleId        : FacadeSupport.normalize(rule.ruleId),
+                    ruleId        : ((rule.ruleId)?.toString()?.trim()),
                     sequenceNum   : rule.sequenceNum,
-                    ruleText      : FacadeSupport.normalize(rule.ruleText),
-                    ruleLogic     : FacadeSupport.normalize(rule.ruleLogic),
-                    ruleType      : FacadeSupport.normalize(rule.ruleType),
-                    expression    : FacadeSupport.normalize(rule.expression),
-                    enabled       : FacadeSupport.normalize(rule.enabled),
-                    severity      : FacadeSupport.normalize(rule.severity),
-                    file1FieldPath: FacadeSupport.normalize(expressionData.file1FieldPath),
-                    file2FieldPath: FacadeSupport.normalize(expressionData.file2FieldPath),
-                    operator      : FacadeSupport.normalize(expressionData.operator),
+                    ruleText      : ((rule.ruleText)?.toString()?.trim()),
+                    ruleLogic     : ((rule.ruleLogic)?.toString()?.trim()),
+                    ruleType      : ((rule.ruleType)?.toString()?.trim()),
+                    expression    : ((rule.expression)?.toString()?.trim()),
+                    enabled       : ((rule.enabled)?.toString()?.trim()),
+                    severity      : ((rule.severity)?.toString()?.trim()),
+                    file1FieldPath: ((expressionData.file1FieldPath)?.toString()?.trim()),
+                    file2FieldPath: ((expressionData.file2FieldPath)?.toString()?.trim()),
+                    operator      : ((expressionData.operator)?.toString()?.trim()),
                     preActions    : normalizePreActions(expressionData.preActions ?: expressionData.preAction),
             ].findAll { String key, Object value -> value != null }
         } as List<Map<String, Object>>
@@ -531,21 +533,21 @@ class ReconciliationSavedRunSupport {
     }
 
     static String normalizePreAction(Object rawPreAction) {
-        String value = FacadeSupport.normalize(rawPreAction)?.toUpperCase()
+        String value = ((rawPreAction)?.toString()?.trim())?.toUpperCase()
         if (value in ["STRING_TO_INTEGER", "TO_INT", "TO_INTEGER"]) return "STRING_TO_INT"
         if (value == "TO_NUMBER") return "STRING_TO_NUMBER"
         return value in ["STRING_TO_INT", "STRING_TO_NUMBER"] ? value : null
     }
 
     static String normalizePreActionFieldSide(Object rawFieldSide) {
-        String value = FacadeSupport.normalize(rawFieldSide)?.toLowerCase()
+        String value = ((rawFieldSide)?.toString()?.trim())?.toLowerCase()
         if (value in ["file1", "file_1", "left"]) return "file1"
         if (value in ["file2", "file_2", "right"]) return "file2"
         return null
     }
 
     static Map<String, Object> parseRuleExpression(Object rawExpression) {
-        String expression = FacadeSupport.normalize(rawExpression)
+        String expression = ((rawExpression)?.toString()?.trim())
         if (!expression) return [:]
 
         try {
@@ -559,12 +561,12 @@ class ReconciliationSavedRunSupport {
     static Map<String, Object> resolveApiSourceConfig(def ec, String sourceLabel, Object rawSystemEnumId,
             Object rawSourceConfigId, Object rawSourceConfigType, Object rawNsRestletConfig = null) {
         String systemEnumId = canonicalSystemEnumId(rawSystemEnumId)
-        String sourceConfigId = FacadeSupport.normalize(rawSourceConfigId)
-        String sourceConfigType = FacadeSupport.normalize(rawSourceConfigType)
+        String sourceConfigId = ((rawSourceConfigId)?.toString()?.trim())
+        String sourceConfigType = ((rawSourceConfigType)?.toString()?.trim())
         def nsRestletConfig = rawNsRestletConfig
 
         if (!sourceConfigId && systemEnumId == SYSTEM_NETSUITE && nsRestletConfig) {
-            sourceConfigId = FacadeSupport.normalize(nsRestletConfig.nsAuthConfigId)
+            sourceConfigId = ((nsRestletConfig.nsAuthConfigId)?.toString()?.trim())
         }
 
         String expectedType = expectedSourceConfigType(systemEnumId)
@@ -619,10 +621,11 @@ class ReconciliationSavedRunSupport {
         TenantAccessSupport.requireTenantRecordAccess(ec, config,
                 "${sourceLabel} Shopify auth config '${sourceConfigId}' was not found.",
                 "${sourceLabel} Shopify auth config '${sourceConfigId}' is not available in your active tenant.")
-        if (config && FacadeSupport.normalize(config.isActive) == "N") {
+        if (config && ((config.isActive)?.toString()?.trim()) == "N") {
             ec.message.addError("${sourceLabel} Shopify auth config '${sourceConfigId}' is inactive.")
         }
-        if (config && !FacadeSupport.normalizeBool(config.canReadOrders, false)) {
+        if (config && !(config.canReadOrders instanceof Boolean ? config.canReadOrders :
+                ["Y", "YES", "TRUE", "1", "ON"].contains(config.canReadOrders?.toString()?.trim()?.toUpperCase(Locale.ROOT)))) {
             ec.message.addError("${sourceLabel} Shopify auth config '${sourceConfigId}' cannot read orders.")
         }
     }
@@ -636,10 +639,11 @@ class ReconciliationSavedRunSupport {
         TenantAccessSupport.requireTenantRecordAccess(ec, config,
                 "${sourceLabel} HotWax source config '${sourceConfigId}' was not found.",
                 "${sourceLabel} HotWax source config '${sourceConfigId}' is not available in your active tenant.")
-        if (config && FacadeSupport.normalize(config.isActive) == "N") {
+        if (config && ((config.isActive)?.toString()?.trim()) == "N") {
             ec.message.addError("${sourceLabel} HotWax source config '${sourceConfigId}' is inactive.")
         }
-        if (config && !FacadeSupport.normalizeBool(config.canReadOrders, false)) {
+        if (config && !(config.canReadOrders instanceof Boolean ? config.canReadOrders :
+                ["Y", "YES", "TRUE", "1", "ON"].contains(config.canReadOrders?.toString()?.trim()?.toUpperCase(Locale.ROOT)))) {
             ec.message.addError("${sourceLabel} HotWax source config '${sourceConfigId}' cannot read orders.")
         }
     }
@@ -653,10 +657,10 @@ class ReconciliationSavedRunSupport {
         TenantAccessSupport.requireTenantRecordAccess(ec, config,
                 "${sourceLabel} NetSuite auth config '${sourceConfigId}' was not found.",
                 "${sourceLabel} NetSuite auth config '${sourceConfigId}' is not available in your active tenant.")
-        if (config && FacadeSupport.normalize(config.isActive) == "N") {
+        if (config && ((config.isActive)?.toString()?.trim()) == "N") {
             ec.message.addError("${sourceLabel} NetSuite auth config '${sourceConfigId}' is inactive.")
         }
-        String endpointAuthConfigId = FacadeSupport.normalize(nsRestletConfig?.nsAuthConfigId)
+        String endpointAuthConfigId = ((nsRestletConfig?.nsAuthConfigId)?.toString()?.trim())
         if (endpointAuthConfigId && endpointAuthConfigId != sourceConfigId) {
             ec.message.addError("${sourceLabel} NetSuite endpoint is configured for ${endpointAuthConfigId}, not ${sourceConfigId}.")
         }
@@ -684,29 +688,29 @@ class ReconciliationSavedRunSupport {
             return [
                     fileSide          : fileSide,
                     enumId            : systemEnumId,
-                    enumCode          : FacadeSupport.normalize(systemEnum?.enumCode),
-                    description       : FacadeSupport.normalize(systemEnum?.description),
+                    enumCode          : ((systemEnum?.enumCode)?.toString()?.trim()),
+                    description       : ((systemEnum?.description)?.toString()?.trim()),
                     label             : resolveEnumLabel(ec, systemEnumId, source.systemEnumId as String),
-                    fileTypeEnumId    : FacadeSupport.normalize(source.fileTypeEnumId),
+                    fileTypeEnumId    : ((source.fileTypeEnumId)?.toString()?.trim()),
                     fileTypeLabel     : fileTypeEnum ? FacadeSupport.enumLabel(fileTypeEnum) : null,
-                    idFieldExpression : FacadeSupport.normalize(source.primaryIdExpression),
-                    schemaFileName    : FacadeSupport.normalize(source.schemaFileName),
-                    sourceTypeEnumId  : FacadeSupport.normalize(source.sourceTypeEnumId),
+                    idFieldExpression : ((source.primaryIdExpression)?.toString()?.trim()),
+                    schemaFileName    : ((source.schemaFileName)?.toString()?.trim()),
+                    sourceTypeEnumId  : ((source.sourceTypeEnumId)?.toString()?.trim()),
                     sourceTypeLabel   : sourceTypeEnum ? FacadeSupport.enumLabel(sourceTypeEnum) : null,
-                    systemMessageRemoteId   : FacadeSupport.normalize(source.systemMessageRemoteId),
-                    systemMessageRemoteLabel: FacadeSupport.normalize(systemMessageRemote?.description) ?:
+                    systemMessageRemoteId   : ((source.systemMessageRemoteId)?.toString()?.trim()),
+                    systemMessageRemoteLabel: ((systemMessageRemote?.description)?.toString()?.trim()) ?:
                             virtualSystemRemoteLabel(systemEnumId, source.systemMessageRemoteId, source.sourceConfigType) ?:
-                            FacadeSupport.normalize(systemMessageRemote?.systemMessageRemoteId),
-                    nsRestletConfigId       : FacadeSupport.normalize(source.nsRestletConfigId),
-                    nsRestletConfigLabel    : FacadeSupport.normalize(nsRestletConfig?.description) ?: FacadeSupport.normalize(nsRestletConfig?.nsRestletConfigId),
-                    sourceConfigId          : FacadeSupport.normalize(source.sourceConfigId),
-                    sourceConfigType        : FacadeSupport.normalize(source.sourceConfigType),
+                            ((systemMessageRemote?.systemMessageRemoteId)?.toString()?.trim()),
+                    nsRestletConfigId       : ((source.nsRestletConfigId)?.toString()?.trim()),
+                    nsRestletConfigLabel    : ((nsRestletConfig?.description)?.toString()?.trim()) ?: ((nsRestletConfig?.nsRestletConfigId)?.toString()?.trim()),
+                    sourceConfigId          : ((source.sourceConfigId)?.toString()?.trim()),
+                    sourceConfigType        : ((source.sourceConfigType)?.toString()?.trim()),
             ]
         }.findAll { it != null } as List<Map<String, Object>>
     }
 
     static String resolveEnumLabel(def ec, Object enumId, String fallback = null) {
-        String normalized = FacadeSupport.normalize(enumId)
+        String normalized = ((enumId)?.toString()?.trim())
         if (!normalized) return fallback
         def enumValue = findEnum(ec, normalized)
         return enumValue ? FacadeSupport.enumLabel(enumValue) : (fallback ?: normalized)
@@ -714,8 +718,8 @@ class ReconciliationSavedRunSupport {
 
     static boolean isVirtualHotWaxOrdersRemote(Object systemEnumId, Object systemMessageRemoteId, Object sourceConfigType) {
         if (canonicalSystemEnumId(systemEnumId) != SYSTEM_HOTWAX_OMS) return false
-        if (FacadeSupport.normalize(systemMessageRemoteId) != HOTWAX_ORDERS_REMOTE_ID) return false
-        String normalizedSourceConfigType = FacadeSupport.normalize(sourceConfigType)
+        if (((systemMessageRemoteId)?.toString()?.trim()) != HOTWAX_ORDERS_REMOTE_ID) return false
+        String normalizedSourceConfigType = ((sourceConfigType)?.toString()?.trim())
         return !normalizedSourceConfigType || normalizedSourceConfigType == SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST
     }
 
@@ -762,8 +766,8 @@ class ReconciliationSavedRunSupport {
 
     static boolean isVirtualShopifyOrdersRemote(Object systemEnumId, Object systemMessageRemoteId, Object sourceConfigType) {
         if (canonicalSystemEnumId(systemEnumId) != SYSTEM_SHOPIFY) return false
-        if (FacadeSupport.normalize(systemMessageRemoteId) != SHOPIFY_ORDERS_REMOTE_ID) return false
-        String normalizedSourceConfigType = FacadeSupport.normalize(sourceConfigType)
+        if (((systemMessageRemoteId)?.toString()?.trim()) != SHOPIFY_ORDERS_REMOTE_ID) return false
+        String normalizedSourceConfigType = ((sourceConfigType)?.toString()?.trim())
         return !normalizedSourceConfigType || normalizedSourceConfigType == SOURCE_CONFIG_TYPE_SHOPIFY_AUTH
     }
 
@@ -799,7 +803,7 @@ class ReconciliationSavedRunSupport {
     }
 
     static def findEnum(def ec, Object enumId) {
-        String normalized = FacadeSupport.normalize(enumId)
+        String normalized = ((enumId)?.toString()?.trim())
         if (!normalized) return null
         return ec.entity.find("moqui.basic.Enumeration")
                 .condition("enumId", normalized)
@@ -809,7 +813,7 @@ class ReconciliationSavedRunSupport {
     }
 
     static String canonicalSystemEnumId(Object systemEnumId) {
-        String normalized = FacadeSupport.normalize(systemEnumId)
+        String normalized = ((systemEnumId)?.toString()?.trim())
         if (!normalized) return null
 
         String lookupKey = normalized.replaceAll(/[\s_-]/, "").toUpperCase()

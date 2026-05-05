@@ -41,33 +41,22 @@
                 <return error="true" message="json1Location and json2Location are required"/>
             </if>
 
-            <script><![CDATA[
-                def normalize = { it?.toString()?.trim() }
-                def jsonPath1 = compareJsonPath
-                def jsonPath2 = compareJsonPath2 ?: compareJsonPath
-                def schema1 = schemaFileName
-                def schema2 = schemaFileName2 ?: schemaFileName
-
-                context.unifiedParams = [
-                        file1Location      : json1Location,
-                        file2Location      : json2Location,
-                        file1Type          : "JSON",
-                        file2Type          : "JSON",
-                        file1IdExpression  : normalize(jsonPath1),
-                        file2IdExpression  : normalize(jsonPath2),
-                        file1SchemaFileName: normalize(schema1),
-                        file2SchemaFileName: normalize(schema2),
-                        file1Label         : json1Label,
-                        file2Label         : json2Label,
-                        outputLocation     : outputLocation,
-                        outputFileName     : outputFileName,
-                        sparkMaster        : sparkMaster,
-                        sparkAppName       : sparkAppName
-                ]
-            ]]></script>
+            <set field="jsonPath2Value" from="compareJsonPath2 ?: compareJsonPath"/>
+            <set field="schemaFileName2Value" from="schemaFileName2 ?: schemaFileName"/>
+            <set field="file1IdExpressionValue" from="((compareJsonPath)?.toString()?.trim())"/>
+            <set field="file2IdExpressionValue" from="((jsonPath2Value)?.toString()?.trim())"/>
+            <set field="file1SchemaFileNameValue" from="((schemaFileName)?.toString()?.trim())"/>
+            <set field="file2SchemaFileNameValue" from="((schemaFileName2Value)?.toString()?.trim())"/>
 
             <service-call name="ReconciliationCoreServices.reconcile#UnifiedFiles"
-                    in-map="unifiedParams" out-map="unifiedOut"/>
+                    in-map="[file1Location:json1Location, file2Location:json2Location,
+                    file1Type:'JSON', file2Type:'JSON',
+                    file1IdExpression:file1IdExpressionValue, file2IdExpression:file2IdExpressionValue,
+                    file1SchemaFileName:file1SchemaFileNameValue, file2SchemaFileName:file2SchemaFileNameValue,
+                    file1Label:json1Label, file2Label:json2Label,
+                    outputLocation:outputLocation, outputFileName:outputFileName,
+                    sparkMaster:sparkMaster, sparkAppName:sparkAppName]"
+                    out-map="unifiedOut"/>
 
             <set field="diffLocation" from="unifiedOut.diffLocation"/>
             <set field="diffFileName" from="unifiedOut.diffFileName"/>

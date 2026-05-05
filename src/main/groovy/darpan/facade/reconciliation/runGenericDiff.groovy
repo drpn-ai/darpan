@@ -5,14 +5,15 @@ import darpan.facade.reconciliation.ReconciliationOutputSupport
 
 import java.sql.Timestamp
 
-String mappingId = FacadeSupport.normalize(reconciliationMappingId)
+String mappingId = ((reconciliationMappingId)?.toString()?.trim())
 String inputFile1Name = ReconciliationOutputSupport.sanitizeUploadFileName(file1Name, "file1")
 String inputFile2Name = ReconciliationOutputSupport.sanitizeUploadFileName(file2Name, "file2")
 String file1TextValue = file1Text?.toString()
 String file2TextValue = file2Text?.toString()
-String requestedFile1SystemEnumId = FacadeSupport.normalize(file1SystemEnumId)
-String requestedFile2SystemEnumId = FacadeSupport.normalize(file2SystemEnumId)
-boolean hasHeaderValue = FacadeSupport.normalizeBool(hasHeader, true)
+String requestedFile1SystemEnumId = ((file1SystemEnumId)?.toString()?.trim())
+String requestedFile2SystemEnumId = ((file2SystemEnumId)?.toString()?.trim())
+boolean hasHeaderValue = hasHeader == null ? true :
+        (hasHeader instanceof Boolean ? hasHeader : ["Y", "YES", "TRUE", "1", "ON"].contains(hasHeader.toString().trim().toUpperCase(Locale.ROOT)))
 
 if (!mappingId) ec.message.addError("reconciliationMappingId is required")
 if (!inputFile1Name) ec.message.addError("file1Name is required")
@@ -102,7 +103,7 @@ if (!ec.message.hasError() && resolvedFile1SystemEnumId == resolvedFile2SystemEn
 }
 
 if (!ec.message.hasError()) {
-    List<String> mappingSystemIds = mappingMembers.collect { FacadeSupport.normalize(it.systemEnumId) }.findAll { it }.unique()
+    List<String> mappingSystemIds = mappingMembers.collect { ((it.systemEnumId)?.toString()?.trim()) }.findAll { it }.unique()
     if (!mappingSystemIds.contains(resolvedFile1SystemEnumId)) {
         ec.message.addError("Mapping '${mappingId}' does not include system '${resolvedFile1SystemEnumId}'.")
     }
@@ -135,7 +136,7 @@ if (!ec.message.hasError()) {
 
     if (!ec.message.hasError()) {
         File outputFile = null
-        String diffLocationValue = FacadeSupport.normalize(serviceResult.diffLocation)
+        String diffLocationValue = ((serviceResult.diffLocation)?.toString()?.trim())
         if (diffLocationValue) {
             outputFile = diffLocationValue.startsWith("/") ?
                     new File(diffLocationValue) :

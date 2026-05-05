@@ -34,9 +34,9 @@
         </out-parameters>
         <actions>
             <set field="schemaUpload" from="jsonschema.common.JsonSchemaUtil.readUploadedText(schemaFile, 'schema file')"/>
-            <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
-            <set field="overwriteMode" from="darpan.facade.common.FacadeSupport.normalizeBool(overwrite, false)"/>
-            <set field="nameToSave" from="darpan.facade.common.FacadeSupport.normalize(schemaName) ?: schemaUpload.fileName"/>
+            <set field="descriptionValue" from="((description)?.toString()?.trim())"/>
+            <set field="overwriteMode" from="overwrite != null ? overwrite : false"/>
+            <set field="nameToSave" from="((schemaName)?.toString()?.trim()) ?: schemaUpload.fileName"/>
             <set field="displayDescriptionValue" from="descriptionValue ?: nameToSave"/>
             <if condition="schemaUpload.error">
                 <message error="true">${schemaUpload.error}</message>
@@ -78,10 +78,10 @@
             <parameter name="jsonSchemaId"/>
         </out-parameters>
         <actions>
-            <set field="jsonSchemaIdValue" from="darpan.facade.common.FacadeSupport.normalize(jsonSchemaId)"/>
-            <set field="schemaNameValue" from="darpan.facade.common.FacadeSupport.normalize(schemaName)"/>
-            <set field="filenameValue" from="darpan.facade.common.FacadeSupport.normalize(filename)"/>
-            <set field="jsonTextValue" from="darpan.facade.common.FacadeSupport.normalize(jsonText)"/>
+            <set field="jsonSchemaIdValue" from="((jsonSchemaId)?.toString()?.trim())"/>
+            <set field="schemaNameValue" from="((schemaName)?.toString()?.trim())"/>
+            <set field="filenameValue" from="((filename)?.toString()?.trim())"/>
+            <set field="jsonTextValue" from="((jsonText)?.toString()?.trim())"/>
             <set field="jsonValidationError" from="jsonschema.common.JsonSchemaUtil.validateJsonText(jsonTextValue, 'jsonText')"/>
             <if condition="!jsonSchemaIdValue &amp;&amp; !schemaNameValue &amp;&amp; !filenameValue">
                 <message error="true">jsonSchemaId, schemaName, or filename is required</message>
@@ -190,8 +190,8 @@
             <parameter name="schemaFileName"/> <!-- Deprecated -->
         </in-parameters>
         <actions>
-            <set field="jsonSchemaIdValue" from="darpan.facade.common.FacadeSupport.normalize(jsonSchemaId)"/>
-            <set field="schemaNameValue" from="darpan.facade.common.FacadeSupport.normalize(schemaName ?: filename ?: schemaFileName)"/>
+            <set field="jsonSchemaIdValue" from="((jsonSchemaId)?.toString()?.trim())"/>
+            <set field="schemaNameValue" from="((schemaName ?: filename ?: schemaFileName)?.toString()?.trim())"/>
             <if condition="!jsonSchemaIdValue &amp;&amp; !schemaNameValue">
                 <message error="true">Schema ID or filename is required</message>
             </if>

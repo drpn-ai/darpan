@@ -7,7 +7,7 @@ This wiki lives in `runtime/component/darpan/docs/Home.md`. The Darpan component
 - Component descriptor: `runtime/component/darpan/component.xml`
 - Main app screen: `runtime/component/darpan/screen/darpan.xml`
 - Reconciliation route: `runtime/component/darpan/screen/Reconciliation.xml`
-- Reconciliation service contracts: `runtime/component/darpan/service/reconciliation/ReconciliationCoreServices.xml`, `runtime/component/darpan/service/reconciliation/ReconciliationGenericServices.xml`, `runtime/component/darpan/service/reconciliation/ReconciliationRuleEngineServices.xml`, `runtime/component/darpan/service/reconciliation/ReconciliationInventoryServices.xml`
+- Reconciliation service contracts: `runtime/component/darpan/service/reconciliation/ReconciliationCoreServices.xml`, `runtime/component/darpan/service/reconciliation/ReconciliationGenericServices.xml`, `runtime/component/darpan/service/reconciliation/ReconciliationRuleEngineServices.xml`
 - Reconciliation automation contracts: `runtime/component/darpan/service/reconciliation/ReconciliationAutomationServices.xml`, `runtime/component/darpan/src/main/groovy/darpan/reconciliation/automation/AutomationExecutionSupport.groovy`, `runtime/component/darpan/src/main/groovy/darpan/reconciliation/automation/SftpAutomationSupport.groovy`, and `runtime/component/darpan/docs/reconciliation/automation/order-reconciliation-automation.md`
 - JSON schema service contracts: `runtime/component/darpan/service/jsonschema/JsonSchemaServices.xml`
 - Auth facade contracts: `runtime/component/darpan/service/facade/AuthFacadeServices.xml`, with auth/session helper logic in `runtime/component/darpan/src/main/groovy/darpan/facade/auth/AuthFacadeSupport.groovy`

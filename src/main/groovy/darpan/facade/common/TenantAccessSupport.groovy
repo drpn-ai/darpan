@@ -13,12 +13,14 @@ class TenantAccessSupport {
     static final String DEFAULT_TIME_ZONE = "UTC"
     static final String DARPAN_COMPANY_GROUP_TYPE_ENUM_ID = "UgtDarpanCompany"
     static final String DARPAN_PERMISSION_GROUP_TYPE_ENUM_ID = "UgtDarpanPermission"
+    static final String DARPAN_ADMIN_GROUP_ID = "DARPAN_ADMIN"
     static final String DARPAN_SUPER_ADMIN_GROUP_ID = "DARPAN_SUPER_ADMIN"
     static final String DARPAN_TENANT_ADMIN_GROUP_ID = "DARPAN_TENANT_ADMIN"
     static final String DARPAN_TENANT_USER_GROUP_ID = "DARPAN_TENANT_USER"
     static final String DARPAN_COMPANY_EDITOR_GROUP_ID = "DARPAN_COMPANY_EDITOR"
     static final String DARPAN_COMPANY_VIEW_ONLY_GROUP_ID = "DARPAN_COMPANY_VIEW_ONLY"
     static final List<String> SUPER_ADMIN_GROUP_IDS = [ADMIN_USER_GROUP_ID, DARPAN_SUPER_ADMIN_GROUP_ID].asImmutable()
+    static final List<String> DARPAN_ADMIN_GROUP_IDS = [ADMIN_USER_GROUP_ID, DARPAN_ADMIN_GROUP_ID].asImmutable()
     static final List<String> TENANT_VIEW_PERMISSION_GROUP_IDS = [
             DARPAN_TENANT_ADMIN_GROUP_ID,
             DARPAN_TENANT_USER_GROUP_ID,
@@ -57,6 +59,7 @@ class TenantAccessSupport {
     protected static Map<String, Object> resolveAccessScope(def ec) {
         String userId = currentUserId(ec)
         boolean superAdmin = isSuperAdmin(ec)
+        boolean darpanAdmin = isDarpanAdmin(ec)
         if (!userId) {
             return [
                 isSuperAdmin                : false,
@@ -87,7 +90,7 @@ class TenantAccessSupport {
             canViewActiveTenantData    : activeTenantPermissionScope.canView,
             canRunActiveTenantReconciliation: activeTenantPermissionScope.canRun,
             canEditActiveTenantData    : activeTenantPermissionScope.canEdit,
-            canManageDarpanCore        : superAdmin,
+            canManageDarpanCore        : darpanAdmin,
         ]
     }
 
@@ -98,8 +101,21 @@ class TenantAccessSupport {
         return SUPER_ADMIN_GROUP_IDS.any { String userGroupId -> hasActiveUserGroupMembership(ec, userGroupId) }
     }
 
+    static boolean isDarpanAdmin(def ec) {
+        String userId = currentUserId(ec)
+        if (!userId) return false
+
+        return DARPAN_ADMIN_GROUP_IDS.any { String userGroupId -> hasActiveUserGroupMembership(ec, userGroupId) }
+    }
+
     static boolean requireSuperAdmin(def ec, String message = "This operation requires super-admin access.") {
         if (isSuperAdmin(ec)) return true
+        ec?.message?.addError(message)
+        return false
+    }
+
+    static boolean requireDarpanAdmin(def ec, String message = "This operation requires Darpan admin access.") {
+        if (isDarpanAdmin(ec)) return true
         ec?.message?.addError(message)
         return false
     }
@@ -119,8 +135,8 @@ class TenantAccessSupport {
                 .findAll { it != null }
                 .unique { it.userGroupId }
                 .sort { left, right ->
-                    String leftLabel = FacadeSupport.normalize(left?.label) ?: left?.userGroupId ?: ""
-                    String rightLabel = FacadeSupport.normalize(right?.label) ?: right?.userGroupId ?: ""
+                    String leftLabel = ((left?.label)?.toString()?.trim()) ?: left?.userGroupId ?: ""
+                    String rightLabel = ((right?.label)?.toString()?.trim()) ?: right?.userGroupId ?: ""
                     int labelCompare = leftLabel <=> rightLabel
                     return labelCompare != 0 ? labelCompare : ((left?.userGroupId ?: "") <=> (right?.userGroupId ?: ""))
                 } as List<Map<String, Object>>
@@ -132,7 +148,7 @@ class TenantAccessSupport {
             return false
         }
 
-        String normalizedTenantUserGroupId = FacadeSupport.normalize(requestedTenantUserGroupId)
+        String normalizedTenantUserGroupId = ((requestedTenantUserGroupId)?.toString()?.trim())
         if (!normalizedTenantUserGroupId) {
             ec?.message?.addError("activeTenantUserGroupId is required.")
             return false
@@ -238,7 +254,7 @@ class TenantAccessSupport {
             return false
         }
 
-        String displayName = FacadeSupport.normalize(rawDisplayName)
+        String displayName = ((rawDisplayName)?.toString()?.trim())
         ec?.user?.setPreference(DISPLAY_NAME_PREFERENCE_KEY, displayName)
         return true
     }
@@ -268,7 +284,7 @@ class TenantAccessSupport {
         def nowTs = ec?.user?.nowTimestamp
         Map<String, Object> tenantSettingsMap = [
                 companyUserGroupId: tenantId,
-                createdByUserId   : FacadeSupport.normalize(existing?.createdByUserId) ?: currentUserId(ec),
+                createdByUserId   : ((existing?.createdByUserId)?.toString()?.trim()) ?: currentUserId(ec),
                 timeZone          : timeZone,
                 createdDate       : existing?.createdDate ?: nowTs,
                 lastUpdatedDate   : nowTs,
@@ -308,8 +324,8 @@ class TenantAccessSupport {
     }
 
     protected static String normalizeTimeZoneId(Object rawTimeZone) {
-        if (rawTimeZone instanceof TimeZone) return FacadeSupport.normalize(rawTimeZone.ID)
-        return FacadeSupport.normalize(rawTimeZone)
+        if (rawTimeZone instanceof TimeZone) return ((rawTimeZone.ID)?.toString()?.trim())
+        return ((rawTimeZone)?.toString()?.trim())
     }
 
     protected static def findTenantSettingsForTenant(def ec, String tenantId) {
@@ -323,12 +339,12 @@ class TenantAccessSupport {
 
     protected static Map<String, Object> buildTenantSettingsResponse(def ec, def tenantSettings, String tenantId,
             Map<String, Object> fallbackSettings = null) {
-        String resolvedTenantId = tenantId ?: FacadeSupport.normalize(fallbackSettings?.companyUserGroupId)
+        String resolvedTenantId = tenantId ?: ((fallbackSettings?.companyUserGroupId)?.toString()?.trim())
         return [
                 companyUserGroupId: resolvedTenantId,
                 companyLabel      : resolveTenantLabelForUserGroupId(ec, resolvedTenantId),
                 timeZone          : resolveTenantSettingsTimeZone(tenantSettings ?: fallbackSettings, ec),
-                createdByUserId   : FacadeSupport.normalize(tenantSettings?.createdByUserId ?: fallbackSettings?.createdByUserId),
+                createdByUserId   : ((tenantSettings?.createdByUserId ?: fallbackSettings?.createdByUserId)?.toString()?.trim()),
                 createdDate       : tenantSettings?.createdDate ?: fallbackSettings?.createdDate,
                 lastUpdatedDate   : tenantSettings?.lastUpdatedDate ?: fallbackSettings?.lastUpdatedDate,
         ]
@@ -411,7 +427,7 @@ class TenantAccessSupport {
     }
 
     static String resolveScopedRuntimeLocation(def ec, String baseLocation) {
-        String normalizedBase = FacadeSupport.normalize(baseLocation)
+        String normalizedBase = ((baseLocation)?.toString()?.trim())
         if (!normalizedBase) return normalizedBase
 
         String scopedSuffix = resolveRuntimeScopeSuffix(ec)
@@ -430,7 +446,7 @@ class TenantAccessSupport {
     }
 
     static String currentUserId(def ec) {
-        return FacadeSupport.normalize(ec?.user?.userId)
+        return ((ec?.user?.userId)?.toString()?.trim())
     }
 
     protected static List listTenantMembershipRecords(def ec) {
@@ -475,21 +491,21 @@ class TenantAccessSupport {
 
     protected static String extractString(def record, String fieldName) {
         if (record == null || !fieldName) return null
-        if (record instanceof Map) return FacadeSupport.normalize(record[fieldName])
+        if (record instanceof Map) return ((record[fieldName])?.toString()?.trim())
         if (record.metaClass.respondsTo(record, "getString", String)) {
-            return FacadeSupport.normalize(record.getString(fieldName))
+            return record.getString(fieldName)?.toString()?.trim()
         }
-        return FacadeSupport.normalize(record."${fieldName}")
+        return ((record."${fieldName}")?.toString()?.trim())
     }
 
     protected static String readPreferredActiveTenantUserGroupId(def ec) {
-        return FacadeSupport.normalize(ec?.user?.getPreference(ACTIVE_TENANT_PREFERENCE_KEY))
+        return ec?.user?.getPreference(ACTIVE_TENANT_PREFERENCE_KEY)?.toString()?.trim()
     }
 
     protected static String resolveDisplayName(def ec) {
-        return FacadeSupport.normalize(ec?.user?.getPreference(DISPLAY_NAME_PREFERENCE_KEY))
-                ?: FacadeSupport.normalize(ec?.user?.userAccount?.userFullName)
-                ?: FacadeSupport.normalize(ec?.user?.username)
+        return ec?.user?.getPreference(DISPLAY_NAME_PREFERENCE_KEY)?.toString()?.trim()
+                ?: ((ec?.user?.userAccount?.userFullName)?.toString()?.trim())
+                ?: ((ec?.user?.username)?.toString()?.trim())
                 ?: currentUserId(ec)
     }
 
@@ -549,7 +565,7 @@ class TenantAccessSupport {
 
     protected static List<String> listTenantPermissionGroupIds(def ec, String tenantUserGroupId) {
         String userId = currentUserId(ec)
-        String normalizedTenantUserGroupId = FacadeSupport.normalize(tenantUserGroupId)
+        String normalizedTenantUserGroupId = ((tenantUserGroupId)?.toString()?.trim())
         if (!userId || !normalizedTenantUserGroupId) return []
 
         def finder = ec?.entity?.find(TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME)
@@ -576,7 +592,7 @@ class TenantAccessSupport {
     }
 
     protected static Map<String, Object> resolveActiveTenantPermissionScope(def ec, Object activeTenantUserGroupId, boolean superAdmin) {
-        String normalizedActiveTenantUserGroupId = FacadeSupport.normalize(activeTenantUserGroupId)
+        String normalizedActiveTenantUserGroupId = ((activeTenantUserGroupId)?.toString()?.trim())
         if (!normalizedActiveTenantUserGroupId) {
             return [permissionGroupIds: [], canView: false, canRun: false, canEdit: false]
         }
@@ -598,7 +614,7 @@ class TenantAccessSupport {
 
     protected static boolean hasActiveUserGroupMembership(def ec, String userGroupId) {
         String userId = currentUserId(ec)
-        String normalizedUserGroupId = FacadeSupport.normalize(userGroupId)
+        String normalizedUserGroupId = ((userGroupId)?.toString()?.trim())
         if (!userId || !normalizedUserGroupId) return false
 
         def finder = ec?.entity?.find("moqui.security.UserGroupMember")
@@ -636,15 +652,15 @@ class TenantAccessSupport {
         }
 
         List<String> availableTenantUserGroupIds = ((scope?.availableTenants ?: []) as List)
-                .collect { Map<String, Object> tenant -> FacadeSupport.normalize(tenant?.userGroupId) }
+                .collect { Map<String, Object> tenant -> ((tenant?.userGroupId)?.toString()?.trim()) }
                 .findAll { it != null } as List<String>
         List<String> activeTenantPermissionGroupIds = ((scope?.activeTenantPermissionGroupIds ?: []) as List)
-                .collect { Object permissionUserGroupId -> FacadeSupport.normalize(permissionUserGroupId) }
+                .collect { Object permissionUserGroupId -> ((permissionUserGroupId)?.toString()?.trim()) }
                 .findAll { it != null } as List<String>
-        String contextTenantUserGroupId = FacadeSupport.normalize(scope?.activeTenantUserGroupId) ?: NO_ACTIVE_TENANT_FILTER_VALUE
+        String contextTenantUserGroupId = ((scope?.activeTenantUserGroupId)?.toString()?.trim()) ?: NO_ACTIVE_TENANT_FILTER_VALUE
 
         userContext.activeTenantUserGroupId = contextTenantUserGroupId
-        userContext.activeTenantLabel = FacadeSupport.normalize(scope?.activeTenantLabel)
+        userContext.activeTenantLabel = ((scope?.activeTenantLabel)?.toString()?.trim())
         userContext.availableTenantUserGroupIds = availableTenantUserGroupIds
         userContext.activeTenantPermissionGroupIds = activeTenantPermissionGroupIds
         userContext.canViewActiveTenantData = scope?.canViewActiveTenantData == true
@@ -652,7 +668,7 @@ class TenantAccessSupport {
         userContext.canEditActiveTenantData = scope?.canEditActiveTenantData == true
         userContext.canManageDarpanCore = scope?.canManageDarpanCore == true
         userContext.isSuperAdmin = scope?.isSuperAdmin == true
-        userContext.scopeType = FacadeSupport.normalize(scope?.scopeType)
+        userContext.scopeType = ((scope?.scopeType)?.toString()?.trim())
     }
 
     protected static Map<String, Object> resolveActiveTenant(List<Map<String, Object>> availableTenants, String preferredTenantUserGroupId) {
@@ -671,7 +687,7 @@ class TenantAccessSupport {
     }
 
     static String resolveTenantLabelForUserGroupId(def ec, Object userGroupId) {
-        String normalizedUserGroupId = FacadeSupport.normalize(userGroupId)
+        String normalizedUserGroupId = ((userGroupId)?.toString()?.trim())
         if (!normalizedUserGroupId) return null
 
         def matchingTenant = listAllTenantRecords(ec).find { record ->
@@ -691,7 +707,7 @@ class TenantAccessSupport {
     }
 
     protected static String sanitizePathToken(String rawToken) {
-        String normalized = FacadeSupport.normalize(rawToken)
+        String normalized = ((rawToken)?.toString()?.trim())
         if (!normalized) return "anonymous"
         return normalized.replaceAll(/[^A-Za-z0-9._-]/, "_")
     }

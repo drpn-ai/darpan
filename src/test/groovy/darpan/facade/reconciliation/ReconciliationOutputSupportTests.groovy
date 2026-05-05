@@ -128,6 +128,31 @@ class ReconciliationOutputSupportTests {
     }
 
     @Test
+    void buildRunResultDescriptorExposesRunningStatusWithoutResultFile() {
+        Map<String, Object> row = ReconciliationOutputSupport.buildRunResultDescriptor(null, [
+                reconciliationRunResultId: "RUN_RESULT_1",
+                savedRunId               : "RS_PRODUCTION_ORDERS",
+                savedRunType             : "ruleset",
+                ruleSetId                : "RS_PRODUCTION_ORDERS",
+                companyUserGroupId       : "TENANT_1",
+                statusEnumId             : "AUT_STAT_RUNNING",
+                createdDate              : Timestamp.valueOf("2026-05-05 10:00:00"),
+                startedDate              : Timestamp.valueOf("2026-05-05 10:00:00"),
+        ], null, [:])
+
+        assertEquals("", row.fileName)
+        assertEquals("RUN_RESULT_1", row.reconciliationRunResultId)
+        assertEquals("RS_PRODUCTION_ORDERS", row.savedRunId)
+        assertEquals("ruleset", row.savedRunType)
+        assertEquals("RS_PRODUCTION_ORDERS", row.ruleSetId)
+        assertEquals("TENANT_1", row.companyUserGroupId)
+        assertEquals("AUT_STAT_RUNNING", row.statusEnumId)
+        assertEquals("Running", row.statusLabel)
+        assertFalse(row.resultAvailable as Boolean)
+        assertEquals(Timestamp.valueOf("2026-05-05 10:00:00"), row.createdDate)
+    }
+
+    @Test
     void matchesGeneratedOutputDescriptorHonorsMappingIdFilter() {
         Map<String, Object> descriptor = [
                 fileName               : "gorjana-order-diff.json",

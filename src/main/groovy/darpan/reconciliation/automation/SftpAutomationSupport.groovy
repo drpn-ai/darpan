@@ -596,7 +596,7 @@ class SftpAutomationSupport {
     }
 
     protected static String normalize(Object value) {
-        return FacadeSupport.normalize(value)
+        return ((value)?.toString()?.trim())
     }
 
     protected static Object readField(def record, String fieldName) {

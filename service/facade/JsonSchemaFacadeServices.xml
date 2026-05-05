@@ -34,15 +34,15 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="pageIndexSafe" from="Math.max(0, darpan.facade.common.FacadeSupport.normalizeInt(pageIndex, 0))"/>
-            <set field="pageSizeSafe" from="Math.max(1, Math.min(200, darpan.facade.common.FacadeSupport.normalizeInt(pageSize, 20)))"/>
-            <set field="searchLower" from="darpan.facade.common.FacadeSupport.normalize(query)?.toLowerCase()"/>
+            <set field="pageIndexSafe" from="Math.max(0, ((pageIndex != null ? pageIndex : 0) as Integer))"/>
+            <set field="pageSizeSafe" from="Math.max(1, Math.min(200, ((pageSize != null ? pageSize : 20) as Integer)))"/>
+            <set field="searchLower" from="((query)?.toString()?.trim())?.toLowerCase()"/>
             <set field="activeTenantUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <set field="schemas" from="[]"/>
             <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
             <set field="ignoreTableEnsure" from="jsonschema.common.JsonSchemaUtil.ensureJsonSchemaTable(ec)"/>
             <set field="schemaFinder" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('statusId', 'Active').orderBy('-lastUpdatedStamp').useCache(false)"/>
-            <set field="rows" from="(activeTenantUserGroupId ? schemaFinder.condition('companyUserGroupId', activeTenantUserGroupId).list() : []).collect { item -> [jsonSchemaId: item.jsonSchemaId, schemaName: item.schemaName, description: item.description, systemEnumId: darpan.facade.common.FacadeSupport.normalize(item.systemEnumId), systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, item.systemEnumId, null, true), companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, item.companyUserGroupId), createdByUserId: item.createdByUserId, statusId: item.statusId, createdDate: item.createdDate, lastUpdatedStamp: item.lastUpdatedStamp] }"/>
+            <set field="rows" from="(activeTenantUserGroupId ? schemaFinder.condition('companyUserGroupId', activeTenantUserGroupId).list() : []).collect { item -> [jsonSchemaId: item.jsonSchemaId, schemaName: item.schemaName, description: item.description, systemEnumId: ((item.systemEnumId)?.toString()?.trim()), systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, item.systemEnumId, null, true), companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, item.companyUserGroupId), createdByUserId: item.createdByUserId, statusId: item.statusId, createdDate: item.createdDate, lastUpdatedStamp: item.lastUpdatedStamp] }"/>
             <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.schemaName, row.description].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
             <set field="totalCount" from="filteredRows.size()"/>
             <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>
@@ -81,8 +81,8 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="jsonSchemaIdValue" from="darpan.facade.common.FacadeSupport.normalize(jsonSchemaId)"/>
-            <set field="schemaNameValue" from="darpan.facade.common.FacadeSupport.normalize(schemaName)"/>
+            <set field="jsonSchemaIdValue" from="((jsonSchemaId)?.toString()?.trim())"/>
+            <set field="schemaNameValue" from="((schemaName)?.toString()?.trim())"/>
             <set field="ignoreTableEnsure" from="jsonschema.common.JsonSchemaUtil.ensureJsonSchemaTable(ec)"/>
             <if condition="!jsonSchemaIdValue &amp;&amp; !schemaNameValue">
                 <message error="true">jsonSchemaId or schemaName is required</message>
@@ -97,7 +97,7 @@
                 <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active tenant.')"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="systemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(schema.systemEnumId)"/>
+                <set field="systemEnumIdValue" from="((schema.systemEnumId)?.toString()?.trim())"/>
                 <set field="schemaData" from="[jsonSchemaId: schema.jsonSchemaId, schemaName: schema.schemaName, description: schema.description, systemEnumId: systemEnumIdValue, systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, systemEnumIdValue, null, true), ownerUserId: schema.ownerUserId, companyUserGroupId: schema.companyUserGroupId, createdByUserId: schema.createdByUserId, schemaText: schema.schemaText, statusId: schema.statusId, createdDate: schema.createdDate, lastUpdatedStamp: schema.lastUpdatedStamp]"/>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
@@ -134,13 +134,13 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="schemaNameValue" from="darpan.facade.common.FacadeSupport.normalize(schemaName)"/>
-            <set field="schemaTextValue" from="darpan.facade.common.FacadeSupport.normalize(schemaText)"/>
-            <set field="descriptionValue" from="darpan.facade.common.FacadeSupport.normalize(description)"/>
-            <set field="schemaIdValue" from="darpan.facade.common.FacadeSupport.normalize(jsonSchemaId)"/>
-            <set field="requestedSystemEnumIdValue" from="darpan.facade.common.FacadeSupport.normalize(systemEnumId)"/>
+            <set field="schemaNameValue" from="((schemaName)?.toString()?.trim())"/>
+            <set field="schemaTextValue" from="((schemaText)?.toString()?.trim())"/>
+            <set field="descriptionValue" from="((description)?.toString()?.trim())"/>
+            <set field="schemaIdValue" from="((jsonSchemaId)?.toString()?.trim())"/>
+            <set field="requestedSystemEnumIdValue" from="((systemEnumId)?.toString()?.trim())"/>
             <set field="displayDescriptionValue" from="descriptionValue ?: schemaNameValue"/>
-            <set field="overwriteMode" from="darpan.facade.common.FacadeSupport.normalizeBool(overwrite, false)"/>
+            <set field="overwriteMode" from="overwrite != null ? overwrite : false"/>
             <set field="hasSystemEnumIdInput" from="context.containsKey('systemEnumId')"/>
             <set field="systemEnumIdValue" from="hasSystemEnumIdInput ? requestedSystemEnumIdValue : null"/>
             <set field="jsonValidationError" from="jsonschema.common.JsonSchemaUtil.validateJsonText(schemaTextValue, 'schemaText')"/>
@@ -196,7 +196,7 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="schemaDataManagerLocation" from="jsonschema.common.JsonSchemaUtil.persistSchemaText(ec, savedSchemaEntity?.schemaName, savedSchemaEntity?.schemaText)"/>
-                <set field="savedSystemEnumId" from="darpan.facade.common.FacadeSupport.normalize(savedSchemaEntity?.systemEnumId)"/>
+                <set field="savedSystemEnumId" from="((savedSchemaEntity?.systemEnumId)?.toString()?.trim())"/>
                 <set field="savedSchema" from="[jsonSchemaId: savedSchemaEntity?.jsonSchemaId, schemaName: savedSchemaEntity?.schemaName, description: savedSchemaEntity?.description, systemEnumId: savedSystemEnumId, systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, savedSystemEnumId, null, true), ownerUserId: savedSchemaEntity?.ownerUserId, companyUserGroupId: savedSchemaEntity?.companyUserGroupId, createdByUserId: savedSchemaEntity?.createdByUserId, statusId: savedSchemaEntity?.statusId, lastUpdatedStamp: savedSchemaEntity?.lastUpdatedStamp]"/>
                 <message>Saved schema ${savedSchema.schemaName}.</message>
             </if>
@@ -268,8 +268,8 @@
             <parameter name="fieldList" type="List"/>
         </out-parameters>
         <actions>
-            <set field="jsonSchemaIdValue" from="darpan.facade.common.FacadeSupport.normalize(jsonSchemaId)"/>
-            <set field="schemaNameValue" from="darpan.facade.common.FacadeSupport.normalize(schemaName)"/>
+            <set field="jsonSchemaIdValue" from="((jsonSchemaId)?.toString()?.trim())"/>
+            <set field="schemaNameValue" from="((schemaName)?.toString()?.trim())"/>
             <if condition="!jsonSchemaIdValue &amp;&amp; !schemaNameValue">
                 <message error="true">jsonSchemaId or schemaName is required</message>
             </if>
@@ -319,10 +319,10 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="schemaIdValue" from="darpan.facade.common.FacadeSupport.normalize(jsonSchemaId)"/>
-            <set field="schemaNameValue" from="darpan.facade.common.FacadeSupport.normalize(schemaName)"/>
-            <set field="descriptionValue" from="description != null ? darpan.facade.common.FacadeSupport.normalize(description) : null"/>
-            <set field="requestedSystemEnumIdValue" from="systemEnumId != null ? darpan.facade.common.FacadeSupport.normalize(systemEnumId) : null"/>
+            <set field="schemaIdValue" from="((jsonSchemaId)?.toString()?.trim())"/>
+            <set field="schemaNameValue" from="((schemaName)?.toString()?.trim())"/>
+            <set field="descriptionValue" from="description != null ? ((description)?.toString()?.trim()) : null"/>
+            <set field="requestedSystemEnumIdValue" from="systemEnumId != null ? ((systemEnumId)?.toString()?.trim()) : null"/>
             <set field="ignoreTableEnsure" from="jsonschema.common.JsonSchemaUtil.ensureJsonSchemaTable(ec)"/>
             <if condition="!(fieldList instanceof Collection) || ((Collection) fieldList).isEmpty()">
                 <message error="true">fieldList is required and cannot be empty</message>
@@ -351,7 +351,7 @@
                         <set field="ignoreSavedUpdate" from="savedSchemaEntity.update()"/>
                     </if>
                 </if>
-                <set field="savedSystemEnumId" from="darpan.facade.common.FacadeSupport.normalize(savedSchemaEntity?.systemEnumId)"/>
+                <set field="savedSystemEnumId" from="((savedSchemaEntity?.systemEnumId)?.toString()?.trim())"/>
                 <set field="savedSchema" from="[jsonSchemaId: saveResult.jsonSchemaId, schemaName: saveResult.schemaName, filename: saveResult.filename, systemEnumId: savedSystemEnumId, systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, savedSystemEnumId, null, true), companyUserGroupId: savedSchemaEntity?.companyUserGroupId, createdByUserId: savedSchemaEntity?.createdByUserId, lastUpdatedStamp: savedSchemaEntity?.lastUpdatedStamp]"/>
                 <message>Saved refined schema ${saveResult.schemaName}.</message>
             </if>
@@ -374,8 +374,8 @@
             <parameter name="deleted" type="Boolean"/>
         </out-parameters>
         <actions>
-            <set field="jsonSchemaIdValue" from="darpan.facade.common.FacadeSupport.normalize(jsonSchemaId)"/>
-            <set field="schemaNameValue" from="darpan.facade.common.FacadeSupport.normalize(schemaName)"/>
+            <set field="jsonSchemaIdValue" from="((jsonSchemaId)?.toString()?.trim())"/>
+            <set field="schemaNameValue" from="((schemaName)?.toString()?.trim())"/>
             <if condition="!jsonSchemaIdValue &amp;&amp; !schemaNameValue">
                 <message error="true">jsonSchemaId or schemaName is required</message>
             </if>

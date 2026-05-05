@@ -43,6 +43,9 @@
             <parameter name="reconciliationMappingId">
                 <description>Legacy mapping bridge input. Still supported temporarily when RuleSet inputs are not yet provided.</description>
             </parameter>
+            <parameter name="reconciliationRunResultId">
+                <description>Optional caller-created run result manifest ID to update after reconciliation completes.</description>
+            </parameter>
 
             <parameter name="hasHeader" type="Boolean" default-value="true">
                 <description>Whether CSV files have headers</description>

@@ -91,7 +91,50 @@ class TenantAccessSupportTests {
         assertTrue(scope.canViewActiveTenantData as boolean)
         assertTrue(scope.canRunActiveTenantReconciliation as boolean)
         assertTrue(scope.canEditActiveTenantData as boolean)
+        assertFalse(scope.canManageDarpanCore as boolean)
+    }
+
+    @Test
+    void buildAccessScopeGrantsDarpanCoreToDarpanAdminGroupWithoutSuperAdmin() {
+        FinderStub adminFinder = new FinderStub(oneResult: [
+                userGroupId: TenantAccessSupport.DARPAN_ADMIN_GROUP_ID,
+                userId     : "EX_DARPAN_ADMIN",
+        ])
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_DARPAN_ADMIN"),
+                entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupMember": adminFinder])
+        )
+
+        Map<String, Object> scope = TenantAccessSupport.buildAccessScope(ec)
+
+        assertFalse(scope.isSuperAdmin as boolean)
+        assertEquals("TENANT", scope.scopeType)
+        assertEquals(null, scope.customerScopeId)
+        assertEquals(null, scope.activeTenantUserGroupId)
+        assertEquals([], scope.availableTenants)
+        assertFalse(scope.canViewActiveTenantData as boolean)
+        assertFalse(scope.canRunActiveTenantReconciliation as boolean)
+        assertFalse(scope.canEditActiveTenantData as boolean)
         assertTrue(scope.canManageDarpanCore as boolean)
+    }
+
+    @Test
+    void requireDarpanAdminRejectsSuperAdminWithoutDarpanAdminGroup() {
+        MessageFacadeStub message = new MessageFacadeStub()
+        FinderStub adminFinder = new FinderStub(oneResult: [
+                userGroupId: TenantAccessSupport.DARPAN_SUPER_ADMIN_GROUP_ID,
+                userId     : "EX_ADMIN",
+        ])
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_ADMIN"),
+                entity: new EntityFacadeStub(finders: ["moqui.security.UserGroupMember": adminFinder]),
+                message: message
+        )
+
+        boolean allowed = TenantAccessSupport.requireDarpanAdmin(ec, "Darpan admin required.")
+
+        assertFalse(allowed)
+        assertEquals(["Darpan admin required."], message.errors)
     }
 
     @Test
@@ -685,6 +728,9 @@ class TenantAccessSupportTests {
         }
 
         Object one() {
+            if (oneResult instanceof Map && !conditions.every { String field, Object value -> oneResult[field] == value }) {
+                return null
+            }
             return oneResult
         }
 

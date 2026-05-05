@@ -40,7 +40,7 @@
 - Public docs checks complete: yes. `mint validate` and `mint broken-links` passed when run with the bundled Node runtime first on `PATH`.
 - Release-pack validation complete: yes. `release_preflight.py validate --version 2.1.0 --backend-repo /Users/aditipatel/sandbox/darpan-master/darpan-backend/runtime/component/darpan --backend-previous-ref v2.0.3 --backend-current-ref HEAD --ui-repo /Users/aditipatel/sandbox/darpan-master/darpan-ui --ui-previous-ref v2.0.0 --ui-current-ref HEAD` passed.
 - Live/deployed smoke coverage noted: not run in this prep-only pass.
-- Unverified items called out: yes; tag cut, GitHub releases, deploys, Docker builds requiring future tags, and live smoke remain deferred.
+- Unverified items called out: yes; tag cut, GitHub releases, deploys, tag-pinned Docker builds, and live smoke remain deferred.
 
 ## Approval
 

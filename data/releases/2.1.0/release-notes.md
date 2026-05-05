@@ -37,7 +37,7 @@ This is a prep pack only. The `v2.1.0`, `v0.2.0`, and `v0.1.0` tags, GitHub rele
 
 - Darpan backend `component.xml` and Darpan UI `package.json` / `package-lock.json` are aligned to `2.1.0`.
 - `shopify-darpan`, `darpan-hotwax`, and `netsuite-darpan` component metadata are prepared for `0.2.0`, `0.2.0`, and `0.1.0` respectively.
-- Backend Docker build refs now point at the future component release tags. These image builds should be run only after the component tags are created.
+- Backend Docker build refs default to `main` for UAT pre-cut testing. Pass tag refs explicitly after the component release tags are created.
 - Darpan inventory adjustment retrieval code is removed from the core Darpan component and remains in the NetSuite integration boundary.
 - Shopify order extraction adds the bulk-operation client path and related tests.
 - HotWax OMS REST order extraction adds pagination/window handling support.
@@ -60,7 +60,7 @@ This is a prep pack only. The `v2.1.0`, `v0.2.0`, and `v0.1.0` tags, GitHub rele
 ## Deferred items
 
 - Actual tag/release cut is deferred by request.
-- Docker builds that depend on `v2.1.0`, `v0.2.0`, and `v0.1.0` refs are deferred until those tags exist.
+- Tag-pinned Docker builds that use `v2.1.0`, `v0.2.0`, and `v0.1.0` refs are deferred until those tags exist.
 - Production deploy and live smoke validation remain separate release-cut activities.
 
 ## Rollback or fallback notes

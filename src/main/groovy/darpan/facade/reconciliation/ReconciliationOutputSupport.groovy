@@ -108,19 +108,89 @@ class ReconciliationOutputSupport {
     }
 
     static def resolveRunResultForArtifactPath(def ec, Object rawFileName) {
-        String safePath = DataManagerSupport.normalizeRelativePath(rawFileName)
-        if (!safePath?.contains("/")) return null
+        List<String> pathCandidates = dataManagerPathCandidates(ec, rawFileName)
+        if (pathCandidates.isEmpty()) return null
 
         for (String fieldName : ["resultDataManagerPath", "file1DataManagerPath", "file2DataManagerPath"]) {
-            def finder = ec?.entity?.find("darpan.reconciliation.ReconciliationRunResult")
-            if (finder == null) continue
-            def runResult = finder.condition(fieldName, safePath)
-                    .disableAuthz()
-                    .useCache(false)
-                    .one()
-            if (runResult != null) return runResult
+            for (String pathCandidate : pathCandidates) {
+                def finder = ec?.entity?.find("darpan.reconciliation.ReconciliationRunResult")
+                if (finder == null) continue
+                def runResult = finder.condition(fieldName, pathCandidate)
+                        .disableAuthz()
+                        .useCache(false)
+                        .one()
+                if (runResult != null) return runResult
+            }
         }
         return null
+    }
+
+    protected static List<String> dataManagerPathCandidates(def ec, Object rawPath) {
+        String relativePath = normalizeDataManagerRelativePath(ec, rawPath)
+        if (!relativePath?.contains("/")) return []
+
+        Set<String> candidates = [relativePath] as LinkedHashSet
+        dataManagerLocationPrefixes(ec).each { String location ->
+            candidates.add(DataManagerSupport.childLocation(location, relativePath))
+        }
+        candidates.add("/datamanager/${relativePath}".toString())
+        candidates.add("/data-manager/${relativePath}".toString())
+        return candidates as List<String>
+    }
+
+    protected static String normalizeDataManagerRelativePath(def ec, Object rawPath) {
+        String normalized = normalize(rawPath)?.replace("\\", "/")
+        if (!normalized) return null
+
+        String relativePath = DataManagerSupport.normalizeRelativePath(normalized)
+        if (relativePath) return relativePath
+
+        for (String location : dataManagerLocationPrefixes(ec)) {
+            if (normalized.startsWith(location + "/")) {
+                return DataManagerSupport.normalizeRelativePath(normalized.substring(location.length() + 1))
+            }
+        }
+
+        for (String location : ["/datamanager", "/data-manager"]) {
+            if (normalized.startsWith(location + "/")) {
+                return DataManagerSupport.normalizeRelativePath(normalized.substring(location.length() + 1))
+            }
+        }
+
+        if (normalized.contains("://")) return null
+
+        File root = DataManagerSupport.resolveDirectoryFile(ec, DataManagerSupport.resolveDataManagerLocation(ec), false)
+        if (root == null) return null
+
+        try {
+            def rootPath = root.canonicalFile.toPath()
+            def candidatePath = new File(normalized).canonicalFile.toPath()
+            if (!candidatePath.startsWith(rootPath)) return null
+            return rootPath.relativize(candidatePath).toString().replace(File.separator, "/")
+        } catch (Exception ignored) {
+            return null
+        }
+    }
+
+    protected static List<String> dataManagerLocationPrefixes(def ec) {
+        Set<String> locations = [] as LinkedHashSet
+        [
+                DataManagerSupport.resolveDataManagerLocation(ec),
+                DataManagerSupport.DEFAULT_DATA_MANAGER_LOCATION,
+                "runtime://data-manager",
+        ].each { Object rawLocation ->
+            String location = trimTrailingSlashes(normalize(rawLocation))
+            if (location) locations.add(location)
+        }
+        return locations as List<String>
+    }
+
+    protected static String trimTrailingSlashes(String rawValue) {
+        String value = normalize(rawValue)
+        while (value?.endsWith("/") && value.length() > 1) {
+            value = value.substring(0, value.length() - 1)
+        }
+        return value
     }
 
     static String resolveGeneratedOutputTenantUserGroupId(def ec, File file, Object rawFileName) {
@@ -147,7 +217,7 @@ class ReconciliationOutputSupport {
             if (resultFinder.metaClass.respondsTo(resultFinder, "disableAuthz")) resultFinder.disableAuthz()
             if (resultFinder.metaClass.respondsTo(resultFinder, "useCache", Boolean)) resultFinder.useCache(false)
             (resultFinder.list() ?: []).each { runResult ->
-                String fileName = DataManagerSupport.normalizeRelativePath(runResult.resultDataManagerPath)
+                String fileName = normalizeDataManagerRelativePath(ec, runResult.resultDataManagerPath)
                 File file = fileName ? resolveGeneratedOutputFile(ec, fileName) : null
                 if (fileName && file?.exists() && file.isFile() && seenFileNames.add(fileName)) {
                     outputFiles.add([
@@ -364,7 +434,7 @@ class ReconciliationOutputSupport {
 
     static Map<String, Object> buildGeneratedOutputSourceDetails(def ec, Object rawFileName, Map<String, Object> outputDocument) {
         def runResult = resolveRunResultForArtifactPath(ec, rawFileName)
-        if (runResult == null) return null
+        if (runResult == null) return buildGeneratedOutputSourceDetailsFromArtifactFolder(ec, rawFileName, outputDocument)
 
         Map<String, Object> metadata = outputDocument?.metadata instanceof Map ? (Map<String, Object>) outputDocument.metadata : [:]
         Map<String, Object> file1Document = parseArtifactDocument(ec, runResult.file1DataManagerPath)
@@ -378,13 +448,50 @@ class ReconciliationOutputSupport {
                 firstDateRange(file2Document?.metadata instanceof Map ? (Map<String, Object>) file2Document.metadata : [:])
 
         List<Map<String, Object>> files = [
-                sourceFileDescriptor(runResult, "file1", normalize(metadata.file1Label ?: metadata.json1Label) ?: "File 1"),
-                sourceFileDescriptor(runResult, "file2", normalize(metadata.file2Label ?: metadata.json2Label) ?: "File 2"),
+                sourceFileDescriptor(ec, runResult, "file1", normalize(metadata.file1Label ?: metadata.json1Label) ?: "File 1"),
+                sourceFileDescriptor(ec, runResult, "file2", normalize(metadata.file2Label ?: metadata.json2Label) ?: "File 2"),
         ].findAll { it != null } as List<Map<String, Object>>
 
         if (!files && !dateRange) return null
 
         boolean isApiMode = isApiSourceDetailsMode(metadata, dateRange)
+        Map<String, Object> sourceDetails = [
+                mode : isApiMode ? "API" : "FILES",
+                files: files,
+        ]
+        if (dateRange) sourceDetails.dateRange = dateRange
+        return sourceDetails
+    }
+
+    protected static Map<String, Object> buildGeneratedOutputSourceDetailsFromArtifactFolder(def ec, Object rawFileName,
+            Map<String, Object> outputDocument) {
+        String resultPath = normalizeDataManagerRelativePath(ec, rawFileName)
+        if (!resultPath?.contains("/") || !isGeneratedResultFile(resultPath)) return null
+
+        String runFolderPath = parentPath(resultPath)
+        if (!runFolderPath) return null
+
+        Map<String, Object> metadata = outputDocument?.metadata instanceof Map ? (Map<String, Object>) outputDocument.metadata : [:]
+        List<Map<String, Object>> files = [
+                sourceFileDescriptorFromRunFolder(ec, runFolderPath, "file1", normalize(metadata.file1Label ?: metadata.json1Label) ?: "File 1"),
+                sourceFileDescriptorFromRunFolder(ec, runFolderPath, "file2", normalize(metadata.file2Label ?: metadata.json2Label) ?: "File 2"),
+        ].findAll { it != null } as List<Map<String, Object>>
+
+        List<Map<String, Object>> artifactDocuments = files.collect { Map<String, Object> fileDescriptor ->
+            parseArtifactDocument(ec, fileDescriptor.filePath)
+        }
+
+        Map<String, Object> dateRange = firstDateRange(metadata)
+        if (!dateRange) {
+            dateRange = artifactDocuments.collect { Map<String, Object> artifactDocument ->
+                artifactDocument?.metadata instanceof Map ? firstDateRange((Map<String, Object>) artifactDocument.metadata) : null
+            }.find { it != null } as Map<String, Object>
+        }
+
+        if (!files && !dateRange) return null
+
+        boolean isApiMode = isApiSourceDetailsMode(metadata, dateRange) ||
+                files.any { Map<String, Object> fileDescriptor -> (fileDescriptor.filePath as String)?.contains("-api/") }
         Map<String, Object> sourceDetails = [
                 mode : isApiMode ? "API" : "FILES",
                 files: files,
@@ -399,7 +506,7 @@ class ReconciliationOutputSupport {
     }
 
     protected static Map<String, Object> parseArtifactDocument(def ec, Object rawPath) {
-        String safePath = DataManagerSupport.normalizeRelativePath(rawPath)
+        String safePath = normalizeDataManagerRelativePath(ec, rawPath)
         if (!safePath || sourceFormatForFile(safePath) != "json") return [:]
 
         File artifactFile = DataManagerSupport.resolveDataManagerFile(ec, safePath, false)
@@ -414,7 +521,7 @@ class ReconciliationOutputSupport {
 
     protected static def resolveAutomationExecutionForRunResult(def ec, def runResult) {
         String resultId = normalize(runResult?.reconciliationRunResultId)
-        String resultPath = DataManagerSupport.normalizeRelativePath(runResult?.resultDataManagerPath)
+        List<String> resultPathCandidates = dataManagerPathCandidates(ec, runResult?.resultDataManagerPath)
         def finder = ec?.entity?.find("darpan.reconciliation.ReconciliationAutomationExecution")
         if (finder == null) return null
 
@@ -426,17 +533,20 @@ class ReconciliationOutputSupport {
             if (execution != null) return execution
         }
 
-        if (!resultPath) return null
-        return ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution")
-                .condition("resultDataManagerPath", resultPath)
-                .disableAuthz()
-                .useCache(false)
-                .one()
+        for (String pathCandidate : resultPathCandidates) {
+            def execution = ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution")
+                    .condition("resultDataManagerPath", pathCandidate)
+                    .disableAuthz()
+                    .useCache(false)
+                    .one()
+            if (execution != null) return execution
+        }
+        return null
     }
 
-    protected static Map<String, Object> sourceFileDescriptor(def runResult, String side, String label) {
+    protected static Map<String, Object> sourceFileDescriptor(def ec, def runResult, String side, String label) {
         boolean file1 = side == "file1"
-        String filePath = DataManagerSupport.normalizeRelativePath(file1 ? runResult?.file1DataManagerPath : runResult?.file2DataManagerPath)
+        String filePath = normalizeDataManagerRelativePath(ec, file1 ? runResult?.file1DataManagerPath : runResult?.file2DataManagerPath)
         String fileName = normalize(file1 ? runResult?.file1Name : runResult?.file2Name) ?: fileNameFromPath(filePath)
         if (!filePath && !fileName) return null
 
@@ -452,20 +562,77 @@ class ReconciliationOutputSupport {
         ].findAll { entry -> entry.value != null && entry.value != "" } as Map<String, Object>
     }
 
+    protected static Map<String, Object> sourceFileDescriptorFromRunFolder(def ec, String runFolderPath, String side, String label) {
+        File sourceFile = resolveSourceArtifactFile(ec, runFolderPath, side)
+        if (sourceFile == null) return null
+
+        String filePath = DataManagerSupport.relativeDataManagerPath(ec, sourceFile)
+        String sourceFormat = sourceFormatForFile(sourceFile.name)
+        return [
+                side            : side,
+                label           : label,
+                fileName        : sourceFile.name,
+                filePath        : filePath,
+                downloadFileName: sourceFile.name,
+                sourceFormat    : sourceFormat,
+                canDownload     : Boolean.valueOf(filePath && sourceFormat),
+        ].findAll { entry -> entry.value != null && entry.value != "" } as Map<String, Object>
+    }
+
+    protected static File resolveSourceArtifactFile(def ec, String runFolderPath, String side) {
+        List<Map<String, Object>> directories = [
+                [path: DataManagerSupport.childLocation(runFolderPath, "${side}-api"), requireSideName: false],
+                [path: DataManagerSupport.childLocation(runFolderPath, side), requireSideName: false],
+                [path: runFolderPath, requireSideName: true],
+        ]
+
+        for (Map<String, Object> directoryEntry : directories) {
+            String directoryPath = directoryEntry.path as String
+            File directory = DataManagerSupport.resolveDataManagerFile(ec, directoryPath, false)
+            if (directory == null || !directory.exists() || !directory.isDirectory()) continue
+
+            List<File> candidates = (directory.listFiles() ?: [] as File[])
+                    .findAll { File file ->
+                        file.isFile() &&
+                                isSupportedOutputFile(file.name) &&
+                                !isGeneratedResultFile(file.name) &&
+                                (directoryEntry.requireSideName != true || file.name.toLowerCase().contains(side.toLowerCase()))
+                    }
+                    .sort { File file -> sourceArtifactSortKey(file, side) }
+            if (candidates) return candidates.first()
+        }
+        return null
+    }
+
+    protected static String sourceArtifactSortKey(File file, String side) {
+        String name = file.name.toLowerCase()
+        String sideToken = side.toLowerCase()
+        String extensionRank = name.endsWith(".json") ? "0" : name.endsWith(".csv") ? "1" : "9"
+        String sideRank = name.contains("_${sideToken}.") || name.contains("-${sideToken}.") ? "0" :
+                name.contains(sideToken) ? "1" : "2"
+        return "${extensionRank}:${sideRank}:${name}"
+    }
+
     protected static String fileNameFromPath(Object rawPath) {
         String safePath = DataManagerSupport.normalizeRelativePath(rawPath)
         if (!safePath) return ""
         return safePath.tokenize("/\\") ? safePath.tokenize("/\\").last() : safePath
     }
 
+    protected static String parentPath(Object rawPath) {
+        String safePath = normalizeDataManagerRelativePath(null, rawPath)
+        if (!safePath?.contains("/")) return ""
+        return safePath.substring(0, safePath.lastIndexOf("/"))
+    }
+
     protected static String sourceArtifactDisplayName(def ec, Object rawPath) {
-        String safePath = DataManagerSupport.normalizeRelativePath(rawPath)
+        String safePath = normalizeDataManagerRelativePath(ec, rawPath)
         def runResult = resolveRunResultForArtifactPath(ec, safePath)
         if (runResult == null) return ""
-        if (safePath == DataManagerSupport.normalizeRelativePath(runResult.file1DataManagerPath)) {
+        if (safePath == normalizeDataManagerRelativePath(ec, runResult.file1DataManagerPath)) {
             return normalize(runResult.file1Name)
         }
-        if (safePath == DataManagerSupport.normalizeRelativePath(runResult.file2DataManagerPath)) {
+        if (safePath == normalizeDataManagerRelativePath(ec, runResult.file2DataManagerPath)) {
             return normalize(runResult.file2Name)
         }
         return ""
@@ -479,6 +646,7 @@ class ReconciliationOutputSupport {
                 metadata.windowStartDate ?:
                 metadata.childWindowStart ?:
                 metadata.childWindowStartDate ?:
+                isoFromEpochMillis(metadata.windowStartEpochMillis) ?:
                 metadata.fromDate ?:
                 metadata.dateFrom
         )
@@ -488,10 +656,21 @@ class ReconciliationOutputSupport {
                 metadata.windowEndDate ?:
                 metadata.childWindowEnd ?:
                 metadata.childWindowEndDate ?:
+                isoFromEpochMillis(metadata.windowEndEpochMillis) ?:
                 metadata.toDate ?:
                 metadata.dateTo
         )
         return start || end ? [start: start, end: end].findAll { entry -> entry.value } as Map<String, Object> : null
+    }
+
+    protected static String isoFromEpochMillis(Object value) {
+        Long millis = normalizeLong(value)
+        if (millis == null) return null
+        try {
+            return new Date(millis).toInstant().toString()
+        } catch (Exception ignored) {
+            return null
+        }
     }
 
     protected static Map<String, Object> dateRangeFromExecution(def execution) {
@@ -537,7 +716,7 @@ class ReconciliationOutputSupport {
 
     static Map<String, Object> buildRunResultDescriptor(def ec, def runResult, File resultFile,
             Map<String, Object> outputDocument) {
-        String fileName = DataManagerSupport.normalizeRelativePath(runResult?.resultDataManagerPath)
+        String fileName = normalizeDataManagerRelativePath(ec, runResult?.resultDataManagerPath)
         boolean resultAvailable = fileName && resultFile?.exists() && resultFile.isFile()
         Map<String, Object> descriptor = resultAvailable ?
                 buildGeneratedOutputDescriptor(fileName, outputDocument ?: [:], resultFile.length(), new Timestamp(resultFile.lastModified())) :

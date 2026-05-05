@@ -1,12 +1,14 @@
 package darpan.facade.reconciliation
 
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertIterableEquals
+import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 class ReconciliationOutputSupportTests {
@@ -235,6 +237,93 @@ class ReconciliationOutputSupportTests {
     }
 
     @Test
+    void sourceDetailsResolveStoredRuntimeDataManagerPaths() {
+        String resultPath = "reconciliation-runs/RS_API_ORDER_SYNC/20260505-195645688/RS_API_ORDER_SYNC_result.json"
+        String hotwaxPath = "reconciliation-runs/RS_API_ORDER_SYNC/20260505-195645688/HotWax-orders-api.json"
+        String shopifyPath = "reconciliation-runs/RS_API_ORDER_SYNC/20260505-195645688/SHOPIFY-orders-api.json"
+        Map<String, Object> runResult = [
+                reconciliationRunResultId: "RUN_RESULT_API",
+                resultDataManagerPath    : "runtime://datamanager/${resultPath}",
+                file1DataManagerPath     : "runtime://datamanager/${hotwaxPath}",
+                file2DataManagerPath     : "runtime://datamanager/${shopifyPath}",
+                file1Name                : "HotWax-orders-api.json",
+                file2Name                : "SHOPIFY-orders-api.json",
+        ]
+        def ec = new Expando(
+                resource: new FakeResource(),
+                entity  : new FakeEntity([
+                        "darpan.reconciliation.ReconciliationRunResult"        : [runResult],
+                        "darpan.reconciliation.ReconciliationAutomationExecution": [],
+                ])
+        )
+
+        Map<String, Object> sourceDetails = ReconciliationOutputSupport.buildGeneratedOutputSourceDetails(ec, resultPath, [
+                metadata: [
+                        sourceMode: "api",
+                        file1Label: "HotWax",
+                        file2Label: "SHOPIFY",
+                        windowStart: "2026-04-01T00:00:00Z",
+                        windowEnd  : "2026-05-01T00:00:00Z",
+                ],
+        ])
+
+        assertEquals(runResult, ReconciliationOutputSupport.resolveRunResultForArtifactPath(ec, resultPath))
+        assertNotNull(sourceDetails)
+        assertEquals("API", sourceDetails.mode)
+        assertEquals([start: "2026-04-01T00:00:00Z", end: "2026-05-01T00:00:00Z"], sourceDetails.dateRange)
+        assertEquals(2, sourceDetails.files.size())
+        assertEquals("HotWax", sourceDetails.files[0].label)
+        assertEquals("HotWax-orders-api.json", sourceDetails.files[0].fileName)
+        assertEquals(hotwaxPath, sourceDetails.files[0].filePath)
+        assertTrue(sourceDetails.files[0].canDownload as Boolean)
+        assertEquals("SHOPIFY-orders-api.json", sourceDetails.files[1].fileName)
+        assertEquals(shopifyPath, sourceDetails.files[1].filePath)
+        assertEquals("HotWax-orders-api.json", ReconciliationOutputSupport.sourceArtifactDisplayName(ec, hotwaxPath))
+    }
+
+    @Test
+    void sourceDetailsFallbackReadsSiblingApiArtifactsWhenRunResultIsMissing(@TempDir File dataManagerRoot) {
+        String resultPath = "reconciliation-runs/RS_API_ORDER_SYNC/20260505-201713752/RS_API_ORDER_SYNC_result.json"
+        File runFolder = new File(dataManagerRoot, "reconciliation-runs/RS_API_ORDER_SYNC/20260505-201713752")
+        File file1Folder = new File(runFolder, "file1-api")
+        File file2Folder = new File(runFolder, "file2-api")
+        assertTrue(file1Folder.mkdirs())
+        assertTrue(file2Folder.mkdirs())
+        new File(file1Folder, "RS_API_ORDER_SYNC_file1.jsonl").text = "{}\n"
+        new File(file1Folder, "RS_API_ORDER_SYNC_file1.json").text =
+                '{"metadata":{"windowStartUtc":"2026-04-01T00:00:00Z","windowEndUtc":"2026-05-01T00:00:00Z"},"records":[]}'
+        new File(file2Folder, "oms-orders-1775026800000-1775113200000.json").text =
+                '{"metadata":{"windowStartEpochMillis":1775026800000,"windowEndEpochMillis":1775113200000},"records":[]}'
+        def ec = new Expando(
+                resource: new FakeResource(dataManagerRoot),
+                entity  : new FakeEntity([
+                        "darpan.reconciliation.ReconciliationRunResult": [],
+                ])
+        )
+
+        Map<String, Object> sourceDetails = ReconciliationOutputSupport.buildGeneratedOutputSourceDetails(ec, resultPath, [
+                metadata: [
+                        file1Label: "SHOPIFY",
+                        file2Label: "HotWax",
+                ],
+        ])
+
+        assertNotNull(sourceDetails)
+        assertEquals("API", sourceDetails.mode)
+        assertEquals([start: "2026-04-01T00:00:00Z", end: "2026-05-01T00:00:00Z"], sourceDetails.dateRange)
+        assertEquals(2, sourceDetails.files.size())
+        assertEquals("SHOPIFY", sourceDetails.files[0].label)
+        assertEquals("RS_API_ORDER_SYNC_file1.json", sourceDetails.files[0].fileName)
+        assertEquals(
+                "reconciliation-runs/RS_API_ORDER_SYNC/20260505-201713752/file1-api/RS_API_ORDER_SYNC_file1.json",
+                sourceDetails.files[0].filePath
+        )
+        assertEquals("HotWax", sourceDetails.files[1].label)
+        assertEquals("oms-orders-1775026800000-1775113200000.json", sourceDetails.files[1].fileName)
+        assertTrue(sourceDetails.files[1].canDownload as Boolean)
+    }
+
+    @Test
     void generatedOutputAccessFailsClosedWithoutActiveTenantForDataManagerPaths() {
         def anonymousEc = [user: [userId: null]]
 
@@ -243,5 +332,78 @@ class ReconciliationOutputSupportTests {
                 new File("OrderId_result.json"),
                 "reconciliation-runs/OrderId/20260428-120000000/OrderId_result.json"
         ))
+    }
+
+    static class FakeResource {
+        Map<String, Object> properties = [:]
+        File dataManagerRoot
+
+        FakeResource() {
+        }
+
+        FakeResource(File dataManagerRoot) {
+            this.dataManagerRoot = dataManagerRoot
+        }
+
+        Object getLocationReference(String location) {
+            if (location == "runtime://datamanager" && dataManagerRoot != null) {
+                return new FakeLocationReference(dataManagerRoot)
+            }
+            return null
+        }
+    }
+
+    static class FakeLocationReference {
+        File file
+
+        FakeLocationReference(File file) {
+            this.file = file
+        }
+
+        File getFile() {
+            return file
+        }
+    }
+
+    static class FakeEntity {
+        Map<String, List<Map<String, Object>>> rowsByEntity
+
+        FakeEntity(Map<String, List<Map<String, Object>>> rowsByEntity) {
+            this.rowsByEntity = rowsByEntity
+        }
+
+        FakeFind find(String entityName) {
+            return new FakeFind(rowsByEntity[entityName] ?: [])
+        }
+    }
+
+    static class FakeFind {
+        List<Map<String, Object>> rows
+        List<Map<String, Object>> conditions = []
+
+        FakeFind(List<Map<String, Object>> rows) {
+            this.rows = rows
+        }
+
+        FakeFind condition(String fieldName, Object value) {
+            conditions.add([fieldName: fieldName, value: value])
+            return this
+        }
+
+        FakeFind disableAuthz() {
+            return this
+        }
+
+        FakeFind useCache(boolean ignored) {
+            return this
+        }
+
+        Object one() {
+            return rows.find { Map<String, Object> row ->
+                conditions.every { Map<String, Object> condition ->
+                    row[condition.fieldName as String] == condition.value
+                }
+            }
+        }
     }
 }

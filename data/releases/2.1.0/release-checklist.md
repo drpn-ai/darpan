@@ -7,7 +7,7 @@
 - Linear bug audit: checked non-archived `Bug` label issues in project `Darpan` on `2026-05-05`.
 - Open release issues: 0
 - Scope changes documented in Linear: no release tracking issue was updated.
-- Deferred issues moved to the next release: tag/release cut, deploy, and live smoke are deferred by request.
+- Deferred issues moved to the next release: none for tag/release cut; deploy and live smoke remain separate release activities.
 
 ## Release notes
 
@@ -33,17 +33,17 @@
 ## Verification
 
 - XML well-formedness checked: yes. `xmllint --noout component.xml data/SecuritySeedData.xml data/upgrade-data.xml data/releases/2.0.3/upgrade-data.xml data/releases/2.1.0/upgrade-data.xml entity/ReconciliationEntities.xml service/facade/AuthFacadeServices.xml service/facade/JsonSchemaFacadeServices.xml service/facade/ReconciliationFacadeServices.xml service/facade/SettingsFacadeServices.xml service/jsonschema/JsonSchemaServices.xml service/reconciliation/ReconciliationGenericServices.xml service/reconciliation/ReconciliationJsonServices.xml service/reconciliation/ReconciliationMixedServices.xml service/reconciliation/ReconciliationRuleEngineServices.xml` passed.
-- Backend checks complete: targeted. `./gradlew --no-daemon :runtime:component:darpan:test --tests darpan.reconciliation.automation.AutomationEntityContractTests --tests darpan.facade.reconciliation.ShopifyCreatedAtWindowPaginatorTests --tests darpan.facade.reconciliation.ReconciliationApiWindowSupportTests --tests darpan.facade.reconciliation.ReconciliationOutputSupportTests --tests reconciliation.rule.RuleEngineSupportTests` passed, and `./gradlew --no-daemon :runtime:component:darpan:test --tests darpan.facade.reconciliation.SavedRunsFacadeSmokeTests` passed.
+- Backend checks complete: targeted. `./gradlew --no-daemon :runtime:component:darpan:test --tests darpan.reconciliation.automation.AutomationEntityContractTests --tests darpan.facade.reconciliation.ShopifyCreatedAtWindowPaginatorTests --tests darpan.facade.reconciliation.ReconciliationApiWindowSupportTests --tests darpan.facade.reconciliation.ReconciliationOutputSupportTests --tests reconciliation.rule.RuleEngineSupportTests` passed, and `./gradlew --no-daemon :runtime:component:darpan:test --tests darpan.facade.reconciliation.SavedRunsFacadeSmokeTests` passed. Production Docker refs were aligned to the release tags before the final cut.
 - Backend full-suite note: `./gradlew --no-daemon :runtime:component:darpan:test :runtime:component:shopify-darpan:test :runtime:component:darpan-hotwax:test` was attempted first and exposed existing full-suite Moqui smoke-test order isolation plus release-data test assumptions after `data/upgrade-data.xml` moved to the 2.1 scoped payload; the release-data assertions were aligned to the archived `2.0.3` upgrade payload before targeted reruns.
 - UI checks complete: yes. `npm run check` passed with 64 test files and 455 tests.
 - Integration component checks complete: partial. `./gradlew --no-daemon :runtime:component:shopify-darpan:test :runtime:component:darpan-hotwax:test` passed. `netsuite-darpan` is not registered as a Gradle subproject in this checkout; XML well-formedness passed for `component.xml`, entity, screen, facade, and inventory service XML.
 - Public docs checks complete: yes. `mint validate` and `mint broken-links` passed when run with the bundled Node runtime first on `PATH`.
 - Release-pack validation complete: yes. `release_preflight.py validate --version 2.1.0 --backend-repo /Users/aditipatel/sandbox/darpan-master/darpan-backend/runtime/component/darpan --backend-previous-ref v2.0.3 --backend-current-ref HEAD --ui-repo /Users/aditipatel/sandbox/darpan-master/darpan-ui --ui-previous-ref v2.0.0 --ui-current-ref HEAD` passed.
-- Live/deployed smoke coverage noted: not run in this prep-only pass.
-- Unverified items called out: yes; tag cut, GitHub releases, deploys, tag-pinned Docker builds, and live smoke remain deferred.
+- Live/deployed smoke coverage noted: not run in this tag-only pass.
+- Unverified items called out: yes; deploys, production image builds, and live smoke remain deferred.
 
 ## Approval
 
-- Release owner sign-off: local prep and push to `main` requested on `2026-05-05`; tag/release cut explicitly not requested.
-- Cut/tag blocked until this checklist is fully complete: yes.
-- Blocking reasons: local verification must pass and the final tag/release cut must be separately approved.
+- Release owner sign-off: local prep and push to `main` requested on `2026-05-05`; tag/release cut requested on `2026-05-05`.
+- Cut/tag blocked until this checklist is fully complete: no.
+- Blocking reasons: none after final release validation passes.

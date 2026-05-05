@@ -29,7 +29,7 @@ This file is the engineer-facing companion to the user release notes. Keep it cu
 - Reconciliation facade orchestration is consolidated around saved-run/generic execution helpers.
 - Generated output handling is more resilient for saved-run result records and manifest lookup.
 - Navigation search, tenant notification, JSON schema, and settings helper behavior are tightened around current facade contracts.
-- Docker build inputs are parameterized and default to `main` for UAT pre-cut testing.
+- Production Docker build inputs are parameterized and default to the coordinated release tags for backend and integration components.
 - Darpan public/backend docs are aligned with tenant setup, security, production settings, and service-contract changes.
 
 ### Fixed
@@ -68,11 +68,11 @@ This file is the engineer-facing companion to the user release notes. Keep it cu
 - `data/SecuritySeedData.xml` is the generic source file for the Darpan permission seed changes.
 - `data/upgrade-data.xml` and `data/releases/2.1.0/upgrade-data.xml` contain the curated upgrade records generated from `v2.0.3..HEAD`.
 - `data/releases/2.0.3/upgrade-data.xml` archives the previous current upgrade-data file.
-- Darpan Dockerfiles default component refs to `main` for UAT pre-cut testing; tag refs should be passed explicitly after the tags exist.
+- The production Dockerfile defaults component refs to `v2.1.0`, `v0.2.0`, `v0.2.0`, and `v0.1.0` for the backend, HotWax, Shopify, and NetSuite components.
 
 ## Validation and rollout notes
 
-- Roll backend, UI, Shopify, HotWax, and NetSuite component tags together for this minor candidate; after tags exist, pass the coordinated tag refs explicitly to Docker builds.
+- Roll backend, UI, Shopify, HotWax, and NetSuite component tags together for this minor candidate; production Docker builds use the coordinated tag refs by default after this cut.
 - Public docs can ship independently on `main`, but the docs content describes the same setup surface as this candidate.
 - Final compare links should be updated to tag-to-tag links after actual tags are cut.
 

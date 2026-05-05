@@ -647,6 +647,55 @@ end'''
     }
 
     @Test
+    void apiRuleSetRunFailsBeforeCompareSourceInsertWhenSourceTypeEnumIsMissing() {
+        deleteRuleSetRunEntities("RS_API_ORDER_SYNC", "CS_RS_API_ORDER_SYNC_COMPARE_SCOPE")
+        deleteAutomationSourceTypeReferences("AUT_SRC_API")
+        ec.entity.find("moqui.basic.Enumeration")
+                .condition("enumId", "AUT_SRC_API")
+                .disableAuthz()
+                .useCache(false)
+                .deleteAll()
+        upsertEntity("moqui.service.message.SystemMessageRemote", [systemMessageRemoteId: "OMS_REMOTE"], [
+                systemMessageRemoteId: "OMS_REMOTE",
+                description          : "OMS orders API",
+                sendUrl              : "https://oms.example.test/orders",
+        ])
+
+        try {
+            Map<String, Object> createResult = ec.service.sync()
+                    .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                    .parameters([
+                            runName                   : "API Order Sync",
+                            file1SystemEnumId         : "OMS",
+                            file1SourceTypeEnumId     : "AUT_SRC_API",
+                            file1SystemMessageRemoteId: "OMS_REMOTE",
+                            file1PrimaryIdExpression  : "\$.records[*].orderId",
+                            file2SystemEnumId         : "SHOPIFY",
+                            file2FileTypeEnumId       : "DftCsv",
+                            file2PrimaryIdExpression  : "order_id",
+                            rules                     : [],
+                    ])
+                    .disableAuthz()
+                    .call()
+
+            assertTrue(ec.message.hasError())
+            assertFalse((Boolean) createResult.ok)
+            assertTrue(ec.message.errors.any { String message ->
+                message.contains("file1SourceTypeEnumId 'AUT_SRC_API' is not valid")
+            })
+            assertEquals(0, ec.entity.find("darpan.rule.RuleSetCompareSource")
+                    .condition("compareScopeId", "CS_RS_API_ORDER_SYNC_COMPARE_SCOPE")
+                    .disableAuthz()
+                    .useCache(false)
+                    .list()
+                    .size())
+        } finally {
+            ec.message.clearErrors()
+            upsertAutomationSourceTypeApi()
+        }
+    }
+
+    @Test
     void ruleSetRunSelfHealsMissingShopifyOrdersRemote() {
         upsertEntity("moqui.basic.EnumerationType", [enumTypeId: "AutomationSourceType"], [
                 enumTypeId : "AutomationSourceType",
@@ -1236,6 +1285,33 @@ end'''
                 .disableAuthz()
                 .useCache(false)
                 .deleteAll()
+    }
+
+    private void deleteAutomationSourceTypeReferences(String sourceTypeEnumId) {
+        ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition("sourceTypeEnumId", sourceTypeEnumId)
+                .disableAuthz()
+                .useCache(false)
+                .deleteAll()
+        ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource")
+                .condition("sourceTypeEnumId", sourceTypeEnumId)
+                .disableAuthz()
+                .useCache(false)
+                .deleteAll()
+    }
+
+    private void upsertAutomationSourceTypeApi() {
+        upsertEntity("moqui.basic.EnumerationType", [enumTypeId: "AutomationSourceType"], [
+                enumTypeId : "AutomationSourceType",
+                description: "Automation source type",
+        ])
+        upsertEntity("moqui.basic.Enumeration", [enumId: "AUT_SRC_API"], [
+                enumId    : "AUT_SRC_API",
+                enumTypeId: "AutomationSourceType",
+                enumCode  : "API",
+                description: "API source",
+                sequenceNum: 1,
+        ])
     }
 
     private void seedOmsRestSourceConfig(String tenantId, String configId) {

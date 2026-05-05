@@ -188,6 +188,12 @@
                 <if condition="!file2UsesApiSource &amp;&amp; file2FileType == null">
                     <message error="true">file2FileTypeEnumId '${file2FileTypeEnumIdValue}' is not valid</message>
                 </if>
+                <if condition="file1UsesApiSource &amp;&amp; file1SourceType == null">
+                    <message error="true">file1SourceTypeEnumId '${file1SourceTypeEnumIdValue}' is not valid. Load Darpan upgrade data before creating API-backed runs.</message>
+                </if>
+                <if condition="file2UsesApiSource &amp;&amp; file2SourceType == null">
+                    <message error="true">file2SourceTypeEnumId '${file2SourceTypeEnumIdValue}' is not valid. Load Darpan upgrade data before creating API-backed runs.</message>
+                </if>
                 <if condition="file1SystemMessageRemoteIdValue &amp;&amp; file1SystemMessageRemote == null &amp;&amp; !darpan.facade.reconciliation.ReconciliationSavedRunSupport.isVirtualApiOrdersRemote(file1SystemEnumIdValue, file1SystemMessageRemoteIdValue, file1SourceConfigTypeValue)">
                     <message error="true">file1SystemMessageRemoteId '${file1SystemMessageRemoteIdValue}' was not found</message>
                 </if>
@@ -726,6 +732,12 @@
                 </if>
                 <if condition="!file2UsesApiSource &amp;&amp; file2FileType == null">
                     <message error="true">file2FileTypeEnumId '${file2FileTypeEnumIdValue}' is not valid</message>
+                </if>
+                <if condition="file1UsesApiSource &amp;&amp; file1SourceType == null">
+                    <message error="true">file1SourceTypeEnumId '${file1SourceTypeEnumIdValue}' is not valid. Load Darpan upgrade data before saving API-backed runs.</message>
+                </if>
+                <if condition="file2UsesApiSource &amp;&amp; file2SourceType == null">
+                    <message error="true">file2SourceTypeEnumId '${file2SourceTypeEnumIdValue}' is not valid. Load Darpan upgrade data before saving API-backed runs.</message>
                 </if>
                 <if condition="file1SystemMessageRemoteIdValue &amp;&amp; file1SystemMessageRemote == null &amp;&amp; !darpan.facade.reconciliation.ReconciliationSavedRunSupport.isVirtualApiOrdersRemote(file1SystemEnumIdValue, file1SystemMessageRemoteIdValue, file1SourceConfigTypeValue)">
                     <message error="true">file1SystemMessageRemoteId '${file1SystemMessageRemoteIdValue}' was not found</message>

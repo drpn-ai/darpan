@@ -1,11 +1,6 @@
-FROM eclipse-temurin:17-jdk
+FROM 600735190428.dkr.ecr.us-east-1.amazonaws.com/maarg-base-os:OS-22.04-latest
 ARG GIT_USERNAME=
 ARG GIT_PASSWORD=
-
-RUN apt-get update \
-    && apt-get install -y git screen \
-    && rm -rf /var/lib/apt/lists/*
-
 
 RUN echo "machine github.com" > /root/.netrc
 RUN echo "login $GIT_USERNAME" >> /root/.netrc

@@ -43,7 +43,7 @@ class RuleSetCompareScopeAdapter {
         def compareScope = ec.entity.find("darpan.rule.RuleSetCompareScope")
                 .condition("compareScopeId", compareScopeId)
                 .disableAuthz()
-                .useCache(true)
+                .useCache(false)
                 .one()
         if (!compareScope) {
             throw new IllegalArgumentException("Compare scope ${compareScopeId} was not found")
@@ -54,7 +54,7 @@ class RuleSetCompareScopeAdapter {
             throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' belongs to RuleSet ${scopeRuleSetId}, not ${ruleSetId}")
         }
 
-        List sources = compareScope.findRelated("sources", null, ["fileSide"], true, false) ?: []
+        List sources = compareScope.findRelated("sources", null, ["fileSide"], false, false) ?: []
         if (!sources) {
             throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' has no source definitions")
         }

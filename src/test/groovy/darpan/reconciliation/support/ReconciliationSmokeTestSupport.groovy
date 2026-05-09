@@ -8,6 +8,8 @@ import org.moqui.impl.context.ExecutionContextFactoryImpl
 
 import javax.naming.NameNotFoundException
 import java.sql.Timestamp
+import java.sql.Connection
+import java.sql.PreparedStatement
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -48,6 +50,9 @@ class ReconciliationSmokeTestSupport {
         ))
 
         ExecutionContext ec = Moqui.getExecutionContext()
+        if (!ec.user.internalLoginUser("john.doe")) {
+            assert ec.user.loginAnonymousIfNoUser()
+        }
         ec.artifactExecution.disableAuthz()
         ec.artifactExecution.push(
                 "smokeTests",
@@ -56,9 +61,6 @@ class ReconciliationSmokeTestSupport {
                 false
         )
         ec.artifactExecution.setAnonymousAuthorizedAll()
-        if (!ec.user.internalLoginUser("john.doe")) {
-            assert ec.user.loginAnonymousIfNoUser()
-        }
         ec.message.clearErrors()
         ec.resource.properties["darpan.data.manager.location"] = "runtime://tmp/test-data-manager/${safeTestToken}"
         return ec
@@ -583,9 +585,7 @@ class ReconciliationSmokeTestSupport {
                     .useCache(false)
                     .one()
             if (existing == null) {
-                ec.entity.makeValue(entityName)
-                        .setAll(fields)
-                        .create()
+                insertEntityDirect(ec, entityName, fields)
             }
         } finally {
             ec.artifactExecution.pop(aei)
@@ -609,13 +609,46 @@ class ReconciliationSmokeTestSupport {
                     .useCache(false)
                     .one()
             if (existing == null) {
-                ec.entity.makeValue(entityName)
-                        .setAll(fields)
-                        .create()
+                insertEntityDirect(ec, entityName, fields)
             }
         } finally {
             ec.artifactExecution.pop(aei)
             if (!alreadyDisabled) ec.artifactExecution.enableAuthz()
+        }
+    }
+
+    static void insertEntityDirect(ExecutionContext ec, String entityName, Map<String, Object> fields) {
+        def entityDefinition = ec.entity.getEntityDefinition(entityName)
+        Map<String, Object> insertFields = new LinkedHashMap<>(fields)
+        if (entityDefinition.isField("lastUpdatedStamp") && !insertFields.containsKey("lastUpdatedStamp")) {
+            insertFields.lastUpdatedStamp = ec.user.nowTimestamp ?: new Timestamp(System.currentTimeMillis())
+        }
+
+        List<String> fieldNames = insertFields.keySet() as List<String>
+        String groupName = ec.entity.getEntityGroupName(entityName)
+        String columns = fieldNames.collect { String fieldName -> entityDefinition.getColumnName(fieldName) }.join(", ")
+        String keyColumns = entityDefinition.getPkFieldNames()
+                .collect { String fieldName -> entityDefinition.getColumnName(fieldName) }
+                .join(", ")
+        String placeholders = fieldNames.collect { "?" }.join(", ")
+        Connection connection = null
+        PreparedStatement statement = null
+        try {
+            connection = ec.entity.getConnection(groupName)
+            statement = connection.prepareStatement("MERGE INTO ${entityDefinition.getFullTableName()} (${columns}) KEY(${keyColumns}) VALUES (${placeholders})")
+            fieldNames.eachWithIndex { String fieldName, int index ->
+                entityDefinition.getFieldInfo(fieldName).setPreparedStatementValue(
+                        statement,
+                        index + 1,
+                        insertFields[fieldName],
+                        entityDefinition,
+                        ec.entity
+                )
+            }
+            statement.executeUpdate()
+        } finally {
+            statement?.close()
+            connection?.close()
         }
     }
 }

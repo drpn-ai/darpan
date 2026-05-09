@@ -395,8 +395,7 @@ class SettingsFacadeTenantFilteringSmokeTests {
                     .condition("userId", TEST_USER_ID)
                     .disableAuthz()
                     .useCache(false)
-                    .list()
-                    .each { it.delete() }
+                    .deleteAll()
         } finally {
             ec.artifactExecution.pop(aei)
             if (!alreadyDisabled) ec.artifactExecution.enableAuthz()
@@ -571,11 +570,7 @@ class SettingsFacadeTenantFilteringSmokeTests {
                     .one()
             if (existing != null) return
 
-            ec.service.sync()
-                    .name("store#${entityName}")
-                    .parameters(fields)
-                    .disableAuthz()
-                    .call()
+            ReconciliationSmokeTestSupport.insertEntityDirect(ec, entityName, fields)
         } finally {
             ec.artifactExecution.pop(aei)
             if (!alreadyDisabled) ec.artifactExecution.enableAuthz()

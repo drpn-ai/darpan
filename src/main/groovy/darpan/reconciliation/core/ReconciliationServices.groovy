@@ -52,6 +52,10 @@ class ReconciliationServices {
             .add("compare_id", DataTypes.StringType, true)
             .add("data", DataTypes.createMapType(DataTypes.StringType, DataTypes.StringType), true)
 
+    static String normalize(Object value) {
+        return darpan.common.ValueSupport.normalize(value)
+    }
+
     /**
      * Core Spark-based reconciliation of two ID DataFrames.
      */

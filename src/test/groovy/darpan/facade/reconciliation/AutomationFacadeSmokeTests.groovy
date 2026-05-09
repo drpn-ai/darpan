@@ -681,8 +681,7 @@ class AutomationFacadeSmokeTests {
                     .condition("userId", TEST_USER_ID)
                     .disableAuthz()
                     .useCache(false)
-                    .list()
-                    .each { it.delete() }
+                    .deleteAll()
         } finally {
             ec.artifactExecution.pop(aei)
             if (!alreadyDisabled) ec.artifactExecution.enableAuthz()
@@ -716,11 +715,7 @@ class AutomationFacadeSmokeTests {
                 .one()
         if (existing != null) return
 
-        ec.service.sync()
-                .name("store#${entityName}")
-                .parameters(fields)
-                .disableAuthz()
-                .call()
+        ReconciliationSmokeTestSupport.insertEntityDirect(ec, entityName, fields)
     }
 
     private void upsertEntityValue(String entityName, Map<String, Object> pkFields, Map<String, Object> fields) {
@@ -731,8 +726,6 @@ class AutomationFacadeSmokeTests {
                 .one()
         if (existing != null) return
 
-        ec.entity.makeValue(entityName)
-                .setAll(fields)
-                .create()
+        ReconciliationSmokeTestSupport.insertEntityDirect(ec, entityName, fields)
     }
 }

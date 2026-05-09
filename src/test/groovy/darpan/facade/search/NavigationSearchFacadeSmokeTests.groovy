@@ -267,11 +267,7 @@ class NavigationSearchFacadeSmokeTests {
                     .one()
             if (existing != null) return
 
-            ec.service.sync()
-                    .name("store#${entityName}")
-                    .parameters(fields)
-                    .disableAuthz()
-                    .call()
+            ReconciliationSmokeTestSupport.insertEntityDirect(ec, entityName, fields)
         } finally {
             ec.artifactExecution.pop(aei)
             if (!alreadyDisabled) ec.artifactExecution.enableAuthz()

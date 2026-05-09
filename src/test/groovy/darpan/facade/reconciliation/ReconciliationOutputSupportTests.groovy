@@ -464,6 +464,11 @@ class ReconciliationOutputSupportTests {
             return this
         }
 
+        FakeFind condition(String fieldName, String operator, Object value) {
+            conditions.add([fieldName: fieldName, operator: operator, value: value])
+            return this
+        }
+
         FakeFind disableAuthz() {
             return this
         }
@@ -475,7 +480,9 @@ class ReconciliationOutputSupportTests {
         Object one() {
             return rows.find { Map<String, Object> row ->
                 conditions.every { Map<String, Object> condition ->
-                    row[condition.fieldName as String] == condition.value
+                    condition.operator == "in" ?
+                            ((Collection) condition.value).any { candidate -> candidate?.toString() == row[condition.fieldName as String]?.toString() } :
+                            row[condition.fieldName as String] == condition.value
                 }
             }
         }
@@ -483,7 +490,9 @@ class ReconciliationOutputSupportTests {
         List<Map<String, Object>> list() {
             return rows.findAll { Map<String, Object> row ->
                 conditions.every { Map<String, Object> condition ->
-                    row[condition.fieldName as String] == condition.value
+                    condition.operator == "in" ?
+                            ((Collection) condition.value).any { candidate -> candidate?.toString() == row[condition.fieldName as String]?.toString() } :
+                            row[condition.fieldName as String] == condition.value
                 }
             }
         }

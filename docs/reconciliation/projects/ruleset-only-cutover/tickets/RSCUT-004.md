@@ -27,7 +27,7 @@ Execute RuleSet DRL rules only against matched object pairs and append rule-gene
 
 ## Files to Touch
 - `service/reconciliation/ReconciliationRuleEngineServices.xml`
-- `src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy`
+- `src/main/groovy/darpan/reconciliation/rule/RuleEngineSupport.groovy`
 - `src/main/groovy/darpan/reconciliation/core/ReconciliationServices.groovy`
 - `docs/reconciliation/rule-engine-services.md`
 

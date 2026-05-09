@@ -8,7 +8,7 @@ Production rule-set CRUD, compilation, and execution behavior used by reconcilia
 
 - Route: `runtime/component/darpan/screen/Reconciliation/RuleEngine/RuleSets.xml`
 - Services: `runtime/component/darpan/service/reconciliation/ReconciliationRuleEngineServices.xml`
-- Scripts: `runtime/component/darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy`, `runtime/component/darpan/src/main/groovy/darpan/reconciliation/rule/RuleConditionParser.groovy`
+- Groovy helpers: `runtime/component/darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineSupport.groovy`, `runtime/component/darpan/src/main/groovy/darpan/reconciliation/rule/RuleConditionParser.groovy`
 
 ## Operational Notes
 

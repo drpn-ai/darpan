@@ -96,7 +96,7 @@
             fileTypeEnumId="DftJson"
             recordRootExpression="data.orders.edges"
             primaryIdExpression="node.id"
-            idValueNormalizer="TRAILING_DIGITS"/>
+            idValueNormalizer="SHOPIFY_GID_TAIL"/>
 
     <darpan.rule.RuleSetCompareScope
             compareScopeId="DARPAN_TEST_PRODUCT_JSON_SCOPE"

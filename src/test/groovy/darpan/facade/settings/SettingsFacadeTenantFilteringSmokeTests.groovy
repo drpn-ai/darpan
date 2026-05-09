@@ -256,6 +256,22 @@ class SettingsFacadeTenantFilteringSmokeTests {
                 notificationRows.first().googleChatWebhookUrl)
     }
 
+    @Test
+    void tenantNotificationSettingsRejectInvalidWebhookWithoutOverwritingExistingSetting() {
+        ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, GORJANA)
+        String existingWebhookUrl = findOne("darpan.reconciliation.TenantNotificationSetting", [companyUserGroupId: GORJANA]).googleChatWebhookUrl
+
+        Map<String, Object> saveResult = saveFacade("facade.SettingsFacadeServices.save#TenantNotificationSettings", [
+                googleChatWebhookUrl: "http://chat.googleapis.com/v1/spaces/GORJANA_BAD/messages?key=bad&token=bad",
+                isActive            : "Y",
+        ])
+
+        assertFalse((Boolean) saveResult.ok)
+        assertTrue((saveResult.errors ?: []).join(" ").contains("Google Chat webhook URL must use https."))
+        assertEquals(existingWebhookUrl,
+                findOne("darpan.reconciliation.TenantNotificationSetting", [companyUserGroupId: GORJANA]).googleChatWebhookUrl)
+    }
+
     private void assertTenantVisibleRows(String tenantId, String expectedSftpId, String expectedAuthId, String expectedEndpointId) {
         ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, tenantId)
         ec.message.clearErrors()

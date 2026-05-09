@@ -211,7 +211,7 @@ class SftpAutomationSupportTests {
     }
 
     private static FakeEc fakeEc() {
-        return new FakeEc(
+        FakeEc ec = new FakeEc(
                 entity: new FakeEntityFacade(),
                 service: new FakeServiceFacade(),
                 transaction: new FakeTransactionFacade(),
@@ -219,6 +219,8 @@ class SftpAutomationSupportTests {
                 user: new Expando(nowTimestamp: NOW, userId: "tester"),
                 resource: new Expando(properties: [:]),
         )
+        ec.service.ec = ec
+        return ec
     }
 
     private static void seedSftpAutomation(FakeEc ec) {
@@ -255,6 +257,32 @@ class SftpAutomationSupportTests {
                 remotePathTemplate: "/incoming/netsuite",
                 fileNamePattern   : "*.csv",
         ])
+    }
+
+    private static Map<String, Object> buildNotificationPayload(FakeEc ec, Map<String, Object> params) {
+        String tenantLabel = ((params.companyLabel)?.toString()?.trim()) ?:
+                darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, params.companyUserGroupId)
+        String runName = ((params.runName)?.toString()?.trim()) ?:
+                ((params.savedRunId)?.toString()?.trim()) ?:
+                ((params.reconciliationRunId)?.toString()?.trim()) ?:
+                "reconciliation run"
+        String resultId = ((params.reconciliationRunResultId)?.toString()?.trim())
+        String resultUrl = TenantNotificationSupport.buildRunResultUrl(ec, params)
+        String file1SystemLabel = TenantNotificationSupport.resolveFileSystemLabel(ec, params, "file1", null)
+        String file2SystemLabel = TenantNotificationSupport.resolveFileSystemLabel(ec, params, "file2", null)
+        Closure<String> displayCount = { Object value ->
+            value == null ? "0" :
+                    value instanceof Number ? ((Number) value).intValue().toString() :
+                            (((value)?.toString()?.trim()) ?: "0")
+        }
+        List<String> lines = ["Darpan run completed: ${runName}".toString()]
+        if (tenantLabel) lines << "Tenant: ${tenantLabel}".toString()
+        if (resultId) lines << "Result ID: ${resultId}".toString()
+        if (resultUrl) lines << "Run result: <${resultUrl}|Open run result>".toString()
+        lines << "Differences: ${displayCount(params.differenceCount)}".toString()
+        lines << "Only in ${file1SystemLabel ?: "File 1"}: ${displayCount(params.onlyInFile1Count)}".toString()
+        lines << "Only in ${file2SystemLabel ?: "File 2"}: ${displayCount(params.onlyInFile2Count)}".toString()
+        return [payload: [text: lines.join("\n")]]
     }
 
     private static class FakeEc {
@@ -356,6 +384,7 @@ class SftpAutomationSupportTests {
     private static class FakeServiceFacade {
         Map<String, Object> nextResult = [:]
         List<FakeServiceCall> calls = []
+        FakeEc ec
 
         FakeServiceCall sync() {
             return new FakeServiceCall(service: this)
@@ -381,6 +410,9 @@ class SftpAutomationSupportTests {
 
         Map<String, Object> call() {
             service.calls << this
+            if (serviceName == "reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload") {
+                return buildNotificationPayload(service.ec, params)
+            }
             return service.nextResult
         }
     }

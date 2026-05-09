@@ -2,6 +2,9 @@ package darpan.facade.reconciliation
 
 import java.sql.Timestamp
 
+import static darpan.common.ValueSupport.boundedInt
+import static darpan.common.ValueSupport.normalize
+
 class ShopifyCreatedAtWindowPaginator {
     static final String DATE_FIELD = "created_at"
     static final int DEFAULT_MAX_PAGES_PER_WINDOW = 20
@@ -9,9 +12,9 @@ class ShopifyCreatedAtWindowPaginator {
 
     static Map<String, Object> collect(Timestamp windowStartDate, Timestamp windowEndDate, Map options = [:],
             Closure<Map<String, Object>> pageFetcher) {
-        String field = normalizeText(options.field) ?: DATE_FIELD
-        int maxPagesPerWindow = Math.max(1, normalizeInt(options.maxPagesPerWindow, DEFAULT_MAX_PAGES_PER_WINDOW))
-        int maxWindows = Math.max(1, normalizeInt(options.maxWindows, DEFAULT_MAX_WINDOWS))
+        String field = normalize(options.field) ?: DATE_FIELD
+        int maxPagesPerWindow = boundedInt(options.maxPagesPerWindow, DEFAULT_MAX_PAGES_PER_WINDOW, 1, Integer.MAX_VALUE)
+        int maxWindows = boundedInt(options.maxWindows, DEFAULT_MAX_WINDOWS, 1, Integer.MAX_VALUE)
         Closure<String> formatWindow = options.formatWindow instanceof Closure ?
                 (Closure<String>) options.formatWindow :
                 { Timestamp timestamp -> timestamp.toInstant().toString() }
@@ -127,7 +130,7 @@ class ShopifyCreatedAtWindowPaginator {
             if (!hasMorePages) {
                 return [records: records, searchQueries: [searchQuery], pageCount: pageCount, exhausted: false, errors: []]
             }
-            afterCursor = normalizeText(pageResult.afterCursor ?: pageResult.endCursor)
+            afterCursor = normalize(pageResult.afterCursor ?: pageResult.endCursor)
             if (!afterCursor) {
                 return [records: records, searchQueries: [searchQuery], pageCount: pageCount, exhausted: false, errors: []]
             }
@@ -167,12 +170,8 @@ class ShopifyCreatedAtWindowPaginator {
     private static List<String> normalizeErrors(Object rawErrors) {
         if (!(rawErrors instanceof Collection)) return []
         return ((Collection) rawErrors)
-                .collect { Object error -> normalizeText(error) }
+                .collect { Object error -> normalize(error) }
                 .findAll { String error -> error }
-    }
-
-    private static String normalizeText(Object value) {
-        return value == null ? null : value.toString().trim()
     }
 
     private static String renderSearchDateTime(String value) {
@@ -180,15 +179,4 @@ class ShopifyCreatedAtWindowPaginator {
         return "'${value.replace("'", "\\'")}'"
     }
 
-    private static int normalizeInt(Object value, int defaultValue) {
-        if (value == null) return defaultValue
-        if (value instanceof Number) return ((Number) value).intValue()
-        String text = normalizeText(value)
-        if (!text) return defaultValue
-        try {
-            return Integer.parseInt(text)
-        } catch (Exception ignored) {
-            return defaultValue
-        }
-    }
 }

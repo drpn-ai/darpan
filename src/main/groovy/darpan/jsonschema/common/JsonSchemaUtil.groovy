@@ -1,15 +1,11 @@
 package jsonschema.common
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.databind.JsonNode
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
 import org.moqui.context.ExecutionContext
-import org.slf4j.Logger
-import org.slf4j.LoggerFactory
 
 class JsonSchemaUtil {
-    private static final Logger logger = LoggerFactory.getLogger(JsonSchemaUtil.class)
     private static final ObjectMapper mapper = new ObjectMapper()
     private static final String JSON_SCHEMA_ENTITY_NAME = "darpan.reconciliation.JsonSchema"
     private static final String SYSTEM_ENUM_TYPE_ID = "DarpanSystemSource"
@@ -108,12 +104,6 @@ class JsonSchemaUtil {
             }
         }
         return location
-    }
-
-    static JsonNode loadSchemaNode(ExecutionContext ec, Object id, Object name) {
-        String text = loadSchemaText(ec, id, name)
-        if (!text) return null
-        return mapper.readTree(text)
     }
 
     static boolean ensureJsonSchemaTable(def ec) {

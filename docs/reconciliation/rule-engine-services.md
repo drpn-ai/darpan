@@ -6,24 +6,22 @@ This document describes the production RuleSet/Rule service contracts used by re
 
 - `runtime/component/darpan/service/reconciliation/ReconciliationRuleEngineServices.xml`
 - XML-backed orchestration:
-  - `save#RuleSet`
-  - `delete#Rule`
-  - `delete#RuleSet`
-  - `clear#RuleSetCache`
-- Script-backed rule engine core:
-  - `runtime/component/darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy`
   - `compile#RuleSet`
   - `execute#RuleSet`
   - `execute#RuleSetMatchedPairs`
+  - `save#RuleSet`
   - `save#Rule`
-- Shared helper for cache and ID orchestration:
+  - `delete#Rule`
+  - `delete#RuleSet`
+  - `clear#RuleSetCache`
+- Shared helper for generated identifier tokens, cache, DRL, and Drools/KIE runtime logic:
   - `runtime/component/darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineSupport.groovy`
 
 ## Service contracts
 
 - `reconciliation.ReconciliationRuleEngineServices.compile#RuleSet`
   - Inputs: `ruleSetId` (required), `useCache` (default `false`), `forceRebuild` (default `true`)
-  - Outputs: `ruleCount`, `drlText`, `warnings`, `error`
+  - Outputs: `kieContainer`, `ruleCount`, `drlText`, `warnings`, `error`
 - `reconciliation.ReconciliationRuleEngineServices.execute#RuleSet`
   - Inputs: `ruleSetId`, `dataList` (`List`), `returnAllFacts` (default `false`)
   - Outputs: `results`, `matchedResults`, `firedRuleCount`, `ruleCount`, `warnings`, `error`
@@ -32,12 +30,12 @@ This document describes the production RuleSet/Rule service contracts used by re
   - Outputs: `diffResults`, `matchedResults`, `firedRuleCount`, `ruleCount`, `warnings`, `error`
 - `reconciliation.ReconciliationRuleEngineServices.save#RuleSet`
   - Creates or updates RuleSet metadata.
-  - `ruleSetId` is optional; if blank, an ID is generated from `ruleSetName`.
+  - `ruleSetId` is optional; when blank, Moqui entity-auto create generates the primary ID.
 - `reconciliation.ReconciliationRuleEngineServices.save#Rule`
   - Creates or updates a Rule with validation.
   - Requires `ruleSetId`.
   - Requires at least one of `ruleText` or `ruleLogic`.
-  - `ruleId` is optional; when blank, an ID is generated.
+  - `ruleId` is optional; when blank, Moqui entity-auto create generates the primary ID.
 - `reconciliation.ReconciliationRuleEngineServices.delete#Rule`
   - Deletes a Rule and invalidates the related RuleSet cache.
 - `reconciliation.ReconciliationRuleEngineServices.delete#RuleSet`
@@ -53,7 +51,10 @@ This document describes the production RuleSet/Rule service contracts used by re
   - `save#Rule`
   - `delete#Rule`
   - `delete#RuleSet`
-- Cache invalidation is tenant-scoped through `RuleEngineSupport`, so XML-backed CRUD and script-backed compile/execute share the same cache entries.
+- Cache invalidation is tenant-scoped through `RuleEngineSupport`, so XML-backed CRUD, compile, and execution services share the same Groovy-managed cache entries.
+- `compile#RuleSet`, `execute#RuleSet`, and `execute#RuleSetMatchedPairs` stay XML-backed at the service layer: XML handles parameter/default normalization, empty-input branching, output assignment, and success messages.
+- RuleSet/Rule CRUD keeps ID validation, enabled/boolean coercion, sequence selection, entity store/delete, cache invalidation calls, and optional compile orchestration in XML actions.
+- `RuleEngineSupport` retains the practical Groovy boundary because it manages generated identifier tokens, DRL generation, KIE container/session lifecycle, tenant-scoped cache entries, fact copying, and matched-pair diff extraction.
 - Rule parsing supports user-friendly condition text (for example: `status is Pending`).
 - Field-comparison rules may store expression JSON with structured `preActions`, currently entries like `{ "fieldSide": "file1", "action": "STRING_TO_INT" }` or `{ "fieldSide": "file2", "action": "STRING_TO_NUMBER" }`, so generated DRL can normalize selected field values before applying the operator.
 - Generated rules add `_matchedRuleIds` to matched fact maps.

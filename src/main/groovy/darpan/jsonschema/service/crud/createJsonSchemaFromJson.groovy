@@ -4,50 +4,16 @@ import com.fasterxml.jackson.databind.ObjectMapper
 
 import jsonschema.common.JsonSchemaUtil
 import org.slf4j.LoggerFactory
-// --------------------------------------------------------------------------------
-// Unique naming logic inlined
-// --------------------------------------------------------------------------------
-def generateUniqueSchemaName = { String baseName, boolean overwrite ->
-    if (!baseName) return null
-    if (overwrite) return baseName
 
-    String name = baseName
-    def existing = ec.entity.find("darpan.reconciliation.JsonSchema")
-        .condition("schemaName", name)
-        .one()
-    
-    if (existing) {
-        String nameRoot = baseName
-        int suffix = 1
-        while (existing != null) {
-            name = "${nameRoot} (${suffix})"
-            existing = ec.entity.find("darpan.reconciliation.JsonSchema")
-                .condition("schemaName", name)
-                .one()
-            suffix++
-        }
-    }
-    return name
-}
-
-
+import static darpan.common.ValueSupport.normalizeBlankToNull
+import static darpan.common.ValueSupport.normalizeBool
+import static darpan.common.ValueSupport.sanitizeFileToken
 
 def logger = LoggerFactory.getLogger("darpan.jsonschema.CreateFromJson")
 
-def normalizeBool = { Object val, boolean defaultValue ->
-    if (val == null) return defaultValue
-    return val.toString().trim().equalsIgnoreCase("true")
-}
-
-def normalizeString = { Object val ->
-    def text = val?.toString()?.trim()
-    return text ?: null
-}
-
 def normalizeBaseName = { Object rawName ->
-    def name = normalizeString(rawName)
+    def name = sanitizeFileToken(rawName, null)
     if (!name) return null
-    name = name.replaceAll("[^A-Za-z0-9._-]", "_")
     name = name.replaceAll("(?i)\\.schema\\.json\$", "")
     name = name.replaceAll("(?i)\\.json\$", "")
     name = name.replaceAll("^\\.+", "")
@@ -223,7 +189,7 @@ if (jsonData == null) {
 
 Map schemaMap = buildSchema(jsonData, strictMode, 0)
 schemaMap["\$schema"] = "http://json-schema.org/draft-07/schema#"
-def schemaTitle = normalizeString(schemaName)
+def schemaTitle = normalizeBlankToNull(schemaName)
 // Serialize map to JSON string
 import groovy.json.JsonOutput
 String schemaJson = JsonOutput.toJson(schemaMap)
@@ -232,12 +198,12 @@ if (schemaTitle) schemaMap.title = schemaTitle
 
 // Use provided schemaName directly, fallback to json filename
 String nameToSave = schemaTitle ?: jsonFile.getName()
-String descriptionToSave = normalizeString(description) ?: schemaTitle ?: nameToSave
+String descriptionToSave = normalizeBlankToNull(description) ?: schemaTitle ?: nameToSave
 
 // --------------------------------------------------------------------------------
 // Unique naming logic centralized in JsonSchemaUtil
 // --------------------------------------------------------------------------------
-String finalName = generateUniqueSchemaName(nameToSave, overwriteMode)
+String finalName = JsonSchemaUtil.generateUniqueSchemaName(ec, nameToSave, overwriteMode)
 
 // Re-fetch to confirm if we are updating or creating
 existingSchema = ec.entity.find("darpan.reconciliation.JsonSchema")

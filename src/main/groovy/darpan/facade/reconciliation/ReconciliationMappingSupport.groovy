@@ -5,6 +5,10 @@ import darpan.facade.common.TenantAccessSupport
 import groovy.json.JsonSlurper
 import jsonschema.common.JsonSchemaUtil
 
+import static darpan.common.ValueSupport.boundedInt
+import static darpan.common.ValueSupport.normalize
+import static darpan.common.ValueSupport.normalizeLower
+
 class ReconciliationMappingSupport {
 
     static boolean ensureMappingTables(def ec) {
@@ -36,9 +40,18 @@ class ReconciliationMappingSupport {
     }
 
     static List<Map<String, Object>> buildEditableMappingMembers(def ec, List mappingMembers) {
-        return (mappingMembers ?: []).collect { member ->
-            String schemaName = ((member?.schemaFileName)?.toString()?.trim())
-            def schema = resolveSavedSchemaRecord(ec, schemaName, false)
+        List members = mappingMembers ?: []
+
+        // Pre-fetch all distinct schemas in a single pass so members that share the same
+        // schema name don't each trigger a separate DB round-trip.
+        Set<String> schemaNames = members.collect { normalize(it?.schemaFileName) }.findAll { it } as LinkedHashSet
+        Map<String, Object> schemaByName = schemaNames.collectEntries { String name ->
+            [name, resolveSavedSchemaRecord(ec, name, false)]
+        }
+
+        return members.collect { member ->
+            String schemaName = normalize(member?.schemaFileName)
+            def schema = schemaName ? schemaByName[schemaName] : null
             if (schema != null) {
                 TenantAccessSupport.requireTenantRecordAccess(
                         ec,
@@ -66,11 +79,9 @@ class ReconciliationMappingSupport {
     }
 
     static Map<String, Object> listMappings(def ec, Object query, Object pageIndex, Object pageSize) {
-        int page = Math.max(0, pageIndex instanceof Number ? pageIndex.intValue() :
-                (pageIndex?.toString()?.trim()?.isInteger() ? pageIndex.toString().trim().toInteger() : 0))
-        int size = Math.max(1, Math.min(200, pageSize instanceof Number ? pageSize.intValue() :
-                (pageSize?.toString()?.trim()?.isInteger() ? pageSize.toString().trim().toInteger() : 20)))
-        String search = ((query)?.toString()?.trim())?.toLowerCase()
+        int page = boundedInt(pageIndex, 0, 0, Integer.MAX_VALUE)
+        int size = boundedInt(pageSize, 20, 1, 200)
+        String search = normalizeLower(query)
 
         List<Map<String, Object>> allRows = ReconciliationSavedRunSupport.collectMappingRows(ec).collect { Map<String, Object> savedRunRow ->
             [
@@ -337,10 +348,6 @@ class ReconciliationMappingSupport {
                 .useCache(true)
                 .one()
         return darpan.facade.common.FacadeSupport.enumLabel(enumValue ?: [enumId: enumId])
-    }
-
-    protected static String normalize(Object value) {
-        return value?.toString()?.trim()
     }
 
     protected static void ensureEntityTable(def ec, String entityName) {

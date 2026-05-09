@@ -42,7 +42,7 @@ This document provides a granular, step-by-step breakdown of the work required t
         - Out: `results` (List<Map>).
     - Define `validateRuleSyntax` (for UI validation).
 
-### 2.2. Drools Integration logic (`reconciliation/rule/RuleEngineServices.groovy`)
+### 2.2. Drools integration logic (`reconciliation/rule/RuleEngineSupport.groovy`)
 - [ ] **Method: `getKieBase(ruleSetId)`**
     - Fetch all active `Rule` records for `ruleSetId`.
     - Construct a `StringBuilder` for the DRL file:

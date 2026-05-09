@@ -11,6 +11,8 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZoneOffset
 
+import static darpan.common.ValueSupport.normalize
+
 class ReconciliationApiWindowSupport {
     private static final long DAY_MILLIS = Duration.ofDays(1).toMillis()
 
@@ -69,7 +71,7 @@ class ReconciliationApiWindowSupport {
     }
 
     private static ZoneId resolveZoneId(Object rawTimeZone) {
-        String timeZone = ((rawTimeZone)?.toString()?.trim()) ?: TenantAccessSupport.DEFAULT_TIME_ZONE
+        String timeZone = normalize(rawTimeZone) ?: TenantAccessSupport.DEFAULT_TIME_ZONE
         try {
             return ZoneId.of(timeZone)
         } catch (DateTimeException ignored) {
@@ -84,7 +86,7 @@ class ReconciliationApiWindowSupport {
         if (rawDate instanceof java.sql.Date) return ((java.sql.Date) rawDate).toLocalDate()
         if (rawDate instanceof Date) return rawDate.toInstant().atZone(ZoneOffset.UTC).toLocalDate()
 
-        String normalized = ((rawDate)?.toString()?.trim())
+        String normalized = normalize(rawDate)
         if (!normalized) return null
         try {
             return LocalDate.parse(normalized)

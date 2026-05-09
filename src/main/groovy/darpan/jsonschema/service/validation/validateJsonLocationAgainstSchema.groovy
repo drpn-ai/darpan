@@ -9,34 +9,11 @@ import com.networknt.schema.SpecVersion
 import com.networknt.schema.ValidationMessage
 import jsonschema.common.JsonSchemaUtil
 import org.slf4j.LoggerFactory
-import org.moqui.context.ExecutionContext
 
 def logger = LoggerFactory.getLogger("darpan.jsonschema.ValidateLocation")
 
 if (!jsonLocation) throw new IllegalArgumentException("jsonLocation is required")
 if (!schemaFileName) throw new IllegalArgumentException("schemaFileName is required")
-
-// --------------------------------------------------------------------------------
-// Helper: Resolve File Path (Inlined from JsonSchemaUtil)
-// --------------------------------------------------------------------------------
-def resolveFilePath = { ExecutionContext context, String location ->
-    if (!location) return null
-    def rr = context.resource.getLocationReference(location)
-    if (rr != null && rr.supportsUrl()) {
-        def url = rr.getUrl()
-        if (url != null) {
-            if ("file".equalsIgnoreCase(url.protocol)) {
-                try {
-                    return new File(url.toURI()).getAbsolutePath()
-                } catch (Exception e) {
-                    return url.getPath()
-                }
-            }
-            return url.toString()
-        }
-    }
-    return location
-}
 
 // --------------------------------------------------------------------------------
 // Helper: stream validation logic kept local to avoid loading large JSON payloads at once.
@@ -123,7 +100,7 @@ def validateStream = { InputStream inputStream, JsonNode sNode, long maxErrors -
 // --------------------------------------------------------------------------------
 
 // 1. Resolve JSON File
-String jsonPath = resolveFilePath(ec, jsonLocation)
+String jsonPath = JsonSchemaUtil.resolveFilePath(ec, jsonLocation)
 File jsonFile = new File(jsonPath)
 if (!jsonFile.exists()) {
     throw new IllegalArgumentException("JSON file not found: ${jsonPath}")

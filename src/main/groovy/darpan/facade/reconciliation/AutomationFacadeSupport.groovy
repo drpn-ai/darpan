@@ -11,6 +11,12 @@ import groovy.json.JsonSlurper
 import java.sql.Timestamp
 import java.time.Instant
 
+import static darpan.common.ValueSupport.fileNameFromPath
+import static darpan.common.ValueSupport.normalize
+import static darpan.common.ValueSupport.normalizeLower
+import static darpan.common.ValueSupport.readField
+import static darpan.common.ValueSupport.readString
+
 class AutomationFacadeSupport {
     static final String INPUT_MODE_API_RANGE = "AUT_IN_API_RANGE"
     static final String INPUT_MODE_SFTP_FILES = "AUT_IN_SFTP_FILES"
@@ -218,12 +224,6 @@ class AutomationFacadeSupport {
         ]
     }
 
-    protected static String fileNameFromPath(Object rawPath) {
-        String normalized = ((rawPath)?.toString()?.trim())
-        if (!normalized) return null
-        return normalized.tokenize("/\\").last()
-    }
-
     protected static Map<String, Object> buildSourceRow(def ec, def source) {
         String sourceTypeEnumId = readString(source, "sourceTypeEnumId")
         String systemEnumId = readString(source, "systemEnumId")
@@ -260,8 +260,8 @@ class AutomationFacadeSupport {
     protected static Map<String, Object> resolveSavedRunForSave(def ec, Map input) {
         Map savedRunPayload = (input.savedRun instanceof Map ? input.savedRun :
                 input.newSavedRun instanceof Map ? input.newSavedRun : null) as Map
-        if (!((input.savedRunId)?.toString()?.trim()) && savedRunPayload) {
-            String createMode = ((savedRunPayload.createMode)?.toString()?.trim())?.toLowerCase()
+        if (!normalize(input.savedRunId) && savedRunPayload) {
+            String createMode = normalizeLower(savedRunPayload.createMode)
             String serviceName = createMode == "csv" ?
                     "facade.ReconciliationFacadeServices.create#CsvRun" :
                     "facade.ReconciliationFacadeServices.create#RuleSetRun"
@@ -277,8 +277,8 @@ class AutomationFacadeSupport {
             input.savedRunType = ((Map) createResult.savedRun)?.runType ?: "ruleset"
         }
 
-        String savedRunId = ((input.savedRunId)?.toString()?.trim())
-        String savedRunType = ((input.savedRunType)?.toString()?.trim())?.toLowerCase() ?: "ruleset"
+        String savedRunId = normalize(input.savedRunId)
+        String savedRunType = normalizeLower(input.savedRunType) ?: "ruleset"
         if (!savedRunId) ec.message.addError("savedRunId or savedRun is required")
         if (!(savedRunType in ["ruleset", "mapping"])) ec.message.addError("savedRunType must be ruleset or mapping")
         if (ec.message.hasError()) return [:]
@@ -298,7 +298,7 @@ class AutomationFacadeSupport {
                     reconciliationMappingId: savedRunId,
                     ruleSetId              : null,
                     compareScopeId         : null,
-                    savedRun               : ReconciliationSavedRunSupport.collectSavedRunRows(ec).find { it.savedRunId == savedRunId },
+                    savedRun               : ReconciliationSavedRunSupport.findSavedRunById(ec, savedRunId),
             ]
         }
 
@@ -349,9 +349,9 @@ class AutomationFacadeSupport {
                 it.fileSide == fileSide
             }
         }
-        String expectedSystemEnumId = ((matchingOption?.enumId)?.toString()?.trim())
-        if (!expectedSystemEnumId && fileSide == FILE_SIDE_1) expectedSystemEnumId = ((savedRun.defaultFile1SystemEnumId)?.toString()?.trim())
-        if (!expectedSystemEnumId && fileSide == FILE_SIDE_2) expectedSystemEnumId = ((savedRun.defaultFile2SystemEnumId)?.toString()?.trim())
+        String expectedSystemEnumId = normalize(matchingOption?.enumId)
+        if (!expectedSystemEnumId && fileSide == FILE_SIDE_1) expectedSystemEnumId = normalize(savedRun.defaultFile1SystemEnumId)
+        if (!expectedSystemEnumId && fileSide == FILE_SIDE_2) expectedSystemEnumId = normalize(savedRun.defaultFile2SystemEnumId)
         if (expectedSystemEnumId && source.systemEnumId && source.systemEnumId != expectedSystemEnumId) {
             ec.message.addError("${fileSide} systemEnumId ${source.systemEnumId} does not match saved run system ${expectedSystemEnumId}")
         }
@@ -418,20 +418,20 @@ class AutomationFacadeSupport {
 
     protected static void validateApiSourceMetadata(def ec, Map<String, Object> source) {
         Map<String, Object> metadata = parseJsonMap(source.safeMetadataJson)
-        String serviceName = ((metadata.extractServiceName ?: metadata.serviceName)?.toString()?.trim())
+        String serviceName = normalize(metadata.extractServiceName ?: metadata.serviceName)
         if (!serviceName) {
             ec.message.addError("${source.fileSide} API source requires safeMetadataJson.extractServiceName.")
             return
         }
         if (serviceName == HOTWAX_OMS_ORDERS_EXTRACT_SERVICE) {
             Map parameters = metadata.parameters instanceof Map ? (Map) metadata.parameters : [:]
-            if (!((parameters.omsRestSourceConfigId)?.toString()?.trim())) {
+            if (!normalize(parameters.omsRestSourceConfigId)) {
                 ec.message.addError("${source.fileSide} OMS API source requires safeMetadataJson.parameters.omsRestSourceConfigId.")
             }
         }
         if (serviceName == SHOPIFY_ORDERS_EXTRACT_SERVICE) {
             Map parameters = metadata.parameters instanceof Map ? (Map) metadata.parameters : [:]
-            if (!((parameters.shopifyAuthConfigId)?.toString()?.trim())) {
+            if (!normalize(parameters.shopifyAuthConfigId)) {
                 ec.message.addError("${source.fileSide} Shopify API source requires safeMetadataJson.parameters.shopifyAuthConfigId.")
             }
         }
@@ -447,28 +447,28 @@ class AutomationFacadeSupport {
                     new LinkedHashMap<>((Map<String, Object>) metadata.parameters) : [:]
 
             if (enriched.systemEnumId == OMS_SYSTEM_ENUM_ID) {
-                String configId = ((parameters.omsRestSourceConfigId)?.toString()?.trim()) ?:
-                        ((enriched.omsRestSourceConfigId)?.toString()?.trim()) ?:
-                        ((enriched.sourceConfigId)?.toString()?.trim()) ?:
-                        ((enriched.optionKey)?.toString()?.trim()) ?:
+                String configId = normalize(parameters.omsRestSourceConfigId) ?:
+                        normalize(enriched.omsRestSourceConfigId) ?:
+                        normalize(enriched.sourceConfigId) ?:
+                        normalize(enriched.optionKey) ?:
                         findSingleActiveOmsRestSourceConfigId(ec)
                 if (configId) parameters.omsRestSourceConfigId = configId
 
-                String serviceName = ((metadata.extractServiceName ?: metadata.serviceName)?.toString()?.trim())
+                String serviceName = normalize(metadata.extractServiceName ?: metadata.serviceName)
                 if (!metadata.extractServiceName && configId) {
                     metadata.extractServiceName = serviceName ?: HOTWAX_OMS_ORDERS_EXTRACT_SERVICE
                 }
             }
 
             if (enriched.systemEnumId == SHOPIFY_SYSTEM_ENUM_ID) {
-                String configId = ((parameters.shopifyAuthConfigId)?.toString()?.trim()) ?:
-                        ((enriched.shopifyAuthConfigId)?.toString()?.trim()) ?:
-                        ((enriched.sourceConfigId)?.toString()?.trim()) ?:
-                        ((enriched.optionKey)?.toString()?.trim()) ?:
+                String configId = normalize(parameters.shopifyAuthConfigId) ?:
+                        normalize(enriched.shopifyAuthConfigId) ?:
+                        normalize(enriched.sourceConfigId) ?:
+                        normalize(enriched.optionKey) ?:
                         findSingleActiveShopifyAuthConfigId(ec)
                 if (configId) parameters.shopifyAuthConfigId = configId
 
-                String serviceName = ((metadata.extractServiceName ?: metadata.serviceName)?.toString()?.trim())
+                String serviceName = normalize(metadata.extractServiceName ?: metadata.serviceName)
                 if (!metadata.extractServiceName && configId) {
                     metadata.extractServiceName = serviceName ?: SHOPIFY_ORDERS_EXTRACT_SERVICE
                 }
@@ -476,7 +476,7 @@ class AutomationFacadeSupport {
 
             if (parameters) metadata.parameters = parameters
 
-            String resolvedServiceName = ((metadata.extractServiceName ?: metadata.serviceName)?.toString()?.trim())
+            String resolvedServiceName = normalize(metadata.extractServiceName ?: metadata.serviceName)
             switch (resolvedServiceName) {
                 case HOTWAX_OMS_ORDERS_EXTRACT_SERVICE:
                     enriched.dateFromParameterName = HOTWAX_OMS_WINDOW_START_PARAMETER
@@ -523,7 +523,7 @@ class AutomationFacadeSupport {
     protected static Map<String, Object> resolveSavedRunSummary(def ec, def automation) {
         String savedRunId = readString(automation, "savedRunId")
         if (!savedRunId) return null
-        return ReconciliationSavedRunSupport.collectSavedRunRows(ec).find { it.savedRunId == savedRunId }
+        return ReconciliationSavedRunSupport.findSavedRunById(ec, savedRunId)
     }
 
     protected static String buildSourceSummary(def ec, String inputModeEnumId, List sources) {
@@ -546,11 +546,11 @@ class AutomationFacadeSupport {
     }
 
     protected static Timestamp resolveNextFireTime(Map input, Timestamp now) {
-        String scheduleExpr = ((input.scheduleExpr)?.toString()?.trim())
+        String scheduleExpr = normalize(input.scheduleExpr)
         if (!scheduleExpr) return null
         Map automationMap = [
                 scheduleExpr          : scheduleExpr,
-                windowTimeZone        : ((input.windowTimeZone)?.toString()?.trim()) ?: "UTC",
+                windowTimeZone        : normalize(input.windowTimeZone) ?: "UTC",
                 lastScheduledFireTime : toTimestamp(input.lastScheduledFireTime),
         ]
         return AutomationExecutionSupport.resolveNextScheduledFireTime(automationMap, automationMap.lastScheduledFireTime as Timestamp, now)
@@ -581,29 +581,45 @@ class AutomationFacadeSupport {
         List servers = ec.entity.find("darpan.reconciliation.SftpServer")
                 .orderBy("description,sftpServerId")
                 .disableAuthz()
-                .useCache(false)
+                .useCache(true)
                 .list() ?: []
-        return servers.collectMany { server ->
-            try {
-                SftpAutomationSupport.requireSftpServerAccess(ec, server, [
-                        runScopeEnumId      : SftpAutomationSupport.SFTP_SCOPE_TENANT,
-                        runTenantUserGroupId: activeTenantUserGroupId,
-                        allowAdminSftp      : false,
-                ], "automation source option")
-                return [[
-                        sftpServerId      : readString(server, "sftpServerId"),
-                        description       : readString(server, "description"),
-                        companyUserGroupId: readString(server, "companyUserGroupId"),
-                        scopeEnumId       : readString(server, "scopeEnumId"),
-                        host              : readString(server, "host"),
-                        port              : readField(server, "port"),
-                        username          : readString(server, "username"),
-                        label             : sftpServerLabel(ec, readString(server, "sftpServerId")),
-                ].findAll { it.value != null } as Map<String, Object>]
-            } catch (IllegalArgumentException ignored) {
-                return []
-            }
+        Set<String> tenantGroupServerIds = accessibleTenantGroupSftpServerIds(ec, activeTenantUserGroupId)
+        return servers.findAll { server ->
+            isSftpServerOptionVisible(server, activeTenantUserGroupId, tenantGroupServerIds)
+        }.collect { server ->
+            String sftpServerId = readString(server, "sftpServerId")
+            [
+                    sftpServerId      : sftpServerId,
+                    description       : readString(server, "description"),
+                    companyUserGroupId: readString(server, "companyUserGroupId"),
+                    scopeEnumId       : readString(server, "scopeEnumId"),
+                    host              : readString(server, "host"),
+                    port              : readField(server, "port"),
+                    username          : readString(server, "username"),
+                    label             : readString(server, "description") ?: sftpServerId,
+            ].findAll { it.value != null } as Map<String, Object>
         } as List<Map<String, Object>>
+    }
+
+    protected static Set<String> accessibleTenantGroupSftpServerIds(def ec, String activeTenantUserGroupId) {
+        if (!activeTenantUserGroupId) return [] as Set
+        List rows = ec.entity.find("darpan.reconciliation.SftpServerTenantAccess")
+                .condition("tenantUserGroupId", activeTenantUserGroupId)
+                .disableAuthz()
+                .useCache(true)
+                .list() ?: []
+        return rows.collect { readString(it, "sftpServerId") }.findAll { it } as Set
+    }
+
+    protected static boolean isSftpServerOptionVisible(def server, String activeTenantUserGroupId, Set<String> tenantGroupServerIds) {
+        String scopeEnumId = SftpAutomationSupport.resolveServerScopeEnumId(server)
+        if (scopeEnumId == SftpAutomationSupport.SFTP_SCOPE_TENANT) {
+            return readString(server, "companyUserGroupId") == activeTenantUserGroupId
+        }
+        if (scopeEnumId == SftpAutomationSupport.SFTP_SCOPE_TENANT_GROUP) {
+            return tenantGroupServerIds.contains(readString(server, "sftpServerId"))
+        }
+        return false
     }
 
     static List<Map<String, Object>> listSourceConfigOptions(def ec) {
@@ -621,6 +637,7 @@ class AutomationFacadeSupport {
                     .orderBy("description,omsRestSourceConfigId")
                     .disableAuthz()
                     .useCache(false)
+                    .limit(2)
                     .list() ?: []
             return rows.collect { item ->
                 String configId = readString(item, "omsRestSourceConfigId")
@@ -651,6 +668,7 @@ class AutomationFacadeSupport {
                     .orderBy("description,shopifyAuthConfigId")
                     .disableAuthz()
                     .useCache(false)
+                    .limit(2)
                     .list() ?: []
             return rows.collect { item ->
                 String configId = readString(item, "shopifyAuthConfigId")
@@ -842,15 +860,15 @@ class AutomationFacadeSupport {
     }
 
     protected static String endpointLabelForSystem(String systemEnumId, String remoteId, String fallbackLabel) {
-        if (((systemEnumId)?.toString()?.trim()) == OMS_SYSTEM_ENUM_ID &&
-                ((remoteId)?.toString()?.trim()) == HOTWAX_ORDERS_REMOTE_ID) {
+        if (normalize(systemEnumId) == OMS_SYSTEM_ENUM_ID &&
+                normalize(remoteId) == HOTWAX_ORDERS_REMOTE_ID) {
             return HOTWAX_ORDERS_ENDPOINT_LABEL
         }
-        if (((systemEnumId)?.toString()?.trim()) == SHOPIFY_SYSTEM_ENUM_ID &&
-                ((remoteId)?.toString()?.trim()) == SHOPIFY_ORDERS_REMOTE_ID) {
+        if (normalize(systemEnumId) == SHOPIFY_SYSTEM_ENUM_ID &&
+                normalize(remoteId) == SHOPIFY_ORDERS_REMOTE_ID) {
             return SHOPIFY_ORDERS_ENDPOINT_LABEL
         }
-        return ((fallbackLabel)?.toString()?.trim()) ?: ((remoteId)?.toString()?.trim())
+        return normalize(fallbackLabel) ?: normalize(remoteId)
     }
 
     protected static boolean isVirtualApiOrdersRemote(Map<String, Object> source) {
@@ -858,22 +876,22 @@ class AutomationFacadeSupport {
     }
 
     protected static boolean isVirtualHotWaxOrdersRemote(Map<String, Object> source) {
-        if (((source?.systemEnumId)?.toString()?.trim()) != OMS_SYSTEM_ENUM_ID) return false
-        if (((source?.systemMessageRemoteId)?.toString()?.trim()) != HOTWAX_ORDERS_REMOTE_ID) return false
+        if (normalize(source?.systemEnumId) != OMS_SYSTEM_ENUM_ID) return false
+        if (normalize(source?.systemMessageRemoteId) != HOTWAX_ORDERS_REMOTE_ID) return false
         Map<String, Object> metadata = parseJsonMap(source?.safeMetadataJson)
-        return ((metadata.extractServiceName ?: metadata.serviceName)?.toString()?.trim()) == HOTWAX_OMS_ORDERS_EXTRACT_SERVICE
+        return normalize(metadata.extractServiceName ?: metadata.serviceName) == HOTWAX_OMS_ORDERS_EXTRACT_SERVICE
     }
 
     protected static boolean isVirtualShopifyOrdersRemote(Map<String, Object> source) {
-        if (((source?.systemEnumId)?.toString()?.trim()) != SHOPIFY_SYSTEM_ENUM_ID) return false
-        if (((source?.systemMessageRemoteId)?.toString()?.trim()) != SHOPIFY_ORDERS_REMOTE_ID) return false
+        if (normalize(source?.systemEnumId) != SHOPIFY_SYSTEM_ENUM_ID) return false
+        if (normalize(source?.systemMessageRemoteId) != SHOPIFY_ORDERS_REMOTE_ID) return false
         Map<String, Object> metadata = parseJsonMap(source?.safeMetadataJson)
-        return ((metadata.extractServiceName ?: metadata.serviceName)?.toString()?.trim()) == SHOPIFY_ORDERS_EXTRACT_SERVICE
+        return normalize(metadata.extractServiceName ?: metadata.serviceName) == SHOPIFY_ORDERS_EXTRACT_SERVICE
     }
 
     protected static boolean isDirectApiSourceRemote(String systemEnumId, String sendServiceName) {
-        String normalizedSystemEnumId = ((systemEnumId)?.toString()?.trim())
-        String normalizedServiceName = ((sendServiceName)?.toString()?.trim())
+        String normalizedSystemEnumId = normalize(systemEnumId)
+        String normalizedServiceName = normalize(sendServiceName)
         if (normalizedSystemEnumId == SHOPIFY_SYSTEM_ENUM_ID) {
             return normalizedServiceName == SHOPIFY_GRAPHQL_EXECUTE_SERVICE
         }
@@ -881,7 +899,7 @@ class AutomationFacadeSupport {
     }
 
     protected static List<Map<String, Object>> primaryIdOptionsForSystem(String systemEnumId) {
-        switch (((systemEnumId)?.toString()?.trim())) {
+        switch (normalize(systemEnumId)) {
             case OMS_SYSTEM_ENUM_ID:
                 return HOTWAX_OMS_ORDER_PRIMARY_ID_OPTIONS
             case SHOPIFY_SYSTEM_ENUM_ID:
@@ -940,7 +958,7 @@ class AutomationFacadeSupport {
         def server = ec.entity.find("darpan.reconciliation.SftpServer")
                 .condition("sftpServerId", sftpServerId)
                 .disableAuthz()
-                .useCache(false)
+                .useCache(true)
                 .one()
         if (!server) return sftpServerId
         return readString(server, "description") ?: readString(server, "sftpServerId")
@@ -965,7 +983,7 @@ class AutomationFacadeSupport {
     }
 
     static String canonicalJsonText(def ec, Object rawValue, String label) {
-        String value = ((rawValue)?.toString()?.trim())
+        String value = normalize(rawValue)
         if (!value) return null
         try {
             Object parsed = new JsonSlurper().parseText(value)
@@ -977,7 +995,7 @@ class AutomationFacadeSupport {
     }
 
     protected static Map<String, Object> parseJsonMap(Object rawValue) {
-        String value = ((rawValue)?.toString()?.trim())
+        String value = normalize(rawValue)
         if (!value) return [:]
         Object parsed = new JsonSlurper().parseText(value)
         return parsed instanceof Map ? new LinkedHashMap<>((Map<String, Object>) parsed) : [:]
@@ -991,7 +1009,7 @@ class AutomationFacadeSupport {
         if (rawValue == null) return null
         if (rawValue instanceof Timestamp) return (Timestamp) rawValue
         if (rawValue instanceof Date) return new Timestamp(((Date) rawValue).time)
-        String value = ((rawValue)?.toString()?.trim())
+        String value = normalize(rawValue)
         if (!value) return null
         try {
             return Timestamp.from(Instant.parse(value))
@@ -1004,14 +1022,4 @@ class AutomationFacadeSupport {
         return ec?.user?.nowTimestamp ?: new Timestamp(System.currentTimeMillis())
     }
 
-    protected static String readString(def record, String fieldName) {
-        return readField(record, fieldName)?.toString()?.trim()
-    }
-
-    protected static Object readField(def record, String fieldName) {
-        if (record == null || !fieldName) return null
-        if (record instanceof Map) return record[fieldName]
-        if (record.metaClass.respondsTo(record, "get", String)) return record.get(fieldName)
-        return record."${fieldName}"
-    }
 }

@@ -11,6 +11,13 @@ import org.slf4j.LoggerFactory
 
 import java.sql.Timestamp
 
+import static darpan.common.ValueSupport.boundedInt
+import static darpan.common.ValueSupport.fileNameFromPath
+import static darpan.common.ValueSupport.normalize
+import static darpan.common.ValueSupport.normalizeLong
+import static darpan.common.ValueSupport.normalizeLower
+import static darpan.common.ValueSupport.sanitizePathFileName
+
 class ReconciliationOutputSupport {
     static final List<String> LEGACY_CSV_COLUMNS = ["type", "id", "presentIn", "missingIn", "note", "data"]
     static final List<String> RULESET_CSV_COLUMNS = ["diffType", "primaryId", "field", "file1Value", "file2Value", "presentIn", "missingIn", "ruleId", "severity", "message", "data"]
@@ -114,15 +121,13 @@ class ReconciliationOutputSupport {
         if (pathCandidates.isEmpty()) return null
 
         for (String fieldName : ["resultDataManagerPath", "file1DataManagerPath", "file2DataManagerPath"]) {
-            for (String pathCandidate : pathCandidates) {
-                def finder = ec?.entity?.find("darpan.reconciliation.ReconciliationRunResult")
-                if (finder == null) continue
-                def runResult = finder.condition(fieldName, pathCandidate)
-                        .disableAuthz()
-                        .useCache(false)
-                        .one()
-                if (runResult != null) return runResult
-            }
+            def finder = ec?.entity?.find("darpan.reconciliation.ReconciliationRunResult")
+            if (finder == null) continue
+            def runResult = finder.condition(fieldName, "in", pathCandidates)
+                    .disableAuthz()
+                    .useCache(false)
+                    .one()
+            if (runResult != null) return runResult
         }
         return null
     }
@@ -315,12 +320,10 @@ class ReconciliationOutputSupport {
 
     static Map<String, Object> listGeneratedOutputs(def ec, Object savedRunId, Object reconciliationMappingId,
             Object query, Object pageIndex, Object pageSize) {
-        int page = Math.max(0, pageIndex instanceof Number ? pageIndex.intValue() :
-                (pageIndex?.toString()?.trim()?.isInteger() ? pageIndex.toString().trim().toInteger() : 0))
-        int size = Math.max(1, Math.min(200, pageSize instanceof Number ? pageSize.intValue() :
-                (pageSize?.toString()?.trim()?.isInteger() ? pageSize.toString().trim().toInteger() : 20)))
-        String savedRunIdFilter = ((savedRunId ?: reconciliationMappingId)?.toString()?.trim())
-        String search = ((query)?.toString()?.trim())?.toLowerCase()
+        int page = boundedInt(pageIndex, 0, 0, Integer.MAX_VALUE)
+        int size = boundedInt(pageSize, 20, 1, 200)
+        String savedRunIdFilter = normalize(savedRunId ?: reconciliationMappingId)
+        String search = normalizeLower(query)
 
         List<Map<String, Object>> rows = []
         (listGeneratedOutputFiles(ec) ?: [])
@@ -349,8 +352,8 @@ class ReconciliationOutputSupport {
     }
 
     static Map<String, Object> getGeneratedOutput(def ec, Object fileName, Object format) {
-        String fileNameValue = ((fileName)?.toString()?.trim())
-        String requestedFormat = (((format)?.toString()?.trim()) ?: "json").toLowerCase()
+        String fileNameValue = normalize(fileName)
+        String requestedFormat = normalizeLower(format) ?: "json"
         Map<String, Object> outputFile = null
 
         if (!fileNameValue) ec.message.addError("fileName is required")
@@ -437,6 +440,87 @@ class ReconciliationOutputSupport {
         ]
     }
 
+    static Map<String, Object> purgeGeneratedOutputFiles(def ec, Integer retentionDays, String outputLocation,
+            boolean usingDefaultOutputLocation) {
+        def outputDirRef = ec.resource.getLocationReference(outputLocation)
+        long cutoffMillis = ec.user.nowTimestamp.getTime() - (retentionDays * 24L * 60L * 60L * 1000L)
+        int scanned = 0
+        int deletedRows = 0
+        int retained = 0
+        List<Map> failed = []
+
+        def scanOutputFile = { String fileName, long lastModified, Closure<Boolean> deleteFile ->
+            if (!fileName) return
+            String lowerName = fileName.toLowerCase()
+            if (usingDefaultOutputLocation) {
+                if (!isGeneratedResultFile(fileName)) return
+            } else if (!(lowerName.endsWith(".csv") || lowerName.endsWith(".json"))) {
+                return
+            }
+
+            scanned++
+            if (lastModified > cutoffMillis) {
+                retained++
+                return
+            }
+
+            try {
+                boolean deletedOk = deleteFile.call()
+                if (deletedOk) {
+                    deletedRows++
+                } else {
+                    failed.add([fileName: fileName, errorMessage: "Delete returned false"])
+                }
+            } catch (Exception e) {
+                failed.add([fileName: fileName, errorMessage: e.message ?: "Delete failed"])
+            }
+        }
+        def scanEntry = { entry ->
+            if (!entry.isFile()) return
+
+            scanOutputFile(entry.getFileName(), entry.getLastModified() ?: 0L) {
+                def entryFile = entry.getFile()
+                if (entryFile != null) return entryFile.delete()
+                if (entry.metaClass.respondsTo(entry, "delete")) return entry.delete()
+                return false
+            }
+        }
+        def scanFile = { File file ->
+            if (!file.isFile()) return
+            scanOutputFile(file.name, file.lastModified()) { -> file.delete() }
+        }
+
+        if (outputDirRef != null && outputDirRef.getExists()) {
+            File outputDirFile = outputDirRef.getFile()
+            if (usingDefaultOutputLocation && outputDirFile?.exists()) {
+                outputDirFile.eachFileRecurse(FileType.FILES) { File file ->
+                    scanFile(file)
+                }
+            } else {
+                def entries = outputDirRef.getDirectoryEntries() ?: []
+                entries.each { entry -> scanEntry(entry) }
+            }
+        }
+
+        String statusMessage = "Purge complete. Scanned=${scanned}, Deleted=${deletedRows}, Retained=${retained}, Failed=${failed.size()}"
+        if (failed) {
+            logger.warn("Reconciliation purge completed with failures: ${statusMessage}")
+        } else {
+            logger.info("Reconciliation purge completed: ${statusMessage}")
+        }
+
+        return [
+                retentionDays : retentionDays,
+                outputLocation: outputLocation,
+                cutoffTimestamp: cutoffMillis,
+                scannedCount  : scanned,
+                deletedCount  : deletedRows,
+                retainedCount : retained,
+                failedFiles   : failed,
+                statusMessage : statusMessage,
+        ]
+    }
+
     static Map<String, Object> parseOutputDocument(File file) {
         if (file == null || !file.exists() || !file.isFile()) return [:]
         if (sourceFormatForFile(file.name) != "json") return [:]
@@ -459,12 +543,7 @@ class ReconciliationOutputSupport {
     }
 
     static String sanitizeUploadFileName(String rawName, String fallbackBase = "file") {
-        String normalized = rawName?.toString()?.trim()
-        if (!normalized) return fallbackBase
-
-        String stripped = normalized.tokenize("/\\") ? normalized.tokenize("/\\").last() : normalized
-        String safe = stripped.replaceAll(/[^A-Za-z0-9._-]/, "_")
-        return safe ?: fallbackBase
+        return sanitizePathFileName(rawName, fallbackBase)
     }
 
     static Map<String, Object> parseGeneratedOutputText(String rawText) {
@@ -574,9 +653,9 @@ class ReconciliationOutputSupport {
             if (execution != null) return execution
         }
 
-        for (String pathCandidate : resultPathCandidates) {
+        if (resultPathCandidates) {
             def execution = ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution")
-                    .condition("resultDataManagerPath", pathCandidate)
+                    .condition("resultDataManagerPath", "in", resultPathCandidates)
                     .disableAuthz()
                     .useCache(false)
                     .one()
@@ -652,12 +731,6 @@ class ReconciliationOutputSupport {
         String sideRank = name.contains("_${sideToken}.") || name.contains("-${sideToken}.") ? "0" :
                 name.contains(sideToken) ? "1" : "2"
         return "${extensionRank}:${sideRank}:${name}"
-    }
-
-    protected static String fileNameFromPath(Object rawPath) {
-        String safePath = DataManagerSupport.normalizeRelativePath(rawPath)
-        if (!safePath) return ""
-        return safePath.tokenize("/\\") ? safePath.tokenize("/\\").last() : safePath
     }
 
     protected static String parentPath(Object rawPath) {
@@ -923,20 +996,6 @@ class ReconciliationOutputSupport {
             default:
                 return difference[columnName]
         }
-    }
-
-    protected static Long normalizeLong(Object value) {
-        if (value == null) return null
-        if (value instanceof Number) return ((Number) value).longValue()
-        try {
-            return Long.parseLong(value.toString().trim())
-        } catch (Exception ignored) {
-            return null
-        }
-    }
-
-    protected static String normalize(Object value) {
-        return value?.toString()?.trim()
     }
 
     protected static Timestamp timestampValue(Object value) {

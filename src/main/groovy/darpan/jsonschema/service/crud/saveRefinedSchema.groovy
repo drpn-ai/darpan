@@ -2,37 +2,12 @@ import groovy.json.JsonOutput
 import jsonschema.common.JsonSchemaUtil
 import org.slf4j.LoggerFactory
 
+import static darpan.common.ValueSupport.normalizeBlankToNull
+import static darpan.common.ValueSupport.normalizeBool
+
 def logger = LoggerFactory.getLogger("darpan.jsonschema.SaveRefinedSchema")
 Set<String> allowedTypes = ["string", "integer", "number", "boolean", "object", "array"] as Set<String>
-String systemEnumTypeId = "DarpanSystemSource"
-
-String jsonSchemaEntityName = "darpan.reconciliation.JsonSchema"
-String jsonSchemaGroupName = ec.entity.getEntityGroupName(jsonSchemaEntityName) ?: "default"
-def jsonSchemaDatasourceFactory = ec.entity.getDatasourceFactory(jsonSchemaGroupName)
-jsonSchemaDatasourceFactory?.checkAndAddTable(jsonSchemaEntityName)
-
-def normalizeString = { Object value ->
-    String text = value?.toString()?.trim()
-    return text ? text : null
-}
-
-def normalizeBool = { Object value ->
-    if (value == null) return false
-    if (value instanceof Boolean) return (Boolean) value
-    String text = value.toString().trim().toLowerCase()
-    return ["true", "1", "y", "yes", "on"].contains(text)
-}
-
-def findSystemEnum = { Object rawSystemId, boolean useCache = true ->
-    String normalized = normalizeString(rawSystemId)
-    if (!normalized) return null
-
-    return ec.entity.find("moqui.basic.Enumeration")
-        .condition("enumTypeId", systemEnumTypeId)
-        .condition("enumId", normalized)
-        .useCache(useCache)
-        .one()
-}
+JsonSchemaUtil.ensureJsonSchemaTable(ec)
 
 def parsePathTokens = { String fieldPath ->
     if (!fieldPath) return null
@@ -135,13 +110,13 @@ fieldList.eachWithIndex { Object rawField, int index ->
         return
     }
 
-    String fieldPath = normalizeString(rawField.fieldPath)
+    String fieldPath = normalizeBlankToNull(rawField.fieldPath)
     if (!fieldPath) {
         ec.message.addError("fieldList entry ${index + 1} is missing fieldPath")
         return
     }
 
-    String fieldType = normalizeString(rawField.type)?.toLowerCase()
+    String fieldType = normalizeBlankToNull(rawField.type)?.toLowerCase()
     if (!fieldType || !allowedTypes.contains(fieldType)) {
         ec.message.addError("fieldList entry ${index + 1} has invalid type '${rawField.type}' for path '${fieldPath}'")
         return
@@ -163,12 +138,12 @@ fieldList.eachWithIndex { Object rawField, int index ->
 
 if (ec.message.hasError()) return
 
-String requestedSystemEnumId = normalizeString(systemEnumId)
+String requestedSystemEnumId = normalizeBlankToNull(systemEnumId)
 boolean hasSystemEnumIdInput = context.containsKey("systemEnumId")
 String resolvedSystemEnumId = hasSystemEnumIdInput ?
         requestedSystemEnumId :
         null
-if (hasSystemEnumIdInput && requestedSystemEnumId && !findSystemEnum(requestedSystemEnumId, false)) {
+if (hasSystemEnumIdInput && requestedSystemEnumId && !JsonSchemaUtil.findSystemEnum(ec, requestedSystemEnumId, false)) {
     ec.message.addError("systemEnumId '${requestedSystemEnumId}' is not a valid reconciliation system.")
     return
 }
@@ -184,7 +159,7 @@ if (jsonSchemaId) {
     }
 }
 
-String requestedSchemaName = normalizeString(schemaName)
+String requestedSchemaName = normalizeBlankToNull(schemaName)
 if (!existingSchema && !requestedSchemaName) {
     ec.message.addError("schemaName is required when creating a schema")
     return
@@ -261,7 +236,7 @@ schemaMap['$schema'] = "http://json-schema.org/draft-07/schema#"
 schemaMap.title = finalSchemaName
 
 String schemaJson = JsonOutput.toJson(schemaMap)
-String descriptionText = normalizeString(description)
+String descriptionText = normalizeBlankToNull(description)
 String createDescriptionText = descriptionText ?: requestedSchemaName
 boolean hasDescriptionInput = description != null
 

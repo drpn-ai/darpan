@@ -3,10 +3,11 @@ import darpan.reconciliation.core.ReconciliationServices
 import org.slf4j.LoggerFactory
 import org.apache.spark.sql.Dataset
 
+import static darpan.common.ValueSupport.normalize
+import static darpan.common.ValueSupport.normalizeInt
 
 def logger = LoggerFactory.getLogger("darpan.reconciliation.automation.SftpReconciliation")
 
-def normalize = { val -> val?.toString()?.trim() }
 def normalizeHostParts = { String host ->
     def normalized = normalize(host)
     if (!normalized) return [hostPort: null, basePath: null]
@@ -50,8 +51,8 @@ def resolveHostAndPort = { String host, Object portVal, String label ->
     if (lastColon > -1 && lastColon < hostOnly.length() - 1) {
         def portStr = hostOnly.substring(lastColon + 1)
         def hostCandidate = hostOnly.substring(0, lastColon)
-        if (portStr.isInteger()) {
-            inlinePort = portStr.toInteger()
+        inlinePort = normalizeInt(portStr)
+        if (inlinePort != null) {
             hostOnly = hostCandidate
         } else {
             throw new IllegalArgumentException("Invalid port '${portStr}' in host ${host} for ${label}")
@@ -61,12 +62,8 @@ def resolveHostAndPort = { String host, Object portVal, String label ->
     String portString = normalize(portVal) ?: "22"
     if (inlinePort != null) portString = inlinePort.toString()
 
-    Integer portNum
-    try {
-        portNum = Integer.parseInt(portString)
-    } catch (Exception e) {
-        throw new IllegalArgumentException("Invalid port '${portString}' for ${label} (host ${host})")
-    }
+    Integer portNum = normalizeInt(portString)
+    if (portNum == null) throw new IllegalArgumentException("Invalid port '${portString}' for ${label} (host ${host})")
 
     return [host: hostOnly, port: portNum, basePath: hostBasePath]
 }
@@ -266,84 +263,76 @@ def prepareFile = { String label, String systemEnumId, String sftpServerId, Stri
     }
 
     def sftpTarget = overrideClean ?: hostBasePath ?: "/"
-    
+
     // Construct simplified SFTP config
     def sftpConfig = [host: cleanHost, port: cleanPort, basePath: sftpTarget]
 
-    if (sftpConfig) {
-        def sftpClient = SftpAutomationSupport.createClient((String) sftpConfig.host, (String) cleanUser, (int) sftpConfig.port)
-        if (cleanPass) sftpClient.password((String) cleanPass)
-        if (server.privateKey) sftpClient.privateKey((String) server.privateKey)
-        
-        logMsg("Connecting to SFTP: ${sftpConfig.host}:${sftpConfig.port} as ${cleanUser} (path: ${sftpConfig.basePath})")
-        // Default to not preserving attributes to avoid permission issues unless configured otherwise (could add param later)
-        // Default to not preserving attributes to avoid permission issues unless configured otherwise
-        sftpClient.preserveAttributes(server.remoteAttributes == "Y")
+    def sftpClient = SftpAutomationSupport.createClient((String) sftpConfig.host, (String) cleanUser, (int) sftpConfig.port)
+    if (cleanPass) sftpClient.password((String) cleanPass)
+    if (server.privateKey) sftpClient.privateKey((String) server.privateKey)
 
-        def selection
-        def staged
+    logMsg("Connecting to SFTP: ${sftpConfig.host}:${sftpConfig.port} as ${cleanUser} (path: ${sftpConfig.basePath})")
+    sftpClient.preserveAttributes(server.remoteAttributes == "Y")
+
+    def selection
+    def staged
+    try {
+        sftpClient.connect()
+        selection = selectSftpCandidateFile(sftpClient, (String) sftpConfig.basePath, label, archiveSubdir)
+        if (!selection.refPath) {
+            String failMsg = "No file found at ${sftpConfig.basePath} matching criteria."
+            logMsg(failMsg)
+            return [found: false, message: failMsg, source: "sftp://${sftpConfig.host}:${sftpConfig.port}${sftpConfig.basePath}"]
+        }
+        logMsg("Found file: ${selection.name} (${selection.refPath})")
+        InputStream inputStream = sftpClient.openStream((String) selection.refPath)
         try {
-            sftpClient.connect()
-            selection = selectSftpCandidateFile(sftpClient, (String) sftpConfig.basePath, label, archiveSubdir)
-            if (!selection.refPath) {
-                String failMsg = "No file found at ${sftpConfig.basePath} matching criteria."
-                logMsg(failMsg)
-                return [found: false, message: failMsg, source: "sftp://${sftpConfig.host}:${sftpConfig.port}${sftpConfig.basePath}"]
-            }
-            logMsg("Found file: ${selection.name} (${selection.refPath})")
-            InputStream inputStream = sftpClient.openStream((String) selection.refPath)
-            try {
-                staged = stageStream(inputStream, stageDirRef, label, selection.name, timestamp)
-                logMsg("Staged file to: ${staged.location}")
-            } finally {
-                try { inputStream?.close() } catch (Exception ignored) {}
-            }
-
-            try {
-                String baseDir = selection.refPath.contains("/") ? selection.refPath.substring(0, selection.refPath.lastIndexOf("/")) : "/"
-                String archiveDir = baseDir.endsWith("/") ? baseDir + (archiveSubdir ?: "archive") : baseDir + "/" + (archiveSubdir ?: "archive")
-                try {
-                    sftpClient.mkdirs(archiveDir)
-                } catch (Exception ignored) { }
-                String archiveDest = archiveDir + "/" + (selection.name ?: selection.refPath.tokenize("/")?.last() ?: selection.refPath)
-                String archiveName = archiveDest.substring(archiveDest.lastIndexOf("/") + 1)
-                logMsg("Archiving remote file to ${archiveDest}")
-                try {
-                    sftpClient.rename(selection.refPath, archiveDest)
-                } catch (Exception e) {
-                    try {
-                        InputStream srcStream = sftpClient.openStream(selection.refPath)
-                        try {
-                            sftpClient.put(archiveDir, archiveName, srcStream)
-                            sftpClient.rm(selection.refPath)
-                        } finally {
-                            try { srcStream?.close() } catch (Exception ignored) {}
-                        }
-                    } catch (Exception e2) {
-                        logger.warn("Unable to archive SFTP file ${selection.refPath} to ${archiveDest}: ${e2.message}")
-                    }
-                }
-            } catch (Exception e) {
-                logger.warn("Archive step failed for ${selection?.refPath ?: '(unknown)'}: ${e.message}")
-            }
+            staged = stageStream(inputStream, stageDirRef, label, selection.name, timestamp)
+            logMsg("Staged file to: ${staged.location}")
         } finally {
-            try { sftpClient.close() } catch (Exception ignored) {}
+            try { inputStream?.close() } catch (Exception ignored) {}
         }
 
-        return [
-                found          : true,
-                server         : server,
-                source         : "sftp://${sftpConfig.host}:${sftpConfig.port}${sftpConfig.basePath}",
-                selectedName   : selection.name ?: selection.refPath,
-                stagedLocation : staged.location,
-                systemLabel    : ReconciliationServices.resolveEnumLabel(ec, systemEnumId, label),
-                basePathUsed   : sftpConfig.basePath
-        ]
+        try {
+            String baseDir = selection.refPath.contains("/") ? selection.refPath.substring(0, selection.refPath.lastIndexOf("/")) : "/"
+            String archiveDir = baseDir.endsWith("/") ? baseDir + (archiveSubdir ?: "archive") : baseDir + "/" + (archiveSubdir ?: "archive")
+            try {
+                sftpClient.mkdirs(archiveDir)
+            } catch (Exception ignored) { }
+            String archiveDest = archiveDir + "/" + (selection.name ?: selection.refPath.tokenize("/")?.last() ?: selection.refPath)
+            String archiveName = archiveDest.substring(archiveDest.lastIndexOf("/") + 1)
+            logMsg("Archiving remote file to ${archiveDest}")
+            try {
+                sftpClient.rename(selection.refPath, archiveDest)
+            } catch (Exception e) {
+                try {
+                    InputStream srcStream = sftpClient.openStream(selection.refPath)
+                    try {
+                        sftpClient.put(archiveDir, archiveName, srcStream)
+                        sftpClient.rm(selection.refPath)
+                    } finally {
+                        try { srcStream?.close() } catch (Exception ignored) {}
+                    }
+                } catch (Exception e2) {
+                    logger.warn("Unable to archive SFTP file ${selection.refPath} to ${archiveDest}: ${e2.message}")
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Archive step failed for ${selection?.refPath ?: '(unknown)'}: ${e.message}")
+        }
+    } finally {
+        try { sftpClient.close() } catch (Exception ignored) {}
     }
-    
-    // Fallback or unreachable code since we enforce SFTP parameters
-    logMsg("Invalid configuration for ${label}")
-    return [found: false, message: "Invalid SFTP configuration for ${label}"]
+
+    return [
+            found          : true,
+            server         : server,
+            source         : "sftp://${sftpConfig.host}:${sftpConfig.port}${sftpConfig.basePath}",
+            selectedName   : selection.name ?: selection.refPath,
+            stagedLocation : staged.location,
+            systemLabel    : ReconciliationServices.resolveEnumLabel(ec, systemEnumId, label),
+            basePathUsed   : sftpConfig.basePath
+    ]
 }
 
 def file1Prep
@@ -490,7 +479,6 @@ statusMessage = "${reconciliationType ?: 'Reconciliation'} complete"
 logger.info("SFTP reconciliation done: run=${reconciliationRunId ?: 'ad-hoc'} type=${reconciliationType} diff=${diffFileName} dataAvailable=${dataAvailable}")
 logMsg("Reconciliation complete. Diff: ${diffFileName}. Counts: Only1=${onlyInFile1Count}, Only2=${onlyInFile2Count}, Diff=${differenceCount}")
 
-// Upload Result to SFTP (Server 1)
 // Upload Result to SFTP (Server 1)
 try {
     def resultFile = null

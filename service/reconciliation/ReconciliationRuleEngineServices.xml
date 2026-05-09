@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="compile" noun="RuleSet" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy" method="compileRuleSet">
+    <service verb="compile" noun="RuleSet">
         <description>Compile active rules for a RuleSet into a Drools container and cache the compiled result.</description>
         <in-parameters>
             <parameter name="ruleSetId" required="true"/>
@@ -15,9 +15,30 @@
             <parameter name="warnings" type="List"/>
             <parameter name="error"/>
         </out-parameters>
+        <actions>
+            <set field="ruleSetIdValue" from="((ruleSetId)?.toString()?.trim())"/>
+            <set field="useCacheText" from="((useCache)?.toString()?.trim()?.toUpperCase(java.util.Locale.ROOT))"/>
+            <set field="forceRebuildText" from="((forceRebuild)?.toString()?.trim()?.toUpperCase(java.util.Locale.ROOT))"/>
+            <set field="useCacheValue" from="useCache instanceof Boolean ? useCache : ['Y', 'YES', 'TRUE', '1', 'ON'].contains(useCacheText)"/>
+            <set field="forceRebuildValue" from="forceRebuild == null ? true : (forceRebuild instanceof Boolean ? forceRebuild : ['Y', 'YES', 'TRUE', '1', 'ON'].contains(forceRebuildText))"/>
+            <set field="compileResult" from="reconciliation.rule.RuleEngineSupport.compileRuleSet(ec, ruleSetIdValue, useCacheValue, forceRebuildValue)"/>
+            <set field="kieContainer" from="compileResult.kieContainer"/>
+            <set field="ruleCount" from="compileResult.ruleCount"/>
+            <set field="drlText" from="compileResult.drlText"/>
+            <set field="warnings" from="compileResult.warnings ?: []"/>
+            <set field="error" from="compileResult.error"/>
+            <if condition="!error">
+                <if condition="warnings">
+                    <message>RuleSet ${ruleSetIdValue} compiled with ${warnings.size()} warning(s).</message>
+                </if>
+                <if condition="!warnings">
+                    <message>RuleSet ${ruleSetIdValue} compiled successfully.</message>
+                </if>
+            </if>
+        </actions>
     </service>
 
-    <service verb="execute" noun="RuleSet" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy" method="executeRuleSet">
+    <service verb="execute" noun="RuleSet">
         <description>Execute a compiled RuleSet on a list of map facts.</description>
         <in-parameters>
             <parameter name="ruleSetId" required="true"/>
@@ -32,9 +53,32 @@
             <parameter name="warnings" type="List"/>
             <parameter name="error"/>
         </out-parameters>
+        <actions>
+            <set field="ruleSetIdValue" from="((ruleSetId)?.toString()?.trim())"/>
+            <set field="dataListValue" from="dataList instanceof List ? dataList : []"/>
+            <set field="returnAllFactsText" from="((returnAllFacts)?.toString()?.trim()?.toUpperCase(java.util.Locale.ROOT))"/>
+            <set field="returnAllFactsValue" from="returnAllFacts instanceof Boolean ? returnAllFacts : ['Y', 'YES', 'TRUE', '1', 'ON'].contains(returnAllFactsText)"/>
+            <if condition="!dataListValue">
+                <set field="results" from="[]"/>
+                <set field="matchedResults" from="[]"/>
+                <set field="firedRuleCount" from="0"/>
+                <set field="ruleCount" from="0"/>
+                <set field="warnings" from="[]"/>
+                <set field="error" from="null"/>
+            </if>
+            <if condition="dataListValue">
+                <set field="executionResult" from="reconciliation.rule.RuleEngineSupport.executeRuleSetFacts(ec, ruleSetIdValue, dataListValue, returnAllFactsValue)"/>
+                <set field="results" from="executionResult.results"/>
+                <set field="matchedResults" from="executionResult.matchedResults"/>
+                <set field="firedRuleCount" from="executionResult.firedRuleCount"/>
+                <set field="ruleCount" from="executionResult.ruleCount"/>
+                <set field="warnings" from="executionResult.warnings"/>
+                <set field="error" from="executionResult.error"/>
+            </if>
+        </actions>
     </service>
 
-    <service verb="execute" noun="RuleSetMatchedPairs" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy" method="executeRuleSetMatchedPairs">
+    <service verb="execute" noun="RuleSetMatchedPairs">
         <description>Execute RuleSet DRL against matched compare-scope facts and return normalized rule-generated Diff maps.</description>
         <in-parameters>
             <parameter name="ruleSetId" required="true"/>
@@ -49,6 +93,27 @@
             <parameter name="warnings" type="List"/>
             <parameter name="error"/>
         </out-parameters>
+        <actions>
+            <set field="ruleSetIdValue" from="((ruleSetId)?.toString()?.trim())"/>
+            <set field="dataListValue" from="dataList instanceof List ? dataList : []"/>
+            <if condition="!dataListValue">
+                <set field="diffResults" from="[]"/>
+                <set field="matchedResults" from="[]"/>
+                <set field="firedRuleCount" from="0"/>
+                <set field="ruleCount" from="0"/>
+                <set field="warnings" from="[]"/>
+                <set field="error" from="null"/>
+            </if>
+            <if condition="dataListValue">
+                <set field="executionResult" from="reconciliation.rule.RuleEngineSupport.executeMatchedPairFacts(ec, ruleSetIdValue, dataListValue)"/>
+                <set field="diffResults" from="executionResult.diffResults"/>
+                <set field="matchedResults" from="executionResult.matchedResults"/>
+                <set field="firedRuleCount" from="executionResult.firedRuleCount"/>
+                <set field="ruleCount" from="executionResult.ruleCount"/>
+                <set field="warnings" from="executionResult.warnings"/>
+                <set field="error" from="executionResult.error"/>
+            </if>
+        </actions>
     </service>
 
     <service verb="save" noun="RuleSet">
@@ -73,25 +138,30 @@
             <set field="versionValue" from="((version)?.toString()?.trim()) ?: '1.0'"/>
             <set field="explosionPathValue" from="((explosionPath)?.toString()?.trim())"/>
             <set field="primaryKeyPathValue" from="((primaryKeyPath)?.toString()?.trim())"/>
-            <set field="resolvedRuleSet" from="reconciliation.rule.RuleEngineSupport.resolveRuleSetId(ec, requestedRuleSetIdValue, ruleSetNameValue)"/>
-            <if condition="resolvedRuleSet.error">
-                <message error="true">${resolvedRuleSet.error}</message>
+            <if condition="requestedRuleSetIdValue &amp;&amp; !requestedRuleSetIdValue.matches('[A-Za-z0-9_.:-]+')">
+                <message error="true">ruleSetId contains invalid characters: ${requestedRuleSetIdValue}</message>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ruleSetId" from="resolvedRuleSet.ruleSetId"/>
-                <set field="existingRuleSet" from="ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', ruleSetId).useCache(false).one()"/>
+                <set field="ruleSetId" from="requestedRuleSetIdValue"/>
+                <set field="existingRuleSet" from="ruleSetId ? ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', ruleSetId).useCache(false).one() : null"/>
                 <set field="nowTs" from="ec.user.nowTimestamp"/>
-                <set field="ruleSetValue" from="[ruleSetId: ruleSetId, ruleSetName: ruleSetNameValue ?: (existingRuleSet?.ruleSetName ?: ruleSetId), description: descriptionValue, version: versionValue, explosionPath: explosionPathValue, primaryKeyPath: primaryKeyPathValue, createdDate: existingRuleSet?.createdDate ?: nowTs, lastUpdatedDate: nowTs]"/>
-                <service-call name="store#darpan.rule.RuleSet" in-map="ruleSetValue"/>
                 <set field="created" from="existingRuleSet == null"/>
                 <set field="updated" from="existingRuleSet != null"/>
+                <set field="ruleSetValue" from="[ruleSetId: ruleSetId, ruleSetName: ruleSetNameValue ?: (existingRuleSet?.ruleSetName ?: ruleSetId), description: descriptionValue, version: versionValue, explosionPath: explosionPathValue, primaryKeyPath: primaryKeyPathValue, createdDate: existingRuleSet?.createdDate ?: nowTs, lastUpdatedDate: nowTs]"/>
+                <if condition="created">
+                    <service-call name="create#darpan.rule.RuleSet" in-map="ruleSetValue" out-map="createdRuleSet"/>
+                    <set field="ruleSetId" from="createdRuleSet.ruleSetId"/>
+                </if>
+                <if condition="updated">
+                    <service-call name="store#darpan.rule.RuleSet" in-map="ruleSetValue"/>
+                </if>
                 <set field="ignoreCacheClear" from="reconciliation.rule.RuleEngineSupport.invalidateRuleSetCache(ec, ruleSetId)"/>
                 <message>${created ? 'Created' : 'Updated'} RuleSet ${ruleSetId}.</message>
             </if>
         </actions>
     </service>
 
-    <service verb="save" noun="Rule" type="script" location="component://darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy" method="saveRule">
+    <service verb="save" noun="Rule">
         <description>Create or update a Rule with validation and cache invalidation.</description>
         <in-parameters>
             <parameter name="ruleSetId" required="true"/>
@@ -111,6 +181,94 @@
             <parameter name="sequenceNum" type="Integer"/>
             <parameter name="warnings" type="List"/>
         </out-parameters>
+        <actions>
+            <set field="ruleSetIdValue" from="((ruleSetId)?.toString()?.trim())"/>
+            <set field="requestedRuleIdValue" from="((ruleId)?.toString()?.trim())"/>
+            <set field="warnings" from="[]"/>
+
+            <if condition="ruleSetIdValue &amp;&amp; !ruleSetIdValue.matches('[A-Za-z0-9_.:-]+')">
+                <message error="true">ruleSetId contains invalid characters: ${ruleSetIdValue}</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; requestedRuleIdValue &amp;&amp; !requestedRuleIdValue.matches('[A-Za-z0-9_.:-]+')">
+                <message error="true">ruleId contains invalid characters: ${requestedRuleIdValue}</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; !ruleSetIdValue">
+                <message error="true">ruleSetId is required</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ruleSetId" from="ruleSetIdValue"/>
+                <set field="existingRuleSet" from="ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', ruleSetId).disableAuthz().useCache(false).one()"/>
+                <if condition="!existingRuleSet">
+                    <message error="true">RuleSet ${ruleSetId} not found</message>
+                </if>
+            </if>
+
+            <if condition="!ec.message.hasError()">
+                <set field="ruleTextValue" from="((ruleText)?.toString()?.trim())"/>
+                <set field="ruleLogicValue" from="((ruleLogic)?.toString()?.trim())"/>
+                <set field="ruleTypeValue" from="((ruleType)?.toString()?.trim())"/>
+                <set field="expressionValue" from="((expression)?.toString()?.trim())"/>
+                <set field="severityValue" from="((severity)?.toString()?.trim())"/>
+                <set field="enabledText" from="((enabled)?.toString()?.trim()?.toUpperCase(java.util.Locale.ROOT))"/>
+                <set field="validateOnSaveText" from="((validateOnSave)?.toString()?.trim()?.toUpperCase(java.util.Locale.ROOT))"/>
+                <set field="enabledValue" from="enabled == null ? 'Y' : ((enabled instanceof Boolean ? enabled : ['Y', 'YES', 'TRUE', '1', 'ON'].contains(enabledText)) ? 'Y' : 'N')"/>
+                <set field="validateOnSaveValue" from="validateOnSave instanceof Boolean ? validateOnSave : ['Y', 'YES', 'TRUE', '1', 'ON'].contains(validateOnSaveText)"/>
+                <set field="sequenceNumText" from="((sequenceNum)?.toString()?.trim())"/>
+                <set field="requestedSeqValue" from="sequenceNum instanceof Number ? sequenceNum.longValue() : (sequenceNumText?.matches('-?\\d+') ? Long.valueOf(sequenceNumText) : null)"/>
+
+                <if condition="!ruleLogicValue &amp;&amp; !ruleTextValue">
+                    <message error="true">Either ruleLogic or ruleText is required</message>
+                </if>
+                <if condition="!ec.message.hasError() &amp;&amp; !ruleLogicValue &amp;&amp; ruleTextValue &amp;&amp; !reconciliation.rule.RuleConditionParser.parseCondition(ruleTextValue)">
+                    <message error="true">ruleText could not be parsed. Use explicit operator syntax (for example: status is 'Pending').</message>
+                </if>
+            </if>
+
+            <set field="existingRule" from="null"/>
+            <if condition="!ec.message.hasError() &amp;&amp; requestedRuleIdValue">
+                <set field="existingRule" from="ec.entity.find('darpan.rule.Rule').condition('ruleId', requestedRuleIdValue).disableAuthz().useCache(false).one()"/>
+                <if condition="existingRule != null &amp;&amp; existingRule.ruleSetId?.toString()?.trim() != ruleSetId">
+                    <message error="true">Rule ${requestedRuleIdValue} belongs to RuleSet ${existingRule.ruleSetId}; moving between RuleSets is not supported.</message>
+                </if>
+            </if>
+
+            <if condition="!ec.message.hasError()">
+                <set field="created" from="existingRule == null"/>
+                <set field="existingSequenceText" from="((existingRule?.sequenceNum)?.toString()?.trim())"/>
+                <set field="existingSequenceValue" from="existingRule?.sequenceNum instanceof Number ? existingRule.sequenceNum.longValue() : (existingSequenceText?.matches('-?\\d+') ? Long.valueOf(existingSequenceText) : null)"/>
+                <set field="lastSequenceRuleList" from="!existingRule &amp;&amp; requestedSeqValue == null ? (ec.entity.find('darpan.rule.Rule').condition('ruleSetId', ruleSetId).orderBy(['-sequenceNum']).limit(1).disableAuthz().useCache(false).list() ?: []) : []"/>
+                <set field="lastSequenceRaw" from="lastSequenceRuleList ? lastSequenceRuleList[0]?.sequenceNum : null"/>
+                <set field="lastSequenceText" from="((lastSequenceRaw)?.toString()?.trim())"/>
+                <set field="lastSequenceValue" from="lastSequenceRaw instanceof Number ? lastSequenceRaw.longValue() : (lastSequenceText?.matches('-?\\d+') ? Long.valueOf(lastSequenceText) : null)"/>
+                <set field="sequenceNum" from="requestedSeqValue != null ? requestedSeqValue : (existingRule ? (existingSequenceValue ?: 10L) : ((lastSequenceValue ?: 0L) + 10L))"/>
+                <set field="ruleId" from="requestedRuleIdValue"/>
+                <set field="nowTs" from="ec.user.nowTimestamp"/>
+                <set field="ruleValue" from="[ruleId: ruleId, ruleSetId: ruleSetId, sequenceNum: sequenceNum, ruleText: ruleTextValue, ruleLogic: ruleLogicValue, ruleType: ruleTypeValue, expression: expressionValue, severity: severityValue, enabled: enabledValue, createdDate: existingRule?.createdDate ?: nowTs, lastUpdatedDate: nowTs]"/>
+                <if condition="created">
+                    <service-call name="create#darpan.rule.Rule" in-map="ruleValue" out-map="createdRule"/>
+                    <set field="ruleId" from="createdRule.ruleId"/>
+                </if>
+                <if condition="!created">
+                    <service-call name="store#darpan.rule.Rule" in-map="ruleValue"/>
+                </if>
+                <set field="ignoreCacheClear" from="reconciliation.rule.RuleEngineSupport.invalidateRuleSetCache(ec, ruleSetId)"/>
+            </if>
+
+            <if condition="!ec.message.hasError() &amp;&amp; validateOnSaveValue &amp;&amp; enabledValue == 'Y'">
+                <service-call name="reconciliation.ReconciliationRuleEngineServices.compile#RuleSet"
+                        disable-authz="true"
+                        in-map="[ruleSetId: ruleSetId, useCache: false, forceRebuild: true]"
+                        out-map="compileResult"/>
+                <set field="warnings" from="compileResult.warnings ?: []"/>
+                <if condition="compileResult.error">
+                    <message error="true">RuleSet ${ruleSetId} could not be compiled: ${compileResult.error}</message>
+                </if>
+            </if>
+
+            <if condition="!ec.message.hasError()">
+                <message>${created ? 'Created' : 'Updated'} Rule ${ruleId}.</message>
+            </if>
+        </actions>
     </service>
 
     <service verb="delete" noun="Rule">
@@ -123,15 +281,15 @@
             <parameter name="ruleSetId"/>
         </out-parameters>
         <actions>
-            <set field="ruleValidation" from="reconciliation.rule.RuleEngineSupport.validateProvidedId(ruleId, 'ruleId')"/>
-            <set field="ruleId" from="ruleValidation.value"/>
-            <if condition="ruleValidation.error">
-                <message error="true">${ruleValidation.error}</message>
+            <set field="ruleIdValue" from="((ruleId)?.toString()?.trim())"/>
+            <if condition="ruleIdValue &amp;&amp; !ruleIdValue.matches('[A-Za-z0-9_.:-]+')">
+                <message error="true">ruleId contains invalid characters: ${ruleIdValue}</message>
             </if>
-            <if condition="!ec.message.hasError() &amp;&amp; !ruleId">
+            <if condition="!ec.message.hasError() &amp;&amp; !ruleIdValue">
                 <message error="true">ruleId is required</message>
             </if>
             <if condition="!ec.message.hasError()">
+                <set field="ruleId" from="ruleIdValue"/>
                 <set field="existingRule" from="ec.entity.find('darpan.rule.Rule').condition('ruleId', ruleId).useCache(false).one()"/>
                 <if condition="!existingRule">
                     <message error="true">Rule ${ruleId} not found</message>
@@ -159,16 +317,16 @@
             <parameter name="deletedCompareSourceCount" type="Integer"/>
         </out-parameters>
         <actions>
-            <set field="ruleSetValidation" from="reconciliation.rule.RuleEngineSupport.validateProvidedId(ruleSetId, 'ruleSetId')"/>
-            <set field="ruleSetId" from="ruleSetValidation.value"/>
+            <set field="ruleSetIdValue" from="((ruleSetId)?.toString()?.trim())"/>
             <set field="forceDeleteRulesValue" from="forceDeleteRules != null ? forceDeleteRules : false"/>
-            <if condition="ruleSetValidation.error">
-                <message error="true">${ruleSetValidation.error}</message>
+            <if condition="ruleSetIdValue &amp;&amp; !ruleSetIdValue.matches('[A-Za-z0-9_.:-]+')">
+                <message error="true">ruleSetId contains invalid characters: ${ruleSetIdValue}</message>
             </if>
-            <if condition="!ec.message.hasError() &amp;&amp; !ruleSetId">
+            <if condition="!ec.message.hasError() &amp;&amp; !ruleSetIdValue">
                 <message error="true">ruleSetId is required</message>
             </if>
             <if condition="!ec.message.hasError()">
+                <set field="ruleSetId" from="ruleSetIdValue"/>
                 <set field="existingRuleSet" from="ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', ruleSetId).useCache(false).one()"/>
                 <if condition="!existingRuleSet">
                     <message error="true">RuleSet ${ruleSetId} not found</message>

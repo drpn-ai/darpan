@@ -110,8 +110,7 @@
         </actions>
     </service>
 
-    <service verb="purge" noun="GeneratedOutputFiles" type="script" transaction="ignore" authenticate="false"
-            location="component://darpan/src/main/groovy/darpan/reconciliation/generic/purgeGeneratedOutputFiles.groovy">
+    <service verb="purge" noun="GeneratedOutputFiles" transaction="ignore" authenticate="false">
         <description>Purge generated reconciliation result files older than the configured retention period.</description>
         <in-parameters>
             <parameter name="retentionDays" type="Integer" default-value="15">
@@ -134,5 +133,43 @@
             </parameter>
             <parameter name="statusMessage"/>
         </out-parameters>
+        <actions>
+            <set field="currentUserId" from="darpan.facade.common.TenantAccessSupport.currentUserId(ec)"/>
+            <if condition="currentUserId &amp;&amp; currentUserId != '_NA_'">
+                <set field="ignoreSuperAdminCheck" from="darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec, 'Only super-admin users may purge reconciliation outputs.')"/>
+            </if>
+
+            <set field="resolvedRetentionDays" from="retentionDays == null ? 15 : ((Number) retentionDays).intValue()"/>
+            <if condition="!ec.message.hasError() &amp;&amp; resolvedRetentionDays &lt; 0">
+                <return error="true" message="retentionDays must be 0 or greater"/>
+            </if>
+
+            <set field="outputLocationValue" from="darpan.common.ValueSupport.normalize(outputLocation)"/>
+            <set field="usingDefaultOutputLocation" from="!outputLocationValue"/>
+            <set field="resolvedOutputLocation" from="usingDefaultOutputLocation ? darpan.facade.common.DataManagerSupport.resolveReconciliationRunsLocation(ec) : darpan.facade.common.TenantAccessSupport.resolveScopedRuntimeLocation(ec, outputLocationValue)"/>
+
+            <if condition="ec.message.hasError()">
+                <set field="retentionDays" from="resolvedRetentionDays"/>
+                <set field="outputLocation" from="resolvedOutputLocation"/>
+                <set field="cutoffTimestamp" from="null"/>
+                <set field="scannedCount" from="0"/>
+                <set field="deletedCount" from="0"/>
+                <set field="retainedCount" from="0"/>
+                <set field="failedFiles" from="[]"/>
+                <set field="statusMessage" from="'Purge skipped.'"/>
+            </if>
+
+            <if condition="!ec.message.hasError()">
+                <set field="purgeResult" from="darpan.facade.reconciliation.ReconciliationOutputSupport.purgeGeneratedOutputFiles(ec, resolvedRetentionDays, resolvedOutputLocation, usingDefaultOutputLocation)"/>
+                <set field="retentionDays" from="purgeResult.retentionDays"/>
+                <set field="outputLocation" from="purgeResult.outputLocation"/>
+                <set field="cutoffTimestamp" from="purgeResult.cutoffTimestamp"/>
+                <set field="scannedCount" from="purgeResult.scannedCount"/>
+                <set field="deletedCount" from="purgeResult.deletedCount"/>
+                <set field="retainedCount" from="purgeResult.retainedCount"/>
+                <set field="failedFiles" from="purgeResult.failedFiles"/>
+                <set field="statusMessage" from="purgeResult.statusMessage"/>
+            </if>
+        </actions>
     </service>
 </services>

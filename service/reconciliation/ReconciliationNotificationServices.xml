@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="build" noun="RunCompletedPayload" authenticate="false">
+        <description>Build the Google Chat text payload for a completed reconciliation run.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId"/>
+            <parameter name="companyLabel"/>
+            <parameter name="runName"/>
+            <parameter name="savedRunId"/>
+            <parameter name="reconciliationRunId"/>
+            <parameter name="reconciliationRunResultId"/>
+            <parameter name="reconciliationMappingId"/>
+            <parameter name="ruleSetId"/>
+            <parameter name="resultDataManagerPath"/>
+            <parameter name="file1SystemLabel"/>
+            <parameter name="file1Label"/>
+            <parameter name="file1SystemEnumId"/>
+            <parameter name="file2SystemLabel"/>
+            <parameter name="file2Label"/>
+            <parameter name="file2SystemEnumId"/>
+            <parameter name="differenceCount"/>
+            <parameter name="onlyInFile1Count"/>
+            <parameter name="onlyInFile2Count"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payload" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="notificationContext" from="[companyUserGroupId: companyUserGroupId, companyLabel: companyLabel, runName: runName, savedRunId: savedRunId, reconciliationRunId: reconciliationRunId, reconciliationRunResultId: reconciliationRunResultId, reconciliationMappingId: reconciliationMappingId, ruleSetId: ruleSetId, resultDataManagerPath: resultDataManagerPath, file1SystemLabel: file1SystemLabel, file1Label: file1Label, file1SystemEnumId: file1SystemEnumId, file2SystemLabel: file2SystemLabel, file2Label: file2Label, file2SystemEnumId: file2SystemEnumId]"/>
+            <set field="tenantLabelValue" from="((companyLabel)?.toString()?.trim()) ?: darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, companyUserGroupId)"/>
+            <set field="runNameValue" from="((runName)?.toString()?.trim()) ?: ((savedRunId)?.toString()?.trim()) ?: ((reconciliationRunId)?.toString()?.trim()) ?: 'reconciliation run'"/>
+            <set field="resultIdValue" from="((reconciliationRunResultId)?.toString()?.trim())"/>
+            <set field="resultUrl" from="darpan.reconciliation.notification.TenantNotificationSupport.buildRunResultUrl(ec, notificationContext)"/>
+            <set field="file1SystemLabelValue" from="darpan.reconciliation.notification.TenantNotificationSupport.resolveFileSystemLabel(ec, notificationContext, 'file1', null)"/>
+            <set field="file2SystemLabelValue" from="darpan.reconciliation.notification.TenantNotificationSupport.resolveFileSystemLabel(ec, notificationContext, 'file2', null)"/>
+            <set field="differenceCountValue" from="differenceCount == null ? '0' : (differenceCount instanceof Number ? ((Number) differenceCount).intValue().toString() : (((differenceCount)?.toString()?.trim()) ?: '0'))"/>
+            <set field="onlyInFile1CountValue" from="onlyInFile1Count == null ? '0' : (onlyInFile1Count instanceof Number ? ((Number) onlyInFile1Count).intValue().toString() : (((onlyInFile1Count)?.toString()?.trim()) ?: '0'))"/>
+            <set field="onlyInFile2CountValue" from="onlyInFile2Count == null ? '0' : (onlyInFile2Count instanceof Number ? ((Number) onlyInFile2Count).intValue().toString() : (((onlyInFile2Count)?.toString()?.trim()) ?: '0'))"/>
+            <set field="lines" from="['Darpan run completed: ' + runNameValue]"/>
+            <if condition="tenantLabelValue">
+                <set field="ignoreLine" from="lines.add('Tenant: ' + tenantLabelValue)"/>
+            </if>
+            <if condition="resultIdValue">
+                <set field="ignoreLine" from="lines.add('Result ID: ' + resultIdValue)"/>
+            </if>
+            <if condition="resultUrl">
+                <set field="ignoreLine" from="lines.add('Run result: &lt;' + resultUrl + '|Open run result&gt;')"/>
+            </if>
+            <set field="ignoreLine" from="lines.add('Differences: ' + differenceCountValue)"/>
+            <set field="ignoreLine" from="lines.add('Only in ' + (file1SystemLabelValue ?: 'File 1') + ': ' + onlyInFile1CountValue)"/>
+            <set field="ignoreLine" from="lines.add('Only in ' + (file2SystemLabelValue ?: 'File 2') + ': ' + onlyInFile2CountValue)"/>
+            <set field="payload" from="[text: lines.join('\n')]"/>
+        </actions>
+    </service>
+
+</services>

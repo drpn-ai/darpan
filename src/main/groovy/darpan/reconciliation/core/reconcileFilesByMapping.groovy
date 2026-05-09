@@ -1,9 +1,10 @@
 import darpan.facade.reconciliation.ReconciliationMappingSupport
 import org.slf4j.LoggerFactory
 
+import static darpan.common.ValueSupport.normalize
+
 def logger = LoggerFactory.getLogger("darpan.reconciliation.core.FileRoutingReconciliation")
 
-def normalize = { it?.toString()?.trim() }
 def resolveFileTypeCode = { String enumId ->
     def normalized = normalize(enumId)
     if (!normalized) return null
@@ -33,25 +34,8 @@ def normalizeIdNormalizer = { String rawNormalizer ->
     def code = normalize(rawNormalizer)
     if (!code) return null
     def normalized = code.replace("-", "_").replace(" ", "_").toUpperCase()
-    switch (normalized) {
-        case "SHOPIFY_GID_TAIL":
-        case "SHOPIFY_GID":
-        case "SHOPIFY_GID_NUMERIC":
-        case "GID_TAIL":
-            return "SHOPIFY_GID_TAIL"
-        case "TRAILING_DIGITS":
-        case "DIGITS":
-            return "TRAILING_DIGITS"
-        default:
-            throw new IllegalArgumentException("Unsupported ID normalizer '${rawNormalizer}'. Supported values: SHOPIFY_GID_TAIL, TRAILING_DIGITS")
-    }
-}
-def normalizeJsonPath = { String idExpr ->
-    def raw = normalize(idExpr)
-    if (!raw) return "\$.id"
-    if (raw.startsWith("\$")) return raw
-    if (raw.contains("[") || raw.contains(".")) return raw
-    return "\$[*].${raw}"
+    if (normalized == "SHOPIFY_GID_TAIL") return "SHOPIFY_GID_TAIL"
+    throw new IllegalArgumentException("Unsupported ID normalizer '${rawNormalizer}'. Supported value: SHOPIFY_GID_TAIL")
 }
 def safeNameFromLocation = { String location, String fallback ->
     def loc = normalize(location) ?: ""

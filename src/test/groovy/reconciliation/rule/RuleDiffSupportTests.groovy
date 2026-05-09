@@ -24,4 +24,12 @@ class RuleDiffSupportTests {
     void applyPreActionsReturnsNullForInvalidIntegerInput() {
         assertNull(RuleDiffSupport.applyPreActions("not-a-number", ["STRING_TO_INT"]))
     }
+
+    @Test
+    void normalizePreActionsCanonicalizesAliasesAndFiltersUnsupportedValues() {
+        assertEquals(
+                ["STRING_TO_INT", "STRING_TO_NUMBER"],
+                RuleDiffSupport.normalizePreActions(["to_integer", "TO_NUMBER", "TRIM"])
+        )
+    }
 }

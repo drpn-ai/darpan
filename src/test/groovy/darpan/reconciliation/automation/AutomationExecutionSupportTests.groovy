@@ -283,6 +283,54 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
+    void apiExecutionReusesSingleActiveSourceConfigDiscoveryAcrossLegacySources() {
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].each { FakeValue source ->
+            source.systemEnumId = AutomationExecutionSupport.SHOPIFY_SYSTEM_ENUM_ID
+            source.remove("safeMetadataJson")
+            source.remove("dateFromParameterName")
+            source.remove("dateToParameterName")
+        }
+        ec.entity.add("darpan.shopify.ShopifyAuthConfig", [
+                shopifyAuthConfigId: "SHOPIFY_MAIN",
+                companyUserGroupId : "TENANT_A",
+                isActive           : "Y",
+                canReadOrders      : "Y",
+        ])
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                return [
+                        dataAvailable: true,
+                        fileLocation : "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName     : "${call.params.fileSide}.json".toString(),
+                        recordCount  : 7,
+                ]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                return [
+                        diffLocation    : "reconciliation-runs/AUTO_API/20260501/result.json",
+                        diffFileName    : "result.json",
+                        differenceCount : 0,
+                        validationErrors: [],
+                ]
+            }
+            return [:]
+        }
+
+        Map result = AutomationExecutionSupport.executeAutomation(ec, [
+                automationId     : "AUTO_API",
+                scheduledFireTime: NOW,
+        ])
+
+        assertEquals(1, result.executedCount)
+        assertEquals(2, ec.service.calls.count {
+            it.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE
+        })
+        assertEquals(1, ec.entity.listCount("darpan.shopify.ShopifyAuthConfig"))
+    }
+
+    @Test
     void successfulApiExecutionSendsConfiguredTenantRunCompletionNotification() {
         FakeEc ec = fakeEc()
         seedApiAutomation(ec)
@@ -474,13 +522,15 @@ class AutomationExecutionSupportTests {
     }
 
     private static FakeEc fakeEc() {
-        return new FakeEc(
+        FakeEc ec = new FakeEc(
                 entity: new FakeEntityFacade(),
                 service: new FakeServiceFacade(),
                 transaction: new FakeTransactionFacade(),
                 resource: new Expando(properties: [:]),
                 user: new Expando(nowTimestamp: NOW, userId: "tester"),
         )
+        ec.service.ec = ec
+        return ec
     }
 
     private static void seedApiAutomation(FakeEc ec) {
@@ -519,6 +569,32 @@ class AutomationExecutionSupportTests {
         return Timestamp.from(Instant.parse(instantText))
     }
 
+    private static Map<String, Object> buildNotificationPayload(FakeEc ec, Map<String, Object> params) {
+        String tenantLabel = ((params.companyLabel)?.toString()?.trim()) ?:
+                darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, params.companyUserGroupId)
+        String runName = ((params.runName)?.toString()?.trim()) ?:
+                ((params.savedRunId)?.toString()?.trim()) ?:
+                ((params.reconciliationRunId)?.toString()?.trim()) ?:
+                "reconciliation run"
+        String resultId = ((params.reconciliationRunResultId)?.toString()?.trim())
+        String resultUrl = TenantNotificationSupport.buildRunResultUrl(ec, params)
+        String file1SystemLabel = TenantNotificationSupport.resolveFileSystemLabel(ec, params, "file1", null)
+        String file2SystemLabel = TenantNotificationSupport.resolveFileSystemLabel(ec, params, "file2", null)
+        Closure<String> displayCount = { Object value ->
+            value == null ? "0" :
+                    value instanceof Number ? ((Number) value).intValue().toString() :
+                            (((value)?.toString()?.trim()) ?: "0")
+        }
+        List<String> lines = ["Darpan run completed: ${runName}".toString()]
+        if (tenantLabel) lines << "Tenant: ${tenantLabel}".toString()
+        if (resultId) lines << "Result ID: ${resultId}".toString()
+        if (resultUrl) lines << "Run result: <${resultUrl}|Open run result>".toString()
+        lines << "Differences: ${displayCount(params.differenceCount)}".toString()
+        lines << "Only in ${file1SystemLabel ?: "File 1"}: ${displayCount(params.onlyInFile1Count)}".toString()
+        lines << "Only in ${file2SystemLabel ?: "File 2"}: ${displayCount(params.onlyInFile2Count)}".toString()
+        return [payload: [text: lines.join("\n")]]
+    }
+
     private static class FakeEc {
         FakeEntityFacade entity
         FakeServiceFacade service
@@ -529,6 +605,7 @@ class AutomationExecutionSupportTests {
 
     private static class FakeEntityFacade {
         Map<String, List<FakeValue>> rows = [:].withDefault { [] }
+        Map<String, Integer> listCounts = [:].withDefault { 0 }
         int automationExecutionSeq = 1
         int runResultSeq = 1
 
@@ -547,15 +624,25 @@ class AutomationExecutionSupportTests {
         List<FakeValue> createdValues(String entityName) {
             return rows[entityName].findAll { it.@created }
         }
+
+        int listCount(String entityName) {
+            return listCounts[entityName] ?: 0
+        }
     }
 
     private static class FakeFind {
         FakeEntityFacade entity
         String entityName
         Map<String, Object> conditions = [:]
+        Integer maxRows
 
         FakeFind condition(String fieldName, Object value) {
             conditions[fieldName] = value
+            return this
+        }
+
+        FakeFind limit(Integer maxRows) {
+            this.maxRows = maxRows
             return this
         }
 
@@ -568,11 +655,13 @@ class AutomationExecutionSupportTests {
         }
 
         List<FakeValue> list() {
-            return entity.rows[entityName].findAll { value ->
+            entity.listCounts[entityName] = (entity.listCounts[entityName] ?: 0) + 1
+            List<FakeValue> matchedRows = entity.rows[entityName].findAll { value ->
                 conditions.every { fieldName, expected ->
                     value[fieldName] == expected
                 }
             }
+            return maxRows != null ? matchedRows.take(maxRows) : matchedRows
         }
     }
 
@@ -617,6 +706,7 @@ class AutomationExecutionSupportTests {
     private static class FakeServiceFacade {
         Closure responder = { FakeServiceCall ignored -> [:] }
         List<FakeServiceCall> calls = []
+        FakeEc ec
 
         FakeServiceCall sync() {
             return new FakeServiceCall(service: this)
@@ -642,6 +732,9 @@ class AutomationExecutionSupportTests {
 
         Map<String, Object> call() {
             service.calls << this
+            if (serviceName == "reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload") {
+                return buildNotificationPayload(service.ec, params)
+            }
             return (service.responder.call(this) ?: [:]) as Map<String, Object>
         }
     }

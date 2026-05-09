@@ -2,10 +2,8 @@ package darpan.reconciliation.automation
 
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
-import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.core.ReconciliationServices
 import darpan.reconciliation.notification.TenantNotificationSupport
-import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import org.apache.spark.sql.Dataset
 import org.moqui.impl.service.ScheduledJobRunner
@@ -20,6 +18,25 @@ import java.time.YearMonth
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.temporal.TemporalAdjusters
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Future
+
+import static darpan.common.ValueSupport.fileNameFromPath
+import static darpan.common.ValueSupport.normalize
+import static darpan.common.ValueSupport.normalizeInt
+import static darpan.common.ValueSupport.readField
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.currentUserId
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.loadAutomation
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.loadAutomationSources
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.normalizeDataManagerPath
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.nowTimestamp
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.requireNormalized
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.runInTransaction
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.safeMetadataJson
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.sanitizeErrorDetail
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.sanitizeErrorMessage
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.truncate
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.updateAutomationExecution
 
 class AutomationExecutionSupport {
     static final String AUTOMATION_INPUT_API_RANGE = "AUT_IN_API_RANGE"
@@ -98,6 +115,9 @@ class AutomationExecutionSupport {
         Map<String, Object> sourcesBySide = loadAutomationSources(ec, automationId)
         def file1Source = requireApiSource(automation, sourcesBySide[FILE_SIDE_1], FILE_SIDE_1)
         def file2Source = requireApiSource(automation, sourcesBySide[FILE_SIDE_2], FILE_SIDE_2)
+        Map<String, Object> executionParams = new LinkedHashMap<String, Object>(input)
+        Map<String, Object> sourceExtractorConfigDefaults = resolveSourceExtractorConfigDefaults(ec, automation, [file1Source, file2Source])
+        if (sourceExtractorConfigDefaults) executionParams.sourceExtractorConfigDefaults = sourceExtractorConfigDefaults
 
         List<Map<String, Object>> executionResults = []
         windows.eachWithIndex { Map<String, Object> window, int index ->
@@ -116,19 +136,21 @@ class AutomationExecutionSupport {
             }
 
             try {
+                Timestamp startedTimestamp = nowTimestamp(ec)
                 updateAutomationExecution(ec, execution, [
                         statusEnumId   : STATUS_RUNNING,
-                        startedDate    : nowTimestamp(ec),
-                        lastUpdatedDate: nowTimestamp(ec),
+                        startedDate    : startedTimestamp,
+                        lastUpdatedDate: startedTimestamp,
                 ])
 
-                Map<String, Object> file1Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file1Source, window, input), file1Source)
-                Map<String, Object> file2Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file2Source, window, input), file2Source)
+                Map<String, Object> file1Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file1Source, window, executionParams), file1Source)
+                Map<String, Object> file2Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file2Source, window, executionParams), file2Source)
 
                 if (!hasData(file1Result) || !hasData(file2Result)) {
+                    Timestamp completedTimestamp = nowTimestamp(ec)
                     Map<String, Object> noDataFields = executionUpdateFields(file1Result, file2Result, [:]) + [
                             statusEnumId    : STATUS_NO_DATA,
-                            completedDate   : nowTimestamp(ec),
+                            completedDate   : completedTimestamp,
                             safeMetadataJson: safeMetadataJson([
                                     mode              : "API_DATE_RANGE",
                                     dataAvailable     : false,
@@ -137,7 +159,7 @@ class AutomationExecutionSupport {
                                     childWindowStart  : window.childWindowStartDate,
                                     childWindowEnd    : window.childWindowEndDate,
                             ]),
-                            lastUpdatedDate : nowTimestamp(ec),
+                            lastUpdatedDate : completedTimestamp,
                     ]
                     updateAutomationExecution(ec, execution, noDataFields)
                     executionResults << noDataFields + [
@@ -149,17 +171,18 @@ class AutomationExecutionSupport {
                 }
 
                 Map<String, Object> reconcileResult = normalizeReconcileResult(
-                        reconcileRunner.call(ec, automation, file1Source, file2Source, file1Result, file2Result, window, input)
+                        reconcileRunner.call(ec, automation, file1Source, file2Source, file1Result, file2Result, window, executionParams)
                 )
-                ensureAutomationResultArtifact(ec, automation, file1Source, file2Source, reconcileResult, window, input)
+                ensureAutomationResultArtifact(ec, automation, file1Source, file2Source, reconcileResult, window, executionParams)
                 String resultDataManagerPath = normalizeDataManagerPath(ec,
                         reconcileResult.resultDataManagerPath ?: reconcileResult.diffLocation ?: reconcileResult.diffFileName)
                 String reconciliationRunResultId = persistAutomationRunResult(ec, automation, file1Result, file2Result,
                         reconcileResult, resultDataManagerPath)
 
+                Timestamp completedTimestamp = nowTimestamp(ec)
                 Map<String, Object> successFields = executionUpdateFields(file1Result, file2Result, reconcileResult) + [
                         statusEnumId              : STATUS_SUCCEEDED,
-                        completedDate             : nowTimestamp(ec),
+                        completedDate             : completedTimestamp,
                         resultFileName            : normalize(reconcileResult.resultFileName) ?: fileNameFromPath(reconcileResult.diffFileName) ?: fileNameFromPath(resultDataManagerPath),
                         resultDataManagerPath     : resultDataManagerPath,
                         reconciliationRunResultId : reconciliationRunResultId,
@@ -173,7 +196,7 @@ class AutomationExecutionSupport {
                                 validationErrors    : reconcileResult.validationErrors ?: [],
                                 processingWarnings  : reconcileResult.processingWarnings ?: [],
                         ]),
-                        lastUpdatedDate           : nowTimestamp(ec),
+                        lastUpdatedDate           : completedTimestamp,
                 ]
                 updateAutomationExecution(ec, execution, successFields)
                 TenantNotificationSupport.notifyRunCompleted(ec, [
@@ -197,9 +220,10 @@ class AutomationExecutionSupport {
                         childWindowEndDate   : window.childWindowEndDate,
                 ]
             } catch (Throwable t) {
+                Timestamp completedTimestamp = nowTimestamp(ec)
                 Map<String, Object> failureFields = [
                         statusEnumId    : STATUS_FAILED,
-                        completedDate   : nowTimestamp(ec),
+                        completedDate   : completedTimestamp,
                         errorMessage    : truncate(sanitizeErrorMessage(t), 3900),
                         errorDetail     : truncate(sanitizeErrorDetail(t), 12000),
                         safeMetadataJson: safeMetadataJson([
@@ -208,7 +232,7 @@ class AutomationExecutionSupport {
                                 childWindowEnd  : window.childWindowEndDate,
                                 errorMessage    : sanitizeErrorMessage(t),
                         ]),
-                        lastUpdatedDate : nowTimestamp(ec),
+                        lastUpdatedDate : completedTimestamp,
                 ]
                 updateAutomationExecution(ec, execution, failureFields)
                 executionResults << failureFields + [
@@ -219,13 +243,14 @@ class AutomationExecutionSupport {
             }
         }
 
+        Map statusCounts = executionResults.countBy { it.statusEnumId }
         return [
                 automationId          : automationId,
                 scheduledFireTime     : scheduledFireTime,
-                executedCount         : executionResults.count { it.statusEnumId == STATUS_SUCCEEDED },
-                noDataCount           : executionResults.count { it.statusEnumId == STATUS_NO_DATA },
-                failedCount           : executionResults.count { it.statusEnumId == STATUS_FAILED },
-                skippedDuplicateCount : executionResults.count { it.statusEnumId == STATUS_SKIPPED_DUPLICATE },
+                executedCount         : statusCounts[STATUS_SUCCEEDED] ?: 0,
+                noDataCount           : statusCounts[STATUS_NO_DATA] ?: 0,
+                failedCount           : statusCounts[STATUS_FAILED] ?: 0,
+                skippedDuplicateCount : statusCounts[STATUS_SKIPPED_DUPLICATE] ?: 0,
                 executionResults      : executionResults,
         ]
     }
@@ -233,7 +258,7 @@ class AutomationExecutionSupport {
     static Map<String, Object> scanDueAutomations(def ec, Map params) {
         Map<String, Object> input = params ?: [:]
         Timestamp now = toTimestamp(input.nowTimestamp) ?: nowTimestamp(ec)
-        int limit = toInteger(input.limit) ?: 100
+        int limit = normalizeInt(input.limit) ?: 100
 
         List<Map<String, Object>> dueAutomationEntries = loadActiveAutomations(ec)
                 .collect { automation ->
@@ -248,8 +273,7 @@ class AutomationExecutionSupport {
                 }
                 .take(limit)
 
-        List<Map<String, Object>> scanResults = []
-        dueAutomationEntries.each { Map<String, Object> dueEntry ->
+        List<Map<String, Object>> pendingExecutions = dueAutomationEntries.collect { Map<String, Object> dueEntry ->
             def automation = dueEntry.automation
             String automationId = normalize(readField(automation, "automationId"))
             Timestamp scheduledFireTime = toTimestamp(dueEntry.scheduledFireTime)
@@ -262,12 +286,25 @@ class AutomationExecutionSupport {
                 if (input[key] != null) executeParams[key] = input[key]
             }
 
-            Map<String, Object> executeResult = callExecuteAutomationService(ec, executeParams)
+            return [
+                    automation       : automation,
+                    automationId     : automationId,
+                    scheduledFireTime: scheduledFireTime,
+                    executeFuture    : callExecuteAutomationServiceFuture(ec, executeParams),
+            ] as Map<String, Object>
+        } as List<Map<String, Object>>
+
+        List<Map<String, Object>> scanResults = []
+        pendingExecutions.each { Map<String, Object> pendingExecution ->
+            def automation = pendingExecution.automation
+            String automationId = pendingExecution.automationId as String
+            Timestamp scheduledFireTime = toTimestamp(pendingExecution.scheduledFireTime)
+            Map<String, Object> executeResult = resolveExecuteAutomationFuture((Future<Map<String, Object>>) pendingExecution.executeFuture)
             Timestamp nextFireTime = resolveNextScheduledFireTime(automation, scheduledFireTime, now)
             updateAutomation(ec, automation, [
                     lastScheduledFireTime: scheduledFireTime,
                     nextScheduledFireTime: nextFireTime,
-                    lastUpdatedDate      : nowTimestamp(ec),
+                    lastUpdatedDate      : now,
             ])
             scanResults << [
                     automationId             : automationId,
@@ -291,7 +328,7 @@ class AutomationExecutionSupport {
         ZoneId zone = resolveZoneId(readField(automation, "windowTimeZone"))
         ZonedDateTime scheduledLocal = scheduledFireTime.toInstant().atZone(zone)
         String windowType = normalize(readField(automation, "relativeWindowTypeEnumId")) ?: WINDOW_LAST_DAYS
-        int windowCount = toInteger(readField(automation, "relativeWindowCount")) ?: 1
+        int windowCount = normalizeInt(readField(automation, "relativeWindowCount")) ?: 1
 
         ZonedDateTime windowStart
         ZonedDateTime windowEnd
@@ -434,6 +471,7 @@ class AutomationExecutionSupport {
         }
 
         def created = runInTransaction(ec, "Error creating reconciliation automation execution", {
+            Timestamp createdTimestamp = nowTimestamp(ec)
             def execution = ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomationExecution")
             execution.set("automationId", automationId)
             execution.set("companyUserGroupId", normalize(readField(automation, "companyUserGroupId")))
@@ -445,8 +483,8 @@ class AutomationExecutionSupport {
             execution.set("windowEndDate", toTimestamp(window.windowEndDate))
             execution.set("childWindowStartDate", childStart)
             execution.set("childWindowEndDate", childEnd)
-            execution.set("createdDate", nowTimestamp(ec))
-            execution.set("lastUpdatedDate", nowTimestamp(ec))
+            execution.set("createdDate", createdTimestamp)
+            execution.set("lastUpdatedDate", createdTimestamp)
             execution.setSequencedIdPrimary()
             execution.create()
             return execution
@@ -495,7 +533,8 @@ class AutomationExecutionSupport {
 
     protected static Map<String, Object> callConfiguredSourceExtractor(def ec, def automation, def source,
             Map<String, Object> window, Map<String, Object> params) {
-        Map<String, Object> metadata = resolveSourceExtractorMetadata(ec, source)
+        Map<String, Object> metadata = resolveSourceExtractorMetadata(ec, source,
+                params?.sourceExtractorConfigDefaults instanceof Map ? (Map<String, Object>) params.sourceExtractorConfigDefaults : [:])
         String serviceName = normalize(metadata.extractServiceName ?: metadata.serviceName)
         if (!serviceName) {
             String systemEnumId = normalize(readField(source, "systemEnumId")) ?: "unknown system"
@@ -529,7 +568,29 @@ class AutomationExecutionSupport {
         return result
     }
 
-    protected static Map<String, Object> resolveSourceExtractorMetadata(def ec, def source) {
+    protected static Map<String, Object> resolveSourceExtractorConfigDefaults(def ec, def automation, Collection sources) {
+        String companyUserGroupId = normalize(readField(automation, "companyUserGroupId"))
+        if (!companyUserGroupId) return [:]
+
+        boolean needsOmsRestConfig = false
+        boolean needsShopifyAuthConfig = false
+        (sources ?: []).each { source ->
+            Map<String, Object> metadata = parseJsonMap(readField(source, "safeMetadataJson"))
+            if (!normalize(metadata.extractServiceName ?: metadata.serviceName)) {
+                Map parameters = metadata.parameters instanceof Map ? (Map) metadata.parameters : [:]
+                String systemEnumId = normalize(readField(source, "systemEnumId"))
+                if (systemEnumId == OMS_SYSTEM_ENUM_ID && !normalize(parameters.omsRestSourceConfigId)) needsOmsRestConfig = true
+                if (systemEnumId == SHOPIFY_SYSTEM_ENUM_ID && !normalize(parameters.shopifyAuthConfigId)) needsShopifyAuthConfig = true
+            }
+        }
+
+        Map<String, Object> defaults = [:]
+        if (needsOmsRestConfig) defaults.omsRestSourceConfigId = findSingleActiveOmsRestSourceConfigId(ec, companyUserGroupId)
+        if (needsShopifyAuthConfig) defaults.shopifyAuthConfigId = findSingleActiveShopifyAuthConfigId(ec, companyUserGroupId)
+        return defaults.findAll { it.value != null } as Map<String, Object>
+    }
+
+    protected static Map<String, Object> resolveSourceExtractorMetadata(def ec, def source, Map<String, Object> configDefaults = [:]) {
         Map<String, Object> metadata = parseJsonMap(readField(source, "safeMetadataJson"))
         if (normalize(metadata.extractServiceName ?: metadata.serviceName)) return metadata
 
@@ -539,7 +600,9 @@ class AutomationExecutionSupport {
                 new LinkedHashMap<>((Map<String, Object>) metadata.parameters) : [:]
 
         if (systemEnumId == OMS_SYSTEM_ENUM_ID) {
-            String configId = normalize(parameters.omsRestSourceConfigId) ?: findSingleActiveOmsRestSourceConfigId(ec, companyUserGroupId)
+            String configId = normalize(parameters.omsRestSourceConfigId) ?:
+                    normalize(configDefaults?.omsRestSourceConfigId) ?:
+                    findSingleActiveOmsRestSourceConfigId(ec, companyUserGroupId)
             if (configId) {
                 parameters.omsRestSourceConfigId = configId
                 metadata.parameters = parameters
@@ -547,7 +610,9 @@ class AutomationExecutionSupport {
             }
         }
         if (systemEnumId == SHOPIFY_SYSTEM_ENUM_ID) {
-            String configId = normalize(parameters.shopifyAuthConfigId) ?: findSingleActiveShopifyAuthConfigId(ec, companyUserGroupId)
+            String configId = normalize(parameters.shopifyAuthConfigId) ?:
+                    normalize(configDefaults?.shopifyAuthConfigId) ?:
+                    findSingleActiveShopifyAuthConfigId(ec, companyUserGroupId)
             if (configId) {
                 parameters.shopifyAuthConfigId = configId
                 metadata.parameters = parameters
@@ -588,6 +653,7 @@ class AutomationExecutionSupport {
                     .condition("canReadOrders", "Y")
                     .disableAuthz()
                     .useCache(false)
+                    .limit(2)
                     .list() ?: []
             return rows.size() == 1 ? normalize(readField(rows.first(), "omsRestSourceConfigId")) : null
         } catch (Throwable ignored) {
@@ -604,6 +670,7 @@ class AutomationExecutionSupport {
                     .condition("canReadOrders", "Y")
                     .disableAuthz()
                     .useCache(false)
+                    .limit(2)
                     .list() ?: []
             return rows.size() == 1 ? normalize(readField(rows.first(), "shopifyAuthConfigId")) : null
         } catch (Throwable ignored) {
@@ -618,7 +685,7 @@ class AutomationExecutionSupport {
             def enumeration = ec?.entity?.find("moqui.basic.Enumeration")
                     ?.condition("enumId", enumId)
                     ?.disableAuthz()
-                    ?.useCache(false)
+                    ?.useCache(true)
                     ?.one()
             return normalize(readField(enumeration, "description")) ?: normalize(readField(enumeration, "enumCode")) ?: enumId
         } catch (Throwable ignored) {
@@ -660,33 +727,28 @@ class AutomationExecutionSupport {
         return (call.call() ?: [:]) as Map<String, Object>
     }
 
+    protected static Future<Map<String, Object>> callExecuteAutomationServiceFuture(def ec, Map<String, Object> executeParams) {
+        if (!ec?.service?.metaClass?.respondsTo(ec.service, "async")) {
+            return CompletableFuture.completedFuture(callExecuteAutomationService(ec, executeParams))
+        }
+
+        def call = ec.service.async()
+                .name("reconciliation.ReconciliationAutomationServices.execute#Automation")
+                .parameters(executeParams)
+        if (call?.metaClass?.respondsTo(call, "disableAuthz")) call = call.disableAuthz()
+        return (Future<Map<String, Object>>) call.callFuture()
+    }
+
+    protected static Map<String, Object> resolveExecuteAutomationFuture(Future<Map<String, Object>> future) {
+        return (future?.get() ?: [:]) as Map<String, Object>
+    }
+
     protected static List loadActiveAutomations(def ec) {
         return ec?.entity?.find("darpan.reconciliation.ReconciliationAutomation")
                 ?.condition("isActive", "Y")
                 ?.disableAuthz()
                 ?.useCache(false)
                 ?.list() ?: []
-    }
-
-    protected static def loadAutomation(def ec, String automationId) {
-        def automation = ec?.entity?.find("darpan.reconciliation.ReconciliationAutomation")
-                ?.condition("automationId", automationId)
-                ?.disableAuthz()
-                ?.useCache(false)
-                ?.one()
-        if (!automation) throw new IllegalArgumentException("Automation ${automationId} not found")
-        return automation
-    }
-
-    protected static Map<String, Object> loadAutomationSources(def ec, String automationId) {
-        List sources = ec?.entity?.find("darpan.reconciliation.ReconciliationAutomationSource")
-                ?.condition("automationId", automationId)
-                ?.disableAuthz()
-                ?.useCache(false)
-                ?.list() ?: []
-        return sources.collectEntries { source ->
-            [(normalize(readField(source, "fileSide"))): source]
-        } as Map<String, Object>
     }
 
     protected static def requireApiSource(def automation, def source, String fileSide) {
@@ -716,7 +778,7 @@ class AutomationExecutionSupport {
         result.fileName = normalize(result.fileName) ?: fileNameFromPath(result.fileLocation)
         result.fileTypeEnumId = normalize(result.fileTypeEnumId) ?: normalize(readField(source, "fileTypeEnumId"))
         result.schemaFileName = normalize(result.schemaFileName) ?: normalize(readField(source, "schemaFileName"))
-        result.recordCount = toInteger(result.recordCount)
+        result.recordCount = normalizeInt(result.recordCount)
         return result
     }
 
@@ -789,34 +851,6 @@ class AutomationExecutionSupport {
         return reconcileResult
     }
 
-    protected static String normalizeDataManagerPath(def ec, Object rawPath) {
-        String normalized = normalize(rawPath)
-        if (!normalized) return null
-
-        String dataManagerLocation = DataManagerSupport.resolveDataManagerLocation(ec)
-        if (normalized.startsWith(dataManagerLocation + "/")) {
-            return DataManagerSupport.normalizeRelativePath(normalized.substring(dataManagerLocation.length() + 1))
-        }
-
-        String relativePath = DataManagerSupport.normalizeRelativePath(normalized)
-        if (relativePath) return relativePath
-
-        if (normalized.contains("://")) return null
-
-        File root = DataManagerSupport.resolveDirectoryFile(ec, dataManagerLocation, false)
-        if (root == null) return null
-
-        File candidate = new File(normalized)
-        try {
-            def rootPath = root.canonicalFile.toPath()
-            def candidatePath = candidate.canonicalFile.toPath()
-            if (!candidatePath.startsWith(rootPath)) return null
-            return rootPath.relativize(candidatePath).toString().replace(File.separator, "/")
-        } catch (Exception ignored) {
-            return null
-        }
-    }
-
     protected static boolean hasData(Map<String, Object> sourceResult) {
         return sourceResult.dataAvailable == true && normalize(sourceResult.fileLocation)
     }
@@ -828,11 +862,11 @@ class AutomationExecutionSupport {
                 file1DataManagerPath: normalize(file1Result.dataManagerPath),
                 file2Name        : normalize(file2Result.fileName),
                 file2DataManagerPath: normalize(file2Result.dataManagerPath),
-                file1RecordCount : toInteger(file1Result.recordCount),
-                file2RecordCount : toInteger(file2Result.recordCount),
-                differenceCount  : toInteger(reconcileResult.differenceCount),
-                onlyInFile1Count : toInteger(reconcileResult.onlyInFile1Count ?: reconcileResult.missingInFile2Count),
-                onlyInFile2Count : toInteger(reconcileResult.onlyInFile2Count ?: reconcileResult.missingInFile1Count),
+                file1RecordCount : normalizeInt(file1Result.recordCount),
+                file2RecordCount : normalizeInt(file2Result.recordCount),
+                differenceCount  : normalizeInt(reconcileResult.differenceCount),
+                onlyInFile1Count : normalizeInt(reconcileResult.onlyInFile1Count ?: reconcileResult.missingInFile2Count),
+                onlyInFile2Count : normalizeInt(reconcileResult.onlyInFile2Count ?: reconcileResult.missingInFile1Count),
         ].findAll { it.value != null } as Map<String, Object>
     }
 
@@ -856,25 +890,14 @@ class AutomationExecutionSupport {
             runResultValue.set("file2DataManagerPath", normalize(file2Result.dataManagerPath))
             runResultValue.set("resultDataManagerPath", normalize(resultDataManagerPath))
             runResultValue.set("reconciliationType", normalize(reconcileResult.reconciliationType ?: reconcileResult.objectType))
-            runResultValue.set("differenceCount", toInteger(reconcileResult.differenceCount))
-            runResultValue.set("onlyInFile1Count", toInteger(reconcileResult.onlyInFile1Count ?: reconcileResult.missingInFile2Count))
-            runResultValue.set("onlyInFile2Count", toInteger(reconcileResult.onlyInFile2Count ?: reconcileResult.missingInFile1Count))
+            runResultValue.set("differenceCount", normalizeInt(reconcileResult.differenceCount))
+            runResultValue.set("onlyInFile1Count", normalizeInt(reconcileResult.onlyInFile1Count ?: reconcileResult.missingInFile2Count))
+            runResultValue.set("onlyInFile2Count", normalizeInt(reconcileResult.onlyInFile2Count ?: reconcileResult.missingInFile1Count))
             runResultValue.set("createdDate", nowTimestamp(ec))
             runResultValue.setSequencedIdPrimary()
             runResultValue.create()
             return normalize(readField(runResultValue, "reconciliationRunResultId"))
         }) as String
-    }
-
-    protected static void updateAutomationExecution(def ec, def execution, Map<String, Object> fields) {
-        if (!execution) return
-        runInTransaction(ec, "Error updating reconciliation automation execution", {
-            fields.findAll { it.value != null }.each { entry ->
-                execution.set(entry.key as String, entry.value)
-            }
-            execution.update()
-            return null
-        })
     }
 
     protected static void updateAutomation(def ec, def automation, Map<String, Object> fields) {
@@ -884,13 +907,6 @@ class AutomationExecutionSupport {
             automation.update()
             return null
         })
-    }
-
-    protected static Object runInTransaction(def ec, String message, Closure work) {
-        if (ec?.transaction?.metaClass?.respondsTo(ec.transaction, "runUseOrBegin", Integer, String, Closure)) {
-            return ec.transaction.runUseOrBegin(30, message, work)
-        }
-        return work.call()
     }
 
     protected static Timestamp resolveScheduledFireTime(def ec, Map<String, Object> input) {
@@ -956,99 +972,9 @@ class AutomationExecutionSupport {
         }
     }
 
-    protected static String safeMetadataJson(Map<String, Object> metadata) {
-        return truncate(JsonOutput.toJson(safeJsonValue(metadata)), 3900)
-    }
-
-    protected static Object safeJsonValue(Object value) {
-        if (value == null || value instanceof CharSequence || value instanceof Number || value instanceof Boolean) return value
-        if (value instanceof Collection) return value.collect { safeJsonValue(it) }
-        if (value instanceof Map) {
-            return value.collectEntries { entry ->
-                [(entry.key?.toString()): safeJsonValue(entry.value)]
-            }
-        }
-        return value.toString()
-    }
-
-    protected static String currentUserId(def ec) {
-        try {
-            return TenantAccessSupport.currentUserId(ec)
-        } catch (Exception ignored) {
-            return normalize(ec?.user?.userId)
-        }
-    }
-
-    protected static Timestamp nowTimestamp(def ec) {
-        return ec?.user?.nowTimestamp ?: new Timestamp(System.currentTimeMillis())
-    }
-
-    protected static Integer toInteger(Object rawValue) {
-        if (rawValue == null) return null
-        if (rawValue instanceof Number) return rawValue.intValue()
-        String normalized = normalize(rawValue)
-        if (!normalized) return null
-        return normalized.isInteger() ? normalized.toInteger() : null
-    }
-
     protected static boolean toBoolean(Object rawValue) {
         if (rawValue == Boolean.TRUE) return true
         if (rawValue == Boolean.FALSE || rawValue == null) return false
         return ["Y", "true", "TRUE", "yes", "YES", "1"].contains(normalize(rawValue))
-    }
-
-    protected static String requireNormalized(Object value, String message) {
-        String normalized = normalize(value)
-        if (!normalized) throw new IllegalArgumentException(message)
-        return normalized
-    }
-
-    protected static String fileNameFromPath(Object rawPath) {
-        String normalized = normalize(rawPath)
-        if (!normalized) return null
-        return normalized.tokenize("/\\").last()
-    }
-
-    protected static String sanitizeErrorMessage(Throwable t) {
-        return sanitizeText(t?.message ?: t?.class?.name ?: "Automation execution failed")
-    }
-
-    protected static String sanitizeErrorDetail(Throwable t) {
-        if (t == null) return null
-
-        StringBuilder detail = new StringBuilder()
-        Throwable cursor = t
-        int depth = 0
-        while (cursor != null && depth < 8) {
-            if (depth > 0) detail.append("\nCaused by: ")
-            detail.append(cursor.class.name)
-            if (cursor.message) detail.append(": ").append(cursor.message)
-            cursor.stackTrace?.each { StackTraceElement element ->
-                detail.append("\n    at ").append(element.toString())
-            }
-            cursor = cursor.cause
-            depth++
-        }
-        return sanitizeText(detail.toString())
-    }
-
-    protected static String sanitizeText(String value) {
-        return value?.replaceAll(/(?i)(password|privateKey|apiToken|token)\s*[:=]\s*[^,\s)]+/, "\$1=***")
-    }
-
-    protected static String truncate(String value, int maxLength) {
-        if (value == null || value.length() <= maxLength) return value
-        return value.substring(0, maxLength)
-    }
-
-    protected static String normalize(Object value) {
-        return ((value)?.toString()?.trim())
-    }
-
-    protected static Object readField(def record, String fieldName) {
-        if (record == null || !fieldName) return null
-        if (record instanceof Map) return record[fieldName]
-        if (record.metaClass.respondsTo(record, "get", String)) return record.get(fieldName)
-        return record."${fieldName}"
     }
 }

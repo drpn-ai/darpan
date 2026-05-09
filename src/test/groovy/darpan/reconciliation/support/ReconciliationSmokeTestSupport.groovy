@@ -201,7 +201,7 @@ class ReconciliationSmokeTestSupport {
                 fileTypeEnumId      : "DftJson",
                 recordRootExpression: "data.orders.edges",
                 primaryIdExpression : "node.id",
-                idValueNormalizer   : "TRAILING_DIGITS"
+                idValueNormalizer   : "SHOPIFY_GID_TAIL"
         ])
         upsertEntity(ec, "darpan.rule.RuleSetCompareSource", [compareScopeId: "DARPAN_TEST_ORDER_CSV_SCOPE", fileSide: "FILE_1"], [
                 compareScopeId      : "DARPAN_TEST_ORDER_CSV_SCOPE",

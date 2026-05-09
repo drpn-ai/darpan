@@ -80,11 +80,11 @@ Generic uploads and SFTP automation now route here when `ruleSetId` is provided.
 
 ### `ReconciliationCoreServices.reconcile#RuleSetCompareScopeBaseDiff`
 
-Internal base compare stage for the RuleSet cutover. It calls `prepare#RuleSetCompareScope`, runs the primary-ID anti-joins, emits missing-object Diff rows, and returns matched object pairs for later DRL execution.
+Internal base compare stage for the RuleSet cutover. XML actions own the service orchestration and missing-diff assembly, while shared Spark helpers handle the matched-ID join, Dataset counting, schema-safe empty Datasets, and matched-pair Dataset construction.
 
 **Inputs (key):** same as `prepare#RuleSetCompareScope`.
 
-**Outputs (key):** `missingInFile1Count`, `missingInFile2Count`, `differenceCount`, `matchedPairCount`, `missingDiffDf`, `matchedPairDf`, `validationErrors`, `processingWarnings`.
+**Outputs (key):** `compareScopeDescription`, `missingInFile1Count`, `missingInFile2Count`, `differenceCount`, `matchedPairCount`, `missingDiffDf`, `matchedPairDf`, `validationErrors`, `processingWarnings`.
 
 Missing-object Diff direction is explicit:
 - `MISSING_IN_FILE_1`: primary ID exists in file 2 but not file 1
@@ -103,13 +103,14 @@ When no objects are missing on either side, `missingDiffDf` is still returned as
 
 ### `ReconciliationCoreServices.reconcile#RuleSetCompareScope`
 
-Internal full RuleSet compare pipeline for the cutover. It preserves the base missing-object Diff stage, executes DRL only on matched pairs, and returns one normalized diff dataset for both missing-object and field/business-rule outcomes.
+Internal full RuleSet compare pipeline for the cutover. XML actions preserve the base missing-object Diff stage, count active rules, call the bounded rule-execution helper only for matched pairs, normalize rule/missing diffs, and return one dataset for both missing-object and field/business-rule outcomes.
 
 **Inputs (key):** same as `reconcile#RuleSetCompareScopeBaseDiff`, plus optional `ruleBatchSize` for bounded matched-pair execution.
 
 **Outputs (key):**
 - `missingInFile1Count`
 - `missingInFile2Count`
+- `compareScopeDescription`
 - `missingObjectDifferenceCount`
 - `ruleDifferenceCount`
 - `differenceCount`
@@ -169,6 +170,8 @@ Purges generated result files older than the retention policy from `runtime://da
 
 **Outputs (key):** `scannedCount`, `deletedCount`, `retainedCount`, `failedFiles`, `statusMessage`.
 
+Implementation boundary: the service contract and XML actions handle the anonymous scheduled-call path, optional super-admin check for logged-in callers, retention defaults, output-location resolution, and output assignment. `ReconciliationOutputSupport.purgeGeneratedOutputFiles(...)` owns the remaining Groovy because the purge itself is procedural filesystem work: recursive run-result scanning, legacy `LocationReference` iteration, delete attempts, failure collection, and logging.
+
 ## Schema Management
 
 For details on creating and managing schemas used in reconciliation, see [JSON Schema Management](json-schema-management.md).
@@ -189,9 +192,8 @@ For compare-scope JSON sources, extraction can also be split into:
 
 The adapter combines those two values into the JSONPath shape used by the existing Spark ingestion logic. When `recordRootExpression` names a repeated collection without an explicit array marker, the adapter expands it to the collection wildcard form first. Example: `data.orders.edges` becomes `$.data.orders.edges[*]` before `primaryIdExpression` is appended.
 
-Supported normalizers:
-- `SHOPIFY_GID_TAIL`: extracts the numeric tail from Shopify GIDs (for example `gid://shopify/Product/7944971747446` -> `7944971747446`)
-- `TRAILING_DIGITS`: extracts trailing digits from the value when present
+Supported normalizer:
+- `SHOPIFY_GID_TAIL`: extracts the numeric tail from Shopify GIDs (for example `gid://shopify/Product/7944971747446` -> `7944971747446`), and also accepts values that are already numeric or end in the same numeric ID.
 
 ### Examples
 

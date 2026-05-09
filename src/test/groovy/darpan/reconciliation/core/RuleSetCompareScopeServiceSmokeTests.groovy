@@ -64,7 +64,7 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertEquals('$.data.orders.edges[*].node.id', prepared.file1IdExpression)
         assertEquals('$.data.orders.edges[*].node.id', prepared.file2IdExpression)
         assertEquals("SHOPIFY_GID_TAIL", prepared.file1IdNormalizer)
-        assertEquals("TRAILING_DIGITS", prepared.file2IdNormalizer)
+        assertEquals("SHOPIFY_GID_TAIL", prepared.file2IdNormalizer)
         assertEquals("SHOPIFY", prepared.file1Label)
         assertEquals("HotWax", prepared.file2Label)
         assertTrue(((List) prepared.validationErrors).isEmpty())

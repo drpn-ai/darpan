@@ -257,7 +257,7 @@
 - Element: `darpan.rule.RuleSetCompareSource`
 
 ```xml
-<darpan.rule.RuleSetCompareSource compareScopeId="DARPAN_TEST_ORDER_JSON_SCOPE" fileSide="FILE_2" systemEnumId="OMS" fileTypeEnumId="DftJson" recordRootExpression="data.orders.edges" primaryIdExpression="node.id" idValueNormalizer="TRAILING_DIGITS"/>
+<darpan.rule.RuleSetCompareSource compareScopeId="DARPAN_TEST_ORDER_JSON_SCOPE" fileSide="FILE_2" systemEnumId="OMS" fileTypeEnumId="DftJson" recordRootExpression="data.orders.edges" primaryIdExpression="node.id" idValueNormalizer="SHOPIFY_GID_TAIL"/>
 ```
 
 ### Added in `data/ReconciliationCompareScopeFixtureData.xml`

@@ -1,18 +1,32 @@
 package reconciliation.rule
 
+import darpan.common.ValueSupport
+
+import java.util.Collections
+import java.util.Locale
 import java.util.Objects
 
-class RuleDiffSupport {
-    static String normalize(Object value) {
-        return value?.toString()?.trim()
-    }
+import static darpan.common.ValueSupport.normalize
+import static darpan.common.ValueSupport.stringify
 
-    static String stringify(Object value) {
-        return value == null ? null : value.toString()
-    }
+class RuleDiffSupport {
+    private static final Set<String> SUPPORTED_PRE_ACTIONS = Collections.unmodifiableSet([
+            "STRING_TO_INT",
+            "STRING_TO_INTEGER",
+            "TO_INT",
+            "TO_INTEGER",
+            "STRING_TO_NUMBER",
+            "TO_NUMBER"
+    ] as Set<String>)
+    private static final Map<String, String> PRE_ACTION_ALIASES = Collections.unmodifiableMap([
+            "STRING_TO_INTEGER": "STRING_TO_INT",
+            "TO_INT"           : "STRING_TO_INT",
+            "TO_INTEGER"       : "STRING_TO_INT",
+            "TO_NUMBER"        : "STRING_TO_NUMBER"
+    ])
 
     static boolean valuesDiffer(Object file1Value, Object file2Value) {
-        return !Objects.equals(file1Value, file2Value)
+        return ValueSupport.valuesDiffer(file1Value, file2Value)
     }
 
     static Object valueAtPath(Object source, String path) {
@@ -83,12 +97,11 @@ class RuleDiffSupport {
         Collection values = rawPreActions instanceof Collection ? (Collection) rawPreActions : [rawPreActions]
 
         return values.collect { Object rawValue ->
-            normalize(rawValue)?.toUpperCase()
+            normalize(rawValue)?.toUpperCase(Locale.ROOT)
         }.findAll { String value ->
-            value in ["STRING_TO_INT", "STRING_TO_INTEGER", "TO_INT", "TO_INTEGER", "STRING_TO_NUMBER", "TO_NUMBER"]
+            value in SUPPORTED_PRE_ACTIONS
         }.collect { String value ->
-            value in ["STRING_TO_INTEGER", "TO_INT", "TO_INTEGER"] ? "STRING_TO_INT" :
-                    (value == "TO_NUMBER" ? "STRING_TO_NUMBER" : value)
+            PRE_ACTION_ALIASES[value] ?: value
         }
     }
 
@@ -132,7 +145,7 @@ class RuleDiffSupport {
         if (!normalized || !(normalized ==~ /-?\d+/)) return null
         try {
             return Long.valueOf(normalized)
-        } catch (Exception ignored) {
+        } catch (NumberFormatException ignored) {
             return null
         }
     }
@@ -145,7 +158,7 @@ class RuleDiffSupport {
         if (!normalized || !(normalized ==~ /-?\d+(\.\d+)?/)) return null
         try {
             return new BigDecimal(normalized)
-        } catch (Exception ignored) {
+        } catch (NumberFormatException ignored) {
             return null
         }
     }
@@ -182,8 +195,9 @@ class RuleDiffSupport {
 
     static List<Map> extractNormalizedDiffs(Map fact) {
         if (fact == null) return []
-        List<Map> generatedDiffs = ensureGeneratedDiffList(fact)
-        return generatedDiffs.collect { Map diff -> normalizeDiff(fact, diff) }
+        // Diffs are already normalized at add time (addDiff calls normalizeDiff before storing),
+        // so a second normalization pass here is redundant. Return a snapshot copy instead.
+        return new ArrayList<>(ensureGeneratedDiffList(fact))
     }
 
     static List<Map> ensureGeneratedDiffList(Map fact) {

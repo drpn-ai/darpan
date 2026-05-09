@@ -8,9 +8,10 @@ import org.slf4j.LoggerFactory
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
 
+import static darpan.common.ValueSupport.normalize
+
 def logger = LoggerFactory.getLogger("darpan.reconciliation.generic.GenericReconciliation")
 
-def normalize = { it?.toString()?.trim() }
 def saveFileItem = { fileItem, targetRef ->
     File targetFile = targetRef.getFile()
     if (targetFile != null) {

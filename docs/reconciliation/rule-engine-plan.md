@@ -44,7 +44,7 @@ We will use the generic `Map<String, Object>` interface so that we don't need to
 - [ ] Preserve `ReconciliationMapping` as the current baseline and migration input until the cutover ticket deprecates it.
 
 ### Phase 2: Core Service Implementation
-- [ ] Implement `reconciliation/rule/RuleEngineServices.groovy` to handle Drools initialization.
+- [ ] Implement XML-backed rule-engine services with Drools initialization in `reconciliation/rule/RuleEngineSupport.groovy`.
 - [ ] Create a "Rule Compiler" that converts the `Rule` entity data into a valid DRL file string.
 - [ ] Implement the execution loop (insert facts -> fire rules -> collect results).
 

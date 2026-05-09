@@ -182,7 +182,10 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="tenantNotificationSettings" from="darpan.reconciliation.notification.TenantNotificationSupport.readSettings(ec)"/>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="notificationSetting" from="tenantId ? ec.entity.find('darpan.reconciliation.TenantNotificationSetting').condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).one() : null"/>
+            <set field="googleChatWebhookUrlValue" from="((notificationSetting?.googleChatWebhookUrl)?.toString()?.trim())"/>
+            <set field="tenantNotificationSettings" from="[companyUserGroupId: tenantId, companyLabel: tenantId ? darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, tenantId) : null, googleChatConfigured: !!googleChatWebhookUrlValue, googleChatWebhookUrlMasked: darpan.reconciliation.notification.TenantNotificationSupport.maskGoogleChatWebhookUrl(googleChatWebhookUrlValue), isActive: ((notificationSetting?.isActive)?.toString()?.trim()) ?: 'N', createdByUserId: ((notificationSetting?.createdByUserId)?.toString()?.trim()), createdDate: notificationSetting?.createdDate, lastUpdatedDate: notificationSetting?.lastUpdatedDate]"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
@@ -211,7 +214,38 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="tenantNotificationSettings" from="darpan.reconciliation.notification.TenantNotificationSupport.saveSettings(ec, googleChatWebhookUrl, isActive)"/>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="notificationSetting" from="tenantId ? ec.entity.find('darpan.reconciliation.TenantNotificationSetting').condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).one() : null"/>
+            <if condition="!tenantId">
+                <message error="true">Active tenant is required for notification settings.</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for notification settings.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="googleChatWebhookUrlValue" from="((googleChatWebhookUrl)?.toString()?.trim())"/>
+                <set field="existingGoogleChatWebhookUrlValue" from="((notificationSetting?.googleChatWebhookUrl)?.toString()?.trim())"/>
+                <set field="googleChatWebhookUrlToSave" from="googleChatWebhookUrlValue ?: existingGoogleChatWebhookUrlValue"/>
+                <set field="isActiveValue" from="isActive == null ? 'Y' : ((isActive instanceof Boolean ? isActive : ['Y', 'YES', 'TRUE', '1', 'ON'].contains(isActive.toString().trim().toUpperCase(Locale.ROOT))) ? 'Y' : 'N')"/>
+                <if condition="isActiveValue == 'Y' &amp;&amp; !googleChatWebhookUrlToSave">
+                    <message error="true">Google Chat webhook URL is required when notifications are enabled.</message>
+                </if>
+                <set field="validationError" from="darpan.reconciliation.notification.TenantNotificationSupport.validateGoogleChatWebhookUrl(googleChatWebhookUrlToSave)"/>
+                <if condition="validationError">
+                    <message error="true">${validationError}</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="nowTs" from="ec.user.nowTimestamp"/>
+                <set field="notificationSettingMap" from="[companyUserGroupId: tenantId, createdByUserId: ((notificationSetting?.createdByUserId)?.toString()?.trim()) ?: darpan.facade.common.TenantAccessSupport.currentUserId(ec), googleChatWebhookUrl: googleChatWebhookUrlToSave, isActive: isActiveValue, createdDate: notificationSetting?.createdDate ?: nowTs, lastUpdatedDate: nowTs]"/>
+                <service-call name="store#darpan.reconciliation.TenantNotificationSetting" in-map="notificationSettingMap"/>
+                <if condition="!ec.message.hasError()">
+                    <message>Saved notification settings.</message>
+                </if>
+            </if>
+            <set field="notificationSetting" from="tenantId ? ec.entity.find('darpan.reconciliation.TenantNotificationSetting').condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).one() : null"/>
+            <set field="googleChatWebhookUrlValue" from="((notificationSetting?.googleChatWebhookUrl)?.toString()?.trim())"/>
+            <set field="tenantNotificationSettings" from="[companyUserGroupId: tenantId, companyLabel: tenantId ? darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, tenantId) : null, googleChatConfigured: !!googleChatWebhookUrlValue, googleChatWebhookUrlMasked: darpan.reconciliation.notification.TenantNotificationSupport.maskGoogleChatWebhookUrl(googleChatWebhookUrlValue), isActive: ((notificationSetting?.isActive)?.toString()?.trim()) ?: 'N', createdByUserId: ((notificationSetting?.createdByUserId)?.toString()?.trim()), createdDate: notificationSetting?.createdDate, lastUpdatedDate: notificationSetting?.lastUpdatedDate]"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

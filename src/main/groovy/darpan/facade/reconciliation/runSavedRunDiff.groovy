@@ -11,12 +11,16 @@ import java.sql.Timestamp
 import java.time.Instant
 import java.time.LocalDateTime
 
+import static darpan.common.ValueSupport.normalize
+import static darpan.common.ValueSupport.normalizeInt
+import static darpan.common.ValueSupport.normalizeUpper
+
 def toTimestampValue = { Object rawValue ->
     if (rawValue == null) return null
     if (rawValue instanceof Timestamp) return rawValue
     if (rawValue instanceof Date) return new Timestamp(rawValue.time)
 
-    String normalized = ((rawValue)?.toString()?.trim())
+    String normalized = normalize(rawValue)
     if (!normalized) return null
     try {
         return Timestamp.from(Instant.parse(normalized))
@@ -37,17 +41,17 @@ def toTimestampValue = { Object rawValue ->
     throw new IllegalArgumentException("Invalid timestamp '${normalized}'")
 }
 
-String savedRunIdValue = ((savedRunId)?.toString()?.trim())
+String savedRunIdValue = normalize(savedRunId)
 String inputFile1Name = file1Name != null ? ReconciliationOutputSupport.sanitizeUploadFileName(file1Name as String, "file1") : null
 String inputFile2Name = file2Name != null ? ReconciliationOutputSupport.sanitizeUploadFileName(file2Name as String, "file2") : null
 String file1TextValue = file1Text?.toString()
 String file2TextValue = file2Text?.toString()
-String requestedFile1SystemEnumId = ((file1SystemEnumId)?.toString()?.trim())
-String requestedFile2SystemEnumId = ((file2SystemEnumId)?.toString()?.trim())
+String requestedFile1SystemEnumId = normalize(file1SystemEnumId)
+String requestedFile2SystemEnumId = normalize(file2SystemEnumId)
 boolean hasHeaderValue = hasHeader == null ? true :
-        (hasHeader instanceof Boolean ? hasHeader : ["Y", "YES", "TRUE", "1", "ON"].contains(hasHeader.toString().trim().toUpperCase(Locale.ROOT)))
-String windowStartLocalDateValue = ((windowStartLocalDate)?.toString()?.trim())
-String windowEndLocalDateValue = ((windowEndLocalDate)?.toString()?.trim())
+        (hasHeader instanceof Boolean ? hasHeader : ["Y", "YES", "TRUE", "1", "ON"].contains(normalizeUpper(hasHeader)))
+String windowStartLocalDateValue = normalize(windowStartLocalDate)
+String windowEndLocalDateValue = normalize(windowEndLocalDate)
 Timestamp requestedWindowStartDateValue = null
 Timestamp requestedWindowEndDateValue = null
 Timestamp windowStartDateValue = null
@@ -100,10 +104,10 @@ def sideToken = { String fileSide ->
     fileSide == ReconciliationSavedRunSupport.FILE_SIDE_1 ? "file1" : "file2"
 }
 def isApiSource = { Object source ->
-    ((source?.sourceTypeEnumId)?.toString()?.trim()) == ReconciliationSavedRunSupport.SOURCE_TYPE_API
+    normalize(source?.sourceTypeEnumId) == ReconciliationSavedRunSupport.SOURCE_TYPE_API
 }
 def sourceLabel = { Object source, String fallback ->
-    enumLabel(((source?.systemEnumId)?.toString()?.trim()) ?: fallback)
+    enumLabel(normalize(source?.systemEnumId) ?: fallback)
 }
 def runInternalService = { String serviceName, Map params ->
     def call = ec.service.sync()
@@ -114,14 +118,14 @@ def runInternalService = { String serviceName, Map params ->
 }
 def resolveOutputFile = { Map serviceResult ->
     File outputFile = null
-    String diffLocationValue = ((serviceResult?.diffLocation)?.toString()?.trim())
+    String diffLocationValue = normalize(serviceResult?.diffLocation)
     if (diffLocationValue) {
         outputFile = diffLocationValue.startsWith("/") ?
                 new File(diffLocationValue) :
                 ec.resource.getLocationReference(diffLocationValue)?.getFile()
     }
     if ((outputFile == null || !outputFile.exists()) && serviceResult?.diffFileName) {
-        String diffFileNameValue = ((serviceResult.diffFileName)?.toString()?.trim())
+        String diffFileNameValue = normalize(serviceResult.diffFileName)
         if (diffFileNameValue?.contains("/")) {
             outputFile = DataManagerSupport.resolveDataManagerFile(ec, diffFileNameValue, false)
         }
@@ -160,7 +164,7 @@ def buildGeneratedOutputDescriptor = { Map serviceResult ->
 }
 def persistRunResult = { Map<String, Object> fields ->
     String resultPath = DataManagerSupport.normalizeRelativePath(fields.resultDataManagerPath)
-    String existingRunResultId = ((fields.reconciliationRunResultId)?.toString()?.trim())
+    String existingRunResultId = normalize(fields.reconciliationRunResultId)
     if (!resultPath && !existingRunResultId && !fields.statusEnumId) return null
 
     return ec.transaction.runUseOrBegin(30, "Error saving reconciliation run result", {
@@ -175,21 +179,21 @@ def persistRunResult = { Map<String, Object> fields ->
         if (creating) runResultValue = ec.entity.makeValue("darpan.reconciliation.ReconciliationRunResult")
 
         [
-                savedRunId             : ((fields.savedRunId)?.toString()?.trim()),
-                savedRunType           : ((fields.savedRunType)?.toString()?.trim()),
-                reconciliationRunId     : ((fields.reconciliationRunId)?.toString()?.trim()),
-                reconciliationMappingId : ((fields.reconciliationMappingId)?.toString()?.trim()),
-                ruleSetId              : ((fields.ruleSetId)?.toString()?.trim()),
-                compareScopeId         : ((fields.compareScopeId)?.toString()?.trim()),
-                companyUserGroupId     : ((fields.companyUserGroupId)?.toString()?.trim()) ?: TenantAccessSupport.currentActiveTenantUserGroupId(ec),
+                savedRunId             : normalize(fields.savedRunId),
+                savedRunType           : normalize(fields.savedRunType),
+                reconciliationRunId     : normalize(fields.reconciliationRunId),
+                reconciliationMappingId : normalize(fields.reconciliationMappingId),
+                ruleSetId              : normalize(fields.ruleSetId),
+                compareScopeId         : normalize(fields.compareScopeId),
+                companyUserGroupId     : normalize(fields.companyUserGroupId) ?: TenantAccessSupport.currentActiveTenantUserGroupId(ec),
                 createdByUserId        : TenantAccessSupport.currentUserId(ec),
-                file1Name              : ((fields.file1Name)?.toString()?.trim()),
+                file1Name              : normalize(fields.file1Name),
                 file1DataManagerPath   : DataManagerSupport.normalizeRelativePath(fields.file1DataManagerPath),
-                file2Name              : ((fields.file2Name)?.toString()?.trim()),
+                file2Name              : normalize(fields.file2Name),
                 file2DataManagerPath   : DataManagerSupport.normalizeRelativePath(fields.file2DataManagerPath),
                 resultDataManagerPath  : resultPath,
-                statusEnumId           : ((fields.statusEnumId)?.toString()?.trim()),
-                reconciliationType     : ((fields.reconciliationType)?.toString()?.trim()),
+                statusEnumId           : normalize(fields.statusEnumId),
+                reconciliationType     : normalize(fields.reconciliationType),
                 differenceCount        : fields.differenceCount,
                 onlyInFile1Count       : fields.onlyInFile1Count,
                 onlyInFile2Count       : fields.onlyInFile2Count,
@@ -227,8 +231,8 @@ def sourceResultForLocation = { Object source, String fileSide, String fileNameV
             fileLocation   : locationFile?.getAbsolutePath() ?: location,
             dataManagerPath: DataManagerSupport.relativeDataManagerPath(ec, locationFile),
             fileName       : fileNameValue,
-            fileTypeEnumId : ((source?.fileTypeEnumId)?.toString()?.trim()) ?: "DftJson",
-            schemaFileName : ((source?.schemaFileName)?.toString()?.trim()),
+            fileTypeEnumId : normalize(source?.fileTypeEnumId) ?: "DftJson",
+            schemaFileName : normalize(source?.schemaFileName),
             recordCount    : recordCount,
             fileSide       : fileSide,
     ].findAll { entry -> entry.value != null } as Map<String, Object>
@@ -255,7 +259,7 @@ def resolveTenantApiWindow = {
     )
 }
 def extractHotWaxSource = { Object source, String fileSide, String label, Map artifactContext ->
-    String configId = ((source?.sourceConfigId)?.toString()?.trim())
+    String configId = normalize(source?.sourceConfigId)
     if (!configId) {
         ec.message.addError("${label} API source requires a HotWax OMS source config.")
         return [:]
@@ -274,17 +278,16 @@ def extractHotWaxSource = { Object source, String fileSide, String label, Map ar
     ((List) (extraction.errors ?: [])).each { Object error -> ec.message.addError("${label}: ${error}") }
     if (ec.message.hasError()) return [:]
 
-    String extractedLocation = ((extraction.fileLocation)?.toString()?.trim())
+    String extractedLocation = normalize(extraction.fileLocation)
     if (!extractedLocation) {
         ec.message.addError("${label} API did not return an output file for the selected time period.")
         return [:]
     }
-    return sourceResultForLocation(source, fileSide, ((extraction.fileName)?.toString()?.trim()) ?: "${sideToken(fileSide)}-api.json",
-            extractedLocation, extraction.recordCount instanceof Number ? extraction.recordCount.intValue() :
-                    (extraction.recordCount?.toString()?.trim()?.isInteger() ? extraction.recordCount.toString().trim().toInteger() : null))
+    return sourceResultForLocation(source, fileSide, normalize(extraction.fileName) ?: "${sideToken(fileSide)}-api.json",
+            extractedLocation, normalizeInt(extraction.recordCount, null))
 }
 def extractShopifySource = { Object source, String fileSide, String label, Map artifactContext ->
-    String configId = ((source?.sourceConfigId)?.toString()?.trim())
+    String configId = normalize(source?.sourceConfigId)
     if (!configId) {
         ec.message.addError("${label} API source requires a Shopify auth config.")
         return [:]
@@ -308,18 +311,17 @@ def extractShopifySource = { Object source, String fileSide, String label, Map a
     ((List) (extraction.errors ?: [])).each { Object error -> ec.message.addError("${label}: ${error}") }
     if (ec.message.hasError()) return [:]
 
-    String extractedLocation = ((extraction.fileLocation)?.toString()?.trim())
+    String extractedLocation = normalize(extraction.fileLocation)
     if (!extractedLocation) {
         ec.message.addError("${label} API did not return an output file for the selected time period.")
         return [:]
     }
-    return sourceResultForLocation(source, fileSide, ((extraction.fileName)?.toString()?.trim()) ?: fileNameValue,
-            extractedLocation, extraction.recordCount instanceof Number ? extraction.recordCount.intValue() :
-                    (extraction.recordCount?.toString()?.trim()?.isInteger() ? extraction.recordCount.toString().trim().toInteger() : null))
+    return sourceResultForLocation(source, fileSide, normalize(extraction.fileName) ?: fileNameValue,
+            extractedLocation, normalizeInt(extraction.recordCount, null))
 }
 def extractApiSource = { Object source, String fileSide, Map artifactContext ->
     String label = sourceLabel(source, fileSide)
-    String sourceConfigType = ((source?.sourceConfigType)?.toString()?.trim())
+    String sourceConfigType = normalize(source?.sourceConfigType)
     switch (sourceConfigType) {
         case ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST:
             return extractHotWaxSource(source, fileSide, label, artifactContext)
@@ -409,7 +411,12 @@ if (!ec.message.hasError() && mapping != null) {
             runName                : mapping.mappingName,
             runType                : ReconciliationSavedRunSupport.RUN_TYPE_MAPPING,
             reconciliationMappingId: mapping.reconciliationMappingId,
+            companyUserGroupId     : legacyRunResult.companyUserGroupId ?: mapping.companyUserGroupId,
             reconciliationRunResultId: legacyRunResult.reconciliationRunResultId,
+            resultDataManagerPath  : legacyRunResult.resultDataManagerPath ?: generatedOutput.fileName,
+            differenceCount        : legacyRunResult.differenceCount,
+            onlyInFile1Count       : legacyRunResult.onlyInFile1Count,
+            onlyInFile2Count       : legacyRunResult.onlyInFile2Count,
             ruleSetId              : null,
             compareScopeId         : null,
             compareScopeDescription: null,
@@ -440,8 +447,8 @@ if (!ec.message.hasError() && mapping == null) {
         boolean file2UsesApiSource = isApiSource(file2Source)
         boolean hasApiInput = file1UsesApiSource || file2UsesApiSource
 
-        String defaultFile1SystemEnumId = ((file1Source?.systemEnumId)?.toString()?.trim())
-        String defaultFile2SystemEnumId = ((file2Source?.systemEnumId)?.toString()?.trim())
+        String defaultFile1SystemEnumId = normalize(file1Source?.systemEnumId)
+        String defaultFile2SystemEnumId = normalize(file2Source?.systemEnumId)
         String resolvedFile1SystemEnumId = requestedFile1SystemEnumId ?: defaultFile1SystemEnumId
         String resolvedFile2SystemEnumId = requestedFile2SystemEnumId ?: defaultFile2SystemEnumId
         if (resolvedFile1SystemEnumId == resolvedFile2SystemEnumId) {
@@ -540,7 +547,12 @@ if (!ec.message.hasError() && mapping == null) {
                                     runName                  : savedRun.runName,
                                     runType                  : savedRun.runType,
                                     reconciliationMappingId  : null,
+                                    companyUserGroupId       : savedRun.companyUserGroupId,
                                     reconciliationRunResultId: reconciliationRunResultId,
+                                    resultDataManagerPath    : resultDataManagerPath,
+                                    differenceCount          : serviceResult.differenceCount,
+                                    onlyInFile1Count         : serviceResult.missingInFile2Count,
+                                    onlyInFile2Count         : serviceResult.missingInFile1Count,
                                     ruleSetId                : savedRun.ruleSetId,
                                     compareScopeId           : savedRun.compareScopeId,
                                     compareScopeDescription  : savedRun.compareScopeDescription,
@@ -619,7 +631,12 @@ if (!ec.message.hasError() && mapping == null) {
                                 runName                  : savedRun.runName,
                                 runType                  : savedRun.runType,
                                 reconciliationMappingId  : null,
+                                companyUserGroupId       : savedRun.companyUserGroupId,
                                 reconciliationRunResultId: serviceResult.reconciliationRunResultId,
+                                resultDataManagerPath    : serviceResult.diffFileName,
+                                differenceCount          : serviceResult.differenceCount,
+                                onlyInFile1Count         : serviceResult.onlyInFile1Count,
+                                onlyInFile2Count         : serviceResult.onlyInFile2Count,
                                 ruleSetId                : savedRun.ruleSetId,
                                 compareScopeId           : savedRun.compareScopeId,
                                 compareScopeDescription  : savedRun.compareScopeDescription,

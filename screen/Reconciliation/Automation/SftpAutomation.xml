@@ -25,10 +25,9 @@
             </if>
 
             <script><![CDATA[
-                def normalize = { it?.toString()?.trim() }
                 String serviceName = "reconciliation.ReconciliationAutomationServices.poll#SftpAndReconcile"
-                String cronExpr = normalize(cronExpression)
-                String unit = normalize(scheduleUnit) ?: "minutes"
+                String cronExpr = darpan.common.ValueSupport.normalize(cronExpression)
+                String unit = darpan.common.ValueSupport.normalize(scheduleUnit) ?: "minutes"
                 Integer interval = scheduleInterval ? (scheduleInterval as Integer) : null
                 Integer dailyHourVal = scheduleDailyHour ? (scheduleDailyHour as Integer) : null
                 Integer dailyMinuteVal = scheduleDailyMinute ? (scheduleDailyMinute as Integer) : null
@@ -77,12 +76,6 @@
                     return
                 }
 
-                def normalizeBool = { val ->
-                    if (val == null) return null
-                    def s = val.toString().toLowerCase()
-                    return (s == "y" || s == "true" || s == "1" || s == "on") ? "true" : "false"
-                }
-
                 Map<String, String> paramMap = [:]
                 [
                         reconciliationMappingId   : reconciliationMappingId,
@@ -102,11 +95,11 @@
                         sparkMaster               : sparkMaster,
                         sparkAppName              : sparkAppName ?: "SftpReconciliation"
                 ].each { key, val ->
-                    def normalized = normalize(val)
+                    def normalized = darpan.common.ValueSupport.normalize(val)
                     if (normalized) paramMap[key] = normalized
                 }
-                def headerFlag = normalizeBool(hasHeader)
-                if (headerFlag != null) paramMap["hasHeader"] = headerFlag
+                Boolean headerFlag = hasHeader == null ? null : darpan.common.ValueSupport.normalizeBool(hasHeader, false)
+                if (headerFlag != null) paramMap["hasHeader"] = headerFlag.toString()
 
                 context.resolvedCronExpression = cronExpr
                 context.serviceName = serviceName
@@ -202,8 +195,6 @@
         </entity-find>
 
         <script><![CDATA[
-            def normalize = { it?.toString()?.trim() }
-
             // Load SftpServers for dropdown
             def servers = []
             ec.entity.find("darpan.reconciliation.SftpServer")

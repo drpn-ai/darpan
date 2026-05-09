@@ -40,7 +40,7 @@
                 <description>ID field name. Optional normalizer suffix is supported using `|`, for example `id|SHOPIFY_GID_TAIL`.</description>
             </parameter>
             <parameter name="file2IdField">
-                <description>ID field name. Optional normalizer suffix is supported using `|`, for example `shopifyProductId|TRAILING_DIGITS`.</description>
+                <description>ID field name. Optional normalizer suffix is supported using `|`, for example `shopifyProductId|SHOPIFY_GID_TAIL`.</description>
             </parameter>
             <parameter name="file1IdExpression">
                 <description>CSV column or JSONPath. Optional normalizer suffix is supported using `|`, for example `$.id|SHOPIFY_GID_TAIL`.</description>
@@ -124,7 +124,7 @@
         </out-parameters>
     </service>
 
-    <service verb="reconcile" noun="RuleSetCompareScopeBaseDiff" type="java" transaction="ignore" location="darpan.reconciliation.core.RuleSetCompareScopeDiffStage" method="reconcileRuleSetCompareScopeBaseDiff">
+    <service verb="reconcile" noun="RuleSetCompareScopeBaseDiff" transaction="ignore">
         <description>Internal base compare stage that emits missing-object Diff rows and matched-pair datasets from RuleSet compare-scope inputs before any DRL rules run.</description>
         <in-parameters>
             <parameter name="ruleSetId" required="true"/>
@@ -148,6 +148,7 @@
         <out-parameters>
             <parameter name="ruleSetId"/>
             <parameter name="compareScopeId"/>
+            <parameter name="compareScopeDescription"/>
             <parameter name="objectType"/>
             <parameter name="file1Type"/>
             <parameter name="file2Type"/>
@@ -162,9 +163,83 @@
             <parameter name="validationErrors" type="List"/>
             <parameter name="processingWarnings" type="List"/>
         </out-parameters>
+        <actions>
+            <set field="ruleSetIdInput" from="ruleSetId"/>
+            <set field="compareScopeIdInput" from="compareScopeId"/>
+            <set field="file1LabelInput" from="file1Label"/>
+            <set field="file2LabelInput" from="file2Label"/>
+            <set field="ruleSetId" from="null"/>
+            <set field="compareScopeId" from="null"/>
+            <set field="file1Label" from="null"/>
+            <set field="file2Label" from="null"/>
+            <set field="allowDuplicateCompareIdsValue" from="allowDuplicateCompareIds == true"/>
+            <set field="buildMatchedPairsValue" from="buildMatchedPairs != false"/>
+
+            <service-call name="reconciliation.ReconciliationCoreServices.prepare#RuleSetCompareScope"
+                    in-map="[ruleSetId:ruleSetIdInput, compareScopeId:compareScopeIdInput,
+                    file1Location:file1Location, file2Location:file2Location,
+                    file1Name:file1Name, file2Name:file2Name,
+                    file1FileTypeEnumId:file1FileTypeEnumId, file2FileTypeEnumId:file2FileTypeEnumId,
+                    file1SchemaFileName:file1SchemaFileName, file2SchemaFileName:file2SchemaFileName,
+                    file1Label:file1LabelInput, file2Label:file2LabelInput,
+                    hasHeader:hasHeader, allowDuplicateCompareIds:allowDuplicateCompareIdsValue,
+                    sparkMaster:sparkMaster, sparkAppName:sparkAppName]"
+                    out-map="prepared"/>
+
+            <if condition="!ec.message.hasError() &amp;&amp; prepared">
+                <service-call name="reconciliation.ReconciliationCoreServices.reconcile#IdDataFrames"
+                        in-map="[df1:prepared.file1IdDf, df2:prepared.file2IdDf,
+                        idColumnName:'compare_id',
+                        df1Label:prepared.file1Label, df2Label:prepared.file2Label]"
+                        out-map="idCompare"/>
+            </if>
+
+            <if condition="!ec.message.hasError() &amp;&amp; prepared &amp;&amp; idCompare">
+                <set field="file1LabelValue" from="darpan.reconciliation.core.ReconciliationServices.normalize(prepared.file1Label) ?: 'File 1'"/>
+                <set field="file2LabelValue" from="darpan.reconciliation.core.ReconciliationServices.normalize(prepared.file2Label) ?: 'File 2'"/>
+                <set field="compareScopeIdValue" from="darpan.reconciliation.core.ReconciliationServices.normalize(prepared.compareScopeId)"/>
+                <set field="compareScopeDescriptionValue" from="darpan.reconciliation.core.ReconciliationServices.normalize(prepared.compareScopeDescription)"/>
+                <set field="objectTypeValue" from="darpan.reconciliation.core.ReconciliationServices.normalize(prepared.objectType)"/>
+                <set field="missingInFile1CountValue" from="((Number) idCompare.onlyInDf2Count).longValue()"/>
+                <set field="missingInFile2CountValue" from="((Number) idCompare.onlyInDf1Count).longValue()"/>
+                <set field="differenceCountValue" from="((Number) idCompare.differenceCount).longValue()"/>
+                <set field="missingInFile1DiffDf" from="darpan.reconciliation.core.ReconciliationServices.buildMissingDiffRows(prepared.file2DataDf, idCompare.onlyInDf2, 'MISSING_IN_FILE_1', file2LabelValue, file1LabelValue, 'Present in ' + file2LabelValue + ', missing in ' + file1LabelValue)"/>
+                <set field="missingInFile2DiffDf" from="darpan.reconciliation.core.ReconciliationServices.buildMissingDiffRows(prepared.file1DataDf, idCompare.onlyInDf1, 'MISSING_IN_FILE_2', file1LabelValue, file2LabelValue, 'Present in ' + file1LabelValue + ', missing in ' + file2LabelValue)"/>
+                <set field="missingDiffDfValue" from="darpan.reconciliation.core.ReconciliationServices.unionDatasets(missingInFile1DiffDf, missingInFile2DiffDf)"/>
+                <if condition="missingDiffDfValue == null">
+                    <set field="missingDiffDfValue" from="darpan.reconciliation.core.ReconciliationServices.emptyMissingDiffDataset(prepared.file1DataDf ?: prepared.file2DataDf)"/>
+                </if>
+                <set field="matchedIdDf" from="darpan.reconciliation.core.ReconciliationServices.buildMatchedIdDataset(prepared.file1IdDf, prepared.file2IdDf)"/>
+                <if condition="buildMatchedPairsValue">
+                    <set field="matchedPairDfValue" from="darpan.reconciliation.core.ReconciliationServices.buildMatchedPairDataset(prepared.file1DataDf, prepared.file2DataDf, matchedIdDf, compareScopeIdValue, objectTypeValue)"/>
+                    <set field="matchedPairCountValue" from="darpan.reconciliation.core.ReconciliationServices.countDataset(matchedPairDfValue)"/>
+                </if>
+                <if condition="!buildMatchedPairsValue">
+                    <set field="matchedPairDfValue" from="null"/>
+                    <set field="matchedPairCountValue" from="darpan.reconciliation.core.ReconciliationServices.countDataset(matchedIdDf)"/>
+                </if>
+
+                <set field="ruleSetId" from="prepared.ruleSetId"/>
+                <set field="compareScopeId" from="compareScopeIdValue"/>
+                <set field="compareScopeDescription" from="compareScopeDescriptionValue"/>
+                <set field="objectType" from="objectTypeValue"/>
+                <set field="file1Type" from="prepared.file1Type"/>
+                <set field="file2Type" from="prepared.file2Type"/>
+                <set field="file1Label" from="file1LabelValue"/>
+                <set field="file2Label" from="file2LabelValue"/>
+                <set field="missingInFile1Count" from="missingInFile1CountValue"/>
+                <set field="missingInFile2Count" from="missingInFile2CountValue"/>
+                <set field="differenceCount" from="differenceCountValue"/>
+                <set field="matchedPairCount" from="matchedPairCountValue"/>
+                <set field="missingDiffDf" from="missingDiffDfValue"/>
+                <set field="matchedPairDf" from="matchedPairDfValue"/>
+                <set field="validationErrors" from="prepared.validationErrors ?: []"/>
+                <set field="processingWarnings" from="prepared.processingWarnings ?: []"/>
+            </if>
+        </actions>
     </service>
 
-    <service verb="reconcile" noun="RuleSetCompareScope" type="java" transaction="ignore" location="darpan.reconciliation.core.RuleSetCompareScopeRuleStage" method="reconcileRuleSetCompareScope">
+    <service verb="reconcile" noun="RuleSetCompareScope" transaction="ignore">
         <description>Internal RuleSet compare pipeline that preserves base missing-object Diffs and appends rule-generated Diffs from matched pairs.</description>
         <in-parameters>
             <parameter name="ruleSetId" required="true"/>
@@ -187,6 +262,7 @@
         <out-parameters>
             <parameter name="ruleSetId"/>
             <parameter name="compareScopeId"/>
+            <parameter name="compareScopeDescription"/>
             <parameter name="objectType"/>
             <parameter name="file1Type"/>
             <parameter name="file2Type"/>
@@ -207,6 +283,87 @@
             <parameter name="validationErrors" type="List"/>
             <parameter name="processingWarnings" type="List"/>
         </out-parameters>
+        <actions>
+            <set field="ruleSetIdInput" from="ruleSetId"/>
+            <set field="compareScopeIdInput" from="compareScopeId"/>
+            <set field="file1LabelInput" from="file1Label"/>
+            <set field="file2LabelInput" from="file2Label"/>
+            <set field="ruleSetId" from="null"/>
+            <set field="compareScopeId" from="null"/>
+            <set field="file1Label" from="null"/>
+            <set field="file2Label" from="null"/>
+
+            <set field="ruleSetIdValue" from="darpan.reconciliation.core.ReconciliationServices.normalize(ruleSetIdInput)"/>
+            <set field="activeRuleList" from="ruleSetIdValue ? ec.entity.find('darpan.rule.Rule').condition('ruleSetId', ruleSetIdValue).condition('enabled', 'Y').disableAuthz().useCache(false).list() ?: [] : []"/>
+            <set field="activeRuleCount" from="activeRuleList.size()"/>
+            <set field="ruleBatchSizeValue" from="ruleBatchSize instanceof Number &amp;&amp; ((Number) ruleBatchSize).intValue() > 0 ? ((Number) ruleBatchSize).intValue() : 500"/>
+
+            <service-call name="reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScopeBaseDiff"
+                    in-map="[ruleSetId:ruleSetIdInput, compareScopeId:compareScopeIdInput,
+                    file1Location:file1Location, file2Location:file2Location,
+                    file1Name:file1Name, file2Name:file2Name,
+                    file1FileTypeEnumId:file1FileTypeEnumId, file2FileTypeEnumId:file2FileTypeEnumId,
+                    file1SchemaFileName:file1SchemaFileName, file2SchemaFileName:file2SchemaFileName,
+                    file1Label:file1LabelInput, file2Label:file2LabelInput,
+                    hasHeader:hasHeader,
+                    allowDuplicateCompareIds:activeRuleCount == 0,
+                    buildMatchedPairs:activeRuleCount > 0,
+                    sparkMaster:sparkMaster, sparkAppName:sparkAppName]"
+                    out-map="baseResult"/>
+
+            <if condition="!ec.message.hasError() &amp;&amp; baseResult">
+                <set field="matchedPairDfValue" from="baseResult.matchedPairDf"/>
+                <set field="missingDiffDfValue" from="baseResult.missingDiffDf"/>
+                <set field="processingWarningsValue" from="baseResult.processingWarnings ?: []"/>
+                <set field="validationErrorsValue" from="baseResult.validationErrors ?: []"/>
+                <set field="ruleSetIdValue" from="darpan.reconciliation.core.ReconciliationServices.normalize(baseResult.ruleSetId) ?: ruleSetIdValue"/>
+                <set field="compareScopeIdValue" from="darpan.reconciliation.core.ReconciliationServices.normalize(baseResult.compareScopeId)"/>
+                <set field="compareScopeDescriptionValue" from="darpan.reconciliation.core.ReconciliationServices.normalize(baseResult.compareScopeDescription) ?: compareScopeIdValue"/>
+                <set field="objectTypeValue" from="darpan.reconciliation.core.ReconciliationServices.normalize(baseResult.objectType)"/>
+                <set field="ruleExecResult" from="[:]"/>
+
+                <if condition="matchedPairDfValue != null &amp;&amp; ((Number) baseResult.matchedPairCount).longValue() > 0L &amp;&amp; activeRuleCount > 0">
+                    <set field="ruleExecResult" from="darpan.reconciliation.core.ReconciliationServices.executeRuleSetMatchedPairBatches(ec, matchedPairDfValue, ruleSetIdValue, compareScopeIdValue, compareScopeDescriptionValue, ruleBatchSizeValue)"/>
+                    <set field="processingWarningsValue" from="processingWarningsValue + (ruleExecResult.processingWarnings ?: [])"/>
+                </if>
+
+                <set field="ruleDiffRows" from="ruleExecResult.ruleDiffRows ?: []"/>
+                <set field="firedRuleCountValue" from="((Number) (ruleExecResult.firedRuleCount ?: 0)).intValue()"/>
+                <set field="referenceDf" from="matchedPairDfValue ?: missingDiffDfValue"/>
+                <set field="ruleDiffDfValue" from="darpan.reconciliation.core.ReconciliationServices.buildRuleSetDiffDataset(referenceDf, ruleDiffRows)"/>
+                <set field="normalizedMissingDiffDf" from="darpan.reconciliation.core.ReconciliationServices.convertMissingDiffToRuleSetDiffDataset(missingDiffDfValue, compareScopeIdValue, objectTypeValue)"/>
+                <if condition="normalizedMissingDiffDf == null">
+                    <set field="normalizedMissingDiffDf" from="darpan.reconciliation.core.ReconciliationServices.emptyRuleSetDiffDataset(referenceDf)"/>
+                </if>
+                <set field="diffDfValue" from="darpan.reconciliation.core.ReconciliationServices.unionByNameDatasets(normalizedMissingDiffDf, ruleDiffDfValue)"/>
+                <set field="ruleDifferenceCountValue" from="((Number) ruleDiffRows.size()).longValue()"/>
+                <set field="missingObjectDifferenceCountValue" from="((Number) baseResult.differenceCount).longValue()"/>
+                <set field="differenceCountValue" from="missingObjectDifferenceCountValue + ruleDifferenceCountValue"/>
+
+                <set field="ruleSetId" from="ruleSetIdValue"/>
+                <set field="compareScopeId" from="compareScopeIdValue"/>
+                <set field="compareScopeDescription" from="compareScopeDescriptionValue"/>
+                <set field="objectType" from="objectTypeValue"/>
+                <set field="file1Type" from="baseResult.file1Type"/>
+                <set field="file2Type" from="baseResult.file2Type"/>
+                <set field="file1Label" from="baseResult.file1Label"/>
+                <set field="file2Label" from="baseResult.file2Label"/>
+                <set field="missingInFile1Count" from="baseResult.missingInFile1Count"/>
+                <set field="missingInFile2Count" from="baseResult.missingInFile2Count"/>
+                <set field="missingObjectDifferenceCount" from="missingObjectDifferenceCountValue"/>
+                <set field="ruleDifferenceCount" from="ruleDifferenceCountValue"/>
+                <set field="differenceCount" from="differenceCountValue"/>
+                <set field="matchedPairCount" from="baseResult.matchedPairCount"/>
+                <set field="ruleCount" from="activeRuleCount"/>
+                <set field="firedRuleCount" from="firedRuleCountValue"/>
+                <set field="diffDf" from="diffDfValue"/>
+                <set field="missingDiffDf" from="missingDiffDfValue"/>
+                <set field="ruleDiffDf" from="ruleDiffDfValue"/>
+                <set field="matchedPairDf" from="matchedPairDfValue"/>
+                <set field="validationErrors" from="validationErrorsValue.unique()"/>
+                <set field="processingWarnings" from="processingWarningsValue.findAll { it }.unique()"/>
+            </if>
+        </actions>
     </service>
 
     <service verb="reconcile" noun="FilesByMapping" type="script" transaction="ignore" location="component://darpan/src/main/groovy/darpan/reconciliation/core/reconcileFilesByMapping.groovy">

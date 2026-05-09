@@ -1,6 +1,9 @@
 package darpan.reconciliation.core
 
+import com.jayway.jsonpath.InvalidPathException
+import com.jayway.jsonpath.JsonPath
 import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
 import org.apache.spark.sql.Column
 import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.Row
@@ -12,10 +15,16 @@ import org.apache.spark.sql.types.StructType
 import org.moqui.context.ExecutionContext
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+
+import java.util.regex.Pattern
+
+import static darpan.common.ValueSupport.normalize
 import static org.apache.spark.sql.functions.*
 
 class ReconciliationServices {
     private static final Logger logger = LoggerFactory.getLogger(ReconciliationServices.class)
+    private static final JsonSlurper JSON_SLURPER = new JsonSlurper()
+    private static final Pattern SIMPLE_JSON_FIELD_NAME = Pattern.compile(/[A-Za-z_][A-Za-z0-9_]*/)
     private static final StructType MISSING_DIFF_SCHEMA = new StructType()
             .add("type", DataTypes.StringType, true)
             .add("id", DataTypes.StringType, true)
@@ -409,8 +418,6 @@ class ReconciliationServices {
                         normalizedPreview.contains('"$defs"'))
     }
 
-    static String normalize(Object val) { return val?.toString()?.trim() }
-
     static String resolveEnumLabel(ExecutionContext ec, String enumId, String fallback) {
         String normalized = normalize(enumId)
         if (!normalized) return fallback
@@ -538,18 +545,8 @@ class ReconciliationServices {
         String code = normalize(rawNormalizer)
         if (!code) return null
         String normalized = code.replace("-", "_").replace(" ", "_").toUpperCase()
-        switch (normalized) {
-            case "SHOPIFY_GID_TAIL":
-            case "SHOPIFY_GID":
-            case "SHOPIFY_GID_NUMERIC":
-            case "GID_TAIL":
-                return "SHOPIFY_GID_TAIL"
-            case "TRAILING_DIGITS":
-            case "DIGITS":
-                return "TRAILING_DIGITS"
-            default:
-                throw new IllegalArgumentException("Unsupported ID normalizer '${rawNormalizer}'. Supported values: SHOPIFY_GID_TAIL, TRAILING_DIGITS")
-        }
+        if (normalized == "SHOPIFY_GID_TAIL") return "SHOPIFY_GID_TAIL"
+        throw new IllegalArgumentException("Unsupported ID normalizer '${rawNormalizer}'. Supported value: SHOPIFY_GID_TAIL")
     }
     
     // JSON & CSV Helpers
@@ -564,14 +561,29 @@ class ReconciliationServices {
     }
     static String normalizeJsonIdExpr(String expr) {
         def raw = normalize(expr)
-        if (!raw) return "\$.id"
+        if (!raw) return validateJsonPath("\$.id")
         String normalized = raw
                 .replaceAll(/\[(\d+)\]/, "[*]")
                 .replace(".[*]", "[*]")
-        if (normalized.startsWith("\$")) return normalized
-        if (normalized.startsWith("[")) return '$' + normalized
-        if (normalized.contains("[") || normalized.contains(".")) return '$.' + normalized
-        return "\$[*].${normalized}"
+        String jsonPath = toJsonPath(normalized)
+        return validateJsonPath(jsonPath)
+    }
+
+    private static String toJsonPath(String expression) {
+        if (expression.startsWith("\$")) return expression
+        if (expression.startsWith("[")) return '$' + expression
+        if (expression.startsWith(".")) return '$' + expression
+        if (SIMPLE_JSON_FIELD_NAME.matcher(expression).matches()) return "\$[*].${expression}"
+        return '$.' + expression
+    }
+
+    private static String validateJsonPath(String expression) {
+        try {
+            JsonPath.compile(expression)
+            return expression
+        } catch (InvalidPathException e) {
+            throw new IllegalArgumentException("Invalid JSONPath '${expression}': ${e.message}", e)
+        }
     }
 
     static Map convertJsonPathToSpark(String jsonPath) {
@@ -605,11 +617,6 @@ class ReconciliationServices {
                     .when(length(trailingDigits).gt(0), trailingDigits)
                     .otherwise(normalized)
         }
-        if ("TRAILING_DIGITS".equals(idNormalizer)) {
-            Column trailingDigits = regexp_extract(normalized, '(\\d+)$', 1)
-            return when(length(trailingDigits).gt(0), trailingDigits).otherwise(normalized)
-        }
-
         throw new IllegalArgumentException("Unsupported ID normalizer '${idNormalizer}'")
     }
 
@@ -690,6 +697,93 @@ class ReconciliationServices {
             throw new IllegalArgumentException("referenceDf is required to create an empty missingDiffDf")
         }
         return referenceDf.sparkSession().createDataFrame(new ArrayList<Row>(), MISSING_DIFF_SCHEMA)
+    }
+
+    static Dataset buildMatchedIdDataset(Dataset file1IdDf, Dataset file2IdDf) {
+        return file1IdDf.join(file2IdDf, "compare_id", "inner")
+                .select("compare_id")
+                .distinct()
+    }
+
+    static long countDataset(Dataset df) {
+        return df == null ? 0L : df.count()
+    }
+
+    static Map<String, Object> executeRuleSetMatchedPairBatches(ExecutionContext ec, Dataset matchedPairDf,
+                                                                String ruleSetId, String compareScopeId,
+                                                                String compareScopeDescription, int ruleBatchSize) {
+        List<Map<String, Object>> ruleDiffRows = []
+        List<String> processingWarnings = []
+        int firedRuleCount = 0
+        int safeRuleBatchSize = ruleBatchSize > 0 ? ruleBatchSize : 500
+
+        if (matchedPairDf == null) {
+            return [
+                    ruleDiffRows     : ruleDiffRows,
+                    ruleDifferenceCount: 0L,
+                    firedRuleCount   : firedRuleCount,
+                    processingWarnings: processingWarnings
+            ]
+        }
+
+        Iterator<String> rowIterator = matchedPairDf.toJSON().toLocalIterator()
+        while (rowIterator.hasNext()) {
+            List<Map<String, Object>> batch = nextMatchedPairBatch(rowIterator, safeRuleBatchSize)
+            if (!batch) break
+
+            Map<String, Object> ruleExec = ec.service.sync()
+                    .name("reconciliation.ReconciliationRuleEngineServices.execute#RuleSetMatchedPairs")
+                    .parameters([
+                            ruleSetId      : ruleSetId,
+                            dataList       : batch,
+                            returnAllFacts : false
+                    ])
+                    .call()
+
+            processingWarnings.addAll(toNormalizedStringList(ruleExec?.warnings))
+            if (ruleExec?.error) {
+                processingWarnings.add(buildRuleStageWarning(ruleSetId, compareScopeDescription, batch, ruleExec.error))
+                logger.warn("RuleSet compare stage preserved base diffs after rule failure ruleSet={} compareScope={} error={}",
+                        ruleSetId, compareScopeId, ruleExec.error)
+                break
+            }
+
+            firedRuleCount += ((Number) (ruleExec?.firedRuleCount ?: 0)).intValue()
+            List<Map<String, Object>> batchDiffs = (List<Map<String, Object>>) (ruleExec?.diffResults ?: [])
+            if (batchDiffs) ruleDiffRows.addAll(batchDiffs)
+        }
+
+        return [
+                ruleDiffRows     : ruleDiffRows,
+                ruleDifferenceCount: ruleDiffRows.size(),
+                firedRuleCount   : firedRuleCount,
+                processingWarnings: processingWarnings
+        ]
+    }
+
+    private static List<String> toNormalizedStringList(Object rawValue) {
+        if (!(rawValue instanceof List)) return []
+        return ((List) rawValue).collect { Object value -> normalize(value) }.findAll { it }
+    }
+
+    private static List<Map<String, Object>> nextMatchedPairBatch(Iterator<String> rowIterator, int ruleBatchSize) {
+        List<Map<String, Object>> batch = []
+        while (rowIterator.hasNext() && batch.size() < ruleBatchSize) {
+            String rowJson = rowIterator.next()
+            batch.add((Map<String, Object>) JSON_SLURPER.parseText(rowJson))
+        }
+        return batch
+    }
+
+    private static String buildRuleStageWarning(String ruleSetId, String compareScopeDescription,
+                                                List<Map<String, Object>> batch, Object error) {
+        String primaryIds = batch.collect { Map<String, Object> row -> normalize(row.primaryId) }
+                .findAll { it }
+                .take(5)
+                .join(", ")
+        String batchToken = primaryIds ? " primaryIds=${primaryIds}" : ""
+        String compareScopeLabel = normalize(compareScopeDescription) ?: "compare scope"
+        return "RuleSet ${ruleSetId} compare scope '${compareScopeLabel}' rule execution failed; preserved base missing-object diffs.${batchToken} Error: ${normalize(error)}"
     }
 
     static Dataset convertMissingDiffToRuleSetDiffDataset(Dataset missingDiffDf, String compareScopeId, String objectType) {

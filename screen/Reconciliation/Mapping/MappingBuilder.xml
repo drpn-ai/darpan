@@ -37,19 +37,7 @@
                         def normalizeIdNormalizer = { String raw ->
                             String code = raw?.trim()
                             if (!code) return null
-                            String normalized = code.replace("-", "_").replace(" ", "_").toUpperCase()
-                            switch (normalized) {
-                                case "SHOPIFY_GID_TAIL":
-                                case "SHOPIFY_GID":
-                                case "SHOPIFY_GID_NUMERIC":
-                                case "GID_TAIL":
-                                    return "SHOPIFY_GID_TAIL"
-                                case "TRAILING_DIGITS":
-                                case "DIGITS":
-                                    return "TRAILING_DIGITS"
-                                default:
-                                    return normalized
-                            }
+                            return code.replace("-", "_").replace(" ", "_").toUpperCase()
                         }
                         def s1 = splitIdExpression(system1IdExpression as String)
                         def s2 = splitIdExpression(system2IdExpression as String)
@@ -71,11 +59,11 @@
                     <if condition="!system1IdExpression || !system2IdExpression">
                         <return error="true" message="ID expression is required for both systems"/>
                     </if>
-                    <if condition="system1IdNormalizer &amp;&amp; system1IdNormalizer != 'SHOPIFY_GID_TAIL' &amp;&amp; system1IdNormalizer != 'TRAILING_DIGITS'">
-                        <return error="true" message="Unsupported ID normalizer for System 1: ${system1IdNormalizer}. Supported values: SHOPIFY_GID_TAIL, TRAILING_DIGITS"/>
+                    <if condition="system1IdNormalizer &amp;&amp; system1IdNormalizer != 'SHOPIFY_GID_TAIL'">
+                        <return error="true" message="Unsupported ID normalizer for System 1: ${system1IdNormalizer}. Supported value: SHOPIFY_GID_TAIL"/>
                     </if>
-                    <if condition="system2IdNormalizer &amp;&amp; system2IdNormalizer != 'SHOPIFY_GID_TAIL' &amp;&amp; system2IdNormalizer != 'TRAILING_DIGITS'">
-                        <return error="true" message="Unsupported ID normalizer for System 2: ${system2IdNormalizer}. Supported values: SHOPIFY_GID_TAIL, TRAILING_DIGITS"/>
+                    <if condition="system2IdNormalizer &amp;&amp; system2IdNormalizer != 'SHOPIFY_GID_TAIL'">
+                        <return error="true" message="Unsupported ID normalizer for System 2: ${system2IdNormalizer}. Supported value: SHOPIFY_GID_TAIL"/>
                     </if>
 
                     <if condition="system1FileTypeEnumId == 'DftJson' &amp;&amp; system1IdExpression &amp;&amp; !system1IdExpression.startsWith('$')">
@@ -195,8 +183,7 @@
         <set field="schemaFiles" from="jsonSchemas"/>
         <script><![CDATA[
             idNormalizerOptions = [
-                [enumId:'SHOPIFY_GID_TAIL', description:'Shopify GID tail (gid://shopify/Product/123 -> 123)'],
-                [enumId:'TRAILING_DIGITS', description:'Trailing digits']
+                [enumId:'SHOPIFY_GID_TAIL', description:'Shopify GID tail (gid://shopify/Product/123 -> 123)']
             ]
         ]]></script>
     </pre-actions>

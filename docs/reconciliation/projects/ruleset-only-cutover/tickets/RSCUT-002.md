@@ -14,7 +14,7 @@ Extract the existing file parsing, ID normalization, and source configuration lo
 - Preserve existing CSV, JSON, and mixed-file extraction semantics.
 - Resolve source configuration from `RuleSetCompareScope` and `RuleSetCompareSource`.
 - Produce Spark datasets keyed by normalized primary ID.
-- Preserve current normalizer behavior such as `SHOPIFY_GID_TAIL` and `TRAILING_DIGITS`.
+- Preserve current normalizer behavior such as `SHOPIFY_GID_TAIL`.
 
 ## Out of Scope
 - Anti-join Diff emission.
@@ -55,7 +55,7 @@ Extract the existing file parsing, ID normalization, and source configuration lo
 - Implementation avoids unbounded `collect()` for large datasets.
 
 ## Validation Commands and Expected Results
-1. Command: `rg -n "primaryIdExpression|RuleSetCompareSource|SHOPIFY_GID_TAIL|TRAILING_DIGITS" src/main/groovy/darpan/reconciliation/core service/reconciliation`
+1. Command: `rg -n "primaryIdExpression|RuleSetCompareSource|SHOPIFY_GID_TAIL" src/main/groovy/darpan/reconciliation/core service/reconciliation`
    Expected: Compare-scope extraction and normalizer handling are present.
 2. Command: `rg -n "ReconciliationMappingMember|reconciliationMappingId" src/main/groovy/darpan/reconciliation/core/*Compare* src/main/groovy/darpan/reconciliation/core/*Scope*`
    Expected: New compare-scope adapter does not depend on Mapping entities.

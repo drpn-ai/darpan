@@ -1051,7 +1051,7 @@
                     <set field="ignoreRuleSetUpdate" from="ruleSet.update()"/>
                     <set field="ignoreRuleSetCacheClear" from="reconciliation.rule.RuleEngineSupport.invalidateRuleSetCache(ec, savedRunIdValue)"/>
                 </if>
-                <set field="savedRun" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.collectSavedRunRows(ec).find { it.savedRunId == savedRunIdValue }"/>
+                <set field="savedRun" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findSavedRunById(ec, savedRunIdValue)"/>
                 <message>Saved run ${runNameValue}.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>

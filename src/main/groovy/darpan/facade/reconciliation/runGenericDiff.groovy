@@ -5,15 +5,18 @@ import darpan.facade.reconciliation.ReconciliationOutputSupport
 
 import java.sql.Timestamp
 
-String mappingId = ((reconciliationMappingId)?.toString()?.trim())
+import static darpan.common.ValueSupport.normalize
+import static darpan.common.ValueSupport.normalizeUpper
+
+String mappingId = normalize(reconciliationMappingId)
 String inputFile1Name = ReconciliationOutputSupport.sanitizeUploadFileName(file1Name, "file1")
 String inputFile2Name = ReconciliationOutputSupport.sanitizeUploadFileName(file2Name, "file2")
 String file1TextValue = file1Text?.toString()
 String file2TextValue = file2Text?.toString()
-String requestedFile1SystemEnumId = ((file1SystemEnumId)?.toString()?.trim())
-String requestedFile2SystemEnumId = ((file2SystemEnumId)?.toString()?.trim())
+String requestedFile1SystemEnumId = normalize(file1SystemEnumId)
+String requestedFile2SystemEnumId = normalize(file2SystemEnumId)
 boolean hasHeaderValue = hasHeader == null ? true :
-        (hasHeader instanceof Boolean ? hasHeader : ["Y", "YES", "TRUE", "1", "ON"].contains(hasHeader.toString().trim().toUpperCase(Locale.ROOT)))
+        (hasHeader instanceof Boolean ? hasHeader : ["Y", "YES", "TRUE", "1", "ON"].contains(normalizeUpper(hasHeader)))
 
 if (!mappingId) ec.message.addError("reconciliationMappingId is required")
 if (!inputFile1Name) ec.message.addError("file1Name is required")
@@ -103,7 +106,7 @@ if (!ec.message.hasError() && resolvedFile1SystemEnumId == resolvedFile2SystemEn
 }
 
 if (!ec.message.hasError()) {
-    List<String> mappingSystemIds = mappingMembers.collect { ((it.systemEnumId)?.toString()?.trim()) }.findAll { it }.unique()
+    List<String> mappingSystemIds = mappingMembers.collect { normalize(it.systemEnumId) }.findAll { it }.unique()
     if (!mappingSystemIds.contains(resolvedFile1SystemEnumId)) {
         ec.message.addError("Mapping '${mappingId}' does not include system '${resolvedFile1SystemEnumId}'.")
     }
@@ -136,7 +139,7 @@ if (!ec.message.hasError()) {
 
     if (!ec.message.hasError()) {
         File outputFile = null
-        String diffLocationValue = ((serviceResult.diffLocation)?.toString()?.trim())
+        String diffLocationValue = normalize(serviceResult.diffLocation)
         if (diffLocationValue) {
             outputFile = diffLocationValue.startsWith("/") ?
                     new File(diffLocationValue) :
@@ -182,7 +185,12 @@ if (!ec.message.hasError()) {
         runResult = [
                 reconciliationMappingId: mapping.reconciliationMappingId,
                 mappingName            : mapping.mappingName,
+                companyUserGroupId     : mapping.companyUserGroupId ?: TenantAccessSupport.currentActiveTenantUserGroupId(ec),
                 reconciliationRunResultId: serviceResult.reconciliationRunResultId,
+                resultDataManagerPath  : serviceResult.diffFileName,
+                differenceCount        : serviceResult.differenceCount,
+                onlyInFile1Count       : serviceResult.onlyInFile1Count,
+                onlyInFile2Count       : serviceResult.onlyInFile2Count,
                 file1Name              : inputFile1Name,
                 file2Name              : inputFile2Name,
                 file1SystemEnumId      : resolvedFile1SystemEnumId,

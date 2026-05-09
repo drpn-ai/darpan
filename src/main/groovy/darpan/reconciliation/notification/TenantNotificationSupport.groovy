@@ -1,7 +1,5 @@
 package darpan.reconciliation.notification
 
-import darpan.facade.common.FacadeSupport
-import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.core.ReconciliationServices
 import groovy.json.JsonOutput
 import org.slf4j.Logger
@@ -31,55 +29,6 @@ class TenantNotificationSupport {
 
     static void resetDeliveryHook() {
         deliveryHook = null
-    }
-
-    static Map<String, Object> readSettings(def ec) {
-        String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
-        if (!tenantId) return emptySettings(null)
-
-        def setting = findSettingsForTenant(ec, tenantId)
-        return buildSettingsResponse(ec, setting, tenantId)
-    }
-
-    static Map<String, Object> saveSettings(def ec, Object rawWebhookUrl, Object rawIsActive) {
-        String tenantId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
-        if (!tenantId) {
-            ec.message.addError("Active tenant is required for notification settings.")
-            return emptySettings(null)
-        }
-
-        TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for notification settings.")
-        if (ec.message.hasError()) return buildSettingsResponse(ec, findSettingsForTenant(ec, tenantId), tenantId)
-
-        def existing = findSettingsForTenant(ec, tenantId)
-        String webhookUrl = ((rawWebhookUrl)?.toString()?.trim())
-        String existingWebhookUrl = ((existing?.googleChatWebhookUrl)?.toString()?.trim())
-        String webhookUrlToSave = webhookUrl ?: existingWebhookUrl
-        boolean isActive = rawIsActive == null ? true :
-                (rawIsActive instanceof Boolean ? rawIsActive : ["Y", "YES", "TRUE", "1", "ON"].contains(rawIsActive.toString().trim().toUpperCase(Locale.ROOT)))
-        if (isActive && !webhookUrlToSave) ec.message.addError("Google Chat webhook URL is required when notifications are enabled.")
-
-        String validationError = validateGoogleChatWebhookUrl(webhookUrlToSave)
-        if (validationError) ec.message.addError(validationError)
-        if (ec.message.hasError()) return buildSettingsResponse(ec, existing, tenantId)
-
-        def nowTs = ec.user.nowTimestamp
-        Map<String, Object> settingMap = [
-                companyUserGroupId   : tenantId,
-                createdByUserId      : ((existing?.createdByUserId)?.toString()?.trim()) ?: TenantAccessSupport.currentUserId(ec),
-                googleChatWebhookUrl : webhookUrlToSave,
-                isActive             : isActive ? "Y" : "N",
-                createdDate          : existing?.createdDate ?: nowTs,
-                lastUpdatedDate      : nowTs,
-        ]
-
-        ec.service.sync()
-                .name("store#${SETTINGS_ENTITY_NAME}".toString())
-                .parameters(settingMap)
-                .call()
-
-        if (!ec.message.hasError()) ec.message.addMessage("Saved notification settings.")
-        return buildSettingsResponse(ec, findSettingsForTenant(ec, tenantId), tenantId)
     }
 
     static String validateGoogleChatWebhookUrl(Object rawWebhookUrl) {
@@ -114,7 +63,7 @@ class TenantNotificationSupport {
             String path = uri.path ?: ""
             List<String> segments = path.split("/").findAll { it }
             String spaceId = segments.size() >= 3 ? segments[2] : null
-            String maskedSpace = spaceId ? maskToken(spaceId) : "space"
+            String maskedSpace = spaceId ? (spaceId.length() <= 8 ? "..." : spaceId.substring(0, 4) + "..." + spaceId.substring(spaceId.length() - 4)) : "space"
             return "${uri.scheme}://${uri.host}/v1/spaces/${maskedSpace}/messages?key=...&token=..."
         } catch (Exception ignored) {
             return "configured"
@@ -122,19 +71,27 @@ class TenantNotificationSupport {
     }
 
     static Map<String, Object> notifyRunCompleted(def ec, Map<String, Object> runResult) {
-        Map<String, Object> context = buildRunResultContext(ec, runResult ?: [:])
+        Map<String, Object> context = new LinkedHashMap<String, Object>((runResult ?: [:]) as Map<String, Object>)
         String tenantId = ((context.companyUserGroupId)?.toString()?.trim())
         String resultId = ((context.reconciliationRunResultId)?.toString()?.trim())
         if (!tenantId) return [ok: true, attempted: false, skippedReason: "NO_TENANT"]
 
-        def settings = findSettingsForTenant(ec, tenantId)
+        def settings = ec?.entity?.find(SETTINGS_ENTITY_NAME)
+                ?.condition("companyUserGroupId", tenantId)
+                ?.disableAuthz()
+                ?.useCache(false)
+                ?.one()
         String webhookUrl = ((settings?.googleChatWebhookUrl)?.toString()?.trim())
         boolean active = ((settings?.isActive)?.toString()?.trim()) != "N"
         if (!settings || !active || !webhookUrl) {
             return [ok: true, attempted: false, skippedReason: "NOT_CONFIGURED"]
         }
 
-        Map<String, Object> payload = buildRunCompletedPayload(ec, context)
+        Map<String, Object> payload = ((ec.service.sync()
+                .name("reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload")
+                .parameters(context)
+                .disableAuthz()
+                .call()?.payload) ?: [:]) as Map<String, Object>
         try {
             Map<String, Object> delivery = deliverGoogleChat(webhookUrl, payload)
             boolean ok = delivery.ok == true
@@ -160,28 +117,7 @@ class TenantNotificationSupport {
         }
     }
 
-    static Map<String, Object> buildRunCompletedPayload(def ec, Map<String, Object> context) {
-        String tenantLabel = ((context.companyLabel)?.toString()?.trim()) ?:
-                TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, context.companyUserGroupId)
-        String runName = ((context.runName)?.toString()?.trim()) ?:
-                ((context.savedRunId)?.toString()?.trim()) ?:
-                ((context.reconciliationRunId)?.toString()?.trim()) ?:
-                "reconciliation run"
-        String resultId = ((context.reconciliationRunResultId)?.toString()?.trim())
-        String resultUrl = buildRunResultUrl(ec, context)
-        String file1SystemLabel = resolveFileSystemLabel(ec, context, "file1", null)
-        String file2SystemLabel = resolveFileSystemLabel(ec, context, "file2", null)
-        List<String> lines = ["Darpan run completed: ${runName}".toString()]
-        if (tenantLabel) lines << "Tenant: ${tenantLabel}".toString()
-        if (resultId) lines << "Result ID: ${resultId}".toString()
-        if (resultUrl) lines << "Run result: <${resultUrl}|Open run result>".toString()
-        lines << "Differences: ${toDisplayCount(context.differenceCount)}".toString()
-        lines << "Only in ${file1SystemLabel ?: "File 1"}: ${toDisplayCount(context.onlyInFile1Count)}".toString()
-        lines << "Only in ${file2SystemLabel ?: "File 2"}: ${toDisplayCount(context.onlyInFile2Count)}".toString()
-        return [text: lines.join("\n")]
-    }
-
-    protected static String buildRunResultUrl(def ec, Map<String, Object> context) {
+    static String buildRunResultUrl(def ec, Map<String, Object> context) {
         String appBaseUrl = resolveAppBaseUrl(ec)
         String savedRunId = ((context.savedRunId)?.toString()?.trim()) ?:
                 ((context.reconciliationMappingId)?.toString()?.trim()) ?:
@@ -189,7 +125,9 @@ class TenantNotificationSupport {
         String outputFileName = ((context.resultDataManagerPath)?.toString()?.trim())
         if (!appBaseUrl || !savedRunId || !outputFileName) return null
 
-        String path = "/reconciliation/run-result/${encodePathSegment(savedRunId)}/${encodePathSegment(outputFileName)}"
+        String encodedSavedRunId = URLEncoder.encode(savedRunId, StandardCharsets.UTF_8.name()).replace("+", "%20")
+        String encodedOutputFileName = URLEncoder.encode(outputFileName, StandardCharsets.UTF_8.name()).replace("+", "%20")
+        String path = "/reconciliation/run-result/${encodedSavedRunId}/${encodedOutputFileName}"
         Map<String, String> queryParams = [
                 runName         : ((context.runName)?.toString()?.trim()),
                 file1SystemLabel: resolveFileSystemLabel(ec, context, "file1", null),
@@ -197,12 +135,12 @@ class TenantNotificationSupport {
         ].findAll { entry -> ((entry.value)?.toString()?.trim()) } as Map<String, String>
 
         String queryText = queryParams.collect { entry ->
-            "${encodeQueryComponent(entry.key)}=${encodeQueryComponent(entry.value)}"
+            "${URLEncoder.encode(entry.key, StandardCharsets.UTF_8.name())}=${URLEncoder.encode(entry.value, StandardCharsets.UTF_8.name())}"
         }.join("&")
         return "${appBaseUrl}${path}${queryText ? "?" + queryText : ""}".toString()
     }
 
-    protected static String resolveFileSystemLabel(def ec, Map<String, Object> context, String prefix, String fallback) {
+    static String resolveFileSystemLabel(def ec, Map<String, Object> context, String prefix, String fallback) {
         String explicitLabel = ((context["${prefix}SystemLabel"])?.toString()?.trim()) ?:
                 ((context["${prefix}Label"])?.toString()?.trim())
         if (explicitLabel) return explicitLabel
@@ -244,14 +182,6 @@ class TenantNotificationSupport {
         return value.replaceAll(/\/+$/, "")
     }
 
-    protected static String encodePathSegment(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20")
-    }
-
-    protected static String encodeQueryComponent(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8.name())
-    }
-
     protected static Map<String, Object> deliverGoogleChat(String webhookUrl, Map<String, Object> payload) {
         if (deliveryHook != null) return (deliveryHook.call(webhookUrl, payload) ?: [:]) as Map<String, Object>
 
@@ -270,85 +200,5 @@ class TenantNotificationSupport {
                 ok        : statusCode >= 200 && statusCode < 300,
                 statusCode: statusCode,
         ]
-    }
-
-    protected static Map<String, Object> buildRunResultContext(def ec, Map<String, Object> input) {
-        Map<String, Object> context = new LinkedHashMap<String, Object>(input)
-        String resultId = ((context.reconciliationRunResultId)?.toString()?.trim())
-        def runResultRecord = resultId ? ec?.entity?.find("darpan.reconciliation.ReconciliationRunResult")
-                ?.condition("reconciliationRunResultId", resultId)
-                ?.disableAuthz()
-                ?.useCache(false)
-                ?.one() : null
-        if (runResultRecord) {
-            [
-                    "savedRunId",
-                    "savedRunType",
-                    "reconciliationRunId",
-                    "reconciliationMappingId",
-                    "ruleSetId",
-                    "compareScopeId",
-                    "companyUserGroupId",
-                    "createdByUserId",
-                    "file1Name",
-                    "file2Name",
-                    "resultDataManagerPath",
-                    "differenceCount",
-                    "onlyInFile1Count",
-                    "onlyInFile2Count",
-            ].each { String fieldName ->
-                if (context[fieldName] == null) context[fieldName] = runResultRecord[fieldName]
-            }
-        }
-        if (!context.companyUserGroupId) {
-            context.companyUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
-        }
-        return context
-    }
-
-    protected static def findSettingsForTenant(def ec, String tenantId) {
-        if (!tenantId) return null
-        return ec?.entity?.find(SETTINGS_ENTITY_NAME)
-                ?.condition("companyUserGroupId", tenantId)
-                ?.disableAuthz()
-                ?.useCache(false)
-                ?.one()
-    }
-
-    protected static Map<String, Object> buildSettingsResponse(def ec, def setting, String tenantId) {
-        String webhookUrl = ((setting?.googleChatWebhookUrl)?.toString()?.trim())
-        return [
-                companyUserGroupId        : tenantId,
-                companyLabel              : TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, tenantId),
-                googleChatConfigured      : !!webhookUrl,
-                googleChatWebhookUrlMasked: maskGoogleChatWebhookUrl(webhookUrl),
-                isActive                  : ((setting?.isActive)?.toString()?.trim()) ?: "N",
-                createdByUserId           : ((setting?.createdByUserId)?.toString()?.trim()),
-                createdDate               : setting?.createdDate,
-                lastUpdatedDate           : setting?.lastUpdatedDate,
-        ]
-    }
-
-    protected static Map<String, Object> emptySettings(String tenantId) {
-        return [
-                companyUserGroupId        : tenantId,
-                companyLabel              : null,
-                googleChatConfigured      : false,
-                googleChatWebhookUrlMasked: null,
-                isActive                  : "N",
-        ]
-    }
-
-    protected static String maskToken(String value) {
-        if (!value) return null
-        if (value.length() <= 8) return "..."
-        return value.substring(0, 4) + "..." + value.substring(value.length() - 4)
-    }
-
-    protected static String toDisplayCount(Object value) {
-        if (value == null) return "0"
-        if (value instanceof Number) return ((Number) value).intValue().toString()
-        String normalized = ((value)?.toString()?.trim())
-        return normalized ?: "0"
     }
 }

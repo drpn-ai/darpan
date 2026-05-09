@@ -4,11 +4,26 @@ import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.notification.TenantNotificationSupport
-import groovy.json.JsonOutput
 
 import org.moqui.sftp.SftpClient
 
-import java.sql.Timestamp
+import static darpan.common.ValueSupport.fileNameFromPath
+import static darpan.common.ValueSupport.normalize
+import static darpan.common.ValueSupport.normalizeInt
+import static darpan.common.ValueSupport.normalizeLong
+import static darpan.common.ValueSupport.readField
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.currentUserId
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.loadAutomation
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.loadAutomationSources
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.normalizeDataManagerPath
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.nowTimestamp
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.requireNormalized
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.runInTransaction
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.safeMetadataJson
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.sanitizeErrorDetail
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.sanitizeErrorMessage
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.truncate
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.updateAutomationExecution
 
 class SftpAutomationSupport {
     static final String AUTOMATION_INPUT_SFTP_FILES = "AUT_IN_SFTP_FILES"
@@ -91,17 +106,18 @@ class SftpAutomationSupport {
             String reconciliationRunResultId = statusEnumId == AUTOMATION_STATUS_COMPLETED ?
                     persistAutomationRunResult(ec, automation, pollResult, resultDataManagerPath) : null
 
+            def completedTimestamp = nowTimestamp(ec)
             Map<String, Object> updateFields = [
                     statusEnumId              : statusEnumId,
-                    completedDate             : nowTimestamp(ec),
+                    completedDate             : completedTimestamp,
                     file1Name                 : normalize(pollResult.file1SelectedName),
                     file2Name                 : normalize(pollResult.file2SelectedName),
                     resultFileName            : normalize(pollResult.diffFileName) ?: fileNameFromPath(resultDataManagerPath),
                     resultDataManagerPath     : resultDataManagerPath,
                     reconciliationRunResultId : reconciliationRunResultId,
-                    differenceCount           : toInteger(pollResult.differenceCount),
-                    onlyInFile1Count          : toInteger(pollResult.onlyInFile1Count),
-                    onlyInFile2Count          : toInteger(pollResult.onlyInFile2Count),
+                    differenceCount           : normalizeInt(pollResult.differenceCount),
+                    onlyInFile1Count          : normalizeInt(pollResult.onlyInFile1Count),
+                    onlyInFile2Count          : normalizeInt(pollResult.onlyInFile2Count),
                     safeMetadataJson          : safeMetadataJson([
                             mode                 : "SFTP_FILES",
                             dataAvailable        : dataAvailable,
@@ -123,7 +139,7 @@ class SftpAutomationSupport {
                             validationErrors     : pollResult.validationErrors ?: [],
                             processingWarnings   : pollResult.processingWarnings ?: [],
                     ]),
-                    lastUpdatedDate           : nowTimestamp(ec),
+                    lastUpdatedDate           : completedTimestamp,
             ]
             if (statusEnumId == AUTOMATION_STATUS_FAILED) {
                 updateFields.errorMessage = normalize(pollResult.statusMessage) ?: "SFTP automation run failed"
@@ -156,16 +172,17 @@ class SftpAutomationSupport {
             return result
         } catch (Throwable t) {
             try {
+                def completedTimestamp = nowTimestamp(ec)
                 updateAutomationExecution(ec, execution, [
                         statusEnumId    : AUTOMATION_STATUS_FAILED,
-                        completedDate   : nowTimestamp(ec),
+                        completedDate   : completedTimestamp,
                         errorMessage    : truncate(sanitizeErrorMessage(t), 3900),
                         errorDetail     : truncate(sanitizeErrorDetail(t), 12000),
                         safeMetadataJson: safeMetadataJson([
                                 mode        : "SFTP_FILES",
                                 errorMessage: sanitizeErrorMessage(t),
                         ]),
-                        lastUpdatedDate : nowTimestamp(ec),
+                        lastUpdatedDate : completedTimestamp,
                 ])
             } catch (Throwable ignored) {
             }
@@ -205,7 +222,7 @@ class SftpAutomationSupport {
         def server = ec?.entity?.find("darpan.reconciliation.SftpServer")
                 ?.condition("sftpServerId", sftpServerId)
                 ?.disableAuthz()
-                ?.useCache(false)
+                ?.useCache(true)
                 ?.one()
         if (!server) throw new IllegalArgumentException("SFTP Server ${sftpServerId} not found for ${label}")
 
@@ -273,30 +290,9 @@ class SftpAutomationSupport {
                 ?.condition("sftpServerId", sftpServerId)
                 ?.condition("tenantUserGroupId", tenantUserGroupId)
                 ?.disableAuthz()
-                ?.useCache(false)
+                ?.useCache(true)
                 ?.one()
         return access != null
-    }
-
-    protected static def loadAutomation(def ec, String automationId) {
-        def automation = ec?.entity?.find("darpan.reconciliation.ReconciliationAutomation")
-                ?.condition("automationId", automationId)
-                ?.disableAuthz()
-                ?.useCache(false)
-                ?.one()
-        if (!automation) throw new IllegalArgumentException("Automation ${automationId} not found")
-        return automation
-    }
-
-    protected static Map<String, Object> loadAutomationSources(def ec, String automationId) {
-        List sources = ec?.entity?.find("darpan.reconciliation.ReconciliationAutomationSource")
-                ?.condition("automationId", automationId)
-                ?.disableAuthz()
-                ?.useCache(false)
-                ?.list() ?: []
-        return sources.collectEntries { source ->
-            [(normalize(readField(source, "fileSide"))): source]
-        } as Map<String, Object>
     }
 
     protected static def requireSftpSource(def automation, def source, String fileSide) {
@@ -398,29 +394,19 @@ class SftpAutomationSupport {
 
     protected static def createAutomationExecution(def ec, def automation, Map input) {
         return runInTransaction(ec, "Error creating reconciliation automation execution", {
+            def createdTimestamp = nowTimestamp(ec)
             def execution = ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomationExecution")
             execution.set("automationId", normalize(readField(automation, "automationId")))
             execution.set("companyUserGroupId", normalize(readField(automation, "companyUserGroupId")))
             execution.set("createdByUserId", normalize(readField(automation, "createdByUserId")) ?: currentUserId(ec))
             execution.set("statusEnumId", AUTOMATION_STATUS_RUNNING)
-            execution.set("scheduledDate", input.scheduledDate ?: nowTimestamp(ec))
-            execution.set("startedDate", nowTimestamp(ec))
-            execution.set("createdDate", nowTimestamp(ec))
-            execution.set("lastUpdatedDate", nowTimestamp(ec))
+            execution.set("scheduledDate", input.scheduledDate ?: createdTimestamp)
+            execution.set("startedDate", createdTimestamp)
+            execution.set("createdDate", createdTimestamp)
+            execution.set("lastUpdatedDate", createdTimestamp)
             execution.setSequencedIdPrimary()
             execution.create()
             return execution
-        })
-    }
-
-    protected static void updateAutomationExecution(def ec, def execution, Map<String, Object> fields) {
-        if (!execution) return
-        runInTransaction(ec, "Error updating reconciliation automation execution", {
-            fields.findAll { it.value != null }.each { entry ->
-                execution.set(entry.key as String, entry.value)
-            }
-            execution.update()
-            return null
         })
     }
 
@@ -442,64 +428,14 @@ class SftpAutomationSupport {
             runResultValue.set("file2Name", normalize(pollResult.file2SelectedName))
             runResultValue.set("resultDataManagerPath", resultDataManagerPath)
             runResultValue.set("reconciliationType", normalize(pollResult.reconciliationType))
-            runResultValue.set("differenceCount", toInteger(pollResult.differenceCount))
-            runResultValue.set("onlyInFile1Count", toInteger(pollResult.onlyInFile1Count))
-            runResultValue.set("onlyInFile2Count", toInteger(pollResult.onlyInFile2Count))
+            runResultValue.set("differenceCount", normalizeInt(pollResult.differenceCount))
+            runResultValue.set("onlyInFile1Count", normalizeInt(pollResult.onlyInFile1Count))
+            runResultValue.set("onlyInFile2Count", normalizeInt(pollResult.onlyInFile2Count))
             runResultValue.set("createdDate", nowTimestamp(ec))
             runResultValue.setSequencedIdPrimary()
             runResultValue.create()
             return normalize(readField(runResultValue, "reconciliationRunResultId"))
         }) as String
-    }
-
-    protected static Object runInTransaction(def ec, String message, Closure work) {
-        if (ec?.transaction?.metaClass?.respondsTo(ec.transaction, "runUseOrBegin", Integer, String, Closure)) {
-            return ec.transaction.runUseOrBegin(30, message, work)
-        }
-        return work.call()
-    }
-
-    protected static String normalizeDataManagerPath(def ec, Object rawPath) {
-        String normalized = normalize(rawPath)
-        if (!normalized) return null
-
-        String dataManagerLocation = DataManagerSupport.resolveDataManagerLocation(ec)
-        if (normalized.startsWith(dataManagerLocation + "/")) {
-            return DataManagerSupport.normalizeRelativePath(normalized.substring(dataManagerLocation.length() + 1))
-        }
-
-        String relativePath = DataManagerSupport.normalizeRelativePath(normalized)
-        if (relativePath) return relativePath
-
-        if (normalized.contains("://")) return null
-
-        File root = DataManagerSupport.resolveDirectoryFile(ec, dataManagerLocation, false)
-        if (root == null) return null
-
-        File candidate = new File(normalized)
-        try {
-            def rootPath = root.canonicalFile.toPath()
-            def candidatePath = candidate.canonicalFile.toPath()
-            if (!candidatePath.startsWith(rootPath)) return null
-            return rootPath.relativize(candidatePath).toString().replace(File.separator, "/")
-        } catch (Exception ignored) {
-            return null
-        }
-    }
-
-    protected static String safeMetadataJson(Map<String, Object> metadata) {
-        return truncate(JsonOutput.toJson(safeJsonValue(metadata)), 3900)
-    }
-
-    protected static Object safeJsonValue(Object value) {
-        if (value == null || value instanceof CharSequence || value instanceof Number || value instanceof Boolean) return value
-        if (value instanceof Collection) return value.collect { safeJsonValue(it) }
-        if (value instanceof Map) {
-            return value.collectEntries { entry ->
-                [(entry.key?.toString()): safeJsonValue(entry.value)]
-            }
-        }
-        return value.toString()
     }
 
     protected static boolean hasMessageErrors(def ec) {
@@ -510,99 +446,18 @@ class SftpAutomationSupport {
         }
     }
 
-    protected static String currentUserId(def ec) {
-        try {
-            return TenantAccessSupport.currentUserId(ec)
-        } catch (Exception ignored) {
-            return normalize(ec?.user?.userId)
-        }
-    }
-
-    protected static Timestamp nowTimestamp(def ec) {
-        return ec?.user?.nowTimestamp ?: new Timestamp(System.currentTimeMillis())
-    }
-
-    protected static Integer toInteger(Object rawValue) {
-        if (rawValue == null) return null
-        if (rawValue instanceof Number) return rawValue.intValue()
-        String normalized = normalize(rawValue)
-        if (!normalized) return null
-        return normalized.isInteger() ? normalized.toInteger() : null
-    }
-
     protected static Integer positiveInteger(Object rawValue) {
-        Integer value = toInteger(rawValue)
+        Integer value = normalizeInt(rawValue)
         return value != null && value > 0 ? value : null
     }
 
     protected static Long positiveLong(Object rawValue) {
-        if (rawValue == null) return null
-        if (rawValue instanceof Number) {
-            long value = rawValue.longValue()
-            return value > 0L ? value : null
-        }
-        String normalized = normalize(rawValue)
-        if (!normalized || !normalized.isLong()) return null
-        long value = normalized.toLong()
-        return value > 0L ? value : null
+        Long value = normalizeLong(rawValue)
+        return value != null && value > 0L ? value : null
     }
 
     protected static boolean toBoolean(Object rawValue) {
         return rawValue == Boolean.TRUE || ["Y", "true", "TRUE", "yes", "YES"].contains(normalize(rawValue))
     }
 
-    protected static String requireNormalized(Object value, String message) {
-        String normalized = normalize(value)
-        if (!normalized) throw new IllegalArgumentException(message)
-        return normalized
-    }
-
-    protected static String fileNameFromPath(Object rawPath) {
-        String normalized = normalize(rawPath)
-        if (!normalized) return null
-        return normalized.tokenize("/\\").last()
-    }
-
-    protected static String sanitizeErrorMessage(Throwable t) {
-        return sanitizeText(t?.message ?: t?.class?.name ?: "Automation execution failed")
-    }
-
-    protected static String sanitizeErrorDetail(Throwable t) {
-        if (t == null) return null
-
-        StringBuilder detail = new StringBuilder()
-        Throwable cursor = t
-        int depth = 0
-        while (cursor != null && depth < 8) {
-            if (depth > 0) detail.append("\nCaused by: ")
-            detail.append(cursor.class.name)
-            if (cursor.message) detail.append(": ").append(cursor.message)
-            cursor.stackTrace?.each { StackTraceElement element ->
-                detail.append("\n    at ").append(element.toString())
-            }
-            cursor = cursor.cause
-            depth++
-        }
-        return sanitizeText(detail.toString())
-    }
-
-    protected static String sanitizeText(String value) {
-        return value?.replaceAll(/(?i)(password|privateKey|apiToken|token)\s*[:=]\s*[^,\s)]+/, "\$1=***")
-    }
-
-    protected static String truncate(String value, int maxLength) {
-        if (value == null || value.length() <= maxLength) return value
-        return value.substring(0, maxLength)
-    }
-
-    protected static String normalize(Object value) {
-        return ((value)?.toString()?.trim())
-    }
-
-    protected static Object readField(def record, String fieldName) {
-        if (record == null || !fieldName) return null
-        if (record instanceof Map) return record[fieldName]
-        if (record.metaClass.respondsTo(record, "get", String)) return record.get(fieldName)
-        return record."${fieldName}"
-    }
 }

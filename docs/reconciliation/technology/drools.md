@@ -12,7 +12,7 @@ Keep comparison and classification logic configurable without changing reconcili
   - `darpan.rule.Rule`
 - Production rule services:
   - `runtime/component/darpan/service/reconciliation/ReconciliationRuleEngineServices.xml`
-  - Script implementation: `runtime/component/darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineServices.groovy`
+  - Drools/KIE runtime helper: `runtime/component/darpan/src/main/groovy/darpan/reconciliation/rule/RuleEngineSupport.groovy`
 
 ## Execution model
 

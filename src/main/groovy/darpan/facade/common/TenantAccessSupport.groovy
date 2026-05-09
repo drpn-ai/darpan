@@ -4,6 +4,8 @@ import java.time.ZoneId
 import java.time.DateTimeException
 import java.util.TimeZone
 
+import static darpan.common.ValueSupport.sanitizeFileToken
+
 class TenantAccessSupport {
     static final String ADMIN_USER_GROUP_ID = "ADMIN"
     static final String ALL_USERS_GROUP_ID = "ALL_USERS"
@@ -707,8 +709,6 @@ class TenantAccessSupport {
     }
 
     protected static String sanitizePathToken(String rawToken) {
-        String normalized = ((rawToken)?.toString()?.trim())
-        if (!normalized) return "anonymous"
-        return normalized.replaceAll(/[^A-Za-z0-9._-]/, "_")
+        return sanitizeFileToken(rawToken, "anonymous")
     }
 }

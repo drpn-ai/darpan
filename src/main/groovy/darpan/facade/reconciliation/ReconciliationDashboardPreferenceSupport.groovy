@@ -5,12 +5,14 @@ import groovy.json.JsonSlurper
 
 import java.util.Arrays
 
+import static darpan.common.ValueSupport.normalize
+
 class ReconciliationDashboardPreferenceSupport {
     static final String PINNED_MAPPING_PREFERENCE_KEY = "darpan.dashboard.pinnedMappingIds"
     static final String PINNED_SAVED_RUN_PREFERENCE_KEY = PINNED_MAPPING_PREFERENCE_KEY
 
     static List<String> parsePinnedReconciliationMappingIds(Object rawValue) {
-        String normalized = rawValue?.toString()?.trim()
+        String normalized = normalize(rawValue)
         if (!normalized) return []
 
         try {
@@ -32,7 +34,7 @@ class ReconciliationDashboardPreferenceSupport {
             values = [rawValue]
         }
 
-        return values.collect { it?.toString()?.trim() }
+        return values.collect { normalize(it) }
                 .findAll { it }
                 .unique()
     }

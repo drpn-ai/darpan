@@ -8,6 +8,12 @@ import reconciliation.rule.RuleEngineSupport
 import java.sql.Connection
 import java.sql.Statement
 
+import static darpan.common.ValueSupport.normalize
+import static darpan.common.ValueSupport.boundedInt
+import static darpan.common.ValueSupport.normalizeInt
+import static darpan.common.ValueSupport.normalizeLower
+import static darpan.common.ValueSupport.normalizeUpper
+
 class ReconciliationSavedRunSupport {
     static final String RULE_SET_COMPARE_SCOPE_ENTITY_NAME = "darpan.rule.RuleSetCompareScope"
     static final String RUN_TYPE_MAPPING = "mapping"
@@ -58,13 +64,13 @@ class ReconciliationSavedRunSupport {
             if (!(rawRule instanceof Map)) return
 
             Map rule = (Map) rawRule
-            String ruleId = ((rule.ruleId)?.toString()?.trim())
-            String ruleText = ((rule.ruleText)?.toString()?.trim())
-            String ruleLogic = ((rule.ruleLogic)?.toString()?.trim())
-            String ruleType = ((rule.ruleType)?.toString()?.trim())
-            String expression = ((rule.expression)?.toString()?.trim())
-            String enabled = ((rule.enabled)?.toString()?.trim())?.toUpperCase() == "N" ? "N" : "Y"
-            String severity = ((rule.severity)?.toString()?.trim())
+            String ruleId = normalize(rule.ruleId)
+            String ruleText = normalize(rule.ruleText)
+            String ruleLogic = normalize(rule.ruleLogic)
+            String ruleType = normalize(rule.ruleType)
+            String expression = normalize(rule.expression)
+            String enabled = normalizeUpper(rule.enabled) == "N" ? "N" : "Y"
+            String severity = normalize(rule.severity)
             Integer providedSequenceNum = toSequenceNum(rule.sequenceNum)
 
             if (!ruleText && !ruleLogic) return
@@ -86,27 +92,16 @@ class ReconciliationSavedRunSupport {
     }
 
     static Integer toSequenceNum(Object rawValue) {
-        if (rawValue == null) return null
-        if (rawValue instanceof Number) {
-            return ((Number) rawValue).intValue()
-        }
-
-        String normalized = ((rawValue)?.toString()?.trim())
-        if (!normalized) return null
-        try {
-            return Integer.valueOf(normalized)
-        } catch (Exception ignored) {
-            return null
-        }
+        return normalizeInt(rawValue, null)
     }
 
     static String normalizeJsonPrimaryIdExpression(Object rawExpression) {
-        String normalized = ((rawExpression)?.toString()?.trim())
+        String normalized = normalize(rawExpression)
         if (!normalized) return null
 
         int suffixIndex = normalized.indexOf("|")
-        String baseExpression = suffixIndex >= 0 ? normalized.substring(0, suffixIndex)?.toString()?.trim() : normalized
-        String suffix = suffixIndex >= 0 ? normalized.substring(suffixIndex + 1)?.toString()?.trim() : null
+        String baseExpression = suffixIndex >= 0 ? normalize(normalized.substring(0, suffixIndex)) : normalized
+        String suffix = suffixIndex >= 0 ? normalize(normalized.substring(suffixIndex + 1)) : null
 
         String normalizedBase = ReconciliationMappingSupport.normalizeMappingJsonIdExpression(baseExpression) ?: baseExpression
         return suffix ? "${normalizedBase}|${suffix}" : normalizedBase
@@ -133,11 +128,11 @@ class ReconciliationSavedRunSupport {
             Map<String, Object> columnMetadata = findColumn(metadata, connection?.catalog, schemaName, rawTableName, columnName)
             if (columnMetadata == null) return true
 
-            String isNullable = ((columnMetadata.isNullable)?.toString()?.trim())?.toUpperCase()
+            String isNullable = normalizeUpper(columnMetadata.isNullable)
             if (isNullable == "YES") return true
 
-            String databaseProductName = ((metadata?.databaseProductName)?.toString()?.trim())?.toLowerCase()
-            String typeName = ((columnMetadata.typeName)?.toString()?.trim()) ?: "VARCHAR"
+            String databaseProductName = normalizeLower(metadata?.databaseProductName)
+            String typeName = normalize(columnMetadata.typeName) ?: "VARCHAR"
             int columnSize = columnMetadata.columnSize instanceof Number ? ((Number) columnMetadata.columnSize).intValue() : 0
             int decimalDigits = columnMetadata.decimalDigits instanceof Number ? ((Number) columnMetadata.decimalDigits).intValue() : 0
             String alterSql = buildDropNotNullSql(databaseProductName, tableName, columnName, typeName, columnSize, decimalDigits)
@@ -220,9 +215,9 @@ class ReconciliationSavedRunSupport {
     }
 
     protected static String buildCompareScopeId(def ec, String ruleSetId, String scopeKind) {
-        String normalizedRuleSetId = RuleEngineSupport.sanitizeIdToken(((ruleSetId)?.toString()?.trim()) ?: "RULE_SET", "RS")
+        String normalizedRuleSetId = RuleEngineSupport.sanitizeIdToken(normalize(ruleSetId) ?: "RULE_SET", "RS")
         if (!normalizedRuleSetId.startsWith("RS_")) normalizedRuleSetId = "RS_${normalizedRuleSetId}"
-        String scopeSuffix = RuleEngineSupport.sanitizeIdToken(((scopeKind)?.toString()?.trim()) ?: "COMPARE_SCOPE", "COMPARE_SCOPE")
+        String scopeSuffix = RuleEngineSupport.sanitizeIdToken(normalize(scopeKind) ?: "COMPARE_SCOPE", "COMPARE_SCOPE")
         String candidate = buildEntityId("CS", normalizedRuleSetId, scopeSuffix)
         int suffix = 1
 
@@ -239,9 +234,9 @@ class ReconciliationSavedRunSupport {
     }
 
     protected static String buildEntityId(String prefix, String bodyToken, String trailingToken = null, String collisionSuffix = null) {
-        String normalizedPrefix = ((prefix)?.toString()?.trim()) ?: "ID"
-        String normalizedBodyToken = ((bodyToken)?.toString()?.trim()) ?: "VALUE"
-        String normalizedTrailingToken = ((trailingToken)?.toString()?.trim())
+        String normalizedPrefix = normalize(prefix) ?: "ID"
+        String normalizedBodyToken = normalize(bodyToken) ?: "VALUE"
+        String normalizedTrailingToken = normalize(trailingToken)
         String normalizedCollisionSuffix = collisionSuffix ?: ""
 
         int reservedLength = normalizedPrefix.length() + 1 + normalizedCollisionSuffix.length()
@@ -259,13 +254,13 @@ class ReconciliationSavedRunSupport {
     }
 
     static String compareScopeDisplayName(Object compareScopeId, Object compareScopeDescription) {
-        String description = ((compareScopeDescription)?.toString()?.trim())
+        String description = normalize(compareScopeDescription)
         if (description) return description
-        return ((compareScopeId)?.toString()?.trim())
+        return normalize(compareScopeId)
     }
 
     static boolean savedRunIdExists(def ec, String savedRunId) {
-        String normalized = ((savedRunId)?.toString()?.trim())
+        String normalized = normalize(savedRunId)
         if (!normalized) return false
 
         return ec.entity.find("darpan.rule.RuleSet")
@@ -286,20 +281,32 @@ class ReconciliationSavedRunSupport {
         rows.addAll(collectRuleSetRows(ec))
 
         return rows.sort { Map<String, Object> left, Map<String, Object> right ->
-            String leftName = ((left.runName)?.toString()?.trim()) ?: ((left.savedRunId)?.toString()?.trim()) ?: ""
-            String rightName = ((right.runName)?.toString()?.trim()) ?: ((right.savedRunId)?.toString()?.trim()) ?: ""
+            String leftName = normalize(left.runName) ?: normalize(left.savedRunId) ?: ""
+            String rightName = normalize(right.runName) ?: normalize(right.savedRunId) ?: ""
             int nameCompare = leftName <=> rightName
             if (nameCompare != 0) return nameCompare
-            return (((left.savedRunId)?.toString()?.trim()) ?: "") <=> (((right.savedRunId)?.toString()?.trim()) ?: "")
+            return (normalize(left.savedRunId) ?: "") <=> (normalize(right.savedRunId) ?: "")
         }
     }
 
+    static Map<String, Object> findSavedRunById(def ec, Object rawSavedRunId) {
+        String savedRunId = normalize(rawSavedRunId)
+        if (!savedRunId) return null
+
+        def mapping = ec.entity.find("darpan.mapping.ReconciliationMapping")
+                .condition("reconciliationMappingId", savedRunId)
+                .disableAuthz()
+                .useCache(false)
+                .one()
+        if (mapping) return buildMappingSavedRunRow(ec, mapping)
+
+        return (Map<String, Object>) resolveRuleSetRun(ec, savedRunId).savedRun
+    }
+
     static Map<String, Object> listSavedRuns(def ec, Object query, Object pageIndex, Object pageSize) {
-        int page = Math.max(0, pageIndex instanceof Number ? pageIndex.intValue() :
-                (pageIndex?.toString()?.trim()?.isInteger() ? pageIndex.toString().trim().toInteger() : 0))
-        int size = Math.max(1, Math.min(200, pageSize instanceof Number ? pageSize.intValue() :
-                (pageSize?.toString()?.trim()?.isInteger() ? pageSize.toString().trim().toInteger() : 20)))
-        String search = ((query)?.toString()?.trim())?.toLowerCase()
+        int page = boundedInt(pageIndex, 0, 0, Integer.MAX_VALUE)
+        int size = boundedInt(pageSize, 20, 1, 200)
+        String search = normalizeLower(query)
 
         List<Map<String, Object>> rows = collectSavedRunRows(ec)
         if (search) rows = rows.findAll { Map<String, Object> row -> savedRunMatches(row, search) }
@@ -324,57 +331,71 @@ class ReconciliationSavedRunSupport {
         List<Map<String, Object>> rows = []
 
         (mappingFinder.list() ?: []).each { mapping ->
-            if (!TenantAccessSupport.canAccessTenantRecord(ec, mapping)) return
-
             List mappingMembers = ec.entity.find("darpan.mapping.ReconciliationMappingMember")
                     .condition("reconciliationMappingId", mapping.reconciliationMappingId)
                     .disableAuthz()
                     .useCache(false)
                     .list() ?: []
-            List<String> mappingReadinessIssues = ReconciliationMappingSupport.collectReadinessIssues(ec, mappingMembers)
-            if (!mappingReadinessIssues.isEmpty()) return
-
-            List<Map<String, Object>> systemOptions = mappingMembers.collect { member ->
-                def systemEnum = findEnum(ec, member.systemEnumId)
-                def fileTypeEnum = findEnum(ec, member.fileTypeEnumId)
-                [
-                        enumId           : ((member.systemEnumId)?.toString()?.trim()),
-                        enumCode         : ((systemEnum?.enumCode)?.toString()?.trim()),
-                        description      : ((systemEnum?.description)?.toString()?.trim()),
-                        label            : resolveEnumLabel(ec, member.systemEnumId, member.systemEnumId as String),
-                        sequenceNum      : systemEnum?.sequenceNum ?: Integer.MAX_VALUE,
-                        fileTypeEnumId   : ((member.fileTypeEnumId)?.toString()?.trim()),
-                        fileTypeLabel    : fileTypeEnum ? FacadeSupport.enumLabel(fileTypeEnum) : null,
-                        idFieldExpression: ((member.idFieldExpression ?: member.systemFieldName)?.toString()?.trim()),
-                        schemaFileName   : ((member.schemaFileName)?.toString()?.trim()),
-                ]
-            }.sort { Map<String, Object> left, Map<String, Object> right ->
-                (left.sequenceNum <=> right.sequenceNum) ?:
-                        ((left.label ?: "") <=> (right.label ?: "")) ?:
-                        ((left.enumId ?: "") <=> (right.enumId ?: ""))
-            }
-
-            List<String> systemIds = systemOptions.collect { it.enumId as String }.findAll { it }.unique()
-            rows.add([
-                    savedRunId              : mapping.reconciliationMappingId,
-                    runName                 : mapping.mappingName,
-                    description             : mapping.description,
-                    companyUserGroupId      : mapping.companyUserGroupId,
-                    companyLabel            : TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, mapping.companyUserGroupId),
-                    runType                 : RUN_TYPE_MAPPING,
-                    reconciliationMappingId : mapping.reconciliationMappingId,
-                    ruleSetId               : null,
-                    compareScopeId          : null,
-                    requiresSystemSelection : systemIds.size() != 2,
-                    defaultFile1SystemEnumId: systemIds.size() >= 2 ? systemIds[0] : null,
-                    defaultFile2SystemEnumId: systemIds.size() >= 2 ? systemIds[1] : null,
-                    systemOptions           : systemOptions.collect { Map<String, Object> option ->
-                        option.findAll { String key, Object value -> key != "sequenceNum" }
-                    },
-            ])
+            Map<String, Object> row = buildMappingSavedRunRow(ec, mapping, mappingMembers)
+            if (row) rows.add(row)
         }
 
         return rows
+    }
+
+    protected static Map<String, Object> buildMappingSavedRunRow(def ec, def mapping, List mappingMembers = null) {
+        if (!mapping || !TenantAccessSupport.canAccessTenantRecord(ec, mapping)) return null
+
+        List members = mappingMembers
+        if (members == null) {
+            members = ec.entity.find("darpan.mapping.ReconciliationMappingMember")
+                    .condition("reconciliationMappingId", mapping.reconciliationMappingId)
+                    .disableAuthz()
+                    .useCache(false)
+                    .list() ?: []
+        }
+
+        List<String> mappingReadinessIssues = ReconciliationMappingSupport.collectReadinessIssues(ec, members)
+        if (!mappingReadinessIssues.isEmpty()) return null
+
+        List<Map<String, Object>> systemOptions = members.collect { member ->
+            def systemEnum = findEnum(ec, member.systemEnumId)
+            def fileTypeEnum = findEnum(ec, member.fileTypeEnumId)
+            [
+                    enumId           : normalize(member.systemEnumId),
+                    enumCode         : normalize(systemEnum?.enumCode),
+                    description      : normalize(systemEnum?.description),
+                    label            : resolveEnumLabel(ec, member.systemEnumId, member.systemEnumId as String),
+                    sequenceNum      : systemEnum?.sequenceNum ?: Integer.MAX_VALUE,
+                    fileTypeEnumId   : normalize(member.fileTypeEnumId),
+                    fileTypeLabel    : fileTypeEnum ? FacadeSupport.enumLabel(fileTypeEnum) : null,
+                    idFieldExpression: normalize(member.idFieldExpression ?: member.systemFieldName),
+                    schemaFileName   : normalize(member.schemaFileName),
+            ]
+        }.sort { Map<String, Object> left, Map<String, Object> right ->
+            (left.sequenceNum <=> right.sequenceNum) ?:
+                    ((left.label ?: "") <=> (right.label ?: "")) ?:
+                    ((left.enumId ?: "") <=> (right.enumId ?: ""))
+        }
+
+        List<String> systemIds = systemOptions.collect { it.enumId as String }.findAll { it }.unique()
+        return [
+                savedRunId              : mapping.reconciliationMappingId,
+                runName                 : mapping.mappingName,
+                description             : mapping.description,
+                companyUserGroupId      : mapping.companyUserGroupId,
+                companyLabel            : TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, mapping.companyUserGroupId),
+                runType                 : RUN_TYPE_MAPPING,
+                reconciliationMappingId : mapping.reconciliationMappingId,
+                ruleSetId               : null,
+                compareScopeId          : null,
+                requiresSystemSelection : systemIds.size() != 2,
+                defaultFile1SystemEnumId: systemIds.size() >= 2 ? systemIds[0] : null,
+                defaultFile2SystemEnumId: systemIds.size() >= 2 ? systemIds[1] : null,
+                systemOptions           : systemOptions.collect { Map<String, Object> option ->
+                    option.findAll { String key, Object value -> key != "sequenceNum" }
+                },
+        ]
     }
 
     static List<Map<String, Object>> collectRuleSetRows(def ec) {
@@ -394,7 +415,7 @@ class ReconciliationSavedRunSupport {
     }
 
     static Map<String, Object> resolveRuleSetRun(def ec, Object rawSavedRunId) {
-        String savedRunId = ((rawSavedRunId)?.toString()?.trim())
+        String savedRunId = normalize(rawSavedRunId)
         if (!savedRunId) return [savedRun: null, error: null]
 
         def ruleSet = ec.entity.find("darpan.rule.RuleSet")
@@ -430,7 +451,7 @@ class ReconciliationSavedRunSupport {
 
         Map<String, Object> sourceBySide = [:]
         for (def source in sources) {
-            String fileSide = ((source.fileSide)?.toString()?.trim())?.toUpperCase()
+            String fileSide = normalizeUpper(source.fileSide)
             if (!(fileSide in [FILE_SIDE_1, FILE_SIDE_2])) {
                 return [savedRun: null, error: "RuleSet ${savedRunId} compare scope '${compareScopeLabel}' has unsupported fileSide ${source.fileSide}."]
             }
@@ -459,9 +480,9 @@ class ReconciliationSavedRunSupport {
         List<Map<String, Object>> resolvedSystemOptions = systemOptions ?: buildRuleSetSystemOptions(ec, sourceBySide)
         return [
                 savedRunId              : ruleSet.ruleSetId,
-                runName                 : ((ruleSet.ruleSetName)?.toString()?.trim()) ?: ((ruleSet.ruleSetId)?.toString()?.trim()),
-                description             : ((ruleSet.description)?.toString()?.trim()),
-                companyUserGroupId      : ((ruleSet.companyUserGroupId)?.toString()?.trim()),
+                runName                 : normalize(ruleSet.ruleSetName) ?: normalize(ruleSet.ruleSetId),
+                description             : normalize(ruleSet.description),
+                companyUserGroupId      : normalize(ruleSet.companyUserGroupId),
                 companyLabel            : TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, ruleSet.companyUserGroupId),
                 runType                 : RUN_TYPE_RULESET,
                 reconciliationMappingId : null,
@@ -477,7 +498,7 @@ class ReconciliationSavedRunSupport {
     }
 
     static List<Map<String, Object>> collectRuleRows(def ec, Object rawRuleSetId) {
-        String ruleSetId = ((rawRuleSetId)?.toString()?.trim())
+        String ruleSetId = normalize(rawRuleSetId)
         if (!ruleSetId) return []
 
         List rules = ec.entity.find("darpan.rule.Rule")
@@ -490,17 +511,17 @@ class ReconciliationSavedRunSupport {
         return rules.collect { rule ->
             Map<String, Object> expressionData = parseRuleExpression(rule.expression)
             [
-                    ruleId        : ((rule.ruleId)?.toString()?.trim()),
+                    ruleId        : normalize(rule.ruleId),
                     sequenceNum   : rule.sequenceNum,
-                    ruleText      : ((rule.ruleText)?.toString()?.trim()),
-                    ruleLogic     : ((rule.ruleLogic)?.toString()?.trim()),
-                    ruleType      : ((rule.ruleType)?.toString()?.trim()),
-                    expression    : ((rule.expression)?.toString()?.trim()),
-                    enabled       : ((rule.enabled)?.toString()?.trim()),
-                    severity      : ((rule.severity)?.toString()?.trim()),
-                    file1FieldPath: ((expressionData.file1FieldPath)?.toString()?.trim()),
-                    file2FieldPath: ((expressionData.file2FieldPath)?.toString()?.trim()),
-                    operator      : ((expressionData.operator)?.toString()?.trim()),
+                    ruleText      : normalize(rule.ruleText),
+                    ruleLogic     : normalize(rule.ruleLogic),
+                    ruleType      : normalize(rule.ruleType),
+                    expression    : normalize(rule.expression),
+                    enabled       : normalize(rule.enabled),
+                    severity      : normalize(rule.severity),
+                    file1FieldPath: normalize(expressionData.file1FieldPath),
+                    file2FieldPath: normalize(expressionData.file2FieldPath),
+                    operator      : normalize(expressionData.operator),
                     preActions    : normalizePreActions(expressionData.preActions ?: expressionData.preAction),
             ].findAll { String key, Object value -> value != null }
         } as List<Map<String, Object>>
@@ -533,21 +554,21 @@ class ReconciliationSavedRunSupport {
     }
 
     static String normalizePreAction(Object rawPreAction) {
-        String value = ((rawPreAction)?.toString()?.trim())?.toUpperCase()
+        String value = normalizeUpper(rawPreAction)
         if (value in ["STRING_TO_INTEGER", "TO_INT", "TO_INTEGER"]) return "STRING_TO_INT"
         if (value == "TO_NUMBER") return "STRING_TO_NUMBER"
         return value in ["STRING_TO_INT", "STRING_TO_NUMBER"] ? value : null
     }
 
     static String normalizePreActionFieldSide(Object rawFieldSide) {
-        String value = ((rawFieldSide)?.toString()?.trim())?.toLowerCase()
+        String value = normalizeLower(rawFieldSide)
         if (value in ["file1", "file_1", "left"]) return "file1"
         if (value in ["file2", "file_2", "right"]) return "file2"
         return null
     }
 
     static Map<String, Object> parseRuleExpression(Object rawExpression) {
-        String expression = ((rawExpression)?.toString()?.trim())
+        String expression = normalize(rawExpression)
         if (!expression) return [:]
 
         try {
@@ -561,12 +582,12 @@ class ReconciliationSavedRunSupport {
     static Map<String, Object> resolveApiSourceConfig(def ec, String sourceLabel, Object rawSystemEnumId,
             Object rawSourceConfigId, Object rawSourceConfigType, Object rawNsRestletConfig = null) {
         String systemEnumId = canonicalSystemEnumId(rawSystemEnumId)
-        String sourceConfigId = ((rawSourceConfigId)?.toString()?.trim())
-        String sourceConfigType = ((rawSourceConfigType)?.toString()?.trim())
+        String sourceConfigId = normalize(rawSourceConfigId)
+        String sourceConfigType = normalize(rawSourceConfigType)
         def nsRestletConfig = rawNsRestletConfig
 
         if (!sourceConfigId && systemEnumId == SYSTEM_NETSUITE && nsRestletConfig) {
-            sourceConfigId = ((nsRestletConfig.nsAuthConfigId)?.toString()?.trim())
+            sourceConfigId = normalize(nsRestletConfig.nsAuthConfigId)
         }
 
         String expectedType = expectedSourceConfigType(systemEnumId)
@@ -621,11 +642,11 @@ class ReconciliationSavedRunSupport {
         TenantAccessSupport.requireTenantRecordAccess(ec, config,
                 "${sourceLabel} Shopify auth config '${sourceConfigId}' was not found.",
                 "${sourceLabel} Shopify auth config '${sourceConfigId}' is not available in your active tenant.")
-        if (config && ((config.isActive)?.toString()?.trim()) == "N") {
+        if (config && normalize(config.isActive) == "N") {
             ec.message.addError("${sourceLabel} Shopify auth config '${sourceConfigId}' is inactive.")
         }
         if (config && !(config.canReadOrders instanceof Boolean ? config.canReadOrders :
-                ["Y", "YES", "TRUE", "1", "ON"].contains(config.canReadOrders?.toString()?.trim()?.toUpperCase(Locale.ROOT)))) {
+                ["Y", "YES", "TRUE", "1", "ON"].contains(normalizeUpper(config.canReadOrders)))) {
             ec.message.addError("${sourceLabel} Shopify auth config '${sourceConfigId}' cannot read orders.")
         }
     }
@@ -639,11 +660,11 @@ class ReconciliationSavedRunSupport {
         TenantAccessSupport.requireTenantRecordAccess(ec, config,
                 "${sourceLabel} HotWax source config '${sourceConfigId}' was not found.",
                 "${sourceLabel} HotWax source config '${sourceConfigId}' is not available in your active tenant.")
-        if (config && ((config.isActive)?.toString()?.trim()) == "N") {
+        if (config && normalize(config.isActive) == "N") {
             ec.message.addError("${sourceLabel} HotWax source config '${sourceConfigId}' is inactive.")
         }
         if (config && !(config.canReadOrders instanceof Boolean ? config.canReadOrders :
-                ["Y", "YES", "TRUE", "1", "ON"].contains(config.canReadOrders?.toString()?.trim()?.toUpperCase(Locale.ROOT)))) {
+                ["Y", "YES", "TRUE", "1", "ON"].contains(normalizeUpper(config.canReadOrders)))) {
             ec.message.addError("${sourceLabel} HotWax source config '${sourceConfigId}' cannot read orders.")
         }
     }
@@ -657,10 +678,10 @@ class ReconciliationSavedRunSupport {
         TenantAccessSupport.requireTenantRecordAccess(ec, config,
                 "${sourceLabel} NetSuite auth config '${sourceConfigId}' was not found.",
                 "${sourceLabel} NetSuite auth config '${sourceConfigId}' is not available in your active tenant.")
-        if (config && ((config.isActive)?.toString()?.trim()) == "N") {
+        if (config && normalize(config.isActive) == "N") {
             ec.message.addError("${sourceLabel} NetSuite auth config '${sourceConfigId}' is inactive.")
         }
-        String endpointAuthConfigId = ((nsRestletConfig?.nsAuthConfigId)?.toString()?.trim())
+        String endpointAuthConfigId = normalize(nsRestletConfig?.nsAuthConfigId)
         if (endpointAuthConfigId && endpointAuthConfigId != sourceConfigId) {
             ec.message.addError("${sourceLabel} NetSuite endpoint is configured for ${endpointAuthConfigId}, not ${sourceConfigId}.")
         }
@@ -688,29 +709,29 @@ class ReconciliationSavedRunSupport {
             return [
                     fileSide          : fileSide,
                     enumId            : systemEnumId,
-                    enumCode          : ((systemEnum?.enumCode)?.toString()?.trim()),
-                    description       : ((systemEnum?.description)?.toString()?.trim()),
+                    enumCode          : normalize(systemEnum?.enumCode),
+                    description       : normalize(systemEnum?.description),
                     label             : resolveEnumLabel(ec, systemEnumId, source.systemEnumId as String),
-                    fileTypeEnumId    : ((source.fileTypeEnumId)?.toString()?.trim()),
+                    fileTypeEnumId    : normalize(source.fileTypeEnumId),
                     fileTypeLabel     : fileTypeEnum ? FacadeSupport.enumLabel(fileTypeEnum) : null,
-                    idFieldExpression : ((source.primaryIdExpression)?.toString()?.trim()),
-                    schemaFileName    : ((source.schemaFileName)?.toString()?.trim()),
-                    sourceTypeEnumId  : ((source.sourceTypeEnumId)?.toString()?.trim()),
+                    idFieldExpression : normalize(source.primaryIdExpression),
+                    schemaFileName    : normalize(source.schemaFileName),
+                    sourceTypeEnumId  : normalize(source.sourceTypeEnumId),
                     sourceTypeLabel   : sourceTypeEnum ? FacadeSupport.enumLabel(sourceTypeEnum) : null,
-                    systemMessageRemoteId   : ((source.systemMessageRemoteId)?.toString()?.trim()),
-                    systemMessageRemoteLabel: ((systemMessageRemote?.description)?.toString()?.trim()) ?:
+                    systemMessageRemoteId   : normalize(source.systemMessageRemoteId),
+                    systemMessageRemoteLabel: normalize(systemMessageRemote?.description) ?:
                             virtualSystemRemoteLabel(systemEnumId, source.systemMessageRemoteId, source.sourceConfigType) ?:
-                            ((systemMessageRemote?.systemMessageRemoteId)?.toString()?.trim()),
-                    nsRestletConfigId       : ((source.nsRestletConfigId)?.toString()?.trim()),
-                    nsRestletConfigLabel    : ((nsRestletConfig?.description)?.toString()?.trim()) ?: ((nsRestletConfig?.nsRestletConfigId)?.toString()?.trim()),
-                    sourceConfigId          : ((source.sourceConfigId)?.toString()?.trim()),
-                    sourceConfigType        : ((source.sourceConfigType)?.toString()?.trim()),
+                            normalize(systemMessageRemote?.systemMessageRemoteId),
+                    nsRestletConfigId       : normalize(source.nsRestletConfigId),
+                    nsRestletConfigLabel    : normalize(nsRestletConfig?.description) ?: normalize(nsRestletConfig?.nsRestletConfigId),
+                    sourceConfigId          : normalize(source.sourceConfigId),
+                    sourceConfigType        : normalize(source.sourceConfigType),
             ]
         }.findAll { it != null } as List<Map<String, Object>>
     }
 
     static String resolveEnumLabel(def ec, Object enumId, String fallback = null) {
-        String normalized = ((enumId)?.toString()?.trim())
+        String normalized = normalize(enumId)
         if (!normalized) return fallback
         def enumValue = findEnum(ec, normalized)
         return enumValue ? FacadeSupport.enumLabel(enumValue) : (fallback ?: normalized)
@@ -718,8 +739,8 @@ class ReconciliationSavedRunSupport {
 
     static boolean isVirtualHotWaxOrdersRemote(Object systemEnumId, Object systemMessageRemoteId, Object sourceConfigType) {
         if (canonicalSystemEnumId(systemEnumId) != SYSTEM_HOTWAX_OMS) return false
-        if (((systemMessageRemoteId)?.toString()?.trim()) != HOTWAX_ORDERS_REMOTE_ID) return false
-        String normalizedSourceConfigType = ((sourceConfigType)?.toString()?.trim())
+        if (normalize(systemMessageRemoteId) != HOTWAX_ORDERS_REMOTE_ID) return false
+        String normalizedSourceConfigType = normalize(sourceConfigType)
         return !normalizedSourceConfigType || normalizedSourceConfigType == SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST
     }
 
@@ -766,8 +787,8 @@ class ReconciliationSavedRunSupport {
 
     static boolean isVirtualShopifyOrdersRemote(Object systemEnumId, Object systemMessageRemoteId, Object sourceConfigType) {
         if (canonicalSystemEnumId(systemEnumId) != SYSTEM_SHOPIFY) return false
-        if (((systemMessageRemoteId)?.toString()?.trim()) != SHOPIFY_ORDERS_REMOTE_ID) return false
-        String normalizedSourceConfigType = ((sourceConfigType)?.toString()?.trim())
+        if (normalize(systemMessageRemoteId) != SHOPIFY_ORDERS_REMOTE_ID) return false
+        String normalizedSourceConfigType = normalize(sourceConfigType)
         return !normalizedSourceConfigType || normalizedSourceConfigType == SOURCE_CONFIG_TYPE_SHOPIFY_AUTH
     }
 
@@ -803,7 +824,7 @@ class ReconciliationSavedRunSupport {
     }
 
     static def findEnum(def ec, Object enumId) {
-        String normalized = ((enumId)?.toString()?.trim())
+        String normalized = normalize(enumId)
         if (!normalized) return null
         return ec.entity.find("moqui.basic.Enumeration")
                 .condition("enumId", normalized)
@@ -813,7 +834,7 @@ class ReconciliationSavedRunSupport {
     }
 
     static String canonicalSystemEnumId(Object systemEnumId) {
-        String normalized = ((systemEnumId)?.toString()?.trim())
+        String normalized = normalize(systemEnumId)
         if (!normalized) return null
 
         String lookupKey = normalized.replaceAll(/[\s_-]/, "").toUpperCase()

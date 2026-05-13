@@ -63,6 +63,16 @@ class JsonSchemaUtilTests {
     }
 
     @Test
+    void cleanFileNameReturnsNullForUnsafeTokens() {
+        assertNull(JsonSchemaUtil.cleanFileName(null))
+        assertNull(JsonSchemaUtil.cleanFileName(""))
+        assertNull(JsonSchemaUtil.cleanFileName("../etc/passwd"))
+        assertNull(JsonSchemaUtil.cleanFileName("dir/schema.json"))
+        assertNull(JsonSchemaUtil.cleanFileName("dir\\schema.json"))
+        assertEquals("schema.json", JsonSchemaUtil.cleanFileName(" schema.json "))
+    }
+
+    @Test
     void readUploadedTextReadsUtf8AndRejectsEmptyUploads() {
         FileItemStub goodFile = new FileItemStub(name: "schema.json", size: 12L, text: '{"a":1}')
         FileItemStub emptyFile = new FileItemStub(name: "empty.json", size: 0L, text: '')

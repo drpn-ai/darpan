@@ -7,19 +7,19 @@ import org.moqui.context.ExecutionContext
 
 class JsonSchemaUtil {
     private static final ObjectMapper mapper = new ObjectMapper()
-    private static final String JSON_SCHEMA_ENTITY_NAME = "darpan.reconciliation.JsonSchema"
-    private static final String SYSTEM_ENUM_TYPE_ID = "DarpanSystemSource"
+    private static final String JSON_SCHEMA_ENTITY_NAME = JsonSchemaConstants.JSON_SCHEMA_ENTITY_NAME
+    private static final String SYSTEM_ENUM_TYPE_ID = JsonSchemaConstants.SYSTEM_ENUM_TYPE_ID
 
     /**
      * Sanitizes a filename to prevent path traversal/injection.
+     * Returns null for tokens that contain path separators or traversal sequences so callers
+     * can safely skip filesystem fallbacks without aborting the overall lookup.
      */
     static String cleanFileName(String rawName) {
         if (!rawName) return null
-        def name = rawName.toString().trim()
+        String name = rawName.toString().trim()
         if (!name) return null
-        if (name.contains("..") || name.contains("/") || name.contains("\\")) {
-            throw new IllegalArgumentException("Invalid schema file name: ${name}")
-        }
+        if (name.contains("..") || name.contains("/") || name.contains("\\")) return null
         return name
     }
 
@@ -228,17 +228,18 @@ class JsonSchemaUtil {
         def existingSchema = ec.entity.find(JSON_SCHEMA_ENTITY_NAME)
             .condition("schemaName", nameToSave)
             .one()
-        
-        if (existingSchema) {
-            String nameRoot = baseName
-            int suffix = 1
-            while (existingSchema != null) {
-                nameToSave = "${nameRoot} (${suffix})"
-                existingSchema = ec.entity.find(JSON_SCHEMA_ENTITY_NAME)
-                    .condition("schemaName", nameToSave)
-                    .one()
-                suffix++
-            }
+        if (existingSchema == null) return nameToSave
+
+        int suffix = 1
+        while (existingSchema != null && suffix <= JsonSchemaConstants.UNIQUE_NAME_ATTEMPT_LIMIT) {
+            nameToSave = "${baseName} (${suffix})"
+            existingSchema = ec.entity.find(JSON_SCHEMA_ENTITY_NAME)
+                .condition("schemaName", nameToSave)
+                .one()
+            suffix++
+        }
+        if (existingSchema != null) {
+            nameToSave = "${baseName} (${System.currentTimeMillis()})"
         }
         return nameToSave
     }

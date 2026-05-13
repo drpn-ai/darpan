@@ -2,7 +2,7 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <service verb="create" noun="JsonSchemaFromJson" type="script"
+    <service verb="create" noun="JsonSchemaFromJson" type="script" authenticate="true"
             location="component://darpan/src/main/groovy/darpan/jsonschema/service/crud/createJsonSchemaFromJson.groovy">
         <description>Create a JSON schema from an uploaded JSON file and save it to the DB.</description>
         <in-parameters>
@@ -19,7 +19,7 @@
         </out-parameters>
     </service>
 
-    <service verb="save" noun="JsonSchema">
+    <service verb="save" noun="JsonSchema" authenticate="true">
         <description>Save an uploaded JSON schema file to the DB.</description>
         <in-parameters>
             <parameter name="schemaFile" type="org.apache.commons.fileupload.FileItem" required="true"/>
@@ -66,12 +66,14 @@
         </actions>
     </service>
 
-    <service verb="update" noun="JsonSchemaText">
+    <service verb="update" noun="JsonSchemaText" authenticate="true">
         <description>Update an existing JSON schema in the DB.</description>
         <in-parameters>
             <parameter name="jsonSchemaId"/>
             <parameter name="filename"/><!-- Deprecated -->
             <parameter name="schemaName"/>
+            <!-- allow-html="any" because JSON Schema content commonly contains '&lt;' and '&gt;' in
+                 descriptions/regex patterns; service must remain authenticated. -->
             <parameter name="jsonText" required="true" allow-html="any"/>
         </in-parameters>
         <out-parameters>
@@ -106,7 +108,7 @@
     </service>
 
 
-    <service verb="infer" noun="JsonSchema" type="script"
+    <service verb="infer" noun="JsonSchema" type="script" authenticate="true"
             location="component://darpan/src/main/groovy/darpan/jsonschema/service/processing/inferJsonSchema.groovy">
         <description>Infer a flattened schema structure from a JSON file for the Creation Wizard.</description>
         <in-parameters>
@@ -118,7 +120,7 @@
         </out-parameters>
     </service>
 
-    <service verb="save" noun="RefinedSchema" type="script"
+    <service verb="save" noun="RefinedSchema" type="script" authenticate="true"
             location="component://darpan/src/main/groovy/darpan/jsonschema/service/crud/saveRefinedSchema.groovy">
         <description>Save a schema from the refined field list to DB; schemaName is required when creating a new schema.</description>
         <in-parameters>
@@ -135,7 +137,7 @@
         </out-parameters>
     </service>
 
-    <service verb="validate" noun="JsonFileAgainstSchema" type="script"
+    <service verb="validate" noun="JsonFileAgainstSchema" type="script" authenticate="true"
             location="component://darpan/src/main/groovy/darpan/jsonschema/service/validation/validateJsonFileAgainstSchema.groovy">
         <description>Validate an uploaded JSON file against a saved JSON schema.</description>
         <in-parameters>
@@ -151,7 +153,7 @@
         </out-parameters>
     </service>
     
-    <service verb="validate" noun="JsonLocationAgainstSchema" type="script"
+    <service verb="validate" noun="JsonLocationAgainstSchema" type="script" authenticate="true"
             location="component://darpan/src/main/groovy/darpan/jsonschema/service/validation/validateJsonLocationAgainstSchema.groovy">
         <description>Validate a JSON file location against a saved JSON schema.</description>
         <in-parameters>
@@ -165,7 +167,7 @@
         </out-parameters>
     </service>
 
-    <service verb="resolve" noun="JsonPathForKey" type="script"
+    <service verb="resolve" noun="JsonPathForKey" type="script" authenticate="true"
             location="component://darpan/src/main/groovy/darpan/jsonschema/service/processing/resolveJsonPathForKey.groovy">
         <description>Resolve a JSONPath from a key using a saved JSON schema.</description>
         <in-parameters>
@@ -181,7 +183,7 @@
             <parameter name="found" type="Boolean"/>
         </out-parameters>
     </service>
-    <service verb="delete" noun="JsonSchema">
+    <service verb="delete" noun="JsonSchema" authenticate="true">
         <description>Delete a JSON schema from DB.</description>
         <in-parameters>
             <parameter name="jsonSchemaId"/>
@@ -207,7 +209,7 @@
         </actions>
     </service>
 
-    <service verb="flatten" noun="JsonSchema" type="script" authenticate="false"
+    <service verb="flatten" noun="JsonSchema" type="script" authenticate="true"
             location="component://darpan/src/main/groovy/darpan/jsonschema/service/processing/flattenJsonSchema.groovy">
         <description>Read a JSON schema from DB or file and flatten it into a list of fields.</description>
         <in-parameters>

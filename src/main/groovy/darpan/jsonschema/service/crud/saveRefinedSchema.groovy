@@ -1,4 +1,5 @@
-import groovy.json.JsonOutput
+import com.fasterxml.jackson.databind.ObjectMapper
+import jsonschema.common.JsonSchemaConstants
 import jsonschema.common.JsonSchemaUtil
 import org.slf4j.LoggerFactory
 
@@ -150,7 +151,7 @@ if (hasSystemEnumIdInput && requestedSystemEnumId && !JsonSchemaUtil.findSystemE
 
 def existingSchema = null
 if (jsonSchemaId) {
-    existingSchema = ec.entity.find("darpan.reconciliation.JsonSchema")
+    existingSchema = ec.entity.find(JsonSchemaConstants.JSON_SCHEMA_ENTITY_NAME)
         .condition("jsonSchemaId", jsonSchemaId)
         .one()
     if (!existingSchema) {
@@ -175,7 +176,7 @@ if (!finalSchemaName) {
 }
 
 if (existingSchema && finalSchemaName != existingSchema.schemaName) {
-    def duplicate = ec.entity.find("darpan.reconciliation.JsonSchema")
+    def duplicate = ec.entity.find(JsonSchemaConstants.JSON_SCHEMA_ENTITY_NAME)
         .condition("schemaName", finalSchemaName)
         .one()
     if (duplicate && duplicate.jsonSchemaId != existingSchema.jsonSchemaId) {
@@ -232,10 +233,11 @@ if (!schemaMap.type) {
 }
 normalizeNode(schemaMap)
 
-schemaMap['$schema'] = "http://json-schema.org/draft-07/schema#"
+schemaMap[JsonSchemaConstants.SCHEMA_KEYWORD] = JsonSchemaConstants.DRAFT_07_URL
 schemaMap.title = finalSchemaName
 
-String schemaJson = JsonOutput.toJson(schemaMap)
+ObjectMapper mapper = new ObjectMapper()
+String schemaJson = mapper.writeValueAsString(schemaMap)
 String descriptionText = normalizeBlankToNull(description)
 String createDescriptionText = descriptionText ?: requestedSchemaName
 boolean hasDescriptionInput = description != null
@@ -249,7 +251,7 @@ if (existingSchema) {
     existingSchema.update()
     jsonSchemaId = existingSchema.jsonSchemaId
 } else {
-    def newSchema = ec.entity.makeValue("darpan.reconciliation.JsonSchema")
+    def newSchema = ec.entity.makeValue(JsonSchemaConstants.JSON_SCHEMA_ENTITY_NAME)
     newSchema.schemaName = finalSchemaName
     newSchema.schemaText = schemaJson
     newSchema.description = createDescriptionText
@@ -257,7 +259,6 @@ if (existingSchema) {
     newSchema.statusId = "Active"
     newSchema.createdDate = ec.user.nowTimestamp
     newSchema.lastUpdatedStamp = ec.user.nowTimestamp
-    newSchema.setSequencedIdPrimary()
     newSchema.create()
     jsonSchemaId = newSchema.jsonSchemaId
 }

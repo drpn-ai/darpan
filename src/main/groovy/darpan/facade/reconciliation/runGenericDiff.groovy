@@ -6,7 +6,7 @@ import darpan.facade.reconciliation.ReconciliationOutputSupport
 import java.sql.Timestamp
 
 import static darpan.common.ValueSupport.normalize
-import static darpan.common.ValueSupport.normalizeUpper
+import static darpan.common.ValueSupport.normalizeBool
 
 String mappingId = normalize(reconciliationMappingId)
 String inputFile1Name = ReconciliationOutputSupport.sanitizeUploadFileName(file1Name, "file1")
@@ -15,8 +15,7 @@ String file1TextValue = file1Text?.toString()
 String file2TextValue = file2Text?.toString()
 String requestedFile1SystemEnumId = normalize(file1SystemEnumId)
 String requestedFile2SystemEnumId = normalize(file2SystemEnumId)
-boolean hasHeaderValue = hasHeader == null ? true :
-        (hasHeader instanceof Boolean ? hasHeader : ["Y", "YES", "TRUE", "1", "ON"].contains(normalizeUpper(hasHeader)))
+boolean hasHeaderValue = normalizeBool(hasHeader, true)
 
 if (!mappingId) ec.message.addError("reconciliationMappingId is required")
 if (!inputFile1Name) ec.message.addError("file1Name is required")
@@ -25,14 +24,6 @@ if (!inputFile2Name) ec.message.addError("file2Name is required")
 if (!file2TextValue) ec.message.addError("file2Text is required")
 if ((requestedFile1SystemEnumId && !requestedFile2SystemEnumId) || (!requestedFile1SystemEnumId && requestedFile2SystemEnumId)) {
     ec.message.addError("file1SystemEnumId and file2SystemEnumId must be provided together when overriding mapping defaults.")
-}
-
-def findEnum = { String enumId ->
-    if (!enumId) return null
-    return ec.entity.find("moqui.basic.Enumeration")
-            .condition("enumId", enumId)
-            .useCache(true)
-            .one()
 }
 
 def mapping = null
@@ -75,7 +66,7 @@ if (!ec.message.hasError()) {
 
 if (!ec.message.hasError()) {
     sortedSystemOptions = mappingMembers.collect { member ->
-        def systemEnum = findEnum(member.systemEnumId as String)
+        def systemEnum = FacadeSupport.findEnum(ec, member.systemEnumId as String)
         [
                 enumId    : member.systemEnumId as String,
                 label     : FacadeSupport.enumLabel(systemEnum ?: [enumId: member.systemEnumId]),
@@ -118,8 +109,8 @@ if (!ec.message.hasError()) {
 String file1Label = null
 String file2Label = null
 if (!ec.message.hasError()) {
-    file1Label = FacadeSupport.enumLabel(findEnum(resolvedFile1SystemEnumId) ?: [enumId: resolvedFile1SystemEnumId])
-    file2Label = FacadeSupport.enumLabel(findEnum(resolvedFile2SystemEnumId) ?: [enumId: resolvedFile2SystemEnumId])
+    file1Label = FacadeSupport.enumLabel(FacadeSupport.findEnum(ec, resolvedFile1SystemEnumId) ?: [enumId: resolvedFile1SystemEnumId])
+    file2Label = FacadeSupport.enumLabel(FacadeSupport.findEnum(ec, resolvedFile2SystemEnumId) ?: [enumId: resolvedFile2SystemEnumId])
 
     Map serviceResult = ec.service.sync()
             .name("reconciliation.ReconciliationGenericServices.reconcile#GenericFiles")

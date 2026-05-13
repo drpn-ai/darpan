@@ -4,6 +4,7 @@ import java.time.ZoneId
 import java.time.DateTimeException
 import java.util.TimeZone
 
+import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.sanitizeFileToken
 
 class TenantAccessSupport {
@@ -47,6 +48,19 @@ class TenantAccessSupport {
     static final String ACTIVE_TENANT_READ_ONLY_MESSAGE = "Your active tenant is read-only for this action."
     static final String NO_ACTIVE_TENANT_FILTER_VALUE = "__NO_ACTIVE_TENANT__"
     static final String OWNED_RECORD_UNAVAILABLE_MESSAGE = "Requested record is not available in your customer scope."
+
+    protected static final List<String> ACCESS_SCOPE_CONTEXT_KEYS = [
+            "activeTenantUserGroupId",
+            "activeTenantLabel",
+            "availableTenantUserGroupIds",
+            "activeTenantPermissionGroupIds",
+            "canViewActiveTenantData",
+            "canRunActiveTenantReconciliation",
+            "canEditActiveTenantData",
+            "canManageDarpanCore",
+            "isSuperAdmin",
+            "scopeType",
+    ].asImmutable()
 
     static Map<String, Object> buildAccessScope(def ec) {
         Map<String, Object> scope = resolveAccessScope(ec)
@@ -137,8 +151,8 @@ class TenantAccessSupport {
                 .findAll { it != null }
                 .unique { it.userGroupId }
                 .sort { left, right ->
-                    String leftLabel = ((left?.label)?.toString()?.trim()) ?: left?.userGroupId ?: ""
-                    String rightLabel = ((right?.label)?.toString()?.trim()) ?: right?.userGroupId ?: ""
+                    String leftLabel = normalize(left?.label) ?: left?.userGroupId ?: ""
+                    String rightLabel = normalize(right?.label) ?: right?.userGroupId ?: ""
                     int labelCompare = leftLabel <=> rightLabel
                     return labelCompare != 0 ? labelCompare : ((left?.userGroupId ?: "") <=> (right?.userGroupId ?: ""))
                 } as List<Map<String, Object>>
@@ -150,7 +164,7 @@ class TenantAccessSupport {
             return false
         }
 
-        String normalizedTenantUserGroupId = ((requestedTenantUserGroupId)?.toString()?.trim())
+        String normalizedTenantUserGroupId = normalize(requestedTenantUserGroupId)
         if (!normalizedTenantUserGroupId) {
             ec?.message?.addError("activeTenantUserGroupId is required.")
             return false
@@ -256,7 +270,7 @@ class TenantAccessSupport {
             return false
         }
 
-        String displayName = ((rawDisplayName)?.toString()?.trim())
+        String displayName = normalize(rawDisplayName)
         ec?.user?.setPreference(DISPLAY_NAME_PREFERENCE_KEY, displayName)
         return true
     }
@@ -286,7 +300,7 @@ class TenantAccessSupport {
         def nowTs = ec?.user?.nowTimestamp
         Map<String, Object> tenantSettingsMap = [
                 companyUserGroupId: tenantId,
-                createdByUserId   : ((existing?.createdByUserId)?.toString()?.trim()) ?: currentUserId(ec),
+                createdByUserId   : normalize(existing?.createdByUserId) ?: currentUserId(ec),
                 timeZone          : timeZone,
                 createdDate       : existing?.createdDate ?: nowTs,
                 lastUpdatedDate   : nowTs,
@@ -326,8 +340,8 @@ class TenantAccessSupport {
     }
 
     protected static String normalizeTimeZoneId(Object rawTimeZone) {
-        if (rawTimeZone instanceof TimeZone) return ((rawTimeZone.ID)?.toString()?.trim())
-        return ((rawTimeZone)?.toString()?.trim())
+        if (rawTimeZone instanceof TimeZone) return normalize(rawTimeZone.ID)
+        return normalize(rawTimeZone)
     }
 
     protected static def findTenantSettingsForTenant(def ec, String tenantId) {
@@ -341,12 +355,12 @@ class TenantAccessSupport {
 
     protected static Map<String, Object> buildTenantSettingsResponse(def ec, def tenantSettings, String tenantId,
             Map<String, Object> fallbackSettings = null) {
-        String resolvedTenantId = tenantId ?: ((fallbackSettings?.companyUserGroupId)?.toString()?.trim())
+        String resolvedTenantId = tenantId ?: normalize(fallbackSettings?.companyUserGroupId)
         return [
                 companyUserGroupId: resolvedTenantId,
                 companyLabel      : resolveTenantLabelForUserGroupId(ec, resolvedTenantId),
                 timeZone          : resolveTenantSettingsTimeZone(tenantSettings ?: fallbackSettings, ec),
-                createdByUserId   : ((tenantSettings?.createdByUserId ?: fallbackSettings?.createdByUserId)?.toString()?.trim()),
+                createdByUserId   : normalize(tenantSettings?.createdByUserId ?: fallbackSettings?.createdByUserId),
                 createdDate       : tenantSettings?.createdDate ?: fallbackSettings?.createdDate,
                 lastUpdatedDate   : tenantSettings?.lastUpdatedDate ?: fallbackSettings?.lastUpdatedDate,
         ]
@@ -429,7 +443,7 @@ class TenantAccessSupport {
     }
 
     static String resolveScopedRuntimeLocation(def ec, String baseLocation) {
-        String normalizedBase = ((baseLocation)?.toString()?.trim())
+        String normalizedBase = normalize(baseLocation)
         if (!normalizedBase) return normalizedBase
 
         String scopedSuffix = resolveRuntimeScopeSuffix(ec)
@@ -448,7 +462,7 @@ class TenantAccessSupport {
     }
 
     static String currentUserId(def ec) {
-        return ((ec?.user?.userId)?.toString()?.trim())
+        return normalize(ec?.user?.userId)
     }
 
     protected static List listTenantMembershipRecords(def ec) {
@@ -459,16 +473,7 @@ class TenantAccessSupport {
         if (finder == null) return []
 
         finder.condition("userId", userId).condition("groupTypeEnumId", DARPAN_COMPANY_GROUP_TYPE_ENUM_ID)
-        if (finder.metaClass.respondsTo(finder, "disableAuthz")) {
-            finder.disableAuthz()
-        }
-        if (finder.metaClass.respondsTo(finder, "conditionDate", String, String, Object)) {
-            finder.conditionDate("fromDate", "thruDate", ec?.user?.nowTimestamp)
-        }
-        if (finder.metaClass.respondsTo(finder, "useCache", Boolean)) {
-            finder.useCache(false)
-        }
-        if (!finder.metaClass.respondsTo(finder, "list")) return []
+        applyFinderDefaults(finder, ec)
 
         def membershipList = finder.list()
         return membershipList instanceof Collection ? membershipList as List : []
@@ -479,25 +484,29 @@ class TenantAccessSupport {
         if (finder == null) return []
 
         finder.condition("groupTypeEnumId", DARPAN_COMPANY_GROUP_TYPE_ENUM_ID)
-        if (finder.metaClass.respondsTo(finder, "disableAuthz")) {
-            finder.disableAuthz()
-        }
-        if (finder.metaClass.respondsTo(finder, "useCache", Boolean)) {
-            finder.useCache(false)
-        }
-        if (!finder.metaClass.respondsTo(finder, "list")) return []
+        applyFinderDefaults(finder, ec, false)
 
         def companyList = finder.list()
         return companyList instanceof Collection ? companyList as List : []
     }
 
+    /**
+     * Apply disableAuthz, conditionDate, and useCache(false) defensively for finders
+     * that may be partial stubs in tests. Each method is guarded so test stubs without
+     * a given method continue to function.
+     */
+    private static void applyFinderDefaults(def finder, def ec, boolean includeDateFilter = true) {
+        if (finder.metaClass.respondsTo(finder, "disableAuthz")) finder.disableAuthz()
+        if (includeDateFilter && finder.metaClass.respondsTo(finder, "conditionDate", String, String, Object)) {
+            finder.conditionDate("fromDate", "thruDate", ec?.user?.nowTimestamp)
+        }
+        if (finder.metaClass.respondsTo(finder, "useCache", Boolean)) finder.useCache(false)
+    }
+
     protected static String extractString(def record, String fieldName) {
         if (record == null || !fieldName) return null
-        if (record instanceof Map) return ((record[fieldName])?.toString()?.trim())
-        if (record.metaClass.respondsTo(record, "getString", String)) {
-            return record.getString(fieldName)?.toString()?.trim()
-        }
-        return ((record."${fieldName}")?.toString()?.trim())
+        Object value = record instanceof Map ? record[fieldName] : record."${fieldName}"
+        return normalize(value)
     }
 
     protected static String readPreferredActiveTenantUserGroupId(def ec) {
@@ -506,8 +515,8 @@ class TenantAccessSupport {
 
     protected static String resolveDisplayName(def ec) {
         return ec?.user?.getPreference(DISPLAY_NAME_PREFERENCE_KEY)?.toString()?.trim()
-                ?: ((ec?.user?.userAccount?.userFullName)?.toString()?.trim())
-                ?: ((ec?.user?.username)?.toString()?.trim())
+                ?: normalize(ec?.user?.userAccount?.userFullName)
+                ?: normalize(ec?.user?.username)
                 ?: currentUserId(ec)
     }
 
@@ -519,17 +528,10 @@ class TenantAccessSupport {
         if (finder == null) return null
 
         finder.condition("userId", userId).condition("successfulLogin", "Y")
-        if (finder.metaClass.respondsTo(finder, "disableAuthz")) {
-            finder.disableAuthz()
-        }
-        if (finder.metaClass.respondsTo(finder, "useCache", Boolean)) {
-            finder.useCache(false)
-        }
-        if (finder.metaClass.respondsTo(finder, "orderBy", String)) {
-            finder.orderBy("-fromDate")
-        }
+        applyFinderDefaults(finder, ec, false)
+        if (finder.metaClass.respondsTo(finder, "orderBy", String)) finder.orderBy("-fromDate")
 
-        def lastLogin = finder.metaClass.respondsTo(finder, "one") ? finder.one() : null
+        def lastLogin = finder.one()
         return lastLogin instanceof Map ? lastLogin.fromDate : lastLogin?.fromDate
     }
 
@@ -543,17 +545,10 @@ class TenantAccessSupport {
         finder.condition("createdByUserId", userId)
         String activeTenantUserGroupId = currentActiveTenantUserGroupId(ec)
         if (activeTenantUserGroupId) finder.condition("companyUserGroupId", activeTenantUserGroupId)
-        if (finder.metaClass.respondsTo(finder, "disableAuthz")) {
-            finder.disableAuthz()
-        }
-        if (finder.metaClass.respondsTo(finder, "useCache", Boolean)) {
-            finder.useCache(false)
-        }
-        if (finder.metaClass.respondsTo(finder, "orderBy", String)) {
-            finder.orderBy("-createdDate")
-        }
+        applyFinderDefaults(finder, ec, false)
+        if (finder.metaClass.respondsTo(finder, "orderBy", String)) finder.orderBy("-createdDate")
 
-        def lastRunResult = finder.metaClass.respondsTo(finder, "one") ? finder.one() : null
+        def lastRunResult = finder.one()
         if (lastRunResult == null) return null
 
         return [
@@ -567,23 +562,14 @@ class TenantAccessSupport {
 
     protected static List<String> listTenantPermissionGroupIds(def ec, String tenantUserGroupId) {
         String userId = currentUserId(ec)
-        String normalizedTenantUserGroupId = ((tenantUserGroupId)?.toString()?.trim())
+        String normalizedTenantUserGroupId = normalize(tenantUserGroupId)
         if (!userId || !normalizedTenantUserGroupId) return []
 
         def finder = ec?.entity?.find(TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME)
         if (finder == null) return []
 
         finder.condition("userId", userId).condition("tenantUserGroupId", normalizedTenantUserGroupId)
-        if (finder.metaClass.respondsTo(finder, "disableAuthz")) {
-            finder.disableAuthz()
-        }
-        if (finder.metaClass.respondsTo(finder, "conditionDate", String, String, Object)) {
-            finder.conditionDate("fromDate", "thruDate", ec?.user?.nowTimestamp)
-        }
-        if (finder.metaClass.respondsTo(finder, "useCache", Boolean)) {
-            finder.useCache(false)
-        }
-        if (!finder.metaClass.respondsTo(finder, "list")) return []
+        applyFinderDefaults(finder, ec)
 
         def assignmentList = finder.list()
         return (assignmentList instanceof Collection ? assignmentList : [])
@@ -594,7 +580,7 @@ class TenantAccessSupport {
     }
 
     protected static Map<String, Object> resolveActiveTenantPermissionScope(def ec, Object activeTenantUserGroupId, boolean superAdmin) {
-        String normalizedActiveTenantUserGroupId = ((activeTenantUserGroupId)?.toString()?.trim())
+        String normalizedActiveTenantUserGroupId = normalize(activeTenantUserGroupId)
         if (!normalizedActiveTenantUserGroupId) {
             return [permissionGroupIds: [], canView: false, canRun: false, canEdit: false]
         }
@@ -616,22 +602,14 @@ class TenantAccessSupport {
 
     protected static boolean hasActiveUserGroupMembership(def ec, String userGroupId) {
         String userId = currentUserId(ec)
-        String normalizedUserGroupId = ((userGroupId)?.toString()?.trim())
+        String normalizedUserGroupId = normalize(userGroupId)
         if (!userId || !normalizedUserGroupId) return false
 
         def finder = ec?.entity?.find("moqui.security.UserGroupMember")
         if (finder == null) return false
 
         finder.condition("userId", userId).condition("userGroupId", normalizedUserGroupId)
-        if (finder.metaClass.respondsTo(finder, "disableAuthz")) {
-            finder.disableAuthz()
-        }
-        if (finder.metaClass.respondsTo(finder, "conditionDate", String, String, Object)) {
-            finder.conditionDate("fromDate", "thruDate", ec?.user?.nowTimestamp)
-        }
-        if (finder.metaClass.respondsTo(finder, "useCache", Boolean)) {
-            finder.useCache(false)
-        }
+        applyFinderDefaults(finder, ec)
         return finder.one() != null
     }
 
@@ -640,29 +618,20 @@ class TenantAccessSupport {
         if (userContext == null) return
 
         if (!currentUserId(ec)) {
-            userContext.remove("activeTenantUserGroupId")
-            userContext.remove("activeTenantLabel")
-            userContext.remove("availableTenantUserGroupIds")
-            userContext.remove("activeTenantPermissionGroupIds")
-            userContext.remove("canViewActiveTenantData")
-            userContext.remove("canRunActiveTenantReconciliation")
-            userContext.remove("canEditActiveTenantData")
-            userContext.remove("canManageDarpanCore")
-            userContext.remove("isSuperAdmin")
-            userContext.remove("scopeType")
+            ACCESS_SCOPE_CONTEXT_KEYS.each { String key -> userContext.remove(key) }
             return
         }
 
         List<String> availableTenantUserGroupIds = ((scope?.availableTenants ?: []) as List)
-                .collect { Map<String, Object> tenant -> ((tenant?.userGroupId)?.toString()?.trim()) }
+                .collect { Map<String, Object> tenant -> normalize(tenant?.userGroupId) }
                 .findAll { it != null } as List<String>
         List<String> activeTenantPermissionGroupIds = ((scope?.activeTenantPermissionGroupIds ?: []) as List)
-                .collect { Object permissionUserGroupId -> ((permissionUserGroupId)?.toString()?.trim()) }
+                .collect { Object permissionUserGroupId -> normalize(permissionUserGroupId) }
                 .findAll { it != null } as List<String>
-        String contextTenantUserGroupId = ((scope?.activeTenantUserGroupId)?.toString()?.trim()) ?: NO_ACTIVE_TENANT_FILTER_VALUE
+        String contextTenantUserGroupId = normalize(scope?.activeTenantUserGroupId) ?: NO_ACTIVE_TENANT_FILTER_VALUE
 
         userContext.activeTenantUserGroupId = contextTenantUserGroupId
-        userContext.activeTenantLabel = ((scope?.activeTenantLabel)?.toString()?.trim())
+        userContext.activeTenantLabel = normalize(scope?.activeTenantLabel)
         userContext.availableTenantUserGroupIds = availableTenantUserGroupIds
         userContext.activeTenantPermissionGroupIds = activeTenantPermissionGroupIds
         userContext.canViewActiveTenantData = scope?.canViewActiveTenantData == true
@@ -670,7 +639,7 @@ class TenantAccessSupport {
         userContext.canEditActiveTenantData = scope?.canEditActiveTenantData == true
         userContext.canManageDarpanCore = scope?.canManageDarpanCore == true
         userContext.isSuperAdmin = scope?.isSuperAdmin == true
-        userContext.scopeType = ((scope?.scopeType)?.toString()?.trim())
+        userContext.scopeType = normalize(scope?.scopeType)
     }
 
     protected static Map<String, Object> resolveActiveTenant(List<Map<String, Object>> availableTenants, String preferredTenantUserGroupId) {
@@ -689,7 +658,7 @@ class TenantAccessSupport {
     }
 
     static String resolveTenantLabelForUserGroupId(def ec, Object userGroupId) {
-        String normalizedUserGroupId = ((userGroupId)?.toString()?.trim())
+        String normalizedUserGroupId = normalize(userGroupId)
         if (!normalizedUserGroupId) return null
 
         def matchingTenant = listAllTenantRecords(ec).find { record ->

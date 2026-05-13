@@ -1,6 +1,7 @@
 package darpan.facade.reconciliation
 
 import darpan.facade.common.FacadeSupport
+import darpan.facade.common.PaginationSupport
 import darpan.facade.common.TenantAccessSupport
 import groovy.json.JsonSlurper
 import jsonschema.common.JsonSchemaUtil
@@ -101,11 +102,11 @@ class ReconciliationMappingSupport {
         List<Map<String, Object>> rows = search ?
                 allRows.findAll { Map<String, Object> row -> mappingRowMatches(row, search) } :
                 allRows
-        Map<String, Object> pagination = ReconciliationSavedRunSupport.pagination(page, size, rows.size())
+        Map<String, Object> pagination = PaginationSupport.pagination(page, size, rows.size())
 
         Map<String, Object> envelope = FacadeSupport.envelope(ec)
         return envelope + [
-                mappings                        : ReconciliationSavedRunSupport.pageRows(rows, page, size),
+                mappings                        : PaginationSupport.pageRows(rows, page, size),
                 pinnedReconciliationMappingIds : ReconciliationDashboardPreferenceSupport.listPinnedReconciliationMappingIds(ec, availableMappingIds),
                 pagination                      : pagination,
         ]
@@ -334,20 +335,12 @@ class ReconciliationMappingSupport {
 
     protected static String resolveFileTypeCode(def ec, String enumId) {
         if (!enumId) return null
-        def enumValue = ec.entity.find("moqui.basic.Enumeration")
-                .condition("enumId", enumId)
-                .useCache(true)
-                .one()
-        return normalize(enumValue?.enumCode)
+        return normalize(FacadeSupport.findEnum(ec, enumId)?.enumCode)
     }
 
     protected static String resolveSystemLabel(def ec, String enumId) {
         if (!enumId) return "A configured system"
-        def enumValue = ec.entity.find("moqui.basic.Enumeration")
-                .condition("enumId", enumId)
-                .useCache(true)
-                .one()
-        return darpan.facade.common.FacadeSupport.enumLabel(enumValue ?: [enumId: enumId])
+        return FacadeSupport.enumLabel(FacadeSupport.findEnum(ec, enumId) ?: [enumId: enumId])
     }
 
     protected static void ensureEntityTable(def ec, String entityName) {

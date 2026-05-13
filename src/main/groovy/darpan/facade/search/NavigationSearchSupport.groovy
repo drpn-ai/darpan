@@ -1,16 +1,23 @@
 package darpan.facade.search
 
 import darpan.facade.common.FacadeSupport
+import darpan.facade.common.PaginationSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.reconciliation.ReconciliationOutputSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
 import jsonschema.common.JsonSchemaUtil
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.sql.Timestamp
 
+import static darpan.common.ValueSupport.normalize
+
 class NavigationSearchSupport {
+    private static final Logger logger = LoggerFactory.getLogger(NavigationSearchSupport.class)
+
     static final String TYPE_SCHEMA = "schema"
     static final String TYPE_SFTP_SERVER = "sftp-server"
     static final String TYPE_NETSUITE_AUTH = "netsuite-auth"
@@ -39,12 +46,12 @@ class NavigationSearchSupport {
                 (rawPageIndex?.toString()?.trim()?.isInteger() ? rawPageIndex.toString().trim().toInteger() : 0))
         int size = Math.max(1, Math.min(MAX_PAGE_SIZE, rawPageSize instanceof Number ? rawPageSize.intValue() :
                 (rawPageSize?.toString()?.trim()?.isInteger() ? rawPageSize.toString().trim().toInteger() : 20)))
-        String query = ((rawQuery)?.toString()?.trim())
+        String query = normalize(rawQuery)
         List<String> queryTokens = tokenize(query)
 
         Map<String, Object> emptyResult = [
                 results   : [],
-                pagination: pagination(page, size, 0),
+                pagination: PaginationSupport.pagination(page, size, 0),
         ]
         if (!query || queryTokens.isEmpty()) return emptyResult
         if (!TenantAccessSupport.currentActiveTenantUserGroupId(ec)) return emptyResult
@@ -70,11 +77,11 @@ class NavigationSearchSupport {
             if (scoreCompare != 0) return scoreCompare
             int typeCompare = typeOrder(left.type as String) <=> typeOrder(right.type as String)
             if (typeCompare != 0) return typeCompare
-            String leftLabel = ((left.label)?.toString()?.trim()) ?: ""
-            String rightLabel = ((right.label)?.toString()?.trim()) ?: ""
+            String leftLabel = normalize(left.label) ?: ""
+            String rightLabel = normalize(right.label) ?: ""
             int labelCompare = leftLabel <=> rightLabel
             if (labelCompare != 0) return labelCompare
-            return (((left.resultId)?.toString()?.trim()) ?: "") <=> (((right.resultId)?.toString()?.trim()) ?: "")
+            return (normalize(left.resultId) ?: "") <=> (normalize(right.resultId) ?: "")
         } as List<Map<String, Object>>
 
         int totalCount = scoredResults.size()
@@ -84,7 +91,7 @@ class NavigationSearchSupport {
                 results   : scoredResults.subList(fromIndex, toIndex).collect { Map<String, Object> result ->
                     result.findAll { String key, Object value -> value != null && !key.startsWith("_") }
                 },
-                pagination: pagination(page, size, totalCount),
+                pagination: PaginationSupport.pagination(page, size, totalCount),
         ]
     }
 
@@ -99,8 +106,8 @@ class NavigationSearchSupport {
                 .list() ?: []
 
         return rows.collect { item ->
-            String id = ((item.sftpServerId)?.toString()?.trim())
-            String label = ((item.description)?.toString()?.trim()) ?: id
+            String id = normalize(item.sftpServerId)
+            String label = normalize(item.description) ?: id
             target(
                     "data:sftp-server:${id}",
                     TYPE_SFTP_SERVER,
@@ -144,9 +151,9 @@ class NavigationSearchSupport {
                 .list() ?: []
 
         return rows.collect { item ->
-            String id = ((item.nsAuthConfigId)?.toString()?.trim())
-            String label = ((item.description)?.toString()?.trim()) ?: id
-            String authType = ((item.authType)?.toString()?.trim()) ?: "NONE"
+            String id = normalize(item.nsAuthConfigId)
+            String label = normalize(item.description) ?: id
+            String authType = normalize(item.authType) ?: "NONE"
             target(
                     "data:netsuite-auth:${id}",
                     TYPE_NETSUITE_AUTH,
@@ -188,9 +195,9 @@ class NavigationSearchSupport {
                 .condition("companyUserGroupId", activeTenantUserGroupId)
                 .useCache(false)
                 .list() ?: []).collectEntries { auth ->
-            [(((auth.nsAuthConfigId)?.toString()?.trim())): [
-                    description: ((auth.description)?.toString()?.trim()),
-                    authType   : ((auth.authType)?.toString()?.trim()) ?: "NONE",
+            [(normalize(auth.nsAuthConfigId)): [
+                    description: normalize(auth.description),
+                    authType   : normalize(auth.authType) ?: "NONE",
             ]]
         } as Map<String, Map<String, Object>>
 
@@ -201,16 +208,16 @@ class NavigationSearchSupport {
                 .list() ?: []
 
         return rows.collect { item ->
-            String id = ((item.nsRestletConfigId)?.toString()?.trim())
-            String authId = ((item.nsAuthConfigId)?.toString()?.trim())
+            String id = normalize(item.nsRestletConfigId)
+            String authId = normalize(item.nsAuthConfigId)
             Map<String, Object> authMeta = authById[authId] ?: [:]
-            String label = ((item.description)?.toString()?.trim()) ?: id
-            String method = ((item.httpMethod)?.toString()?.trim()) ?: "POST"
+            String label = normalize(item.description) ?: id
+            String method = normalize(item.httpMethod) ?: "POST"
             target(
                     "data:netsuite-endpoint:${id}",
                     TYPE_NETSUITE_ENDPOINT,
                     "Edit NetSuite Endpoint: ${label}",
-                    "${method} ${((item.endpointUrl)?.toString()?.trim()) ?: "NetSuite endpoint"}",
+                    "${method} ${normalize(item.endpointUrl) ?: "NetSuite endpoint"}",
                     "settings-netsuite-endpoints-edit",
                     "/settings/netsuite/endpoints/edit/${encodePathSegment(id)}",
                     [nsRestletConfigId: id],
@@ -258,14 +265,14 @@ class NavigationSearchSupport {
                 .list() ?: []
 
         return rows.collect { item ->
-            String id = ((item.jsonSchemaId)?.toString()?.trim())
-            String label = ((item.schemaName)?.toString()?.trim()) ?: id
+            String id = normalize(item.jsonSchemaId)
+            String label = normalize(item.schemaName) ?: id
             String systemLabel = JsonSchemaUtil.resolveSystemLabel(ec, item.systemEnumId, null, true)
             target(
                     "data:schema:${id}",
                     TYPE_SCHEMA,
                     "Open Schema: ${label}",
-                    ((item.description)?.toString()?.trim()) ?: (systemLabel ? "${systemLabel} schema." : "Open the schema editor."),
+                    normalize(item.description) ?: (systemLabel ? "${systemLabel} schema." : "Open the schema editor."),
                     "schemas-editor",
                     "/schemas/editor/${encodePathSegment(id)}",
                     [jsonSchemaId: id],
@@ -296,16 +303,16 @@ class NavigationSearchSupport {
 
     protected static List<Map<String, Object>> collectSavedRunTargets(def ec) {
         return ReconciliationSavedRunSupport.collectSavedRunRows(ec).collect { Map<String, Object> row ->
-            String id = ((row.savedRunId)?.toString()?.trim())
-            String label = ((row.runName)?.toString()?.trim()) ?: id
+            String id = normalize(row.savedRunId)
+            String label = normalize(row.runName) ?: id
             List systemLabels = row.systemOptions instanceof Collection ? row.systemOptions.collect { it?.label } : []
             List systemCodes = row.systemOptions instanceof Collection ? row.systemOptions.collect { it?.enumCode ?: it?.enumId } : []
             target(
                     "data:saved-run:${id}",
                     TYPE_SAVED_RUN,
                     "Open Run: ${label}",
-                    ((row.description)?.toString()?.trim()) ?:
-                            (((row.compareScopeDescription)?.toString()?.trim()) ?: "Open saved run history."),
+                    normalize(row.description) ?:
+                            (normalize(row.compareScopeDescription) ?: "Open saved run history."),
                     "reconciliation-run-history",
                     "/reconciliation/run-history/${encodePathSegment(id)}",
                     [savedRunId: id],
@@ -353,7 +360,7 @@ class NavigationSearchSupport {
 
         return outputFiles.collectMany { Map<String, Object> outputFile ->
                     File file = (File) outputFile.file
-                    String outputFileName = ((outputFile.fileName)?.toString()?.trim())
+                    String outputFileName = normalize(outputFile.fileName)
                     if (file == null || !file.exists() || !file.isFile() || !outputFileName) return []
                     if (!ReconciliationOutputSupport.canAccessGeneratedOutputFile(ec, file, outputFileName)) return []
 
@@ -361,7 +368,8 @@ class NavigationSearchSupport {
                     if (ReconciliationOutputSupport.sourceFormatForFile(file.name) == "json") {
                         try {
                             outputDocument = ReconciliationOutputSupport.parseGeneratedOutputText(file.getText("UTF-8"))
-                        } catch (Exception ignored) {
+                        } catch (Exception e) {
+                            logger.warn("Failed to parse generated output for navigation search: {}", file.name, e)
                             outputDocument = [:]
                         }
                     }
@@ -375,17 +383,17 @@ class NavigationSearchSupport {
                     if (outputFile.runResult?.reconciliationRunResultId) {
                         descriptor.reconciliationRunResultId = outputFile.runResult.reconciliationRunResultId
                     }
-                    String descriptorCompany = ((descriptor.companyUserGroupId)?.toString()?.trim())
+                    String descriptorCompany = normalize(descriptor.companyUserGroupId)
                     if (descriptorCompany && descriptorCompany != activeTenantUserGroupId) return []
 
-                    String savedRunId = ((descriptor.savedRunId ?: descriptor.reconciliationMappingId ?: descriptor.ruleSetId)?.toString()?.trim())
-                    String fileName = ((descriptor.fileName)?.toString()?.trim())
+                    String savedRunId = normalize(descriptor.savedRunId ?: descriptor.reconciliationMappingId ?: descriptor.ruleSetId)
+                    String fileName = normalize(descriptor.fileName)
                     if (!savedRunId || !fileName) return []
 
-                    String label = ((descriptor.savedRunName ?: descriptor.mappingName)?.toString()?.trim()) ?: fileName
+                    String label = normalize(descriptor.savedRunName ?: descriptor.mappingName) ?: fileName
                     String diffText = descriptor.totalDifferences instanceof Number ? "${descriptor.totalDifferences} differences" : "Saved result"
-                    String file1Label = ((descriptor.file1Label)?.toString()?.trim())
-                    String file2Label = ((descriptor.file2Label)?.toString()?.trim())
+                    String file1Label = normalize(descriptor.file1Label)
+                    String file2Label = normalize(descriptor.file2Label)
                     List<String> systemLabelParts = [file1Label, file2Label].findAll { it } as List<String>
                     String description = systemLabelParts.size() == 2 ?
                             "${diffText} for ${systemLabelParts[0]} and ${systemLabelParts[1]}." :
@@ -400,7 +408,7 @@ class NavigationSearchSupport {
                             "/reconciliation/run-result/${encodePathSegment(savedRunId)}/${encodePathSegment(fileName)}",
                             [savedRunId: savedRunId, outputFileName: fileName],
                             [
-                                    runName         : ((descriptor.savedRunName ?: descriptor.mappingName)?.toString()?.trim()),
+                                    runName         : normalize(descriptor.savedRunName ?: descriptor.mappingName),
                                     file1SystemLabel: file1Label,
                                     file2SystemLabel: file2Label,
                             ].findAll { String key, Object value -> value },
@@ -502,7 +510,7 @@ class NavigationSearchSupport {
         if (rawTypes instanceof Collection) {
             rawCollection = (Collection) rawTypes
         } else {
-            String rawString = ((rawTypes)?.toString()?.trim())
+            String rawString = normalize(rawTypes)
             rawCollection = rawString ? rawString.split(/\s*,\s*/).toList() : []
         }
 
@@ -513,7 +521,7 @@ class NavigationSearchSupport {
     }
 
     protected static String canonicalType(Object rawType) {
-        String value = ((rawType)?.toString()?.trim())?.toLowerCase()?.replaceAll(/[_\s]+/, "-")
+        String value = normalize(rawType)?.toLowerCase()?.replaceAll(/[_\s]+/, "-")
         switch (value) {
             case TYPE_SCHEMA:
             case "json-schema":
@@ -561,7 +569,7 @@ class NavigationSearchSupport {
             if (item instanceof Collection) return (Collection) item
             return [item]
         }.collect { Object item ->
-            ((item)?.toString()?.trim())
+            normalize(item)
         }.findAll { it }.join(" ")
                 .toLowerCase()
                 .replaceAll(/[^a-z0-9]+/, " ")
@@ -573,7 +581,7 @@ class NavigationSearchSupport {
         Set<String> seen = [] as Set<String>
         List<String> normalized = []
         (values ?: []).flatten().each { Object value ->
-            String text = ((value)?.toString()?.trim())
+            String text = normalize(value)
             if (!text) return
             String key = text.toLowerCase()
             if (seen.contains(key)) return
@@ -592,12 +600,4 @@ class NavigationSearchSupport {
         return index >= 0 ? index : DEFAULT_TYPES.size()
     }
 
-    protected static Map<String, Object> pagination(int page, int size, int totalCount) {
-        return [
-                pageIndex : page,
-                pageSize  : size,
-                totalCount: totalCount,
-                pageCount : Math.max(1, Math.ceil(totalCount / (double) size) as int),
-        ]
-    }
 }

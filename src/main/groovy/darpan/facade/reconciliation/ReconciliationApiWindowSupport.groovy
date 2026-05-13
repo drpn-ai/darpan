@@ -2,6 +2,8 @@ package darpan.facade.reconciliation
 
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 
 import java.sql.Timestamp
 import java.time.DateTimeException
@@ -14,6 +16,7 @@ import java.time.ZoneOffset
 import static darpan.common.ValueSupport.normalize
 
 class ReconciliationApiWindowSupport {
+    private static final Logger logger = LoggerFactory.getLogger(ReconciliationApiWindowSupport.class)
     private static final long DAY_MILLIS = Duration.ofDays(1).toMillis()
 
     static Map<String, Object> normalizeSavedRunApiWindow(def ec, Timestamp windowStartDate, Timestamp windowEndDate) {
@@ -90,7 +93,8 @@ class ReconciliationApiWindowSupport {
         if (!normalized) return null
         try {
             return LocalDate.parse(normalized)
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            logger.debug("Could not parse '{}' as LocalDate", normalized, e)
             return null
         }
     }

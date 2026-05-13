@@ -5,11 +5,16 @@ import darpan.facade.common.TenantAccessSupport
 import org.apache.shiro.authc.SimpleAuthenticationInfo
 import org.apache.shiro.authc.UsernamePasswordToken
 import org.apache.shiro.util.SimpleByteSource
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+
+import static darpan.common.ValueSupport.normalize
 
 class AuthFacadeSupport {
+    private static final Logger logger = LoggerFactory.getLogger(AuthFacadeSupport.class)
 
     static Map<String, Object> loginSession(def ec, Object username, Object password) {
-        String usernameValue = ((username)?.toString()?.trim())
+        String usernameValue = normalize(username)
         String passwordValue = password?.toString()
 
         if (!usernameValue) ec.message.addError("username is required")
@@ -23,7 +28,7 @@ class AuthFacadeSupport {
             if (!loggedIn) ec.message.addError("Invalid username or password")
         }
 
-        String userId = ((ec?.user?.userId)?.toString()?.trim())
+        String userId = normalize(ec?.user?.userId)
         boolean authenticated = loggedIn && userId != null
 
         if (authenticated) {
@@ -55,7 +60,7 @@ class AuthFacadeSupport {
     static Map<String, Object> verifyOwnPassword(def ec, Object currentPassword) {
         String currentPasswordValue = currentPassword?.toString()
 
-        boolean authenticated = ((ec?.user?.userId)?.toString()?.trim()) != null
+        boolean authenticated = normalize(ec?.user?.userId) != null
         boolean passwordVerified = false
 
         if (!authenticated) {
@@ -70,7 +75,7 @@ class AuthFacadeSupport {
                         .one()
             }
 
-            String usernameValue = ((userAccount?.username)?.toString()?.trim()) ?: ((ec?.user?.username)?.toString()?.trim())
+            String usernameValue = normalize(userAccount?.username) ?: normalize(ec?.user?.username)
             if (usernameValue && userAccount?.currentPassword) {
                 def token = new UsernamePasswordToken(usernameValue, currentPasswordValue)
                 def salt = userAccount?.passwordSalt ? new SimpleByteSource((String) userAccount.passwordSalt) : null
@@ -107,7 +112,7 @@ class AuthFacadeSupport {
             }
         }
 
-        if (((ec?.user?.userId)?.toString()?.trim()) != null) {
+        if (normalize(ec?.user?.userId) != null) {
             ec.user.logoutUser()
         } else {
             def session = request?.getSession(false)
@@ -132,7 +137,8 @@ class AuthFacadeSupport {
                     ((Number) configured).floatValue() :
                     ((configured ?: "144") as String).toFloat()
             return Math.max(1, Math.round(expireHours * 60.0f * 60.0f))
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            logger.warn("Could not resolve loginKeyExpireHours; defaulting to 144 hours", e)
             return 518400
         }
     }
@@ -150,7 +156,7 @@ class AuthFacadeSupport {
     }
 
     protected static String normalizeTokenValue(Object value) {
-        String normalized = ((value)?.toString()?.trim())
+        String normalized = normalize(value)
         if (!normalized || "null".equalsIgnoreCase(normalized) || "undefined".equalsIgnoreCase(normalized)) return null
         return normalized
     }

@@ -12,8 +12,8 @@ import java.time.Instant
 import java.time.LocalDateTime
 
 import static darpan.common.ValueSupport.normalize
+import static darpan.common.ValueSupport.normalizeBool
 import static darpan.common.ValueSupport.normalizeInt
-import static darpan.common.ValueSupport.normalizeUpper
 
 def toTimestampValue = { Object rawValue ->
     if (rawValue == null) return null
@@ -48,8 +48,7 @@ String file1TextValue = file1Text?.toString()
 String file2TextValue = file2Text?.toString()
 String requestedFile1SystemEnumId = normalize(file1SystemEnumId)
 String requestedFile2SystemEnumId = normalize(file2SystemEnumId)
-boolean hasHeaderValue = hasHeader == null ? true :
-        (hasHeader instanceof Boolean ? hasHeader : ["Y", "YES", "TRUE", "1", "ON"].contains(normalizeUpper(hasHeader)))
+boolean hasHeaderValue = normalizeBool(hasHeader, true)
 String windowStartLocalDateValue = normalize(windowStartLocalDate)
 String windowEndLocalDateValue = normalize(windowEndLocalDate)
 Timestamp requestedWindowStartDateValue = null
@@ -86,15 +85,8 @@ if (!ec.message.hasError()) {
     TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for reconciliation runs.")
 }
 
-def findEnum = { String enumId ->
-    if (!enumId) return null
-    return ec.entity.find("moqui.basic.Enumeration")
-            .condition("enumId", enumId)
-            .useCache(true)
-            .one()
-}
 def enumLabel = { String enumId ->
-    return FacadeSupport.enumLabel(findEnum(enumId) ?: [enumId: enumId])
+    return FacadeSupport.enumLabel(FacadeSupport.findEnum(ec, enumId) ?: [enumId: enumId])
 }
 def requireUploadInput = { String filePrefix, String inputName, String inputText ->
     if (!inputName) ec.message.addError("${filePrefix}Name is required")
@@ -110,11 +102,11 @@ def sourceLabel = { Object source, String fallback ->
     enumLabel(normalize(source?.systemEnumId) ?: fallback)
 }
 def runInternalService = { String serviceName, Map params ->
-    def call = ec.service.sync()
+    return (ec.service.sync()
             .name(serviceName)
             .parameters((params ?: [:]).findAll { entry -> entry.value != null })
-    if (call?.metaClass?.respondsTo(call, "disableAuthz")) call = call.disableAuthz()
-    return (call.call() ?: [:]) as Map
+            .disableAuthz()
+            .call() ?: [:]) as Map
 }
 def resolveOutputFile = { Map serviceResult ->
     File outputFile = null

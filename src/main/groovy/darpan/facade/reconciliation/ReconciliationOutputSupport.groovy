@@ -2,6 +2,7 @@ package darpan.facade.reconciliation
 
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
+import darpan.facade.common.PaginationSupport
 import darpan.facade.common.TenantAccessSupport
 import groovy.io.FileType
 import groovy.json.JsonOutput
@@ -346,8 +347,8 @@ class ReconciliationOutputSupport {
 
         Map<String, Object> envelope = FacadeSupport.envelope(ec)
         return envelope + [
-                generatedOutputs: pageRows(rows, page, size),
-                pagination      : pagination(page, size, rows.size()),
+                generatedOutputs: PaginationSupport.pageRows(rows, page, size),
+                pagination      : PaginationSupport.pagination(page, size, rows.size()),
         ]
     }
 
@@ -678,7 +679,7 @@ class ReconciliationOutputSupport {
                 filePath        : filePath,
                 downloadFileName: fileName ?: fileNameFromPath(filePath),
                 sourceFormat    : sourceFormat,
-                canDownload     : Boolean.valueOf(filePath && sourceFormat),
+                canDownload     : (filePath && sourceFormat) as Boolean,
         ].findAll { entry -> entry.value != null && entry.value != "" } as Map<String, Object>
     }
 
@@ -695,7 +696,7 @@ class ReconciliationOutputSupport {
                 filePath        : filePath,
                 downloadFileName: sourceFile.name,
                 sourceFormat    : sourceFormat,
-                canDownload     : Boolean.valueOf(filePath && sourceFormat),
+                canDownload     : (filePath && sourceFormat) as Boolean,
         ].findAll { entry -> entry.value != null && entry.value != "" } as Map<String, Object>
     }
 
@@ -1007,22 +1008,6 @@ class ReconciliationOutputSupport {
         } catch (Exception ignored) {
             return null
         }
-    }
-
-    protected static Map<String, Object> pagination(int page, int size, int totalCount) {
-        return [
-                pageIndex : page,
-                pageSize  : size,
-                totalCount: totalCount,
-                pageCount : Math.max(1, Math.ceil(totalCount / (double) size) as int),
-        ]
-    }
-
-    protected static List<Map<String, Object>> pageRows(List<Map<String, Object>> rows, int page, int size) {
-        int totalCount = rows.size()
-        int fromIndex = Math.min(page * size, totalCount)
-        int toIndex = Math.min(fromIndex + size, totalCount)
-        return rows.subList(fromIndex, toIndex)
     }
 
     protected static String csvEscape(String rawValue) {

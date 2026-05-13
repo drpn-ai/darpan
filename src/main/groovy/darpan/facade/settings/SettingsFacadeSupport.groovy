@@ -3,13 +3,15 @@ package darpan.facade.settings
 import darpan.facade.common.FacadeSupport
 import groovy.json.JsonSlurper
 
+import static darpan.common.ValueSupport.normalize
+
 class SettingsFacadeSupport {
     static final String DARPAN_SYSTEM_SOURCE_ENUM_TYPE_ID = "DarpanSystemSource"
     private static final String HOTWAX_SYSTEM_DEDUPE_KEY = "HOTWAX"
     private static final String HOTWAX_CANONICAL_ENUM_ID = "OMS"
 
     static String validateJsonObjectText(String text, String label) {
-        String normalized = ((text)?.toString()?.trim())
+        String normalized = normalize(text)
         if (!normalized) return null
 
         try {
@@ -23,7 +25,7 @@ class SettingsFacadeSupport {
 
     static List<Map<String, Object>> deduplicateEnumOptions(String enumTypeId, List<Map<String, Object>> rawOptions) {
         List<Map<String, Object>> optionList = (rawOptions ?: []) as List<Map<String, Object>>
-        if (((enumTypeId)?.toString()?.trim()) != DARPAN_SYSTEM_SOURCE_ENUM_TYPE_ID) return optionList
+        if (normalize(enumTypeId) != DARPAN_SYSTEM_SOURCE_ENUM_TYPE_ID) return optionList
 
         LinkedHashMap<String, Map<String, Object>> preferredByKey = [:]
         optionList.each { Map<String, Object> option ->
@@ -54,9 +56,9 @@ class SettingsFacadeSupport {
         String logicalSystemKey = logicalSystemDedupeKey(option)
         if (logicalSystemKey) return logicalSystemKey
 
-        return ((option?.enumCode)?.toString()?.trim()) ?:
-                ((option?.label)?.toString()?.trim()) ?:
-                ((option?.enumId)?.toString()?.trim())
+        return normalize(option?.enumCode) ?:
+                normalize(option?.label) ?:
+                normalize(option?.enumId)
     }
 
     protected static boolean shouldPreferEnumOption(Map<String, Object> candidate, Map<String, Object> currentPreferred) {
@@ -68,14 +70,14 @@ class SettingsFacadeSupport {
         Integer currentSequence = normalizeSequenceNumber(currentPreferred?.sequenceNum)
         if (candidateSequence != currentSequence) return candidateSequence < currentSequence
 
-        String candidateId = ((candidate?.enumId)?.toString()?.trim()) ?: ""
-        String currentId = ((currentPreferred?.enumId)?.toString()?.trim()) ?: ""
+        String candidateId = normalize(candidate?.enumId) ?: ""
+        String currentId = normalize(currentPreferred?.enumId) ?: ""
         return candidateId < currentId
     }
 
     protected static boolean isCanonicalEnumOption(Map<String, Object> option) {
-        String enumId = ((option?.enumId)?.toString()?.trim())
-        String enumCode = ((option?.enumCode)?.toString()?.trim())
+        String enumId = normalize(option?.enumId)
+        String enumCode = normalize(option?.enumCode)
         String logicalSystemKey = logicalSystemDedupeKey(option)
         if (logicalSystemKey == HOTWAX_SYSTEM_DEDUPE_KEY) return enumId == HOTWAX_CANONICAL_ENUM_ID
 
@@ -88,10 +90,10 @@ class SettingsFacadeSupport {
 
     protected static boolean isHotWaxSystemOption(Map<String, Object> option) {
         List<String> values = [
-                ((option?.enumId)?.toString()?.trim()),
-                ((option?.enumCode)?.toString()?.trim()),
-                ((option?.label)?.toString()?.trim()),
-                ((option?.description)?.toString()?.trim()),
+                normalize(option?.enumId),
+                normalize(option?.enumCode),
+                normalize(option?.label),
+                normalize(option?.description),
         ].findAll { it } as List<String>
 
         return values.any { String value ->
@@ -102,8 +104,7 @@ class SettingsFacadeSupport {
 
     protected static Integer normalizeSequenceNumber(Object rawValue) {
         if (rawValue instanceof Number) return rawValue.intValue()
-        Integer parsed = rawValue instanceof Number ? rawValue.intValue() :
-                (rawValue?.toString()?.trim()?.isInteger() ? rawValue.toString().trim().toInteger() : Integer.MAX_VALUE)
-        return parsed != null ? parsed : Integer.MAX_VALUE
+        String normalized = rawValue?.toString()?.trim()
+        return normalized?.isInteger() ? normalized.toInteger() : Integer.MAX_VALUE
     }
 }

@@ -177,13 +177,16 @@ class AutomationEntityContractTests {
 
     @Test
     void automationSourceOptionHelpersBypassEntityAuthzForInternalMetadataReads() {
+        // moqui.basic.Enumeration access was centralized in FacadeSupport.findEnum;
+        // that helper is the canonical disableAuthz read for enumerations.
+        String facadeSource = readSource("src/main/groovy/darpan/facade/common/FacadeSupport.groovy")
+        assertAllFindsDisableAuthz(facadeSource, "moqui.basic.Enumeration")
+
         String automationSource = readSource("src/main/groovy/darpan/facade/reconciliation/AutomationFacadeSupport.groovy")
-        assertAllFindsDisableAuthz(automationSource, "moqui.basic.Enumeration")
         assertAllFindsDisableAuthz(automationSource, "moqui.service.message.SystemMessageRemote")
 
         String savedRunSource = readSource("src/main/groovy/darpan/facade/reconciliation/ReconciliationSavedRunSupport.groovy")
         [
-                "moqui.basic.Enumeration",
                 "moqui.service.message.SystemMessageRemote",
                 "darpan.mapping.ReconciliationMapping",
                 "darpan.mapping.ReconciliationMappingMember",

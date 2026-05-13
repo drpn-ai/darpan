@@ -1,8 +1,11 @@
 package darpan.facade.reconciliation
 
 import darpan.facade.common.FacadeSupport
+import darpan.facade.common.PaginationSupport
 import darpan.facade.common.TenantAccessSupport
 import groovy.json.JsonSlurper
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 import reconciliation.rule.RuleEngineSupport
 
 import java.sql.Connection
@@ -10,11 +13,14 @@ import java.sql.Statement
 
 import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.boundedInt
+import static darpan.common.ValueSupport.normalizeBool
 import static darpan.common.ValueSupport.normalizeInt
 import static darpan.common.ValueSupport.normalizeLower
 import static darpan.common.ValueSupport.normalizeUpper
 
 class ReconciliationSavedRunSupport {
+    protected static final Logger logger = LoggerFactory.getLogger(ReconciliationSavedRunSupport.class)
+
     static final String RULE_SET_COMPARE_SCOPE_ENTITY_NAME = "darpan.rule.RuleSetCompareScope"
     static final String RUN_TYPE_MAPPING = "mapping"
     static final String RUN_TYPE_RULESET = "ruleset"
@@ -311,14 +317,14 @@ class ReconciliationSavedRunSupport {
         List<Map<String, Object>> rows = collectSavedRunRows(ec)
         if (search) rows = rows.findAll { Map<String, Object> row -> savedRunMatches(row, search) }
 
-        Map<String, Object> pagination = pagination(page, size, rows.size())
-        List<Map<String, Object>> pagedRows = pageRows(rows, page, size)
+        Map<String, Object> pagination = PaginationSupport.pagination(page, size, rows.size())
+        List<Map<String, Object>> pagedRows = PaginationSupport.pageRows(rows, page, size)
         Set<String> availableSavedRunIds = rows.collect { it.savedRunId as String }.findAll { it } as Set<String>
 
         Map<String, Object> envelope = FacadeSupport.envelope(ec)
         return envelope + [
                 savedRuns        : pagedRows,
-                pinnedSavedRunIds: ReconciliationDashboardPreferenceSupport.listPinnedSavedRunIds(ec, availableSavedRunIds),
+                pinnedSavedRunIds: ReconciliationDashboardPreferenceSupport.listPinnedReconciliationMappingIds(ec, availableSavedRunIds),
                 pagination       : pagination,
         ]
     }
@@ -359,8 +365,8 @@ class ReconciliationSavedRunSupport {
         if (!mappingReadinessIssues.isEmpty()) return null
 
         List<Map<String, Object>> systemOptions = members.collect { member ->
-            def systemEnum = findEnum(ec, member.systemEnumId)
-            def fileTypeEnum = findEnum(ec, member.fileTypeEnumId)
+            def systemEnum = FacadeSupport.findEnum(ec,member.systemEnumId)
+            def fileTypeEnum = FacadeSupport.findEnum(ec,member.fileTypeEnumId)
             [
                     enumId           : normalize(member.systemEnumId),
                     enumCode         : normalize(systemEnum?.enumCode),
@@ -574,7 +580,8 @@ class ReconciliationSavedRunSupport {
         try {
             Object parsed = new JsonSlurper().parseText(expression)
             return parsed instanceof Map ? (Map<String, Object>) parsed : [:]
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            logger.warn("Failed to parse rule expression JSON", e)
             return [:]
         }
     }
@@ -645,8 +652,7 @@ class ReconciliationSavedRunSupport {
         if (config && normalize(config.isActive) == "N") {
             ec.message.addError("${sourceLabel} Shopify auth config '${sourceConfigId}' is inactive.")
         }
-        if (config && !(config.canReadOrders instanceof Boolean ? config.canReadOrders :
-                ["Y", "YES", "TRUE", "1", "ON"].contains(normalizeUpper(config.canReadOrders)))) {
+        if (config && !normalizeBool(config.canReadOrders)) {
             ec.message.addError("${sourceLabel} Shopify auth config '${sourceConfigId}' cannot read orders.")
         }
     }
@@ -663,8 +669,7 @@ class ReconciliationSavedRunSupport {
         if (config && normalize(config.isActive) == "N") {
             ec.message.addError("${sourceLabel} HotWax source config '${sourceConfigId}' is inactive.")
         }
-        if (config && !(config.canReadOrders instanceof Boolean ? config.canReadOrders :
-                ["Y", "YES", "TRUE", "1", "ON"].contains(normalizeUpper(config.canReadOrders)))) {
+        if (config && !normalizeBool(config.canReadOrders)) {
             ec.message.addError("${sourceLabel} HotWax source config '${sourceConfigId}' cannot read orders.")
         }
     }
@@ -693,9 +698,9 @@ class ReconciliationSavedRunSupport {
             if (!source) return null
 
             String systemEnumId = canonicalSystemEnumId(source.systemEnumId)
-            def systemEnum = findEnum(ec, systemEnumId)
-            def fileTypeEnum = findEnum(ec, source.fileTypeEnumId)
-            def sourceTypeEnum = findEnum(ec, source.sourceTypeEnumId)
+            def systemEnum = FacadeSupport.findEnum(ec,systemEnumId)
+            def fileTypeEnum = FacadeSupport.findEnum(ec,source.fileTypeEnumId)
+            def sourceTypeEnum = FacadeSupport.findEnum(ec, source.sourceTypeEnumId)
             def systemMessageRemote = source.systemMessageRemoteId ? ec.entity.find("moqui.service.message.SystemMessageRemote")
                     .condition("systemMessageRemoteId", source.systemMessageRemoteId)
                     .disableAuthz()
@@ -733,7 +738,7 @@ class ReconciliationSavedRunSupport {
     static String resolveEnumLabel(def ec, Object enumId, String fallback = null) {
         String normalized = normalize(enumId)
         if (!normalized) return fallback
-        def enumValue = findEnum(ec, normalized)
+        def enumValue = FacadeSupport.findEnum(ec, normalized)
         return enumValue ? FacadeSupport.enumLabel(enumValue) : (fallback ?: normalized)
     }
 
@@ -823,6 +828,10 @@ class ReconciliationSavedRunSupport {
                 ensureVirtualShopifyOrdersRemote(ec, systemEnumId, systemMessageRemoteId, sourceConfigType)
     }
 
+    /**
+     * Non-cached enum lookup used by XML service callers that need fresh reads
+     * (e.g. after upgrade-data inserts in tests). FacadeSupport.findEnum is cached.
+     */
     static def findEnum(def ec, Object enumId) {
         String normalized = normalize(enumId)
         if (!normalized) return null
@@ -855,22 +864,6 @@ class ReconciliationSavedRunSupport {
             default:
                 return normalized
         }
-    }
-
-    static Map<String, Object> pagination(int page, int size, int totalCount) {
-        return [
-                pageIndex : page,
-                pageSize  : size,
-                totalCount: totalCount,
-                pageCount : Math.max(1, Math.ceil(totalCount / (double) size) as int),
-        ]
-    }
-
-    static List<Map<String, Object>> pageRows(List<Map<String, Object>> rows, int page, int size) {
-        int totalCount = rows.size()
-        int fromIndex = Math.min(page * size, totalCount)
-        int toIndex = Math.min(fromIndex + size, totalCount)
-        return rows.subList(fromIndex, toIndex)
     }
 
     protected static boolean savedRunMatches(Map<String, Object> row, String search) {

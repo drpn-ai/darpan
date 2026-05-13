@@ -2,14 +2,17 @@ package darpan.facade.reconciliation
 
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 
 import java.util.Arrays
 
 import static darpan.common.ValueSupport.normalize
 
 class ReconciliationDashboardPreferenceSupport {
+    protected static final Logger logger = LoggerFactory.getLogger(ReconciliationDashboardPreferenceSupport.class)
+
     static final String PINNED_MAPPING_PREFERENCE_KEY = "darpan.dashboard.pinnedMappingIds"
-    static final String PINNED_SAVED_RUN_PREFERENCE_KEY = PINNED_MAPPING_PREFERENCE_KEY
 
     static List<String> parsePinnedReconciliationMappingIds(Object rawValue) {
         String normalized = normalize(rawValue)
@@ -17,7 +20,8 @@ class ReconciliationDashboardPreferenceSupport {
 
         try {
             return normalizePinnedReconciliationMappingIds(new JsonSlurper().parseText(normalized))
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            logger.warn("Failed to parse pinned mapping preference JSON", e)
             return []
         }
     }
@@ -61,33 +65,5 @@ class ReconciliationDashboardPreferenceSupport {
         )
         ec.user.setPreference(PINNED_MAPPING_PREFERENCE_KEY, JsonOutput.toJson(pinnedMappingIds))
         return pinnedMappingIds
-    }
-
-    static List<String> parsePinnedSavedRunIds(Object rawValue) {
-        return parsePinnedReconciliationMappingIds(rawValue)
-    }
-
-    static List<String> normalizePinnedSavedRunIds(Object rawValue) {
-        return normalizePinnedReconciliationMappingIds(rawValue)
-    }
-
-    static List<String> filterPinnedSavedRunIds(Collection<String> savedRunIds, Collection<String> validSavedRunIds) {
-        return filterPinnedReconciliationMappingIds(savedRunIds, validSavedRunIds)
-    }
-
-    static List<String> listPinnedSavedRunIds(def ec, Collection<String> validSavedRunIds = null) {
-        return filterPinnedSavedRunIds(
-                parsePinnedSavedRunIds(ec?.user?.getPreference(PINNED_SAVED_RUN_PREFERENCE_KEY)),
-                validSavedRunIds
-        )
-    }
-
-    static List<String> savePinnedSavedRunIds(def ec, Object requestedSavedRunIds, Collection<String> validSavedRunIds = null) {
-        List<String> pinnedSavedRunIds = filterPinnedSavedRunIds(
-                normalizePinnedSavedRunIds(requestedSavedRunIds),
-                validSavedRunIds
-        )
-        ec.user.setPreference(PINNED_SAVED_RUN_PREFERENCE_KEY, JsonOutput.toJson(pinnedSavedRunIds))
-        return pinnedSavedRunIds
     }
 }

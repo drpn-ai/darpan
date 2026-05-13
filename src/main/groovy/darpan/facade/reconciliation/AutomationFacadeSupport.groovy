@@ -7,6 +7,8 @@ import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.SftpAutomationSupport
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 
 import java.sql.Timestamp
 import java.time.Instant
@@ -18,25 +20,28 @@ import static darpan.common.ValueSupport.readField
 import static darpan.common.ValueSupport.readString
 
 class AutomationFacadeSupport {
+    protected static final Logger logger = LoggerFactory.getLogger(AutomationFacadeSupport.class)
+
     static final String INPUT_MODE_API_RANGE = "AUT_IN_API_RANGE"
     static final String INPUT_MODE_SFTP_FILES = "AUT_IN_SFTP_FILES"
-    static final String SOURCE_TYPE_API = "AUT_SRC_API"
     static final String SOURCE_TYPE_SFTP = "AUT_SRC_SFTP"
-    static final String FILE_SIDE_1 = "FILE_1"
-    static final String FILE_SIDE_2 = "FILE_2"
     static final String OMS_SYSTEM_ENUM_ID = "OMS"
     static final String SHOPIFY_SYSTEM_ENUM_ID = "SHOPIFY"
     static final String NETSUITE_SYSTEM_ENUM_ID = "NETSUITE"
-    static final String SOURCE_CONFIG_TYPE_SHOPIFY_AUTH = "SHOPIFY_AUTH"
-    static final String SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST = "HOTWAX_OMS_REST"
-    static final String SOURCE_CONFIG_TYPE_NETSUITE_AUTH = "NETSUITE_AUTH"
-    static final String HOTWAX_ORDERS_REMOTE_ID = "HOTWAX_ORDERS_API"
-    static final String HOTWAX_ORDERS_ENDPOINT_LABEL = "Orders API"
-    static final String SHOPIFY_ORDERS_REMOTE_ID = "SHOPIFY_REMOTE"
-    static final String SHOPIFY_ORDERS_ENDPOINT_LABEL = "Admin GraphQL Orders"
-    static final String HOTWAX_OMS_ORDERS_EXTRACT_SERVICE = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"
+    // Constants below reference ReconciliationSavedRunSupport to avoid duplicate string literals.
+    static final String SOURCE_TYPE_API = ReconciliationSavedRunSupport.SOURCE_TYPE_API
+    static final String FILE_SIDE_1 = ReconciliationSavedRunSupport.FILE_SIDE_1
+    static final String FILE_SIDE_2 = ReconciliationSavedRunSupport.FILE_SIDE_2
+    static final String SOURCE_CONFIG_TYPE_SHOPIFY_AUTH = ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_SHOPIFY_AUTH
+    static final String SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST = ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST
+    static final String SOURCE_CONFIG_TYPE_NETSUITE_AUTH = ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_NETSUITE_AUTH
+    static final String HOTWAX_ORDERS_REMOTE_ID = ReconciliationSavedRunSupport.HOTWAX_ORDERS_REMOTE_ID
+    static final String HOTWAX_ORDERS_ENDPOINT_LABEL = ReconciliationSavedRunSupport.HOTWAX_ORDERS_ENDPOINT_LABEL
+    static final String SHOPIFY_ORDERS_REMOTE_ID = ReconciliationSavedRunSupport.SHOPIFY_ORDERS_REMOTE_ID
+    static final String SHOPIFY_ORDERS_ENDPOINT_LABEL = ReconciliationSavedRunSupport.SHOPIFY_ORDERS_ENDPOINT_LABEL
+    static final String HOTWAX_OMS_ORDERS_EXTRACT_SERVICE = ReconciliationSavedRunSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE
     static final String SHOPIFY_ORDERS_EXTRACT_SERVICE = "reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders"
-    static final String SHOPIFY_GRAPHQL_EXECUTE_SERVICE = "facade.ShopifyFacadeServices.execute#ShopifyGraphql"
+    static final String SHOPIFY_GRAPHQL_EXECUTE_SERVICE = ReconciliationSavedRunSupport.SHOPIFY_GRAPHQL_EXECUTE_SERVICE
     static final String HOTWAX_OMS_WINDOW_START_PARAMETER = "windowStart"
     static final String HOTWAX_OMS_WINDOW_END_PARAMETER = "windowEnd"
     static final String SHOPIFY_WINDOW_START_PARAMETER = "windowStart"
@@ -652,7 +657,8 @@ class AutomationFacadeSupport {
                         label               : label,
                 ].findAll { it.value != null } as Map<String, Object>
             } as List<Map<String, Object>>
-        } catch (Throwable ignored) {
+        } catch (Exception e) {
+            logger.warn("Failed to load source config options", e)
             return []
         }
     }
@@ -689,7 +695,8 @@ class AutomationFacadeSupport {
                         label              : label,
                 ].findAll { it.value != null } as Map<String, Object>
             } as List<Map<String, Object>>
-        } catch (Throwable ignored) {
+        } catch (Exception e) {
+            logger.warn("Failed to load source config options", e)
             return []
         }
     }
@@ -791,7 +798,8 @@ class AutomationFacadeSupport {
                         label                : endpointLabel,
                 ].findAll { it.value != null } as Map<String, Object>
             } as List<Map<String, Object>>
-        } catch (Throwable ignored) {
+        } catch (Exception e) {
+            logger.warn("Failed to load source config options", e)
             return []
         }
     }
@@ -922,7 +930,8 @@ class AutomationFacadeSupport {
                     .useCache(false)
                     .list() ?: []
             return rows.size() == 1 ? readString(rows.first(), "omsRestSourceConfigId") : null
-        } catch (Throwable ignored) {
+        } catch (Exception e) {
+            logger.warn("Failed to detect single active OMS rest source config", e)
             return null
         }
     }
@@ -940,7 +949,8 @@ class AutomationFacadeSupport {
                     .useCache(false)
                     .list() ?: []
             return rows.size() == 1 ? readString(rows.first(), "shopifyAuthConfigId") : null
-        } catch (Throwable ignored) {
+        } catch (Exception e) {
+            logger.warn("Failed to detect single active Shopify auth config", e)
             return null
         }
     }
@@ -965,21 +975,12 @@ class AutomationFacadeSupport {
     }
 
     protected static String enumLabel(def ec, String enumId) {
-        def enumValue = findEnum(ec, enumId)
+        def enumValue = FacadeSupport.findEnum(ec, enumId)
         return enumValue ? FacadeSupport.enumLabel(enumValue) : enumId
     }
 
     protected static String enumCode(def ec, String enumId) {
-        return readString(findEnum(ec, enumId), "enumCode")
-    }
-
-    protected static def findEnum(def ec, String enumId) {
-        if (!enumId) return null
-        return ec.entity.find("moqui.basic.Enumeration")
-                .condition("enumId", enumId)
-                .disableAuthz()
-                .useCache(true)
-                .one()
+        return readString(FacadeSupport.findEnum(ec, enumId), "enumCode")
     }
 
     static String canonicalJsonText(def ec, Object rawValue, String label) {
@@ -997,8 +998,13 @@ class AutomationFacadeSupport {
     protected static Map<String, Object> parseJsonMap(Object rawValue) {
         String value = normalize(rawValue)
         if (!value) return [:]
-        Object parsed = new JsonSlurper().parseText(value)
-        return parsed instanceof Map ? new LinkedHashMap<>((Map<String, Object>) parsed) : [:]
+        try {
+            Object parsed = new JsonSlurper().parseText(value)
+            return parsed instanceof Map ? new LinkedHashMap<>((Map<String, Object>) parsed) : [:]
+        } catch (Exception e) {
+            logger.warn("Invalid JSON in automation metadata field", e)
+            return [:]
+        }
     }
 
     protected static String maskUrl(String value) {

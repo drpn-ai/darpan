@@ -1,5 +1,8 @@
 package darpan.facade.common
 
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+
 import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 
@@ -7,6 +10,8 @@ import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.sanitizeFileToken
 
 class DataManagerSupport {
+    private static final Logger logger = LoggerFactory.getLogger(DataManagerSupport.class)
+
     static final String DEFAULT_DATA_MANAGER_LOCATION = "runtime://datamanager"
     static final String RECONCILIATION_RUNS_PATH = "reconciliation-runs"
     static final String SCHEMA_PATH = "schemas/json"
@@ -41,7 +46,8 @@ class DataManagerSupport {
             if (ec?.l10n != null && ec?.user?.nowTimestamp != null) {
                 return ec.l10n.format(ec.user.nowTimestamp, "yyyyMMdd-HHmmssSSS")
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            logger.debug("L10n run timestamp formatting failed; using SimpleDateFormat fallback", e)
         }
         return new SimpleDateFormat("yyyyMMdd-HHmmssSSS").format(new Date())
     }

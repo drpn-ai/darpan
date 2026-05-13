@@ -24,11 +24,25 @@ class FacadeSupport {
         ]
     }
 
+    static def findEnum(def ec, Object enumId) {
+        String normalized = normalize(enumId)
+        if (!normalized) return null
+        def finder = ec.entity.find("moqui.basic.Enumeration").condition("enumId", normalized)
+        // Guarded for test-stub compatibility – production EntityFind always provides both methods.
+        if (finder.metaClass.respondsTo(finder, "disableAuthz")) finder.disableAuthz()
+        if (finder.metaClass.respondsTo(finder, "useCache", Boolean)) finder.useCache(true)
+        return finder.one()
+    }
+
     static String enumLabel(def item) {
-        if (normalize(item?.enumTypeId) == "DarpanSystemSource" &&
-                normalize(item?.enumId) == "OMS") {
+        if (isHotWaxOmsSystemSourceOption(item)) {
             return normalize(item?.description) ?: "HotWax"
         }
         return normalize(item?.enumCode) ?: normalize(item?.description) ?: normalize(item?.enumId)
+    }
+
+    private static boolean isHotWaxOmsSystemSourceOption(def item) {
+        return normalize(item?.enumTypeId) == "DarpanSystemSource" &&
+                normalize(item?.enumId) == "OMS"
     }
 }

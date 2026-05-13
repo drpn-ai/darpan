@@ -2,6 +2,9 @@ package darpan.facade.settings
 
 import darpan.facade.common.FacadeSupport
 
+import static darpan.common.ValueSupport.normalize
+import static darpan.common.ValueSupport.normalizeBool
+
 class LlmSettingsSupport {
     static final Set<String> ALLOWED_PROVIDERS = ["OPENAI", "GEMINI"] as Set<String>
     static final Map<String, Map<String, String>> DEFAULT_BY_PROVIDER = [
@@ -26,12 +29,12 @@ class LlmSettingsSupport {
     ]
 
     static String normalizeProvider(Object rawProvider) {
-        String provider = ((rawProvider)?.toString()?.trim())?.toUpperCase()
+        String provider = normalize(rawProvider)?.toUpperCase()
         return ALLOWED_PROVIDERS.contains(provider) ? provider : "OPENAI"
     }
 
     static String normalizeTimeout(Object rawTimeout, String defaultTimeout) {
-        String timeout = ((rawTimeout)?.toString()?.trim()) ?: defaultTimeout
+        String timeout = normalize(rawTimeout) ?: defaultTimeout
         return timeout ==~ /\d+/ ? timeout : defaultTimeout
     }
 
@@ -45,7 +48,7 @@ class LlmSettingsSupport {
                 ?.useCache(false)
                 ?.one()
         String activeProvider = normalizeProvider(activeProviderRec?.username)
-        String selectedProvider = ((rawProvider)?.toString()?.trim()) ? normalizeProvider(rawProvider) : activeProvider
+        String selectedProvider = normalize(rawProvider) ? normalizeProvider(rawProvider) : activeProvider
         Map<String, String> defaults = DEFAULT_BY_PROVIDER[selectedProvider]
 
         def llmRemote = ec?.entity?.find("moqui.service.message.SystemMessageRemote")
@@ -91,9 +94,9 @@ class LlmSettingsSupport {
                 llmTimeoutSeconds     : normalizeTimeout(llmRemote?.internalAppCode ?: providerContext.fallbackTimeout,
                         providerContext.defaults.timeout),
                 llmEnabled            : llmRemote?.remoteAttributes ?: "Y",
-                hasStoredLlmApiKey    : !!((llmRemote?.password)?.toString()?.trim()),
-                hasFallbackLlmApiKey  : !!((providerContext.fallbackKey)?.toString()?.trim()) &&
-                        !((llmRemote?.password)?.toString()?.trim()),
+                hasStoredLlmApiKey    : !!normalize(llmRemote?.password),
+                hasFallbackLlmApiKey  : !!normalize(providerContext.fallbackKey) &&
+                        !normalize(llmRemote?.password),
                 fallbackLlmKeyEnvName : providerContext.fallbackKeyEnvName,
         ]
     }
@@ -105,16 +108,15 @@ class LlmSettingsSupport {
         def existingProviderRemote = providerContext.llmRemote
         Map<String, String> defaults = providerContext.defaults as Map<String, String>
 
-        String modelToUse = ((llmModel)?.toString()?.trim()) ?:
-                ((existingProviderRemote?.username)?.toString()?.trim()) ?:
+        String modelToUse = normalize(llmModel) ?:
+                normalize(existingProviderRemote?.username) ?:
                 defaults.model
-        String baseUrlToUse = ((llmBaseUrl)?.toString()?.trim()) ?:
-                ((existingProviderRemote?.sendUrl)?.toString()?.trim()) ?:
+        String baseUrlToUse = normalize(llmBaseUrl) ?:
+                normalize(existingProviderRemote?.sendUrl) ?:
                 defaults.baseUrl
-        String timeoutToUse = normalizeTimeout(((llmTimeoutSeconds)?.toString()?.trim()) ?:
-                ((existingProviderRemote?.internalAppCode)?.toString()?.trim()), defaults.timeout)
-        String remoteAttributes = (llmEnabled == null ? true :
-                (llmEnabled instanceof Boolean ? llmEnabled : ["Y", "YES", "TRUE", "1", "ON"].contains(llmEnabled.toString().trim().toUpperCase(Locale.ROOT)))) ? "Y" : "N"
+        String timeoutToUse = normalizeTimeout(normalize(llmTimeoutSeconds) ?:
+                normalize(existingProviderRemote?.internalAppCode), defaults.timeout)
+        String remoteAttributes = normalizeBool(llmEnabled, true) ? "Y" : "N"
 
         Map<String, Object> llmRemoteMap = [
                 systemMessageRemoteId : "${provider}_RULE_WORKSPACE",
@@ -126,7 +128,7 @@ class LlmSettingsSupport {
                 sendServiceName       : provider,
         ]
 
-        String providedApiKey = ((llmApiKey)?.toString()?.trim())
+        String providedApiKey = normalize(llmApiKey)
         if (providedApiKey) {
             llmRemoteMap.password = providedApiKey
         } else if (existingProviderRemote?.password) {
@@ -149,7 +151,7 @@ class LlmSettingsSupport {
                         llmBaseUrl         : baseUrlToUse,
                         llmTimeoutSeconds  : timeoutToUse,
                         llmEnabled         : remoteAttributes,
-                        hasStoredLlmApiKey : !!((llmRemoteMap.password)?.toString()?.trim()),
+                        hasStoredLlmApiKey : !!normalize(llmRemoteMap.password),
                 ]
         ]
     }

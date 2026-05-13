@@ -1146,9 +1146,9 @@
             </if>
 
             <if condition="!ec.message.hasError()">
-                <set field="currentPinnedSavedRunIds" from="darpan.facade.reconciliation.ReconciliationDashboardPreferenceSupport.listPinnedSavedRunIds(ec, null)"/>
+                <set field="currentPinnedSavedRunIds" from="darpan.facade.reconciliation.ReconciliationDashboardPreferenceSupport.listPinnedReconciliationMappingIds(ec, null)"/>
                 <set field="pinnedSavedRunIdsAfterDelete" from="currentPinnedSavedRunIds.findAll { it != savedRunIdValue }"/>
-                <set field="ignorePinnedSavedRuns" from="darpan.facade.reconciliation.ReconciliationDashboardPreferenceSupport.savePinnedSavedRunIds(ec, pinnedSavedRunIdsAfterDelete, null)"/>
+                <set field="ignorePinnedSavedRuns" from="darpan.facade.reconciliation.ReconciliationDashboardPreferenceSupport.savePinnedReconciliationMappingIds(ec, pinnedSavedRunIdsAfterDelete, null)"/>
                 <set field="deletedSavedRunId" from="savedRunIdValue"/>
                 <message>Deleted saved run ${savedRunIdValue}.</message>
             </if>
@@ -1426,7 +1426,7 @@
         </out-parameters>
         <actions>
             <set field="validSavedRunIds" from="new java.util.LinkedHashSet(darpan.facade.reconciliation.ReconciliationSavedRunSupport.collectSavedRunRows(ec).collect { it.savedRunId as String }.findAll { it })"/>
-            <set field="pinnedSavedRunIds" from="darpan.facade.reconciliation.ReconciliationDashboardPreferenceSupport.savePinnedSavedRunIds(ec, pinnedSavedRunIds, validSavedRunIds)"/>
+            <set field="pinnedSavedRunIds" from="darpan.facade.reconciliation.ReconciliationDashboardPreferenceSupport.savePinnedReconciliationMappingIds(ec, pinnedSavedRunIds, validSavedRunIds)"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

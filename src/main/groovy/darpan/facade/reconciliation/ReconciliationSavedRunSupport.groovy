@@ -1,5 +1,6 @@
 package darpan.facade.reconciliation
 
+import darpan.common.DarpanEntityConstants
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.PaginationSupport
 import darpan.facade.common.TenantAccessSupport
@@ -21,7 +22,6 @@ import static darpan.common.ValueSupport.normalizeUpper
 class ReconciliationSavedRunSupport {
     protected static final Logger logger = LoggerFactory.getLogger(ReconciliationSavedRunSupport.class)
 
-    static final String RULE_SET_COMPARE_SCOPE_ENTITY_NAME = "darpan.rule.RuleSetCompareScope"
     static final String RUN_TYPE_MAPPING = "mapping"
     static final String RUN_TYPE_RULESET = "ruleset"
     static final String FILE_SIDE_1 = "FILE_1"
@@ -114,11 +114,11 @@ class ReconciliationSavedRunSupport {
     }
 
     static boolean ensureRuleSetCompareScopeObjectTypeNullable(def ec) {
-        String groupName = ec?.entity?.getEntityGroupName(RULE_SET_COMPARE_SCOPE_ENTITY_NAME) ?: "default"
+        String groupName = ec?.entity?.getEntityGroupName(DarpanEntityConstants.RULE_SET_COMPARE_SCOPE) ?: "default"
         def datasourceFactory = ec?.entity?.getDatasourceFactory(groupName)
-        datasourceFactory?.checkAndAddTable(RULE_SET_COMPARE_SCOPE_ENTITY_NAME)
+        datasourceFactory?.checkAndAddTable(DarpanEntityConstants.RULE_SET_COMPARE_SCOPE)
 
-        def entityDefinition = ec?.entity?.getEntityDefinition(RULE_SET_COMPARE_SCOPE_ENTITY_NAME)
+        def entityDefinition = ec?.entity?.getEntityDefinition(DarpanEntityConstants.RULE_SET_COMPARE_SCOPE)
         if (entityDefinition == null) return true
 
         String tableName = entityDefinition.getFullTableName()
@@ -227,7 +227,7 @@ class ReconciliationSavedRunSupport {
         String candidate = buildEntityId("CS", normalizedRuleSetId, scopeSuffix)
         int suffix = 1
 
-        while (ec.entity.find("darpan.rule.RuleSetCompareScope")
+        while (ec.entity.find(DarpanEntityConstants.RULE_SET_COMPARE_SCOPE)
                 .condition("compareScopeId", candidate)
                 .disableAuthz()
                 .useCache(false)
@@ -269,12 +269,12 @@ class ReconciliationSavedRunSupport {
         String normalized = normalize(savedRunId)
         if (!normalized) return false
 
-        return ec.entity.find("darpan.rule.RuleSet")
+        return ec.entity.find(DarpanEntityConstants.RULE_SET)
                 .condition("ruleSetId", normalized)
                 .disableAuthz()
                 .useCache(false)
                 .one() != null ||
-                ec.entity.find("darpan.mapping.ReconciliationMapping")
+                ec.entity.find(DarpanEntityConstants.RECONCILIATION_MAPPING)
                         .condition("reconciliationMappingId", normalized)
                         .disableAuthz()
                         .useCache(false)
@@ -299,7 +299,7 @@ class ReconciliationSavedRunSupport {
         String savedRunId = normalize(rawSavedRunId)
         if (!savedRunId) return null
 
-        def mapping = ec.entity.find("darpan.mapping.ReconciliationMapping")
+        def mapping = ec.entity.find(DarpanEntityConstants.RECONCILIATION_MAPPING)
                 .condition("reconciliationMappingId", savedRunId)
                 .disableAuthz()
                 .useCache(false)
@@ -330,14 +330,14 @@ class ReconciliationSavedRunSupport {
     }
 
     static List<Map<String, Object>> collectMappingRows(def ec) {
-        def mappingFinder = ec.entity.find("darpan.mapping.ReconciliationMapping")
+        def mappingFinder = ec.entity.find(DarpanEntityConstants.RECONCILIATION_MAPPING)
                 .orderBy("mappingName,reconciliationMappingId")
                 .disableAuthz()
                 .useCache(false)
         List<Map<String, Object>> rows = []
 
         (mappingFinder.list() ?: []).each { mapping ->
-            List mappingMembers = ec.entity.find("darpan.mapping.ReconciliationMappingMember")
+            List mappingMembers = ec.entity.find(DarpanEntityConstants.RECONCILIATION_MAPPING_MEMBER)
                     .condition("reconciliationMappingId", mapping.reconciliationMappingId)
                     .disableAuthz()
                     .useCache(false)
@@ -354,7 +354,7 @@ class ReconciliationSavedRunSupport {
 
         List members = mappingMembers
         if (members == null) {
-            members = ec.entity.find("darpan.mapping.ReconciliationMappingMember")
+            members = ec.entity.find(DarpanEntityConstants.RECONCILIATION_MAPPING_MEMBER)
                     .condition("reconciliationMappingId", mapping.reconciliationMappingId)
                     .disableAuthz()
                     .useCache(false)
@@ -405,7 +405,7 @@ class ReconciliationSavedRunSupport {
     }
 
     static List<Map<String, Object>> collectRuleSetRows(def ec) {
-        def ruleSetFinder = ec.entity.find("darpan.rule.RuleSet")
+        def ruleSetFinder = ec.entity.find(DarpanEntityConstants.RULE_SET)
                 .orderBy("ruleSetName,ruleSetId")
                 .disableAuthz()
                 .useCache(false)
@@ -424,7 +424,7 @@ class ReconciliationSavedRunSupport {
         String savedRunId = normalize(rawSavedRunId)
         if (!savedRunId) return [savedRun: null, error: null]
 
-        def ruleSet = ec.entity.find("darpan.rule.RuleSet")
+        def ruleSet = ec.entity.find(DarpanEntityConstants.RULE_SET)
                 .condition("ruleSetId", savedRunId)
                 .disableAuthz()
                 .useCache(false)
@@ -434,7 +434,7 @@ class ReconciliationSavedRunSupport {
             return [savedRun: null, error: "Saved run '${savedRunId}' is not available in your active tenant."]
         }
 
-        List compareScopes = ec.entity.find("darpan.rule.RuleSetCompareScope")
+        List compareScopes = ec.entity.find(DarpanEntityConstants.RULE_SET_COMPARE_SCOPE)
                 .condition("ruleSetId", savedRunId)
                 .orderBy("compareScopeId")
                 .disableAuthz()
@@ -641,7 +641,7 @@ class ReconciliationSavedRunSupport {
     }
 
     protected static void validateShopifyAuthConfig(def ec, String sourceLabel, String sourceConfigId) {
-        def config = ec.entity.find("darpan.shopify.ShopifyAuthConfig")
+        def config = ec.entity.find(DarpanEntityConstants.SHOPIFY_AUTH_CONFIG)
                 .condition("shopifyAuthConfigId", sourceConfigId)
                 .disableAuthz()
                 .useCache(false)
@@ -658,7 +658,7 @@ class ReconciliationSavedRunSupport {
     }
 
     protected static void validateHotWaxOmsConfig(def ec, String sourceLabel, String sourceConfigId) {
-        def config = ec.entity.find("darpan.hotwax.HotWaxOmsRestSourceConfig")
+        def config = ec.entity.find(DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG)
                 .condition("omsRestSourceConfigId", sourceConfigId)
                 .disableAuthz()
                 .useCache(false)
@@ -675,7 +675,7 @@ class ReconciliationSavedRunSupport {
     }
 
     protected static void validateNetSuiteAuthConfig(def ec, String sourceLabel, String sourceConfigId, def nsRestletConfig) {
-        def config = ec.entity.find("darpan.reconciliation.NsAuthConfig")
+        def config = ec.entity.find(DarpanEntityConstants.NS_AUTH_CONFIG)
                 .condition("nsAuthConfigId", sourceConfigId)
                 .disableAuthz()
                 .useCache(false)
@@ -706,7 +706,7 @@ class ReconciliationSavedRunSupport {
                     .disableAuthz()
                     .useCache(false)
                     .one() : null
-            def nsRestletConfig = source.nsRestletConfigId ? ec.entity.find("darpan.reconciliation.NsRestletConfig")
+            def nsRestletConfig = source.nsRestletConfigId ? ec.entity.find(DarpanEntityConstants.NS_RESTLET_CONFIG)
                     .condition("nsRestletConfigId", source.nsRestletConfigId)
                     .disableAuthz()
                     .useCache(false)

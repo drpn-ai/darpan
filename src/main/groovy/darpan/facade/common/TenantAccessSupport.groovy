@@ -1,5 +1,7 @@
 package darpan.facade.common
 
+import darpan.common.DarpanEntityConstants
+
 import java.time.ZoneId
 import java.time.DateTimeException
 import java.util.TimeZone
@@ -539,7 +541,7 @@ class TenantAccessSupport {
         String userId = currentUserId(ec)
         if (!userId) return null
 
-        def finder = ec?.entity?.find("darpan.reconciliation.ReconciliationRunResult")
+        def finder = ec?.entity?.find(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
         if (finder == null) return null
 
         finder.condition("createdByUserId", userId)

@@ -1,5 +1,6 @@
 package darpan.reconciliation.automation
 
+import darpan.common.DarpanEntityConstants
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
 import darpan.reconciliation.core.ReconciliationServices
@@ -453,7 +454,7 @@ class AutomationExecutionSupport {
         Timestamp childStart = toTimestamp(window.childWindowStartDate)
         Timestamp childEnd = toTimestamp(window.childWindowEndDate)
 
-        def existing = ec?.entity?.find("darpan.reconciliation.ReconciliationAutomationExecution")
+        def existing = ec?.entity?.find(DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION)
                 ?.condition("automationId", automationId)
                 ?.condition("scheduledDate", scheduledFireTime)
                 ?.condition("childWindowStartDate", childStart)
@@ -472,7 +473,7 @@ class AutomationExecutionSupport {
 
         def created = runInTransaction(ec, "Error creating reconciliation automation execution", {
             Timestamp createdTimestamp = nowTimestamp(ec)
-            def execution = ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomationExecution")
+            def execution = ec.entity.makeValue(DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION)
             execution.set("automationId", automationId)
             execution.set("companyUserGroupId", normalize(readField(automation, "companyUserGroupId")))
             execution.set("createdByUserId", normalize(readField(automation, "createdByUserId")) ?: currentUserId(ec))
@@ -647,7 +648,7 @@ class AutomationExecutionSupport {
     protected static String findSingleActiveOmsRestSourceConfigId(def ec, String companyUserGroupId) {
         if (!companyUserGroupId) return null
         try {
-            List rows = ec.entity.find("darpan.hotwax.HotWaxOmsRestSourceConfig")
+            List rows = ec.entity.find(DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG)
                     .condition("companyUserGroupId", companyUserGroupId)
                     .condition("isActive", "Y")
                     .condition("canReadOrders", "Y")
@@ -664,7 +665,7 @@ class AutomationExecutionSupport {
     protected static String findSingleActiveShopifyAuthConfigId(def ec, String companyUserGroupId) {
         if (!companyUserGroupId) return null
         try {
-            List rows = ec.entity.find("darpan.shopify.ShopifyAuthConfig")
+            List rows = ec.entity.find(DarpanEntityConstants.SHOPIFY_AUTH_CONFIG)
                     .condition("companyUserGroupId", companyUserGroupId)
                     .condition("isActive", "Y")
                     .condition("canReadOrders", "Y")
@@ -875,7 +876,7 @@ class AutomationExecutionSupport {
         if (!normalize(resultDataManagerPath)) return null
 
         return runInTransaction(ec, "Error saving reconciliation automation run result", {
-            def runResultValue = ec.entity.makeValue("darpan.reconciliation.ReconciliationRunResult")
+            def runResultValue = ec.entity.makeValue(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
             runResultValue.set("savedRunId", normalize(readField(automation, "savedRunId")))
             runResultValue.set("savedRunType", normalize(readField(automation, "savedRunType")) ?: "ruleset")
             runResultValue.set("reconciliationRunId", normalize(readField(automation, "reconciliationRunId")))

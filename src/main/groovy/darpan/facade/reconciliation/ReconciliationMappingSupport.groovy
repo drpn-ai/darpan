@@ -1,9 +1,11 @@
 package darpan.facade.reconciliation
 
+import darpan.common.DarpanEntityConstants
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.PaginationSupport
 import darpan.facade.common.TenantAccessSupport
 import groovy.json.JsonSlurper
+import jsonschema.common.JsonSchemaConstants
 import jsonschema.common.JsonSchemaUtil
 
 import static darpan.common.ValueSupport.boundedInt
@@ -14,9 +16,9 @@ class ReconciliationMappingSupport {
 
     static boolean ensureMappingTables(def ec) {
         [
-                "darpan.reconciliation.JsonSchema",
-                "darpan.mapping.ReconciliationMapping",
-                "darpan.mapping.ReconciliationMappingMember"
+                JsonSchemaConstants.JSON_SCHEMA_ENTITY_NAME,
+                DarpanEntityConstants.RECONCILIATION_MAPPING,
+                DarpanEntityConstants.RECONCILIATION_MAPPING_MEMBER
         ].each { String entityName -> ensureEntityTable(ec, entityName) }
         return true
     }
@@ -27,7 +29,7 @@ class ReconciliationMappingSupport {
         if (mappingIdBase.length() > 38) mappingIdBase = mappingIdBase.substring(0, 38)
 
         String mappingIdValue = mappingIdBase
-        def existingMapping = ec.entity.find("darpan.mapping.ReconciliationMapping")
+        def existingMapping = ec.entity.find(DarpanEntityConstants.RECONCILIATION_MAPPING)
                 .condition("reconciliationMappingId", mappingIdValue)
                 .useCache(false)
                 .one()

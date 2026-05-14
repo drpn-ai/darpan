@@ -1,3 +1,4 @@
+import darpan.common.DarpanEntityConstants
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
@@ -161,14 +162,14 @@ def persistRunResult = { Map<String, Object> fields ->
 
     return ec.transaction.runUseOrBegin(30, "Error saving reconciliation run result", {
         def runResultValue = existingRunResultId ?
-                ec.entity.find("darpan.reconciliation.ReconciliationRunResult")
+                ec.entity.find(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
                         .condition("reconciliationRunResultId", existingRunResultId)
                         .disableAuthz()
                         .useCache(false)
                         .one() :
                 null
         boolean creating = runResultValue == null
-        if (creating) runResultValue = ec.entity.makeValue("darpan.reconciliation.ReconciliationRunResult")
+        if (creating) runResultValue = ec.entity.makeValue(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
 
         [
                 savedRunId             : normalize(fields.savedRunId),
@@ -363,7 +364,7 @@ def writeRuleSetOutput = { Map serviceResult, Map savedRun, String file1Label, S
 
 def mapping = null
 if (!ec.message.hasError()) {
-    mapping = ec.entity.find("darpan.mapping.ReconciliationMapping")
+    mapping = ec.entity.find(DarpanEntityConstants.RECONCILIATION_MAPPING)
             .condition("reconciliationMappingId", savedRunIdValue)
             .useCache(false)
             .one()

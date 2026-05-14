@@ -1,5 +1,6 @@
 package darpan.facade.reconciliation
 
+import darpan.common.DarpanEntityConstants
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.PaginationSupport
@@ -122,7 +123,7 @@ class ReconciliationOutputSupport {
         if (pathCandidates.isEmpty()) return null
 
         for (String fieldName : ["resultDataManagerPath", "file1DataManagerPath", "file2DataManagerPath"]) {
-            def finder = ec?.entity?.find("darpan.reconciliation.ReconciliationRunResult")
+            def finder = ec?.entity?.find(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
             if (finder == null) continue
             def runResult = finder.condition(fieldName, "in", pathCandidates)
                     .disableAuthz()
@@ -257,7 +258,7 @@ class ReconciliationOutputSupport {
         Set<String> seenFileNames = [] as Set
         Set<String> seenRunResultIds = [] as Set
 
-        def resultFinder = ec?.entity?.find("darpan.reconciliation.ReconciliationRunResult")
+        def resultFinder = ec?.entity?.find(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
         if (resultFinder != null) {
             String activeTenantUserGroupId = normalize(TenantAccessSupport.currentActiveTenantUserGroupId(ec))
             if (activeTenantUserGroupId) resultFinder.condition("companyUserGroupId", activeTenantUserGroupId)
@@ -643,7 +644,7 @@ class ReconciliationOutputSupport {
     protected static def resolveAutomationExecutionForRunResult(def ec, def runResult) {
         String resultId = normalize(runResult?.reconciliationRunResultId)
         List<String> resultPathCandidates = dataManagerPathCandidates(ec, runResult?.resultDataManagerPath)
-        def finder = ec?.entity?.find("darpan.reconciliation.ReconciliationAutomationExecution")
+        def finder = ec?.entity?.find(DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION)
         if (finder == null) return null
 
         if (resultId) {
@@ -655,7 +656,7 @@ class ReconciliationOutputSupport {
         }
 
         if (resultPathCandidates) {
-            def execution = ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution")
+            def execution = ec.entity.find(DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION)
                     .condition("resultDataManagerPath", "in", resultPathCandidates)
                     .disableAuthz()
                     .useCache(false)

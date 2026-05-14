@@ -1,5 +1,6 @@
 package darpan.facade.reconciliation
 
+import darpan.common.DarpanEntityConstants
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.settings.SettingsFacadeSupport
@@ -212,7 +213,7 @@ class AutomationFacadeSupport {
         String resultFileName = readString(execution, "resultFileName")
 
         if (reconciliationRunResultId && (!resultDataManagerPath || !resultFileName)) {
-            def runResult = ec?.entity?.find("darpan.reconciliation.ReconciliationRunResult")
+            def runResult = ec?.entity?.find(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
                     ?.condition("reconciliationRunResultId", reconciliationRunResultId)
                     ?.disableAuthz()
                     ?.useCache(false)
@@ -289,7 +290,7 @@ class AutomationFacadeSupport {
         if (ec.message.hasError()) return [:]
 
         if (savedRunType == "mapping") {
-            def mapping = ec.entity.find("darpan.mapping.ReconciliationMapping")
+            def mapping = ec.entity.find(DarpanEntityConstants.RECONCILIATION_MAPPING)
                     .condition("reconciliationMappingId", savedRunId)
                     .disableAuthz()
                     .useCache(false)
@@ -367,7 +368,7 @@ class AutomationFacadeSupport {
         if (!source.remotePathTemplate) ec.message.addError("${source.fileSide} remotePathTemplate is required")
         if (ec.message.hasError() || !source.sftpServerId) return
 
-        def server = ec.entity.find("darpan.reconciliation.SftpServer")
+        def server = ec.entity.find(DarpanEntityConstants.SFTP_SERVER)
                 .condition("sftpServerId", source.sftpServerId)
                 .disableAuthz()
                 .useCache(false)
@@ -406,7 +407,7 @@ class AutomationFacadeSupport {
             }
         }
         if (source.nsRestletConfigId) {
-            def restlet = ec.entity.find("darpan.reconciliation.NsRestletConfig")
+            def restlet = ec.entity.find(DarpanEntityConstants.NS_RESTLET_CONFIG)
                     .condition("nsRestletConfigId", source.nsRestletConfigId)
                     .disableAuthz()
                     .useCache(false)
@@ -583,7 +584,7 @@ class AutomationFacadeSupport {
     static List<Map<String, Object>> listSftpServerOptions(def ec) {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
-        List servers = ec.entity.find("darpan.reconciliation.SftpServer")
+        List servers = ec.entity.find(DarpanEntityConstants.SFTP_SERVER)
                 .orderBy("description,sftpServerId")
                 .disableAuthz()
                 .useCache(true)
@@ -635,7 +636,7 @@ class AutomationFacadeSupport {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
         try {
-            List rows = ec.entity.find("darpan.hotwax.HotWaxOmsRestSourceConfig")
+            List rows = ec.entity.find(DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG)
                     .condition("companyUserGroupId", activeTenantUserGroupId)
                     .condition("isActive", "Y")
                     .condition("canReadOrders", "Y")
@@ -667,7 +668,7 @@ class AutomationFacadeSupport {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
         try {
-            List rows = ec.entity.find("darpan.shopify.ShopifyAuthConfig")
+            List rows = ec.entity.find(DarpanEntityConstants.SHOPIFY_AUTH_CONFIG)
                     .condition("companyUserGroupId", activeTenantUserGroupId)
                     .condition("isActive", "Y")
                     .condition("canReadOrders", "Y")
@@ -704,7 +705,7 @@ class AutomationFacadeSupport {
     protected static List<Map<String, Object>> listNsAuthConfigOptions(def ec) {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
-        List rows = ec.entity.find("darpan.reconciliation.NsAuthConfig")
+        List rows = ec.entity.find(DarpanEntityConstants.NS_AUTH_CONFIG)
                 .condition("companyUserGroupId", activeTenantUserGroupId)
                 .condition("isActive", "Y")
                 .orderBy("description,nsAuthConfigId")
@@ -729,7 +730,7 @@ class AutomationFacadeSupport {
     static List<Map<String, Object>> listNsRestletOptions(def ec) {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
-        List rows = ec.entity.find("darpan.reconciliation.NsRestletConfig")
+        List rows = ec.entity.find(DarpanEntityConstants.NS_RESTLET_CONFIG)
                 .condition("companyUserGroupId", activeTenantUserGroupId)
                 .orderBy("description,nsRestletConfigId")
                 .disableAuthz()
@@ -767,7 +768,7 @@ class AutomationFacadeSupport {
                 readString(omsRemote, "description") ?: HOTWAX_ORDERS_ENDPOINT_LABEL)
 
         try {
-            List rows = ec.entity.find("darpan.hotwax.HotWaxOmsRestSourceConfig")
+            List rows = ec.entity.find(DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG)
                     .condition("companyUserGroupId", activeTenantUserGroupId)
                     .condition("isActive", "Y")
                     .condition("canReadOrders", "Y")
@@ -921,7 +922,7 @@ class AutomationFacadeSupport {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return null
         try {
-            List rows = ec.entity.find("darpan.hotwax.HotWaxOmsRestSourceConfig")
+            List rows = ec.entity.find(DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG)
                     .condition("companyUserGroupId", activeTenantUserGroupId)
                     .condition("isActive", "Y")
                     .condition("canReadOrders", "Y")
@@ -940,7 +941,7 @@ class AutomationFacadeSupport {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return null
         try {
-            List rows = ec.entity.find("darpan.shopify.ShopifyAuthConfig")
+            List rows = ec.entity.find(DarpanEntityConstants.SHOPIFY_AUTH_CONFIG)
                     .condition("companyUserGroupId", activeTenantUserGroupId)
                     .condition("isActive", "Y")
                     .condition("canReadOrders", "Y")
@@ -965,7 +966,7 @@ class AutomationFacadeSupport {
 
     protected static String sftpServerLabel(def ec, String sftpServerId) {
         if (!sftpServerId) return null
-        def server = ec.entity.find("darpan.reconciliation.SftpServer")
+        def server = ec.entity.find(DarpanEntityConstants.SFTP_SERVER)
                 .condition("sftpServerId", sftpServerId)
                 .disableAuthz()
                 .useCache(true)

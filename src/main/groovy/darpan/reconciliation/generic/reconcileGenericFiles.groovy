@@ -1,3 +1,4 @@
+import darpan.common.DarpanEntityConstants
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.reconciliation.ReconciliationOutputSupport
@@ -39,7 +40,7 @@ def saveTextPayload = { String payload, targetRef ->
 def resolveMappingName = { String mappingId ->
     String normalized = normalize(mappingId)
     if (!normalized) return null
-    def mapping = ec.entity.find("darpan.mapping.ReconciliationMapping")
+    def mapping = ec.entity.find(DarpanEntityConstants.RECONCILIATION_MAPPING)
             .condition("reconciliationMappingId", normalized)
             .disableAuthz()
             .useCache(true)
@@ -49,7 +50,7 @@ def resolveMappingName = { String mappingId ->
 def resolveRuleSet = { String ruleSetId ->
     String normalized = normalize(ruleSetId)
     if (!normalized) return null
-    return ec.entity.find("darpan.rule.RuleSet")
+    return ec.entity.find(DarpanEntityConstants.RULE_SET)
             .condition("ruleSetId", normalized)
             .disableAuthz()
             .useCache(true)
@@ -63,7 +64,7 @@ def persistRunResult = { Map<String, Object> fields ->
 
     return ec.transaction.runUseOrBegin(30, "Error saving reconciliation run result", {
         def runResultValue = existingRunResultId ?
-                ec.entity.find("darpan.reconciliation.ReconciliationRunResult")
+                ec.entity.find(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
                         .condition("reconciliationRunResultId", existingRunResultId)
                         .disableAuthz()
                         .useCache(false)
@@ -71,7 +72,7 @@ def persistRunResult = { Map<String, Object> fields ->
                 null
         boolean creating = runResultValue == null
         if (creating) {
-            runResultValue = ec.entity.makeValue("darpan.reconciliation.ReconciliationRunResult")
+            runResultValue = ec.entity.makeValue(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
             if (existingRunResultId) runResultValue.reconciliationRunResultId = existingRunResultId
         }
 

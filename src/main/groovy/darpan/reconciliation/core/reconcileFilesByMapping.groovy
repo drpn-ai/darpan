@@ -1,3 +1,4 @@
+import darpan.common.DarpanEntityConstants
 import darpan.facade.reconciliation.ReconciliationMappingSupport
 import org.slf4j.LoggerFactory
 
@@ -84,7 +85,7 @@ def resolveIdFieldForCompare = { Map memberConfig, String systemEnumId ->
     return finalNormalizer ? "${baseExpr}|${finalNormalizer}" : baseExpr
 }
 
-def mappingMembers = ec.entity.find("darpan.mapping.ReconciliationMappingMember")
+def mappingMembers = ec.entity.find(DarpanEntityConstants.RECONCILIATION_MAPPING_MEMBER)
         .condition("reconciliationMappingId", reconciliationMappingId)
         .disableAuthz()
         .useCache(true)
@@ -166,7 +167,7 @@ def file2Schema = file2Config.schemaFileName
 
 def file1Label = normalize(file1Label) ?: resolveEnumLabel(file1SystemEnumId, "File 1")
 def file2Label = normalize(file2Label) ?: resolveEnumLabel(file2SystemEnumId, "File 2")
-def mappingRecord = ec.entity.find("darpan.mapping.ReconciliationMapping")
+def mappingRecord = ec.entity.find(DarpanEntityConstants.RECONCILIATION_MAPPING)
         .condition("reconciliationMappingId", reconciliationMappingId)
         .disableAuthz()
         .useCache(true)

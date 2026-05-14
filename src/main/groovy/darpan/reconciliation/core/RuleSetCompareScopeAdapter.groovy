@@ -1,5 +1,6 @@
 package darpan.reconciliation.core
 
+import darpan.common.DarpanEntityConstants
 import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.SparkSession
 import org.moqui.context.ExecutionContext
@@ -40,7 +41,7 @@ class RuleSetCompareScopeAdapter {
         if (!compareScopeId) throw new IllegalArgumentException("compareScopeId is required")
         if (!sideInputBySide.FILE_1.fileLocation || !sideInputBySide.FILE_2.fileLocation) throw new IllegalArgumentException("file1Location and file2Location are required")
 
-        def compareScope = ec.entity.find("darpan.rule.RuleSetCompareScope")
+        def compareScope = ec.entity.find(DarpanEntityConstants.RULE_SET_COMPARE_SCOPE)
                 .condition("compareScopeId", compareScopeId)
                 .disableAuthz()
                 .useCache(false)

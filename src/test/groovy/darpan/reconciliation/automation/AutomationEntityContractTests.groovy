@@ -180,26 +180,26 @@ class AutomationEntityContractTests {
         // moqui.basic.Enumeration access was centralized in FacadeSupport.findEnum;
         // that helper is the canonical disableAuthz read for enumerations.
         String facadeSource = readSource("src/main/groovy/darpan/facade/common/FacadeSupport.groovy")
-        assertAllFindsDisableAuthz(facadeSource, "moqui.basic.Enumeration")
+        assertAllFindsDisableAuthz(facadeSource, "\"moqui.basic.Enumeration\"")
 
         String automationSource = readSource("src/main/groovy/darpan/facade/reconciliation/AutomationFacadeSupport.groovy")
-        assertAllFindsDisableAuthz(automationSource, "moqui.service.message.SystemMessageRemote")
+        assertAllFindsDisableAuthz(automationSource, "\"moqui.service.message.SystemMessageRemote\"")
 
         String savedRunSource = readSource("src/main/groovy/darpan/facade/reconciliation/ReconciliationSavedRunSupport.groovy")
         [
-                "moqui.service.message.SystemMessageRemote",
-                "darpan.mapping.ReconciliationMapping",
-                "darpan.mapping.ReconciliationMappingMember",
-                "darpan.rule.RuleSet",
-                "darpan.rule.RuleSetCompareScope",
-                "darpan.rule.RuleSetCompareSource",
-                "darpan.rule.Rule",
-                "darpan.shopify.ShopifyAuthConfig",
-                "darpan.hotwax.HotWaxOmsRestSourceConfig",
-                "darpan.reconciliation.NsAuthConfig",
-                "darpan.reconciliation.NsRestletConfig",
-        ].each { String entityName ->
-            assertAllFindsDisableAuthz(savedRunSource, entityName)
+                "\"moqui.service.message.SystemMessageRemote\"",
+                "DarpanEntityConstants.RECONCILIATION_MAPPING",
+                "DarpanEntityConstants.RECONCILIATION_MAPPING_MEMBER",
+                "DarpanEntityConstants.RULE_SET",
+                "DarpanEntityConstants.RULE_SET_COMPARE_SCOPE",
+                "\"darpan.rule.RuleSetCompareSource\"",
+                "\"darpan.rule.Rule\"",
+                "DarpanEntityConstants.SHOPIFY_AUTH_CONFIG",
+                "DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG",
+                "DarpanEntityConstants.NS_AUTH_CONFIG",
+                "DarpanEntityConstants.NS_RESTLET_CONFIG",
+        ].each { String findArg ->
+            assertAllFindsDisableAuthz(savedRunSource, findArg)
         }
     }
 
@@ -362,8 +362,8 @@ class AutomationEntityContractTests {
         return Files.readString(componentRoot().resolve(relativePath))
     }
 
-    private static void assertAllFindsDisableAuthz(String source, String entityName) {
-        String needle = "ec.entity.find(\"${entityName}\")"
+    private static void assertAllFindsDisableAuthz(String source, String findArgExpression) {
+        String needle = "ec.entity.find(${findArgExpression})"
         int index = source.indexOf(needle)
         assertTrue(index >= 0, "Expected ${needle} in source")
 

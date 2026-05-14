@@ -1,3 +1,4 @@
+import darpan.common.DarpanEntityConstants
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.reconciliation.ReconciliationMappingSupport
@@ -31,7 +32,7 @@ List mappingMembers = []
 List<Map> sortedSystemOptions = []
 
 if (!ec.message.hasError()) {
-    mapping = ec.entity.find("darpan.mapping.ReconciliationMapping")
+    mapping = ec.entity.find(DarpanEntityConstants.RECONCILIATION_MAPPING)
             .condition("reconciliationMappingId", mappingId)
             .useCache(false)
             .one()
@@ -48,7 +49,7 @@ if (!ec.message.hasError()) {
 }
 
 if (!ec.message.hasError()) {
-    mappingMembers = ec.entity.find("darpan.mapping.ReconciliationMappingMember")
+    mappingMembers = ec.entity.find(DarpanEntityConstants.RECONCILIATION_MAPPING_MEMBER)
             .condition("reconciliationMappingId", mappingId)
             .useCache(false)
             .list() ?: []

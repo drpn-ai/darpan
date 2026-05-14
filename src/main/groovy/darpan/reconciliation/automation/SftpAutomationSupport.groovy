@@ -1,5 +1,6 @@
 package darpan.reconciliation.automation
 
+import darpan.common.DarpanEntityConstants
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
@@ -219,7 +220,7 @@ class SftpAutomationSupport {
         String sftpServerId = normalize(rawSftpServerId)
         if (!sftpServerId) throw new IllegalArgumentException("SFTP server is required for ${label}")
 
-        def server = ec?.entity?.find("darpan.reconciliation.SftpServer")
+        def server = ec?.entity?.find(DarpanEntityConstants.SFTP_SERVER)
                 ?.condition("sftpServerId", sftpServerId)
                 ?.disableAuthz()
                 ?.useCache(true)
@@ -395,7 +396,7 @@ class SftpAutomationSupport {
     protected static def createAutomationExecution(def ec, def automation, Map input) {
         return runInTransaction(ec, "Error creating reconciliation automation execution", {
             def createdTimestamp = nowTimestamp(ec)
-            def execution = ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomationExecution")
+            def execution = ec.entity.makeValue(DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION)
             execution.set("automationId", normalize(readField(automation, "automationId")))
             execution.set("companyUserGroupId", normalize(readField(automation, "companyUserGroupId")))
             execution.set("createdByUserId", normalize(readField(automation, "createdByUserId")) ?: currentUserId(ec))
@@ -415,7 +416,7 @@ class SftpAutomationSupport {
         if (!resultDataManagerPath) return null
 
         return runInTransaction(ec, "Error saving reconciliation automation run result", {
-            def runResultValue = ec.entity.makeValue("darpan.reconciliation.ReconciliationRunResult")
+            def runResultValue = ec.entity.makeValue(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
             runResultValue.set("savedRunId", normalize(readField(automation, "savedRunId")))
             runResultValue.set("savedRunType", normalize(readField(automation, "savedRunType")) ?: "ruleset")
             runResultValue.set("reconciliationRunId", normalize(readField(automation, "reconciliationRunId")))

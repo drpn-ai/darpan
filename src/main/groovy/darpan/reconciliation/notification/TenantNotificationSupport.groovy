@@ -20,7 +20,7 @@ class TenantNotificationSupport {
     static final String APP_BASE_URL_PROPERTY = "darpan.app.baseUrl"
     static final String DEFAULT_APP_BASE_URL = "https://hotwax-darpan-dev.web.app"
 
-    private static final Logger logger = LoggerFactory.getLogger(TenantNotificationSupport)
+    private static final Logger logger = LoggerFactory.getLogger(TenantNotificationSupport.class)
     private static Closure deliveryHook = null
 
     static void setDeliveryHook(Closure hook) {

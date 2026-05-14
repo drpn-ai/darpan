@@ -1,5 +1,6 @@
 package darpan.reconciliation.core
 
+import darpan.common.DarpanEntityConstants
 import com.jayway.jsonpath.InvalidPathException
 import com.jayway.jsonpath.JsonPath
 import groovy.json.JsonOutput
@@ -459,7 +460,7 @@ class ReconciliationServices {
 
         def compareScope = null
         if (compareScopeIdValue) {
-            compareScope = ec.entity.find("darpan.rule.RuleSetCompareScope")
+            compareScope = ec.entity.find(DarpanEntityConstants.RULE_SET_COMPARE_SCOPE)
                     .condition("compareScopeId", compareScopeIdValue)
                     .condition("ruleSetId", normalizedRuleSetId)
                     .disableAuthz()
@@ -469,7 +470,7 @@ class ReconciliationServices {
                 throw new IllegalArgumentException("Compare scope ${compareScopeIdValue} was not found for RuleSet ${normalizedRuleSetId}")
             }
         } else {
-            List compareScopes = ec.entity.find("darpan.rule.RuleSetCompareScope")
+            List compareScopes = ec.entity.find(DarpanEntityConstants.RULE_SET_COMPARE_SCOPE)
                     .condition("ruleSetId", normalizedRuleSetId)
                     .orderBy("compareScopeId")
                     .disableAuthz()

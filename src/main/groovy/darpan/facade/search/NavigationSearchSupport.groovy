@@ -1,5 +1,6 @@
 package darpan.facade.search
 
+import darpan.common.DarpanEntityConstants
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.PaginationSupport
 import darpan.facade.common.TenantAccessSupport
@@ -99,7 +100,7 @@ class NavigationSearchSupport {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
 
-        List rows = ec.entity.find("darpan.reconciliation.SftpServer")
+        List rows = ec.entity.find(DarpanEntityConstants.SFTP_SERVER)
                 .condition("companyUserGroupId", activeTenantUserGroupId)
                 .orderBy("description,sftpServerId")
                 .useCache(false)
@@ -118,7 +119,7 @@ class NavigationSearchSupport {
                     [sftpServerId: id],
                     [:],
                     id,
-                    "darpan.reconciliation.SftpServer",
+                    DarpanEntityConstants.SFTP_SERVER,
                     [
                             label,
                             id,
@@ -144,7 +145,7 @@ class NavigationSearchSupport {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
 
-        List rows = ec.entity.find("darpan.reconciliation.NsAuthConfig")
+        List rows = ec.entity.find(DarpanEntityConstants.NS_AUTH_CONFIG)
                 .condition("companyUserGroupId", activeTenantUserGroupId)
                 .orderBy("description,nsAuthConfigId")
                 .useCache(false)
@@ -164,7 +165,7 @@ class NavigationSearchSupport {
                     [nsAuthConfigId: id],
                     [:],
                     id,
-                    "darpan.reconciliation.NsAuthConfig",
+                    DarpanEntityConstants.NS_AUTH_CONFIG,
                     [
                             label,
                             id,
@@ -191,7 +192,7 @@ class NavigationSearchSupport {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
 
-        Map<String, Map<String, Object>> authById = (ec.entity.find("darpan.reconciliation.NsAuthConfig")
+        Map<String, Map<String, Object>> authById = (ec.entity.find(DarpanEntityConstants.NS_AUTH_CONFIG)
                 .condition("companyUserGroupId", activeTenantUserGroupId)
                 .useCache(false)
                 .list() ?: []).collectEntries { auth ->
@@ -201,7 +202,7 @@ class NavigationSearchSupport {
             ]]
         } as Map<String, Map<String, Object>>
 
-        List rows = ec.entity.find("darpan.reconciliation.NsRestletConfig")
+        List rows = ec.entity.find(DarpanEntityConstants.NS_RESTLET_CONFIG)
                 .condition("companyUserGroupId", activeTenantUserGroupId)
                 .orderBy("description,nsRestletConfigId")
                 .useCache(false)
@@ -223,7 +224,7 @@ class NavigationSearchSupport {
                     [nsRestletConfigId: id],
                     [:],
                     id,
-                    "darpan.reconciliation.NsRestletConfig",
+                    DarpanEntityConstants.NS_RESTLET_CONFIG,
                     [
                             label,
                             id,
@@ -318,7 +319,7 @@ class NavigationSearchSupport {
                     [savedRunId: id],
                     [:],
                     id,
-                    row.runType == ReconciliationSavedRunSupport.RUN_TYPE_RULESET ? "darpan.rule.RuleSet" : "darpan.mapping.ReconciliationMapping",
+                    row.runType == ReconciliationSavedRunSupport.RUN_TYPE_RULESET ? DarpanEntityConstants.RULE_SET : DarpanEntityConstants.RECONCILIATION_MAPPING,
                     [
                             label,
                             id,

@@ -1,5 +1,6 @@
 package reconciliation.rule
 
+import darpan.common.DarpanEntityConstants
 import org.kie.api.KieServices
 import org.kie.api.builder.KieBuilder
 import org.kie.api.builder.KieFileSystem
@@ -21,7 +22,7 @@ import static reconciliation.rule.RuleConditionParser.parseCondition
 
 class RuleEngineSupport {
     private static final int MAX_ID_LENGTH = 60
-    private static final Logger logger = LoggerFactory.getLogger("darpan.reconciliation.rule.RuleEngineSupport")
+    private static final Logger logger = LoggerFactory.getLogger(RuleEngineSupport.class)
     private static final Set<String> JAVA_KEYWORDS = [
             "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const",
             "continue", "default", "do", "double", "else", "enum", "extends", "final", "finally", "float",
@@ -174,7 +175,7 @@ class RuleEngineSupport {
     private static Map<String, Object> getOrBuildContainer(def ec, String ruleSetId, boolean useCache = true, boolean forceRebuild = false) {
         if (!ruleSetId) throw new IllegalArgumentException("ruleSetId is required")
 
-        EntityValue ruleSet = ec.entity.find("darpan.rule.RuleSet")
+        EntityValue ruleSet = ec.entity.find(DarpanEntityConstants.RULE_SET)
                 .condition("ruleSetId", ruleSetId)
                 .disableAuthz()
                 .useCache(false)

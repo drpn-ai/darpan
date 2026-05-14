@@ -203,9 +203,7 @@
                 <set field="sessionInfo" from="darpan.facade.common.TenantAccessSupport.buildSessionInfo(ec)"/>
             </if>
             <if condition="!authenticated">
-                <script><![CDATA[
-                    ec.message.addError("Authentication required to change the active tenant.")
-                ]]></script>
+                <message error="true">Authentication required to change the active tenant.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -273,9 +271,7 @@
                 <set field="sessionInfo" from="darpan.facade.common.TenantAccessSupport.buildSessionInfo(ec)"/>
             </if>
             <if condition="!authenticated">
-                <script><![CDATA[
-                    ec.message.addError("Authentication required to save user settings.")
-                ]]></script>
+                <message error="true">Authentication required to save user settings.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -426,9 +422,7 @@
                 <set field="sessionInfo" from="darpan.facade.common.TenantAccessSupport.buildSessionInfo(ec)"/>
             </if>
             <if condition="!authenticated">
-                <script><![CDATA[
-                    ec.message.addError("Authentication required to change password.")
-                ]]></script>
+                <message error="true">Authentication required to change password.</message>
             </if>
             <set field="ok" from="passwordUpdated == true &amp;&amp; !ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

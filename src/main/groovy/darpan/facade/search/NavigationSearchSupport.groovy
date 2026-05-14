@@ -6,6 +6,7 @@ import darpan.facade.common.PaginationSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.reconciliation.ReconciliationOutputSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
+import jsonschema.common.JsonSchemaConstants
 import jsonschema.common.JsonSchemaUtil
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -258,7 +259,7 @@ class NavigationSearchSupport {
         if (!activeTenantUserGroupId) return []
 
         JsonSchemaUtil.ensureJsonSchemaTable(ec)
-        List rows = ec.entity.find("darpan.reconciliation.JsonSchema")
+        List rows = ec.entity.find(JsonSchemaConstants.JSON_SCHEMA_ENTITY_NAME)
                 .condition("companyUserGroupId", activeTenantUserGroupId)
                 .condition("statusId", "Active")
                 .orderBy("schemaName,jsonSchemaId")
@@ -279,7 +280,7 @@ class NavigationSearchSupport {
                     [jsonSchemaId: id],
                     [:],
                     id,
-                    "darpan.reconciliation.JsonSchema",
+                    JsonSchemaConstants.JSON_SCHEMA_ENTITY_NAME,
                     [
                             label,
                             id,

@@ -8,6 +8,7 @@ import com.networknt.schema.ValidationMessage
 import com.saasquatch.jsonschemainferrer.JsonSchemaInferrer
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
+import jsonschema.common.JsonSchemaConstants
 import jsonschema.common.SchemaFlattener
 
 import static darpan.common.ValueSupport.normalize
@@ -64,13 +65,13 @@ class JsonSchemaFacadeSupport {
                 JsonNode payloadNode = mapper.readTree(jsonTextValue)
                 def schemaRecord = null
                 if (schemaId) {
-                    schemaRecord = ec.entity.find("darpan.reconciliation.JsonSchema")
+                    schemaRecord = ec.entity.find(JsonSchemaConstants.JSON_SCHEMA_ENTITY_NAME)
                             .condition("jsonSchemaId", schemaId)
                             .useCache(false)
                             .one()
                 }
                 if (!schemaRecord && schemaNameValue) {
-                    schemaRecord = ec.entity.find("darpan.reconciliation.JsonSchema")
+                    schemaRecord = ec.entity.find(JsonSchemaConstants.JSON_SCHEMA_ENTITY_NAME)
                             .condition("schemaName", schemaNameValue)
                             .useCache(false)
                             .one()

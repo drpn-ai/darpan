@@ -11,6 +11,11 @@ class DarpanEntityConstants {
     static final String SFTP_SERVER = "darpan.reconciliation.SftpServer"
     static final String NS_AUTH_CONFIG = "darpan.reconciliation.NsAuthConfig"
     static final String NS_RESTLET_CONFIG = "darpan.reconciliation.NsRestletConfig"
+    static final String TENANT_NOTIFICATION_SETTING = "darpan.reconciliation.TenantNotificationSetting"
+
+    // Auth / tenant
+    static final String TENANT_SETTING = "darpan.auth.TenantSetting"
+    static final String TENANT_USER_PERMISSION_GROUP_MEMBER = "darpan.auth.TenantUserPermissionGroupMember"
 
     // Rule
     static final String RULE_SET = "darpan.rule.RuleSet"

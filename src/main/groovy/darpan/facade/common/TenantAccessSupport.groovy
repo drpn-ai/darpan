@@ -14,7 +14,7 @@ class TenantAccessSupport {
     static final String ALL_USERS_GROUP_ID = "ALL_USERS"
     static final String ACTIVE_TENANT_PREFERENCE_KEY = "darpan.auth.activeTenantUserGroupId"
     static final String DISPLAY_NAME_PREFERENCE_KEY = "darpan.user.displayName"
-    static final String TENANT_SETTING_ENTITY_NAME = "darpan.auth.TenantSetting"
+    static final String TENANT_SETTING_ENTITY_NAME = DarpanEntityConstants.TENANT_SETTING
     static final String DEFAULT_TIME_ZONE = "UTC"
     static final String DARPAN_COMPANY_GROUP_TYPE_ENUM_ID = "UgtDarpanCompany"
     static final String DARPAN_PERMISSION_GROUP_TYPE_ENUM_ID = "UgtDarpanPermission"
@@ -41,7 +41,7 @@ class TenantAccessSupport {
             DARPAN_TENANT_ADMIN_GROUP_ID,
             DARPAN_COMPANY_EDITOR_GROUP_ID,
     ].asImmutable()
-    static final String TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME = "darpan.auth.TenantUserPermissionGroupMember"
+    static final String TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME = DarpanEntityConstants.TENANT_USER_PERMISSION_GROUP_MEMBER
     static final String SCOPE_TYPE_ANONYMOUS = "ANONYMOUS"
     static final String SCOPE_TYPE_TENANT = "TENANT"
     static final String ACTIVE_TENANT_UNAVAILABLE_MESSAGE = "Requested tenant is not available for current user."

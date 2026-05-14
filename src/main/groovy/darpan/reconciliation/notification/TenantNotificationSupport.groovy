@@ -1,5 +1,6 @@
 package darpan.reconciliation.notification
 
+import darpan.common.DarpanEntityConstants
 import darpan.reconciliation.core.ReconciliationServices
 import groovy.json.JsonOutput
 import org.slf4j.Logger
@@ -14,7 +15,6 @@ import java.nio.charset.StandardCharsets
 import java.time.Duration
 
 class TenantNotificationSupport {
-    static final String SETTINGS_ENTITY_NAME = "darpan.reconciliation.TenantNotificationSetting"
     static final String GOOGLE_CHAT_HOST = "chat.googleapis.com"
     static final String APP_BASE_URL_ENV = "DARPAN_APP_BASE_URL"
     static final String APP_BASE_URL_PROPERTY = "darpan.app.baseUrl"
@@ -76,7 +76,7 @@ class TenantNotificationSupport {
         String resultId = ((context.reconciliationRunResultId)?.toString()?.trim())
         if (!tenantId) return [ok: true, attempted: false, skippedReason: "NO_TENANT"]
 
-        def settings = ec?.entity?.find(SETTINGS_ENTITY_NAME)
+        def settings = ec?.entity?.find(DarpanEntityConstants.TENANT_NOTIFICATION_SETTING)
                 ?.condition("companyUserGroupId", tenantId)
                 ?.disableAuthz()
                 ?.useCache(false)

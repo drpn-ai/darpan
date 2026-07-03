@@ -560,6 +560,15 @@ class ReconciliationSmokeTestSupport {
                 description : "Shopify",
                 sequenceNum : 2
         ])
+        // MACH database-source epic Task 1: mirrors data/DarpanSystemSourceSeedData.xml's DATABASE row,
+        // which this fixture (unlike the real seed file) hand-inserts row-by-row rather than loading.
+        upsertEntity(ec, "moqui.basic.Enumeration", [enumId: "DATABASE"], [
+                enumId      : "DATABASE",
+                enumTypeId  : "DarpanSystemSource",
+                enumCode    : "DATABASE",
+                description : "Database",
+                sequenceNum : 5
+        ])
         upsertEntity(ec, "moqui.basic.Enumeration", [enumId: "DftCsv"], [
                 enumId      : "DftCsv",
                 enumTypeId  : "DarpanFileType",

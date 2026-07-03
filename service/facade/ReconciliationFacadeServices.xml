@@ -98,22 +98,29 @@
             <set field="file1SystemEnumIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file1SystemEnumId)"/>
             <set field="file1SourceTypeEnumIdValue" from="((file1SourceTypeEnumId)?.toString()?.trim())"/>
             <set field="file1UsesApiSource" from="file1SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_API"/>
+            <!-- AUT_SRC_DB is an extracted (non-upload) source just like AUT_SRC_API (MACH database-source
+                 epic Task 2 follow-up): file1UsesApiSource stays narrow for API-payload-specific gates
+                 (endpoint requirement, resolveApiSourceConfig); file1UsesConnectorSource covers both for
+                 extract-vs-upload gates (fileType defaulting, schema/root nulling, sourceConfigId/Type). -->
+            <set field="file1UsesConnectorSource" from="file1UsesApiSource || file1SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_DB"/>
             <set field="file1SystemMessageRemoteIdValue" from="((file1SystemMessageRemoteId)?.toString()?.trim())"/>
             <set field="file1NsRestletConfigIdValue" from="((file1NsRestletConfigId)?.toString()?.trim())"/>
             <set field="file1SourceConfigIdValue" from="((file1SourceConfigId)?.toString()?.trim())"/>
             <set field="file1SourceConfigTypeValue" from="((file1SourceConfigType)?.toString()?.trim())"/>
-            <set field="file1FileTypeEnumIdValue" from="file1UsesApiSource ? null : (((file1FileTypeEnumId)?.toString()?.trim()) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
+            <set field="file1FileTypeEnumIdValue" from="file1UsesConnectorSource ? null : (((file1FileTypeEnumId)?.toString()?.trim()) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
             <set field="file1SchemaFileNameValue" from="((file1SchemaFileName)?.toString()?.trim())"/>
             <set field="file1RecordRootExpressionValue" from="((file1RecordRootExpression)?.toString()?.trim())"/>
             <set field="file1PrimaryIdExpressionValue" from="((file1PrimaryIdExpression)?.toString()?.trim())"/>
             <set field="file2SystemEnumIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file2SystemEnumId)"/>
             <set field="file2SourceTypeEnumIdValue" from="((file2SourceTypeEnumId)?.toString()?.trim())"/>
             <set field="file2UsesApiSource" from="file2SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_API"/>
+            <!-- See file1UsesConnectorSource comment above. -->
+            <set field="file2UsesConnectorSource" from="file2UsesApiSource || file2SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_DB"/>
             <set field="file2SystemMessageRemoteIdValue" from="((file2SystemMessageRemoteId)?.toString()?.trim())"/>
             <set field="file2NsRestletConfigIdValue" from="((file2NsRestletConfigId)?.toString()?.trim())"/>
             <set field="file2SourceConfigIdValue" from="((file2SourceConfigId)?.toString()?.trim())"/>
             <set field="file2SourceConfigTypeValue" from="((file2SourceConfigType)?.toString()?.trim())"/>
-            <set field="file2FileTypeEnumIdValue" from="file2UsesApiSource ? null : (((file2FileTypeEnumId)?.toString()?.trim()) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
+            <set field="file2FileTypeEnumIdValue" from="file2UsesConnectorSource ? null : (((file2FileTypeEnumId)?.toString()?.trim()) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
             <set field="file2SchemaFileNameValue" from="((file2SchemaFileName)?.toString()?.trim())"/>
             <set field="file2RecordRootExpressionValue" from="((file2RecordRootExpression)?.toString()?.trim())"/>
             <set field="file2PrimaryIdExpressionValue" from="((file2PrimaryIdExpression)?.toString()?.trim())"/>
@@ -137,10 +144,10 @@
             <if condition="file1SystemEnumIdValue &amp;&amp; file2SystemEnumIdValue &amp;&amp; file1SystemEnumIdValue == file2SystemEnumIdValue">
                 <message error="true">file1SystemEnumId and file2SystemEnumId must be different</message>
             </if>
-            <if condition="file1SourceTypeEnumIdValue &amp;&amp; !file1UsesApiSource">
+            <if condition="file1SourceTypeEnumIdValue &amp;&amp; !file1UsesConnectorSource">
                 <message error="true">file1SourceTypeEnumId '${file1SourceTypeEnumIdValue}' is not supported</message>
             </if>
-            <if condition="file2SourceTypeEnumIdValue &amp;&amp; !file2UsesApiSource">
+            <if condition="file2SourceTypeEnumIdValue &amp;&amp; !file2UsesConnectorSource">
                 <message error="true">file2SourceTypeEnumId '${file2SourceTypeEnumIdValue}' is not supported</message>
             </if>
             <if condition="file1UsesApiSource &amp;&amp; !file1SystemMessageRemoteIdValue &amp;&amp; !file1NsRestletConfigIdValue">
@@ -155,6 +162,15 @@
             <if condition="file2UsesApiSource &amp;&amp; file2SystemMessageRemoteIdValue &amp;&amp; file2NsRestletConfigIdValue">
                 <message error="true">file2 API source must use only one endpoint</message>
             </if>
+            <!-- DB sources have no HTTP endpoint (not systemMessageRemoteId/nsRestletConfigId): they locate
+                 their extract via the generic sourceConfigId/sourceConfigType slot instead (reused the same
+                 way NetSuite's auth config is), so only require that slot be populated. -->
+            <if condition="file1SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_DB &amp;&amp; !file1SourceConfigIdValue">
+                <message error="true">file1 database source requires sourceConfigId (the DatabaseSourceQuery id)</message>
+            </if>
+            <if condition="file2SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_DB &amp;&amp; !file2SourceConfigIdValue">
+                <message error="true">file2 database source requires sourceConfigId (the DatabaseSourceQuery id)</message>
+            </if>
             <if condition="!ec.message.hasError()">
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
             </if>
@@ -164,8 +180,8 @@
                 <set field="file2System" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2SystemEnumIdValue)"/>
                 <set field="file1FileType" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file1FileTypeEnumIdValue)"/>
                 <set field="file2FileType" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2FileTypeEnumIdValue)"/>
-                <set field="file1SourceType" from="file1UsesApiSource ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file1SourceTypeEnumIdValue) : null"/>
-                <set field="file2SourceType" from="file2UsesApiSource ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2SourceTypeEnumIdValue) : null"/>
+                <set field="file1SourceType" from="file1UsesConnectorSource ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file1SourceTypeEnumIdValue) : null"/>
+                <set field="file2SourceType" from="file2UsesConnectorSource ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2SourceTypeEnumIdValue) : null"/>
                 <set field="file1SystemMessageRemote" from="file1SystemMessageRemoteIdValue ? ec.entity.find('moqui.service.message.SystemMessageRemote').condition('systemMessageRemoteId', file1SystemMessageRemoteIdValue).useCache(false).one() : null"/>
                 <set field="file2SystemMessageRemote" from="file2SystemMessageRemoteIdValue ? ec.entity.find('moqui.service.message.SystemMessageRemote').condition('systemMessageRemoteId', file2SystemMessageRemoteIdValue).useCache(false).one() : null"/>
                 <if condition="file1SystemMessageRemoteIdValue &amp;&amp; file1SystemMessageRemote == null">
@@ -182,17 +198,17 @@
                 <if condition="file2System == null">
                     <message error="true">file2SystemEnumId '${file2SystemEnumIdValue}' is not valid</message>
                 </if>
-                <if condition="!file1UsesApiSource &amp;&amp; file1FileType == null">
+                <if condition="!file1UsesConnectorSource &amp;&amp; file1FileType == null">
                     <message error="true">file1FileTypeEnumId '${file1FileTypeEnumIdValue}' is not valid</message>
                 </if>
-                <if condition="!file2UsesApiSource &amp;&amp; file2FileType == null">
+                <if condition="!file2UsesConnectorSource &amp;&amp; file2FileType == null">
                     <message error="true">file2FileTypeEnumId '${file2FileTypeEnumIdValue}' is not valid</message>
                 </if>
-                <if condition="file1UsesApiSource &amp;&amp; file1SourceType == null">
-                    <message error="true">file1SourceTypeEnumId '${file1SourceTypeEnumIdValue}' is not valid. Load Darpan upgrade data before creating API-backed runs.</message>
+                <if condition="file1UsesConnectorSource &amp;&amp; file1SourceType == null">
+                    <message error="true">file1SourceTypeEnumId '${file1SourceTypeEnumIdValue}' is not valid. Load Darpan upgrade data before creating API- or database-backed runs.</message>
                 </if>
-                <if condition="file2UsesApiSource &amp;&amp; file2SourceType == null">
-                    <message error="true">file2SourceTypeEnumId '${file2SourceTypeEnumIdValue}' is not valid. Load Darpan upgrade data before creating API-backed runs.</message>
+                <if condition="file2UsesConnectorSource &amp;&amp; file2SourceType == null">
+                    <message error="true">file2SourceTypeEnumId '${file2SourceTypeEnumIdValue}' is not valid. Load Darpan upgrade data before creating API- or database-backed runs.</message>
                 </if>
                 <if condition="file1SystemMessageRemoteIdValue &amp;&amp; file1SystemMessageRemote == null &amp;&amp; !darpan.facade.reconciliation.ReconciliationSavedRunSupport.isVirtualApiOrdersRemote(file1SystemEnumIdValue, file1SystemMessageRemoteIdValue, file1SourceConfigTypeValue)">
                     <message error="true">file1SystemMessageRemoteId '${file1SystemMessageRemoteIdValue}' was not found</message>
@@ -282,10 +298,10 @@
                         in-map="[compareScopeId: compareScopeIdValue, ruleSetId: ruleSetIdValue, companyUserGroupId: ruleSetValue.companyUserGroupId, description: descriptionValue ?: 'Compare scope for ' + runNameValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
                 <service-call name="create#darpan.rule.RuleSetCompareSource"
                         disable-authz="true"
-                        in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_1', companyUserGroupId: ruleSetValue.companyUserGroupId, systemEnumId: file1SystemEnumIdValue, sourceTypeEnumId: file1SourceTypeEnumIdValue, systemMessageRemoteId: file1SystemMessageRemoteIdValue, nsRestletConfigId: file1NsRestletConfigIdValue, sourceConfigId: file1UsesApiSource ? file1SourceConfigIdValue : null, sourceConfigType: file1UsesApiSource ? file1SourceConfigTypeValue : null, fileTypeEnumId: file1FileTypeEnumIdValue, schemaFileName: file1UsesApiSource ? null : file1SchemaFileNameValue, recordRootExpression: file1UsesApiSource ? null : file1RecordRootExpressionValue, primaryIdExpression: resolvedFile1PrimaryIdExpressionValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                        in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_1', companyUserGroupId: ruleSetValue.companyUserGroupId, systemEnumId: file1SystemEnumIdValue, sourceTypeEnumId: file1SourceTypeEnumIdValue, systemMessageRemoteId: file1SystemMessageRemoteIdValue, nsRestletConfigId: file1NsRestletConfigIdValue, sourceConfigId: file1UsesConnectorSource ? file1SourceConfigIdValue : null, sourceConfigType: file1UsesConnectorSource ? file1SourceConfigTypeValue : null, fileTypeEnumId: file1FileTypeEnumIdValue, schemaFileName: file1UsesConnectorSource ? null : file1SchemaFileNameValue, recordRootExpression: file1UsesConnectorSource ? null : file1RecordRootExpressionValue, primaryIdExpression: resolvedFile1PrimaryIdExpressionValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
                 <service-call name="create#darpan.rule.RuleSetCompareSource"
                         disable-authz="true"
-                        in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', companyUserGroupId: ruleSetValue.companyUserGroupId, systemEnumId: file2SystemEnumIdValue, sourceTypeEnumId: file2SourceTypeEnumIdValue, systemMessageRemoteId: file2SystemMessageRemoteIdValue, nsRestletConfigId: file2NsRestletConfigIdValue, sourceConfigId: file2UsesApiSource ? file2SourceConfigIdValue : null, sourceConfigType: file2UsesApiSource ? file2SourceConfigTypeValue : null, fileTypeEnumId: file2FileTypeEnumIdValue, schemaFileName: file2UsesApiSource ? null : file2SchemaFileNameValue, recordRootExpression: file2UsesApiSource ? null : file2RecordRootExpressionValue, primaryIdExpression: resolvedFile2PrimaryIdExpressionValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                        in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', companyUserGroupId: ruleSetValue.companyUserGroupId, systemEnumId: file2SystemEnumIdValue, sourceTypeEnumId: file2SourceTypeEnumIdValue, systemMessageRemoteId: file2SystemMessageRemoteIdValue, nsRestletConfigId: file2NsRestletConfigIdValue, sourceConfigId: file2UsesConnectorSource ? file2SourceConfigIdValue : null, sourceConfigType: file2UsesConnectorSource ? file2SourceConfigTypeValue : null, fileTypeEnumId: file2FileTypeEnumIdValue, schemaFileName: file2UsesConnectorSource ? null : file2SchemaFileNameValue, recordRootExpression: file2UsesConnectorSource ? null : file2RecordRootExpressionValue, primaryIdExpression: resolvedFile2PrimaryIdExpressionValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
             </if>
 
             <if condition="!ec.message.hasError() &amp;&amp; !ruleEntries.isEmpty()">
@@ -634,22 +650,29 @@
             <set field="file1SystemEnumIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file1SystemEnumId)"/>
             <set field="file1SourceTypeEnumIdValue" from="((file1SourceTypeEnumId)?.toString()?.trim())"/>
             <set field="file1UsesApiSource" from="file1SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_API"/>
+            <!-- AUT_SRC_DB is an extracted (non-upload) source just like AUT_SRC_API (MACH database-source
+                 epic Task 2 follow-up): file1UsesApiSource stays narrow for API-payload-specific gates
+                 (endpoint requirement, resolveApiSourceConfig); file1UsesConnectorSource covers both for
+                 extract-vs-upload gates (fileType defaulting, schema/root nulling, sourceConfigId/Type). -->
+            <set field="file1UsesConnectorSource" from="file1UsesApiSource || file1SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_DB"/>
             <set field="file1SystemMessageRemoteIdValue" from="((file1SystemMessageRemoteId)?.toString()?.trim())"/>
             <set field="file1NsRestletConfigIdValue" from="((file1NsRestletConfigId)?.toString()?.trim())"/>
             <set field="file1SourceConfigIdValue" from="((file1SourceConfigId)?.toString()?.trim())"/>
             <set field="file1SourceConfigTypeValue" from="((file1SourceConfigType)?.toString()?.trim())"/>
-            <set field="file1FileTypeEnumIdValue" from="file1UsesApiSource ? null : (((file1FileTypeEnumId)?.toString()?.trim()) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
+            <set field="file1FileTypeEnumIdValue" from="file1UsesConnectorSource ? null : (((file1FileTypeEnumId)?.toString()?.trim()) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
             <set field="file1SchemaFileNameValue" from="((file1SchemaFileName)?.toString()?.trim())"/>
             <set field="file1RecordRootExpressionValue" from="((file1RecordRootExpression)?.toString()?.trim())"/>
             <set field="file1PrimaryIdExpressionValue" from="((file1PrimaryIdExpression)?.toString()?.trim())"/>
             <set field="file2SystemEnumIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file2SystemEnumId)"/>
             <set field="file2SourceTypeEnumIdValue" from="((file2SourceTypeEnumId)?.toString()?.trim())"/>
             <set field="file2UsesApiSource" from="file2SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_API"/>
+            <!-- See file1UsesConnectorSource comment above. -->
+            <set field="file2UsesConnectorSource" from="file2UsesApiSource || file2SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_DB"/>
             <set field="file2SystemMessageRemoteIdValue" from="((file2SystemMessageRemoteId)?.toString()?.trim())"/>
             <set field="file2NsRestletConfigIdValue" from="((file2NsRestletConfigId)?.toString()?.trim())"/>
             <set field="file2SourceConfigIdValue" from="((file2SourceConfigId)?.toString()?.trim())"/>
             <set field="file2SourceConfigTypeValue" from="((file2SourceConfigType)?.toString()?.trim())"/>
-            <set field="file2FileTypeEnumIdValue" from="file2UsesApiSource ? null : (((file2FileTypeEnumId)?.toString()?.trim()) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
+            <set field="file2FileTypeEnumIdValue" from="file2UsesConnectorSource ? null : (((file2FileTypeEnumId)?.toString()?.trim()) ?: darpan.facade.reconciliation.ReconciliationSavedRunSupport.DEFAULT_FILE_TYPE_ENUM_ID)"/>
             <set field="file2SchemaFileNameValue" from="((file2SchemaFileName)?.toString()?.trim())"/>
             <set field="file2RecordRootExpressionValue" from="((file2RecordRootExpression)?.toString()?.trim())"/>
             <set field="file2PrimaryIdExpressionValue" from="((file2PrimaryIdExpression)?.toString()?.trim())"/>
@@ -668,19 +691,19 @@
             <if condition="!file2SystemEnumIdValue">
                 <message error="true">file2SystemEnumId is required</message>
             </if>
-            <if condition="!file1UsesApiSource &amp;&amp; !file1PrimaryIdExpressionValue">
+            <if condition="!file1UsesConnectorSource &amp;&amp; !file1PrimaryIdExpressionValue">
                 <message error="true">file1PrimaryIdExpression is required</message>
             </if>
-            <if condition="!file2UsesApiSource &amp;&amp; !file2PrimaryIdExpressionValue">
+            <if condition="!file2UsesConnectorSource &amp;&amp; !file2PrimaryIdExpressionValue">
                 <message error="true">file2PrimaryIdExpression is required</message>
             </if>
             <if condition="file1SystemEnumIdValue &amp;&amp; file2SystemEnumIdValue &amp;&amp; file1SystemEnumIdValue == file2SystemEnumIdValue">
                 <message error="true">file1SystemEnumId and file2SystemEnumId must be different</message>
             </if>
-            <if condition="file1SourceTypeEnumIdValue &amp;&amp; !file1UsesApiSource">
+            <if condition="file1SourceTypeEnumIdValue &amp;&amp; !file1UsesConnectorSource">
                 <message error="true">file1SourceTypeEnumId '${file1SourceTypeEnumIdValue}' is not supported</message>
             </if>
-            <if condition="file2SourceTypeEnumIdValue &amp;&amp; !file2UsesApiSource">
+            <if condition="file2SourceTypeEnumIdValue &amp;&amp; !file2UsesConnectorSource">
                 <message error="true">file2SourceTypeEnumId '${file2SourceTypeEnumIdValue}' is not supported</message>
             </if>
             <if condition="file1UsesApiSource &amp;&amp; !file1SystemMessageRemoteIdValue &amp;&amp; !file1NsRestletConfigIdValue">
@@ -694,6 +717,13 @@
             </if>
             <if condition="file2UsesApiSource &amp;&amp; file2SystemMessageRemoteIdValue &amp;&amp; file2NsRestletConfigIdValue">
                 <message error="true">file2 API source must use only one endpoint</message>
+            </if>
+            <!-- See create#RuleSetRun's DB-source-requires-sourceConfigId comment above. -->
+            <if condition="file1SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_DB &amp;&amp; !file1SourceConfigIdValue">
+                <message error="true">file1 database source requires sourceConfigId (the DatabaseSourceQuery id)</message>
+            </if>
+            <if condition="file2SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_DB &amp;&amp; !file2SourceConfigIdValue">
+                <message error="true">file2 database source requires sourceConfigId (the DatabaseSourceQuery id)</message>
             </if>
 
             <if condition="!ec.message.hasError()">
@@ -720,8 +750,8 @@
                 <set field="file2System" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2SystemEnumIdValue)"/>
                 <set field="file1FileType" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file1FileTypeEnumIdValue)"/>
                 <set field="file2FileType" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2FileTypeEnumIdValue)"/>
-                <set field="file1SourceType" from="file1UsesApiSource ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file1SourceTypeEnumIdValue) : null"/>
-                <set field="file2SourceType" from="file2UsesApiSource ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2SourceTypeEnumIdValue) : null"/>
+                <set field="file1SourceType" from="file1UsesConnectorSource ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file1SourceTypeEnumIdValue) : null"/>
+                <set field="file2SourceType" from="file2UsesConnectorSource ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.findEnum(ec, file2SourceTypeEnumIdValue) : null"/>
                 <set field="file1SystemMessageRemote" from="file1SystemMessageRemoteIdValue ? ec.entity.find('moqui.service.message.SystemMessageRemote').condition('systemMessageRemoteId', file1SystemMessageRemoteIdValue).useCache(false).one() : null"/>
                 <set field="file2SystemMessageRemote" from="file2SystemMessageRemoteIdValue ? ec.entity.find('moqui.service.message.SystemMessageRemote').condition('systemMessageRemoteId', file2SystemMessageRemoteIdValue).useCache(false).one() : null"/>
                 <if condition="file1SystemMessageRemoteIdValue &amp;&amp; file1SystemMessageRemote == null">
@@ -738,17 +768,17 @@
                 <if condition="file2System == null">
                     <message error="true">file2SystemEnumId '${file2SystemEnumIdValue}' is not valid</message>
                 </if>
-                <if condition="!file1UsesApiSource &amp;&amp; file1FileType == null">
+                <if condition="!file1UsesConnectorSource &amp;&amp; file1FileType == null">
                     <message error="true">file1FileTypeEnumId '${file1FileTypeEnumIdValue}' is not valid</message>
                 </if>
-                <if condition="!file2UsesApiSource &amp;&amp; file2FileType == null">
+                <if condition="!file2UsesConnectorSource &amp;&amp; file2FileType == null">
                     <message error="true">file2FileTypeEnumId '${file2FileTypeEnumIdValue}' is not valid</message>
                 </if>
-                <if condition="file1UsesApiSource &amp;&amp; file1SourceType == null">
-                    <message error="true">file1SourceTypeEnumId '${file1SourceTypeEnumIdValue}' is not valid. Load Darpan upgrade data before saving API-backed runs.</message>
+                <if condition="file1UsesConnectorSource &amp;&amp; file1SourceType == null">
+                    <message error="true">file1SourceTypeEnumId '${file1SourceTypeEnumIdValue}' is not valid. Load Darpan upgrade data before saving API- or database-backed runs.</message>
                 </if>
-                <if condition="file2UsesApiSource &amp;&amp; file2SourceType == null">
-                    <message error="true">file2SourceTypeEnumId '${file2SourceTypeEnumIdValue}' is not valid. Load Darpan upgrade data before saving API-backed runs.</message>
+                <if condition="file2UsesConnectorSource &amp;&amp; file2SourceType == null">
+                    <message error="true">file2SourceTypeEnumId '${file2SourceTypeEnumIdValue}' is not valid. Load Darpan upgrade data before saving API- or database-backed runs.</message>
                 </if>
                 <if condition="file1SystemMessageRemoteIdValue &amp;&amp; file1SystemMessageRemote == null &amp;&amp; !darpan.facade.reconciliation.ReconciliationSavedRunSupport.isVirtualApiOrdersRemote(file1SystemEnumIdValue, file1SystemMessageRemoteIdValue, file1SourceConfigTypeValue)">
                     <message error="true">file1SystemMessageRemoteId '${file1SystemMessageRemoteIdValue}' was not found</message>
@@ -836,11 +866,11 @@
                 <set field="ignoreFile1SourceType" from="file1Source.set('sourceTypeEnumId', file1SourceTypeEnumIdValue)"/>
                 <set field="ignoreFile1SystemRemote" from="file1Source.set('systemMessageRemoteId', file1SystemMessageRemoteIdValue)"/>
                 <set field="ignoreFile1NsRestlet" from="file1Source.set('nsRestletConfigId', file1NsRestletConfigIdValue)"/>
-                <set field="ignoreFile1SourceConfigId" from="file1Source.set('sourceConfigId', file1UsesApiSource ? file1SourceConfigIdValue : null)"/>
-                <set field="ignoreFile1SourceConfigType" from="file1Source.set('sourceConfigType', file1UsesApiSource ? file1SourceConfigTypeValue : null)"/>
+                <set field="ignoreFile1SourceConfigId" from="file1Source.set('sourceConfigId', file1UsesConnectorSource ? file1SourceConfigIdValue : null)"/>
+                <set field="ignoreFile1SourceConfigType" from="file1Source.set('sourceConfigType', file1UsesConnectorSource ? file1SourceConfigTypeValue : null)"/>
                 <set field="ignoreFile1FileType" from="file1Source.set('fileTypeEnumId', file1FileTypeEnumIdValue)"/>
-                <set field="ignoreFile1Schema" from="file1Source.set('schemaFileName', file1UsesApiSource ? null : file1SchemaFileNameValue)"/>
-                <set field="ignoreFile1Root" from="file1Source.set('recordRootExpression', file1UsesApiSource ? null : file1RecordRootExpressionValue)"/>
+                <set field="ignoreFile1Schema" from="file1Source.set('schemaFileName', file1UsesConnectorSource ? null : file1SchemaFileNameValue)"/>
+                <set field="ignoreFile1Root" from="file1Source.set('recordRootExpression', file1UsesConnectorSource ? null : file1RecordRootExpressionValue)"/>
                 <set field="ignoreFile1PrimaryId" from="file1Source.set('primaryIdExpression', resolvedFile1PrimaryIdExpressionValue)"/>
                 <set field="ignoreFile1UpdatedDate" from="file1Source.set('lastUpdatedDate', nowTs)"/>
                 <set field="ignoreFile1Update" from="file1Source.update()"/>
@@ -849,11 +879,11 @@
                 <set field="ignoreFile2SourceType" from="file2Source.set('sourceTypeEnumId', file2SourceTypeEnumIdValue)"/>
                 <set field="ignoreFile2SystemRemote" from="file2Source.set('systemMessageRemoteId', file2SystemMessageRemoteIdValue)"/>
                 <set field="ignoreFile2NsRestlet" from="file2Source.set('nsRestletConfigId', file2NsRestletConfigIdValue)"/>
-                <set field="ignoreFile2SourceConfigId" from="file2Source.set('sourceConfigId', file2UsesApiSource ? file2SourceConfigIdValue : null)"/>
-                <set field="ignoreFile2SourceConfigType" from="file2Source.set('sourceConfigType', file2UsesApiSource ? file2SourceConfigTypeValue : null)"/>
+                <set field="ignoreFile2SourceConfigId" from="file2Source.set('sourceConfigId', file2UsesConnectorSource ? file2SourceConfigIdValue : null)"/>
+                <set field="ignoreFile2SourceConfigType" from="file2Source.set('sourceConfigType', file2UsesConnectorSource ? file2SourceConfigTypeValue : null)"/>
                 <set field="ignoreFile2FileType" from="file2Source.set('fileTypeEnumId', file2FileTypeEnumIdValue)"/>
-                <set field="ignoreFile2Schema" from="file2Source.set('schemaFileName', file2UsesApiSource ? null : file2SchemaFileNameValue)"/>
-                <set field="ignoreFile2Root" from="file2Source.set('recordRootExpression', file2UsesApiSource ? null : file2RecordRootExpressionValue)"/>
+                <set field="ignoreFile2Schema" from="file2Source.set('schemaFileName', file2UsesConnectorSource ? null : file2SchemaFileNameValue)"/>
+                <set field="ignoreFile2Root" from="file2Source.set('recordRootExpression', file2UsesConnectorSource ? null : file2RecordRootExpressionValue)"/>
                 <set field="ignoreFile2PrimaryId" from="file2Source.set('primaryIdExpression', resolvedFile2PrimaryIdExpressionValue)"/>
                 <set field="ignoreFile2UpdatedDate" from="file2Source.set('lastUpdatedDate', nowTs)"/>
                 <set field="ignoreFile2Update" from="file2Source.update()"/>

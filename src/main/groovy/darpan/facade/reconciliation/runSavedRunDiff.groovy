@@ -99,7 +99,12 @@ def sideToken = { String fileSide ->
     fileSide == ReconciliationSavedRunSupport.FILE_SIDE_1 ? "file1" : "file2"
 }
 def isApiSource = { Object source ->
-    normalize(source?.sourceTypeEnumId) == ReconciliationSavedRunSupport.SOURCE_TYPE_API
+    // Both AUT_SRC_API and AUT_SRC_DB are extracted (non-upload) sources: extractApiSource below
+    // dispatches through the SourceSystemConnector registry keyed by systemEnumId/sourceConfigType,
+    // not by sourceTypeEnumId, so a DB source flows the same registry-driven extraction path as an
+    // API source (MACH database-source epic Task 2 follow-up).
+    String sourceType = normalize(source?.sourceTypeEnumId)
+    sourceType == ReconciliationSavedRunSupport.SOURCE_TYPE_API || sourceType == ReconciliationSavedRunSupport.SOURCE_TYPE_DB
 }
 def sourceLabel = { Object source, String fallback ->
     enumLabel(normalize(source?.systemEnumId) ?: fallback)
@@ -435,7 +440,7 @@ if (!ec.message.hasError() && mapping == null) {
 
         if (!ec.message.hasError() && hasApiInput) {
             if (!windowStartDateValue || !windowEndDateValue) {
-                ec.message.addError("windowStartDate and windowEndDate are required when a saved-run source is API-backed.")
+                ec.message.addError("windowStartDate and windowEndDate are required when a saved-run source is API- or database-backed.")
             } else if (!windowStartDateValue.before(windowEndDateValue)) {
                 ec.message.addError("windowStartDate must be before windowEndDate.")
             }

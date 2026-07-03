@@ -844,6 +844,98 @@ end'''
     }
 
     @Test
+    void ruleSetRunCreationTreatsDatabaseSourceLikeApiSource() {
+        // MACH database-source epic Task 2 follow-up: AUT_SRC_DB must flow the same extract-vs-upload
+        // path as AUT_SRC_API through create#RuleSetRun and run#SavedRunDiff — no fileTypeEnumId/schema
+        // required at create time, and execution dispatches through the connector registry (not the
+        // plain-upload "fileText is required" path), even though no DATABASE connector is registered yet.
+        Map<String, Object> createResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters([
+                        runName                 : "Database Source Compare",
+                        file1SystemEnumId       : "DATABASE",
+                        file1SourceTypeEnumId   : "AUT_SRC_DB",
+                        file1SourceConfigId     : "TEST_DB_QUERY",
+                        file1SourceConfigType   : "DATABASE_QUERY",
+                        file1PrimaryIdExpression: "\$.records[*].orderId",
+                        file2SystemEnumId       : "SHOPIFY",
+                        file2FileTypeEnumId     : "DftCsv",
+                        file2PrimaryIdExpression: "order_id",
+                        rules                   : [],
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals("Database Source Compare", createResult.savedRun.runName)
+
+        List<Map<String, Object>> systemOptions = (List<Map<String, Object>>) (createResult.savedRun.systemOptions ?: [])
+        Map<String, Object> file1Option = systemOptions.find { it.fileSide == "FILE_1" }
+        assertEquals("AUT_SRC_DB", file1Option.sourceTypeEnumId)
+        assertEquals("TEST_DB_QUERY", file1Option.sourceConfigId)
+        assertEquals("DATABASE_QUERY", file1Option.sourceConfigType)
+
+        List sources = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition("compareScopeId", createResult.savedRun.compareScopeId)
+                .useCache(false)
+                .list() ?: []
+        def file1Source = sources.find { it.fileSide == "FILE_1" }
+        assertEquals("AUT_SRC_DB", file1Source.sourceTypeEnumId)
+        assertEquals("TEST_DB_QUERY", file1Source.sourceConfigId)
+        assertEquals("DATABASE_QUERY", file1Source.sourceConfigType)
+        assertNull(file1Source.fileTypeEnumId, "DB source is extracted, not uploaded — no fileTypeEnumId expected")
+        assertNull(file1Source.schemaFileName)
+        assertNull(file1Source.recordRootExpression)
+
+        Map<String, Object> runResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.run#SavedRunDiff")
+                .parameters([
+                        savedRunId     : createResult.savedRun.savedRunId,
+                        file2Name      : "shopify-orders.csv",
+                        file2Text      : "order_id\nA100\nA200\n",
+                        hasHeader      : true,
+                        windowStartDate: "2026-06-01T00:00:00Z",
+                        windowEndDate  : "2026-06-02T00:00:00Z",
+                ])
+                .disableAuthz()
+                .call()
+
+        assertTrue(ec.message.hasError())
+        // No DATABASE SourceSystemConnector row exists yet (database-darpan component ships it later),
+        // so extraction fails gracefully at connector resolution — proving the DB source took the
+        // registry-driven extract path, not the plain-upload path (which would ask for file1Name/file1Text).
+        assertTrue(ec.message.errors.any { String message -> message.contains("is not supported for manual saved-run execution") },
+                "Unexpected errors: ${ec.message.errors}")
+        assertFalse(ec.message.errors.any { String message -> message.contains("file1Name is required") })
+        assertFalse(ec.message.errors.any { String message -> message.contains("file1Text is required") })
+        ec.message.clearErrors()
+    }
+
+    @Test
+    void ruleSetRunCreationRejectsDatabaseSourceMissingSourceConfigId() {
+        Map<String, Object> createResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters([
+                        runName                 : "Database Source Missing Config",
+                        file1SystemEnumId       : "DATABASE",
+                        file1SourceTypeEnumId   : "AUT_SRC_DB",
+                        file1PrimaryIdExpression: "\$.records[*].orderId",
+                        file2SystemEnumId       : "SHOPIFY",
+                        file2FileTypeEnumId     : "DftCsv",
+                        file2PrimaryIdExpression: "order_id",
+                        rules                   : [],
+                ])
+                .disableAuthz()
+                .call()
+
+        assertTrue(ec.message.hasError())
+        assertFalse((Boolean) createResult.ok)
+        assertTrue(ec.message.errors.any { String message -> message.contains("file1 database source requires sourceConfigId") },
+                "Unexpected errors: ${ec.message.errors}")
+        ec.message.clearErrors()
+    }
+
+    @Test
     void apiRuleSetRunFailsBeforeCompareSourceInsertWhenSourceTypeEnumIsMissing() {
         deleteRuleSetRunEntities("RS_API_ORDER_SYNC", "CS_RS_API_ORDER_SYNC_COMPARE_SCOPE")
         deleteAutomationSourceTypeReferences("AUT_SRC_API")

@@ -9,7 +9,7 @@
 #  - W5 #37: GitHub credentials via BuildKit `--mount=type=secret` so they never land in image
 #    layer history. ARG GIT_USERNAME/GIT_PASSWORD remain as a backward-compat fallback during the
 #    CI rollout window.
-#  - W5 #38: Product refs pinned to tags (darpan v1.0.0 / darpan-hotwax v0.3.0 / shopify-darpan
+#  - W5 #38: Product refs pinned to tags (darpan v1.0.1 / darpan-hotwax v0.3.0 / shopify-darpan
 #    v0.3.0 / netsuite-darpan v0.1.0).
 #    moqui-framework / moqui-runtime / moqui-sftp are pinned in-file to stable immutable refs
 #    matching the dev baseline (see the ARG block); build args remain available but no override
@@ -47,7 +47,7 @@ ARG MOQUI_SFTP_REF=v1.0.3
 # darpan history was reset 2026-07-03 (repo detached from the hotwax fork network); pre-reset tags
 # no longer exist on the remote. v1.0.0 is the first post-reset tag — never fall back to v1.x/v2.x
 # pre-reset refs.
-ARG DARPAN_REF=v1.0.0
+ARG DARPAN_REF=v1.0.1
 # darpan-hotwax/shopify-darpan tags below v0.3.0 predate the JDK 21 / Moqui 4 / Gradle 9 migration
 # and still declare the removed :runtime:component:moqui-atomikos project — they cannot build on
 # this stack. v0.3.0 tags == the component mains that darpan CI proves against darpan v1.0.0.

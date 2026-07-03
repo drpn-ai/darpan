@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Candidate release-scoped upgrade data for Darpan 2.1.0.
+Generated from backend compare range: v2.0.3..HEAD
+Records must also live in generic source data files under runtime/component/darpan/data/.
+Review each record before loading into an environment.
+-->
+<entity-facade-xml type="darpan-seed">
+    <!-- Modified records from data/SecuritySeedData.xml -->
+    <moqui.basic.Enumeration enumId="UgtDarpanPermission" description="Darpan permission groups" enumTypeId="UserGroupType"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_ADMIN" description="Can manage Darpan app-level settings and core configuration" groupTypeEnumId="UgtDarpanPermission"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_SUPER_ADMIN" description="Can view and edit every tenant and manage tenant and user setup" groupTypeEnumId="UgtDarpanPermission"/>
+    <!-- MACH P0 #3 (tightened): super-admin-only gate for the legacy server-rendered screen UI
+         (component://darpan/screen/**), which bypasses the facade. DARPAN_SCREEN_UI_ADMIN removed —
+         /apps/darpan screens are super-admin-only; aligning URL-authz to the isSuperAdmin() content gate.
+         Framework ADMIN still reaches via DARPAN_APP_ADMIN. Regular tenant groups remain denied.
+         Mirrors data/SecuritySeedData.xml. -->
+    <moqui.security.ArtifactGroup artifactGroupId="DARPAN_SCREEN_UI" description="Legacy server-rendered Darpan screen UI — super-admin only (facade-bypassing)."/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_SCREEN_UI" artifactName="component://darpan/screen/.*" artifactTypeEnumId="AT_XML_SCREEN" nameIsPattern="Y" inheritAuthz="Y"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_SCREEN_UI_SUPER_ADMIN" userGroupId="DARPAN_SUPER_ADMIN" artifactGroupId="DARPAN_SCREEN_UI" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+</entity-facade-xml>

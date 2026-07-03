@@ -9,9 +9,8 @@
 #  - W5 #37: GitHub credentials via BuildKit `--mount=type=secret` so they never land in image
 #    layer history. ARG GIT_USERNAME/GIT_PASSWORD remain as a backward-compat fallback during the
 #    CI rollout window.
-#  - W5 #38: Product refs pinned to tags where tags exist (darpan-hotwax v0.2.0 / shopify-darpan
-#    v0.2.1 / netsuite-darpan v0.1.0). darpan itself defaults to `main` since the 2026-07-03 history
-#    reset removed all pre-reset tags; re-pin at the next release cut.
+#  - W5 #38: Product refs pinned to tags (darpan v1.0.0 / darpan-hotwax v0.2.0 / shopify-darpan
+#    v0.2.1 / netsuite-darpan v0.1.0).
 #    moqui-framework / moqui-runtime / moqui-sftp are pinned in-file to stable immutable refs
 #    matching the dev baseline (see the ARG block); build args remain available but no override
 #    is required for a reproducible build.
@@ -46,8 +45,9 @@ ARG MOQUI_RUNTIME_REF=v3.9.9
 # moqui-atomikos retired: Moqui 4 embeds Bitronix as the default JTA TM; no separate Atomikos component needed.
 ARG MOQUI_SFTP_REF=v1.0.3
 # darpan history was reset 2026-07-03 (repo detached from the hotwax fork network); pre-reset tags
-# (v1.x/v2.x) no longer exist on the remote. Versioning restarts at v1.0.0 — re-pin when that tag is cut.
-ARG DARPAN_REF=main
+# no longer exist on the remote. v1.0.0 is the first post-reset tag — never fall back to v1.x/v2.x
+# pre-reset refs.
+ARG DARPAN_REF=v1.0.0
 ARG DARPAN_HOTWAX_REF=v0.2.0
 ARG SHOPIFY_DARPAN_REF=v0.2.1
 ARG NETSUITE_DARPAN_REF=v0.1.0

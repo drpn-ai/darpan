@@ -25,6 +25,11 @@
             enumCode="SFTP"
             description="SFTP source"
             sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="AUT_SRC_DB"
+            enumTypeId="AutomationSourceType"
+            enumCode="DB"
+            description="Database source"
+            sequenceNum="3"/>
 
     <moqui.basic.EnumerationType enumTypeId="AutomationExecStatus"
             description="Automation execution status"/>

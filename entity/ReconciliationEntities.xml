@@ -216,6 +216,9 @@
         <field name="systemMessageRemoteId" type="id"/>
         <field name="nsRestletConfigId" type="id"/>
         <field name="sftpServerId" type="id"/>
+        <field name="databaseSourceQueryId" type="id">
+            <description>DatabaseSourceQuery id (database-darpan component) for AUT_SRC_DB sources.</description>
+        </field>
         <field name="remotePathTemplate" type="text-long"/>
         <field name="fileNamePattern" type="text-medium"/>
         <field name="apiRequestTemplateJson" type="text-long"/>

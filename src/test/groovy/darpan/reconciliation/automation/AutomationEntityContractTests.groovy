@@ -108,7 +108,7 @@ class AutomationEntityContractTests {
                 "automationId", "fileSide", "companyUserGroupId", "createdByUserId",
                 "sourceTypeEnumId", "systemEnumId", "fileTypeEnumId", "schemaFileName",
                 "recordRootExpression", "primaryIdExpression", "idValueNormalizer",
-                "systemMessageRemoteId", "nsRestletConfigId", "sftpServerId",
+                "systemMessageRemoteId", "nsRestletConfigId", "sftpServerId", "databaseSourceQueryId",
                 "remotePathTemplate", "fileNamePattern", "apiRequestTemplateJson",
                 "apiResponsePathExpression", "dateFromParameterName", "dateToParameterName",
                 "safeMetadataJson", "createdDate", "lastUpdatedDate",

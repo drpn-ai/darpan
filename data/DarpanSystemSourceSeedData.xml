@@ -31,4 +31,11 @@
             enumCode="SAPI"
             description="SAPI"
             sequenceNum="4"/>
+
+    <moqui.basic.Enumeration
+            enumId="DATABASE"
+            enumTypeId="DarpanSystemSource"
+            enumCode="DATABASE"
+            description="Database"
+            sequenceNum="5"/>
 </entity-facade-xml>

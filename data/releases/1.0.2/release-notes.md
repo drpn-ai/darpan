@@ -31,9 +31,10 @@ keys, returns reconciliation, and multi-file-source stitching (see the public ro
 
 This release establishes the platform baseline rather than a feature delta:
 
-- Multi-system reconciliation of order and inventory data across connected source
-  systems (HotWax OMS, NetSuite, Shopify via companion connector components), with
-  Spark-based comparison runs, run scheduling, and run/system-instance management.
+- Multi-system reconciliation of order data across connected source systems (HotWax
+  OMS, NetSuite, Shopify via companion connector components), with Spark-based
+  comparison runs, run scheduling, and run/system-instance management. (Inventory
+  reconciliation is seeded in the data model but not live yet.)
 - Configurable reconciliation rule engine (Drools) with server-side rule generation,
   field-comparison rule types, and per-tenant rule scoping.
 - Multi-tenant model with tenant-scoped data access and permission groups

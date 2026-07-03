@@ -6,7 +6,9 @@ import java.sql.Timestamp
 import java.time.Instant
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNull
+import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
  * Characterization tests for the pure/branch-heavy helpers of AutomationFacadeSupport
@@ -68,5 +70,57 @@ class AutomationFacadeSupportTests {
     void resolveNextFireTimeReturnsNullWithoutSchedule() {
         assertNull(AutomationFacadeSupport.resolveNextFireTime([:], ts("2026-05-01T10:00:00Z")))
         assertNull(AutomationFacadeSupport.resolveNextFireTime([scheduleExpr: "  "], ts("2026-05-01T10:00:00Z")))
+    }
+
+    // ─── source-type gate widening (AUT_SRC_DB, MACH database-source epic Task 2) ─────
+    // validateSources/validateDatabaseSource only touch ec.message for a database-typed source
+    // (no entity lookups on this branch — those live behind validateApiSource), so a minimal
+    // Expando + MessageStub ec double is enough here, mirroring the no-Moqui-bootstrap pattern in
+    // AutomationFacadeSupportExtractServiceAllowlistTests.groovy.
+
+    private static Object stubEc(MessageStub message) {
+        return new Expando(message: message)
+    }
+
+    private static List<Map<String, Object>> databaseSourceFixture(Map<String, Object> file1Overrides = [:],
+            Map<String, Object> file2Overrides = [:]) {
+        Map<String, Object> file1 = [fileSide: "FILE_1", sourceTypeEnumId: "AUT_SRC_DB", systemEnumId: "OMS",
+                                      fileTypeEnumId: "DftCsv", databaseSourceQueryId: "TEST_DB_QUERY"] + file1Overrides
+        Map<String, Object> file2 = [fileSide: "FILE_2", sourceTypeEnumId: "AUT_SRC_DB", systemEnumId: "SHOPIFY",
+                                      fileTypeEnumId: "DftCsv", databaseSourceQueryId: "TEST_DB_QUERY"] + file2Overrides
+        return [file1, file2]
+    }
+
+    @Test
+    void acceptsDatabaseSourceOnApiInputMode() {
+        MessageStub message = new MessageStub()
+        def ec = stubEc(message)
+        AutomationFacadeSupport.validateSources(ec, "AUT_IN_API_RANGE", databaseSourceFixture(), null)
+        assertFalse(message.hasError(), "Unexpected errors: ${message.errors}")
+    }
+
+    @Test
+    void rejectsDatabaseSourceMissingQueryId() {
+        MessageStub message = new MessageStub()
+        def ec = stubEc(message)
+        List<Map<String, Object>> sources = databaseSourceFixture([databaseSourceQueryId: null])
+        AutomationFacadeSupport.validateSources(ec, "AUT_IN_API_RANGE", sources, null)
+        assertTrue(message.hasError())
+        assertTrue(message.errors.any { it.contains("databaseSourceQueryId") }, "Unexpected errors: ${message.errors}")
+    }
+
+    @Test
+    void applyApiSourceMetadataDefaultsPassesThroughDatabaseSourceUnchanged() {
+        // DB sources carry no secrets on the source row (credentials live in DatabaseSourceConfig), so
+        // the API-only sanitize/enrichment branch must leave a database-typed row untouched.
+        Map<String, Object> dbSource = databaseSourceFixture().first()
+        List<Map<String, Object>> result = AutomationFacadeSupport.applyApiSourceMetadataDefaults(null, [dbSource])
+        assertEquals([dbSource], result)
+    }
+
+    static class MessageStub {
+        List<String> errors = []
+        void addError(Object error) { errors.add(error?.toString()) }
+        boolean hasError() { return !errors.isEmpty() }
     }
 }

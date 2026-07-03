@@ -31,6 +31,7 @@ class ReconciliationSavedRunSupport {
     static final String FILE_SIDE_2 = "FILE_2"
     static final String DEFAULT_FILE_TYPE_ENUM_ID = "DftCsv"
     static final String SOURCE_TYPE_API = "AUT_SRC_API"
+    static final String SOURCE_TYPE_DB = "AUT_SRC_DB"
     static final String SYSTEM_SHOPIFY = "SHOPIFY"
     static final String SYSTEM_HOTWAX_OMS = "OMS"
     static final String SYSTEM_NETSUITE = "NETSUITE"

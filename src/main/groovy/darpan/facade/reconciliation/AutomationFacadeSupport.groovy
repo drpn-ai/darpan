@@ -33,6 +33,7 @@ class AutomationFacadeSupport {
     static final String NETSUITE_SYSTEM_ENUM_ID = "NETSUITE"
     // Constants below reference ReconciliationSavedRunSupport to avoid duplicate string literals.
     static final String SOURCE_TYPE_API = ReconciliationSavedRunSupport.SOURCE_TYPE_API
+    static final String SOURCE_TYPE_DB = ReconciliationSavedRunSupport.SOURCE_TYPE_DB
     static final String FILE_SIDE_1 = ReconciliationSavedRunSupport.FILE_SIDE_1
     static final String FILE_SIDE_2 = ReconciliationSavedRunSupport.FILE_SIDE_2
     static final String SOURCE_CONFIG_TYPE_SHOPIFY_AUTH = ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_SHOPIFY_AUTH
@@ -332,14 +333,18 @@ class AutomationFacadeSupport {
 
         sources.each { Map<String, Object> source ->
             String fileSide = source.fileSide as String
-            String expectedSourceType = inputModeEnumId == INPUT_MODE_SFTP_FILES ? SOURCE_TYPE_SFTP : SOURCE_TYPE_API
-            if (source.sourceTypeEnumId != expectedSourceType) {
-                ec.message.addError("${fileSide} sourceTypeEnumId must be ${expectedSourceType}")
+            // Per-side allowed set (not a single expected type) so a DB source can pair with an API
+            // source on the other file side of the same automation (MACH database-source epic Task 2).
+            Set<String> allowedSourceTypes = inputModeEnumId == INPUT_MODE_SFTP_FILES ?
+                    [SOURCE_TYPE_SFTP] as Set : [SOURCE_TYPE_API, SOURCE_TYPE_DB] as Set
+            if (!allowedSourceTypes.contains(source.sourceTypeEnumId)) {
+                ec.message.addError("${fileSide} sourceTypeEnumId must be one of ${allowedSourceTypes.join(', ')}")
             }
             if (!source.systemEnumId) ec.message.addError("${fileSide} systemEnumId is required")
             validateSourceMatchesSavedRun(ec, source, savedRun)
-            if (expectedSourceType == SOURCE_TYPE_SFTP) validateSftpSource(ec, source)
-            if (expectedSourceType == SOURCE_TYPE_API) validateApiSource(ec, source)
+            if (source.sourceTypeEnumId == SOURCE_TYPE_SFTP) validateSftpSource(ec, source)
+            if (source.sourceTypeEnumId == SOURCE_TYPE_API) validateApiSource(ec, source)
+            if (source.sourceTypeEnumId == SOURCE_TYPE_DB) validateDatabaseSource(ec, source)
         }
     }
 
@@ -413,6 +418,11 @@ class AutomationFacadeSupport {
             }
         }
         validateApiSourceMetadata(ec, source)
+    }
+
+    protected static void validateDatabaseSource(def ec, Map<String, Object> source) {
+        String queryId = source.databaseSourceQueryId?.toString()?.trim()
+        if (!queryId) ec.message.addError("Database source (${source.fileSide}) requires databaseSourceQueryId.")
     }
 
     protected static void validateApiSourceMetadata(def ec, Map<String, Object> source) {

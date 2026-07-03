@@ -65,6 +65,7 @@ class AutomationExecutionSupport {
     static final String AUTOMATION_INPUT_API_RANGE = "AUT_IN_API_RANGE"
     static final String AUTOMATION_INPUT_SFTP_FILES = "AUT_IN_SFTP_FILES"
     static final String AUTOMATION_SOURCE_API = "AUT_SRC_API"
+    static final String AUTOMATION_SOURCE_DB = "AUT_SRC_DB"
     // Extract-service name aliases (single source of truth = ReconciliationSavedRunSupport), kept for
     // test references. Dispatch is now data-driven: the allow-list comes from the registry
     // (SourceSystemConnectorSupport.allowedServiceNames) + a naming guard, so the old
@@ -1064,8 +1065,8 @@ class AutomationExecutionSupport {
         }
 
         String sourceTypeEnumId = normalize(readField(source, "sourceTypeEnumId"))
-        if (sourceTypeEnumId != AUTOMATION_SOURCE_API) {
-            throw new IllegalArgumentException("Automation ${automationId} ${fileSide} source must use ${AUTOMATION_SOURCE_API}")
+        if (sourceTypeEnumId != AUTOMATION_SOURCE_API && sourceTypeEnumId != AUTOMATION_SOURCE_DB) {
+            throw new IllegalArgumentException("Automation ${automationId} ${fileSide} source must use ${AUTOMATION_SOURCE_API} or ${AUTOMATION_SOURCE_DB}")
         }
         return source
     }

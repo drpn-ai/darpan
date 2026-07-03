@@ -130,7 +130,11 @@ RUN cp /moqui-framework/runtime/component/darpan/docker/entrypoint.sh /moqui-dep
 RUN chmod +x entrypoint.sh
 RUN jar -xvf /moqui-framework/moqui-plus-runtime.war
 
-ENV DB_LOAD="./gradlew loadProduction -Ptypes=seed,seed-initial,install,ext-seed,ext -Praw"
+# DB_LOAD is the ops-runbook command for a first-time full DB load (entrypoint.sh does NOT run it).
+# darpan-seed-initial/darpan-seed must be INSIDE -Ptypes — loadProduction only forwards -Ptypes; a
+# -Praw flag is read by no gradle task (silent no-op). Loader flags go as MoquiStart args instead,
+# e.g.: java -jar moqui-plus-runtime.war load conf=$CONF_FILE types=darpan-seed dummy-fks
+ENV DB_LOAD="./gradlew loadProduction -Ptypes=seed,seed-initial,install,ext-seed,ext,darpan-seed-initial,darpan-seed"
 # Audit 2026-06-27 MACH P1 #1: replaced hardcoded -Xms512m/-Xmx4096m with cgroup-aware JDK 21
 # container support. JDK 21 respects cgroup v1/v2 memory limits by default (UseContainerSupport=true).
 # -XX:MaxRAMPercentage=75.0 caps the heap at 75 % of the container's cgroup limit (leaves headroom for

@@ -912,6 +912,103 @@ end'''
     }
 
     @Test
+    void ruleSetRunSaveTreatsDatabaseSourceLikeApiSourceAndRequiresSourceConfigId() {
+        // Covers save#RuleSetRun's widened file{1,2}UsesConnectorSource gates (the create# twin is
+        // covered above): switching an upload source to AUT_SRC_DB via save# must persist the DB
+        // locator (sourceConfigId/Type) and null the upload-only columns, and a DB source missing
+        // sourceConfigId must be rejected by save#'s new DB check.
+        Map<String, Object> createResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters([
+                        runName                 : "Database Source Save",
+                        file1SystemEnumId       : "OMS",
+                        file1FileTypeEnumId     : "DftCsv",
+                        file1PrimaryIdExpression: "order_id",
+                        file2SystemEnumId       : "SHOPIFY",
+                        file2FileTypeEnumId     : "DftCsv",
+                        file2PrimaryIdExpression: "order_id",
+                        rules                   : [],
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        String savedRunId = createResult.savedRun.savedRunId as String
+        String compareScopeId = createResult.savedRun.compareScopeId as String
+
+        Map<String, Object> saveResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.save#RuleSetRun")
+                .parameters([
+                        savedRunId              : savedRunId,
+                        runName                 : "Database Source Save",
+                        file1SystemEnumId       : "DATABASE",
+                        file1SourceTypeEnumId   : "AUT_SRC_DB",
+                        file1SourceConfigId     : "TEST_DB_QUERY",
+                        file1SourceConfigType   : "DATABASE_QUERY",
+                        file1PrimaryIdExpression: "\$.records[*].orderId",
+                        file2SystemEnumId       : "SHOPIFY",
+                        file2FileTypeEnumId     : "DftCsv",
+                        file2PrimaryIdExpression: "order_id",
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals(savedRunId, saveResult.savedRun.savedRunId)
+
+        def file1Source = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition("compareScopeId", compareScopeId)
+                .condition("fileSide", "FILE_1")
+                .useCache(false)
+                .one()
+        assertEquals("DATABASE", file1Source.systemEnumId)
+        assertEquals("AUT_SRC_DB", file1Source.sourceTypeEnumId)
+        assertEquals("TEST_DB_QUERY", file1Source.sourceConfigId)
+        assertEquals("DATABASE_QUERY", file1Source.sourceConfigType)
+        assertNull(file1Source.fileTypeEnumId, "DB source is extracted, not uploaded — no fileTypeEnumId expected")
+        assertNull(file1Source.schemaFileName)
+        assertNull(file1Source.recordRootExpression)
+
+        // Upload side is untouched by the DB widening.
+        def file2Source = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition("compareScopeId", compareScopeId)
+                .condition("fileSide", "FILE_2")
+                .useCache(false)
+                .one()
+        assertEquals("DftCsv", file2Source.fileTypeEnumId)
+        assertEquals("order_id", file2Source.primaryIdExpression)
+
+        Map<String, Object> rejectedSaveResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.save#RuleSetRun")
+                .parameters([
+                        savedRunId              : savedRunId,
+                        runName                 : "Database Source Save",
+                        file1SystemEnumId       : "DATABASE",
+                        file1SourceTypeEnumId   : "AUT_SRC_DB",
+                        file1PrimaryIdExpression: "\$.records[*].orderId",
+                        file2SystemEnumId       : "SHOPIFY",
+                        file2FileTypeEnumId     : "DftCsv",
+                        file2PrimaryIdExpression: "order_id",
+                ])
+                .disableAuthz()
+                .call()
+
+        assertTrue(ec.message.hasError())
+        assertFalse((Boolean) rejectedSaveResult.ok)
+        assertTrue(ec.message.errors.any { String message -> message.contains("file1 database source requires sourceConfigId") },
+                "Unexpected errors: ${ec.message.errors}")
+        ec.message.clearErrors()
+
+        // The rejected save must not have clobbered the persisted DB locator.
+        def file1SourceAfterReject = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition("compareScopeId", compareScopeId)
+                .condition("fileSide", "FILE_1")
+                .useCache(false)
+                .one()
+        assertEquals("TEST_DB_QUERY", file1SourceAfterReject.sourceConfigId)
+    }
+
+    @Test
     void ruleSetRunCreationRejectsDatabaseSourceMissingSourceConfigId() {
         Map<String, Object> createResult = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.create#RuleSetRun")

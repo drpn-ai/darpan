@@ -171,6 +171,13 @@ jobs:
                   data {
                       directory = System.getProperty('user.home') + '/.gradle/dependency-check-data'
                   }
+
+                  // The plugin does NOT read the NVD_API_KEY env var on its own — without this
+                  // block every NVD API 2.0 request goes out anonymous and gets 403'd. The env
+                  // var is injected by the workflow step from the repo secret.
+                  nvd {
+                      apiKey = System.getenv('NVD_API_KEY')
+                  }
               }
           }
           INIT_SCRIPT

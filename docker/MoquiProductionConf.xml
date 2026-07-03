@@ -34,8 +34,12 @@
     <!-- Crypt-key rotation: entity_ds_crypt_pass_old defaults to the current key when not set, making
          the decrypt-alt entries a harmless no-op during normal operation. During a rotation window,
          set entity_ds_crypt_pass_old to the outgoing key and entity_ds_crypt_pass to the new key.
-         See docs/crypt-key-rotation.md for the full procedure. -->
-    <default-property name="entity_ds_crypt_pass_old" value="${entity_ds_crypt_pass_old:-${entity_ds_crypt_pass}}"/>
+         See docs/crypt-key-rotation.md for the full procedure.
+         This value is expanded as a Groovy GString (SystemBinding), NOT by a shell — shell
+         `${var:-default}` syntax parses as a call to a method named `$` and crashes any process
+         whose environment lacks the var (e.g. `kubectl exec` data loads; the entrypoint's export
+         masks it for the server). Missing vars resolve to "" here, so Elvis gives the fallback. -->
+    <default-property name="entity_ds_crypt_pass_old" value="${entity_ds_crypt_pass_old ?: entity_ds_crypt_pass}"/>
 
     <!-- NOTE: using the environment variable is relatively secure in a container environment, but for more security set it here instead -->
     <!-- MACH Security P1: entity-facade includes decrypt-alt fallbacks (mirrors MoquiDefaultConf.xml

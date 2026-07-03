@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd" include-child-content="true" menu-image="fa fa-balance-scale" menu-image-type="icon" default-menu-title="Darpan" require-authentication="false">
+    <!-- CSRF-bootstrap endpoint for cookie-auth migration (P0 #6).
+         GET /apps/darpan/csrfToken — exempt from CSRF check because Moqui's
+         ScreenRenderImpl.groovy ~L429 skips the check for all GET requests.
+         Restores an authenticated session from the HttpOnly darpan_login_key cookie when
+         present (new-tab bootstrap), then returns the CSRF token and authenticated flag.
+         NEVER returns the cookie value, api keys, or any secret. -->
+    <transition name="csrfToken" method="get">
+        <actions>
+            <script><![CDATA[
+                darpan.facade.auth.AuthSessionSupport.restoreAuthenticatedSession(ec)
+                boolean authenticated = ((ec?.user?.userId)?.toString()?.trim()) != null
+                String token = ec?.web?.getSessionToken()
+                ec.web.sendJsonResponse([moquiSessionToken: token, authenticated: authenticated])
+            ]]></script>
+        </actions>
+        <default-response type="none"/>
+    </transition>
+    <subscreens default-item="Reconciliation">
+        <subscreens-item name="Reconciliation" menu-title="Reconciliation" location="component://darpan/screen/Reconciliation.xml"/>
+        <subscreens-item name="Settings" menu-title="Settings" location="component://darpan/screen/Settings.xml"/>
+    </subscreens>
+    <widgets>
+        <subscreens-panel id="darpan-app" type="popup"/>
+    </widgets>
+</screen>

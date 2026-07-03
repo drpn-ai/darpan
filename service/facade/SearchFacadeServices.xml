@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="search" noun="NavigationTargets" authz-action="view" allow-remote="true" authenticate="true">
+        <description>Search authorized Darpan records and return normalized navigation targets for Ask Darpan.</description>
+        <in-parameters>
+            <parameter name="query"/>
+            <parameter name="types" type="List"><parameter name="type"/></parameter>
+            <parameter name="pageIndex" type="Integer" default-value="0"/>
+            <parameter name="pageSize" type="Integer" default-value="20"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="pagination" type="Map">
+                <parameter name="pageIndex" type="Integer"/>
+                <parameter name="pageSize" type="Integer"/>
+                <parameter name="totalCount" type="Integer"/>
+                <parameter name="pageCount" type="Integer"/>
+            </parameter>
+            <parameter name="results" type="List">
+                <parameter name="resultId"/>
+                <parameter name="type"/>
+                <parameter name="label"/>
+                <parameter name="description"/>
+                <parameter name="routeName"/>
+                <parameter name="routePath"/>
+                <parameter name="routeParams" type="Map"/>
+                <parameter name="routeQuery" type="Map"/>
+                <parameter name="score" type="Integer"/>
+                <parameter name="sourceId"/>
+                <parameter name="sourceType"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="searchResult" from="darpan.facade.search.NavigationSearchSupport.search(ec, query, types, pageIndex, pageSize)"/>
+            <set field="results" from="searchResult.results"/>
+            <set field="pagination" from="searchResult.pagination"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+</services>

@@ -1,0 +1,43 @@
+<!-- Darpan reusable HTML blocks (copy/adapt into screen HTML widgets or templates) -->
+
+<template id="dt-app-shell">
+  <main class="dt-shell">
+    <section class="dt-container">
+      <h1 class="dt-title">Page Title</h1>
+      <p class="dt-subtitle">task_flow: step_1 -> step_2 -> step_3 -> step_4</p>
+    </section>
+  </main>
+</template>
+
+<template id="dt-step-flow-4">
+  <ol class="dt-flow" aria-label="Execution flow">
+    <li class="dt-flow-step is-active" data-step-indicator="1"><span class="dt-flow-index">01</span> step_one</li>
+    <li class="dt-flow-step" data-step-indicator="2"><span class="dt-flow-index">02</span> step_two</li>
+    <li class="dt-flow-step" data-step-indicator="3"><span class="dt-flow-index">03</span> step_three</li>
+    <li class="dt-flow-step" data-step-indicator="4"><span class="dt-flow-index">04</span> review_submit</li>
+  </ol>
+</template>
+
+<template id="dt-config-card">
+  <article class="dt-card">
+    <h2 class="dt-card-title">Configure source</h2>
+
+    <div class="dt-field">
+      <label class="dt-label">source_system</label>
+      <select class="dt-select">
+        <option>Shopify</option>
+      </select>
+    </div>
+
+    <div class="dt-field">
+      <label class="dt-label">id_expression</label>
+      <input class="dt-input" value="productId" />
+      <div class="dt-help">required for progression</div>
+    </div>
+
+    <div class="dt-actions">
+      <button type="button" class="dt-btn dt-btn-secondary" data-step-back>back</button>
+      <button type="button" class="dt-btn dt-btn-primary" data-step-next>continue</button>
+    </div>
+  </article>
+</template>

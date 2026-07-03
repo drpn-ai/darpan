@@ -1,0 +1,142 @@
+name: Darpan Backend CI
+
+# Restores automated backend CI (MACH maturity audit P0 #2). `drpn-ai/darpan` is a Moqui
+# *component* repo, so the framework has to be assembled around the checked-out code before the
+# JUnit suite (39 files / ~318 @Test) can run. Assembly mirrors the verified darpan-cli bootstrap
+# recipe (REPO_MANIFEST in darpan-cli/bin/darpan): clone moqui-framework@master -> getRuntime ->
+# place moqui-sftp + ALL 4 Darpan components (darpan under test + darpan-hotwax + netsuite-darpan +
+# shopify-darpan) -> load (H2) -> test. The 3 integration components are mandatory, not optional:
+# darpan's own main code and tests resolve their entities by name (darpan.hotwax.*, ShopifyAuthConfig,
+# Ns* configs), so omitting them makes those entity reads throw EntityNotFoundException at runtime.
+# Tests run against the embedded H2 datasource, so no external DB service is required, and the Spark
+# 3.5 / JDK 21 `--add-opens` set is already injected by the component's own test task jvmArgs
+# (build.gradle: sparkJava21Opens), so it does not need to be re-declared here.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # MACH P2 (security): repo-wide secret scan. Runs the pinned gitleaks binary directly —
+  # the marketplace action requires an org license secret (a devops dependency); the binary
+  # does not. fetch-depth: 0 so history is scanned, not just the tip.
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks detect --source . --no-banner --redact --verbose
+
+  backend-tests:
+    name: Component test suite (JDK 21, H2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out darpan component (code under test)
+        uses: actions/checkout@v5
+        with:
+          path: component-darpan
+          fetch-depth: 0
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache Gradle
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('component-darpan/build.gradle') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Clone Moqui framework (master)
+        run: git clone --depth 1 --branch master https://github.com/moqui/moqui-framework.git darpan-backend
+
+      - name: Download Moqui runtime (must precede component placement)
+        working-directory: darpan-backend
+        run: ./gradlew --no-daemon --console=plain getRuntime
+
+      - name: Place components (moqui-sftp + the 4 Darpan components — darpan under test + 3 integrations)
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch master https://github.com/moqui/moqui-sftp.git \
+            darpan-backend/runtime/component/moqui-sftp
+          # darpan's main code and test suite reference sibling-component entities: darpan-hotwax
+          # owns darpan.hotwax.HotWaxOmsRestSourceConfig and shopify-darpan owns
+          # darpan.shopify.ShopifyAuthConfig (the Ns* configs are canonical in darpan itself, so
+          # netsuite-darpan is a consumer placed only to assemble the full, proven platform). All
+          # three are public drpn-ai repos on `main` and part of the canonical darpan-cli
+          # REPO_MANIFEST. Without darpan-hotwax/shopify-darpan those entity definitions never load
+          # and ~24 darpan tests fail with EntityNotFoundException in their shared @BeforeEach.
+          for repo in darpan-hotwax netsuite-darpan shopify-darpan; do
+            git clone --depth 1 --branch main "https://github.com/drpn-ai/${repo}.git" \
+              "darpan-backend/runtime/component/${repo}"
+          done
+          mv component-darpan darpan-backend/runtime/component/darpan
+
+      - name: Load seed data into the embedded H2 database
+        working-directory: darpan-backend
+        run: ./gradlew --no-daemon --console=plain load
+
+      - name: Run darpan component test suite
+        working-directory: darpan-backend
+        run: ./gradlew --no-daemon --console=plain :runtime:component:darpan:test
+
+      # Coverage ratchet (MACH P1): reuses the execution data from :test — no test rerun.
+      # Floors sit ~2 points below the measured baseline (build.gradle jacoco block).
+      - name: Enforce coverage floors (Jacoco)
+        working-directory: darpan-backend
+        run: ./gradlew --no-daemon --console=plain :runtime:component:darpan:jacocoTestCoverageVerification
+
+      # Contract-drift guard (MACH P0, API management). The XML <-> committed-contract gate
+      # already runs inside :test (ApiContractGeneratorTests); this step extends the guard to
+      # the docs service catalog. The UI side is enforced by darpan-ui's own CI
+      # (src/lib/api/__tests__/contractDrift.spec.ts against its committed methods.txt copy).
+      - name: Check docs service catalog against the generated API contract
+        run: |
+          git clone --depth 1 https://github.com/drpn-ai/darpan-docs.git darpan-docs
+          cd darpan-docs && python3 scripts/check_service_catalog.py \
+            ../darpan-backend/runtime/component/darpan/docs/api-contract/methods.txt
+
+      # Contract compatibility gate (MACH P1): breaking facade changes (removed method/param/
+      # field, type change) fail PRs unless x-darpan-contract-version was consciously bumped.
+      # Additive changes always pass (additive-only deprecation policy).
+      - name: Check facade contract compatibility against PR base
+        if: github.event_name == 'pull_request'
+        working-directory: darpan-backend/runtime/component/darpan
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git cat-file -e "${BASE_SHA}:docs/api-contract/openapi.json" 2>/dev/null; then
+            git show "${BASE_SHA}:docs/api-contract/openapi.json" > /tmp/base-openapi.json
+            python3 scripts/check_contract_compat.py /tmp/base-openapi.json docs/api-contract/openapi.json
+          else
+            echo "no committed contract at PR base — first contract commit, skipping compat gate"
+          fi
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: darpan-test-reports
+          path: darpan-backend/runtime/component/darpan/build/reports/tests/test/
+          if-no-files-found: ignore

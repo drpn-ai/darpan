@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd" default-menu-title="Rule Engine" default-menu-index="1">
+
+    <subscreens default-item="RuleSetList">
+        <subscreens-item name="RuleSetList" location="component://darpan/screen/Reconciliation/RuleEngine/RuleSetList.xml"/>
+        <subscreens-item name="RuleSetDetail" location="component://darpan/screen/Reconciliation/RuleEngine/RuleSetDetail.xml"/>
+    </subscreens>
+
+    <widgets>
+        <subscreens-panel id="rule-engine-panel" type="popup"/>
+    </widgets>
+</screen>

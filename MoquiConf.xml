@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<moqui-conf xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/moqui-conf-3.xsd">
+    <webapp-list>
+        <webapp name="webroot">
+            <before-request>
+                <actions>
+                    <script><![CDATA[
+                        darpan.facade.common.TenantAccessSupport.syncUserContext(ec)
+                    ]]></script>
+                </actions>
+            </before-request>
+            <!-- Clear MDC correlation keys after every request so values never leak across
+                 pooled threads. syncUserContext (before-request) stamps the keys; this block
+                 guarantees cleanup regardless of whether the request succeeded or errored. -->
+            <after-request>
+                <actions>
+                    <script><![CDATA[
+                        darpan.facade.common.DarpanMdcSupport.clear()
+                    ]]></script>
+                </actions>
+            </after-request>
+            <after-login>
+                <actions>
+                    <script><![CDATA[
+                        darpan.facade.common.TenantAccessSupport.syncUserContext(ec)
+                    ]]></script>
+                </actions>
+            </after-login>
+        </webapp>
+    </webapp-list>
+    <screen-facade>
+        <screen location="component://webroot/screen/webroot/apps.xml">
+            <subscreens-item name="darpan" menu-title="Darpan" menu-index="50" location="component://darpan/screen/darpan.xml"/>
+        </screen>
+    </screen-facade>
+</moqui-conf>

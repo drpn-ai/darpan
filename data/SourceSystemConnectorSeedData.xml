@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SourceSystemConnector registry seed (DAR-292 / DAR-293, Phase 1).
+     OMS + SHOPIFY rows reproduce the current per-system dispatch switch BYTE-IDENTICALLY. Values
+     mirror the constants in ReconciliationSavedRunSupport / AutomationExecutionSupport:
+       - extractServiceName          <- HOTWAX_OMS_ORDERS_EXTRACT_SERVICE / SHOPIFY_ORDERS_EXTRACT_SERVICE
+       - dateFrom/ToParameterName    <- windowStart / windowEnd (defaultDate*ParameterName switch)
+       - preserveWindowInstants      <- Y only for Shopify (AutomationExecutionSupport:634)
+       - expectedSourceConfigType    <- HOTWAX_OMS_REST / SHOPIFY_AUTH (expectedSourceConfigType switch)
+       - remoteId / endpointLabel    <- HOTWAX_ORDERS_API "Orders API" / SHOPIFY_REMOTE "Admin GraphQL Orders"
+       - sendUrlTemplate             <- the ensureVirtual*OrdersRemote sendUrl templates
+       - systemAliases               <- canonicalSystemEnumId alias table
+     configIdResolverServiceName / validationServiceName are intentionally left blank: today these are
+     Groovy static methods, not Moqui services; converting + allow-listing them is a later phase.
+     NetSuite / SAPI are intentionally deferred to a later phase. -->
+<entity-facade-xml type="darpan-seed">
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_REST"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Orders API"
+            sendUrlTemplate="{baseUrl}/rest/s1/oms/orders"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"
+            systemAliases="OMS,HOTWAX,DAR_SYS_OMS"
+            preserveWindowInstants="N"
+            enabled="Y"/>
+
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="SHOPIFY"
+            extractServiceName="reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="SHOPIFY_AUTH"
+            configParameterName="shopifyAuthConfigId"
+            configEntityName="darpan.shopify.ShopifyAuthConfig"
+            remoteId="SHOPIFY_REMOTE"
+            endpointLabel="Admin GraphQL Orders"
+            sendUrlTemplate="https://{shop}.myshopify.com/admin/api/{apiVersion}/graphql.json"
+            remoteSendServiceName="facade.ShopifyFacadeServices.execute#ShopifyGraphql"
+            systemAliases="SHOPIFY,DAR_SYS_SHOPIFY"
+            preserveWindowInstants="Y"
+            enabled="Y"/>
+
+    <!-- NETSUITE has no automation extractor; this row exists so the saved-run path resolves its
+         expectedSourceConfigType (NETSUITE_AUTH) + aliases from the registry (config over code).
+         No extractServiceName / configParameterName / remote fields on purpose. -->
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="NETSUITE"
+            expectedSourceConfigType="NETSUITE_AUTH"
+            systemAliases="NETSUITE,DAR_SYS_NETSUITE"
+            preserveWindowInstants="N"
+            enabled="Y"/>
+</entity-facade-xml>

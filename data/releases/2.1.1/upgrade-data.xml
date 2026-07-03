@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Release-scoped upgrade data for Darpan 2.1.1 (security / production-readiness audit follow-up).
+
+Generated from the 2026-05-29 platform-wide audit. All records here are also present in their
+canonical source data files under runtime/component/darpan/data/ — this release archive is the
+idempotent payload that production environments apply via DARPAN_LOAD_UPGRADE_DATA.
+
+Schema-level changes (new indexes, composite unique constraints) are documented in MIGRATION.md
+in this directory; they must be applied via the operator-run DDL there because Moqui's entity
+facade auto-creates schema on fresh installs but does not ALTER existing tables.
+
+Records below:
+  - Editor-tier ArtifactAuthz + ArtifactAuthzFilter for DARPAN_FACADE_APP (audit H1.3 / H12.9).
+    SecuritySeedData defines these rows but releases/2.0.3/upgrade-data.xml and 2.1.0/upgrade-data.xml
+    only carried ADMIN+USER. Production upgrades that went through release upgrade-data without re-
+    seeding SecuritySeedData are missing editor-tier scope enforcement; running this batch closes
+    the gap and is idempotent (re-runs upsert the same rows).
+  - HotWax + Shopify EntityFilter rows + ArtifactAuthzFilter binding (audit H12.2).
+    Both entities are tenant-owned but were missing from DARPAN_ACTIVE_COMPANY_SCOPE so direct
+    entity finds returned rows across all tenants.
+-->
+<entity-facade-xml type="darpan-seed">
+
+    <!-- Editor-tier ArtifactAuthz (audit H1.3) — DARPAN_FACADE_APP, AUTHZA_ALL today (Phase B will
+         downgrade DARPAN_FACADE_APP_USER to AUTHZA_VIEW). -->
+    <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_FACADE_APP_EDITOR" userGroupId="DARPAN_COMPANY_EDITOR"
+            artifactGroupId="DARPAN_FACADE_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_FACADE_APP_TENANT_USER" userGroupId="DARPAN_TENANT_USER"
+            artifactGroupId="DARPAN_FACADE_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_FACADE_APP_TENANT_ADMIN" userGroupId="DARPAN_TENANT_ADMIN"
+            artifactGroupId="DARPAN_FACADE_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_FACADE_APP_SUPER_ADMIN" userGroupId="DARPAN_SUPER_ADMIN"
+            artifactGroupId="DARPAN_FACADE_APP" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+
+    <!-- Editor-tier ArtifactAuthzFilter bindings (audit H12.9) — apply DARPAN_ACTIVE_COMPANY_SCOPE
+         to editor-tier reads. Without these, queries by users in DARPAN_COMPANY_EDITOR /
+         DARPAN_TENANT_USER / DARPAN_TENANT_ADMIN / DARPAN_SUPER_ADMIN return rows across tenants. -->
+    <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_EDITOR"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"/>
+    <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_TENANT_USER"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"/>
+    <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_TENANT_ADMIN"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"/>
+    <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_SUPER_ADMIN"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"/>
+
+    <!-- HotWax + Shopify tenant-scope EntityFilter rows (audit H12.2). -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_HW_OMS_REST"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_SHOPIFY_AUTH"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.shopify.ShopifyAuthConfig"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+
+</entity-facade-xml>

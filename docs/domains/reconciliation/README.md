@@ -1,0 +1,27 @@
+# Reconciliation Domain
+
+## Purpose
+
+Production reconciliation flows (file ingest, current Mapping-backed source extraction, RuleSet-backed decisioning, Diff output, persistence, and run tracking).
+
+## Production Entrypoints
+
+- Route: `runtime/component/darpan/screen/Reconciliation.xml`
+- Services: `runtime/component/darpan/service/reconciliation/ReconciliationCoreServices.xml`, `ReconciliationGenericServices.xml`, `ReconciliationJsonServices.xml`, `ReconciliationMixedServices.xml`, `ReconciliationRuleEngineServices.xml`, `ReconciliationAutomationServices.xml` (SFTP polling, scheduled execution, stuck-run reaper), `ReconciliationNotificationServices.xml` (run-completed Google Chat payload)
+- Core processing/helpers: `runtime/component/darpan/src/main/groovy/darpan/reconciliation/core/ReconciliationServices.groovy`, `core/RuleSetCompareScopeAdapter.groovy`, `core/reconcileFilesByMapping.groovy`, `rule/RuleEngineSupport.groovy`, `automation/AutomationExecutionSupport.groovy`, `automation/StuckRunReaper.groovy`, `notification/TenantNotificationSupport.groovy`
+- End-to-end pipeline description: `runtime/component/darpan/docs/reconciliation/reconciliation-flow.md`
+
+## Operational Notes
+
+- Keep production flows free of sample/debug service calls.
+- The RuleSet compare-scope path is shipped and is the primary contract: object identity and file-side primary ID extraction live on RuleSet compare scopes (`ruleSetId` plus `compareScopeId`), created through `facade.ReconciliationFacadeServices.create#RuleSetRun` and executed through `reconcile#RuleSetCompareScope`. Mapping-backed runs (`reconciliationMappingId`) remain supported as a legacy bridge — the planned bulk migration/deprecation of Mapping (cutover ticket RSCUT-009, `migrate#MappingsToRuleSetScopes`) has not landed, so existing mapping-backed saved runs and legacy SFTP jobs still execute through `reconcile#FilesByMapping`.
+- User-facing RuleSet compare-scope errors and generated-output labels should prefer the compare-scope description over the raw `compareScopeId`. New generic RuleSet compare scopes use neutral `_COMPARE_SCOPE` ids, while CSV-only saved runs keep `_CSV_SCOPE`; generated ids must still stay within the stored Moqui `id` length, trimming the RuleSet portion before persistence when needed.
+- DRL rules should assume the compared object exists in both files; missing-object Diffs are produced by the base compare stage before DRL.
+- RuleSet CSV compare-scope extraction now validates the configured primary-ID column before Spark projection so file-type or header mismatches fail with a contract error that includes the available columns instead of a raw `UNRESOLVED_COLUMN` stack fragment.
+- RuleSet runs with no active rules may collapse duplicate per-side primary IDs into one representative object for missing-object base diffing and emit a processing warning; RuleSet runs with active rules still require each primary ID to map to exactly one object per file side.
+- Saved-run diff uploads now also reject obvious payload-shape mismatches before Spark staging. CSV runs block JSON and JSON Schema documents, and JSON runs block non-JSON payloads plus schema-definition uploads when the flow expects record data.
+- API-backed order saved runs must use the active tenant time zone as the requested reconciliation period. Source-system time zones may affect API parameter representation, but they must not redefine the business period being compared; Shopify `created_at` and HotWax `orderDate` fetch the same tenant-derived instants.
+- Saved-run file executions must create a durable `ReconciliationRunResult` manifest with an active status before long-running compare work starts, then update the same row with the generated artifact path and final status. Run-history surfaces depend on this create-before-poll contract.
+- For generic reconciliation text payload parameters such as `file1Text` and `file2Text`, use `allow-html="any"` in service XML. Moqui does not treat `allow-html="true"` as enabled input allowance, so literal `<` and `>` content will still be rejected during parameter validation.
+- Use `./gradlew :runtime:component:darpan:verifyOrganization --console=plain` to validate boundary rules.
+- NetSuite inventory retrieval is owned by `runtime/component/netsuite-darpan/service/reconciliation/NetSuiteInventoryServices.xml`; the Darpan component no longer exposes an inventory retrieval service surface.

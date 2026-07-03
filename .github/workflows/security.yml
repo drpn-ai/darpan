@@ -1,0 +1,200 @@
+name: Security Gate
+
+# MACH Security & Secrets P1 — three gates for the darpan Moqui component:
+#   1. Secret scanning  (gitleaks binary — free, no org license needed)
+#   2. Dependency / SCA vuln scan  (OWASP dependency-check via Gradle init script)
+#   3. Lockfile drift  — N/A (documented below)
+#
+# Gate 3 — Gradle Lockfile / Drift Enforcement:
+#   Gradle does not use a lockfile by default. Enabling dependency locking
+#   (dependencyLocking {}) in a component-only repo is high-risk: this component
+#   is assembled inside a cloned moqui-framework at CI time, so the resolved
+#   dependency graph includes framework-contributed configurations that are not
+#   visible in the component's own build.gradle. Locking would produce a lockfile
+#   that cannot be committed alongside the component without also freezing the
+#   framework version — creating a maintenance burden and fragility that outweighs
+#   the benefit. This gate is marked N/A for the backend component.
+#   TODO (P2): Re-evaluate when the component has its own standalone build or
+#   when a Gradle verification-metadata approach is feasible inside the assembled tree.
+#
+# Gate 2 — SCA approach:
+#   OWASP dependency-check is applied via a Gradle init script (--init-script) rather
+#   than by appending to build.gradle. A nested buildscript {} block inside a
+#   conditional or appended at the end of build.gradle is not evaluated in Gradle's
+#   buildscript phase, so the plugin cannot be resolved that way. The init script is
+#   written to disk in CI and passed via --init-script; it uses the plugin class FQN
+#   directly (org.owasp.dependencycheck.gradle.DependencyCheckPlugin) as required by
+#   the init-script application model. The NVD CVE database is cached via the Gradle
+#   cache action. Fail threshold: CVSS >= 7 (High/Critical).
+#
+# NVD_API_KEY — REQUIRED GitHub Actions secret:
+#   Without an NVD API key the NVD data download is rate-limited and takes ~2 hours
+#   cold (well beyond the 60-min timeout). With a key, the first run takes ~5 minutes.
+#   Cached subsequent runs are fast regardless. Provision the key at:
+#     Settings → Secrets and variables → Actions → NVD_API_KEY
+#   Request a free key at: https://nvd.nist.gov/developers/request-an-api-key
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly Sunday 03:00 UTC — catches newly-published CVEs between pushes
+    - cron: '0 3 * * 0'
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Gate 1: Secret scanning ─────────────────────────────────────────────────
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out darpan component
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download gitleaks v8.30.1 binary (pinned, MIT licensed)
+        # Using the MIT-licensed gitleaks binary directly avoids the org-license
+        # requirement of gitleaks/gitleaks-action@v2 (which errors for org-owned
+        # repos that do not have a paid Gitleaks license).
+        run: |
+          set -euo pipefail
+          GITLEAKS_VERSION="8.30.1"
+          ASSET="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          URL="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${ASSET}"
+          curl -fsSL "${URL}" -o /tmp/gitleaks.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          chmod +x /tmp/gitleaks
+
+      - name: Run gitleaks — scan full git history for secrets
+        # --source . + fetch-depth:0 means gitleaks detect scans the full commit
+        # history on this ref, not just the working tree.
+        # --redact: replaces secret values in output with REDACTED so findings are
+        # safe to read in public CI logs.
+        # --exit-code 1: fails the job if any secret is found (default behaviour).
+        # --verbose: prints per-finding details so reviewers can act on them.
+        # Add a .gitleaks.toml to the repo root to suppress confirmed false-positives;
+        # each allowlist entry must carry an inline comment explaining why it is safe.
+        run: /tmp/gitleaks detect --source . --redact --exit-code 1 --verbose
+
+  # ── Gate 2: SCA / dependency vulnerability scan ─────────────────────────────
+  sca-audit:
+    name: Dependency vulnerability scan (OWASP, CVSS ≥ 7)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out darpan component
+        uses: actions/checkout@v4
+        with:
+          path: component-darpan
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache Gradle + OWASP NVD database
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.gradle/dependency-check-data
+          key: gradle-sec-${{ runner.os }}-${{ hashFiles('component-darpan/build.gradle') }}
+          restore-keys: |
+            gradle-sec-${{ runner.os }}-
+
+      - name: Clone Moqui framework (master)
+        run: git clone --depth 1 --branch master https://github.com/moqui/moqui-framework.git darpan-backend
+
+      - name: Download Moqui runtime
+        working-directory: darpan-backend
+        run: ./gradlew --no-daemon --console=plain getRuntime
+
+      - name: Place darpan component inside the framework tree
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch master https://github.com/moqui/moqui-sftp.git \
+            darpan-backend/runtime/component/moqui-sftp
+          mv component-darpan darpan-backend/runtime/component/darpan
+
+      - name: Write OWASP dependency-check Gradle init script
+        # A Gradle init script is evaluated in the buildscript phase and can load
+        # plugins via initscript { dependencies { classpath ... } }, which is the
+        # only correct way to apply a third-party plugin at CI time without permanently
+        # modifying build.gradle. The plugin class FQN is used directly (not the string
+        # plugin id) because init scripts must reference the class, not the plugin
+        # registry entry. FQN confirmed from:
+        #   META-INF/gradle-plugins/org.owasp.dependencycheck.properties in
+        #   dependency-check-gradle-9.2.0.jar → implementation-class=org.owasp.dependencycheck.gradle.DependencyCheckPlugin
+        run: |
+          cat > /tmp/owasp-dc.init.gradle << 'INIT_SCRIPT'
+          initscript {
+              repositories {
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'org.owasp:dependency-check-gradle:9.2.0'
+              }
+          }
+
+          allprojects {
+              apply plugin: org.owasp.dependencycheck.gradle.DependencyCheckPlugin
+
+              dependencyCheck {
+                  // Fail on High (7.0+) and Critical (9.0+); Medium and below are
+                  // reported in the HTML/JSON output but do not fail the build.
+                  failBuildOnCVSS = 7
+
+                  // Produce both human-readable and machine-readable output.
+                  formats = ['HTML', 'JSON']
+
+                  outputDirectory = "${project.buildDir}/reports/dependency-check"
+
+                  // Suppress known false-positives via a committed suppressions file
+                  // (check in at .github/owasp-suppressions.xml when needed).
+                  if (new File(rootProject.projectDir, '.github/owasp-suppressions.xml').exists()) {
+                      suppressionFile = rootProject.file('.github/owasp-suppressions.xml').absolutePath
+                  }
+
+                  // Use the cached NVD data directory (populated by the cache action).
+                  // This avoids re-downloading the full NVD database on every run.
+                  data {
+                      directory = System.getProperty('user.home') + '/.gradle/dependency-check-data'
+                  }
+              }
+          }
+          INIT_SCRIPT
+
+      - name: Run OWASP dependency-check (fail on CVSS ≥ 7)
+        # NVD_API_KEY is REQUIRED: without it the NVD download is rate-limited and
+        # takes ~2 hours cold (exceeds the 60-min timeout). With a key, first run is
+        # ~5 minutes. Provision at: Settings → Secrets → NVD_API_KEY
+        # Request a free key: https://nvd.nist.gov/developers/request-an-api-key
+        working-directory: darpan-backend
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          ./gradlew --no-daemon --console=plain \
+            --init-script /tmp/owasp-dc.init.gradle \
+            :runtime:component:darpan:dependencyCheckAnalyze
+
+      - name: Upload vulnerability report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owasp-dependency-check-report
+          path: darpan-backend/runtime/component/darpan/build/reports/dependency-check/
+          if-no-files-found: ignore
+
+  # ── Gate 3: Lockfile drift ─ N/A ────────────────────────────────────────────
+  # See top-of-file comment. No check implemented; documented as intentional gap.

@@ -1,0 +1,43 @@
+package darpan.facade.reconciliation
+
+import org.junit.jupiter.api.Test
+
+import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertTrue
+
+class ReconciliationDashboardPreferenceSupportTests {
+
+    @Test
+    void pinnedPreferenceKeyFitsMoquiIdLimit() {
+        assertTrue(ReconciliationDashboardPreferenceSupport.PINNED_MAPPING_PREFERENCE_KEY.size() <= 40)
+    }
+
+    @Test
+    void parsesPinnedMappingIdsFromStoredJson() {
+        assertEquals(
+                ["Map8", "Map1"],
+                ReconciliationDashboardPreferenceSupport.parsePinnedReconciliationMappingIds('["Map8","Map1","Map8"," "]')
+        )
+    }
+
+    @Test
+    void returnsEmptyListForInvalidStoredJson() {
+        assertEquals([], ReconciliationDashboardPreferenceSupport.parsePinnedReconciliationMappingIds("not-json"))
+    }
+
+    @Test
+    void normalizesIncomingPinnedMappingIds() {
+        assertEquals(
+                ["Map8", "Map1"],
+                ReconciliationDashboardPreferenceSupport.normalizePinnedReconciliationMappingIds([" Map8 ", "", "Map1", "Map8", null])
+        )
+    }
+
+    @Test
+    void filtersPinnedMappingIdsToKnownMappings() {
+        assertEquals(
+                ["Map8", "Map1"],
+                ReconciliationDashboardPreferenceSupport.filterPinnedReconciliationMappingIds(["Map8", "Unknown", "Map1"], ["Map8", "Map2", "Map1"] as Set<String>)
+        )
+    }
+}

@@ -1,0 +1,178 @@
+[
+  {
+    "name": "eq_simple",
+    "index": 0,
+    "file1PrimaryIdExpression": "$.orders[*].order_id",
+    "file2PrimaryIdExpression": "$[*].shopify_order_id",
+    "ruleId": null,
+    "severity": "WARN",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[*].status\",\"file2FieldPath\":\"$[*].status\",\"operator\":\"=\"}",
+    "ruleText": "status = status",
+    "ruleLogic": "rule \"FIELD_COMPARISON_1\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(!java.util.Objects.equals(((Map) $m.get(\"file1\")).get(\"status\"), ((Map) $m.get(\"file2\")).get(\"status\")))\nthen\n    Object _file1Value = ((Map) $m.get(\"file1\")).get(\"status\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"status\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"status = status\",\n        _file1Value,\n        _file2Value,\n        \"WARN\",\n        \"Field comparison failed: status = status\"\n    );\nend"
+  },
+  {
+    "name": "gt_no_pre",
+    "index": 0,
+    "file1PrimaryIdExpression": "$.orders[*].order_id",
+    "file2PrimaryIdExpression": "$[*].shopify_order_id",
+    "ruleId": null,
+    "severity": "WARN",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[*].totalQuantity\",\"file2FieldPath\":\"$[*].quantity\",\"operator\":\">\"}",
+    "ruleText": "totalQuantity > quantity",
+    "ruleLogic": "rule \"FIELD_COMPARISON_1\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get(\"file1\")).get(\"totalQuantity\"), ((Map) $m.get(\"file2\")).get(\"quantity\"), \">\"))\nthen\n    Object _file1Value = ((Map) $m.get(\"file1\")).get(\"totalQuantity\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"quantity\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"totalQuantity > quantity\",\n        _file1Value,\n        _file2Value,\n        \"WARN\",\n        \"Field comparison failed: totalQuantity > quantity\"\n    );\nend"
+  },
+  {
+    "name": "neq",
+    "index": 0,
+    "file1PrimaryIdExpression": "$.orders[*].order_id",
+    "file2PrimaryIdExpression": "$[*].shopify_order_id",
+    "ruleId": null,
+    "severity": "WARN",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[*].sku\",\"file2FieldPath\":\"$[*].sku\",\"operator\":\"!=\"}",
+    "ruleText": "sku != sku",
+    "ruleLogic": "rule \"FIELD_COMPARISON_1\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(java.util.Objects.equals(((Map) $m.get(\"file1\")).get(\"sku\"), ((Map) $m.get(\"file2\")).get(\"sku\")))\nthen\n    Object _file1Value = ((Map) $m.get(\"file1\")).get(\"sku\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"sku\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"sku != sku\",\n        _file1Value,\n        _file2Value,\n        \"WARN\",\n        \"Field comparison failed: sku != sku\"\n    );\nend"
+  },
+  {
+    "name": "eqeq",
+    "index": 0,
+    "file1PrimaryIdExpression": "$.orders[*].order_id",
+    "file2PrimaryIdExpression": "$[*].shopify_order_id",
+    "ruleId": null,
+    "severity": "WARN",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[*].sku\",\"file2FieldPath\":\"$[*].sku\",\"operator\":\"==\"}",
+    "ruleText": "sku == sku",
+    "ruleLogic": "rule \"FIELD_COMPARISON_1\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(!java.util.Objects.equals(((Map) $m.get(\"file1\")).get(\"sku\"), ((Map) $m.get(\"file2\")).get(\"sku\")))\nthen\n    Object _file1Value = ((Map) $m.get(\"file1\")).get(\"sku\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"sku\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"sku == sku\",\n        _file1Value,\n        _file2Value,\n        \"WARN\",\n        \"Field comparison failed: sku == sku\"\n    );\nend"
+  },
+  {
+    "name": "gte",
+    "index": 0,
+    "file1PrimaryIdExpression": "$.orders[*].order_id",
+    "file2PrimaryIdExpression": "$[*].shopify_order_id",
+    "ruleId": null,
+    "severity": "WARN",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[*].total\",\"file2FieldPath\":\"$[*].total\",\"operator\":\">=\"}",
+    "ruleText": "total >= total",
+    "ruleLogic": "rule \"FIELD_COMPARISON_1\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get(\"file1\")).get(\"total\"), ((Map) $m.get(\"file2\")).get(\"total\"), \">=\"))\nthen\n    Object _file1Value = ((Map) $m.get(\"file1\")).get(\"total\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"total\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"total >= total\",\n        _file1Value,\n        _file2Value,\n        \"WARN\",\n        \"Field comparison failed: total >= total\"\n    );\nend"
+  },
+  {
+    "name": "lte",
+    "index": 0,
+    "file1PrimaryIdExpression": "$.orders[*].order_id",
+    "file2PrimaryIdExpression": "$[*].shopify_order_id",
+    "ruleId": null,
+    "severity": "WARN",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[*].total\",\"file2FieldPath\":\"$[*].total\",\"operator\":\"<=\"}",
+    "ruleText": "total <= total",
+    "ruleLogic": "rule \"FIELD_COMPARISON_1\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get(\"file1\")).get(\"total\"), ((Map) $m.get(\"file2\")).get(\"total\"), \"<=\"))\nthen\n    Object _file1Value = ((Map) $m.get(\"file1\")).get(\"total\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"total\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"total <= total\",\n        _file1Value,\n        _file2Value,\n        \"WARN\",\n        \"Field comparison failed: total <= total\"\n    );\nend"
+  },
+  {
+    "name": "lt",
+    "index": 0,
+    "file1PrimaryIdExpression": "$.orders[*].order_id",
+    "file2PrimaryIdExpression": "$[*].shopify_order_id",
+    "ruleId": null,
+    "severity": "WARN",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[*].total\",\"file2FieldPath\":\"$[*].total\",\"operator\":\"<\"}",
+    "ruleText": "total < total",
+    "ruleLogic": "rule \"FIELD_COMPARISON_1\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get(\"file1\")).get(\"total\"), ((Map) $m.get(\"file2\")).get(\"total\"), \"<\"))\nthen\n    Object _file1Value = ((Map) $m.get(\"file1\")).get(\"total\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"total\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"total < total\",\n        _file1Value,\n        _file2Value,\n        \"WARN\",\n        \"Field comparison failed: total < total\"\n    );\nend"
+  },
+  {
+    "name": "pre_both",
+    "index": 0,
+    "file1PrimaryIdExpression": "$.orders[*].order_id",
+    "file2PrimaryIdExpression": "$[*].shopify_order_id",
+    "ruleId": null,
+    "severity": "WARN",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[*].totalQuantity\",\"file2FieldPath\":\"$[*].quantity\",\"operator\":\">\",\"preActions\":[{\"fieldSide\":\"file1\",\"action\":\"STRING_TO_INT\"},{\"fieldSide\":\"file2\",\"action\":\"STRING_TO_NUMBER\"}]}",
+    "ruleText": "totalQuantity > quantity",
+    "ruleLogic": "rule \"FIELD_COMPARISON_1\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get(\"file1\")).get(\"totalQuantity\"), java.util.Arrays.asList(\"STRING_TO_INT\")), reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get(\"file2\")).get(\"quantity\"), java.util.Arrays.asList(\"STRING_TO_NUMBER\")), \">\"))\nthen\n    Object _file1Value = reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get(\"file1\")).get(\"totalQuantity\"), java.util.Arrays.asList(\"STRING_TO_INT\"));\n    Object _file2Value = reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get(\"file2\")).get(\"quantity\"), java.util.Arrays.asList(\"STRING_TO_NUMBER\"));\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"totalQuantity > quantity\",\n        _file1Value,\n        _file2Value,\n        \"WARN\",\n        \"Field comparison failed: totalQuantity > quantity\"\n    );\nend"
+  },
+  {
+    "name": "pre_one",
+    "index": 0,
+    "file1PrimaryIdExpression": "$.orders[*].order_id",
+    "file2PrimaryIdExpression": "$[*].shopify_order_id",
+    "ruleId": null,
+    "severity": "WARN",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[*].totalQuantity\",\"file2FieldPath\":\"$[*].quantity\",\"operator\":\"=\",\"preActions\":[{\"fieldSide\":\"file1\",\"action\":\"STRING_TO_INT\"}]}",
+    "ruleText": "totalQuantity = quantity",
+    "ruleLogic": "rule \"FIELD_COMPARISON_1\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get(\"file1\")).get(\"totalQuantity\"), java.util.Arrays.asList(\"STRING_TO_INT\")), ((Map) $m.get(\"file2\")).get(\"quantity\"), \"=\"))\nthen\n    Object _file1Value = reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get(\"file1\")).get(\"totalQuantity\"), java.util.Arrays.asList(\"STRING_TO_INT\"));\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"quantity\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"totalQuantity = quantity\",\n        _file1Value,\n        _file2Value,\n        \"WARN\",\n        \"Field comparison failed: totalQuantity = quantity\"\n    );\nend"
+  },
+  {
+    "name": "nested",
+    "index": 0,
+    "file1PrimaryIdExpression": "$.data.orders.edges[*].node.id",
+    "file2PrimaryIdExpression": "$[*].order_id",
+    "ruleId": null,
+    "severity": "WARN",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.data.orders.edges[*].node.price\",\"file2FieldPath\":\"$[*].price\",\"operator\":\"=\"}",
+    "ruleText": "price = price",
+    "ruleLogic": "rule \"FIELD_COMPARISON_1\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(!java.util.Objects.equals(((Map) ((Map) $m.get(\"file1\")).get(\"node\")).get(\"price\"), ((Map) $m.get(\"file2\")).get(\"price\")))\nthen\n    Object _file1Value = ((Map) ((Map) $m.get(\"file1\")).get(\"node\")).get(\"price\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"price\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"price = price\",\n        _file1Value,\n        _file2Value,\n        \"WARN\",\n        \"Field comparison failed: price = price\"\n    );\nend"
+  },
+  {
+    "name": "csv_flat",
+    "index": 0,
+    "file1PrimaryIdExpression": "order_id",
+    "file2PrimaryIdExpression": "order_id",
+    "ruleId": null,
+    "severity": "WARN",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"status\",\"file2FieldPath\":\"order_status\",\"operator\":\"=\"}",
+    "ruleText": "status = order_status",
+    "ruleLogic": "rule \"FIELD_COMPARISON_1\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(!java.util.Objects.equals(((Map) $m.get(\"file1\")).get(\"status\"), ((Map) $m.get(\"file2\")).get(\"order_status\")))\nthen\n    Object _file1Value = ((Map) $m.get(\"file1\")).get(\"status\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"order_status\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"status = order_status\",\n        _file1Value,\n        _file2Value,\n        \"WARN\",\n        \"Field comparison failed: status = order_status\"\n    );\nend"
+  },
+  {
+    "name": "array_index",
+    "index": 0,
+    "file1PrimaryIdExpression": "$.orders[*].order_id",
+    "file2PrimaryIdExpression": "$[*].shopify_order_id",
+    "ruleId": null,
+    "severity": "WARN",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[0].lines[2].sku\",\"file2FieldPath\":\"$[*].sku\",\"operator\":\"=\"}",
+    "ruleText": "sku = sku",
+    "ruleLogic": "rule \"FIELD_COMPARISON_1\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(!java.util.Objects.equals(((Map) ((Map) $m.get(\"file1\")).get(\"lines\")).get(\"sku\"), ((Map) $m.get(\"file2\")).get(\"sku\")))\nthen\n    Object _file1Value = ((Map) ((Map) $m.get(\"file1\")).get(\"lines\")).get(\"sku\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"sku\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"sku = sku\",\n        _file1Value,\n        _file2Value,\n        \"WARN\",\n        \"Field comparison failed: sku = sku\"\n    );\nend"
+  },
+  {
+    "name": "bracket_key",
+    "index": 0,
+    "file1PrimaryIdExpression": "$.orders[*].order_id",
+    "file2PrimaryIdExpression": "$[*].shopify_order_id",
+    "ruleId": null,
+    "severity": "WARN",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[*][\\\"weird-key\\\"]\",\"file2FieldPath\":\"$[*].normal\",\"operator\":\"=\"}",
+    "ruleText": "weird-key = normal",
+    "ruleLogic": "rule \"FIELD_COMPARISON_1\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(!java.util.Objects.equals(((Map) ((Map) $m.get(\"file1\")).get(\"orders\")).get(\"weird-key\"), ((Map) $m.get(\"file2\")).get(\"normal\")))\nthen\n    Object _file1Value = ((Map) ((Map) $m.get(\"file1\")).get(\"orders\")).get(\"weird-key\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"normal\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"weird-key = normal\",\n        _file1Value,\n        _file2Value,\n        \"WARN\",\n        \"Field comparison failed: weird-key = normal\"\n    );\nend"
+  },
+  {
+    "name": "with_ruleid",
+    "index": 0,
+    "file1PrimaryIdExpression": "$.orders[*].order_id",
+    "file2PrimaryIdExpression": "$[*].shopify_order_id",
+    "ruleId": "MY_RULE",
+    "severity": "ERROR",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[*].status\",\"file2FieldPath\":\"$[*].status\",\"operator\":\"=\"}",
+    "ruleText": "status = status",
+    "ruleLogic": "rule \"MY_RULE\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(!java.util.Objects.equals(((Map) $m.get(\"file1\")).get(\"status\"), ((Map) $m.get(\"file2\")).get(\"status\")))\nthen\n    Object _file1Value = ((Map) $m.get(\"file1\")).get(\"status\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"status\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"status = status\",\n        _file1Value,\n        _file2Value,\n        \"ERROR\",\n        \"Field comparison failed: status = status\"\n    );\nend"
+  },
+  {
+    "name": "second_index",
+    "index": 0,
+    "file1PrimaryIdExpression": "$.orders[*].order_id",
+    "file2PrimaryIdExpression": "$[*].shopify_order_id",
+    "ruleId": null,
+    "severity": "WARN",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[*].a\",\"file2FieldPath\":\"$[*].a\",\"operator\":\"=\"}",
+    "ruleText": "a = a",
+    "ruleLogic": "rule \"FIELD_COMPARISON_1\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(!java.util.Objects.equals(((Map) $m.get(\"file1\")).get(\"a\"), ((Map) $m.get(\"file2\")).get(\"a\")))\nthen\n    Object _file1Value = ((Map) $m.get(\"file1\")).get(\"a\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"a\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"a = a\",\n        _file1Value,\n        _file2Value,\n        \"WARN\",\n        \"Field comparison failed: a = a\"\n    );\nend"
+  },
+  {
+    "name": "second_index",
+    "index": 1,
+    "file1PrimaryIdExpression": "$.orders[*].order_id",
+    "file2PrimaryIdExpression": "$[*].shopify_order_id",
+    "ruleId": null,
+    "severity": "WARN",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[*].b\",\"file2FieldPath\":\"$[*].b\",\"operator\":\"=\"}",
+    "ruleText": "b = b",
+    "ruleLogic": "rule \"FIELD_COMPARISON_2\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(!java.util.Objects.equals(((Map) $m.get(\"file1\")).get(\"b\"), ((Map) $m.get(\"file2\")).get(\"b\")))\nthen\n    Object _file1Value = ((Map) $m.get(\"file1\")).get(\"b\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"b\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"b = b\",\n        _file1Value,\n        _file2Value,\n        \"WARN\",\n        \"Field comparison failed: b = b\"\n    );\nend"
+  }
+]

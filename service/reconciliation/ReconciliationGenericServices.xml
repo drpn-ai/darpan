@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="reconcile" noun="GenericFiles" type="script" transaction="ignore"
+            location="component://darpan/src/main/groovy/darpan/reconciliation/generic/reconcileGenericFiles.groovy">
+        <description>
+            Generic file reconciliation that stages uploads and routes through either the RuleSet compare-scope pipeline
+            or the legacy mapping bridge during the RuleSet cutover.
+        </description>
+        <in-parameters>
+            <parameter name="file1" type="org.apache.commons.fileupload.FileItem">
+                <description>First file to compare (CSV or JSON)</description>
+            </parameter>
+            <parameter name="file2" type="org.apache.commons.fileupload.FileItem">
+                <description>Second file to compare (CSV or JSON)</description>
+            </parameter>
+            <parameter name="file1Name">
+                <description>Optional file name override used when the caller provides text payload instead of FileItem.</description>
+            </parameter>
+            <parameter name="file1Text" allow-html="any">
+                <description>Optional UTF-8 file text payload for remote facade callers that cannot send FileItem uploads.</description>
+            </parameter>
+            <parameter name="file2Name">
+                <description>Optional file name override used when the caller provides text payload instead of FileItem.</description>
+            </parameter>
+            <parameter name="file2Text" allow-html="any">
+                <description>Optional UTF-8 file text payload for remote facade callers that cannot send FileItem uploads.</description>
+            </parameter>
+
+            <parameter name="ruleSetId">
+                <description>Preferred RuleSet input for the Generic backend cutover. When present, Generic routing uses the RuleSet compare-scope pipeline.</description>
+            </parameter>
+            <parameter name="compareScopeId">
+                <description>Optional compare-scope override. Required only when the RuleSet exposes more than one compare scope.</description>
+            </parameter>
+            <parameter name="file1SystemEnumId">
+                <description>Optional file 1 system identifier. In RuleSet mode this is used only for file-side validation; in mapping mode it remains required.</description>
+            </parameter>
+            <parameter name="file2SystemEnumId">
+                <description>Optional file 2 system identifier. In RuleSet mode this is used only for file-side validation; in mapping mode it remains required.</description>
+            </parameter>
+            <parameter name="reconciliationMappingId">
+                <description>Legacy mapping bridge input. Still supported temporarily when RuleSet inputs are not yet provided.</description>
+            </parameter>
+            <parameter name="reconciliationRunResultId">
+                <description>Optional caller-created run result manifest ID to update after reconciliation completes.</description>
+            </parameter>
+
+            <parameter name="hasHeader" type="Boolean" default-value="true">
+                <description>Whether CSV files have headers</description>
+            </parameter>
+
+            <parameter name="sparkMaster" default-value="local[*]"/>
+            <parameter name="sparkAppName" default-value="GenericReconciliation"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="file1Type">
+                <description>Detected file type: CSV or JSON</description>
+            </parameter>
+            <parameter name="file2Type">
+                <description>Detected file type: CSV or JSON</description>
+            </parameter>
+            <parameter name="reconciliationType">
+                <description>Type of reconciliation performed: CSV, JSON, or MIXED</description>
+            </parameter>
+            <parameter name="diffLocation">
+                <description>Location of generated diff file</description>
+            </parameter>
+            <parameter name="diffFileName">
+                <description>Data-manager relative path of generated diff file</description>
+            </parameter>
+            <parameter name="reconciliationRunResultId">
+                <description>Persisted reconciliation run result manifest ID for generated artifacts.</description>
+            </parameter>
+            <parameter name="differenceCount" type="Integer">
+                <description>Total number of differences found</description>
+            </parameter>
+            <parameter name="onlyInFile1Count" type="Integer">
+                <description>Count of IDs only in file 1</description>
+            </parameter>
+            <parameter name="onlyInFile2Count" type="Integer">
+                <description>Count of IDs only in file 2</description>
+            </parameter>
+            <parameter name="validationErrors" type="List"/>
+            <parameter name="processingWarnings" type="List"/>
+        </out-parameters>
+    </service>
+
+    <service verb="delete" noun="GeneratedOutputFile" transaction="ignore" authenticate="true">
+        <description>Delete one generated reconciliation output file from data-manager or the legacy generic output directory.</description>
+        <in-parameters>
+            <parameter name="filename" required="true">
+                <description>Safe generated-output filename or data-manager relative path to delete.</description>
+            </parameter>
+            <parameter name="outputLocation">
+                <description>Deprecated; generated output deletion resolves the current data-manager path first.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="deleted" type="Boolean"/>
+            <parameter name="deletedFileName"/>
+            <parameter name="statusMessage"/>
+        </out-parameters>
+        <actions>
+            <set field="deleteResult" from="darpan.facade.reconciliation.ReconciliationOutputSupport.deleteGeneratedOutputFile(ec, filename)"/>
+            <set field="deleted" from="deleteResult.deleted"/>
+            <set field="deletedFileName" from="deleteResult.deletedFileName"/>
+            <set field="statusMessage" from="deleteResult.statusMessage"/>
+        </actions>
+    </service>
+
+    <!-- This is a scheduled cleanup job (moqui.service.job.ServiceJob in ReconciliationJobSeedData.xml).
+         authenticate="false" lets the ScheduledJobRunner call it without a logged-in user; the super-admin
+         check below applies only when an authenticated user IS present (manual ops). allow-remote="false"
+         (explicit, audit M5.7 / L7) closes any inbound REST exposure to the unauthenticated branch — the
+         service is reachable only from internal Groovy/XML and the scheduler. -->
+    <service verb="purge" noun="GeneratedOutputFiles" transaction="ignore" authenticate="false" allow-remote="false">
+        <description>Purge generated reconciliation result files older than the configured retention period.</description>
+        <in-parameters>
+            <parameter name="retentionDays" type="Integer" default-value="15">
+                <description>Delete files whose last-modified timestamp is retentionDays or older.</description>
+            </parameter>
+            <parameter name="outputLocation">
+                <description>Optional output directory override. Defaults to data-manager reconciliation run results.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="retentionDays" type="Integer"/>
+            <parameter name="outputLocation"/>
+            <parameter name="cutoffTimestamp" type="Long"/>
+            <parameter name="scannedCount" type="Integer"/>
+            <parameter name="deletedCount" type="Integer"/>
+            <parameter name="retainedCount" type="Integer"/>
+            <parameter name="failedFiles">
+                <parameter name="fileName"/>
+                <parameter name="errorMessage"/>
+            </parameter>
+            <parameter name="statusMessage"/>
+        </out-parameters>
+        <actions>
+            <set field="currentUserId" from="darpan.facade.common.TenantAccessSupport.currentUserId(ec)"/>
+            <if condition="currentUserId &amp;&amp; currentUserId != '_NA_'">
+                <set field="ignoreSuperAdminCheck" from="darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec, 'Only super-admin users may purge reconciliation outputs.')"/>
+            </if>
+
+            <set field="resolvedRetentionDays" from="retentionDays == null ? 15 : ((Number) retentionDays).intValue()"/>
+            <if condition="!ec.message.hasError() &amp;&amp; resolvedRetentionDays &lt; 0">
+                <return error="true" message="retentionDays must be 0 or greater"/>
+            </if>
+
+            <set field="outputLocationValue" from="darpan.common.ValueSupport.normalize(outputLocation)"/>
+            <set field="usingDefaultOutputLocation" from="!outputLocationValue"/>
+            <set field="resolvedOutputLocation" from="usingDefaultOutputLocation ? darpan.facade.common.DataManagerSupport.resolveReconciliationRunsLocation(ec) : darpan.facade.common.TenantAccessSupport.resolveScopedRuntimeLocation(ec, outputLocationValue)"/>
+
+            <if condition="ec.message.hasError()">
+                <set field="retentionDays" from="resolvedRetentionDays"/>
+                <set field="outputLocation" from="resolvedOutputLocation"/>
+                <set field="cutoffTimestamp" from="null"/>
+                <set field="scannedCount" from="0"/>
+                <set field="deletedCount" from="0"/>
+                <set field="retainedCount" from="0"/>
+                <set field="failedFiles" from="[]"/>
+                <set field="statusMessage" from="'Purge skipped.'"/>
+            </if>
+
+            <if condition="!ec.message.hasError()">
+                <set field="purgeResult" from="darpan.facade.reconciliation.ReconciliationOutputSupport.purgeGeneratedOutputFiles(ec, resolvedRetentionDays, resolvedOutputLocation, usingDefaultOutputLocation)"/>
+                <set field="retentionDays" from="purgeResult.retentionDays"/>
+                <set field="outputLocation" from="purgeResult.outputLocation"/>
+                <set field="cutoffTimestamp" from="purgeResult.cutoffTimestamp"/>
+                <set field="scannedCount" from="purgeResult.scannedCount"/>
+                <set field="deletedCount" from="purgeResult.deletedCount"/>
+                <set field="retainedCount" from="purgeResult.retainedCount"/>
+                <set field="failedFiles" from="purgeResult.failedFiles"/>
+                <set field="statusMessage" from="purgeResult.statusMessage"/>
+            </if>
+        </actions>
+    </service>
+    <!-- MACH P2 (security, crypt-key rotation runbook step 4): one-shot bulk re-encryption of all
+         encrypt="true" fields under the ACTIVE entity_ds_crypt_pass. Run while the old key is still
+         wired via decrypt-alt (entity_ds_crypt_pass_old); afterwards the old key can be dropped.
+         Same exposure stance as purge#GeneratedOutputFiles: internal-only + super-admin when a user
+         is present. See docs/crypt-key-rotation.md. -->
+    <service verb="rotate" noun="EncryptedFieldValues" authenticate="false" allow-remote="false">
+        <description>Re-encrypt every non-null encrypt="true" field value across Darpan entities with the
+            active crypt key (crypt-key rotation runbook step 4). Idempotent; safe to re-run.</description>
+        <out-parameters>
+            <parameter name="reencryptedByEntity" type="Map">
+                <description>Entity name to re-encrypted row count.</description>
+            </parameter>
+            <parameter name="totalRows" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="currentUserId" from="darpan.facade.common.TenantAccessSupport.currentUserId(ec)"/>
+            <if condition="currentUserId &amp;&amp; currentUserId != '_NA_'">
+                <set field="ignoreSuperAdminCheck" from="darpan.facade.common.TenantAccessSupport.requireSuperAdmin(ec, 'Only super-admin users may run crypt-key rotation.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="reencryptedByEntity" from="darpan.common.CryptRotationSupport.reencryptAll(ec)"/>
+                <set field="totalRows" from="(reencryptedByEntity.values().sum() ?: 0) as int"/>
+                <message>Re-encrypted ${totalRows} rows across ${reencryptedByEntity.size()} entities.</message>
+            </if>
+        </actions>
+    </service>
+
+</services>

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entity-facade-xml type="darpan-seed">
+    <moqui.service.job.ServiceJob
+            jobName="purge_ReconciliationGeneratedFiles_daily"
+            description="Purge generated reconciliation output files older than retention policy."
+            serviceName="reconciliation.ReconciliationGenericServices.purge#GeneratedOutputFiles"
+            cronExpression="0 0 2 * * ?"
+            paused="N"/>
+
+    <moqui.service.job.ServiceJobParameter
+            jobName="purge_ReconciliationGeneratedFiles_daily"
+            parameterName="retentionDays"
+            parameterValue="15"/>
+
+    <moqui.service.job.ServiceJob
+            jobName="scan_ReconciliationAutomations_5m"
+            description="Scan due reconciliation automations and execute scheduled windows."
+            serviceName="reconciliation.ReconciliationAutomationServices.scan#DueAutomations"
+            cronExpression="0 0/5 * * * ?"
+            paused="N"/>
+
+    <moqui.service.job.ServiceJobParameter
+            jobName="scan_ReconciliationAutomations_5m"
+            parameterName="limit"
+            parameterValue="100"/>
+
+    <!-- Audit H2.5 / H3.3: stuck-RUNNING reaper. Every 10 minutes, flip stale RUNNING/PENDING
+         reconciliation rows to FAILED so the UI stops blocking re-triggers and the scanner stops
+         skipping those windows. Threshold: 120 minutes since the last update. -->
+    <moqui.service.job.ServiceJob
+            jobName="sweep_StuckReconciliationRuns_10m"
+            description="Reap reconciliation runs / automation executions wedged in RUNNING after crash."
+            serviceName="reconciliation.ReconciliationAutomationServices.sweep#StuckReconciliationRuns"
+            cronExpression="0 0/10 * * * ?"
+            paused="N"/>
+
+    <moqui.service.job.ServiceJobParameter
+            jobName="sweep_StuckReconciliationRuns_10m"
+            parameterName="staleMinutes"
+            parameterValue="120"/>
+
+    <!-- MACH P1: backfill denormalized tenant stamps on Rule children; idempotent no-op after
+         the first pass (NULL-stamp query walks the tenant index and finds nothing). -->
+    <moqui.service.job.ServiceJob
+            jobName="sweep_RuleChildTenantStamps_hourly"
+            description="Backfill companyUserGroupId on Rule/RuleSetCompareScope/RuleSetCompareSource from the parent RuleSet."
+            serviceName="reconciliation.ReconciliationRuleEngineServices.sweep#RuleChildTenantStamps"
+            cronExpression="0 15 * * * ?"
+            paused="N"/>
+</entity-facade-xml>

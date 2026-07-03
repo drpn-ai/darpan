@@ -1,0 +1,422 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="list" noun="JsonSchemas" authz-action="view" allow-remote="true" authenticate="true">
+        <description>List active JSON schemas with pagination for darpan-ui browse page.</description>
+        <in-parameters>
+            <parameter name="query"/>
+            <parameter name="pageIndex" type="Integer" default-value="0"/>
+            <parameter name="pageSize" type="Integer" default-value="20"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="pagination" type="Map">
+                <parameter name="pageIndex" type="Integer"/>
+                <parameter name="pageSize" type="Integer"/>
+                <parameter name="totalCount" type="Integer"/>
+                <parameter name="pageCount" type="Integer"/>
+            </parameter>
+            <parameter name="schemas" type="List">
+                <parameter name="jsonSchemaId"/>
+                <parameter name="schemaName"/>
+                <parameter name="description"/>
+                <parameter name="systemEnumId"/>
+                <parameter name="systemLabel"/>
+                <parameter name="companyUserGroupId"/>
+                <parameter name="companyLabel"/>
+                <parameter name="createdByUserId"/>
+                <parameter name="statusId"/>
+                <parameter name="createdDate" type="Timestamp"/>
+                <parameter name="lastUpdatedStamp" type="Timestamp"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="pageIndexSafe" from="Math.max(0, ((pageIndex != null ? pageIndex : 0) as Integer))"/>
+            <set field="pageSizeSafe" from="Math.max(1, Math.min(200, ((pageSize != null ? pageSize : 20) as Integer)))"/>
+            <set field="searchLower" from="((query)?.toString()?.trim())?.toLowerCase()"/>
+            <set field="activeTenantUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="schemas" from="[]"/>
+            <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
+            <set field="ignoreTableEnsure" from="jsonschema.common.JsonSchemaUtil.ensureJsonSchemaTable(ec)"/>
+            <set field="schemaFinder" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('statusId', 'Active').orderBy('-lastUpdatedStamp').useCache(false)"/>
+            <set field="rows" from="(activeTenantUserGroupId ? schemaFinder.condition('companyUserGroupId', activeTenantUserGroupId).list() : []).collect { item -> [jsonSchemaId: item.jsonSchemaId, schemaName: item.schemaName, description: item.description, systemEnumId: ((item.systemEnumId)?.toString()?.trim()), systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, item.systemEnumId, null, true), companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, item.companyUserGroupId), createdByUserId: item.createdByUserId, statusId: item.statusId, createdDate: item.createdDate, lastUpdatedStamp: item.lastUpdatedStamp] }"/>
+            <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.schemaName, row.description].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
+            <set field="totalCount" from="filteredRows.size()"/>
+            <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>
+            <set field="toIndex" from="Math.min(fromIndex + pageSizeSafe, totalCount)"/>
+            <set field="schemas" from="filteredRows.subList(fromIndex, toIndex)"/>
+            <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: totalCount, pageCount: Math.max(1, Math.ceil(totalCount / (double) pageSizeSafe) as int)]"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="JsonSchema" authz-action="view" allow-remote="true" authenticate="true">
+        <description>Get a single JSON schema including schemaText.</description>
+        <in-parameters>
+            <parameter name="jsonSchemaId"/>
+            <parameter name="schemaName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="schemaData" type="Map">
+                <parameter name="jsonSchemaId"/>
+                <parameter name="schemaName"/>
+                <parameter name="description"/>
+                <parameter name="systemEnumId"/>
+                <parameter name="systemLabel"/>
+                <parameter name="ownerUserId"/>
+                <parameter name="companyUserGroupId"/>
+                <parameter name="createdByUserId"/>
+                <parameter name="schemaText" allow-html="any"/>
+                <parameter name="statusId"/>
+                <parameter name="createdDate" type="Timestamp"/>
+                <parameter name="lastUpdatedStamp" type="Timestamp"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="jsonSchemaIdValue" from="((jsonSchemaId)?.toString()?.trim())"/>
+            <set field="schemaNameValue" from="((schemaName)?.toString()?.trim())"/>
+            <set field="ignoreTableEnsure" from="jsonschema.common.JsonSchemaUtil.ensureJsonSchemaTable(ec)"/>
+            <if condition="!jsonSchemaIdValue &amp;&amp; !schemaNameValue">
+                <message error="true">jsonSchemaId or schemaName is required</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; jsonSchemaIdValue">
+                <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', jsonSchemaIdValue).useCache(false).one()"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; !schema &amp;&amp; schemaNameValue">
+                <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active tenant.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="systemEnumIdValue" from="((schema.systemEnumId)?.toString()?.trim())"/>
+                <set field="schemaData" from="[jsonSchemaId: schema.jsonSchemaId, schemaName: schema.schemaName, description: schema.description, systemEnumId: systemEnumIdValue, systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, systemEnumIdValue, null, true), ownerUserId: schema.ownerUserId, companyUserGroupId: schema.companyUserGroupId, createdByUserId: schema.createdByUserId, schemaText: schema.schemaText, statusId: schema.statusId, createdDate: schema.createdDate, lastUpdatedStamp: schema.lastUpdatedStamp]"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="JsonSchemaText" allow-remote="true" authenticate="true">
+        <description>Save schema text directly from darpan-ui (no backend screen transition dependency).</description>
+        <in-parameters>
+            <parameter name="jsonSchemaId"/>
+            <parameter name="schemaName"/>
+            <parameter name="description"/>
+            <parameter name="systemEnumId"/>
+            <parameter name="schemaText" required="true" allow-html="any"/>
+            <parameter name="overwrite" type="Boolean" default-value="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="savedSchema" type="Map">
+                <parameter name="jsonSchemaId"/>
+                <parameter name="schemaName"/>
+                <parameter name="description"/>
+                <parameter name="systemEnumId"/>
+                <parameter name="systemLabel"/>
+                <parameter name="ownerUserId"/>
+                <parameter name="companyUserGroupId"/>
+                <parameter name="createdByUserId"/>
+                <parameter name="statusId"/>
+                <parameter name="lastUpdatedStamp" type="Timestamp"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="schemaNameValue" from="((schemaName)?.toString()?.trim())"/>
+            <set field="schemaTextValue" from="((schemaText)?.toString()?.trim())"/>
+            <set field="descriptionValue" from="((description)?.toString()?.trim())"/>
+            <set field="schemaIdValue" from="((jsonSchemaId)?.toString()?.trim())"/>
+            <set field="requestedSystemEnumIdValue" from="((systemEnumId)?.toString()?.trim())"/>
+            <set field="displayDescriptionValue" from="descriptionValue ?: schemaNameValue"/>
+            <set field="overwriteMode" from="overwrite != null ? overwrite : false"/>
+            <set field="hasSystemEnumIdInput" from="context.containsKey('systemEnumId')"/>
+            <set field="systemEnumIdValue" from="hasSystemEnumIdInput ? requestedSystemEnumIdValue : null"/>
+            <set field="jsonValidationError" from="jsonschema.common.JsonSchemaUtil.validateJsonText(schemaTextValue, 'schemaText')"/>
+            <set field="ignoreTableEnsure" from="jsonschema.common.JsonSchemaUtil.ensureJsonSchemaTable(ec)"/>
+            <!-- Security (HIGH gap, reworked 2026-06-30): cap schemaText size. The fieldList path
+                 (save#RefinedSchema) already caps leaf-field count, but save#JsonSchemaText persists
+                 arbitrary schemaText with only a JSON-validity check, so a caller can POST a multi-MB
+                 blob that is read back and deserialized on every later reconciliation run (GC pressure /
+                 OOM on the shared JVM). 5 MB is far above any legitimate JSON schema; tune via the
+                 darpan.jsonschema.maxSchemaTextBytes resource property if a real schema needs more. -->
+            <set field="__schemaTextBytes" from="(schemaTextValue ?: '').getBytes('UTF-8').length"/>
+            <set field="__maxSchemaTextBytesProp" from="ec.resource.properties.get('darpan.jsonschema.maxSchemaTextBytes')?.toString()?.trim()"/>
+            <set field="__maxSchemaTextBytes" from="(__maxSchemaTextBytesProp &amp;&amp; __maxSchemaTextBytesProp.isLong()) ? Long.parseLong(__maxSchemaTextBytesProp) : (5L * 1024L * 1024L)"/>
+            <if condition="!schemaIdValue &amp;&amp; !schemaNameValue">
+                <message error="true">schemaName is required when jsonSchemaId is not provided</message>
+            </if>
+            <if condition="jsonValidationError">
+                <message error="true">${jsonValidationError}</message>
+            </if>
+            <if condition="__schemaTextBytes &gt; __maxSchemaTextBytes">
+                <message error="true">schemaText exceeds the maximum of ${__maxSchemaTextBytes &gt;&gt; 20} MB (received ${__schemaTextBytes &gt;&gt; 20} MB).</message>
+            </if>
+            <if condition="hasSystemEnumIdInput &amp;&amp; requestedSystemEnumIdValue &amp;&amp; !jsonschema.common.JsonSchemaUtil.findSystemEnum(ec, requestedSystemEnumIdValue, false)">
+                <message error="true">systemEnumId '${requestedSystemEnumIdValue}' is not a valid reconciliation system.</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; schemaIdValue">
+                <set field="existingSchema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schemaIdValue).useCache(false).one()"/>
+                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, existingSchema, &quot;Schema not found for ID '${schemaIdValue}'&quot;, 'Schema is not available in your active tenant.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for schema changes.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="resolvedName" from="existingSchema ? (schemaNameValue ?: existingSchema.schemaName) : jsonschema.common.JsonSchemaUtil.generateUniqueSchemaName(ec, schemaNameValue, overwriteMode)"/>
+                <if condition="existingSchema &amp;&amp; resolvedName != existingSchema.schemaName">
+                    <set field="duplicateSchema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', resolvedName).useCache(false).one()"/>
+                    <if condition="duplicateSchema &amp;&amp; duplicateSchema.jsonSchemaId != existingSchema.jsonSchemaId">
+                        <message error="true">Schema name '${resolvedName}' already exists</message>
+                    </if>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; existingSchema">
+                <set field="ignoreSchemaName" from="existingSchema.set('schemaName', resolvedName)"/>
+                <set field="ignoreSchemaText" from="existingSchema.set('schemaText', schemaTextValue)"/>
+                <if condition="description != null">
+                    <set field="ignoreDescription" from="existingSchema.set('description', descriptionValue)"/>
+                </if>
+                <if condition="hasSystemEnumIdInput">
+                    <set field="ignoreSystemEnum" from="existingSchema.set('systemEnumId', systemEnumIdValue)"/>
+                </if>
+                <if condition="!existingSchema.statusId">
+                    <set field="ignoreStatusId" from="existingSchema.set('statusId', 'Active')"/>
+                </if>
+                <set field="ignoreLastUpdated" from="existingSchema.set('lastUpdatedStamp', ec.user.nowTimestamp)"/>
+                <set field="ignoreSchemaUpdate" from="existingSchema.update()"/>
+                <set field="savedSchemaEntity" from="existingSchema"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; !existingSchema">
+                <set field="newSchemaMap" from="[schemaName: resolvedName, schemaText: schemaTextValue, description: displayDescriptionValue, systemEnumId: systemEnumIdValue, statusId: 'Active', createdDate: ec.user.nowTimestamp, lastUpdatedStamp: ec.user.nowTimestamp]"/>
+                <set field="ignoreCompanyAssignment" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(newSchemaMap, ec)"/>
+                <if condition="!ec.message.hasError()">
+                    <service-call name="create#darpan.reconciliation.JsonSchema" in-map="newSchemaMap" out-map="createSchemaResult"/>
+                    <set field="savedSchemaEntity" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', createSchemaResult.jsonSchemaId).useCache(false).one()"/>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="schemaDataManagerLocation" from="jsonschema.common.JsonSchemaUtil.persistSchemaText(ec, savedSchemaEntity?.schemaName, savedSchemaEntity?.schemaText)"/>
+                <set field="savedSystemEnumId" from="((savedSchemaEntity?.systemEnumId)?.toString()?.trim())"/>
+                <set field="savedSchema" from="[jsonSchemaId: savedSchemaEntity?.jsonSchemaId, schemaName: savedSchemaEntity?.schemaName, description: savedSchemaEntity?.description, systemEnumId: savedSystemEnumId, systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, savedSystemEnumId, null, true), ownerUserId: savedSchemaEntity?.ownerUserId, companyUserGroupId: savedSchemaEntity?.companyUserGroupId, createdByUserId: savedSchemaEntity?.createdByUserId, statusId: savedSchemaEntity?.statusId, lastUpdatedStamp: savedSchemaEntity?.lastUpdatedStamp]"/>
+                <message>Saved schema ${savedSchema.schemaName}.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="infer" noun="JsonSchemaFromText" authz-action="view" allow-remote="true" authenticate="true">
+        <description>Infer schema from JSON text and return flattened editor field rows.</description>
+        <in-parameters>
+            <parameter name="jsonText" required="true" allow-html="any"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="jsonSchemaString" allow-html="any"/>
+            <parameter name="fieldList" type="List"><parameter name="fieldPath"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="schemaResult" from="darpan.facade.jsonschema.JsonSchemaFacadeSupport.inferJsonSchemaFromText(ec, jsonText)"/>
+            <set field="ok" from="schemaResult.ok"/>
+            <set field="messages" from="schemaResult.messages"/>
+            <set field="errors" from="schemaResult.errors"/>
+            <set field="jsonSchemaString" from="schemaResult.jsonSchemaString"/>
+            <set field="fieldList" from="schemaResult.fieldList"/>
+        </actions>
+    </service>
+
+    <service verb="validate" noun="JsonTextAgainstSchema" authz-action="view" allow-remote="true" authenticate="true">
+        <description>Validate JSON text against a saved schema.</description>
+        <in-parameters>
+            <parameter name="jsonText" required="true" allow-html="any"/>
+            <parameter name="jsonSchemaId"/>
+            <parameter name="schemaName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="valid" type="Boolean"/>
+            <parameter name="errorCount" type="Integer"/>
+            <parameter name="errorMessages" type="List"><parameter name="errorMessage"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="schemaResult" from="darpan.facade.jsonschema.JsonSchemaFacadeSupport.validateJsonTextAgainstSchema(ec, jsonText, jsonSchemaId, schemaName)"/>
+            <set field="ok" from="schemaResult.ok"/>
+            <set field="messages" from="schemaResult.messages"/>
+            <set field="errors" from="schemaResult.errors"/>
+            <set field="valid" from="schemaResult.valid"/>
+            <set field="errorCount" from="schemaResult.errorCount"/>
+            <set field="errorMessages" from="schemaResult.errorMessages"/>
+        </actions>
+    </service>
+
+    <service verb="flatten" noun="JsonSchema" authz-action="view" allow-remote="true" authenticate="true">
+        <description>Flatten a saved schema to editor field rows.</description>
+        <in-parameters>
+            <parameter name="jsonSchemaId"/>
+            <parameter name="schemaName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="jsonSchemaString" allow-html="any"/>
+            <parameter name="fieldList" type="List"><parameter name="fieldPath"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="jsonSchemaIdValue" from="((jsonSchemaId)?.toString()?.trim())"/>
+            <set field="schemaNameValue" from="((schemaName)?.toString()?.trim())"/>
+            <if condition="!jsonSchemaIdValue &amp;&amp; !schemaNameValue">
+                <message error="true">jsonSchemaId or schemaName is required</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; jsonSchemaIdValue">
+                <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', jsonSchemaIdValue).useCache(false).one()"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; !schema &amp;&amp; schemaNameValue">
+                <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active tenant.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <service-call name="jsonschema.JsonSchemaServices.flatten#JsonSchema"
+                        in-map="[jsonSchemaId: schema?.jsonSchemaId, schemaName: schema?.schemaName]" out-map="flattenResult"/>
+                <set field="fieldList" from="flattenResult.fieldList ?: []"/>
+                <set field="jsonSchemaString" from="flattenResult.jsonSchemaString"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="RefinedSchema" allow-remote="true" authenticate="true">
+        <description>Save refined schema field rows from editor in darpan-ui.</description>
+        <in-parameters>
+            <parameter name="jsonSchemaId"/>
+            <parameter name="schemaName"/>
+            <parameter name="description"/>
+            <parameter name="systemEnumId"/>
+            <parameter name="fieldList" type="List" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="savedSchema" type="Map">
+                <parameter name="jsonSchemaId"/>
+                <parameter name="schemaName"/>
+                <parameter name="filename"/>
+                <parameter name="systemEnumId"/>
+                <parameter name="systemLabel"/>
+                <parameter name="companyUserGroupId"/>
+                <parameter name="createdByUserId"/>
+                <parameter name="lastUpdatedStamp" type="Timestamp"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="schemaIdValue" from="((jsonSchemaId)?.toString()?.trim())"/>
+            <set field="schemaNameValue" from="((schemaName)?.toString()?.trim())"/>
+            <set field="descriptionValue" from="description != null ? ((description)?.toString()?.trim()) : null"/>
+            <set field="requestedSystemEnumIdValue" from="systemEnumId != null ? ((systemEnumId)?.toString()?.trim()) : null"/>
+            <set field="ignoreTableEnsure" from="jsonschema.common.JsonSchemaUtil.ensureJsonSchemaTable(ec)"/>
+            <if condition="!(fieldList instanceof Collection) || ((Collection) fieldList).isEmpty()">
+                <message error="true">fieldList is required and cannot be empty</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; schemaIdValue">
+                <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schemaIdValue).useCache(false).one()"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; !schema &amp;&amp; schemaNameValue">
+                <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; (schemaIdValue || schemaNameValue)">
+                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active tenant.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for schema changes.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <service-call name="jsonschema.JsonSchemaServices.save#RefinedSchema"
+                        in-map="[jsonSchemaId: schemaIdValue, schemaName: schemaNameValue, description: descriptionValue, systemEnumId: requestedSystemEnumIdValue, fieldList: fieldList]" out-map="saveResult"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="savedSchemaEntity" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', saveResult.jsonSchemaId).useCache(false).one()"/>
+                <if condition="savedSchemaEntity != null &amp;&amp; !savedSchemaEntity.companyUserGroupId">
+                    <set field="ignoreCompanyAssignment" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(savedSchemaEntity, ec)"/>
+                    <if condition="!ec.message.hasError()">
+                        <set field="ignoreSavedUpdate" from="savedSchemaEntity.update()"/>
+                    </if>
+                </if>
+                <set field="savedSystemEnumId" from="((savedSchemaEntity?.systemEnumId)?.toString()?.trim())"/>
+                <set field="savedSchema" from="[jsonSchemaId: saveResult.jsonSchemaId, schemaName: saveResult.schemaName, filename: saveResult.filename, systemEnumId: savedSystemEnumId, systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, savedSystemEnumId, null, true), companyUserGroupId: savedSchemaEntity?.companyUserGroupId, createdByUserId: savedSchemaEntity?.createdByUserId, lastUpdatedStamp: savedSchemaEntity?.lastUpdatedStamp]"/>
+                <message>Saved refined schema ${saveResult.schemaName}.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="delete" noun="JsonSchema" allow-remote="true" authenticate="true">
+        <description>Delete a saved JSON schema by id or schemaName.</description>
+        <in-parameters>
+            <parameter name="jsonSchemaId"/>
+            <parameter name="schemaName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="deleted" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="jsonSchemaIdValue" from="((jsonSchemaId)?.toString()?.trim())"/>
+            <set field="schemaNameValue" from="((schemaName)?.toString()?.trim())"/>
+            <if condition="!jsonSchemaIdValue &amp;&amp; !schemaNameValue">
+                <message error="true">jsonSchemaId or schemaName is required</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; jsonSchemaIdValue">
+                <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', jsonSchemaIdValue).useCache(false).one()"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; !schema &amp;&amp; schemaNameValue">
+                <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active tenant.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for schema changes.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <service-call name="jsonschema.JsonSchemaServices.delete#JsonSchema"
+                        in-map="[jsonSchemaId: schema?.jsonSchemaId, schemaName: schema?.schemaName]" out-map="deleteResult"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="deleted" from="true"/>
+                <message>Schema deleted.</message>
+            </if>
+            <if condition="ec.message.hasError()">
+                <set field="deleted" from="false"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+</services>

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd" include-child-content="true" menu-image="fa fa-exchange" menu-image-type="icon" default-menu-title="Reconciliation" require-authentication="true">
+        <subscreens default-item="GenericReconciliation">
+                <conditional-default item="GenericReconciliation" condition="true"/>
+                <subscreens-item name="GenericReconciliation" menu-title="File Reconciliation" location="component://darpan/screen/Reconciliation/GenericReconciliation.xml"/>
+                <subscreens-item name="SftpAutomation" menu-title="SFTP Automation" location="component://darpan/screen/Reconciliation/Automation/SftpAutomation.xml"/>
+                <subscreens-item name="JsonSchemaManager" menu-title="JSON Schemas" location="component://darpan/screen/Reconciliation/JsonSchema/JsonSchemaManager.xml"/>
+                <subscreens-item name="MappingSetup" menu-title="Mappings" location="component://darpan/screen/Reconciliation/Mapping/MappingSetup.xml"/>
+                <subscreens-item name="RuleEngine" menu-title="Rule Engine" location="component://darpan/screen/Reconciliation/RuleEngine/RuleSets.xml"/>
+                <subscreens-item name="Settings" menu-include="false" location="component://darpan/screen/Settings.xml"/>
+        </subscreens>
+        <pre-actions>
+                <script><![CDATA[
+                    if (!darpan.facade.common.TenantAccessSupport.isSuperAdmin(ec)) {
+                        if (ec.web != null) {
+                            // Denial strategy: write a 403 response body directly and then suppress the
+                            // Moqui render pipeline via sri.dontDoRender = true.  A redirect (sendRedirect)
+                            // would emit HTTP 302 and silently override the 403 we just set, so we must
+                            // write inline.  Moqui exposes no public stopRender() API, so we write the
+                            // framework field directly — FORWARD-RISK: if the render path ever becomes a
+                            // Groovy sandbox or makes ScreenRenderImpl fields private, this will break
+                            // silently at runtime rather than compile time; revisit when upgrading
+                            // moqui-framework past the current pinned version.
+                            ec.web.response.setStatus(403)
+                            ec.web.response.setContentType("text/html")
+                            ec.web.response.setCharacterEncoding("UTF-8")
+                            ec.web.response.writer.write("""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Access Denied</title>
+<link rel="stylesheet" href="/apps/darpan/theme-library/css/tokens.css">
+<link rel="stylesheet" href="/apps/darpan/theme-library/css/components.css">
+</head><body class="dt-shell"><div class="dt-container">
+<div class="error-state" role="alert"><h3 class="error-state__title">super-admin access required</h3>
+<p class="error-state__msg">these administration screens are limited to super-admin users — head back to the app to keep working</p>
+</div></div></body></html>""")
+                            ec.web.response.writer.flush()
+                        }
+                        sri.dontDoRender = true
+                    }
+                ]]></script>
+        </pre-actions>
+        <widgets>
+                <subscreens-panel id="reconciliation-app" type="popup"/>
+        </widgets>
+</screen>

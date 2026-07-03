@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Release-scoped upgrade data for Darpan 2.1.2 (source connector registry — DAR-292).
+
+All records here are also present in their canonical source data file
+runtime/component/darpan/data/SourceSystemConnectorSeedData.xml — this release archive is the
+idempotent payload that production environments apply via DARPAN_LOAD_UPGRADE_DATA.
+
+Why existing deployments need this batch:
+  DAR-294 (Phase 2) routes the automation source-dispatch path through SourceSystemConnector rows
+  instead of hardcoded OMS/SHOPIFY switches. Fresh installs auto-create the SourceSystemConnector
+  table and load these rows via the darpan-seed data set; EXISTING deployments that upgrade via
+  release upgrade-data must apply this batch or scheduled OMS/SHOPIFY extraction will fail to resolve
+  an extract service. Re-runs upsert the same rows (idempotent). The SourceSystemConnector table is a
+  new entity, so Moqui's entity facade creates it on upgrade (no ALTER of an existing table).
+
+Records below:
+  - OMS + SHOPIFY SourceSystemConnector rows, byte-identical to the pre-registry dispatch switch.
+-->
+<entity-facade-xml type="darpan-seed">
+
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_REST"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Orders API"
+            sendUrlTemplate="{baseUrl}/rest/s1/oms/orders"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"
+            systemAliases="OMS,HOTWAX,DAR_SYS_OMS"
+            preserveWindowInstants="N"
+            enabled="Y"/>
+
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="SHOPIFY"
+            extractServiceName="reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="SHOPIFY_AUTH"
+            configParameterName="shopifyAuthConfigId"
+            configEntityName="darpan.shopify.ShopifyAuthConfig"
+            remoteId="SHOPIFY_REMOTE"
+            endpointLabel="Admin GraphQL Orders"
+            sendUrlTemplate="https://{shop}.myshopify.com/admin/api/{apiVersion}/graphql.json"
+            remoteSendServiceName="facade.ShopifyFacadeServices.execute#ShopifyGraphql"
+            systemAliases="SHOPIFY,DAR_SYS_SHOPIFY"
+            preserveWindowInstants="Y"
+            enabled="Y"/>
+
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="NETSUITE"
+            expectedSourceConfigType="NETSUITE_AUTH"
+            systemAliases="NETSUITE,DAR_SYS_NETSUITE"
+            preserveWindowInstants="N"
+            enabled="Y"/>
+
+    <!-- DAR-300: dead-letter status for automation executions that exhaust transient-failure retries. -->
+    <moqui.basic.Enumeration enumId="AUT_STAT_DEAD_LETTER"
+            enumTypeId="AutomationExecStatus"
+            enumCode="DEAD_LETTER"
+            description="Dead-lettered after exhausting transient-failure retries"
+            sequenceNum="7"/>
+
+
+    <!-- MACH P1 (denormalized tenant stamps on Rule children): tenant-scope EntityFilters for the
+         three child entities + the hourly backfill sweep that stamps pre-existing rows from the
+         parent RuleSet. Columns are new (Moqui adds them on upgrade); rows below are idempotent
+         mirrors of data/SecuritySeedData.xml and data/ReconciliationJobSeedData.xml. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULE"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.rule.Rule"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULE_SCOPE"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.rule.RuleSetCompareScope"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULE_SOURCE"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.rule.RuleSetCompareSource"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.service.job.ServiceJob
+            jobName="sweep_RuleChildTenantStamps_hourly"
+            description="Backfill companyUserGroupId on Rule/RuleSetCompareScope/RuleSetCompareSource from the parent RuleSet."
+            serviceName="reconciliation.ReconciliationRuleEngineServices.sweep#RuleChildTenantStamps"
+            cronExpression="0 15 * * * ?"
+            paused="N"/>
+
+</entity-facade-xml>

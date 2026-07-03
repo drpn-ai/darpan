@@ -10,10 +10,10 @@
 #  - W5 #37: GitHub credentials are now BuildKit `--mount=type=secret` (above `RUN`), so they
 #    NEVER land in an image layer. ARG GIT_USERNAME/GIT_PASSWORD remain for backward compat
 #    during the rollout window; once CI is on `--secret id=netrc,...` they can be dropped.
-#  - W5 #38: Moqui framework / runtime / sftp / darpan / darpan-hotwax / shopify-darpan /
-#    netsuite-darpan refs default to `main` (mutable). CI/prod MUST pass tagged refs
-#    (`--build-arg MOQUI_FRAMEWORK_REF=v4.X.Y` and similar). The `prod/Dockerfile` variant
-#    already pins the four product components; this variant should match in CI.
+#  - W5 #38: Moqui framework / runtime / sftp refs are pinned in-file to stable immutable refs
+#    matching the dev baseline (see the ARG block); no build-arg override is required. Product
+#    components (darpan / darpan-hotwax / shopify-darpan / netsuite-darpan) default to `main` on
+#    this UAT-track image by design; `prod/Dockerfile` pins them to release tags.
 ARG BASE_IMAGE=public.ecr.aws/j6s7y7u4/hotwax/ubuntu:22.04
 
 # JDK 21 provider stage. The default base ships no JDK 21 (maarg-base-os had JDK 11), but Moqui 4, the upstream
@@ -38,10 +38,12 @@ RUN set -e; \
 
 ARG GIT_USERNAME=
 ARG GIT_PASSWORD=
-# moqui-framework: upstream moqui/moqui-framework pinned to the embed-bitronix merge commit (JDK21 + Bitronix; == dev baseline).
-# JDK21/Bitronix is in no upstream tag, so pin the SHA (fetched below). moqui-runtime + moqui-sftp also
-# track upstream moqui/* now (== dev baseline): the hotwax fork tags (runtime v3.2.0 / sftp v1.2.3)
-# predate Gradle 9 + Moqui 4 and broke the build (sftp used the removed Jar.archivePath API).
+# moqui-framework: pinned to d12a86e = upstream v4.0.0 + PR #705 (embed-bitronix), the merge this
+# stack requires (Bitronix is the default JTA TM; moqui-atomikos retired). The v4.0.0 tag predates
+# that merge by 6 commits, so no upstream tag contains Bitronix yet — re-pin to the first tag that
+# does. moqui-runtime v3.9.9 == dev baseline (upstream v4.0.0 adds Groovy 5 + Gradle bumps; adopt
+# in dev first, then bump here). moqui-sftp v1.0.3 is the latest upstream tag. All three are stable
+# immutable refs; no build-arg override is required.
 ARG MOQUI_FRAMEWORK_REF=d12a86e1ac735ae41d93b586bbcb789889997110
 ARG MOQUI_RUNTIME_REF=v3.9.9
 # moqui-atomikos retired: Moqui 4 embeds Bitronix as the default JTA TM; no separate Atomikos component needed.

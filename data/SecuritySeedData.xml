@@ -1,6 +1,33 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- No copyright or license for configuration file, details here are not considered a creative work. -->
 <entity-facade-xml type="darpan-seed">
+    <!-- UserGroups (and the enum they FK) MUST precede every ArtifactAuthz below: a data file loads
+         in document order inside one transaction, and on MySQL with FK constraints already in place
+         a forward reference to a not-yet-inserted UserGroup fails and rolls back the entire file. -->
+    <moqui.security.UserGroup userGroupId="DARPAN_USER"
+            description="Darpan application users"/>
+    <moqui.basic.Enumeration enumId="UgtDarpanPermission"
+            description="Darpan permission groups"
+            enumTypeId="UserGroupType"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_ADMIN"
+            description="Can manage Darpan app-level settings and core configuration"
+            groupTypeEnumId="UgtDarpanPermission"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_SUPER_ADMIN"
+            description="Can view and edit every tenant and manage tenant and user setup"
+            groupTypeEnumId="UgtDarpanPermission"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_TENANT_ADMIN"
+            description="Can view, run, create, update, and delete data for associated tenants"
+            groupTypeEnumId="UgtDarpanPermission"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_TENANT_USER"
+            description="Can view tenant pages, upload files, and run reconciliation for associated tenants"
+            groupTypeEnumId="UgtDarpanPermission"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_COMPANY_EDITOR"
+            description="Can create, update, run, and delete tenant-scoped Darpan data"
+            groupTypeEnumId="UgtDarpanPermission"/>
+    <moqui.security.UserGroup userGroupId="DARPAN_COMPANY_VIEW_ONLY"
+            description="Can view tenant-scoped Darpan data but cannot mutate it"
+            groupTypeEnumId="UgtDarpanPermission"/>
+
     <moqui.security.ArtifactGroup artifactGroupId="DARPAN_AUTH_API" description="Darpan anonymous-accessible auth facade entry points (login, session info, logout). Tightly scoped: do not widen with patterns."/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_AUTH_API"
             artifactName="facade.AuthFacadeServices.login#Session" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"/>
@@ -193,30 +220,6 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"/>
     <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_SUPER_ADMIN"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"/>
-
-    <moqui.security.UserGroup userGroupId="DARPAN_USER"
-            description="Darpan application users"/>
-    <moqui.basic.Enumeration enumId="UgtDarpanPermission"
-            description="Darpan permission groups"
-            enumTypeId="UserGroupType"/>
-    <moqui.security.UserGroup userGroupId="DARPAN_ADMIN"
-            description="Can manage Darpan app-level settings and core configuration"
-            groupTypeEnumId="UgtDarpanPermission"/>
-    <moqui.security.UserGroup userGroupId="DARPAN_SUPER_ADMIN"
-            description="Can view and edit every tenant and manage tenant and user setup"
-            groupTypeEnumId="UgtDarpanPermission"/>
-    <moqui.security.UserGroup userGroupId="DARPAN_TENANT_ADMIN"
-            description="Can view, run, create, update, and delete data for associated tenants"
-            groupTypeEnumId="UgtDarpanPermission"/>
-    <moqui.security.UserGroup userGroupId="DARPAN_TENANT_USER"
-            description="Can view tenant pages, upload files, and run reconciliation for associated tenants"
-            groupTypeEnumId="UgtDarpanPermission"/>
-    <moqui.security.UserGroup userGroupId="DARPAN_COMPANY_EDITOR"
-            description="Can create, update, run, and delete tenant-scoped Darpan data"
-            groupTypeEnumId="UgtDarpanPermission"/>
-    <moqui.security.UserGroup userGroupId="DARPAN_COMPANY_VIEW_ONLY"
-            description="Can view tenant-scoped Darpan data but cannot mutate it"
-            groupTypeEnumId="UgtDarpanPermission"/>
 
     <moqui.basic.Enumeration enumId="UgtDarpanCompany"
             description="Darpan tenant groups"

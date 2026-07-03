@@ -36,6 +36,10 @@ This file is the engineer-facing companion to the user release notes. Keep it cu
   `data/releases/pre-reset/<version>/`; the unreleased post-v2.1.3 current upgrade file
   archived as `data/releases/pre-reset/unreleased-post-2.1.3/upgrade-data.xml`.
 - `data/upgrade-data.xml` re-seeded as the (empty) `1.0.0` candidate.
+- `AutomationEntityContractTests` (and path mentions in `docs/code-map.md`,
+  `entity/JsonSchemaEntities.xml`) re-pointed to the archived pack location
+  `data/releases/pre-reset/2.0.3/…` — the pack move broke the test's hardcoded
+  historical-contract path and failed CI on the first release-prep commit.
 
 ### Fixed
 

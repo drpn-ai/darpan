@@ -15,7 +15,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 
 class AutomationEntityContractTests {
     private static final int MAX_ENUM_ID_LENGTH = 20
-    private static final String PREVIOUS_RELEASE_UPGRADE_DATA_PATH = "data/releases/2.0.3/upgrade-data.xml"
+    // Archived pre-reset pack that introduced the automation contract (packs moved under
+    // pre-reset/ at the v1.0.0 cut; retired numbering, see data/releases/pre-reset/README.md).
+    private static final String PREVIOUS_RELEASE_UPGRADE_DATA_PATH = "data/releases/pre-reset/2.0.3/upgrade-data.xml"
 
     private static final List<String> AUTOMATION_ENTITIES = [
             "darpan.reconciliation.ReconciliationAutomation",

@@ -37,17 +37,24 @@
 
 ## Verification
 
-- Release preflight pack validated: `release_preflight.py validate --version 1.0.0` — result recorded at cut time in the release summary.
+- Release preflight pack validated: `release_preflight.py validate --version 1.0.0` — passed.
 - XML well-formedness checked for every changed XML file (`component.xml`,
-  `data/upgrade-data.xml`): result recorded at cut time in the release summary.
+  `data/upgrade-data.xml`, pack mirror): passed.
 - Backend compile check: `./gradlew :runtime:component:darpan:compileGroovy` via
-  `run_backend_checks.sh` — result recorded at cut time in the release summary.
-- Not verified for this cut: full backend test suite and live-deploy smoke. The tagged
-  tree differs from the CI-green baseline only in release metadata, data-pack
-  organization, and the `DARPAN_REF` pin; CI runs on the pushed release commit.
+  `run_backend_checks.sh` — passed.
+- API contract gate: `./gradlew :runtime:component:darpan:checkApiContract` — passed
+  (65 methods, snapshot regenerated for the version bump).
+- Full backend test suite: first release-prep commit (`a6811fd`) FAILED CI — 5
+  `AutomationEntityContractTests` failures caused by the pre-reset pack move (the test
+  pins the archived `2.0.3` upgrade pack as a historical contract source). Fixed by
+  re-pointing the path to `data/releases/pre-reset/2.0.3/upgrade-data.xml` (plus the
+  same path updates in `docs/code-map.md` and a `JsonSchemaEntities.xml` comment);
+  verified by a focused local run and by CI on the final tagged commit.
+- Not verified for this cut: live-deploy smoke (no deployed behavior changes in range).
 
 ## Approval
 
 - Release owner: aditi.patel@hotwax.co (requested the prod tag 2026-07-03).
-- Tag placement: `v1.0.0` on the release-prep commit on `main` (child of `93d98f0`),
-  pushed to `drpn-ai/darpan` together with the GitHub release.
+- Tag placement: `v1.0.0` on the final release-prep commit on `main` (the archived-pack
+  path fix on top of `a6811fd`), re-pointed after CI verified it; the initial tag on
+  `a6811fd` was moved before any GitHub release or deploy consumed it.

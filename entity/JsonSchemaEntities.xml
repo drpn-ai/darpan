@@ -27,7 +27,7 @@
         <!-- Audit H1.6 / H12.7 — was unique on schemaName alone (global), which made schemaName a
              cross-tenant scarce resource: tenant A creating 'orders.json' would block tenant B from
              creating their own 'orders.json'. Now composite-unique on (companyUserGroupId, schemaName)
-             so each tenant has its own namespace. See data/releases/2.1.1/MIGRATION.md for the DDL
+             so each tenant has its own namespace. See data/releases/pre-reset/2.1.1/MIGRATION.md for the DDL
              that operators must run on existing production databases to convert the index. -->
         <index name="JSON_SCHEMA_TENANT_NAME" unique="true">
             <index-field name="companyUserGroupId"/>

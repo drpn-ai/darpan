@@ -91,7 +91,7 @@ This wiki lives in `runtime/component/darpan/docs/Home.md`. The Darpan component
   `:runtime:component:darpan:loadDarpanUpgradeData` (Gradle 9 removed `-b`), the `darpan-seed`
   reader type, and the `component://darpan/data/upgrade-data.xml` location
 - Release upgrade records must also be reflected in the appropriate generic source data file; release preflight generates upgrade candidates from generic source data diffs against the previous tag
-- Archived release upgrade data: versioned files such as `data/releases/2.0.0/upgrade-data.xml`; these are generated release artifacts and should not be treated as source seed files when diffing upgrade data
+- Archived release upgrade data: versioned files such as `data/releases/pre-reset/2.0.0/upgrade-data.xml`; these are generated release artifacts and should not be treated as source seed files when diffing upgrade data
 - Theme library: `theme-library/css/tokens.css`, `theme-library/css/components.css`, `theme-library/js/theme-runtime.js`, `theme-library/html/blocks.html`
 - Build config + organization guardrails: `build.gradle` (JDK 21 toolchain, Spark/Drools/MVEL2
   pins, `sparkJava21Opens` JVM flags, `verifyOrganization`) — see `docs/runtime-baseline.md`

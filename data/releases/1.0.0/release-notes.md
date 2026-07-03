@@ -65,11 +65,11 @@ This release establishes the platform baseline rather than a feature delta:
 ## Verification
 
 Recorded in `release-checklist.md` alongside the exact commands: release-preflight pack
-validation, XML well-formedness checks on every changed XML file, and the backend
-compile check (`./gradlew :runtime:component:darpan:compileGroovy`). The full backend
-test suite and live-deploy smoke were not re-run for this cut; the tagged tree differs
-from the CI-green baseline only in release metadata, data-pack organization, and the
-Dockerfile ref pin.
+validation, XML well-formedness checks on every changed XML file, the backend compile
+check, the API contract gate, and the full backend test suite in CI on the tagged
+commit (the first release-prep commit failed CI on a test path broken by the data-pack
+archive move; fixed and re-verified before tagging). Live-deploy smoke was not run —
+no deployed behavior changes in this range.
 
 ## Deferred items
 

@@ -9,8 +9,8 @@
 #  - W5 #37: GitHub credentials via BuildKit `--mount=type=secret` so they never land in image
 #    layer history. ARG GIT_USERNAME/GIT_PASSWORD remain as a backward-compat fallback during the
 #    CI rollout window.
-#  - W5 #38: Product refs pinned to tags (darpan v1.0.0 / darpan-hotwax v0.2.0 / shopify-darpan
-#    v0.2.1 / netsuite-darpan v0.1.0).
+#  - W5 #38: Product refs pinned to tags (darpan v1.0.0 / darpan-hotwax v0.3.0 / shopify-darpan
+#    v0.3.0 / netsuite-darpan v0.1.0).
 #    moqui-framework / moqui-runtime / moqui-sftp are pinned in-file to stable immutable refs
 #    matching the dev baseline (see the ARG block); build args remain available but no override
 #    is required for a reproducible build.
@@ -48,8 +48,13 @@ ARG MOQUI_SFTP_REF=v1.0.3
 # no longer exist on the remote. v1.0.0 is the first post-reset tag — never fall back to v1.x/v2.x
 # pre-reset refs.
 ARG DARPAN_REF=v1.0.0
-ARG DARPAN_HOTWAX_REF=v0.2.0
-ARG SHOPIFY_DARPAN_REF=v0.2.1
+# darpan-hotwax/shopify-darpan tags below v0.3.0 predate the JDK 21 / Moqui 4 / Gradle 9 migration
+# and still declare the removed :runtime:component:moqui-atomikos project — they cannot build on
+# this stack. v0.3.0 tags == the component mains that darpan CI proves against darpan v1.0.0.
+ARG DARPAN_HOTWAX_REF=v0.3.0
+ARG SHOPIFY_DARPAN_REF=v0.3.0
+# netsuite-darpan v0.1.0 predates the migration but carries no build.gradle at that tag (XML-only,
+# nothing for Gradle to evaluate); main is 10 commits ahead — re-pin when its next tag is cut.
 ARG NETSUITE_DARPAN_REF=v0.1.0
 # moqui-gql has no release tag yet (Phase-0/1 component); pin to a tag before exposing the public tier.
 ARG MOQUI_GQL_REF=main

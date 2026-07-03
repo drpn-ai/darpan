@@ -78,6 +78,16 @@ no deployed behavior changes in this range.
 - Returns reconciliation and multi-file-source stitching.
 - Decision on retiring the old `darpan-ui` v1.x/v2.x tag series.
 
+## Post-release notes (2026-07-03)
+
+- The `docker/prod/Dockerfile` inside the `v1.0.0` tag pins `darpan-hotwax v0.2.0` and
+  `shopify-darpan v0.2.1`, which predate the JDK 21 / Moqui 4 / Gradle 9 migration and
+  fail the image build (`:runtime:component:moqui-atomikos` no longer exists). Build
+  prod images with the Dockerfile from `main` (pins corrected to the new
+  `darpan-hotwax v0.3.0` / `shopify-darpan v0.3.0` tags), or override
+  `DARPAN_HOTWAX_REF`/`SHOPIFY_DARPAN_REF` as build args. `DARPAN_REF=v1.0.0` — the
+  product code this release describes — is unaffected.
+
 ## Rollback or fallback notes
 
 - No earlier post-reset tag exists. If `v1.0.0` must be rolled back, rebuild the

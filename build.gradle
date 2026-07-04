@@ -65,6 +65,9 @@ dependencies {
     implementation 'org.ow2.asm:asm:9.8'
     implementation 'com.github.saasquatch:json-schema-inferrer:0.1.5'
     runtimeOnly 'com.mysql:mysql-connector-j:8.3.0'
+    // Chelan runs Postgres (MoquiProductionConf.xml datasource is PGXADataSource); the MySQL
+    // connector stays for local/dev compose stacks that still point at MySQL.
+    runtimeOnly 'org.postgresql:postgresql:42.7.7'
 
     // Drools (MACH P1: off EOL 7.73.0.Final → 8.44.0.Final). Drools 8.x module set for the classic
     // KieFileSystem DRL + MVEL-dialect compilation: drools-engine (runtime; pulls drools-core/compiler at

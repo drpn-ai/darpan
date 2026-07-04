@@ -45,7 +45,7 @@ Two more flags quiet known JDK 21 warnings:
 ## Where the flags are wired (do not strip them)
 
 - `build.gradle` — `ext.sparkJava21Opens` applied to the `test` task (`jvmArgs`)
-- `docker/entrypoint.sh` and `docker/prod/entrypoint.sh` — exported through `JAVA_TOOL_OPTIONS` for deployed containers
+- `entrypoint.sh` and `prod/entrypoint.sh` in the private `drpn-ai/darpan-docker-config` repo — exported through `JAVA_TOOL_OPTIONS` for deployed containers
 - wrapper-root `dev-stack.sh` — exports the same set through `JAVA_TOOL_OPTIONS` for local runs
 
 ## Local commands
@@ -67,8 +67,8 @@ There is no `loadDarpanData` Gradle task; ordered setup data loads through the s
 
 ## Production environment variables (Docker)
 
-`docker/entrypoint.sh` and `docker/prod/entrypoint.sh` fail fast if any **required** variable is
-unset, rather than silently keeping an insecure default.
+`entrypoint.sh` and `prod/entrypoint.sh` (in `drpn-ai/darpan-docker-config`) fail fast if any
+**required** variable is unset, rather than silently keeping an insecure default.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |

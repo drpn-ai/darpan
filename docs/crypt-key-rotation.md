@@ -18,11 +18,11 @@ harmless no-op.
 The upstream `moqui-*-compose.yml` files under `darpan-backend/docker/` (origin: `moqui/moqui-framework`,
 push disabled) contain `DEFAULT_CHANGE_ME!!!` placeholders for `entity_ds_crypt_pass`. These are
 upstream Moqui example files, not Darpan deploy artifacts. They are not used by the Darpan production
-deploy, which uses the component Dockerfile and entrypoint (see below). No action needed in the Darpan
-component repo for those files.
+deploy, which uses the Dockerfile and entrypoint from the private `drpn-ai/darpan-docker-config` repo
+(see below). No action needed in the Darpan component repo for those files.
 
-The Darpan deploy entrypoints (`docker/entrypoint.sh` and `docker/prod/entrypoint.sh`) fail fast with
-`:?` on `entity_ds_crypt_pass` — there is no insecure default in the Darpan deploy path.
+The Darpan deploy entrypoints (`entrypoint.sh` and `prod/entrypoint.sh` in `darpan-docker-config`)
+fail fast with `:?` on `entity_ds_crypt_pass` — there is no insecure default in the Darpan deploy path.
 
 ## Rotation Steps
 
@@ -123,3 +123,6 @@ in step 4. If found, temporarily re-add `entity_ds_crypt_pass_old` and complete 
 - `runtime/component/darpan/docker/entrypoint.sh` — exports `entity_ds_crypt_pass_old` as optional,
   defaulting to `entity_ds_crypt_pass`.
 - `runtime/component/darpan/docker/prod/entrypoint.sh` — same.
+
+(Paths above are as of 2026-06-29. The component `docker/` directory has since moved to the private
+`drpn-ai/darpan-docker-config` repo, where these files live at the repo root.)

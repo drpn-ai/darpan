@@ -22,7 +22,7 @@ The poll service checks configured SFTP locations, stages the newest matching fi
 When `ruleSetId` is provided, SFTP automation now uses the same compare-scope + DRL path as Generic reconciliation. Legacy scheduled jobs can continue to run through the mapping bridge until they are migrated.
 
 ## Prerequisites
-- Install/configure the `moqui-sftp` component. For Docker builds, `runtime/component/darpan/docker/Dockerfile` now clones `https://github.com/hotwax/moqui-sftp.git` before running `addRuntime`.
+- Install/configure the `moqui-sftp` component. For Docker builds, the `Dockerfile` in the private `drpn-ai/darpan-docker-config` repo clones `https://github.com/hotwax/moqui-sftp.git` before running `addRuntime`.
 - Create `darpan.reconciliation.SftpServer` records with host, port, username, and either `password` or `privateKey`.
 - For RuleSet mode:
   - define a `RuleSet`

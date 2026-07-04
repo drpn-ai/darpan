@@ -95,10 +95,11 @@ This wiki lives in `runtime/component/darpan/docs/Home.md`. The Darpan component
 - Theme library: `theme-library/css/tokens.css`, `theme-library/css/components.css`, `theme-library/js/theme-runtime.js`, `theme-library/html/blocks.html`
 - Build config + organization guardrails: `build.gradle` (JDK 21 toolchain, Spark/Drools/MVEL2
   pins, `sparkJava21Opens` JVM flags, `verifyOrganization`) — see `docs/runtime-baseline.md`
-- Docker production config: `docker/MoquiProductionConf.xml` (the transactional datasource must
-  keep `startup-add-missing="${entity_add_missing_startup}"` so deployed MySQL environments
+- Docker production config: lives in the private `drpn-ai/darpan-docker-config` repo —
+  `MoquiProductionConf.xml` (the transactional datasource must keep
+  `startup-add-missing="${entity_add_missing_startup}"` so deployed MySQL environments
   create newly introduced entity tables before upgrade-data load or user-facing finds run) and
-  `docker/entrypoint.sh` / `docker/prod/entrypoint.sh` (JDK 21 `JAVA_TOOL_OPTIONS` flags)
+  `entrypoint.sh` / `prod/entrypoint.sh` (JDK 21 `JAVA_TOOL_OPTIONS` flags)
 
 ## Framework References
 

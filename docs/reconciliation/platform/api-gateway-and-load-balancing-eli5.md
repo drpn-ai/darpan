@@ -129,9 +129,9 @@ outside world yet (that's a later, deliberately-deferred step).
 | Your own token bucket | `ThrottleGate` keyed by API-key id (fixed in step 4) | `moqui-gql` `policy/ThrottleGate.groovy`, `GqlEngine.groovy` |
 | Logbook | `GqlQueryLog` | `moqui-gql` `entity/GqlEntities.xml` |
 | Watchdog | `scan#QueryAnomalies` + `GqlAnomalyAlert`, scheduled `GqlAnomalyScanJob` (~15 min) | `moqui-gql` `GqlMonitorServices.xml` |
-| "Are you open?" sign | `HEALTHCHECK curl http://127.0.0.1:8080/status` (every 30s) | darpan `docker/Dockerfile`, `docker/prod/Dockerfile` |
-| Polite shift change | `exec` JVM as PID 1 → receives `SIGTERM` from `docker stop` for graceful drain | darpan `docker/entrypoint.sh` |
-| Staff-door origin lock | `webapp_allow_origins` (first-party only: `*.drpn.ai`, `*.hotwax.io`, Firebase) | darpan `docker/MoquiProductionConf.xml` |
+| "Are you open?" sign | `HEALTHCHECK curl http://127.0.0.1:8080/status` (every 30s) | `darpan-docker-config` `Dockerfile`, `prod/Dockerfile` |
+| Polite shift change | `exec` JVM as PID 1 → receives `SIGTERM` from `docker stop` for graceful drain | `darpan-docker-config` `entrypoint.sh` |
+| Staff-door origin lock | `webapp_allow_origins` (first-party only: `*.drpn.ai`, `*.hotwax.io`, Firebase) | `darpan-docker-config` `MoquiProductionConf.xml` |
 
 **Why "load balancing" is mostly groundwork here:** the application's job is to be *load-balancer-ready*
 — health-checkable, gracefully drainable, stateless per request, and fair per caller. Putting an actual

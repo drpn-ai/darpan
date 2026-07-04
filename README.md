@@ -11,8 +11,8 @@ sync issues surface as flagged differences, and notifies tenants on run completi
 - JTA transaction manager is the Moqui 4 embedded **Bitronix**; `moqui-atomikos` is retired.
 - Apache Spark 3.5.1 for reconciliation diffs; Drools 7.73 with MVEL2 forced to 2.5.x for JDK 21.
 - Spark needs the canonical `--add-opens` JVM flag set, wired in `build.gradle` (tests),
-  `docker/entrypoint.sh` / `docker/prod/entrypoint.sh` (deploys), and the wrapper-root
-  `dev-stack.sh` (local). Do not strip them.
+  `entrypoint.sh` / `prod/entrypoint.sh` in the private `drpn-ai/darpan-docker-config` repo
+  (deploys), and the wrapper-root `dev-stack.sh` (local). Do not strip them.
 
 Details: `runtime/component/darpan/docs/runtime-baseline.md`
 

@@ -33,8 +33,8 @@ public docs site.
   only the 3 auth-bootstrap services are anonymous. Auth is the SPA-shaped `login_key` token
   (`AuthFacadeServices.xml:30`). There is **no API-key / OAuth / signed-request mechanism** for
   non-interactive clients.
-- **CORS is locked to first-party origins** (`docker/MoquiProductionConf.xml:3`) — a browser
-  3rd party is blocked at preflight.
+- **CORS is locked to first-party origins** (`MoquiProductionConf.xml:3` in the private
+  `drpn-ai/darpan-docker-config` repo) — a browser 3rd party is blocked at preflight.
 - **Partner integrations are outbound** (Darpan pulls from NetSuite/Shopify/HotWax/SFTP); no
   partner calls *into* Darpan. There is no inbound public surface today.
 

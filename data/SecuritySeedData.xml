@@ -56,6 +56,8 @@
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
             artifactName="darpan.rule.RuleSetCompareSource" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
+            artifactName="darpan.rule.RuleSetCompareSourceKeyField" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
             artifactName="darpan.auth.TenantSetting" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
             artifactName="darpan.reconciliation.ReconciliationRunResult" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
@@ -160,6 +162,10 @@
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULE_SOURCE"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.rule.RuleSetCompareSource"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULE_SOURCE_KEY_FIELD"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.rule.RuleSetCompareSourceKeyField"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RUN_RESULT"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"

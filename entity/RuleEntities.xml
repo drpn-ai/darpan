@@ -154,7 +154,46 @@
         <relationship type="one" related="darpan.reconciliation.NsRestletConfig" fk-name="RSCSR_NSREST">
             <key-map field-name="nsRestletConfigId"/>
         </relationship>
+        <relationship type="many" related="darpan.rule.RuleSetCompareSourceKeyField" short-alias="keyFields">
+            <key-map field-name="compareScopeId"/>
+            <key-map field-name="fileSide"/>
+        </relationship>
         <index name="RSCSR_TENANT">
+            <index-field name="companyUserGroupId"/>
+        </index>
+    </entity>
+
+    <entity entity-name="RuleSetCompareSourceKeyField" package="darpan.rule" use="configuration">
+        <description>One ordered field of a composite (multi-field) primary/compare key for a RuleSet compare source.
+            When one or more rows exist for a (compareScopeId, fileSide), they replace that source's single
+            primaryIdExpression: fields are evaluated in sequenceNum order and composed into one compare_id.
+            When no rows exist, the source's primaryIdExpression is used unchanged (backward compatible).</description>
+        <field name="compareScopeId" type="id" is-pk="true" not-null="true"/>
+        <field name="fileSide" type="text-short" is-pk="true" not-null="true">
+            <description>Logical file side for the compare scope: FILE_1 or FILE_2.</description>
+        </field>
+        <field name="sequenceNum" type="number-integer" is-pk="true" not-null="true">
+            <description>Composition order: fields are concatenated in ascending sequenceNum order.</description>
+        </field>
+        <field name="fieldExpression" type="text-medium" not-null="true">
+            <description>Expression identifying one field of the composite key, using the same JSONPath/CSV-column
+                syntax as primaryIdExpression, optionally suffixed with |NORMALIZER (for example SHOPIFY_GID_TAIL).</description>
+        </field>
+        <field name="companyUserGroupId" type="id">
+            <description>Denormalized owning-tenant stamp copied from the parent RuleSet (defense-in-depth;
+                the parent RuleSet stays the authoritative tenant boundary).</description>
+        </field>
+        <field name="createdDate" type="date-time"/>
+        <field name="lastUpdatedDate" type="date-time"/>
+
+        <relationship type="one" related="darpan.rule.RuleSetCompareSource" fk-name="RSCKF_SOURCE">
+            <key-map field-name="compareScopeId"/>
+            <key-map field-name="fileSide"/>
+        </relationship>
+        <relationship type="one" title="Company" related="moqui.security.UserGroup" fk-name="RSCKF_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+        <index name="RSCKF_TENANT">
             <index-field name="companyUserGroupId"/>
         </index>
     </entity>

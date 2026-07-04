@@ -626,6 +626,80 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
+    void databaseAutomationDispatchResolvesExtractServiceAndCarriesSourceRowQueryId() {
+        // Final-blocker regression (AUT_SRC_DB scheduled path): a scheduled automation whose input is a
+        // DATABASE source must resolve the DATABASE connector's extract service AND carry the admin-chosen
+        // databaseSourceQueryId taken DIRECTLY from the automation source ROW column. Before the fix,
+        // dispatch resolved the config id only via safeMetadataJson.parameters (never populated for a DB
+        // source) or the canReadOrders-filtered findSingleActiveConfigId (a field that does NOT exist on
+        // DatabaseSourceQuery) -> null config id -> no extract service -> "no connector registered", so the
+        // saved-run path worked while the scheduled path was silently dead.
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        // Registry row shipped by the database-darpan component (mirrors data/DatabaseConnectorSeedData.xml).
+        ec.entity.add(SourceSystemConnectorSupport.ENTITY_NAME, [
+                systemEnumId            : "DATABASE",
+                extractServiceName      : "reconciliation.DatabaseExtractionServices.extract#DatabaseRecords",
+                dateFromParameterName   : "windowStart",
+                dateToParameterName     : "windowEnd",
+                expectedSourceConfigType: "DATABASE_QUERY",
+                configParameterName     : "databaseSourceQueryId",
+                configEntityName        : "darpan.database.DatabaseSourceQuery",
+                systemAliases           : "DATABASE,DB,DAR_SYS_DATABASE",
+                preserveWindowInstants  : "N",
+                enabled                 : "Y",
+        ])
+        // Active query rows exist per side, but DatabaseSourceQuery has NO canReadOrders field, so the
+        // legacy findSingleActiveConfigId lookup (which filters canReadOrders="Y") can never see them AND
+        // there is more than one, so a "single active" pick could not choose the admin's query anyway.
+        // The chosen id lives on the source ROW column - that is what dispatch must read.
+        ec.entity.add("darpan.database.DatabaseSourceQuery", [
+                databaseSourceQueryId: "DBQ_1", companyUserGroupId: "TENANT_A", isActive: "Y",
+        ])
+        ec.entity.add("darpan.database.DatabaseSourceQuery", [
+                databaseSourceQueryId: "DBQ_2", companyUserGroupId: "TENANT_A", isActive: "Y",
+        ])
+        // Convert both automation sources to DATABASE sources: AUT_SRC_DB, systemEnumId DATABASE, the chosen
+        // query id on the ROW column, and NO safeMetadataJson (the DB save path never enriches metadata with
+        // an extractServiceName - applyApiSourceMetadataDefaults early-returns for non-API sources).
+        ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].each { FakeValue s ->
+            s.sourceTypeEnumId = AutomationExecutionSupport.AUTOMATION_SOURCE_DB
+            s.systemEnumId = "DATABASE"
+            s.databaseSourceQueryId = s.fileSide == "FILE_1" ? "DBQ_1" : "DBQ_2"
+            s.remove("safeMetadataJson")
+            s.remove("dateFromParameterName")
+            s.remove("dateToParameterName")
+        }
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == "reconciliation.DatabaseExtractionServices.extract#DatabaseRecords") {
+                return [dataAvailable: true, fileLocation: "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName: "${call.params.fileSide}.json".toString(), recordCount: 4]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                return [diffLocation: "reconciliation-runs/AUTO_API/20260501/result.json", diffFileName: "result.json",
+                        differenceCount: 0, validationErrors: []]
+            }
+            return [:]
+        }
+
+        Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+        assertEquals(1, result.executedCount)
+        List<FakeServiceCall> dbCalls = ec.service.calls.findAll {
+            it.serviceName == "reconciliation.DatabaseExtractionServices.extract#DatabaseRecords"
+        }
+        assertEquals(2, dbCalls.size())
+        FakeServiceCall file1Extract = dbCalls.find { it.params.fileSide == "FILE_1" }
+        FakeServiceCall file2Extract = dbCalls.find { it.params.fileSide == "FILE_2" }
+        assertNotNull(file1Extract)
+        assertNotNull(file2Extract)
+        // The admin-chosen query id from the SOURCE ROW column reaches the extract service: NOT null, and
+        // each side carries its own configured id (not a single tenant-wide "active" pick).
+        assertEquals("DBQ_1", file1Extract.params.databaseSourceQueryId)
+        assertEquals("DBQ_2", file2Extract.params.databaseSourceQueryId)
+    }
+
+    @Test
     void registryConnectorPointingAtNonExtractorServiceIsRejectedByNamingGuard() {
         // Defense-in-depth: even a registry-registered service name (so it clears the allow-list) must
         // match a recognized extractor/execute shape. A connector row pointing dispatch at an internal

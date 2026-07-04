@@ -900,6 +900,11 @@ class AutomationExecutionSupport {
             String configParameterName = normalize(connector?.configParameterName)
             if (!configParameterName) return
             if (normalize(parameters[configParameterName]) || defaults.containsKey(configParameterName)) return
+            // A connector whose config id lives on the source row (DATABASE -> databaseSourceQueryId) carries
+            // its own id per source, so no shared tenant default is needed and the canReadOrders-filtered
+            // findSingleActiveConfigId (which cannot match DatabaseSourceQuery) must not run. Null for the
+            // API/SFTP connectors, whose id is not a row column, so their default resolution is unchanged.
+            if (readSourceRowConfigId(source, configParameterName)) return
             String configId = findSingleActiveConfigId(ec, companyUserGroupId,
                     normalize(connector.configEntityName), configParameterName)
             if (configId) defaults[configParameterName] = configId
@@ -924,10 +929,19 @@ class AutomationExecutionSupport {
 
         String configParameterName = normalize(connector.configParameterName)
         if (configParameterName) {
-            // Preserve today's behavior exactly: a connector that requires a source config only yields an
-            // extract service once that config id is resolved (source param -> automation default -> the
-            // single active config for the tenant). Otherwise leave the metadata service unset.
-            String configId = normalize(parameters[configParameterName]) ?:
+            // Preserve today's behavior exactly for the API/SFTP connectors (OMS/Shopify): those store the
+            // config id in safeMetadataJson.parameters, never as a column on the source row, so the row read
+            // below is null for them and the resolution falls through the SAME chain as before
+            // (source param -> automation default -> the single active config for the tenant).
+            //
+            // AUT_SRC_DB regression fix: a connector whose configParameterName names a REAL column on the
+            // automation source row (DATABASE -> databaseSourceQueryId) resolves that id DIRECTLY from the
+            // admin-chosen row value. This bypasses findSingleActiveConfigId, whose canReadOrders="Y" filter
+            // does not apply to DatabaseSourceQuery and whose "single active" pick would ignore the admin's
+            // choice on a multi-query tenant. The id still flows into the extract service, which re-checks
+            // tenant scope. Otherwise (no config id anywhere) leave the metadata service unset.
+            String configId = readSourceRowConfigId(source, configParameterName) ?:
+                    normalize(parameters[configParameterName]) ?:
                     normalize(configDefaults?[configParameterName]) ?:
                     findSingleActiveConfigId(ec, companyUserGroupId,
                             normalize(connector.configEntityName), configParameterName)
@@ -938,6 +952,28 @@ class AutomationExecutionSupport {
         metadata.parameters = parameters
         metadata.extractServiceName = connector.extractServiceName
         return metadata
+    }
+
+    /**
+     * The admin-chosen config id stored DIRECTLY on the automation source row, when the connector's
+     * configParameterName names a real column on that row (config over code: DATABASE ->
+     * databaseSourceQueryId). Returns null for connectors whose config id is not a source-row column
+     * (OMS/Shopify keep it in safeMetadataJson.parameters), so those dispatch paths stay byte-identical.
+     *
+     * A Moqui EntityValue is also a Map, but its containsKey only reflects fields actually loaded, so the
+     * definition-backed isField check gates the read: reading an unknown field via EntityValue.get()
+     * throws. A plain Map (unit-test source) has no isField, so key presence is the column-present signal.
+     */
+    protected static String readSourceRowConfigId(def source, String configParameterName) {
+        if (source == null || !configParameterName) return null
+        if (source.metaClass.respondsTo(source, "isField", String)) {
+            return source.isField(configParameterName) ? normalize(readField(source, configParameterName)) : null
+        }
+        if (source instanceof Map) {
+            return ((Map) source).containsKey(configParameterName) ?
+                    normalize(((Map) source).get(configParameterName)) : null
+        }
+        return normalize(readField(source, configParameterName))
     }
 
     protected static String findSingleActiveConfigId(def ec, String companyUserGroupId, String configEntityName, String configIdField) {

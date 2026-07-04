@@ -1,0 +1,4 @@
+return_id,product_id,qty
+R1,P1,2
+R1,P2,1
+R2,P1,5

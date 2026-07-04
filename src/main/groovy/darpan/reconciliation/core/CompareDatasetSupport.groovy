@@ -233,32 +233,54 @@ class CompareDatasetSupport {
                 )
     }
 
-    static Dataset buildJsonIdDf(Dataset rawDf, Map pathInfo, String pathLabel, String idNormalizer) {
-        if (pathInfo.needsExplode) {
-             String arrayPath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(pathInfo.arrayPath as String))
-             String fieldPath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(pathInfo.fieldPath as String))
-             Dataset explodedDf = rawDf.selectExpr("explode(${arrayPath}) as exploded_item")
-             if (!datasetHasRows(explodedDf)) return emptyCompareIdDataset(rawDf.sparkSession())
-             Dataset idDf = explodedDf.selectExpr("exploded_item.${fieldPath} as compare_id")
-             return normalizeCompareIdDataset(idDf, idNormalizer).distinct()
+    static Dataset buildJsonIdDf(Dataset rawDf, List<Map> pathInfos, String pathLabel, List<String> idNormalizers, List<String> fieldExpressions) {
+        Map sharedPathInfo = validateSharedRecordRoot(pathInfos, pathLabel)
+        if (sharedPathInfo.needsExplode) {
+            String arrayPath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(sharedPathInfo.arrayPath as String))
+            Dataset explodedDf = rawDf.selectExpr("explode(${arrayPath}) as exploded_item")
+            if (!datasetHasRows(explodedDf)) return emptyCompareIdDataset(rawDf.sparkSession())
+            List<Column> fieldCols = [pathInfos, idNormalizers].transpose().collect { List pair ->
+                Map pathInfo = (Map) pair[0]; String normalizer = (String) pair[1]
+                String fieldPath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(pathInfo.fieldPath as String))
+                applyIdNormalizer(col("exploded_item.${fieldPath}"), normalizer)
+            }
+            validateNoBlankCompositeKeyFields(explodedDf, fieldCols, fieldExpressions, pathLabel)
+            Dataset idDf = explodedDf.select(buildCompositeCompareIdColumn(fieldCols).alias("compare_id"))
+            return idDf.filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0").distinct()
         }
-        String safePath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(pathInfo.path as String))
-        Dataset idDf = rawDf.selectExpr("${safePath} as compare_id")
-        return normalizeCompareIdDataset(idDf, idNormalizer).distinct()
+        List<Column> fieldCols = [pathInfos, idNormalizers].transpose().collect { List pair ->
+            Map pathInfo = (Map) pair[0]; String normalizer = (String) pair[1]
+            String safePath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(pathInfo.path as String))
+            applyIdNormalizer(col(safePath), normalizer)
+        }
+        validateNoBlankCompositeKeyFields(rawDf, fieldCols, fieldExpressions, pathLabel)
+        Dataset idDf = rawDf.select(buildCompositeCompareIdColumn(fieldCols).alias("compare_id"))
+        return idDf.filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0").distinct()
     }
 
-    static Dataset buildJsonDataDf(Dataset rawDf, Map pathInfo, String pathLabel, String idNormalizer) {
-         if (pathInfo.needsExplode) {
-             String arrayPath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(pathInfo.arrayPath as String))
-             String fieldPath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(pathInfo.fieldPath as String))
+    static Dataset buildJsonDataDf(Dataset rawDf, List<Map> pathInfos, String pathLabel, List<String> idNormalizers, List<String> fieldExpressions) {
+         Map sharedPathInfo = validateSharedRecordRoot(pathInfos, pathLabel)
+         if (sharedPathInfo.needsExplode) {
+             String arrayPath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(sharedPathInfo.arrayPath as String))
              Dataset explodedDf = rawDf.selectExpr("explode(${arrayPath}) as exploded_item")
              if (!datasetHasRows(explodedDf)) return emptyCompareDataDataset(rawDf.sparkSession())
-             Dataset dataDf = explodedDf.selectExpr("exploded_item.${fieldPath} as compare_id", "exploded_item as data")
-             return normalizeCompareIdDataset(dataDf, idNormalizer)
+             List<Column> fieldCols = [pathInfos, idNormalizers].transpose().collect { List pair ->
+                 Map pathInfo = (Map) pair[0]; String normalizer = (String) pair[1]
+                 String fieldPath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(pathInfo.fieldPath as String))
+                 applyIdNormalizer(col("exploded_item.${fieldPath}"), normalizer)
+             }
+             validateNoBlankCompositeKeyFields(explodedDf, fieldCols, fieldExpressions, pathLabel)
+             Dataset dataDf = explodedDf.select(buildCompositeCompareIdColumn(fieldCols).alias("compare_id"), col("exploded_item").alias("data"))
+             return dataDf.filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0")
          }
-         String safePath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(pathInfo.path as String))
-         Dataset dataDf = rawDf.selectExpr("${safePath} as compare_id", "struct(*) as data")
-         return normalizeCompareIdDataset(dataDf, idNormalizer)
+         List<Column> fieldCols = [pathInfos, idNormalizers].transpose().collect { List pair ->
+             Map pathInfo = (Map) pair[0]; String normalizer = (String) pair[1]
+             String safePath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(pathInfo.path as String))
+             applyIdNormalizer(col(safePath), normalizer)
+         }
+         validateNoBlankCompositeKeyFields(rawDf, fieldCols, fieldExpressions, pathLabel)
+         Dataset dataDf = rawDf.select(buildCompositeCompareIdColumn(fieldCols).alias("compare_id"), struct(col("*")).alias("data"))
+         return dataDf.filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0")
     }
 
     private static boolean datasetHasRows(Dataset df) {
@@ -273,15 +295,69 @@ class CompareDatasetSupport {
         return spark.createDataFrame(new ArrayList<Row>(), ReconciliationServices.EMPTY_COMPARE_DATA_SCHEMA)
     }
 
-    static Dataset buildCsvIdDf(Dataset rawDf, String fieldName, String idNormalizer, String label = null, boolean hasHeader = true) {
-         String fieldExpr = buildValidatedCsvFieldExpr(rawDf, fieldName, label, hasHeader)
-         Dataset idDf = rawDf.selectExpr("${fieldExpr} as compare_id")
-         return normalizeCompareIdDataset(idDf, idNormalizer).distinct()
+    static Dataset buildCsvIdDf(Dataset rawDf, List<Map> idSpecs, String label = null, boolean hasHeader = true) {
+         List<Column> fieldCols = buildCsvFieldColumns(rawDf, idSpecs, label, hasHeader)
+         List<String> fieldExpressions = idSpecs.collect { (String) it.idExpr }
+         validateNoBlankCompositeKeyFields(rawDf, fieldCols, fieldExpressions, label)
+         Dataset idDf = rawDf.select(buildCompositeCompareIdColumn(fieldCols).alias("compare_id"))
+         return idDf.filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0").distinct()
     }
-     static Dataset buildCsvDataDf(Dataset rawDf, String fieldName, String idNormalizer, String label = null, boolean hasHeader = true) {
-         String fieldExpr = buildValidatedCsvFieldExpr(rawDf, fieldName, label, hasHeader)
-         Dataset dataDf = rawDf.selectExpr("${fieldExpr} as compare_id", "struct(*) as data")
-         return normalizeCompareIdDataset(dataDf, idNormalizer)
+
+    static Dataset buildCsvDataDf(Dataset rawDf, List<Map> idSpecs, String label = null, boolean hasHeader = true) {
+         List<Column> fieldCols = buildCsvFieldColumns(rawDf, idSpecs, label, hasHeader)
+         List<String> fieldExpressions = idSpecs.collect { (String) it.idExpr }
+         validateNoBlankCompositeKeyFields(rawDf, fieldCols, fieldExpressions, label)
+         Dataset dataDf = rawDf.select(buildCompositeCompareIdColumn(fieldCols).alias("compare_id"), struct(col("*")).alias("data"))
+         return dataDf.filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0")
+    }
+
+    private static List<Column> buildCsvFieldColumns(Dataset rawDf, List<Map> idSpecs, String label, boolean hasHeader) {
+        return idSpecs.collect { Map idSpec ->
+            String fieldExpr = buildValidatedCsvFieldExpr(rawDf, (String) idSpec.idExpr, label, hasHeader)
+            Column rawColumn = expr(fieldExpr)
+            String normalizerValue = (String) idSpec.idNormalizer
+            return applyIdNormalizer(rawColumn, normalizerValue)
+        }
+    }
+
+    // Composite keys (>=2 fields) can only be built from JSON records that share a single array/record
+    // root — mixing key fields resolved under different array paths would explode into a cross product
+    // rather than a per-record composite, so reject that configuration up front rather than silently
+    // producing nonsense compare_id values.
+    private static Map validateSharedRecordRoot(List<Map> pathInfos, String pathLabel) {
+        Map first = (Map) pathInfos[0]
+        boolean needsExplode = first.needsExplode as boolean
+        boolean allMatch = pathInfos.every { Map info ->
+            (info.needsExplode as boolean) == needsExplode &&
+                    (!needsExplode || info.arrayPath == first.arrayPath)
+        }
+        if (!allMatch) {
+            throw new IllegalArgumentException(
+                    "${pathLabel}: composite key fields must all resolve to the same JSON record level; found key fields under different array paths."
+            )
+        }
+        return first
+    }
+
+    private static Column buildCompositeCompareIdColumn(List<Column> normalizedFieldColumns) {
+        return concat_ws(ReconciliationServices.COMPOSITE_KEY_DELIMITER, normalizedFieldColumns as Column[])
+    }
+
+    // Spark's concat_ws silently SKIPS null columns instead of nulling the whole result, so a missing
+    // composite field would otherwise produce a shorter, silently-collidable compare_id rather than
+    // failing loudly. Only applies to genuinely composite (>=2 field) keys — single-field sources keep
+    // their existing behavior of silently dropping null-id rows via the compare_id IS NOT NULL filter.
+    private static void validateNoBlankCompositeKeyFields(Dataset dfWithFieldCols, List<Column> normalizedFieldColumns, List<String> fieldExpressions, String pathLabel) {
+        if (normalizedFieldColumns.size() < 2) return
+        Column anyBlank = normalizedFieldColumns.inject((Column) lit(false)) { Column acc, Column fieldCol ->
+            acc.or(fieldCol.isNull().or(length(trim(fieldCol.cast("string"))).equalTo(0)))
+        } as Column
+        boolean hasBlankRows = dfWithFieldCols.filter(anyBlank).limit(1).count() > 0
+        if (hasBlankRows) {
+            throw new IllegalArgumentException(
+                    "${pathLabel}: composite key fields [${fieldExpressions.join(', ')}] must all be present on every row, but at least one row has a null or blank value for one of them."
+            )
+        }
     }
 
     private static String buildValidatedCsvFieldExpr(Dataset rawDf, String fieldName, String label, boolean hasHeader) {

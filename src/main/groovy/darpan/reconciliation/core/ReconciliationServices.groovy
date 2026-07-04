@@ -34,6 +34,9 @@ class ReconciliationServices {
     static final int MAX_RULE_DIFF_ROWS =
             (System.getProperty("darpan.reconciliation.rule.maxRuleDiffRows") ?: "1000000").isInteger() ?
                     (System.getProperty("darpan.reconciliation.rule.maxRuleDiffRows") ?: "1000000").toInteger() : 1_000_000
+    // Non-printable delimiter (ASCII Unit Separator, U+001F) for composed composite compare_id values —
+    // avoids collisions with ordinary field values the way a printable delimiter like '-' or '::' could.
+    static final String COMPOSITE_KEY_DELIMITER = "\u001F"
     // Decomposition 2026-07-02: shared constants stay here (single source of truth); the extracted
     // CompareIdExpressionSupport / CompareDatasetSupport units in this package reference them, so the
     // ones they need are @PackageScope instead of private.
@@ -360,10 +363,9 @@ class ReconciliationServices {
 
     // --- Private Helpers ---
 
-    static Map ingestFile(ExecutionContext ec, SparkSession spark, String loc, String type, Map idSpec, boolean hasHeader, String label, List validationErrors, String schemaFile) {
+    static Map ingestFile(ExecutionContext ec, SparkSession spark, String loc, String type, Object idSpecOrList, boolean hasHeader, String label, List validationErrors, String schemaFile) {
         String path = resolvePath(ec, loc)
-        String idExpr = normalize(idSpec?.idExpr)
-        String idNormalizer = normalize(idSpec?.idNormalizer)
+        List<Map> idSpecs = normalizeIdSpecs(idSpecOrList)
         Dataset df = null
         Dataset idDf = null
         Dataset dataDf = null
@@ -385,29 +387,41 @@ class ReconciliationServices {
             // supply the saved schema as the read schema to skip Spark's per-run inference scan. If the
             // saved schema does not resolve the id/rule paths, degrade transparently to inference so the
             // optimization can never fail a run. Default (no property) keeps the inference behaviour.
-            Map pathInfo = CompareIdExpressionSupport.convertJsonPathToSpark(idExpr)
+            List<Map> pathInfos = idSpecs.collect { Map spec -> CompareIdExpressionSupport.convertJsonPathToSpark(normalize((String) spec.idExpr)) }
+            List<String> idNormalizers = idSpecs.collect { (String) it.idNormalizer }
+            List<String> fieldExpressions = idSpecs.collect { (String) it.idExpr }
             StructType readSchema = (schemaFile && SparkReadSchemaSupport.savedReadSchemaEnabled()) ?
                     SparkReadSchemaSupport.buildReadSchema(ec, schemaFile) : null
             try {
                 df = readSchema != null ?
                         spark.read().schema(readSchema).option("multiLine", "true").json(path) :
                         spark.read().option("multiLine", "true").json(path)
-                idDf = CompareDatasetSupport.buildJsonIdDf(df, pathInfo, label, idNormalizer)
-                dataDf = CompareDatasetSupport.buildJsonDataDf(df, pathInfo, label, idNormalizer)
+                idDf = CompareDatasetSupport.buildJsonIdDf(df, pathInfos, label, idNormalizers, fieldExpressions)
+                dataDf = CompareDatasetSupport.buildJsonDataDf(df, pathInfos, label, idNormalizers, fieldExpressions)
             } catch (Exception readFailure) {
                 if (readSchema == null) throw readFailure
                 logger.warn("Saved read schema for '${label}' did not cover the data (${readFailure.message}); re-reading with inference.")
                 df = spark.read().option("multiLine", "true").json(path)
-                idDf = CompareDatasetSupport.buildJsonIdDf(df, pathInfo, label, idNormalizer)
-                dataDf = CompareDatasetSupport.buildJsonDataDf(df, pathInfo, label, idNormalizer)
+                idDf = CompareDatasetSupport.buildJsonIdDf(df, pathInfos, label, idNormalizers, fieldExpressions)
+                dataDf = CompareDatasetSupport.buildJsonDataDf(df, pathInfos, label, idNormalizers, fieldExpressions)
             }
         } else {
              // CSV
              df = spark.read().option("header", hasHeader.toString()).option("multiLine", "true").csv(path)
-             idDf = CompareDatasetSupport.buildCsvIdDf(df, idExpr, idNormalizer, label, hasHeader)
-             dataDf = CompareDatasetSupport.buildCsvDataDf(df, idExpr, idNormalizer, label, hasHeader)
+             idDf = CompareDatasetSupport.buildCsvIdDf(df, idSpecs, label, hasHeader)
+             dataDf = CompareDatasetSupport.buildCsvDataDf(df, idSpecs, label, hasHeader)
         }
         return [idDf: idDf, dataDf: dataDf]
+    }
+
+    // Task 3 (composite compare keys): the RuleSet compare-scope pipeline always resolves an ordered
+    // List<Map> of idSpecs (Task 2), but the legacy reconcileUnifiedFilesInternal pipeline still calls
+    // this with a single Map idSpec — accept both shapes rather than forcing that separate legacy path
+    // to wrap its Map in a List.
+    private static List<Map> normalizeIdSpecs(Object idSpecOrList) {
+        if (idSpecOrList instanceof List) return ((List) idSpecOrList) as List<Map>
+        if (idSpecOrList instanceof Map) return [(Map) idSpecOrList]
+        throw new IllegalArgumentException("idSpec must be a Map or a List of Maps, got ${idSpecOrList?.getClass()}")
     }
 
     static String resolvePath(ExecutionContext ec, String location) {

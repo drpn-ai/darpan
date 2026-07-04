@@ -1,6 +1,8 @@
 package darpan.reconciliation.core
 
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import org.apache.spark.sql.Dataset
+import org.apache.spark.sql.SparkSession
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
@@ -98,5 +100,67 @@ class RuleSetCompareSourceCompositeKeyTests {
                 "Legacy scope", "FILE_1", "JSON", legacyConfig, [])
         assertEquals(1, legacySpecs.size())
         assertEquals('$.returns[*].return_id', legacySpecs[0].idExpr)
+    }
+
+    @Test
+    void compositeKeyProducesDistinctComposedIdsAndRejectsNullFields() {
+        SparkSession spark = SparkSession.builder().appName("CompositeKeyTest").master("local[1]")
+                .config("spark.ui.enabled", "false").getOrCreate()
+        try {
+            List<Map<String, Object>> idSpecs = [
+                    [idExpr: '$.returns[*].return_id', idNormalizer: null],
+                    [idExpr: '$.returns[*].product_id', idNormalizer: null],
+            ]
+            Map ingested = ReconciliationServices.ingestFile(
+                    ec, spark, "component://darpan/data/test/test-return-items-1.json", "JSON",
+                    idSpecs, true, "Return items 1", [], null)
+            List<String> compareIds = ((Dataset) ingested.idDf).collectAsList()
+                    .collect { it.getAs("compare_id").toString() }
+                    .sort()
+
+            assertEquals(["R1\u001FP1", "R1\u001FP2", "R2\u001FP1"], compareIds)
+        } finally {
+            spark.stop()
+        }
+    }
+
+    @Test
+    void legacySingleFieldIdSpecStillWorksWhenPassedAsABareMapNotAList() {
+        SparkSession spark = SparkSession.builder().appName("LegacySingleFieldTest").master("local[1]")
+                .config("spark.ui.enabled", "false").getOrCreate()
+        try {
+            Map<String, Object> singleIdSpec = [idExpr: '$.returns[*].return_id', idNormalizer: null]
+            Map ingested = ReconciliationServices.ingestFile(
+                    ec, spark, "component://darpan/data/test/test-return-items-1.json", "JSON",
+                    singleIdSpec, true, "Return items 1", [], null)
+            List<String> compareIds = ((Dataset) ingested.idDf).collectAsList()
+                    .collect { it.getAs("compare_id").toString() }
+                    .sort()
+
+            assertEquals(["R1", "R2"], compareIds)
+        } finally {
+            spark.stop()
+        }
+    }
+
+    // Regression: buildCsvFieldColumns must not nest applyIdNormalizer(expr(...), ...) in one Groovy
+    // expression — dynamic dispatch resolved the wrong overload and broke single-field CSV ingestion.
+    @Test
+    void csvSingleFieldIdSpecStillWorksWhenPassedAsABareMapNotAList() {
+        SparkSession spark = SparkSession.builder().appName("CsvSingleFieldRegressionTest").master("local[1]")
+                .config("spark.ui.enabled", "false").getOrCreate()
+        try {
+            Map<String, Object> singleIdSpec = [idExpr: 'return_id', idNormalizer: null]
+            Map ingested = ReconciliationServices.ingestFile(
+                    ec, spark, "component://darpan/data/test/test-return-items-1.csv", "CSV",
+                    singleIdSpec, true, "Return items 1", [], null)
+            List<String> compareIds = ((Dataset) ingested.idDf).collectAsList()
+                    .collect { it.getAs("compare_id").toString() }
+                    .sort()
+
+            assertEquals(["R1", "R2"], compareIds)
+        } finally {
+            spark.stop()
+        }
     }
 }

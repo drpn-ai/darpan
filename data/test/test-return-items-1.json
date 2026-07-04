@@ -1,0 +1,7 @@
+{
+  "returns": [
+    {"return_id": "R1", "product_id": "P1", "qty": 2},
+    {"return_id": "R1", "product_id": "P2", "qty": 1},
+    {"return_id": "R2", "product_id": "P1", "qty": 5}
+  ]
+}

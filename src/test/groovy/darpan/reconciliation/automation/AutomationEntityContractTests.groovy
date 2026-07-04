@@ -203,6 +203,83 @@ class AutomationEntityContractTests {
                 "ReconciliationSavedRunSupport should not have bare ec.entity.find(RECONCILIATION_MAPPING_MEMBER) after P0#4 step 5 migration")
     }
 
+    @Test
+    void databaseSourceQueryIdIsTheOnlyConnectorConfigParamThatIsASourceRowColumn() {
+        // Locks the isolation invariant that AutomationExecutionSupport.readSourceRowConfigId relies on:
+        // that helper reads a connector's configParameterName DIRECTLY off the automation source row when
+        // (and only when) it names a real ReconciliationAutomationSource column. That is safe ONLY while
+        // databaseSourceQueryId is the SOLE connector configParameterName that is a source-row column. If a
+        // future connector row set configParameterName to an existing source column (sftpServerId,
+        // nsRestletConfigId, systemMessageRemoteId, omsRestSourceConfigId, shopifyAuthConfigId, ...), the DB
+        // guard would silently start rewriting that path's dispatch with no other test catching it. Fail
+        // loudly here instead.
+        def source = entity(parse("entity/ReconciliationEntities.xml").entity, "ReconciliationAutomationSource")
+        Set<String> sourceFields = source.field.collect { attr(it, "name") } as Set<String>
+        // Sanity: the column the guard reads for AUT_SRC_DB must exist on the source row.
+        assertTrue(sourceFields.contains("databaseSourceQueryId"),
+                "ReconciliationAutomationSource must define the databaseSourceQueryId column the DB guard reads")
+
+        List connectorRows = collectSourceSystemConnectorRows().findAll { attr(it, "enabled") != "N" }
+        assertFalse(connectorRows.isEmpty(), "Expected SourceSystemConnector seed rows to inspect")
+
+        // The set of connector configParameterNames that ARE ReconciliationAutomationSource columns must be
+        // a subset of {databaseSourceQueryId}. Fails loudly if any (future) connector's config param
+        // collides with a real source column, regardless of which systemEnumId owns it or whether the
+        // database-darpan component is checked out.
+        Set<String> allowed = ["databaseSourceQueryId"] as Set<String>
+        Set<String> configParamsThatAreSourceColumns = connectorRows
+                .collect { attr(it, "configParameterName") }
+                .findAll { it && sourceFields.contains(it) }
+                .toSet()
+        assertTrue(allowed.containsAll(configParamsThatAreSourceColumns),
+                "Only databaseSourceQueryId may be a connector configParameterName that is also a " +
+                        "ReconciliationAutomationSource column; found: ${configParamsThatAreSourceColumns}")
+
+        // Any connector that DOES name a source-row column must be the DATABASE connector (the sanctioned
+        // exception the guard is built for), naming exactly databaseSourceQueryId.
+        connectorRows.each { row ->
+            String param = attr(row, "configParameterName")
+            if (param && sourceFields.contains(param)) {
+                assertEquals("DATABASE", attr(row, "systemEnumId"),
+                        "Connector ${attr(row, "systemEnumId")} uses source-row column ${param} as its config " +
+                                "param; only the DATABASE connector may do so")
+                assertEquals("databaseSourceQueryId", param,
+                        "The DATABASE connector's source-row config column must be databaseSourceQueryId")
+            }
+        }
+
+        // When the DATABASE connector is present (database-darpan checked out), the set is exactly
+        // {databaseSourceQueryId} - a positive lock that the sanctioned exception is wired as expected.
+        if (connectorRows.any { attr(it, "systemEnumId") == "DATABASE" }) {
+            assertEquals(allowed, configParamsThatAreSourceColumns,
+                    "With the DATABASE connector present, databaseSourceQueryId must be exactly the set of " +
+                            "connector config params that are ReconciliationAutomationSource columns")
+        }
+
+        // Teeth: the API connectors' config params are NOT source-row columns, so the guard leaves their
+        // dispatch byte-identical (present in the core seed regardless of database-darpan).
+        assertFalse(sourceFields.contains("omsRestSourceConfigId"),
+                "omsRestSourceConfigId must not be a ReconciliationAutomationSource column")
+        assertFalse(sourceFields.contains("shopifyAuthConfigId"),
+                "shopifyAuthConfigId must not be a ReconciliationAutomationSource column")
+    }
+
+    private static List collectSourceSystemConnectorRows() {
+        List rows = []
+        // Core registry seed (OMS / SHOPIFY / NETSUITE).
+        rows.addAll(nodes(parse("data/SourceSystemConnectorSeedData.xml"),
+                "darpan.reconciliation.SourceSystemConnector"))
+        // The DATABASE connector ships in the sibling database-darpan component; fold it in when that
+        // component is checked out so the invariant covers the row that legitimately uses a source-row
+        // column. Best-effort: the subset assertion still holds (and fails loudly) when it is absent.
+        Path dbSeed = componentRoot().getParent().resolve("database-darpan/data/DatabaseConnectorSeedData.xml")
+        if (Files.exists(dbSeed)) {
+            def root = new XmlParser(false, false).parse(dbSeed.toFile())
+            rows.addAll(nodes(root, "darpan.reconciliation.SourceSystemConnector"))
+        }
+        return rows
+    }
+
     private static void assertAutomationEnums(def root) {
         List<String> typeIds = nodes(root, "moqui.basic.EnumerationType").collect { attr(it, "enumTypeId") }
         REQUIRED_ENUMS_BY_TYPE.keySet().each { String enumTypeId ->

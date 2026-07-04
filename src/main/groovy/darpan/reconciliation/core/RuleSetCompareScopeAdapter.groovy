@@ -15,6 +15,7 @@ class RuleSetCompareScopeAdapter {
     private static final Map<String, String> SIDE_PREFIX_BY_SIDE = [FILE_1: "file1", FILE_2: "file2"].asImmutable()
     private static final Map<String, String> SIDE_FALLBACK_LABEL_BY_SIDE = [FILE_1: "File 1", FILE_2: "File 2"].asImmutable()
     private static final Set<String> SUPPORTED_FILE_TYPES = ["CSV", "JSON"] as Set
+    private static final int MAX_COMPOSITE_KEY_FIELDS = 5
 
     static Map<String, Object> prepareRuleSetCompareScope(ExecutionContext ec) {
         Map<String, Object> context = (Map<String, Object>) ec.contextStack
@@ -90,7 +91,8 @@ class RuleSetCompareScopeAdapter {
                     schemaFileName      : sideInput.schemaFileName ?: ReconciliationServices.normalize(source.schemaFileName),
                     recordRootExpression: ReconciliationServices.normalize(source.recordRootExpression),
                     primaryIdExpression : ReconciliationServices.normalize(source.primaryIdExpression),
-                    idValueNormalizer   : ReconciliationServices.normalize(source.idValueNormalizer)
+                    idValueNormalizer   : ReconciliationServices.normalize(source.idValueNormalizer),
+                    keyFields           : source.findRelated("keyFields", null, ["sequenceNum"], false, false) ?: []
             ]]
         }
         List<String> fileTypeEnumIds = sideConfigBySide.values()
@@ -123,7 +125,7 @@ class RuleSetCompareScopeAdapter {
                     config      : sideConfig,
                     fileLocation: sideInput.fileLocation,
                     fileType    : fileType,
-                    idSpec      : buildCompareSourceIdSpec(compareScopeLabel, fileSide, fileType, sideConfig, processingWarnings),
+                    idSpecs     : buildCompareSourceIdSpecs(compareScopeLabel, fileSide, fileType, sideConfig, processingWarnings),
                     label       : sideInput.fileLabel ?: ReconciliationServices.resolveEnumLabel(ec, (String) sideConfig.systemEnumId, SIDE_FALLBACK_LABEL_BY_SIDE[fileSide])
             ]]
         }
@@ -131,8 +133,8 @@ class RuleSetCompareScopeAdapter {
         Map<String, Object> file2Plan = (Map<String, Object>) sidePlanBySide.FILE_2
         Map<String, Object> file1Config = (Map<String, Object>) file1Plan.config
         Map<String, Object> file2Config = (Map<String, Object>) file2Plan.config
-        Map<String, Object> file1IdSpec = (Map<String, Object>) file1Plan.idSpec
-        Map<String, Object> file2IdSpec = (Map<String, Object>) file2Plan.idSpec
+        List<Map<String, Object>> file1IdSpecs = (List<Map<String, Object>>) file1Plan.idSpecs
+        List<Map<String, Object>> file2IdSpecs = (List<Map<String, Object>>) file2Plan.idSpecs
 
         logger.info("Preparing compare scope extraction: ruleSet={} compareScope={} objectType={} file1Type={} file2Type={}",
                 ruleSetId, compareScopeId, compareScope.objectType, file1Plan.fileType, file2Plan.fileType)
@@ -155,7 +157,7 @@ class RuleSetCompareScopeAdapter {
             Map<String, Object> plan = (Map<String, Object>) sidePlanBySide[fileSide]
             Map<String, Object> config = (Map<String, Object>) plan.config
             [(fileSide): ReconciliationServices.ingestFile(
-                    ec, spark, (String) plan.fileLocation, (String) plan.fileType, (Map) plan.idSpec,
+                    ec, spark, (String) plan.fileLocation, (String) plan.fileType, (List) plan.idSpecs,
                     hasHeader != null ? hasHeader : true, (String) plan.label, validationErrors,
                     (String) config.schemaFileName)]
         }
@@ -194,10 +196,10 @@ class RuleSetCompareScopeAdapter {
                 file2SystemEnumId: file2Config.systemEnumId,
                 file1SchemaFileName: file1Config.schemaFileName,
                 file2SchemaFileName: file2Config.schemaFileName,
-                file1IdExpression: file1IdSpec.idExpr,
-                file2IdExpression: file2IdSpec.idExpr,
-                file1IdNormalizer: file1IdSpec.idNormalizer,
-                file2IdNormalizer: file2IdSpec.idNormalizer,
+                file1IdExpression: file1IdSpecs.collect { it.idExpr }.join(' + '),
+                file2IdExpression: file2IdSpecs.collect { it.idExpr }.join(' + '),
+                file1IdNormalizer: file1IdSpecs.collect { it.idNormalizer }.findAll { it }.join(', ') ?: null,
+                file2IdNormalizer: file2IdSpecs.collect { it.idNormalizer }.findAll { it }.join(', ') ?: null,
                 file1Label       : file1Plan.label,
                 file2Label       : file2Plan.label,
                 file1IdDf        : file1IdDf,
@@ -233,7 +235,32 @@ class RuleSetCompareScopeAdapter {
         return collapsedIngest
     }
 
-    private static Map<String, Object> buildCompareSourceIdSpec(String compareScopeLabel, String fileSide, String fileType,
+    static List<Map<String, Object>> buildCompareSourceIdSpecsForTest(String compareScopeLabel, String fileSide, String fileType,
+                                                                        Map<String, Object> sourceConfig, List<String> processingWarnings) {
+        return buildCompareSourceIdSpecs(compareScopeLabel, fileSide, fileType, sourceConfig, processingWarnings)
+    }
+
+    private static List<Map<String, Object>> buildCompareSourceIdSpecs(String compareScopeLabel, String fileSide, String fileType,
+                                                                Map<String, Object> sourceConfig, List<String> processingWarnings) {
+        List<Map> keyFields = ((List) sourceConfig.keyFields ?: []) as List<Map>
+        if (!keyFields) {
+            return [buildLegacyCompareSourceIdSpec(compareScopeLabel, fileSide, fileType, sourceConfig, processingWarnings)]
+        }
+
+        if (keyFields.size() > MAX_COMPOSITE_KEY_FIELDS) {
+            throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' ${fileSide} defines ${keyFields.size()} key fields; the maximum is ${MAX_COMPOSITE_KEY_FIELDS}")
+        }
+
+        String recordRootExpression = (String) sourceConfig.recordRootExpression
+        return keyFields
+                .sort { (it.sequenceNum as Integer) }
+                .collect { Map keyField ->
+                    buildCompositeKeyFieldIdSpec(compareScopeLabel, fileSide, fileType,
+                            ReconciliationServices.normalize(keyField.fieldExpression), recordRootExpression, processingWarnings)
+                }
+    }
+
+    private static Map<String, Object> buildLegacyCompareSourceIdSpec(String compareScopeLabel, String fileSide, String fileType,
                                                                 Map<String, Object> sourceConfig, List<String> processingWarnings) {
         String rawPrimaryIdExpression = ReconciliationServices.normalize(sourceConfig.primaryIdExpression)
         if (!rawPrimaryIdExpression) {
@@ -260,6 +287,30 @@ class RuleSetCompareScopeAdapter {
         }
 
         String expressionWithNormalizer = finalNormalizer ? "${baseExpression}|${finalNormalizer}" : baseExpression
+        return ReconciliationServices.parseIdSpec(expressionWithNormalizer, "CSV".equals(fileType))
+    }
+
+    private static Map<String, Object> buildCompositeKeyFieldIdSpec(String compareScopeLabel, String fileSide, String fileType,
+                                                                String rawExpression, String recordRootExpression,
+                                                                List<String> processingWarnings) {
+        if (!rawExpression) {
+            throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' ${fileSide} has a composite key field with an empty expression")
+        }
+
+        Map<String, Object> split = ReconciliationServices.splitIdExpression(rawExpression)
+        String normalizer = ReconciliationServices.resolveIdNormalizer((String) split.normalizer)
+        String baseExpression = ReconciliationServices.normalize(split.idExpr)
+        if ("JSON".equals(fileType)) {
+            baseExpression = combineJsonRootAndPrimaryExpression(recordRootExpression, baseExpression)
+        } else if ("CSV".equals(fileType) && ReconciliationServices.normalize(recordRootExpression)) {
+            processingWarnings.add("Compare scope '${compareScopeLabel}' ${fileSide} ignores recordRootExpression for CSV input")
+        }
+
+        if (!baseExpression) {
+            throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' ${fileSide} resolved an empty composite key field expression")
+        }
+
+        String expressionWithNormalizer = normalizer ? "${baseExpression}|${normalizer}" : baseExpression
         return ReconciliationServices.parseIdSpec(expressionWithNormalizer, "CSV".equals(fileType))
     }
 

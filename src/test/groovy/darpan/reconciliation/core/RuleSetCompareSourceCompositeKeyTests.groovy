@@ -70,4 +70,33 @@ class RuleSetCompareSourceCompositeKeyTests {
         assertEquals("product_id", keyFields[1].fieldExpression)
         assertFalse(ec.message.hasError())
     }
+
+    @Test
+    void buildCompareSourceIdSpecsReturnsOrderedSpecsForCompositeKeyFieldsAndFallsBackToLegacyExpression() {
+        Map<String, Object> compositeConfig = [
+                primaryIdExpression: null,
+                idValueNormalizer  : null,
+                recordRootExpression: '$.returns[*]',
+                keyFields: [
+                        [sequenceNum: 2, fieldExpression: "product_id"],
+                        [sequenceNum: 1, fieldExpression: "return_id"],
+                ]
+        ]
+        List<Map<String, Object>> compositeSpecs = RuleSetCompareScopeAdapter.buildCompareSourceIdSpecsForTest(
+                "Composite scope", "FILE_1", "JSON", compositeConfig, [])
+        assertEquals(2, compositeSpecs.size())
+        assertEquals('$.returns[*].return_id', compositeSpecs[0].idExpr)
+        assertEquals('$.returns[*].product_id', compositeSpecs[1].idExpr)
+
+        Map<String, Object> legacyConfig = [
+                primaryIdExpression: '$.returns[*].return_id',
+                idValueNormalizer  : null,
+                recordRootExpression: null,
+                keyFields: []
+        ]
+        List<Map<String, Object>> legacySpecs = RuleSetCompareScopeAdapter.buildCompareSourceIdSpecsForTest(
+                "Legacy scope", "FILE_1", "JSON", legacyConfig, [])
+        assertEquals(1, legacySpecs.size())
+        assertEquals('$.returns[*].return_id', legacySpecs[0].idExpr)
+    }
 }

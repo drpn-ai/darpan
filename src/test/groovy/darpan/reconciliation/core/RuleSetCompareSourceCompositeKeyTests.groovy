@@ -14,19 +14,27 @@ import java.nio.file.Path
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertThrows
+import static org.junit.jupiter.api.Assertions.assertTrue
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RuleSetCompareSourceCompositeKeyTests {
     private ExecutionContext ec
+    private SparkSession spark
 
     @BeforeAll
     void setup() {
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "ruleset-composite-key")
+        // One session for the whole class: per-test create/stop raced the next test's getOrCreate
+        // against the previous test's asynchronous stop and intermittently handed out a dead session.
+        spark = SparkSession.builder().appName("RuleSetCompareSourceCompositeKeyTests").master("local[1]")
+                .config("spark.ui.enabled", "false").getOrCreate()
     }
 
     @AfterAll
     void cleanup() {
+        if (spark != null) spark.stop()
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 
@@ -103,64 +111,63 @@ class RuleSetCompareSourceCompositeKeyTests {
     }
 
     @Test
-    void compositeKeyProducesDistinctComposedIdsAndRejectsNullFields() {
-        SparkSession spark = SparkSession.builder().appName("CompositeKeyTest").master("local[1]")
-                .config("spark.ui.enabled", "false").getOrCreate()
-        try {
-            List<Map<String, Object>> idSpecs = [
-                    [idExpr: '$.returns[*].return_id', idNormalizer: null],
-                    [idExpr: '$.returns[*].product_id', idNormalizer: null],
-            ]
-            Map ingested = ReconciliationServices.ingestFile(
-                    ec, spark, "component://darpan/data/test/test-return-items-1.json", "JSON",
-                    idSpecs, true, "Return items 1", [], null)
-            List<String> compareIds = ((Dataset) ingested.idDf).collectAsList()
-                    .collect { it.getAs("compare_id").toString() }
-                    .sort()
+    void compositeKeyProducesDistinctComposedIds() {
+        List<Map<String, Object>> idSpecs = [
+                [idExpr: '$.returns[*].return_id', idNormalizer: null],
+                [idExpr: '$.returns[*].product_id', idNormalizer: null],
+        ]
+        Map ingested = ReconciliationServices.ingestFile(
+                ec, spark, "component://darpan/data/test/test-return-items-1.json", "JSON",
+                idSpecs, true, "Return items 1", [], null)
+        List<String> compareIds = ((Dataset) ingested.idDf).collectAsList()
+                .collect { it.getAs("compare_id").toString() }
+                .sort()
 
-            assertEquals(["R1\u001FP1", "R1\u001FP2", "R2\u001FP1"], compareIds)
-        } finally {
-            spark.stop()
+        assertEquals(["R1\u001FP1", "R1\u001FP2", "R2\u001FP1"], compareIds)
+    }
+
+    // Spark's concat_ws silently skips null columns; without the explicit guard a row missing one
+    // composite field would compose a shorter, collidable compare_id instead of failing loudly.
+    @Test
+    void compositeKeyRejectsRowsWithNullOrBlankKeyFields() {
+        List<Map<String, Object>> idSpecs = [
+                [idExpr: '$.returns[*].return_id', idNormalizer: null],
+                [idExpr: '$.returns[*].product_id', idNormalizer: null],
+        ]
+        IllegalArgumentException thrown = assertThrows(IllegalArgumentException) {
+            ReconciliationServices.ingestFile(
+                    ec, spark, "component://darpan/data/test/test-return-items-null-field.json", "JSON",
+                    idSpecs, true, "Return items with null field", [], null)
         }
+        assertTrue(thrown.message.contains("must all be present"),
+                "expected the null-field guard message, got: ${thrown.message}")
     }
 
     @Test
     void legacySingleFieldIdSpecStillWorksWhenPassedAsABareMapNotAList() {
-        SparkSession spark = SparkSession.builder().appName("LegacySingleFieldTest").master("local[1]")
-                .config("spark.ui.enabled", "false").getOrCreate()
-        try {
-            Map<String, Object> singleIdSpec = [idExpr: '$.returns[*].return_id', idNormalizer: null]
-            Map ingested = ReconciliationServices.ingestFile(
-                    ec, spark, "component://darpan/data/test/test-return-items-1.json", "JSON",
-                    singleIdSpec, true, "Return items 1", [], null)
-            List<String> compareIds = ((Dataset) ingested.idDf).collectAsList()
-                    .collect { it.getAs("compare_id").toString() }
-                    .sort()
+        Map<String, Object> singleIdSpec = [idExpr: '$.returns[*].return_id', idNormalizer: null]
+        Map ingested = ReconciliationServices.ingestFile(
+                ec, spark, "component://darpan/data/test/test-return-items-1.json", "JSON",
+                singleIdSpec, true, "Return items 1", [], null)
+        List<String> compareIds = ((Dataset) ingested.idDf).collectAsList()
+                .collect { it.getAs("compare_id").toString() }
+                .sort()
 
-            assertEquals(["R1", "R2"], compareIds)
-        } finally {
-            spark.stop()
-        }
+        assertEquals(["R1", "R2"], compareIds)
     }
 
     // Regression: buildCsvFieldColumns must not nest applyIdNormalizer(expr(...), ...) in one Groovy
     // expression — dynamic dispatch resolved the wrong overload and broke single-field CSV ingestion.
     @Test
     void csvSingleFieldIdSpecStillWorksWhenPassedAsABareMapNotAList() {
-        SparkSession spark = SparkSession.builder().appName("CsvSingleFieldRegressionTest").master("local[1]")
-                .config("spark.ui.enabled", "false").getOrCreate()
-        try {
-            Map<String, Object> singleIdSpec = [idExpr: 'return_id', idNormalizer: null]
-            Map ingested = ReconciliationServices.ingestFile(
-                    ec, spark, "component://darpan/data/test/test-return-items-1.csv", "CSV",
-                    singleIdSpec, true, "Return items 1", [], null)
-            List<String> compareIds = ((Dataset) ingested.idDf).collectAsList()
-                    .collect { it.getAs("compare_id").toString() }
-                    .sort()
+        Map<String, Object> singleIdSpec = [idExpr: 'return_id', idNormalizer: null]
+        Map ingested = ReconciliationServices.ingestFile(
+                ec, spark, "component://darpan/data/test/test-return-items-1.csv", "CSV",
+                singleIdSpec, true, "Return items 1", [], null)
+        List<String> compareIds = ((Dataset) ingested.idDf).collectAsList()
+                .collect { it.getAs("compare_id").toString() }
+                .sort()
 
-            assertEquals(["R1", "R2"], compareIds)
-        } finally {
-            spark.stop()
-        }
+        assertEquals(["R1", "R2"], compareIds)
     }
 }

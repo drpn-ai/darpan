@@ -419,9 +419,16 @@ class ReconciliationServices {
     // this with a single Map idSpec — accept both shapes rather than forcing that separate legacy path
     // to wrap its Map in a List.
     private static List<Map> normalizeIdSpecs(Object idSpecOrList) {
-        if (idSpecOrList instanceof List) return ((List) idSpecOrList) as List<Map>
-        if (idSpecOrList instanceof Map) return [(Map) idSpecOrList]
-        throw new IllegalArgumentException("idSpec must be a Map or a List of Maps, got ${idSpecOrList?.getClass()}")
+        List<Map> rawSpecs
+        if (idSpecOrList instanceof List) rawSpecs = ((List) idSpecOrList) as List<Map>
+        else if (idSpecOrList instanceof Map) rawSpecs = [(Map) idSpecOrList]
+        else throw new IllegalArgumentException("idSpec must be a Map or a List of Maps, got ${idSpecOrList?.getClass()}")
+        // Trim-to-null idExpr and idNormalizer here, at the single entry point, so no downstream
+        // consumer (JSON or CSV path) can see an untrimmed value — the pre-composite code normalized
+        // both, and applyIdNormalizer matches normalizer names by exact string equality.
+        return rawSpecs.collect { Map spec ->
+            [idExpr: normalize(spec?.get('idExpr')), idNormalizer: normalize(spec?.get('idNormalizer'))] as Map
+        }
     }
 
     static String resolvePath(ExecutionContext ec, String location) {

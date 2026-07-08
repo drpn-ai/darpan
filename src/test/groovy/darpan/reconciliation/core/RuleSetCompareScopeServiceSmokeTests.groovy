@@ -464,6 +464,34 @@ class RuleSetCompareScopeServiceSmokeTests {
         )
     }
 
+    @Test
+    void singleFieldPrimaryIdExpressionProducesIdenticalCompareIdsAfterCompositeKeySupportWasAdded() {
+        Map<String, Object> prepared = ec.service.sync()
+                .name("reconciliation.ReconciliationCoreServices.prepare#RuleSetCompareScope")
+                .parameters([
+                        ruleSetId    : "DARPAN_TEST_COMPARE_RS",
+                        compareScopeId: "DARPAN_TEST_ORDER_JSON_SCOPE",
+                        file1Location: "component://darpan/data/test/test-orders-1.json",
+                        file2Location: "component://darpan/data/test/test-orders-2.json",
+                        sparkMaster  : "local[1]",
+                        sparkAppName : "RuleSetCompareScopeServiceSmokeTests-Regression"
+                ])
+                .disableAuthz()
+                .call()
+
+        // Identical assertions to prepareCompareScopeReturnsNormalizedDatasetsForCallerPipeline above —
+        // this is a deliberate duplicate proving composite-key support did not change legacy output.
+        assertEquals('$.data.orders.edges[*].node.id', prepared.file1IdExpression)
+        assertEquals("SHOPIFY_GID_TAIL", prepared.file1IdNormalizer)
+        Dataset file1IdDf = (Dataset) prepared.file1IdDf
+        assertEquals(3L, file1IdDf.count())
+        assertIterableEquals(
+                ["6470622019715", "6470622478467", "6470624575619"],
+                collectCompareIds(file1IdDf)
+        )
+        assertFalse(ec.message.hasError())
+    }
+
     private static List<String> collectCompareIds(Dataset dataset) {
         return dataset.collectAsList()
                 .collect { row -> row.getAs("compare_id")?.toString() }

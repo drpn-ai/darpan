@@ -471,4 +471,17 @@ class RuleSetCompareSourceCompositeKeyTests {
                 .condition([compareScopeId: scopeId, fileSide: "FILE_2"]).useCache(false).one()
         assertEquals(2, f2.findRelated("keyFields", null, ["sequenceNum"], false, false).size())
     }
+
+    // Task 2 (defense in depth): RuleSetCompareScopeAdapter.prepareRuleSetCompareScope must also reject
+    // mismatched cross-side key-field counts, independently of the facade-level guard above — this
+    // covers compare scopes prepared/extracted through paths that predate or bypass that facade guard.
+    @Test
+    void adapterRejectsMismatchedIdSpecCounts() {
+        def two = [[idExpr: 'a', idNormalizer: null], [idExpr: 'b', idNormalizer: null]]
+        def one = [[idExpr: 'a', idNormalizer: null]]
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException) {
+            RuleSetCompareScopeAdapter.assertMatchingIdSpecCountsForTest(two, one)
+        }
+        assertTrue(ex.message.contains("same number"))
+    }
 }

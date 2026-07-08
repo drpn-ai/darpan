@@ -135,6 +135,12 @@ class RuleSetCompareScopeAdapter {
         Map<String, Object> file2Config = (Map<String, Object>) file2Plan.config
         List<Map<String, Object>> file1IdSpecs = (List<Map<String, Object>>) file1Plan.idSpecs
         List<Map<String, Object>> file2IdSpecs = (List<Map<String, Object>>) file2Plan.idSpecs
+        // Defense in depth: the facade-level create#RuleSetRun/save#RuleSetRun guard already rejects
+        // mismatched cross-side composite key-field counts at request time, but this adapter is the
+        // single choke point every extraction path (including ones that predate or bypass that facade
+        // guard) funnels through before ingest — re-check here so a stored scope with skewed counts
+        // fails loudly instead of silently mis-composing compare_id joins.
+        assertMatchingIdSpecCounts(file1IdSpecs, file2IdSpecs)
 
         logger.info("Preparing compare scope extraction: ruleSet={} compareScope={} objectType={} file1Type={} file2Type={}",
                 ruleSetId, compareScopeId, compareScope.objectType, file1Plan.fileType, file2Plan.fileType)
@@ -238,6 +244,20 @@ class RuleSetCompareScopeAdapter {
     static List<Map<String, Object>> buildCompareSourceIdSpecsForTest(String compareScopeLabel, String fileSide, String fileType,
                                                                         Map<String, Object> sourceConfig, List<String> processingWarnings) {
         return buildCompareSourceIdSpecs(compareScopeLabel, fileSide, fileType, sourceConfig, processingWarnings)
+    }
+
+    static void assertMatchingIdSpecCountsForTest(List file1IdSpecs, List file2IdSpecs) {
+        assertMatchingIdSpecCounts(file1IdSpecs, file2IdSpecs)
+    }
+
+    // Defense in depth: mirrors the facade-level cross-side count guard (create#RuleSetRun /
+    // save#RuleSetRun). A composed compare_id with N segments on one side can never join an
+    // M-segment side, so every extraction path must fail loudly here rather than let Spark
+    // silently mis-join or mis-compose the compare_id columns.
+    private static void assertMatchingIdSpecCounts(List file1IdSpecs, List file2IdSpecs) {
+        if (file1IdSpecs.size() != file2IdSpecs.size()) {
+            throw new IllegalArgumentException("Compare scope sides must use the same number of primary-key fields; file1 has ${file1IdSpecs.size()}, file2 has ${file2IdSpecs.size()}")
+        }
     }
 
     private static List<Map<String, Object>> buildCompareSourceIdSpecs(String compareScopeLabel, String fileSide, String fileType,

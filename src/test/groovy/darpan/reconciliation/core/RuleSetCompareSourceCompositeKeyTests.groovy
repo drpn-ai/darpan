@@ -484,4 +484,60 @@ class RuleSetCompareSourceCompositeKeyTests {
         }
         assertTrue(ex.message.contains("same number"))
     }
+
+    // Task 3: the saved-run load path (list#SavedRuns, backed by
+    // ReconciliationSavedRunSupport.buildRuleSetSystemOptions) must surface a composite run's ordered
+    // key-field expressions as a new `idFieldExpressions` list so the UI can hydrate an editable
+    // composite draft. The legacy singular `idFieldExpression` stays null for composite sides — it is
+    // only ever populated for single-field (non-composite) sources.
+    @Test
+    void listSavedRunsSurfacesCompositeKeyFieldsAsIdFieldExpressions() {
+        Map created = createReturnItemsRun(["return_id", "product_id"], ["return_id", "product_id"])
+        String savedRunId = (String) created.savedRun.savedRunId
+
+        Map<String, Object> listResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.list#SavedRuns")
+                .parameters([query: savedRunId, pageIndex: 0, pageSize: 20])
+                .disableAuthz()
+                .call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertTrue((Boolean) listResult.ok)
+
+        List<Map> savedRuns = (List<Map>) listResult.savedRuns
+        Map matchingRun = savedRuns.find { it.savedRunId == savedRunId }
+        assertTrue(matchingRun != null, "expected to find saved run ${savedRunId} in list#SavedRuns result: ${savedRuns}")
+
+        List<Map> systemOptions = (List<Map>) matchingRun.systemOptions
+        Map file1Option = systemOptions.find { it.fileSide == "FILE_1" }
+        assertEquals(["return_id", "product_id"], file1Option.idFieldExpressions)
+        assertEquals(null, file1Option.idFieldExpression)
+
+        Map file2Option = systemOptions.find { it.fileSide == "FILE_2" }
+        assertEquals(["return_id", "product_id"], file2Option.idFieldExpressions)
+        assertEquals(null, file2Option.idFieldExpression)
+    }
+
+    // Legacy single-field sources must keep working: idFieldExpressions falls back to a one-element
+    // list wrapping the singular primaryIdExpression when there are no RuleSetCompareSourceKeyField rows.
+    @Test
+    void listSavedRunsFallsBackToSingleFieldIdFieldExpressionsForLegacyRuns() {
+        Map created = createReturnItemsRun(["return_id"], ["return_id"])
+        String savedRunId = (String) created.savedRun.savedRunId
+
+        Map<String, Object> listResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.list#SavedRuns")
+                .parameters([query: savedRunId, pageIndex: 0, pageSize: 20])
+                .disableAuthz()
+                .call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+
+        List<Map> savedRuns = (List<Map>) listResult.savedRuns
+        Map matchingRun = savedRuns.find { it.savedRunId == savedRunId }
+        assertTrue(matchingRun != null, "expected to find saved run ${savedRunId} in list#SavedRuns result: ${savedRuns}")
+
+        List<Map> systemOptions = (List<Map>) matchingRun.systemOptions
+        Map file1Option = systemOptions.find { it.fileSide == "FILE_1" }
+        assertEquals("return_id", file1Option.idFieldExpression)
+        assertEquals(["return_id"], file1Option.idFieldExpressions)
+    }
 }

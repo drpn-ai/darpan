@@ -741,6 +741,7 @@ class ReconciliationSavedRunSupport {
                     fileTypeEnumId    : normalize(source.fileTypeEnumId),
                     fileTypeLabel     : fileTypeEnum ? FacadeSupport.enumLabel(fileTypeEnum) : null,
                     idFieldExpression : normalize(source.primaryIdExpression),
+                    idFieldExpressions: resolveKeyFieldExpressions(source),
                     schemaFileName    : normalize(source.schemaFileName),
                     sourceTypeEnumId  : normalize(source.sourceTypeEnumId),
                     sourceTypeLabel   : sourceTypeEnum ? FacadeSupport.enumLabel(sourceTypeEnum) : null,
@@ -754,6 +755,17 @@ class ReconciliationSavedRunSupport {
                     sourceConfigType        : normalize(source.sourceConfigType),
             ]
         }.findAll { it != null } as List<Map<String, Object>>
+    }
+
+    // Composite-key sides store their ordered key fields as RuleSetCompareSourceKeyField rows (via the
+    // `keyFields` relationship on RuleSetCompareSource) rather than in primaryIdExpression, which is
+    // left null for those sides. This surfaces the ordered field list either way so the saved-run load
+    // path (list#SavedRuns) can hand the UI an editable composite draft.
+    private static List<String> resolveKeyFieldExpressions(def source) {
+        List keyFields = source.findRelated("keyFields", null, ["sequenceNum"], false, false) ?: []
+        if (keyFields) return keyFields.collect { normalize(it.fieldExpression) }.findAll { it }
+        String single = normalize(source.primaryIdExpression)
+        return single ? [single] : []
     }
 
     static String resolveEnumLabel(def ec, Object enumId, String fallback = null) {

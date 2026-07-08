@@ -65,6 +65,7 @@
                     <parameter name="fileTypeEnumId"/>
                     <parameter name="fileTypeLabel"/>
                     <parameter name="idFieldExpression"/>
+                    <parameter name="idFieldExpressions" type="List"/>
                     <parameter name="schemaFileName"/>
                     <parameter name="sourceTypeEnumId"/>
                     <parameter name="sourceTypeLabel"/>
@@ -421,6 +422,7 @@
                     <parameter name="fileTypeEnumId"/>
                     <parameter name="fileTypeLabel"/>
                     <parameter name="idFieldExpression"/>
+                    <parameter name="idFieldExpressions" type="List"/>
                     <parameter name="schemaFileName"/>
                     <parameter name="sourceTypeEnumId"/>
                     <parameter name="sourceTypeLabel"/>
@@ -668,6 +670,7 @@
                     <parameter name="fileTypeEnumId"/>
                     <parameter name="fileTypeLabel"/>
                     <parameter name="idFieldExpression"/>
+                    <parameter name="idFieldExpressions" type="List"/>
                     <parameter name="schemaFileName"/>
                     <parameter name="sourceTypeEnumId"/>
                     <parameter name="sourceTypeLabel"/>
@@ -1092,6 +1095,7 @@
                     <parameter name="fileTypeEnumId"/>
                     <parameter name="fileTypeLabel"/>
                     <parameter name="idFieldExpression"/>
+                    <parameter name="idFieldExpressions" type="List"/>
                     <parameter name="schemaFileName"/>
                     <parameter name="sourceTypeEnumId"/>
                     <parameter name="sourceTypeLabel"/>
@@ -1164,6 +1168,7 @@
                     <parameter name="fileTypeEnumId"/>
                     <parameter name="fileTypeLabel"/>
                     <parameter name="idFieldExpression"/>
+                    <parameter name="idFieldExpressions" type="List"/>
                     <parameter name="schemaFileName"/>
                     <parameter name="sourceTypeEnumId"/>
                     <parameter name="sourceTypeLabel"/>
@@ -1356,6 +1361,7 @@
                     <parameter name="fileTypeEnumId"/>
                     <parameter name="fileTypeLabel"/>
                     <parameter name="idFieldExpression"/>
+                    <parameter name="idFieldExpressions" type="List"/>
                     <parameter name="schemaFileName"/>
                 </parameter>
             </parameter>

@@ -1247,6 +1247,7 @@ SERVICE save RuleSetRun
     file1FileTypeEnumId : String
     file1NsRestletConfigId : String
     file1PrimaryIdExpression : String
+    file1PrimaryIdExpressions : List
     file1RecordRootExpression : String
     file1SchemaFileName : String
     file1SourceConfigId : String
@@ -1257,6 +1258,7 @@ SERVICE save RuleSetRun
     file2FileTypeEnumId : String
     file2NsRestletConfigId : String
     file2PrimaryIdExpression : String
+    file2PrimaryIdExpressions : List
     file2RecordRootExpression : String
     file2SchemaFileName : String
     file2SourceConfigId : String

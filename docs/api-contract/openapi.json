@@ -3521,6 +3521,12 @@
                                         "idFieldExpression": {
                                             "type": "string"
                                         },
+                                        "idFieldExpressions": {
+                                            "type": "array",
+                                            "items": {
+                                                
+                                            }
+                                        },
                                         "schemaFileName": {
                                             "type": "string"
                                         },
@@ -3961,6 +3967,12 @@
                                         },
                                         "idFieldExpression": {
                                             "type": "string"
+                                        },
+                                        "idFieldExpressions": {
+                                            "type": "array",
+                                            "items": {
+                                                
+                                            }
                                         },
                                         "schemaFileName": {
                                             "type": "string"
@@ -6012,6 +6024,12 @@
                                             "idFieldExpression": {
                                                 "type": "string"
                                             },
+                                            "idFieldExpressions": {
+                                                "type": "array",
+                                                "items": {
+                                                    
+                                                }
+                                            },
                                             "schemaFileName": {
                                                 "type": "string"
                                             }
@@ -6208,6 +6226,12 @@
                                             },
                                             "idFieldExpression": {
                                                 "type": "string"
+                                            },
+                                            "idFieldExpressions": {
+                                                "type": "array",
+                                                "items": {
+                                                    
+                                                }
                                             },
                                             "schemaFileName": {
                                                 "type": "string"
@@ -8034,6 +8058,12 @@
                     "file1PrimaryIdExpression": {
                         "type": "string"
                     },
+                    "file1PrimaryIdExpressions": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    },
                     "file2SystemEnumId": {
                         "type": "string"
                     },
@@ -8063,6 +8093,12 @@
                     },
                     "file2PrimaryIdExpression": {
                         "type": "string"
+                    },
+                    "file2PrimaryIdExpressions": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
                     },
                     "rules": {
                         "type": "array",
@@ -8187,6 +8223,12 @@
                                         },
                                         "idFieldExpression": {
                                             "type": "string"
+                                        },
+                                        "idFieldExpressions": {
+                                            "type": "array",
+                                            "items": {
+                                                
+                                            }
                                         },
                                         "schemaFileName": {
                                             "type": "string"
@@ -8438,6 +8480,12 @@
                                         },
                                         "idFieldExpression": {
                                             "type": "string"
+                                        },
+                                        "idFieldExpressions": {
+                                            "type": "array",
+                                            "items": {
+                                                
+                                            }
                                         },
                                         "schemaFileName": {
                                             "type": "string"

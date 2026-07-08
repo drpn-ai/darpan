@@ -762,9 +762,14 @@ class ReconciliationSavedRunSupport {
     // left null for those sides. This surfaces the ordered field list either way so the saved-run load
     // path (list#SavedRuns) can hand the UI an editable composite draft.
     private static List<String> resolveKeyFieldExpressions(def source) {
-        List keyFields = source.findRelated("keyFields", null, ["sequenceNum"], false, false) ?: []
-        if (keyFields) return keyFields.collect { normalize(it.fieldExpression) }.findAll { it }
-        String single = normalize(source.primaryIdExpression)
+        // The real load path passes a RuleSetCompareSource EntityValue (which supports the keyFields
+        // relationship); some unit tests stub `source` as a plain Map, which has no findRelated — only
+        // traverse the relationship for genuine entities, and read scalars via Map.get for both shapes.
+        List keyFields = (source instanceof org.moqui.entity.EntityValue)
+                ? (source.findRelated("keyFields", null, ["sequenceNum"], false, false) ?: [])
+                : []
+        if (keyFields) return keyFields.collect { normalize(it.get("fieldExpression")) }.findAll { it }
+        String single = normalize(source.get("primaryIdExpression"))
         return single ? [single] : []
     }
 

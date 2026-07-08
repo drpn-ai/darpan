@@ -183,8 +183,11 @@ class RuleSetCompareSourceCompositeKeyTests {
     // resolvability check (isResolvableJsonIdExpression) requires a saved JsonSchema whose systemEnumId
     // equals the passed file*SystemEnumId; since file1 and file2 must use different systems, this needs
     // two distinct schemas (one per system), each containing return_id/product_id fields.
-    @Test
-    void createRuleSetRunWithTwoPrimaryIdExpressionsCreatesKeyFieldRowsAndLeavesLegacyExpressionNull() {
+    // Shared seed for facade tests: SHOPIFY/OMS enums (via seedSchemaBackedCsvMappingFixtures), the
+    // DftJson file-type enum, and two JsonSchemas (one per system) each with return_id/product_id.
+    // Extracted from this test so ET1's save#RuleSetRun composite tests and the cross-side count-guard
+    // test can reuse the exact same fixtures without duplicating the seed block.
+    private void seedReturnItemsSchemas() {
         ReconciliationSmokeTestSupport.seedSchemaBackedCsvMappingFixtures(ec)
         // Test 1 in this class creates a bare "DftJson" Enumeration row (no enumCode) directly via
         // entity API; JUnit does not guarantee method execution order, so force-correct enumCode/
@@ -219,6 +222,55 @@ class RuleSetCompareSourceCompositeKeyTests {
                 createdDate       : seedTimestamp,
                 schemaText        : returnItemsSchemaText
         ]).createOrUpdate()
+    }
+
+    // Creates a saved run via create#RuleSetRun using the shared return-items schemas, with the given
+    // plural primary-id-expression arrays on each side. Asserts the create call itself succeeded (so
+    // ET1's save#RuleSetRun tests can focus their own assertions on the save behavior) and returns the
+    // raw create#RuleSetRun result map. runName is uniquified per call: RULE_SET.ruleSetName carries
+    // its own tenant-scoped unique index (independent of the auto-deduped ruleSetId), and this helper
+    // is called once per @Test within the same PER_CLASS session/database.
+    private Map<String, Object> createReturnItemsRun(List<String> file1Fields, List<String> file2Fields) {
+        seedReturnItemsSchemas()
+        Map<String, Object> result = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters([
+                        runName                  : "Composite key save test " + UUID.randomUUID(),
+                        file1SystemEnumId        : "SHOPIFY",
+                        file1FileTypeEnumId      : "DftJson",
+                        file1SchemaFileName      : "test-return-items-schema-shopify",
+                        file1PrimaryIdExpressions: file1Fields,
+                        file2SystemEnumId        : "OMS",
+                        file2FileTypeEnumId      : "DftJson",
+                        file2SchemaFileName      : "test-return-items-schema-oms",
+                        file2PrimaryIdExpressions: file2Fields,
+                ])
+                .disableAuthz()
+                .call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertTrue((Boolean) result.ok)
+        return result
+    }
+
+    // Required save#RuleSetRun params shared by the composite-key save tests below; callers merge in
+    // whichever primary-id-expression param(s) (singular and/or plural) the scenario needs. runName is
+    // uniquified per call for the same reason as createReturnItemsRun above.
+    private Map<String, Object> baseSaveParams(String savedRunId) {
+        return [
+                savedRunId         : savedRunId,
+                runName            : "Composite key save test (edited) " + UUID.randomUUID(),
+                file1SystemEnumId  : "SHOPIFY",
+                file1FileTypeEnumId: "DftJson",
+                file1SchemaFileName: "test-return-items-schema-shopify",
+                file2SystemEnumId  : "OMS",
+                file2FileTypeEnumId: "DftJson",
+                file2SchemaFileName: "test-return-items-schema-oms",
+        ]
+    }
+
+    @Test
+    void createRuleSetRunWithTwoPrimaryIdExpressionsCreatesKeyFieldRowsAndLeavesLegacyExpressionNull() {
+        seedReturnItemsSchemas()
 
         Map<String, Object> result = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
@@ -324,5 +376,99 @@ class RuleSetCompareSourceCompositeKeyTests {
                 .condition([compareScopeId: compareScopeId, fileSide: "FILE_2"]).useCache(false).one()
         assertEquals("return_id", file2Source.primaryIdExpression)
         assertEquals(0, file2Source.findRelated("keyFields", null, ["sequenceNum"], false, false).size())
+    }
+
+    // ET1: save#RuleSetRun must mirror create#RuleSetRun's composite-key persistence — a run created
+    // with a single legacy primaryIdExpression can be *upgraded* to a composite key on save: the
+    // legacy expression is nulled and one RuleSetCompareSourceKeyField row per field is created.
+    @Test
+    void saveRuleSetRunUpgradesSingleFieldRunToCompositeKey() {
+        Map created = createReturnItemsRun(["return_id"], ["return_id"])
+        String savedRunId = (String) created.savedRun.savedRunId
+        Map saved = ec.service.sync().name("facade.ReconciliationFacadeServices.save#RuleSetRun")
+                .parameters(baseSaveParams(savedRunId) + [
+                        file1PrimaryIdExpressions: ["return_id", "product_id"],
+                        file2PrimaryIdExpressions: ["return_id", "product_id"],
+                ]).disableAuthz().call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertTrue((Boolean) saved.ok)
+        String scopeId = (String) saved.savedRun.compareScopeId
+        def f1 = ec.entity.find("darpan.rule.RuleSetCompareSource").condition([compareScopeId: scopeId, fileSide: "FILE_1"]).useCache(false).one()
+        assertEquals(null, f1.primaryIdExpression)
+        List kf = f1.findRelated("keyFields", null, ["sequenceNum"], false, false)
+        assertEquals(2, kf.size()); assertEquals("return_id", kf[0].fieldExpression); assertEquals("product_id", kf[1].fieldExpression)
+    }
+
+    // The reverse of the upgrade test: a composite-key run *downgraded* to a single legacy field on
+    // save must have its RuleSetCompareSourceKeyField rows deleted and primaryIdExpression restored.
+    @Test
+    void saveRuleSetRunDowngradesCompositeRunToSingleFieldAndDeletesKeyRows() {
+        Map created = createReturnItemsRun(["return_id", "product_id"], ["return_id", "product_id"])
+        String savedRunId = (String) created.savedRun.savedRunId
+        Map saved = ec.service.sync().name("facade.ReconciliationFacadeServices.save#RuleSetRun")
+                .parameters(baseSaveParams(savedRunId) + [
+                        file1PrimaryIdExpression: "return_id",
+                        file2PrimaryIdExpression: "return_id",
+                ]).disableAuthz().call()
+        assertTrue((Boolean) saved.ok)
+        String scopeId = (String) saved.savedRun.compareScopeId
+        def f1 = ec.entity.find("darpan.rule.RuleSetCompareSource").condition([compareScopeId: scopeId, fileSide: "FILE_1"]).useCache(false).one()
+        assertEquals("return_id", f1.primaryIdExpression)
+        assertEquals(0, f1.findRelated("keyFields", null, ["sequenceNum"], false, false).size())
+    }
+
+    // A composite-key run whose composite fields *change* (same count, different fields/order) on save
+    // must have its old key-field rows replaced (deleted + recreated) rather than left stale.
+    @Test
+    void saveRuleSetRunReplacesCompositeKeyFieldsWhenTheyChange() {
+        Map created = createReturnItemsRun(["return_id", "product_id"], ["return_id", "product_id"])
+        String savedRunId = (String) created.savedRun.savedRunId
+        Map saved = ec.service.sync().name("facade.ReconciliationFacadeServices.save#RuleSetRun")
+                .parameters(baseSaveParams(savedRunId) + [
+                        file1PrimaryIdExpressions: ["product_id", "return_id"],
+                        file2PrimaryIdExpressions: ["product_id", "return_id"],
+                ]).disableAuthz().call()
+        assertTrue((Boolean) saved.ok)
+        String scopeId = (String) saved.savedRun.compareScopeId
+        def f1 = ec.entity.find("darpan.rule.RuleSetCompareSource").condition([compareScopeId: scopeId, fileSide: "FILE_1"]).useCache(false).one()
+        List kf = f1.findRelated("keyFields", null, ["sequenceNum"], false, false)
+        assertEquals(2, kf.size()); assertEquals("product_id", kf[0].fieldExpression); assertEquals("return_id", kf[1].fieldExpression)
+    }
+
+    // Cross-side count guard: create#RuleSetRun (and save#RuleSetRun, mirrored) must reject a request
+    // where file1 and file2 define different numbers of composite primary-key fields — a mismatched
+    // count can never produce a coherent row-to-row comparison.
+    @Test
+    void createRuleSetRunRejectsMismatchedCrossSideFieldCounts() {
+        seedReturnItemsSchemas()
+        Map result = ec.service.sync().name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters([
+                        runName: "Mismatched counts", file1SystemEnumId: "SHOPIFY", file1FileTypeEnumId: "DftJson",
+                        file1SchemaFileName: "test-return-items-schema-shopify", file1PrimaryIdExpressions: ["return_id", "product_id"],
+                        file2SystemEnumId: "OMS", file2FileTypeEnumId: "DftJson",
+                        file2SchemaFileName: "test-return-items-schema-oms", file2PrimaryIdExpressions: ["return_id"],
+                ]).disableAuthz().call()
+        assertTrue(ec.message.hasError())
+        assertTrue(ec.message.errors.any { it.toString().contains("same number of primary-key fields") }, ec.message.errors?.toString())
+    }
+
+    @Test
+    void saveRuleSetRunRejectsMismatchedCrossSideFieldCounts() {
+        Map created = createReturnItemsRun(["return_id", "product_id"], ["return_id", "product_id"])
+        String savedRunId = (String) created.savedRun.savedRunId
+        String scopeId = (String) created.savedRun.compareScopeId
+
+        Map saved = ec.service.sync().name("facade.ReconciliationFacadeServices.save#RuleSetRun")
+                .parameters(baseSaveParams(savedRunId) + [
+                        file1PrimaryIdExpressions: ["return_id", "product_id"],
+                        file2PrimaryIdExpressions: ["return_id"],
+                ]).disableAuthz().call()
+
+        assertTrue(ec.message.hasError())
+        assertTrue(ec.message.errors.any { it.toString().contains("same number of primary-key fields") }, ec.message.errors?.toString())
+        // Guard runs before persistence: the original composite key rows are untouched.
+        def f2 = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition([compareScopeId: scopeId, fileSide: "FILE_2"]).useCache(false).one()
+        assertEquals(2, f2.findRelated("keyFields", null, ["sequenceNum"], false, false).size())
     }
 }

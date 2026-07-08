@@ -17,6 +17,7 @@
             <parameter name="file1SchemaFileName"/>
             <parameter name="file1RecordRootExpression"/>
             <parameter name="file1PrimaryIdExpression"/>
+            <parameter name="file1PrimaryIdExpressions" type="List"/>
             <parameter name="file2SystemEnumId" required="true"/>
             <parameter name="file2SourceTypeEnumId"/>
             <parameter name="file2SystemMessageRemoteId"/>
@@ -27,6 +28,7 @@
             <parameter name="file2SchemaFileName"/>
             <parameter name="file2RecordRootExpression"/>
             <parameter name="file2PrimaryIdExpression"/>
+            <parameter name="file2PrimaryIdExpressions" type="List"/>
             <parameter name="rules" type="List">
                 <parameter name="ruleId"/>
                 <parameter name="sequenceNum" type="Integer"/>
@@ -111,6 +113,7 @@
             <set field="file1SchemaFileNameValue" from="((file1SchemaFileName)?.toString()?.trim())"/>
             <set field="file1RecordRootExpressionValue" from="((file1RecordRootExpression)?.toString()?.trim())"/>
             <set field="file1PrimaryIdExpressionValue" from="((file1PrimaryIdExpression)?.toString()?.trim())"/>
+            <set field="file1PrimaryIdExpressionsValue" from="((file1PrimaryIdExpressions instanceof List) ? ((List) file1PrimaryIdExpressions).collect { ((it)?.toString()?.trim()) }.findAll { it } : [])"/>
             <set field="file2SystemEnumIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file2SystemEnumId)"/>
             <set field="file2SourceTypeEnumIdValue" from="((file2SourceTypeEnumId)?.toString()?.trim())"/>
             <set field="file2UsesApiSource" from="file2SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_API"/>
@@ -124,6 +127,7 @@
             <set field="file2SchemaFileNameValue" from="((file2SchemaFileName)?.toString()?.trim())"/>
             <set field="file2RecordRootExpressionValue" from="((file2RecordRootExpression)?.toString()?.trim())"/>
             <set field="file2PrimaryIdExpressionValue" from="((file2PrimaryIdExpression)?.toString()?.trim())"/>
+            <set field="file2PrimaryIdExpressionsValue" from="((file2PrimaryIdExpressions instanceof List) ? ((List) file2PrimaryIdExpressions).collect { ((it)?.toString()?.trim()) }.findAll { it } : [])"/>
             <set field="ruleEntries" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.normalizeRuleEntries(rules)"/>
 
             <if condition="!runNameValue">
@@ -135,11 +139,17 @@
             <if condition="!file2SystemEnumIdValue">
                 <message error="true">file2SystemEnumId is required</message>
             </if>
-            <if condition="!file1PrimaryIdExpressionValue">
+            <if condition="!file1PrimaryIdExpressionValue &amp;&amp; file1PrimaryIdExpressionsValue.isEmpty()">
                 <message error="true">file1PrimaryIdExpression is required</message>
             </if>
-            <if condition="!file2PrimaryIdExpressionValue">
+            <if condition="!file2PrimaryIdExpressionValue &amp;&amp; file2PrimaryIdExpressionsValue.isEmpty()">
                 <message error="true">file2PrimaryIdExpression is required</message>
+            </if>
+            <if condition="file1PrimaryIdExpressionsValue.size() &gt; 5">
+                <message error="true">file1PrimaryIdExpressions defines ${file1PrimaryIdExpressionsValue.size()} fields; the maximum is 5</message>
+            </if>
+            <if condition="file2PrimaryIdExpressionsValue.size() &gt; 5">
+                <message error="true">file2PrimaryIdExpressions defines ${file2PrimaryIdExpressionsValue.size()} fields; the maximum is 5</message>
             </if>
             <if condition="file1SystemEnumIdValue &amp;&amp; file2SystemEnumIdValue &amp;&amp; file1SystemEnumIdValue == file2SystemEnumIdValue">
                 <message error="true">file1SystemEnumId and file2SystemEnumId must be different</message>
@@ -270,15 +280,29 @@
             <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson &amp;&amp; file2SchemaSystemEnumId != file2SystemEnumIdValue">
                 <message error="true">file2SchemaFileName '${file2SchemaFileNameValue}' belongs to system ${file2Schema?.systemEnumId}, not ${file2SystemEnumIdValue}</message>
             </if>
-            <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson &amp;&amp; !darpan.facade.reconciliation.ReconciliationMappingSupport.isResolvableJsonIdExpression(file1PrimaryIdExpressionValue, file1Schema?.schemaText as String)">
+            <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson &amp;&amp; !file1PrimaryIdExpressionsValue.isEmpty()">
+                <set field="file1UnresolvableKeyFields" from="file1PrimaryIdExpressionsValue.findAll { !darpan.facade.reconciliation.ReconciliationMappingSupport.isResolvableJsonIdExpression(it, file1Schema?.schemaText as String) }"/>
+                <if condition="!file1UnresolvableKeyFields.isEmpty()">
+                    <message error="true">file1PrimaryIdExpressions ${file1UnresolvableKeyFields} are not present in schema '${file1SchemaFileNameValue}'</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson &amp;&amp; file1PrimaryIdExpressionsValue.isEmpty() &amp;&amp; !darpan.facade.reconciliation.ReconciliationMappingSupport.isResolvableJsonIdExpression(file1PrimaryIdExpressionValue, file1Schema?.schemaText as String)">
                 <message error="true">file1PrimaryIdExpression '${file1PrimaryIdExpressionValue}' is not present in schema '${file1SchemaFileNameValue}'</message>
             </if>
-            <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson &amp;&amp; !darpan.facade.reconciliation.ReconciliationMappingSupport.isResolvableJsonIdExpression(file2PrimaryIdExpressionValue, file2Schema?.schemaText as String)">
+            <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson &amp;&amp; !file2PrimaryIdExpressionsValue.isEmpty()">
+                <set field="file2UnresolvableKeyFields" from="file2PrimaryIdExpressionsValue.findAll { !darpan.facade.reconciliation.ReconciliationMappingSupport.isResolvableJsonIdExpression(it, file2Schema?.schemaText as String) }"/>
+                <if condition="!file2UnresolvableKeyFields.isEmpty()">
+                    <message error="true">file2PrimaryIdExpressions ${file2UnresolvableKeyFields} are not present in schema '${file2SchemaFileNameValue}'</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson &amp;&amp; file2PrimaryIdExpressionsValue.isEmpty() &amp;&amp; !darpan.facade.reconciliation.ReconciliationMappingSupport.isResolvableJsonIdExpression(file2PrimaryIdExpressionValue, file2Schema?.schemaText as String)">
                 <message error="true">file2PrimaryIdExpression '${file2PrimaryIdExpressionValue}' is not present in schema '${file2SchemaFileNameValue}'</message>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="resolvedFile1PrimaryIdExpressionValue" from="file1UsesJson ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.normalizeJsonPrimaryIdExpression(file1PrimaryIdExpressionValue) : file1PrimaryIdExpressionValue"/>
                 <set field="resolvedFile2PrimaryIdExpressionValue" from="file2UsesJson ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.normalizeJsonPrimaryIdExpression(file2PrimaryIdExpressionValue) : file2PrimaryIdExpressionValue"/>
+                <set field="resolvedFile1PrimaryIdExpressionsValue" from="file1PrimaryIdExpressionsValue.collect { file1UsesJson ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.normalizeJsonPrimaryIdExpression(it) : it }"/>
+                <set field="resolvedFile2PrimaryIdExpressionsValue" from="file2PrimaryIdExpressionsValue.collect { file2UsesJson ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.normalizeJsonPrimaryIdExpression(it) : it }"/>
             </if>
 
             <if condition="!ec.message.hasError()">
@@ -298,16 +322,34 @@
                         in-map="[compareScopeId: compareScopeIdValue, ruleSetId: ruleSetIdValue, companyUserGroupId: ruleSetValue.companyUserGroupId, description: descriptionValue ?: 'Compare scope for ' + runNameValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
                 <service-call name="create#darpan.rule.RuleSetCompareSource"
                         disable-authz="true"
-                        in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_1', companyUserGroupId: ruleSetValue.companyUserGroupId, systemEnumId: file1SystemEnumIdValue, sourceTypeEnumId: file1SourceTypeEnumIdValue, systemMessageRemoteId: file1SystemMessageRemoteIdValue, nsRestletConfigId: file1NsRestletConfigIdValue, sourceConfigId: file1UsesConnectorSource ? file1SourceConfigIdValue : null, sourceConfigType: file1UsesConnectorSource ? file1SourceConfigTypeValue : null, fileTypeEnumId: file1FileTypeEnumIdValue, schemaFileName: file1UsesConnectorSource ? null : file1SchemaFileNameValue, recordRootExpression: file1UsesConnectorSource ? null : file1RecordRootExpressionValue, primaryIdExpression: resolvedFile1PrimaryIdExpressionValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                        in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_1', companyUserGroupId: ruleSetValue.companyUserGroupId, systemEnumId: file1SystemEnumIdValue, sourceTypeEnumId: file1SourceTypeEnumIdValue, systemMessageRemoteId: file1SystemMessageRemoteIdValue, nsRestletConfigId: file1NsRestletConfigIdValue, sourceConfigId: file1UsesConnectorSource ? file1SourceConfigIdValue : null, sourceConfigType: file1UsesConnectorSource ? file1SourceConfigTypeValue : null, fileTypeEnumId: file1FileTypeEnumIdValue, schemaFileName: file1UsesConnectorSource ? null : file1SchemaFileNameValue, recordRootExpression: file1UsesConnectorSource ? null : file1RecordRootExpressionValue, primaryIdExpression: resolvedFile1PrimaryIdExpressionsValue.size() &gt; 1 ? null : (resolvedFile1PrimaryIdExpressionsValue.isEmpty() ? resolvedFile1PrimaryIdExpressionValue : resolvedFile1PrimaryIdExpressionsValue[0]), createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                <if condition="resolvedFile1PrimaryIdExpressionsValue.size() &gt; 1">
+                    <set field="file1KeyFieldSequence" from="0"/>
+                    <iterate list="resolvedFile1PrimaryIdExpressionsValue" entry="file1KeyFieldExpression">
+                        <set field="file1KeyFieldSequence" from="file1KeyFieldSequence + 1"/>
+                        <service-call name="create#darpan.rule.RuleSetCompareSourceKeyField"
+                                disable-authz="true"
+                                in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_1', sequenceNum: file1KeyFieldSequence, fieldExpression: file1KeyFieldExpression, companyUserGroupId: ruleSetValue.companyUserGroupId, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                    </iterate>
+                </if>
                 <service-call name="create#darpan.rule.RuleSetCompareSource"
                         disable-authz="true"
-                        in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', companyUserGroupId: ruleSetValue.companyUserGroupId, systemEnumId: file2SystemEnumIdValue, sourceTypeEnumId: file2SourceTypeEnumIdValue, systemMessageRemoteId: file2SystemMessageRemoteIdValue, nsRestletConfigId: file2NsRestletConfigIdValue, sourceConfigId: file2UsesConnectorSource ? file2SourceConfigIdValue : null, sourceConfigType: file2UsesConnectorSource ? file2SourceConfigTypeValue : null, fileTypeEnumId: file2FileTypeEnumIdValue, schemaFileName: file2UsesConnectorSource ? null : file2SchemaFileNameValue, recordRootExpression: file2UsesConnectorSource ? null : file2RecordRootExpressionValue, primaryIdExpression: resolvedFile2PrimaryIdExpressionValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                        in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', companyUserGroupId: ruleSetValue.companyUserGroupId, systemEnumId: file2SystemEnumIdValue, sourceTypeEnumId: file2SourceTypeEnumIdValue, systemMessageRemoteId: file2SystemMessageRemoteIdValue, nsRestletConfigId: file2NsRestletConfigIdValue, sourceConfigId: file2UsesConnectorSource ? file2SourceConfigIdValue : null, sourceConfigType: file2UsesConnectorSource ? file2SourceConfigTypeValue : null, fileTypeEnumId: file2FileTypeEnumIdValue, schemaFileName: file2UsesConnectorSource ? null : file2SchemaFileNameValue, recordRootExpression: file2UsesConnectorSource ? null : file2RecordRootExpressionValue, primaryIdExpression: resolvedFile2PrimaryIdExpressionsValue.size() &gt; 1 ? null : (resolvedFile2PrimaryIdExpressionsValue.isEmpty() ? resolvedFile2PrimaryIdExpressionValue : resolvedFile2PrimaryIdExpressionsValue[0]), createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                <if condition="resolvedFile2PrimaryIdExpressionsValue.size() &gt; 1">
+                    <set field="file2KeyFieldSequence" from="0"/>
+                    <iterate list="resolvedFile2PrimaryIdExpressionsValue" entry="file2KeyFieldExpression">
+                        <set field="file2KeyFieldSequence" from="file2KeyFieldSequence + 1"/>
+                        <service-call name="create#darpan.rule.RuleSetCompareSourceKeyField"
+                                disable-authz="true"
+                                in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', sequenceNum: file2KeyFieldSequence, fieldExpression: file2KeyFieldExpression, companyUserGroupId: ruleSetValue.companyUserGroupId, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                    </iterate>
+                </if>
             </if>
 
             <if condition="!ec.message.hasError() &amp;&amp; !ruleEntries.isEmpty()">
                 <!-- Audit 2026-06-11 #1 (durable fix): regenerate FIELD_COMPARISON ruleLogic server-side from
                      the structured expression so no client-authored DRL string reaches the compiler. -->
-                <set field="ruleEntries" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.regenerateFieldComparisonRuleLogic(ruleEntries, file1PrimaryIdExpressionValue, file2PrimaryIdExpressionValue)"/>
+                <set field="ruleEntries" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.regenerateFieldComparisonRuleLogic(ruleEntries, file1PrimaryIdExpressionsValue ? file1PrimaryIdExpressionsValue[0] : file1PrimaryIdExpressionValue, file2PrimaryIdExpressionsValue ? file2PrimaryIdExpressionsValue[0] : file2PrimaryIdExpressionValue)"/>
                 <iterate list="ruleEntries" entry="ruleEntry">
                     <service-call name="reconciliation.ReconciliationRuleEngineServices.save#Rule"
                             disable-authz="true"

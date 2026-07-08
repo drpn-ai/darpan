@@ -54,12 +54,15 @@ class RuleSetCompareSourceCompositeKeyTests {
         // RuleSetCompareSource.systemEnumId and fileTypeEnumId carry real FKs (RSCSR_SYS_ENUM,
         // RSCSR_FTYPE_ENUM) to moqui.basic.Enumeration; this test's own Enumeration.enumTypeId is
         // nullable, so minimal enum rows satisfy the FKs without needing EnumerationType rows too.
+        // createOrUpdate (not create): JUnit does not guarantee method execution order within this
+        // class, and the new composite-key facade test below also seeds/enriches a "DftJson" row —
+        // a hard create() here would throw a PK violation if that test's @Test method runs first.
         ec.entity.makeValue("moqui.basic.Enumeration").setAll([
                 enumId: "DARPAN_SYS_SHOPIFY"
-        ]).create()
+        ]).createOrUpdate()
         ec.entity.makeValue("moqui.basic.Enumeration").setAll([
                 enumId: "DftJson"
-        ]).create()
+        ]).createOrUpdate()
         ec.entity.makeValue("darpan.rule.RuleSetCompareSource").setAll([
                 compareScopeId: "DARPAN_TEST_CKEY_SCOPE", fileSide: "FILE_1", systemEnumId: "DARPAN_SYS_SHOPIFY",
                 fileTypeEnumId: "DftJson"
@@ -169,5 +172,157 @@ class RuleSetCompareSourceCompositeKeyTests {
                 .sort()
 
         assertEquals(["R1", "R2"], compareIds)
+    }
+
+    // Task 5: create#RuleSetRun must accept plural file1PrimaryIdExpressions/file2PrimaryIdExpressions
+    // arrays, leave RuleSetCompareSource.primaryIdExpression null for composite sides, and persist one
+    // RuleSetCompareSourceKeyField row per composite field in sequence order.
+    //
+    // Uses real system enum ids (SHOPIFY/OMS) and the DftJson file type, matching how the facade's
+    // canonicalSystemEnumId and JSON-schema resolvability checks actually work. The JSON schema
+    // resolvability check (isResolvableJsonIdExpression) requires a saved JsonSchema whose systemEnumId
+    // equals the passed file*SystemEnumId; since file1 and file2 must use different systems, this needs
+    // two distinct schemas (one per system), each containing return_id/product_id fields.
+    @Test
+    void createRuleSetRunWithTwoPrimaryIdExpressionsCreatesKeyFieldRowsAndLeavesLegacyExpressionNull() {
+        ReconciliationSmokeTestSupport.seedSchemaBackedCsvMappingFixtures(ec)
+        // Test 1 in this class creates a bare "DftJson" Enumeration row (no enumCode) directly via
+        // entity API; JUnit does not guarantee method execution order, so force-correct enumCode/
+        // enumTypeId here via createOrUpdate (idempotent/self-healing) rather than relying on
+        // seedSchemaBackedCsvMappingFixtures' find-or-skip upsert to have won the race.
+        ec.entity.makeValue("moqui.basic.EnumerationType").setAll([
+                enumTypeId : "DarpanFileType", description: "File Types for Reconciliation"
+        ]).createOrUpdate()
+        ec.entity.makeValue("moqui.basic.Enumeration").setAll([
+                enumId: "DftJson", enumTypeId: "DarpanFileType", enumCode: "JSON", description: "JSON", sequenceNum: 2
+        ]).createOrUpdate()
+
+        String companyUserGroupId = "KREWE"
+        def seedTimestamp = ec.user.nowTimestamp
+        String returnItemsSchemaText = '{"type":"object","properties":{"returns":{"type":"array",' +
+                '"items":{"type":"object","properties":{"return_id":{"type":"string"},"product_id":{"type":"string"}}}}}}'
+        ec.entity.makeValue("darpan.reconciliation.JsonSchema").setAll([
+                jsonSchemaId      : "TestReturnItemsSchemaShopify",
+                schemaName        : "test-return-items-schema-shopify",
+                description       : "Composite-key facade test Shopify return items schema",
+                systemEnumId      : "SHOPIFY",
+                companyUserGroupId: companyUserGroupId,
+                createdDate       : seedTimestamp,
+                schemaText        : returnItemsSchemaText
+        ]).createOrUpdate()
+        ec.entity.makeValue("darpan.reconciliation.JsonSchema").setAll([
+                jsonSchemaId      : "TestReturnItemsSchemaOms",
+                schemaName        : "test-return-items-schema-oms",
+                description       : "Composite-key facade test OMS return items schema",
+                systemEnumId      : "OMS",
+                companyUserGroupId: companyUserGroupId,
+                createdDate       : seedTimestamp,
+                schemaText        : returnItemsSchemaText
+        ]).createOrUpdate()
+
+        Map<String, Object> result = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters([
+                        runName                  : "Composite key facade test",
+                        file1SystemEnumId        : "SHOPIFY",
+                        file1FileTypeEnumId      : "DftJson",
+                        file1SchemaFileName      : "test-return-items-schema-shopify",
+                        file1PrimaryIdExpressions: ["return_id", "product_id"],
+                        file2SystemEnumId        : "OMS",
+                        file2FileTypeEnumId      : "DftJson",
+                        file2SchemaFileName      : "test-return-items-schema-oms",
+                        file2PrimaryIdExpressions: ["return_id", "product_id"],
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertTrue((Boolean) result.ok)
+        String compareScopeId = (String) result.savedRun.compareScopeId
+
+        def file1Source = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition([compareScopeId: compareScopeId, fileSide: "FILE_1"]).useCache(false).one()
+        assertEquals(null, file1Source.primaryIdExpression)
+        List file1KeyFields = file1Source.findRelated("keyFields", null, ["sequenceNum"], false, false)
+        assertEquals(2, file1KeyFields.size())
+        assertEquals("return_id", file1KeyFields[0].fieldExpression)
+        assertEquals("product_id", file1KeyFields[1].fieldExpression)
+
+        def file2Source = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition([compareScopeId: compareScopeId, fileSide: "FILE_2"]).useCache(false).one()
+        assertEquals(null, file2Source.primaryIdExpression)
+        List file2KeyFields = file2Source.findRelated("keyFields", null, ["sequenceNum"], false, false)
+        assertEquals(2, file2KeyFields.size())
+        assertEquals("return_id", file2KeyFields[0].fieldExpression)
+        assertEquals("product_id", file2KeyFields[1].fieldExpression)
+    }
+
+    // A single-entry plural array with no singular fallback is NOT a composite key: per the facade
+    // contract it must behave like the legacy singular field — write primaryIdExpression and create
+    // NO key-field rows. Guards the allow-remote service against a direct/API caller (the UI collapses
+    // one field to the singular param, but the service must be safe on its own) persisting a source
+    // with neither a primaryIdExpression nor any key-field rows.
+    @Test
+    void createRuleSetRunWithSingleEntryPluralArrayWritesPrimaryIdExpressionAndNoKeyFieldRows() {
+        ReconciliationSmokeTestSupport.seedSchemaBackedCsvMappingFixtures(ec)
+        ec.entity.makeValue("moqui.basic.EnumerationType").setAll([
+                enumTypeId : "DarpanFileType", description: "File Types for Reconciliation"
+        ]).createOrUpdate()
+        ec.entity.makeValue("moqui.basic.Enumeration").setAll([
+                enumId: "DftJson", enumTypeId: "DarpanFileType", enumCode: "JSON", description: "JSON", sequenceNum: 2
+        ]).createOrUpdate()
+
+        String companyUserGroupId = "KREWE"
+        def seedTimestamp = ec.user.nowTimestamp
+        String returnItemsSchemaText = '{"type":"object","properties":{"returns":{"type":"array",' +
+                '"items":{"type":"object","properties":{"return_id":{"type":"string"},"product_id":{"type":"string"}}}}}}'
+        ec.entity.makeValue("darpan.reconciliation.JsonSchema").setAll([
+                jsonSchemaId      : "TestReturnItemsSchemaShopify",
+                schemaName        : "test-return-items-schema-shopify",
+                description       : "Composite-key facade test Shopify return items schema",
+                systemEnumId      : "SHOPIFY",
+                companyUserGroupId: companyUserGroupId,
+                createdDate       : seedTimestamp,
+                schemaText        : returnItemsSchemaText
+        ]).createOrUpdate()
+        ec.entity.makeValue("darpan.reconciliation.JsonSchema").setAll([
+                jsonSchemaId      : "TestReturnItemsSchemaOms",
+                schemaName        : "test-return-items-schema-oms",
+                description       : "Composite-key facade test OMS return items schema",
+                systemEnumId      : "OMS",
+                companyUserGroupId: companyUserGroupId,
+                createdDate       : seedTimestamp,
+                schemaText        : returnItemsSchemaText
+        ]).createOrUpdate()
+
+        Map<String, Object> result = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters([
+                        runName                  : "Single-entry plural facade test",
+                        file1SystemEnumId        : "SHOPIFY",
+                        file1FileTypeEnumId      : "DftJson",
+                        file1SchemaFileName      : "test-return-items-schema-shopify",
+                        file1PrimaryIdExpressions: ["return_id"],
+                        file2SystemEnumId        : "OMS",
+                        file2FileTypeEnumId      : "DftJson",
+                        file2SchemaFileName      : "test-return-items-schema-oms",
+                        file2PrimaryIdExpressions: ["return_id"],
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertTrue((Boolean) result.ok)
+        String compareScopeId = (String) result.savedRun.compareScopeId
+
+        def file1Source = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition([compareScopeId: compareScopeId, fileSide: "FILE_1"]).useCache(false).one()
+        assertEquals("return_id", file1Source.primaryIdExpression)
+        assertEquals(0, file1Source.findRelated("keyFields", null, ["sequenceNum"], false, false).size())
+
+        def file2Source = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition([compareScopeId: compareScopeId, fileSide: "FILE_2"]).useCache(false).one()
+        assertEquals("return_id", file2Source.primaryIdExpression)
+        assertEquals(0, file2Source.findRelated("keyFields", null, ["sequenceNum"], false, false).size())
     }
 }

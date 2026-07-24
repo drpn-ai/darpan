@@ -44,11 +44,18 @@ class DarpanMdcSupport {
         ThreadContext.put(MDC_TENANT, tenantId ?: "anonymous")
     }
 
-    /** Remove all darpan MDC keys. Must be called in <after-request> (finally path). */
+    /**
+     * Remove all darpan MDC keys, including run-scoped ones (see clearRun()). Must be called in
+     * <after-request> (finally path) so a request that stamped run keys but never reached a
+     * terminal RunObservability call (e.g. beginRun's write failed and runId came back null,
+     * skipping every later obsRunId-gated call) can't leak darpan.savedRunId/darpan.stage onto
+     * the pooled thread for the next request.
+     */
     static void clear() {
         ThreadContext.remove(MDC_TENANT)
         ThreadContext.remove(MDC_USER_ID)
         ThreadContext.remove(MDC_CORRELATION_ID)
+        clearRun()
     }
 
     /** Stamp run-scoped MDC keys for the duration of a reconciliation run. Cleared via clearRun(). */

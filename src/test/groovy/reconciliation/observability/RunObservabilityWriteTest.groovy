@@ -79,6 +79,22 @@ class RunObservabilityWriteTest {
     }
 
     @Test
+    void endStepTruncatesErrorMessageAtTextMediumSeam() {
+        // errorMessage is text-medium (VARCHAR(255)). A raw exception message longer than that
+        // (e.g. passed through from the NOTIFY catch in runSavedRunDiff.groovy) must be truncated
+        // here rather than left to fail the step UPDATE and strand the step in RUNNING.
+        def ec = new FakeEc()
+        String runId = RunObservability.beginRun(ec, [savedRunId: "SR1", companyUserGroupId: "KREWE"])
+        def step = RunObservability.beginStep(ec, runId, [companyUserGroupId: "KREWE"], RunObservability.STAGE_NOTIFY)
+
+        String longMessage = "x" * 300
+        RunObservability.endStep(ec, step, RunObservability.STATUS_FAILED, [errorMessage: longMessage])
+
+        assertEquals(255, (step.get("errorMessage") as String).length())
+        assertEquals(RunObservability.STATUS_FAILED, step.get("statusEnumId"))
+    }
+
+    @Test
     void failRunSetsFailedAndClosesOpenStep() {
         def ec = new FakeEc()
         String runId = RunObservability.beginRun(ec, [savedRunId: "SR1", companyUserGroupId: "KREWE"])

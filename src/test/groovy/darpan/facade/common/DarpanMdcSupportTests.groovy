@@ -198,6 +198,24 @@ class DarpanMdcSupportTests {
         assertNull(ThreadContext.get(DarpanMdcSupport.MDC_SAVED_RUN_ID))
     }
 
+    @Test
+    void clearAloneAlsoRemovesRunScopedKeys() {
+        // Guards against run keys leaking onto the pooled thread when a request stamps
+        // darpan.savedRunId/darpan.stage but never reaches a terminal RunObservability call
+        // (e.g. beginRun's DB write fails, runId comes back null, and every later
+        // obsRunId-gated call — including clearRun() — is skipped). The request-scoped
+        // clear() must remove the run keys itself rather than relying on clearRun().
+        DarpanMdcSupport.stampRun("RUN_99", "SAVED_99")
+        DarpanMdcSupport.stampStage("COMPARE")
+        assertNotNull(ThreadContext.get(DarpanMdcSupport.MDC_RUN_ID))
+
+        DarpanMdcSupport.clear()
+
+        assertNull(ThreadContext.get(DarpanMdcSupport.MDC_RUN_ID),       "runId key must be removed by clear() alone")
+        assertNull(ThreadContext.get(DarpanMdcSupport.MDC_STAGE),        "stage key must be removed by clear() alone")
+        assertNull(ThreadContext.get(DarpanMdcSupport.MDC_SAVED_RUN_ID), "savedRunId key must be removed by clear() alone")
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /** Minimal EC stub for unit tests — only wires ec.user.userId and ec.web. */

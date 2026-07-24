@@ -84,8 +84,10 @@ class RunObservability {
         } catch (Throwable t) {
             logger.warn("RunObservability.beginRun best-effort failure (runId=${runId}): ${t.message}")
         }
-        DarpanMdcSupport.stampRun(runId, norm(ctx.get("savedRunId")))
-        DarpanMdcSupport.stampStage(STAGE_RESOLVE)
+        if (runId) {
+            DarpanMdcSupport.stampRun(runId, norm(ctx.get("savedRunId")))
+            DarpanMdcSupport.stampStage(STAGE_RESOLVE)
+        }
         logger.info("recon run begin savedRunId={} runId={}", norm(ctx.get("savedRunId")), runId)
         return runId
     }
@@ -156,7 +158,10 @@ class RunObservability {
                 step.set("statusEnumId", statusEnumId)
                 step.set("completedDate", now)
                 if (metrics?.get("recordCount") != null) step.set("recordCount", metrics.get("recordCount"))
-                if (metrics?.get("errorMessage") != null) step.set("errorMessage", metrics.get("errorMessage"))
+                if (metrics?.get("errorMessage") != null) {
+                    String errorMessage = metrics.get("errorMessage").toString()
+                    step.set("errorMessage", errorMessage.length() > 255 ? errorMessage.substring(0, 255) : errorMessage)
+                }
                 if (metrics?.get("metricsJson") != null) step.set("metricsJson", metrics.get("metricsJson"))
                 step.set("lastUpdatedDate", now)
                 step.update()

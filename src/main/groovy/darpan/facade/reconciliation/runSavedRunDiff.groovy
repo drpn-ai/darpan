@@ -191,6 +191,11 @@ def buildGeneratedOutputDescriptor = { Map serviceResult ->
 def persistRunResult = { Map<String, Object> fields ->
     String resultPath = DataManagerSupport.normalizeRelativePath(fields.resultDataManagerPath)
     String existingRunResultId = normalize(fields.reconciliationRunResultId)
+    // Degenerate case: if RunObservability.beginRun's write failed, obsRunId comes back null and
+    // existingRunResultId is never populated. A later persist call that still has a
+    // resultDataManagerPath falls through this guard and creates a fresh run-result row here,
+    // whose statusEnumId is never set to RUNNING (the entity default applies instead). Accepted
+    // best-effort behavior for now; revisit when the watchdog/cleanup phase lands.
     if (!resultPath && !existingRunResultId) return null
 
     return ec.transaction.runUseOrBegin(30, "Error saving reconciliation run result", {

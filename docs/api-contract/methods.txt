@@ -27,6 +27,7 @@ facade.ReconciliationFacadeServices.get#Automation
 facade.ReconciliationFacadeServices.get#GeneratedOutput
 facade.ReconciliationFacadeServices.get#GeneratedOutputDifferences
 facade.ReconciliationFacadeServices.get#Mapping
+facade.ReconciliationFacadeServices.get#ReconciliationRunStatus
 facade.ReconciliationFacadeServices.list#AutomationExecutions
 facade.ReconciliationFacadeServices.list#AutomationSourceOptions
 facade.ReconciliationFacadeServices.list#Automations

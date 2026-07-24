@@ -111,6 +111,9 @@
                                         "$ref": "#/components/schemas/GetMappingRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetReconciliationRunStatusRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ListAutomationExecutionsRequest"
                                     },
                                     {
@@ -251,6 +254,7 @@
                                         "facade.ReconciliationFacadeServices.get#GeneratedOutput": "#/components/schemas/GetGeneratedOutputRequest",
                                         "facade.ReconciliationFacadeServices.get#GeneratedOutputDifferences": "#/components/schemas/GetGeneratedOutputDifferencesRequest",
                                         "facade.ReconciliationFacadeServices.get#Mapping": "#/components/schemas/GetMappingRequest",
+                                        "facade.ReconciliationFacadeServices.get#ReconciliationRunStatus": "#/components/schemas/GetReconciliationRunStatusRequest",
                                         "facade.ReconciliationFacadeServices.list#AutomationExecutions": "#/components/schemas/ListAutomationExecutionsRequest",
                                         "facade.ReconciliationFacadeServices.list#AutomationSourceOptions": "#/components/schemas/ListAutomationSourceOptionsRequest",
                                         "facade.ReconciliationFacadeServices.list#Automations": "#/components/schemas/ListAutomationsRequest",
@@ -389,6 +393,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetMappingResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetReconciliationRunStatusResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ListAutomationExecutionsResponse"
@@ -4989,6 +4996,188 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/GetMappingResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetReconciliationRunStatusParams": {
+                "type": "object",
+                "properties": {
+                    "reconciliationRunResultId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "reconciliationRunResultId"
+                ],
+                "description": "Live status + per-stage timeline for one reconciliation run. Tenant-gated."
+            },
+            "GetReconciliationRunStatusResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "statusEnumId": {
+                        "type": "string"
+                    },
+                    "currentStage": {
+                        "type": "string"
+                    },
+                    "progressPercent": {
+                        "type": "integer"
+                    },
+                    "startedDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                    },
+                    "lastHeartbeatDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                    },
+                    "completedDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                    },
+                    "errorMessage": {
+                        "type": "string"
+                    },
+                    "steps": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "stageCode": {
+                                    "type": "string"
+                                },
+                                "stageSequence": {
+                                    "type": "integer"
+                                },
+                                "statusEnumId": {
+                                    "type": "string"
+                                },
+                                "startedDate": {
+                                    "oneOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "type": "number"
+                                        }
+                                    ],
+                                    "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                },
+                                "completedDate": {
+                                    "oneOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "type": "number"
+                                        }
+                                    ],
+                                    "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                },
+                                "recordCount": {
+                                    "type": "integer"
+                                },
+                                "errorMessage": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "GetReconciliationRunStatusRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.get#ReconciliationRunStatus",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.get#ReconciliationRunStatus",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.get#ReconciliationRunStatus"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetReconciliationRunStatusParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetReconciliationRunStatusResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.get#ReconciliationRunStatus. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetReconciliationRunStatusResult"
                     }
                 },
                 "required": [
@@ -11136,6 +11325,7 @@
         "facade.ReconciliationFacadeServices.get#GeneratedOutput": "GetGeneratedOutput",
         "facade.ReconciliationFacadeServices.get#GeneratedOutputDifferences": "GetGeneratedOutputDifferences",
         "facade.ReconciliationFacadeServices.get#Mapping": "GetMapping",
+        "facade.ReconciliationFacadeServices.get#ReconciliationRunStatus": "GetReconciliationRunStatus",
         "facade.ReconciliationFacadeServices.list#AutomationExecutions": "ListAutomationExecutions",
         "facade.ReconciliationFacadeServices.list#AutomationSourceOptions": "ListAutomationSourceOptions",
         "facade.ReconciliationFacadeServices.list#Automations": "ListAutomations",

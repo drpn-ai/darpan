@@ -2546,6 +2546,58 @@
         </actions>
     </service>
 
+    <service verb="get" noun="ReconciliationRunStatus" authz-action="view" allow-remote="true" authenticate="true">
+        <description>Live status + per-stage timeline for one reconciliation run. Tenant-gated.</description>
+        <in-parameters>
+            <parameter name="reconciliationRunResultId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="statusEnumId"/>
+            <parameter name="currentStage"/>
+            <parameter name="progressPercent" type="Integer"/>
+            <parameter name="startedDate" type="Timestamp"/>
+            <parameter name="lastHeartbeatDate" type="Timestamp"/>
+            <parameter name="completedDate" type="Timestamp"/>
+            <parameter name="errorMessage"/>
+            <parameter name="steps" type="List">
+                <parameter name="stageCode"/>
+                <parameter name="stageSequence" type="Integer"/>
+                <parameter name="statusEnumId"/>
+                <parameter name="startedDate" type="Timestamp"/>
+                <parameter name="completedDate" type="Timestamp"/>
+                <parameter name="recordCount" type="Integer"/>
+                <parameter name="errorMessage"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="runIdValue" from="((reconciliationRunResultId)?.toString()?.trim())"/>
+            <if condition="!runIdValue"><message error="true">reconciliationRunResultId is required</message></if>
+            <if condition="!ec.message.hasError()">
+                <set field="runRow" from="ec.entity.find('darpan.reconciliation.ReconciliationRunResult').condition('reconciliationRunResultId', runIdValue).disableAuthz().useCache(false).one()"/>
+                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, runRow)">
+                    <message error="true">Reconciliation run '${runIdValue}' was not found.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="statusEnumId" from="runRow.statusEnumId"/>
+                <set field="currentStage" from="runRow.currentStage"/>
+                <set field="progressPercent" from="runRow.progressPercent"/>
+                <set field="startedDate" from="runRow.startedDate"/>
+                <set field="lastHeartbeatDate" from="runRow.lastHeartbeatDate"/>
+                <set field="completedDate" from="runRow.completedDate"/>
+                <set field="errorMessage" from="runRow.errorMessage"/>
+                <set field="stepRows" from="ec.entity.find('darpan.reconciliation.ReconciliationRunStep').condition('reconciliationRunResultId', runIdValue).orderBy('stageSequence').disableAuthz().useCache(false).list() ?: []"/>
+                <set field="steps" from="stepRows.collect { row -> [stageCode: row.stageCode, stageSequence: row.stageSequence, statusEnumId: row.statusEnumId, startedDate: row.startedDate, completedDate: row.completedDate, recordCount: row.recordCount, errorMessage: row.errorMessage] }"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
     <service verb="get" noun="GeneratedOutputDifferences" authz-action="view" allow-remote="true" authenticate="true">
         <description>
             Return a bounded page of a JSON diff document's differences (plus whole-document facets,

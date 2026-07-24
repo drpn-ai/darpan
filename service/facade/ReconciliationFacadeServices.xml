@@ -1292,6 +1292,8 @@
                         </if>
                     </if>
                 </iterate>
+                <!-- delete the observability step timeline first: ReconciliationRunStep rows hold an FK (RECSTEP_RUN) to the run rows deleted below -->
+                <set field="ignoreRunStepDelete" from="ec.entity.find('darpan.reconciliation.ReconciliationRunResult').condition('savedRunId', savedRunIdValue).disableAuthz().useCache(false).list().each { runRow -> ec.entity.find('darpan.reconciliation.ReconciliationRunStep').condition('reconciliationRunResultId', runRow.reconciliationRunResultId).disableAuthz().useCache(false).deleteAll() }"/>
                 <set field="ignoreRunResultDelete" from="ec.entity.find('darpan.reconciliation.ReconciliationRunResult').condition('savedRunId', savedRunIdValue).disableAuthz().useCache(false).deleteAll()"/>
             </if>
 
@@ -2643,6 +2645,8 @@
                 <set field="deletedFileName" from="deleteResult.deletedFileName ?: fileNameValue"/>
                 <set field="statusMessage" from="deleteResult.statusMessage"/>
                 <if condition="deleted">
+                    <!-- delete the observability step timeline first: ReconciliationRunStep rows hold an FK (RECSTEP_RUN) to the run rows deleted below -->
+                    <set field="ignoreRunStepDelete" from="ec.entity.find('darpan.reconciliation.ReconciliationRunResult').condition('resultDataManagerPath', fileNameValue).disableAuthz().useCache(false).list().each { runRow -> ec.entity.find('darpan.reconciliation.ReconciliationRunStep').condition('reconciliationRunResultId', runRow.reconciliationRunResultId).disableAuthz().useCache(false).deleteAll() }"/>
                     <set field="ignoreRunResultDelete" from="ec.entity.find('darpan.reconciliation.ReconciliationRunResult').condition('resultDataManagerPath', fileNameValue).disableAuthz().useCache(false).deleteAll()"/>
                 </if>
             </if>

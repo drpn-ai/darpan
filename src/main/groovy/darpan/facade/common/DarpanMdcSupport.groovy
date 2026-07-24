@@ -20,6 +20,9 @@ class DarpanMdcSupport {
     static final String MDC_TENANT         = "darpan.tenant"
     static final String MDC_USER_ID        = "darpan.userId"
     static final String MDC_CORRELATION_ID = "darpan.correlationId"
+    static final String MDC_RUN_ID         = "darpan.runId"
+    static final String MDC_STAGE          = "darpan.stage"
+    static final String MDC_SAVED_RUN_ID   = "darpan.savedRunId"
 
     /**
      * Stamp MDC keys from the resolved execution context. Safe to call multiple times per request
@@ -46,6 +49,24 @@ class DarpanMdcSupport {
         ThreadContext.remove(MDC_TENANT)
         ThreadContext.remove(MDC_USER_ID)
         ThreadContext.remove(MDC_CORRELATION_ID)
+    }
+
+    /** Stamp run-scoped MDC keys for the duration of a reconciliation run. Cleared via clearRun(). */
+    static void stampRun(String runId, String savedRunId) {
+        if (runId != null) ThreadContext.put(MDC_RUN_ID, runId)
+        if (savedRunId != null) ThreadContext.put(MDC_SAVED_RUN_ID, savedRunId)
+    }
+
+    /** Stamp the current stage; overwritten as the run advances. */
+    static void stampStage(String stageCode) {
+        if (stageCode != null) ThreadContext.put(MDC_STAGE, stageCode)
+    }
+
+    /** Remove run-scoped keys. MUST be called in a finally on every thread that stamped them. */
+    static void clearRun() {
+        ThreadContext.remove(MDC_RUN_ID)
+        ThreadContext.remove(MDC_STAGE)
+        ThreadContext.remove(MDC_SAVED_RUN_ID)
     }
 
     // ── internal ─────────────────────────────────────────────────────────────

@@ -183,6 +183,21 @@ class DarpanMdcSupportTests {
         assertNull(ThreadContext.get(DarpanMdcSupport.MDC_CORRELATION_ID), "darpan.correlationId must be cleared")
     }
 
+    @Test
+    void stampRunPopulatesRunKeysAndClearRunRemovesThem() {
+        DarpanMdcSupport.stampRun("RUN_42", "SAVED_7")
+        assertEquals("RUN_42", ThreadContext.get(DarpanMdcSupport.MDC_RUN_ID))
+        assertEquals("SAVED_7", ThreadContext.get(DarpanMdcSupport.MDC_SAVED_RUN_ID))
+
+        DarpanMdcSupport.stampStage("COMPARE")
+        assertEquals("COMPARE", ThreadContext.get(DarpanMdcSupport.MDC_STAGE))
+
+        DarpanMdcSupport.clearRun()
+        assertNull(ThreadContext.get(DarpanMdcSupport.MDC_RUN_ID))
+        assertNull(ThreadContext.get(DarpanMdcSupport.MDC_STAGE))
+        assertNull(ThreadContext.get(DarpanMdcSupport.MDC_SAVED_RUN_ID))
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /** Minimal EC stub for unit tests — only wires ec.user.userId and ec.web. */

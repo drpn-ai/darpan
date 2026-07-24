@@ -51,7 +51,7 @@ class RunObservability {
     /** Create-or-adopt the run row in RUNNING with startedDate + currentStage=RESOLVE. Returns runId. */
     static String beginRun(def ec, Map<String, Object> ctx) {
         String runId = norm(ctx.get("reconciliationRunResultId"))
-        Timestamp now = (Timestamp) ec.user.nowTimestamp
+        Timestamp now = nowSafe(ec)
         try {
             ec.transaction.runUseOrBegin(30, "Error starting reconciliation run", {
                 def run = runId ? ec.entity.find(RUN_RESULT_ENTITY).condition("reconciliationRunResultId", runId).useCache(false).one() : null
@@ -92,7 +92,7 @@ class RunObservability {
 
     /** Create a step row in RUNNING, advance the run's currentStage, stamp MDC stage. Returns the step value. */
     static Object beginStep(def ec, String runId, Map<String, Object> ctx, String stageCode) {
-        Timestamp now = (Timestamp) ec.user.nowTimestamp
+        Timestamp now = nowSafe(ec)
         def step = null
         try {
             ec.transaction.runUseOrBegin(30, "Error starting reconciliation step", {
@@ -127,7 +127,7 @@ class RunObservability {
     /** Bump heartbeat + optional progress on the step (and mirror onto the run for cheap live display). */
     static void heartbeat(def ec, Object step, Map<String, Object> progress) {
         if (step == null) return
-        Timestamp now = (Timestamp) ec.user.nowTimestamp
+        Timestamp now = nowSafe(ec)
         try {
             ec.transaction.runUseOrBegin(30, "Error heartbeating reconciliation step", {
                 step.set("heartbeatDate", now)
@@ -150,7 +150,7 @@ class RunObservability {
     /** Close a step with a terminal status + optional record count; logs the stage duration. */
     static void endStep(def ec, Object step, String statusEnumId, Map<String, Object> metrics) {
         if (step == null) return
-        Timestamp now = (Timestamp) ec.user.nowTimestamp
+        Timestamp now = nowSafe(ec)
         try {
             ec.transaction.runUseOrBegin(30, "Error ending reconciliation step", {
                 step.set("statusEnumId", statusEnumId)
@@ -164,15 +164,19 @@ class RunObservability {
         } catch (Throwable t) {
             logger.warn("RunObservability.endStep best-effort failure: ${t.message}")
         }
-        Object started = step.get("startedDate")
-        long durationMs = (started instanceof Timestamp) ? (now.time - ((Timestamp) started).time) : -1L
-        logger.info("recon stage end stage={} status={} rows={} durationMs={}",
-                step.get("stageCode"), statusEnumId, step.get("recordCount"), durationMs)
+        try {
+            Object started = step.get("startedDate")
+            long durationMs = (started instanceof Timestamp) ? (now.time - ((Timestamp) started).time) : -1L
+            logger.info("recon stage end stage={} status={} rows={} durationMs={}",
+                    step.get("stageCode"), statusEnumId, step.get("recordCount"), durationMs)
+        } catch (Throwable t) {
+            logger.warn("RunObservability.endStep best-effort duration logging failure: ${t.message}")
+        }
     }
 
     /** Terminal SUCCESS/NO_DATA. Sets completedDate, progress=100, clears MDC. */
     static void completeRun(def ec, String runId, String terminalStatusEnumId, Map<String, Object> summary) {
-        Timestamp now = (Timestamp) ec.user.nowTimestamp
+        Timestamp now = nowSafe(ec)
         try {
             ec.transaction.runUseOrBegin(30, "Error completing reconciliation run", {
                 def run = ec.entity.find(RUN_RESULT_ENTITY).condition("reconciliationRunResultId", runId).useCache(false).one()
@@ -194,7 +198,7 @@ class RunObservability {
 
     /** Terminal FAILED with a reason; closes the open step if provided; clears MDC. */
     static void failRun(def ec, String runId, Object openStepOrNull, String stageCode, String reason) {
-        Timestamp now = (Timestamp) ec.user.nowTimestamp
+        Timestamp now = nowSafe(ec)
         String shortReason = reason == null ? null : (reason.length() > 255 ? reason.substring(0, 255) : reason)
         try {
             if (openStepOrNull != null && !isTerminalStatus(norm(openStepOrNull.get("statusEnumId")))) {
@@ -220,4 +224,14 @@ class RunObservability {
     }
 
     private static String norm(Object v) { v?.toString()?.trim() ?: null }
+
+    /** Best-effort clock read: falls back to wall-clock time if ec.user is unavailable/throws. */
+    private static Timestamp nowSafe(def ec) {
+        try {
+            return (Timestamp) ec.user.nowTimestamp
+        } catch (Throwable t) {
+            logger.warn("RunObservability.nowSafe falling back to system clock: ${t.message}")
+            return new Timestamp(System.currentTimeMillis())
+        }
+    }
 }

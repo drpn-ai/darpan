@@ -103,14 +103,31 @@ class RunObservabilityWriteTest {
 
     @Test
     void observabilityWriteNeverThrows() {
-        // A broken ec (throws on any entity op) must not propagate — observability is best-effort.
+        // A broken ec (throws on any entity op AND on ec.user, so the timestamp source itself
+        // is also broken) must not propagate from ANY write method — observability is best-effort
+        // and must never mask the run's real error.
+        def brokenUser = new Object() {
+            def getNowTimestamp() { throw new RuntimeException("user ctx gone") }
+        }
         def brokenEc = new Object() {
             def entity = new Object() { def makeValue(String n) { throw new RuntimeException("db down") }
                                         def find(String n) { throw new RuntimeException("db down") } }
             def transaction = new FakeTx()
-            def user = new FakeUser()
+            def user = brokenUser
         }
-        // Should return a (possibly null) id, not throw.
-        RunObservability.beginRun(brokenEc, [savedRunId: "SR1"])
+        def brokenStep = new Object() {
+            def get(String k) { throw new RuntimeException("step read broken") }
+            def set(String k, Object val) { throw new RuntimeException("step write broken") }
+            def update() { throw new RuntimeException("step update broken") }
+        }
+
+        // Every write method must return/complete without throwing, even when both entity ops
+        // and ec.user.nowTimestamp are broken.
+        String runId = RunObservability.beginRun(brokenEc, [savedRunId: "SR1"])
+        RunObservability.beginStep(brokenEc, runId, [companyUserGroupId: "KREWE"], RunObservability.STAGE_EXTRACT_FILE1)
+        RunObservability.heartbeat(brokenEc, brokenStep, [recordCount: 10])
+        RunObservability.endStep(brokenEc, brokenStep, RunObservability.STATUS_SUCCESS, [recordCount: 10])
+        RunObservability.completeRun(brokenEc, "R1", RunObservability.STATUS_SUCCESS, [:])
+        RunObservability.failRun(brokenEc, "R1", brokenStep, RunObservability.STAGE_COMPARE, "boom")
     }
 }

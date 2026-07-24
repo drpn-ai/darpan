@@ -10,6 +10,7 @@ import darpan.facade.reconciliation.RunObservability
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.core.ReconciliationServices
 import darpan.reconciliation.notification.TenantNotificationSupport
+import org.slf4j.LoggerFactory
 
 import java.sql.Timestamp
 import java.time.Instant
@@ -18,6 +19,8 @@ import java.time.LocalDateTime
 import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.normalizeBool
 import static darpan.common.ValueSupport.normalizeInt
+
+def logger = LoggerFactory.getLogger("darpan.facade.reconciliation.SavedRunDiff")
 
 def toTimestampValue = { Object rawValue ->
     if (rawValue == null) return null
@@ -92,14 +95,17 @@ if (!ec.message.hasError()) {
 // --- Observability (run status lifecycle): RunObservability owns statusEnumId from here on.
 // beginRun creates the run row in RUNNING; every observability write is best-effort and commits
 // in its own short transaction, so these calls are safe inside this transaction="ignore" service.
-String obsRunId = RunObservability.beginRun(ec, [
+// Pre-validated or access-denied requests (ec errors already present here) never mint a run row:
+// obsRunId stays null and every observability call below is skipped or a no-op. Errors that occur
+// AFTER beginRun (resolution/source validation) still end the minted row terminal FAILED.
+String obsRunId = ec.message.hasError() ? null : RunObservability.beginRun(ec, [
         savedRunId        : savedRunIdValue,
         companyUserGroupId: TenantAccessSupport.currentActiveTenantUserGroupId(ec),
         createdByUserId   : TenantAccessSupport.currentUserId(ec),
 ])
 Map<String, Object> obsCtx = [companyUserGroupId: TenantAccessSupport.currentActiveTenantUserGroupId(ec)]
 boolean obsTerminalWritten = false
-def obsStep = RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_RESOLVE)
+def obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_RESOLVE) : null
 String obsStage = RunObservability.STAGE_RESOLVE
 boolean obsRuleExecutionFailed = false
 boolean obsNoData = false
@@ -394,7 +400,7 @@ try {
         // Observability: the legacy mapping path runs as a single COMPARE stage — extraction and
         // output writing happen inside run#GenericDiff, so there are no per-side EXTRACT brackets.
         RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [:])
-        obsStep = RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_COMPARE)
+        obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_COMPARE) : null
         obsStage = RunObservability.STAGE_COMPARE
         Map legacyResult = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.run#GenericDiff")
@@ -509,14 +515,14 @@ try {
                         // the finally unpersists them on every exit path of this saved-run execution.
                         List ruleSetPersistedSources = []
                         try {
-                            obsStep = RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_EXTRACT_FILE1)
+                            obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_EXTRACT_FILE1) : null
                             obsStage = RunObservability.STAGE_EXTRACT_FILE1
                             file1Result = file1UsesApiSource ?
                                     extractApiSource(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, artifactContext) :
                                     stageTextInput(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, inputFile1Name, file1TextValue, artifactContext)
                             if (!ec.message.hasError()) {
                                 RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [recordCount: file1Result.recordCount])
-                                obsStep = RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_EXTRACT_FILE2)
+                                obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_EXTRACT_FILE2) : null
                                 obsStage = RunObservability.STAGE_EXTRACT_FILE2
                             }
                             file2Result = !ec.message.hasError() && file2UsesApiSource ?
@@ -529,7 +535,7 @@ try {
                             }
 
                             if (!ec.message.hasError()) {
-                                obsStep = RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_COMPARE)
+                                obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_COMPARE) : null
                                 obsStage = RunObservability.STAGE_COMPARE
                                 Map serviceResult = runInternalService("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope", [
                                     ruleSetId          : savedRun.ruleSetId,
@@ -554,7 +560,7 @@ try {
                                     RunObservability.endStep(ec, obsStep,
                                             obsRuleExecutionFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
                                             [recordCount: serviceResult.differenceCount, errorMessage: obsRuleExecutionFailed ? "rule execution failed" : null])
-                                    obsStep = RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_WRITE_OUTPUT)
+                                    obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_WRITE_OUTPUT) : null
                                     obsStage = RunObservability.STAGE_WRITE_OUTPUT
                                     writeRuleSetOutput(serviceResult, savedRun, file1Label, file2Label, artifactContext)
                                     String resultDataManagerPath = serviceResult.diffLocation ?
@@ -648,7 +654,7 @@ try {
                     ])
                     // Observability: reconcile#GenericFiles stages, compares, and writes output in one
                     // inseparable service call, so a single COMPARE step covers all of it here.
-                    obsStep = RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_COMPARE)
+                    obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_COMPARE) : null
                     obsStage = RunObservability.STAGE_COMPARE
                     try {
                         Map serviceResult = ec.service.sync()
@@ -719,43 +725,54 @@ try {
     }
 
     if (!ec.message.hasError() && runResult?.reconciliationRunResultId) {
-        // Observability: NOTIFY is best-effort and must never fail the run.
-        obsStep = RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_NOTIFY)
+        // Observability: NOTIFY is best-effort and must never fail the run — a notification
+        // failure is contained here (step FAILED + warn) and the run still ends SUCCESS/NO_DATA.
+        obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_NOTIFY) : null
         obsStage = RunObservability.STAGE_NOTIFY
-        TenantNotificationSupport.notifyRunCompleted(ec, (Map<String, Object>) runResult)
-        RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [:])
+        try {
+            TenantNotificationSupport.notifyRunCompleted(ec, (Map<String, Object>) runResult)
+            RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [:])
+        } catch (Throwable notifyError) {
+            RunObservability.endStep(ec, obsStep, RunObservability.STATUS_FAILED,
+                    [errorMessage: notifyError.message ?: notifyError.toString()])
+            logger.warn("run#SavedRunDiff notify stage failed (best-effort, run outcome preserved): ${notifyError.message ?: notifyError}", notifyError)
+        }
         obsStep = null
     }
 
-    // --- Observability terminal guarantee: no path may leave the run row RUNNING. ---
-    if (ec.message.hasError()) {
-        RunObservability.failRun(ec, obsRunId, obsStep, obsStage,
-                ec.message.errors ? ec.message.errors.join("; ") : "reconciliation run failed")
-    } else {
-        String obsRowStatus = null
-        try {
-            obsRowStatus = normalize(TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
-                    .condition("reconciliationRunResultId", obsRunId)
-                    .useCache(false)
-                    .one()?.statusEnumId)
-        } catch (Throwable ignored) {
-        }
-        if (obsRuleExecutionFailed || RunObservability.STATUS_FAILED == obsRowStatus) {
-            // A nested reconcile service recorded FAILED (rule execution did not fully evaluate)
-            // while the facade still returns its normal envelope — preserve that FAILED terminal.
-            RunObservability.failRun(ec, obsRunId, obsStep, RunObservability.STAGE_COMPARE, "rule execution failed")
+    // --- Observability terminal guarantee: no path may leave a minted run row RUNNING.
+    // (Pre-validated requests never minted a row: obsRunId is null and nothing is written.) ---
+    if (obsRunId) {
+        if (ec.message.hasError()) {
+            RunObservability.failRun(ec, obsRunId, obsStep, obsStage,
+                    ec.message.errors ? ec.message.errors.join("; ") : "reconciliation run failed")
         } else {
-            RunObservability.completeRun(ec, obsRunId,
-                    obsNoData ? RunObservability.STATUS_NO_DATA : RunObservability.STATUS_SUCCESS, [:])
+            String obsRowStatus = null
+            try {
+                obsRowStatus = normalize(TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
+                        .condition("reconciliationRunResultId", obsRunId)
+                        .useCache(false)
+                        .one()?.statusEnumId)
+            } catch (Throwable statusReadError) {
+                logger.warn("run#SavedRunDiff terminal status read failed (best-effort): ${statusReadError.message ?: statusReadError}")
+            }
+            if (obsRuleExecutionFailed || RunObservability.STATUS_FAILED == obsRowStatus) {
+                // A nested reconcile service recorded FAILED (rule execution did not fully evaluate)
+                // while the facade still returns its normal envelope — preserve that FAILED terminal.
+                RunObservability.failRun(ec, obsRunId, obsStep, RunObservability.STAGE_COMPARE, "rule execution failed")
+            } else {
+                RunObservability.completeRun(ec, obsRunId,
+                        obsNoData ? RunObservability.STATUS_NO_DATA : RunObservability.STATUS_SUCCESS, [:])
+            }
         }
     }
     obsTerminalWritten = true
 } catch (Throwable obsError) {
-    RunObservability.failRun(ec, obsRunId, obsStep, obsStage, obsError.message ?: obsError.toString())
+    if (obsRunId) RunObservability.failRun(ec, obsRunId, obsStep, obsStage, obsError.message ?: obsError.toString())
     obsTerminalWritten = true
     throw obsError
 } finally {
-    if (!obsTerminalWritten) {
+    if (!obsTerminalWritten && obsRunId) {
         RunObservability.failRun(ec, obsRunId, obsStep, obsStage, "run exited without terminal status")
     }
 }

@@ -20,7 +20,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * Live-H2 proof that the interactive run#SavedRunDiff pipeline is instrumented with the
  * RunObservability status lifecycle: the returned run row always ends in a TERMINAL status
  * (never abandoned RUNNING) and an ordered, fully-terminal ReconciliationRunStep timeline
- * exists for the run — including early validation-error exits.
+ * exists for the run. Pre-validated/access-denied requests mint NO run row at all; errors
+ * after beginRun (resolution/source validation) end the minted row terminal FAILED.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RunObservabilityPipelineIntegrationTest {
@@ -115,6 +116,42 @@ class RunObservabilityPipelineIntegrationTest {
     }
 
     @Test
+    void preValidatedRequestMintsNoRunRow() {
+        // Errors raised BEFORE beginRun (here: file1/file2 system-enum pairing) must not mint a
+        // ReconciliationRunResult row or any ReconciliationRunStep rows at all.
+        long runRowsBefore = ec.entity.find(RunObservability.RUN_RESULT_ENTITY).disableAuthz().useCache(false).count()
+        long stepRowsBefore = ec.entity.find(RunObservability.RUN_STEP_ENTITY).disableAuthz().useCache(false).count()
+
+        Map<String, Object> runResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.run#SavedRunDiff")
+                .parameters([
+                        savedRunId       : "OBS_PREVALID_RUN",
+                        file1SystemEnumId: "OMS",
+                        file1Name        : "orders-1.csv",
+                        file1Text        : "order_id\nA100\n",
+                        file2Name        : "orders-2.csv",
+                        file2Text        : "order_id\nA200\n",
+                        hasHeader        : true,
+                ])
+                .disableAuthz()
+                .call()
+
+        assertEquals(false, runResult.ok)
+        ec.message.clearErrors()
+
+        assertEquals(0, ec.entity.find(RunObservability.RUN_RESULT_ENTITY)
+                .condition("savedRunId", "OBS_PREVALID_RUN")
+                .disableAuthz()
+                .useCache(false)
+                .list()
+                .size(), "pre-validated request must not mint a run row")
+        assertEquals(runRowsBefore, ec.entity.find(RunObservability.RUN_RESULT_ENTITY).disableAuthz().useCache(false).count(),
+                "pre-validated request must not create ANY run row")
+        assertEquals(stepRowsBefore, ec.entity.find(RunObservability.RUN_STEP_ENTITY).disableAuthz().useCache(false).count(),
+                "pre-validated request must not create ANY step row")
+    }
+
+    @Test
     void validationFailureStillEndsRunTerminal() {
         Map<String, Object> runResult = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.run#SavedRunDiff")
@@ -149,6 +186,7 @@ class RunObservabilityPipelineIntegrationTest {
                 .disableAuthz()
                 .useCache(false)
                 .list() as List
+        assertTrue(steps.size() >= 1, "post-beginRun validation failure must leave a closed step timeline")
         steps.each { def step ->
             assertTrue(RunObservability.isTerminalStatus(step.statusEnumId as String),
                     "step ${step.stageCode} not terminal: ${step.statusEnumId}")

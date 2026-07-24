@@ -69,6 +69,19 @@
         <field name="completedDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>
 
+        <!-- Observability foundation (2026-07-24): live status + error surface. errorMessage is
+             text-medium (NOT text-long) to stay within MySQL's ~4 text-long / 65535-byte InnoDB
+             row budget — this table already has 3 text-long path fields. errorDetail is
+             text-very-long (LOB, off-page). -->
+        <field name="currentStage" type="text-short"/>
+        <field name="lastHeartbeatDate" type="date-time"/>
+        <field name="progressPercent" type="number-integer"/>
+        <field name="errorMessage" type="text-medium"/>
+        <field name="errorDetail" type="text-very-long"/>
+        <field name="notifiedDate" type="date-time">
+            <description>Alert-dedupe stamp; set once so completion/watchdog/reaper cannot double-send.</description>
+        </field>
+
         <relationship type="one" related="darpan.reconciliation.ReconciliationRun" fk-name="RECRES_RUN">
             <key-map field-name="reconciliationRunId"/>
         </relationship>
@@ -95,6 +108,50 @@
         <index name="RECRES_TENANT_CREATED">
             <index-field name="companyUserGroupId"/>
             <index-field name="createdDate"/>
+        </index>
+    </entity>
+
+    <entity entity-name="ReconciliationRunStep" package="darpan.reconciliation" use="transactional" cache="never">
+        <description>One stage of one reconciliation run execution — the forensic timeline (extract/compare/write/notify).</description>
+        <field name="reconciliationRunStepId" type="id" is-pk="true"/>
+        <field name="reconciliationRunResultId" type="id" not-null="true"/>
+        <field name="companyUserGroupId" type="id"/>
+        <field name="stageCode" type="text-short"/>
+        <field name="stageSequence" type="number-integer"/>
+        <field name="statusEnumId" type="id" default="'AUT_STAT_RUNNING'"/>
+        <field name="startedDate" type="date-time"/>
+        <field name="completedDate" type="date-time"/>
+        <field name="heartbeatDate" type="date-time"/>
+        <field name="deadlineDate" type="date-time">
+            <description>When this stage's watchdog fires. Null until the watchdog plan (Phase 3) populates it.</description>
+        </field>
+        <field name="recordCount" type="number-integer"/>
+        <field name="errorMessage" type="text-medium"/>
+        <field name="errorDetail" type="text-very-long">
+            <description>Sanitized stage error detail; never store credentials or raw request secrets.</description>
+        </field>
+        <field name="metricsJson" type="text-long">
+            <description>Optional non-secret per-stage metrics safe to show in diagnostics.</description>
+        </field>
+        <field name="createdDate" type="date-time"/>
+        <field name="lastUpdatedDate" type="date-time"/>
+
+        <relationship type="one" related="darpan.reconciliation.ReconciliationRunResult" fk-name="RECSTEP_RUN">
+            <key-map field-name="reconciliationRunResultId"/>
+        </relationship>
+        <relationship type="one" title="Company" related="moqui.security.UserGroup" fk-name="RECSTEP_COMPANY">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+        <relationship type="one" title="Status" related="moqui.basic.Enumeration" fk-name="RECSTEP_STATUS">
+            <key-map field-name="statusEnumId" related-field-name="enumId"/>
+        </relationship>
+        <index name="RECSTEP_RUN_SEQ">
+            <index-field name="reconciliationRunResultId"/>
+            <index-field name="stageSequence"/>
+        </index>
+        <index name="RECSTEP_TENANT_UPDATED">
+            <index-field name="companyUserGroupId"/>
+            <index-field name="lastUpdatedStamp"/>
         </index>
     </entity>
 

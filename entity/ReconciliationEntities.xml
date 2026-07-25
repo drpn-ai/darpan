@@ -551,6 +551,23 @@
         <field name="remoteSendServiceName" type="text-medium"/>
         <field name="systemAliases" type="text-medium"/>
         <field name="preserveWindowInstants" type="text-indicator" default="'N'"/>
+        <field name="keepFieldsParameterName" type="text-short">
+            <description>Optional extract-service parameter that carries the record projection (keep-fields)
+                list. When set, dispatch computes the fields reconciliation needs for the side (join-key
+                fields plus keepFieldsBase) and passes them so the extractor trims records before writing.
+                Blank disables projection for this connector.</description>
+        </field>
+        <field name="keepFieldsBase" type="text-medium">
+            <description>Comma-separated record fields always kept when projection is active: identity and
+                operator-display fields (for the OMS connector, the RQ-2 export field set).</description>
+        </field>
+        <field name="lookupServiceName" type="text-medium">
+            <description>Optional point-lookup service (lookup#* shape only, enforced by the lookup fence)
+                that checks record ids directly against the source's primary datastore. When set, the
+                saved-run verification pass rechecks diffs reported missing in this side and removes
+                rows the lookup confirms present (bulk-export index-skew false positives). Blank
+                disables the verification pass for this connector.</description>
+        </field>
         <field name="enabled" type="text-indicator" default="'Y'"/>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>

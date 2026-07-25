@@ -38,7 +38,16 @@ class OutputDescriptorSupport {
         return parsed instanceof Map ? (Map<String, Object>) parsed : [:]
     }
 
-    protected static Map<String, Object> parseArtifactDocument(def ec, Object rawPath) {
+    /** Source extract artifacts can be multi-GB, so only this bounded prefix may ever be read from them. */
+    static final int ARTIFACT_HEADER_SCAN_CHARS = 64 * 1024
+
+    /**
+     * Bounded replacement for the retired full-artifact parse: reads at most
+     * {@link #ARTIFACT_HEADER_SCAN_CHARS} from the artifact and extracts only a leading top-level
+     * {@code metadata} object. Returns an empty map when the file is missing, not JSON, or the
+     * metadata object is absent or unclosed within the scan window.
+     */
+    protected static Map<String, Object> readArtifactMetadataHeader(def ec, Object rawPath) {
         String safePath = OutputPathSupport.normalizeDataManagerRelativePath(ec, rawPath)
         if (!safePath || OutputPathSupport.sourceFormatForFile(safePath) != "json") return [:]
 
@@ -46,10 +55,45 @@ class OutputDescriptorSupport {
         if (artifactFile == null || !artifactFile.exists() || !artifactFile.isFile()) return [:]
 
         try {
-            return parseGeneratedOutputText(artifactFile.getText("UTF-8"))
+            char[] buffer = new char[ARTIFACT_HEADER_SCAN_CHARS]
+            int read = 0
+            artifactFile.withReader("UTF-8") { Reader reader ->
+                while (read < buffer.length) {
+                    int count = reader.read(buffer, read, buffer.length - read)
+                    if (count < 0) break
+                    read += count
+                }
+            }
+            String metadataJson = extractJsonObjectForKey(new String(buffer, 0, Math.max(read, 0)), '"metadata"')
+            if (!metadataJson) return [:]
+            def parsed = new JsonSlurper().parseText(metadataJson)
+            return parsed instanceof Map ? (Map<String, Object>) parsed : [:]
         } catch (Exception ignored) {
             return [:]
         }
+    }
+
+    /** Quote/escape-aware extraction of the {@code {...}} value following keyToken; null if absent or unclosed. */
+    protected static String extractJsonObjectForKey(String head, String keyToken) {
+        int keyIndex = head != null ? head.indexOf(keyToken) : -1
+        if (keyIndex < 0) return null
+        int cursor = keyIndex + keyToken.length()
+        while (cursor < head.length() && (head[cursor] == ":" || head[cursor].trim().isEmpty())) cursor++
+        if (cursor >= head.length() || head[cursor] != "{") return null
+
+        boolean inString = false
+        boolean escaped = false
+        int depth = 0
+        for (int i = cursor; i < head.length(); i++) {
+            String c = head[i]
+            if (escaped) { escaped = false; continue }
+            if (c == "\\") { if (inString) escaped = true; continue }
+            if (c == '"') { inString = !inString; continue }
+            if (inString) continue
+            if (c == "{") depth++
+            else if (c == "}") { depth--; if (depth == 0) return head.substring(cursor, i + 1) }
+        }
+        return null
     }
 
     static Map<String, Object> buildGeneratedOutputSourceDetails(def ec, Object rawFileName, Map<String, Object> outputDocument) {
@@ -57,15 +101,13 @@ class OutputDescriptorSupport {
         if (runResult == null) return buildGeneratedOutputSourceDetailsFromArtifactFolder(ec, rawFileName, outputDocument)
 
         Map<String, Object> metadata = outputDocument?.metadata instanceof Map ? (Map<String, Object>) outputDocument.metadata : [:]
-        Map<String, Object> file1Document = parseArtifactDocument(ec, runResult.file1DataManagerPath)
-        Map<String, Object> file2Document = parseArtifactDocument(ec, runResult.file2DataManagerPath)
         def automationExecution = resolveAutomationExecutionForRunResult(ec, runResult)
 
-        Map<String, Object> dateRange =
-                firstDateRange(metadata) ?:
-                dateRangeFromExecution(automationExecution) ?:
-                firstDateRange(file1Document?.metadata instanceof Map ? (Map<String, Object>) file1Document.metadata : [:]) ?:
-                firstDateRange(file2Document?.metadata instanceof Map ? (Map<String, Object>) file2Document.metadata : [:])
+        // Lazy chain: artifact headers are only consulted when the diff document and execution row
+        // carry no window, and readArtifactMetadataHeader never reads past its bounded prefix.
+        Map<String, Object> dateRange = firstDateRange(metadata) ?: dateRangeFromExecution(automationExecution) ?:
+                firstDateRange(readArtifactMetadataHeader(ec, runResult.file1DataManagerPath)) ?:
+                firstDateRange(readArtifactMetadataHeader(ec, runResult.file2DataManagerPath))
 
         List<Map<String, Object>> files = [
                 sourceFileDescriptor(ec, runResult, "file1", normalize(metadata.file1Label ?: metadata.json1Label) ?: "File 1"),
@@ -74,7 +116,8 @@ class OutputDescriptorSupport {
 
         if (!files && !dateRange) return null
 
-        boolean isApiMode = isApiSourceDetailsMode(metadata, dateRange)
+        boolean isApiMode = isApiSourceDetailsMode(metadata, dateRange) ||
+                files.any { Map<String, Object> fileDescriptor -> (fileDescriptor.filePath as String)?.contains("-api/") }
         Map<String, Object> sourceDetails = [
                 mode : isApiMode ? "API" : "FILES",
                 files: files,
@@ -97,15 +140,9 @@ class OutputDescriptorSupport {
                 sourceFileDescriptorFromRunFolder(ec, runFolderPath, "file2", normalize(metadata.file2Label ?: metadata.json2Label) ?: "File 2"),
         ].findAll { it != null } as List<Map<String, Object>>
 
-        List<Map<String, Object>> artifactDocuments = files.collect { Map<String, Object> fileDescriptor ->
-            parseArtifactDocument(ec, fileDescriptor.filePath)
-        }
-
-        Map<String, Object> dateRange = firstDateRange(metadata)
-        if (!dateRange) {
-            dateRange = artifactDocuments.collect { Map<String, Object> artifactDocument ->
-                artifactDocument?.metadata instanceof Map ? firstDateRange((Map<String, Object>) artifactDocument.metadata) : null
-            }.find { it != null } as Map<String, Object>
+        // Same lazy/bounded constraint as the run-result path: header prefix only, never a full parse.
+        Map<String, Object> dateRange = firstDateRange(metadata) ?: files.findResult { Map<String, Object> fileDescriptor ->
+            firstDateRange(readArtifactMetadataHeader(ec, fileDescriptor.filePath))
         }
 
         if (!files && !dateRange) return null

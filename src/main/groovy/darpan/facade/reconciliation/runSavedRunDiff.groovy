@@ -3,6 +3,7 @@ import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
+import darpan.facade.reconciliation.MissingDiffVerificationSupport
 import darpan.facade.reconciliation.ReconciliationApiWindowSupport
 import darpan.facade.reconciliation.ReconciliationOutputSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
@@ -291,7 +292,7 @@ def resolveTenantApiWindow = {
 // service name, config parameter name, window parameter names, and preserveWindowInstants —
 // the same resolver the automation path uses, so connector dispatch lives in one place and
 // onboarding a new source needs no edit here.
-def extractApiSource = { Object source, String fileSide, Map artifactContext ->
+def extractApiSource = { Object source, String fileSide, Map artifactContext, Map progressContext = null ->
     String label = sourceLabel(source, fileSide)
     String sourceConfigType = normalize(source?.sourceConfigType)
     Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, normalize(source?.systemEnumId))
@@ -332,6 +333,23 @@ def extractApiSource = { Object source, String fileSide, Map artifactContext ->
             fileName      : DataManagerSupport.runArtifactFileName(artifactContext.runToken, token, fileNameValue),
     ] as Map<String, Object>
     if (connector.preserveWindowInstants) extractParams.preserveWindowInstants = true
+
+    // Registry-driven record projection: when the connector declares a keep-fields parameter, pass
+    // the fields reconciliation actually needs so the extractor trims records before writing
+    // (99k-order OMS windows drop from ~1.4 GB to tens of MB). Skipped automatically for rule sets
+    // with field-comparison rules — see resolveExtractKeepFields.
+    String keepFieldsParameterName = normalize(connector.keepFieldsParameterName)
+    if (keepFieldsParameterName) {
+        List<String> keepFields = ReconciliationSavedRunSupport.resolveExtractKeepFields(ec, source, connector.keepFieldsBase)
+        if (keepFields) extractParams[keepFieldsParameterName] = keepFields
+    }
+
+    // Live extract progress: the second side knows the first side's record count for the same
+    // window, so the extractor can heartbeat a real percent onto the run's step timeline.
+    if (progressContext?.reconciliationRunResultId && progressContext?.expectedRecordCount) {
+        extractParams.reconciliationRunResultId = progressContext.reconciliationRunResultId
+        extractParams.expectedRecordCount = progressContext.expectedRecordCount
+    }
 
     Map extraction = runInternalService(extractServiceName, extractParams)
     ((List) (extraction.errors ?: [])).each { Object error -> ec.message.addError("${label}: ${error}") }
@@ -380,6 +398,79 @@ def writeRuleSetOutput = { Map serviceResult, Map savedRun, String file1Label, S
     serviceResult.diffLocation = output.diffLocation
     serviceResult.diffFileName = output.diffFileName
     return output
+}
+
+// Verification pass (bulk-export index skew): a source whose connector declares a lookupServiceName
+// can point-check ids the compare reported missing in that side against its primary datastore (e.g.
+// Shopify nodes(ids:) vs the search-index-backed orders(query:) bulk export). Rows the source of
+// record confirms present are false positives and are removed from the written artifact — with an
+// audit note in processingWarnings — before counts are persisted. Strictly best-effort: nothing in
+// this pass may fail the run; worst case the differences stay exactly as compare reported them.
+def buildVerificationLookup = { Object source ->
+    if (source == null) return null
+    String sourceConfigType = normalize(source?.sourceConfigType)
+    Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, normalize(source?.systemEnumId))
+    if (connector == null || normalize(connector.expectedSourceConfigType) != sourceConfigType) {
+        connector = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(ec, sourceConfigType)
+    }
+    String lookupServiceName = connector == null ? null : normalize(connector.lookupServiceName)
+    if (lookupServiceName == null) return null
+    // Narrower sibling of the extractor fence: the lookup slot may only dispatch lookup#* services.
+    if (!SourceSystemConnectorSupport.isAllowedLookupServiceShape(lookupServiceName)) return null
+    String configId = normalize(source?.sourceConfigId)
+    if (configId == null) return null
+    String configParameterName = normalize(connector.configParameterName) ?: "sourceConfigId"
+    return { List<String> ids ->
+        runInternalService(lookupServiceName, [(configParameterName): configId, orderIds: ids])
+    }
+}
+
+def runVerificationPass = { Map serviceResult, Object file1Source, Object file2Source, String file1Label, String file2Label ->
+    // Rule execution failure preserves partial diffs for investigation — never rewrite those.
+    if (serviceResult.ruleExecutionFailed == true) return
+    long missingInFile1 = (serviceResult.missingInFile1Count ?: 0) as long
+    long missingInFile2 = (serviceResult.missingInFile2Count ?: 0) as long
+    if (missingInFile1 <= 0L && missingInFile2 <= 0L) return
+    Map<String, Closure> sideLookups = [:]
+    if (missingInFile1 > 0L) { Closure lookup = (Closure) buildVerificationLookup(file1Source); if (lookup != null) sideLookups[file1Label] = lookup }
+    if (missingInFile2 > 0L) { Closure lookup = (Closure) buildVerificationLookup(file2Source); if (lookup != null) sideLookups[file2Label] = lookup }
+    if (!sideLookups) return
+    File diffFile = resolveOutputFile(serviceResult)
+    if (diffFile == null || !diffFile.isFile()) return
+
+    def verifyStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_VERIFY) : null
+    Map verification
+    try {
+        verification = MissingDiffVerificationSupport.verifyMissingDiffs([
+                diffFile: diffFile, file1Label: file1Label, file2Label: file2Label, sideLookups: sideLookups])
+    } catch (Throwable t) {
+        verification = [performed: true, rewritten: false, checkedCount: 0, removedCount: 0, lookupFailed: true,
+                warnings: ["Verification pass failed: ${normalize(t.message) ?: t.class.simpleName}".toString()], auditNote: null] as Map
+    }
+    // The lookup dispatch is best-effort after a complete compare: demote any service-level errors
+    // it raised (auth config, transport) to warnings so they cannot fail the run.
+    if (ec.message.hasError()) {
+        verification.warnings = ((verification.warnings ?: []) as List) + ((ec.message.getErrors() ?: []) as List)
+        verification.lookupFailed = true
+        ec.message.clearErrors()
+    }
+    if (verification.rewritten) {
+        serviceResult.differenceCount = Math.max(0L, ((serviceResult.differenceCount ?: 0) as long) - ((verification.removedCount ?: 0) as long))
+        serviceResult.missingInFile1Count = Math.max(0L, missingInFile1 - ((verification.removedMissingInFile1 ?: 0) as long))
+        serviceResult.missingInFile2Count = Math.max(0L, missingInFile2 - ((verification.removedMissingInFile2 ?: 0) as long))
+        if (serviceResult.missingObjectDifferenceCount != null) {
+            serviceResult.missingObjectDifferenceCount = Math.max(0L,
+                    (serviceResult.missingObjectDifferenceCount as long) - ((verification.removedCount ?: 0) as long))
+        }
+    }
+    List verificationNotes = []
+    if (verification.auditNote) verificationNotes.add(verification.auditNote)
+    verificationNotes.addAll((verification.warnings ?: []) as List)
+    if (verificationNotes) serviceResult.processingWarnings = ((serviceResult.processingWarnings ?: []) as List) + verificationNotes
+    RunObservability.endStep(ec, verifyStep,
+            verification.lookupFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
+            [recordCount : verification.checkedCount ?: 0,
+             errorMessage: verification.lookupFailed && verification.warnings ? verification.warnings.first().toString() : null])
 }
 
 try {
@@ -531,7 +622,8 @@ try {
                                 obsStage = RunObservability.STAGE_EXTRACT_FILE2
                             }
                             file2Result = !ec.message.hasError() && file2UsesApiSource ?
-                                    extractApiSource(file2Source, ReconciliationSavedRunSupport.FILE_SIDE_2, artifactContext) :
+                                    extractApiSource(file2Source, ReconciliationSavedRunSupport.FILE_SIDE_2, artifactContext,
+                                            [reconciliationRunResultId: obsRunId, expectedRecordCount: file1Result.recordCount]) :
                                     !ec.message.hasError() ? stageTextInput(file2Source, ReconciliationSavedRunSupport.FILE_SIDE_2, inputFile2Name, file2TextValue, artifactContext) : [:]
                             if (!ec.message.hasError()) {
                                 RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [recordCount: file2Result.recordCount])
@@ -568,6 +660,11 @@ try {
                                     obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_WRITE_OUTPUT) : null
                                     obsStage = RunObservability.STAGE_WRITE_OUTPUT
                                     writeRuleSetOutput(serviceResult, savedRun, file1Label, file2Label, artifactContext)
+                                    RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [:])
+                                    obsStep = null
+                                    // Verification pass reads and may rewrite the artifact writeRuleSetOutput
+                                    // just produced, and adjusts serviceResult counts BEFORE they are persisted.
+                                    runVerificationPass(serviceResult, file1Source, file2Source, file1Label, file2Label)
                                     String resultDataManagerPath = serviceResult.diffLocation ?
                                             (DataManagerSupport.relativeDataManagerPath(ec, new File(serviceResult.diffLocation as String)) ?: serviceResult.diffFileName) :
                                             serviceResult.diffFileName
@@ -616,8 +713,6 @@ try {
                                         statusEnumId             : (serviceResult.ruleExecutionFailed == true) ? ReconciliationOutputSupport.STATUS_FAILED : ReconciliationOutputSupport.STATUS_SUCCEEDED,
                                         generatedOutput          : buildGeneratedOutputDescriptor(serviceResult),
                                     ]
-                                    RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [:])
-                                    obsStep = null
                                 }
                             }
                         } catch (Throwable t) {

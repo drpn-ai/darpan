@@ -69,6 +69,10 @@ class SourceSystemConnectorSupportSmokeTests {
         assertEquals(ReconciliationSavedRunSupport.SHOPIFY_ORDERS_ENDPOINT_LABEL, c.endpointLabel)
         // Shopify special-case: preserveWindowInstants = true (AutomationExecutionSupport:634).
         assertTrue((boolean) c.preserveWindowInstants)
+        // Verification pass: Shopify is the only source with a point-lookup service (nodes(ids:)),
+        // used to recheck missing-in-SHOPIFY diffs against the primary datastore.
+        assertEquals(ReconciliationSavedRunSupport.SHOPIFY_ORDER_IDS_LOOKUP_SERVICE, c.lookupServiceName)
+        assertTrue(SourceSystemConnectorSupport.isAllowedLookupServiceShape((String) c.lookupServiceName))
     }
 
     @Test

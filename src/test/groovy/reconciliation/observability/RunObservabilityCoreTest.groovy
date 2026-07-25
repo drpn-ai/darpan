@@ -26,7 +26,10 @@ class RunObservabilityCoreTest {
     void stageSequenceIsOrdered() {
         assertEquals(1, RunObservability.stageSequenceOf(RunObservability.STAGE_RESOLVE))
         assertEquals(4, RunObservability.stageSequenceOf(RunObservability.STAGE_COMPARE))
-        assertEquals(6, RunObservability.stageSequenceOf(RunObservability.STAGE_NOTIFY))
+        // VERIFY sits after WRITE_OUTPUT: the verification pass rechecks (and may rewrite) the
+        // written artifact, so it cannot precede it.
+        assertEquals(6, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY))
+        assertEquals(7, RunObservability.stageSequenceOf(RunObservability.STAGE_NOTIFY))
         assertEquals(0, RunObservability.stageSequenceOf("UNKNOWN_STAGE"))
     }
 }

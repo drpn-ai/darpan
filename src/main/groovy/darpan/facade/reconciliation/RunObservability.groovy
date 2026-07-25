@@ -33,6 +33,9 @@ class RunObservability {
     static final String STAGE_EXTRACT_FILE2 = "EXTRACT_FILE2"
     static final String STAGE_COMPARE       = "COMPARE"
     static final String STAGE_WRITE_OUTPUT  = "WRITE_OUTPUT"
+    /** Verification pass: point-lookup recheck of missing-in-side diffs against lookup-capable
+     *  sources; runs after WRITE_OUTPUT because it verifies (and may rewrite) the written artifact. */
+    static final String STAGE_VERIFY        = "VERIFY"
     static final String STAGE_NOTIFY        = "NOTIFY"
 
     static final Map<String, Integer> STAGE_SEQUENCE = [
@@ -41,7 +44,8 @@ class RunObservability {
             (STAGE_EXTRACT_FILE2): 3,
             (STAGE_COMPARE)      : 4,
             (STAGE_WRITE_OUTPUT) : 5,
-            (STAGE_NOTIFY)       : 6,
+            (STAGE_VERIFY)       : 6,
+            (STAGE_NOTIFY)       : 7,
     ]
 
     static boolean isTerminalStatus(String status) { TERMINAL_STATUSES.contains(status) }
@@ -127,6 +131,30 @@ class RunObservability {
     }
 
     /** Bump heartbeat + optional progress on the step (and mirror onto the run for cheap live display). */
+    /**
+     * Advisory extract progress from a source extractor: finds the RUNNING step for the stage and
+     * heartbeats processed count + a 0..99 progressPercent against the expected total (typically the
+     * other side's record count). Never throws — progress must never fail a run.
+     */
+    static void heartbeatStageProgress(def ec, Object runId, String stageCode, Object processedCount, Object expectedCount) {
+        try {
+            String runIdValue = norm(runId)
+            if (!runIdValue) return
+            Integer processed = processedCount as Integer
+            Integer expected = expectedCount as Integer
+            if (processed == null || expected == null || expected <= 0) return
+            def step = ec.entity.find(RUN_STEP_ENTITY)
+                    .condition("reconciliationRunResultId", runIdValue)
+                    .condition("stageCode", norm(stageCode))
+                    .condition("statusEnumId", STATUS_RUNNING)
+                    .useCache(false).one()
+            if (step == null) return
+            int percent = Math.min(99, (int) Math.floor(processed * 100.0d / expected))
+            heartbeat(ec, step, [recordCount: processed, progressPercent: percent] as Map<String, Object>)
+        } catch (Exception ignored) {
+        }
+    }
+
     static void heartbeat(def ec, Object step, Map<String, Object> progress) {
         if (step == null) return
         Timestamp now = nowSafe(ec)

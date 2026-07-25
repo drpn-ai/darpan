@@ -2,6 +2,7 @@ package darpan.facade.reconciliation
 
 import darpan.common.DarpanEntityConstants
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
+import darpan.reconciliation.core.CompareIdExpressionSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.PaginationSupport
 import darpan.facade.common.TenantAccessSupport
@@ -46,6 +47,7 @@ class ReconciliationSavedRunSupport {
     static final String SHOPIFY_ORDERS_ENDPOINT_LABEL = "Admin GraphQL Orders"
     static final String SHOPIFY_GRAPHQL_EXECUTE_SERVICE = "facade.ShopifyFacadeServices.execute#ShopifyGraphql"
     static final String SHOPIFY_ORDERS_EXTRACT_SERVICE = "reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders"
+    static final String SHOPIFY_ORDER_IDS_LOOKUP_SERVICE = "reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderIds"
     static final int ENTITY_ID_MAX_LENGTH = 40
 
     static String generateCsvRuleSetId(def ec, String runName) {
@@ -535,6 +537,70 @@ class ReconciliationSavedRunSupport {
                 systemOptions           : resolvedSystemOptions,
                 rules                   : collectRuleRows(ec, ruleSet.ruleSetId),
         ]
+    }
+
+    /**
+     * Fields the extract file must keep for one compare source: the connector's base
+     * identity/display fields plus every join-key field configured for the side. Returns null
+     * (no projection — full records) when the rule set defines ANY rules: rule expressions are
+     * not yet parsed into record fields, so trimming could break them. Presence-only rule sets
+     * (the production shape) get the full size win.
+     */
+    static List<String> resolveExtractKeepFields(def ec, Object source, Object baseFieldsCsv) {
+        String compareScopeId = normalize(source?.compareScopeId)
+        String fileSide = normalize(source?.fileSide)
+        if (!compareScopeId || !fileSide) return null
+
+        // Tenant-gated reads: a scope outside the active tenant yields null → no projection
+        // (full records), never a cross-tenant read.
+        def scope = TenantScopedFinder.findTenantScopedByIdQuiet(
+                ec, "darpan.rule.RuleSetCompareScope", "compareScopeId", compareScopeId)
+        if (scope == null) return null
+        String ruleSetId = normalize(scope.ruleSetId)
+        if (ruleSetId && collectRuleRows(ec, ruleSetId)) return null
+
+        Set<String> keepFields = new LinkedHashSet<String>()
+        normalize(baseFieldsCsv)?.tokenize(",")?.each { Object field ->
+            String name = normalize(field)
+            if (name) keepFields.add(name)
+        }
+
+        List keyFieldRows = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSourceKeyField")
+                .condition("compareScopeId", compareScopeId).condition("fileSide", fileSide)
+                .orderBy("sequenceNum").useCache(false).list() ?: []
+        keyFieldRows.each { Object row ->
+            String fieldName = topLevelRecordField(normalize(row.fieldExpression))
+            if (fieldName) keepFields.add(fieldName)
+        }
+        if (!keyFieldRows) {
+            String fieldName = topLevelRecordField(normalize(source?.primaryIdExpression))
+            if (fieldName) keepFields.add(fieldName)
+        }
+        return keepFields ? new ArrayList<String>(keepFields) : null
+    }
+
+    /**
+     * Derives the top-level record field a JSONPath-style compare expression reads, e.g.
+     * {@code $.records[*].externalId} → {@code externalId}, {@code $.records[*].items[*].sku} →
+     * {@code items} (keeping the whole nested field), plain {@code id} → {@code id}.
+     * Returns null when no safe field name can be derived (caller then skips that expression).
+     */
+    static String topLevelRecordField(Object expression) {
+        String raw = normalize(expression)
+        if (!raw) return null
+        try {
+            String idExpr = (String) CompareIdExpressionSupport.splitIdExpression(raw).idExpr
+            String path = CompareIdExpressionSupport.normalizeSparkPath(
+                    CompareIdExpressionSupport.normalizeJsonIdExpr(idExpr))
+            if (!path) return null
+            int starIndex = path.indexOf("[*]")
+            if (starIndex >= 0) path = path.substring(starIndex + 3)
+            path = path.replaceFirst(/^\./, "")
+            String firstSegment = (path.tokenize(".")[0] ?: "").replaceAll(/\[.*$/, "")
+            return firstSegment ==~ /[A-Za-z0-9_]+/ ? firstSegment : null
+        } catch (Exception ignored) {
+            return null
+        }
     }
 
     static List<Map<String, Object>> collectRuleRows(def ec, Object rawRuleSetId) {

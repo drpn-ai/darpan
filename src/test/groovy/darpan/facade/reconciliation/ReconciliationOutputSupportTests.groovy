@@ -301,7 +301,87 @@ class ReconciliationOutputSupportTests {
     }
 
     @Test
-    void sourceDetailsFallbackReadsSiblingApiArtifactsWhenRunResultIsMissing(@TempDir File dataManagerRoot) {
+    void sourceDetailsReadDateRangeFromBoundedArtifactHeader(@TempDir File dataManagerRoot) {
+        String runFolderPath = "reconciliation-runs/RS_API_ORDER_SYNC/20260505-195645688"
+        String resultPath = "${runFolderPath}/RS_API_ORDER_SYNC_result.json"
+        String file1Path = "${runFolderPath}/file1-api/RS_API_ORDER_SYNC_file1.json"
+        String file2Path = "${runFolderPath}/file2-api/RS_API_ORDER_SYNC_file2.json"
+        File runFolder = new File(dataManagerRoot, runFolderPath)
+        File file1Folder = new File(runFolder, "file1-api")
+        File file2Folder = new File(runFolder, "file2-api")
+        assertTrue(file1Folder.mkdirs())
+        assertTrue(file2Folder.mkdirs())
+        // window keys live only in the artifact metadata header; braces inside string values (GraphQL
+        // queries in real Shopify extracts) must not confuse the bounded header scan
+        new File(file1Folder, "RS_API_ORDER_SYNC_file1.json").text =
+                '{"metadata":{"searchQueries":["created_at:>=\'2026-04-01\' {orders {edges}}"],' +
+                '"windowStartUtc":"2026-04-01T00:00:00Z","windowEndUtc":"2026-05-01T00:00:00Z"},"records":[]}'
+        new File(file2Folder, "RS_API_ORDER_SYNC_file2.json").text = '{"records":[]}'
+        Map<String, Object> runResult = [
+                reconciliationRunResultId: "RUN_RESULT_API",
+                resultDataManagerPath    : "runtime://datamanager/${resultPath}",
+                file1DataManagerPath     : "runtime://datamanager/${file1Path}",
+                file2DataManagerPath     : "runtime://datamanager/${file2Path}",
+                file1Name                : "RS_API_ORDER_SYNC_file1.json",
+                file2Name                : "RS_API_ORDER_SYNC_file2.json",
+        ]
+        def ec = new Expando(
+                resource: new FakeResource(dataManagerRoot),
+                entity  : new FakeEntity([
+                        "darpan.reconciliation.ReconciliationRunResult"          : [runResult],
+                        "darpan.reconciliation.ReconciliationAutomationExecution": [],
+                ])
+        )
+
+        Map<String, Object> sourceDetails = ReconciliationOutputSupport.buildGeneratedOutputSourceDetails(ec, resultPath, [
+                metadata: [file1Label: "SHOPIFY", file2Label: "HotWax"],
+        ])
+
+        assertNotNull(sourceDetails)
+        assertEquals([start: "2026-04-01T00:00:00Z", end: "2026-05-01T00:00:00Z"], sourceDetails.dateRange)
+        assertEquals("API", sourceDetails.mode)
+        assertEquals(2, sourceDetails.files.size())
+        assertEquals(file1Path, sourceDetails.files[0].filePath)
+        assertEquals(file2Path, sourceDetails.files[1].filePath)
+    }
+
+    @Test
+    void sourceDetailsHeaderScanNeverReadsBeyondBoundedPrefix(@TempDir File dataManagerRoot) {
+        String runFolderPath = "reconciliation-runs/RS_API_ORDER_SYNC/20260505-195645688"
+        String resultPath = "${runFolderPath}/RS_API_ORDER_SYNC_result.json"
+        String file1Path = "${runFolderPath}/file1-api/RS_API_ORDER_SYNC_file1.json"
+        File runFolder = new File(dataManagerRoot, runFolderPath)
+        File file1Folder = new File(runFolder, "file1-api")
+        assertTrue(file1Folder.mkdirs())
+        // metadata placed past the 64KB scan window models the multi-GB extracts that caused the
+        // heap OOM: anything requiring a read beyond the bounded prefix must be ignored
+        new File(file1Folder, "RS_API_ORDER_SYNC_file1.json").text =
+                '{"records":["' + ("x" * (80 * 1024)) + '"],' +
+                '"metadata":{"windowStartUtc":"2026-04-01T00:00:00Z","windowEndUtc":"2026-05-01T00:00:00Z"}}'
+        Map<String, Object> runResult = [
+                reconciliationRunResultId: "RUN_RESULT_API",
+                resultDataManagerPath    : "runtime://datamanager/${resultPath}",
+                file1DataManagerPath     : "runtime://datamanager/${file1Path}",
+                file1Name                : "RS_API_ORDER_SYNC_file1.json",
+        ]
+        def ec = new Expando(
+                resource: new FakeResource(dataManagerRoot),
+                entity  : new FakeEntity([
+                        "darpan.reconciliation.ReconciliationRunResult"          : [runResult],
+                        "darpan.reconciliation.ReconciliationAutomationExecution": [],
+                ])
+        )
+
+        Map<String, Object> sourceDetails = ReconciliationOutputSupport.buildGeneratedOutputSourceDetails(ec, resultPath, [
+                metadata: [file1Label: "SHOPIFY"],
+        ])
+
+        assertNotNull(sourceDetails)
+        assertNull(sourceDetails.dateRange)
+    }
+
+    @Test
+    void sourceDetailsFallbackReadsSiblingArtifactHeadersWhenRunResultIsMissing(@TempDir File dataManagerRoot) {
         String resultPath = "reconciliation-runs/RS_API_ORDER_SYNC/20260505-201713752/RS_API_ORDER_SYNC_result.json"
         File runFolder = new File(dataManagerRoot, "reconciliation-runs/RS_API_ORDER_SYNC/20260505-201713752")
         File file1Folder = new File(runFolder, "file1-api")

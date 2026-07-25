@@ -27,6 +27,8 @@
             remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"
             systemAliases="OMS,HOTWAX,DAR_SYS_OMS"
             preserveWindowInstants="N"
+            keepFieldsParameterName="keepRecordFields"
+            keepFieldsBase="orderId,orderName,externalId,grandTotal,orderDate,statusId"
             enabled="Y"/>
 
     <darpan.reconciliation.SourceSystemConnector
@@ -43,6 +45,7 @@
             remoteSendServiceName="facade.ShopifyFacadeServices.execute#ShopifyGraphql"
             systemAliases="SHOPIFY,DAR_SYS_SHOPIFY"
             preserveWindowInstants="Y"
+            lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderIds"
             enabled="Y"/>
 
     <!-- NETSUITE has no automation extractor; this row exists so the saved-run path resolves its

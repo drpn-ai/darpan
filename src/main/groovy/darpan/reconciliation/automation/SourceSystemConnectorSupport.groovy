@@ -121,6 +121,19 @@ class SourceSystemConnectorSupport {
         return s != null && EXTRACTOR_SERVICE_NAME.matcher(s).matches()
     }
 
+    /**
+     * Recognized verification lookup service-name shape: the lookup slot may only dispatch lookup#*
+     * services (never extract/execute/framework services), keeping the verification sink narrower
+     * than the extraction fence.
+     */
+    private static final Pattern LOOKUP_SERVICE_NAME =
+            Pattern.compile(/^(reconciliation|facade)\.[A-Za-z0-9]+(Extraction|Facade)Services\.lookup#[A-Za-z0-9]+$/)
+
+    static boolean isAllowedLookupServiceShape(String serviceName) {
+        String s = normalize(serviceName)
+        return s != null && LOOKUP_SERVICE_NAME.matcher(s).matches()
+    }
+
     protected static boolean isEnabled(def record) {
         return normalizeBool(readField(record, "enabled"), true)
     }
@@ -150,6 +163,9 @@ class SourceSystemConnectorSupport {
                 remoteSendServiceName      : readString(record, "remoteSendServiceName"),
                 systemAliases              : readString(record, "systemAliases"),
                 preserveWindowInstants     : normalizeBool(readField(record, "preserveWindowInstants"), false),
+                keepFieldsParameterName    : readString(record, "keepFieldsParameterName"),
+                keepFieldsBase             : readString(record, "keepFieldsBase"),
+                lookupServiceName          : readString(record, "lookupServiceName"),
                 enabled                    : isEnabled(record),
         ] as Map<String, Object>
     }

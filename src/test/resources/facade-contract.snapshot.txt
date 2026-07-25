@@ -892,6 +892,7 @@ SERVICE list GeneratedOutputs
     generatedOutputs.compareScopeId : String
     generatedOutputs.completedDate : Timestamp
     generatedOutputs.createdDate : Timestamp
+    generatedOutputs.currentStage : String
     generatedOutputs.file1Label : String
     generatedOutputs.file2Label : String
     generatedOutputs.fileName : String
@@ -900,6 +901,7 @@ SERVICE list GeneratedOutputs
     generatedOutputs.onlyInFile1Count : Long
     generatedOutputs.onlyInFile2Count : Long
     generatedOutputs.preferredDownloadFormat : String
+    generatedOutputs.progressPercent : Integer
     generatedOutputs.reconciliationMappingId : String
     generatedOutputs.reconciliationRunResultId : String
     generatedOutputs.reconciliationType : String

@@ -163,4 +163,15 @@ class ReconciliationSavedRunSupportTests {
         assertFalse(withSuffix.startsWith("|"), withSuffix)
         assertNull(ReconciliationSavedRunSupport.normalizeJsonPrimaryIdExpression("  "))
     }
+
+    @Test
+    void topLevelRecordFieldDerivesTheFieldAnExpressionReads() {
+        assertEquals("externalId", ReconciliationSavedRunSupport.topLevelRecordField('$.records[*].externalId'))
+        assertEquals("externalId", ReconciliationSavedRunSupport.topLevelRecordField('$.records[*].externalId|SHOPIFY_GID_TAIL'))
+        assertEquals("orderItems", ReconciliationSavedRunSupport.topLevelRecordField('$.records[*].orderItems[*].sku'))
+        assertEquals("id", ReconciliationSavedRunSupport.topLevelRecordField("id"))
+        assertEquals("externalId", ReconciliationSavedRunSupport.topLevelRecordField('$.externalId'))
+        assertNull(ReconciliationSavedRunSupport.topLevelRecordField(null))
+        assertNull(ReconciliationSavedRunSupport.topLevelRecordField("   "))
+    }
 }

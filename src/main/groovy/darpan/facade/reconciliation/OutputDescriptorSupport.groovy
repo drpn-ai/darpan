@@ -296,6 +296,11 @@ class OutputDescriptorSupport {
         descriptor.lastUpdatedDate = timestampValue(runResult?.lastUpdatedDate)
         descriptor.statusEnumId = statusEnumId
         descriptor.statusLabel = resolveStatusLabel(ec, statusEnumId)
+        // Live-run fields maintained by RunObservability; null on legacy/terminal rows so the UI
+        // can distinguish "no live detail" from a zero-progress run.
+        descriptor.currentStage = normalize(runResult?.currentStage)
+        Object progressPercent = runResult?.progressPercent
+        descriptor.progressPercent = progressPercent != null ? (progressPercent as Integer) : null
         descriptor.resultAvailable = resultAvailable
         return descriptor
     }

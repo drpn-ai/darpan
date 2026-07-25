@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertIterableEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 class ReconciliationOutputSupportTests {
@@ -141,6 +142,8 @@ class ReconciliationOutputSupportTests {
                 ruleSetId                : "RS_PRODUCTION_ORDERS",
                 companyUserGroupId       : "TENANT_1",
                 statusEnumId             : "AUT_STAT_RUNNING",
+                currentStage             : "COMPARE",
+                progressPercent          : 62,
                 createdDate              : Timestamp.valueOf("2026-05-05 10:00:00"),
                 startedDate              : Timestamp.valueOf("2026-05-05 10:00:00"),
         ], null, [:])
@@ -153,8 +156,21 @@ class ReconciliationOutputSupportTests {
         assertEquals("TENANT_1", row.companyUserGroupId)
         assertEquals("AUT_STAT_RUNNING", row.statusEnumId)
         assertEquals("Running", row.statusLabel)
+        assertEquals("COMPARE", row.currentStage)
+        assertEquals(62, row.progressPercent)
         assertFalse(row.resultAvailable as Boolean)
         assertEquals(Timestamp.valueOf("2026-05-05 10:00:00"), row.createdDate)
+    }
+
+    @Test
+    void buildRunResultDescriptorLeavesLiveFieldsNullWhenAbsent() {
+        Map<String, Object> row = ReconciliationOutputSupport.buildRunResultDescriptor(null, [
+                reconciliationRunResultId: "RUN_RESULT_LEGACY",
+                statusEnumId             : "AUT_STAT_DONE",
+        ], null, [:])
+
+        assertNull(row.currentStage)
+        assertNull(row.progressPercent)
     }
 
     @Test

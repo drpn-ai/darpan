@@ -2484,6 +2484,8 @@
                 <parameter name="sizeBytes" type="Long"/>
                 <parameter name="statusEnumId"/>
                 <parameter name="statusLabel"/>
+                <parameter name="currentStage"/>
+                <parameter name="progressPercent" type="Integer"/>
                 <parameter name="resultAvailable" type="Boolean"/>
                 <parameter name="startedDate" type="Timestamp"/>
                 <parameter name="completedDate" type="Timestamp"/>

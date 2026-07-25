@@ -6001,6 +6001,12 @@
                                 "statusLabel": {
                                     "type": "string"
                                 },
+                                "currentStage": {
+                                    "type": "string"
+                                },
+                                "progressPercent": {
+                                    "type": "integer"
+                                },
                                 "resultAvailable": {
                                     "type": "boolean"
                                 },

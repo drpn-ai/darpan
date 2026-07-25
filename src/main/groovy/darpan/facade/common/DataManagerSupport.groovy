@@ -4,7 +4,9 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
 import java.nio.charset.StandardCharsets
+import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.text.SimpleDateFormat
 
 import static darpan.common.ValueSupport.normalize
@@ -148,6 +150,32 @@ class DataManagerSupport {
         }
 
         ref?.putStream(new ByteArrayInputStream(bytes))
+        return location
+    }
+
+    // Moves an already-written work file into its final location without re-reading it into
+    // memory — the streaming counterpart to writeText for large extracts. File-backed locations
+    // get an atomic rename (same-volume work files make this a metadata-only operation, and
+    // readers never observe a half-written file); other resource locations are fed the work
+    // file as a stream and the work file is removed afterwards.
+    static String moveIntoLocation(def ec, File workFile, String location) {
+        def ref = ec?.resource?.getLocationReference(location)
+        File targetFile = ref?.getFile()
+        if (targetFile != null) {
+            ensureDirectory(targetFile.parentFile, "datamanager output")
+            try {
+                Files.move(workFile.toPath(), targetFile.toPath(),
+                        StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+            } catch (AtomicMoveNotSupportedException ignored) {
+                Files.move(workFile.toPath(), targetFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+            return location
+        }
+
+        workFile.withInputStream { InputStream inputStream ->
+            ref?.putStream(inputStream)
+        }
+        workFile.delete()
         return location
     }
 

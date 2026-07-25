@@ -48,6 +48,44 @@ class DataManagerSupportTests {
     }
 
     @Test
+    void moveIntoLocationMovesWorkFileIntoFileBackedTargetWithoutRereading() {
+        File tempRoot = Files.createTempDirectory("dm-support-test").toFile()
+        try {
+            File workFile = new File(tempRoot, "extract.partial")
+            workFile.text = '{"records":[],"metadata":{}}'
+            File target = new File(tempRoot, "reconciliation-runs/RunId/20260725-000000000/oms-orders.json")
+
+            DataManagerSupport.moveIntoLocation(ecReturningFile(target), workFile, "runtime://datamanager/ignored")
+
+            assertEquals('{"records":[],"metadata":{}}', target.text)
+            assertTrue(!workFile.exists(), "work file must be gone after the move")
+        } finally {
+            tempRoot.deleteDir()
+        }
+    }
+
+    @Test
+    void moveIntoLocationStreamsToPutStreamForNonFileTargetsAndDeletesWorkFile() {
+        File tempRoot = Files.createTempDirectory("dm-support-test").toFile()
+        try {
+            File workFile = new File(tempRoot, "extract.partial")
+            workFile.text = "streamed-content"
+            String received = null
+            def ec = new Expando(resource: new Expando(
+                    getLocationReference: { String location ->
+                        new Expando(getFile: { -> null }, putStream: { InputStream stream -> received = stream.text })
+                    }))
+
+            DataManagerSupport.moveIntoLocation(ec, workFile, "s3://bucket/oms-orders.json")
+
+            assertEquals("streamed-content", received)
+            assertTrue(!workFile.exists(), "work file must be deleted after streaming")
+        } finally {
+            tempRoot.deleteDir()
+        }
+    }
+
+    @Test
     void resolveDirectoryFileFailsLoudlyWhenCreationIsBlocked() {
         File tempRoot = Files.createTempDirectory("dm-support-test").toFile()
         try {

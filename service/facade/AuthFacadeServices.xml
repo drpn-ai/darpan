@@ -443,7 +443,9 @@
     </service>
 
     <service verb="logout" noun="Session" allow-remote="true" authenticate="anonymous-all">
-        <description>Revoke the explicit login-key token from the current request and terminate any active authenticated session.</description>
+        <description>Revoke the login-key token from the current request (header or cookie) and end the caller's own session only.
+            Other active sessions on the same UserAccount — including other people on a shared login — are not affected;
+            use logout#AllSessions to revoke every session.</description>
         <out-parameters>
             <parameter name="ok" type="Boolean">
                 <description>True when logout cleanup completed without facade errors.</description>

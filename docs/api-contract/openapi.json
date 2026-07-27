@@ -1328,7 +1328,7 @@
                 "properties": {
                     
                 },
-                "description": "Revoke the explicit login-key token from the current request and terminate any active authenticated session."
+                "description": "Revoke the login-key token from the current request (header or cookie) and end the caller's own session only.\n            Other active sessions on the same UserAccount \u2014 including other people on a shared login \u2014 are not affected;\n            use logout#AllSessions to revoke every session."
             },
             "LogoutSessionResult": {
                 "type": "object",

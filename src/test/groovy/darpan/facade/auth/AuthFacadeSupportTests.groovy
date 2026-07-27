@@ -241,9 +241,42 @@ class AuthFacadeSupportTests {
 
         assertTrue(result.authTokenRevoked as boolean)
         assertFalse(result.authenticated as boolean)
-        assertTrue(user.loggedOut)
+        assertTrue(user.loggedOutLocally)
         assertEquals("hash:header-token", keyFinder.conditions["loginKey"])
         assertTrue(result.ok as boolean)
+    }
+
+    @Test
+    void logoutSessionDoesNotBroadcastLogoutToOtherSessionsOnSharedAccount() {
+        MessageFacadeStub message = new MessageFacadeStub()
+        EntityFacadeStub entity = new EntityFacadeStub(finders: ["moqui.security.UserLoginKey": new FinderStub(deleteAllResult: 1)])
+        RequestStub request = new RequestStub(headers: ["login_key": "header-token"])
+        UserStub user = new UserStub(userId: "EX_USER", username: "hotwax.user")
+        def ec = executionContext(message: message, user: user, entity: entity, request: request)
+
+        Map<String, Object> result = AuthFacadeSupport.logoutSession(ec)
+
+        // Framework logoutUser() writes hasLoggedOut=Y on the shared UserAccount row, which
+        // force-logs-out every other session on the same account — logout#Session must not use it.
+        assertFalse(user.loggedOut)
+        assertTrue(user.loggedOutLocally)
+        assertTrue(request.session.invalidated)
+        assertFalse(result.authenticated as boolean)
+        assertTrue(result.ok as boolean)
+    }
+
+    @Test
+    void loginSessionTokenIssuanceFailureEndsOnlyCallersSession() {
+        MessageFacadeStub message = new MessageFacadeStub()
+        UserStub user = new UserStub(userId: "EX_USER", username: "hotwax.user", loginUserResult: true, loginKey: null)
+        def ec = executionContext(message: message, user: user)
+
+        Map<String, Object> result = AuthFacadeSupport.loginSession(ec, "hotwax.user", "secret")
+
+        assertFalse(result.authenticated as boolean)
+        assertTrue((result.errors as List<String>).contains("Unable to issue auth token"))
+        assertFalse(user.loggedOut)
+        assertTrue(user.loggedOutLocally)
     }
 
     // ----- Audit W5 #39 — AuthSessionSupport cookie writer + SameSite escalation -----
@@ -392,6 +425,7 @@ class AuthFacadeSupportTests {
         String loginKey
         boolean loginUserResult = false
         boolean loggedOut = false
+        boolean loggedOutLocally = false
         Map<String, Object> preferences = [:]
         Map<String, Object> context = [:]
         Timestamp nowTimestamp = new Timestamp(System.currentTimeMillis())
@@ -419,6 +453,12 @@ class AuthFacadeSupportTests {
 
         void logoutUser() {
             loggedOut = true
+            userId = null
+            username = null
+        }
+
+        void logoutLocal() {
+            loggedOutLocally = true
             userId = null
             username = null
         }

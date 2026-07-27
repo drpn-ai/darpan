@@ -36,7 +36,7 @@ class AuthFacadeSupport {
             issuedAuthToken = ec?.user?.getLoginKey()?.toString()?.trim()
             if (!issuedAuthToken) {
                 ec.message.addError("Unable to issue auth token")
-                ec.user.logoutUser()
+                logoutCurrentSessionOnly(ec)
                 authenticated = false
             } else {
                 authTokenExpiresInSecondsValue = resolveLoginKeyExpiresInSeconds(ec)
@@ -138,6 +138,8 @@ class AuthFacadeSupport {
         AuthSessionSupport.clearPersistentLoginCookie(ec)
 
         try {
+            // logoutUser() (not logoutCurrentSessionOnly) is intentional here: the hasLoggedOut=Y
+            // broadcast is what evicts other browsers' session-authenticated requests on this account.
             ec.user.logoutUser()
         } catch (Exception ignored) {
             def session = ec?.web?.request?.getSession(false)
@@ -172,15 +174,7 @@ class AuthFacadeSupport {
         }
         AuthSessionSupport.clearPersistentLoginCookie(ec)
 
-        if (normalize(ec?.user?.userId) != null) {
-            ec.user.logoutUser()
-        } else {
-            def session = request?.getSession(false)
-            if (session != null) {
-                session.invalidate()
-                request.getSession(true)
-            }
-        }
+        logoutCurrentSessionOnly(ec)
 
         Map<String, Object> result = [
                 authenticated   : false,
@@ -188,6 +182,26 @@ class AuthFacadeSupport {
         ]
         result.putAll(FacadeSupport.envelope(ec))
         return result
+    }
+
+    /** End only the caller's session: local Shiro/user-stack logout plus servlet session
+     *  invalidation. Deliberately avoids UserFacade.logoutUser(), which broadcasts
+     *  hasLoggedOut=Y on the UserAccount row — with a shared account (UAT hotwax.user) that
+     *  flag force-logs-out every other session at its next request, and the reset update it
+     *  forces on the next auth serializes all logins on the single row (observed as 50s+
+     *  lock-wait login failures). logout#AllSessions remains the revoke-everywhere path. */
+    static void logoutCurrentSessionOnly(def ec) {
+        try {
+            ec.user.logoutLocal()
+        } catch (Exception e) {
+            logger.warn("logoutLocal failed during per-session logout, falling back to session invalidation only: ${e.message}")
+        }
+        def request = ec?.web?.request
+        def session = request?.getSession(false)
+        if (session != null) {
+            session.invalidate()
+            request.getSession(true)
+        }
     }
 
     protected static Integer resolveLoginKeyExpiresInSeconds(def ec) {

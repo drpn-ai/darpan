@@ -972,6 +972,8 @@
                     <econdition field-name="compareScopeId" from="file1Source.compareScopeId"/>
                     <econdition field-name="fileSide" value="FILE_1"/>
                 </entity-find>
+                <!-- The recreate is a replacement, not a new key: keep the earliest original createdDate. -->
+                <set field="file1KeyFieldCreatedDate" from="(file1ExistingKeyFields ? file1ExistingKeyFields.collect({ it.createdDate }).findAll({ it }).min() : null) ?: nowTs"/>
                 <iterate list="file1ExistingKeyFields" entry="file1OldKeyField">
                     <service-call name="delete#darpan.rule.RuleSetCompareSourceKeyField" disable-authz="true" in-map="[compareScopeId: file1OldKeyField.compareScopeId, fileSide: file1OldKeyField.fileSide, sequenceNum: file1OldKeyField.sequenceNum]"/>
                 </iterate>
@@ -981,7 +983,7 @@
                         <set field="file1KeyFieldSequence" from="file1KeyFieldSequence + 1"/>
                         <service-call name="create#darpan.rule.RuleSetCompareSourceKeyField"
                                 disable-authz="true"
-                                in-map="[compareScopeId: file1Source.compareScopeId, fileSide: 'FILE_1', sequenceNum: file1KeyFieldSequence, fieldExpression: file1KeyFieldExpression, companyUserGroupId: file1Source.companyUserGroupId, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                                in-map="[compareScopeId: file1Source.compareScopeId, fileSide: 'FILE_1', sequenceNum: file1KeyFieldSequence, fieldExpression: file1KeyFieldExpression, companyUserGroupId: file1Source.companyUserGroupId, createdDate: file1KeyFieldCreatedDate, lastUpdatedDate: nowTs]"/>
                     </iterate>
                 </if>
 
@@ -1003,6 +1005,8 @@
                     <econdition field-name="compareScopeId" from="file2Source.compareScopeId"/>
                     <econdition field-name="fileSide" value="FILE_2"/>
                 </entity-find>
+                <!-- See the FILE_1 createdDate note above. -->
+                <set field="file2KeyFieldCreatedDate" from="(file2ExistingKeyFields ? file2ExistingKeyFields.collect({ it.createdDate }).findAll({ it }).min() : null) ?: nowTs"/>
                 <iterate list="file2ExistingKeyFields" entry="file2OldKeyField">
                     <service-call name="delete#darpan.rule.RuleSetCompareSourceKeyField" disable-authz="true" in-map="[compareScopeId: file2OldKeyField.compareScopeId, fileSide: file2OldKeyField.fileSide, sequenceNum: file2OldKeyField.sequenceNum]"/>
                 </iterate>
@@ -1012,7 +1016,7 @@
                         <set field="file2KeyFieldSequence" from="file2KeyFieldSequence + 1"/>
                         <service-call name="create#darpan.rule.RuleSetCompareSourceKeyField"
                                 disable-authz="true"
-                                in-map="[compareScopeId: file2Source.compareScopeId, fileSide: 'FILE_2', sequenceNum: file2KeyFieldSequence, fieldExpression: file2KeyFieldExpression, companyUserGroupId: file2Source.companyUserGroupId, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                                in-map="[compareScopeId: file2Source.compareScopeId, fileSide: 'FILE_2', sequenceNum: file2KeyFieldSequence, fieldExpression: file2KeyFieldExpression, companyUserGroupId: file2Source.companyUserGroupId, createdDate: file2KeyFieldCreatedDate, lastUpdatedDate: nowTs]"/>
                     </iterate>
                 </if>
 

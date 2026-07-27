@@ -435,6 +435,43 @@ class RuleSetCompareSourceCompositeKeyTests {
         assertEquals(2, kf.size()); assertEquals("product_id", kf[0].fieldExpression); assertEquals("return_id", kf[1].fieldExpression)
     }
 
+    // Audit fidelity: the delete-and-recreate of key-field rows on save must not re-stamp
+    // createdDate — recreated rows carry the earliest createdDate of the rows they replace, and only
+    // lastUpdatedDate moves. Rows are backdated first so a same-millisecond create/save can't make
+    // the assertion pass trivially.
+    @Test
+    void saveRuleSetRunPreservesOriginalCreatedDateOnRecreatedKeyRows() {
+        Map created = createReturnItemsRun(["return_id", "product_id"], ["return_id", "product_id"])
+        String savedRunId = (String) created.savedRun.savedRunId
+        String scopeId = (String) created.savedRun.compareScopeId
+
+        java.sql.Timestamp originalCreatedDate = java.sql.Timestamp.valueOf("2026-01-01 00:00:00")
+        ec.entity.find("darpan.rule.RuleSetCompareSourceKeyField")
+                .condition([compareScopeId: scopeId]).useCache(false).list().each { keyRow ->
+            keyRow.set("createdDate", originalCreatedDate)
+            keyRow.update()
+        }
+
+        Map saved = ec.service.sync().name("facade.ReconciliationFacadeServices.save#RuleSetRun")
+                .parameters(baseSaveParams(savedRunId) + [
+                        file1PrimaryIdExpressions: ["product_id", "return_id"],
+                        file2PrimaryIdExpressions: ["product_id", "return_id"],
+                ]).disableAuthz().call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertTrue((Boolean) saved.ok)
+
+        ["FILE_1", "FILE_2"].each { fileSide ->
+            def source = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                    .condition([compareScopeId: scopeId, fileSide: fileSide]).useCache(false).one()
+            List keyFields = source.findRelated("keyFields", null, ["sequenceNum"], false, false)
+            assertEquals(2, keyFields.size())
+            keyFields.each { keyRow ->
+                assertEquals(originalCreatedDate, keyRow.createdDate, "createdDate re-stamped on ${fileSide}")
+                assertTrue(((java.sql.Timestamp) keyRow.lastUpdatedDate).after(originalCreatedDate))
+            }
+        }
+    }
+
     // Cross-side count guard: create#RuleSetRun (and save#RuleSetRun, mirrored) must reject a request
     // where file1 and file2 define different numbers of composite primary-key fields — a mismatched
     // count can never produce a coherent row-to-row comparison.

@@ -23,6 +23,16 @@ import static darpan.common.ValueSupport.normalizeInt
 
 def logger = LoggerFactory.getLogger("darpan.facade.reconciliation.SavedRunDiff")
 
+// The ENTIRE run executes detached from any caller/request transaction: the JSON-RPC screen path
+// wraps this service call in the request's JTA transaction (60s default timeout), which Bitronix
+// marks rollback-only long before a real extract finishes — killing the run at the next entity
+// touch and rolling back the run + step rows invisibly. Detaching lets observability writes
+// commit live in their own short transactions (this service is transaction="ignore" by design);
+// the caller's transaction is resumed untouched for the response path. Out-parameters are
+// unaffected: they are undeclared binding writes, which pass through this closure to the script
+// binding. See SavedRunTransactionDetachTests.
+return ReconciliationSavedRunSupport.runDetachedFromCallerTransaction(ec) { ->
+
 def toTimestampValue = { Object rawValue ->
     if (rawValue == null) return null
     if (rawValue instanceof Timestamp) return rawValue
@@ -882,3 +892,4 @@ Map envelope = FacadeSupport.envelope(ec)
 ok = envelope.ok
 messages = envelope.messages
 errors = envelope.errors
+}

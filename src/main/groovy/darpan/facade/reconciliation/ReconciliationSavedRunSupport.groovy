@@ -26,6 +26,38 @@ import static darpan.common.ValueSupport.normalizeUpper
 class ReconciliationSavedRunSupport {
     protected static final Logger logger = LoggerFactory.getLogger(ReconciliationSavedRunSupport.class)
 
+    /**
+     * Run a long-lived saved-run body OUTSIDE any caller transaction. The JSON-RPC/screen request
+     * path can wrap the whole service call in the request's JTA transaction, whose default 60s
+     * timeout is far shorter than a real extract; when Bitronix marks that transaction
+     * rollback-only mid-run, every later entity touch fails and the run's completed work rolls
+     * back invisibly (UAT 2026-07-27: every run died exactly at the EXTRACT_FILE2 boundary with
+     * the run + step rows erased). Suspending first lets the run own its transactional life —
+     * observability writes commit live in their own short transactions — and the caller's
+     * transaction is ALWAYS resumed for the response path. Mirrors the suspend/resume pattern in
+     * the TransactionFacade javadoc. A failed suspend is non-fatal: the work still runs, at worst
+     * inside the caller's transaction exactly as before this guard existed.
+     */
+    static Object runDetachedFromCallerTransaction(def ec, Closure<?> work) {
+        boolean suspendedCallerTransaction = false
+        try {
+            if (ec.transaction.isTransactionInPlace()) suspendedCallerTransaction = ec.transaction.suspend()
+        } catch (Exception e) {
+            logger.warn("Could not suspend caller transaction before saved-run execution; continuing inside it: ${e.message}")
+        }
+        try {
+            return work.call()
+        } finally {
+            if (suspendedCallerTransaction) {
+                try {
+                    ec.transaction.resume()
+                } catch (Exception e) {
+                    logger.warn("Could not resume caller transaction after saved-run execution: ${e.message}")
+                }
+            }
+        }
+    }
+
     static final String RUN_TYPE_MAPPING = "mapping"
     static final String RUN_TYPE_RULESET = "ruleset"
     static final String FILE_SIDE_1 = "FILE_1"

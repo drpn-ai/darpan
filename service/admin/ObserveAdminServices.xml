@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="get" noun="AdminSessionInfo" allow-remote="true">
+        <description>Fence probe + admin-app route guard: returns the operator identity when the caller
+            passes the DARPAN_ADMIN_API artifact fence and the isSuperAdmin() content gate.
+            A non-super-admin caller is denied at the artifact layer before this body runs.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the caller is a super admin.</description></parameter>
+            <parameter name="adminSessionInfo" type="Map">
+                <description>Operator identity for the admin app shell.</description>
+                <parameter name="userId" type="String"/>
+                <parameter name="username" type="String"/>
+                <parameter name="isSuperAdmin" type="Boolean"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="adminSessionInfo" from="darpan.admin.AdminAccessSupport.buildAdminSessionInfo(ec)"/>
+            <set field="ok" from="adminSessionInfo != null"/>
+        </actions>
+    </service>
+</services>

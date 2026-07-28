@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="add" noun="TenantMember" allow-remote="true">
+        <description>Add a user to a tenant with a tenant-scoped role. Writes UserGroupMember and
+            TenantUserPermissionGroupMember atomically — never one without the other.</description>
+        <in-parameters>
+            <parameter name="userId" required="true"><description>User to add.</description></parameter>
+            <parameter name="tenantUserGroupId" required="true"><description>Target tenant.</description></parameter>
+            <parameter name="permissionUserGroupId" required="true"><description>One of the assignable tenant roles
+                (DARPAN_TENANT_ADMIN, DARPAN_TENANT_USER, DARPAN_COMPANY_EDITOR, DARPAN_COMPANY_VIEW_ONLY).</description></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="ok" type="Boolean"><description>True when the member was added.</description></parameter></out-parameters>
+        <actions><set field="ok" from="darpan.admin.AdminMembershipSupport.addTenantMember(ec, userId, tenantUserGroupId, permissionUserGroupId)"/></actions>
+    </service>
+
+    <service verb="update" noun="TenantMemberRole" allow-remote="true">
+        <description>Change a member's tenant role: thruDate the old permission row, create the new one.</description>
+        <in-parameters>
+            <parameter name="userId" required="true"><description>Member whose role changes.</description></parameter>
+            <parameter name="tenantUserGroupId" required="true"><description>Tenant the membership belongs to.</description></parameter>
+            <parameter name="permissionUserGroupId" required="true"><description>New assignable tenant role.</description></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="ok" type="Boolean"><description>True when the role was changed.</description></parameter></out-parameters>
+        <actions><set field="ok" from="darpan.admin.AdminMembershipSupport.updateTenantMemberRole(ec, userId, tenantUserGroupId, permissionUserGroupId)"/></actions>
+    </service>
+
+    <service verb="remove" noun="TenantMember" allow-remote="true">
+        <description>Remove a user from a tenant: thruDate both membership entities (no row deletes) and
+            clear the user's active-tenant preference when it pointed at the removed tenant.</description>
+        <in-parameters>
+            <parameter name="userId" required="true"><description>Member to remove.</description></parameter>
+            <parameter name="tenantUserGroupId" required="true"><description>Tenant to remove the member from.</description></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="ok" type="Boolean"><description>True when the member was removed.</description></parameter></out-parameters>
+        <actions><set field="ok" from="darpan.admin.AdminMembershipSupport.removeTenantMember(ec, userId, tenantUserGroupId)"/></actions>
+    </service>
+</services>

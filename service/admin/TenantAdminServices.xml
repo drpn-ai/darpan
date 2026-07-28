@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="create" noun="Tenant" allow-remote="true">
+        <description>Create a Darpan tenant: UserGroup (UgtDarpanCompany) + TenantSetting in one transaction.</description>
+        <in-parameters>
+            <parameter name="tenantUserGroupId" required="true"><description>Uppercase tenant id, e.g. KREWE.</description></parameter>
+            <parameter name="label" required="true"><description>Display label for tenant pickers.</description></parameter>
+            <parameter name="timeZone"><description>Tenant display timezone; defaults to UTC.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the tenant was created.</description></parameter>
+            <parameter name="tenantUserGroupId"><description>Id of the created tenant.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.admin.AdminTenantSupport.createTenant(ec, tenantUserGroupId, label, timeZone)"/>
+            <set field="ok" from="result != null"/>
+            <set field="tenantUserGroupId" from="result?.tenantUserGroupId"/>
+        </actions>
+    </service>
+
+    <service verb="update" noun="Tenant" allow-remote="true">
+        <description>Rename a tenant and/or change its timezone.</description>
+        <in-parameters>
+            <parameter name="tenantUserGroupId" required="true"><description>Tenant to update.</description></parameter>
+            <parameter name="label"><description>New display label; unchanged when omitted.</description></parameter>
+            <parameter name="timeZone"><description>New timezone; unchanged when omitted.</description></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="ok" type="Boolean"><description>True when updated.</description></parameter></out-parameters>
+        <actions><set field="ok" from="darpan.admin.AdminTenantSupport.updateTenant(ec, tenantUserGroupId, label, timeZone)"/></actions>
+    </service>
+
+    <service verb="deactivate" noun="Tenant" allow-remote="true">
+        <description>Hide the tenant from the tenant app (availableTenants + active-tenant selection). Flag, not delete.</description>
+        <in-parameters><parameter name="tenantUserGroupId" required="true"><description>Tenant to deactivate.</description></parameter></in-parameters>
+        <out-parameters><parameter name="ok" type="Boolean"><description>True when deactivated.</description></parameter></out-parameters>
+        <actions><set field="ok" from="darpan.admin.AdminTenantSupport.setTenantDisabled(ec, tenantUserGroupId, true)"/></actions>
+    </service>
+
+    <service verb="reactivate" noun="Tenant" allow-remote="true">
+        <description>Re-enable a deactivated tenant.</description>
+        <in-parameters><parameter name="tenantUserGroupId" required="true"><description>Tenant to reactivate.</description></parameter></in-parameters>
+        <out-parameters><parameter name="ok" type="Boolean"><description>True when reactivated.</description></parameter></out-parameters>
+        <actions><set field="ok" from="darpan.admin.AdminTenantSupport.setTenantDisabled(ec, tenantUserGroupId, false)"/></actions>
+    </service>
+
+    <service verb="get" noun="TenantList" allow-remote="true" authz-action="view">
+        <description>All tenants (including deactivated) with member counts, for the admin Tenants board.</description>
+        <out-parameters>
+            <parameter name="tenantList" type="List"><description>All tenants sorted by label.</description>
+                <parameter name="tenant" type="Map">
+                    <parameter name="tenantUserGroupId"/><parameter name="label"/>
+                    <parameter name="disabled" type="Boolean"/><parameter name="memberCount" type="Integer"/>
+                </parameter>
+            </parameter>
+        </out-parameters>
+        <actions><set field="tenantList" from="darpan.admin.AdminTenantSupport.listTenants(ec) ?: []"/></actions>
+    </service>
+
+    <service verb="get" noun="TenantDetail" allow-remote="true" authz-action="view">
+        <description>One tenant with settings and active members, for the admin tenant detail board.</description>
+        <in-parameters><parameter name="tenantUserGroupId" required="true"><description>Tenant to read.</description></parameter></in-parameters>
+        <out-parameters>
+            <parameter name="tenantDetail" type="Map"><description>Tenant detail or null when not found.</description>
+                <parameter name="tenantUserGroupId"/><parameter name="label"/><parameter name="timeZone"/>
+                <parameter name="disabled" type="Boolean"/><parameter name="createdDate" type="Timestamp"/>
+                <parameter name="members" type="List"><parameter name="member" type="Map">
+                    <parameter name="userId"/><parameter name="username"/>
+                    <parameter name="permissionUserGroupId"/><parameter name="fromDate" type="Timestamp"/>
+                </parameter></parameter>
+            </parameter>
+        </out-parameters>
+        <actions><set field="tenantDetail" from="darpan.admin.AdminTenantSupport.getTenantDetail(ec, tenantUserGroupId)"/></actions>
+    </service>
+</services>

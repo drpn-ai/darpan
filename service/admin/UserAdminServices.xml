@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="create" noun="UserAccount" allow-remote="true">
+        <description>Create a user with a temporary password (change forced at first login) and
+            DARPAN_USER group membership. Credentials are shared out-of-band; there is no email invite.</description>
+        <in-parameters>
+            <parameter name="username" required="true"><description>Login username.</description></parameter>
+            <parameter name="userFullName"><description>Display name.</description></parameter>
+            <parameter name="emailAddress"><description>Contact email; must be unique when provided.</description>
+                <text-email/></parameter>
+            <parameter name="tempPassword" required="true"><description>Temporary password; user must change it at first login.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"><description>True when the user was created.</description></parameter>
+            <parameter name="userId"><description>Id of the created user.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.admin.AdminUserSupport.createUser(ec, username, userFullName, emailAddress, tempPassword)"/>
+            <set field="ok" from="result != null"/>
+            <set field="userId" from="result?.userId"/>
+        </actions>
+    </service>
+
+    <service verb="update" noun="UserAccount" allow-remote="true">
+        <description>Update a user's display name and/or email.</description>
+        <in-parameters>
+            <parameter name="userId" required="true"><description>User to update.</description></parameter>
+            <parameter name="userFullName"><description>New display name; unchanged when omitted.</description></parameter>
+            <parameter name="emailAddress"><description>New email; unchanged when omitted.</description><text-email/></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="ok" type="Boolean"><description>True when updated.</description></parameter></out-parameters>
+        <actions><set field="ok" from="darpan.admin.AdminUserSupport.updateUser(ec, userId, userFullName, emailAddress)"/></actions>
+    </service>
+
+    <service verb="disable" noun="UserAccount" allow-remote="true">
+        <description>Disable a user and revoke their live login keys. Self-disable is refused.</description>
+        <in-parameters><parameter name="userId" required="true"><description>User to disable.</description></parameter></in-parameters>
+        <out-parameters><parameter name="ok" type="Boolean"><description>True when disabled.</description></parameter></out-parameters>
+        <actions><set field="ok" from="darpan.admin.AdminUserSupport.setUserDisabled(ec, userId, true)"/></actions>
+    </service>
+
+    <service verb="enable" noun="UserAccount" allow-remote="true">
+        <description>Re-enable a disabled user.</description>
+        <in-parameters><parameter name="userId" required="true"><description>User to enable.</description></parameter></in-parameters>
+        <out-parameters><parameter name="ok" type="Boolean"><description>True when enabled.</description></parameter></out-parameters>
+        <actions><set field="ok" from="darpan.admin.AdminUserSupport.setUserDisabled(ec, userId, false)"/></actions>
+    </service>
+
+    <service verb="reset" noun="Password" allow-remote="true">
+        <description>Set a temporary password for a user (change forced at next login) and revoke
+            their live login keys. The temp password is shared out-of-band.</description>
+        <in-parameters>
+            <parameter name="userId" required="true"><description>User whose password resets.</description></parameter>
+            <parameter name="tempPassword" required="true"><description>Temporary password.</description></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="ok" type="Boolean"><description>True when reset.</description></parameter></out-parameters>
+        <actions><set field="ok" from="darpan.admin.AdminUserSupport.resetPassword(ec, userId, tempPassword)"/></actions>
+    </service>
+
+    <service verb="get" noun="UserList" allow-remote="true" authz-action="view">
+        <description>Paged user search over username, email, and display name for the admin Users board.</description>
+        <in-parameters>
+            <parameter name="searchText"><description>Case-insensitive substring filter; all users when omitted.</description></parameter>
+            <parameter name="pageIndex" type="Integer"><description>Zero-based page; defaults to 0.</description></parameter>
+            <parameter name="pageSize" type="Integer"><description>Rows per page; defaults to 25.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="users" type="List"><description>Users on the requested page, sorted by username.</description>
+                <parameter name="user" type="Map">
+                    <parameter name="userId"/><parameter name="username"/><parameter name="userFullName"/>
+                    <parameter name="emailAddress"/><parameter name="disabled" type="Boolean"/>
+                </parameter>
+            </parameter>
+            <parameter name="totalCount" type="Integer"><description>Total matches across all pages.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.admin.AdminUserSupport.listUsers(ec, searchText, pageIndex, pageSize)"/>
+            <set field="users" from="result?.users ?: []"/>
+            <set field="totalCount" from="result?.totalCount ?: 0"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="UserDetail" allow-remote="true" authz-action="view">
+        <description>One user with account state and active tenant memberships, for the admin user detail board.</description>
+        <in-parameters><parameter name="userId" required="true"><description>User to read.</description></parameter></in-parameters>
+        <out-parameters>
+            <parameter name="userDetail" type="Map"><description>User detail or null when not found.</description>
+                <parameter name="userId"/><parameter name="username"/><parameter name="userFullName"/>
+                <parameter name="emailAddress"/><parameter name="disabled" type="Boolean"/>
+                <parameter name="requirePasswordChange" type="Boolean"/>
+                <parameter name="memberships" type="List"><parameter name="membership" type="Map">
+                    <parameter name="tenantUserGroupId"/><parameter name="permissionUserGroupId"/>
+                    <parameter name="fromDate" type="Timestamp"/>
+                </parameter></parameter>
+            </parameter>
+        </out-parameters>
+        <actions><set field="userDetail" from="darpan.admin.AdminUserSupport.getUserDetail(ec, userId)"/></actions>
+    </service>
+</services>

@@ -514,11 +514,17 @@ class TenantAccessSupport {
         return companyList instanceof Collection ? companyList as List : []
     }
 
-    /** Tenants flagged disabled on TenantSetting are hidden from the tenant app for every caller. */
+    /** Tenants flagged disabled on TenantSetting are hidden from the tenant app for every caller.
+     *  This is invoked from every request via syncUserContext()'s <before-request> hook, so it
+     *  must not depend on the caller's own entity-level grant on TenantSetting (only ADMIN has
+     *  one, via DARPAN_APP) — disableAuthz() here mirrors listAllTenantRecords() above for the
+     *  same reason: a bounded, id-only system lookup used purely to filter the caller's own
+     *  already-scoped tenant list, never returned to the caller directly. */
     private static Set<String> listDisabledTenantIds(def ec) {
         def finder = ec?.entity?.find(TENANT_SETTING_ENTITY_NAME)
         if (finder == null) return [] as Set<String>
 
+        if (finder.metaClass.respondsTo(finder, "disableAuthz")) finder.disableAuthz()
         finder.condition("disabled", "Y")
         if (finder.metaClass.respondsTo(finder, "useCache", Boolean)) finder.useCache(true)
 

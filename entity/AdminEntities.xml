@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+
+    <entity entity-name="AdminAuditLog" package="darpan.admin" use="nontransactional" cache="never">
+        <description>Immutable trail of platform-admin mutations (admin.* services). One row per
+            mutation, written in the same transaction as the change itself.</description>
+        <field name="adminAuditLogId" type="id" is-pk="true"/>
+        <field name="adminUserId" type="id" not-null="true">
+            <description>Operator (super admin) who performed the mutation.</description></field>
+        <field name="serviceName" type="text-medium" not-null="true">
+            <description>Full admin service name that performed the mutation.</description></field>
+        <field name="targetType" type="text-short" not-null="true">
+            <description>Kind of record affected: Tenant, User, or Membership.</description></field>
+        <field name="targetId" type="text-medium" not-null="true">
+            <description>Primary identifier of the affected record (tenant group id, user id, or composite).</description></field>
+        <field name="detailText" type="text-long">
+            <description>One-sentence summary of what changed.</description></field>
+        <field name="auditTimestamp" type="date-time" not-null="true"/>
+
+        <relationship type="one-nofk" title="AdminUser" related="moqui.security.UserAccount" short-alias="adminUser">
+            <key-map field-name="adminUserId" related-field-name="userId"/>
+        </relationship>
+    </entity>
+</entities>

@@ -41,12 +41,12 @@ class ApiContractGeneratorTests {
         throw new IllegalStateException("Cannot locate darpan component root from ${cwd}")
     }
 
-    /** Independent XML count — every allow-remote facade service must appear in the contract. */
+    /** Independent XML count — every allow-remote facade/admin service must appear in the contract. */
     @Test
     void generatesOneOperationPerAllowRemoteFacadeService() {
         int expected = 0
-        for (String dir in ApiContractGenerator.FACADE_DIRS) {
-            File facadeDir = new File(componentRoot, dir)
+        for (List<String> serviceDir in ApiContractGenerator.SERVICE_DIRS) {
+            File facadeDir = new File(componentRoot, serviceDir[0])
             if (!facadeDir.isDirectory()) continue
             facadeDir.listFiles({ File f -> f.name.endsWith(".xml") } as FileFilter).each { File xml ->
                 expected += new XmlParser().parse(xml).service.count { it.@"allow-remote" == "true" }
@@ -105,6 +105,17 @@ class ApiContractGeneratorTests {
         Map sessionInfo = (Map) ((Map) ((Map) schemas.LoginSessionResult).get('properties')).sessionInfo
         assertEquals("object", sessionInfo.type)
         assertEquals("array", ((Map) ((Map) sessionInfo.get('properties')).availableTenants).type)
+    }
+
+    /** Per-dir prefixes: admin.* services must appear, and never leak in under facade.* . */
+    @Test
+    void adminServicesAppearWithAdminPrefixAndNeverFacade() {
+        List<String> methods = new File(componentRoot, ApiContractGenerator.METHODS_RELATIVE_PATH).readLines()
+        assert methods.contains("admin.ObserveAdminServices.get#AdminSessionInfo")
+        assert methods.contains("admin.TenantAdminServices.create#Tenant")
+        assert methods.contains("admin.UserAdminServices.reset#Password")
+        assert methods.contains("admin.MembershipAdminServices.add#TenantMember")
+        assert methods.findAll { it.startsWith("facade.") && it.contains("AdminServices") }.isEmpty()
     }
 
     /** The committed contract must match the XML — same gate CI enforces via --check. */

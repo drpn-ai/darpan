@@ -22,11 +22,15 @@ import groovy.xml.XmlParser
  */
 class ApiContractGenerator {
 
-    static final List<String> FACADE_DIRS = [
-            "service/facade",
-            "../darpan-hotwax/service/facade",
-            "../shopify-darpan/service/facade",
-            "../netsuite-darpan/service/facade",
+    // Scanned service dirs and the method-name prefix each one mints. The prefix IS the
+    // security namespace (facade.* is granted to every user; admin.* only to super admins)
+    // — a wrong prefix here would misdocument the ACL, so it is explicit per dir.
+    static final List<List<String>> SERVICE_DIRS = [
+            ["service/facade", "facade"],
+            ["../darpan-hotwax/service/facade", "facade"],
+            ["../shopify-darpan/service/facade", "facade"],
+            ["../netsuite-darpan/service/facade", "facade"],
+            ["service/admin", "admin"],
     ]
     static final String SPEC_RELATIVE_PATH = "docs/api-contract/openapi.json"
     static final String METHODS_RELATIVE_PATH = "docs/api-contract/methods.txt"
@@ -90,11 +94,13 @@ class ApiContractGenerator {
 
     static Map generate(File componentRoot) {
         List<Map> operations = []
-        for (String dir in FACADE_DIRS) {
+        for (List<String> serviceDir in SERVICE_DIRS) {
+            String dir = serviceDir[0]
+            String prefix = serviceDir[1]
             File facadeDir = new File(componentRoot, dir)
             if (!facadeDir.isDirectory()) continue
             facadeDir.listFiles({ File f -> f.name.endsWith(".xml") } as FileFilter).sort { it.name }.each { File xml ->
-                operations.addAll(parseServiceFile(xml))
+                operations.addAll(parseServiceFile(xml, prefix))
             }
         }
         operations = operations.sort { it.method as String }
@@ -206,7 +212,7 @@ class ApiContractGenerator {
         ]
     }
 
-    static List<Map> parseServiceFile(File xmlFile) {
+    static List<Map> parseServiceFile(File xmlFile, String prefix) {
         def root = new XmlParser().parse(xmlFile)
         String fileBase = xmlFile.name.replace(".xml", "")
         List<Map> ops = []
@@ -214,7 +220,7 @@ class ApiContractGenerator {
             if (svc.@"allow-remote" != "true") return
             String verb = svc.@verb
             String noun = svc.@noun
-            String method = "facade.${fileBase}.${verb}#${noun}".toString()
+            String method = "${prefix}.${fileBase}.${verb}#${noun}".toString()
             String pascal = "${pascalCase(verb)}${pascalCase(noun)}".toString()
             String description = svc.description ? svc.description[0].text().trim() : null
 

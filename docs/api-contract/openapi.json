@@ -24,6 +24,57 @@
                             "schema": {
                                 "oneOf": [
                                     {
+                                        "$ref": "#/components/schemas/AddTenantMemberRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RemoveTenantMemberRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UpdateTenantMemberRoleRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetAdminSessionInfoRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/CreateTenantRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/DeactivateTenantRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetTenantDetailRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetTenantListRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ReactivateTenantRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UpdateTenantRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/CreateUserAccountRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/DisableUserAccountRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/EnableUserAccountRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetUserDetailRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetUserListRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ResetPasswordRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UpdateUserAccountRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ChangeOwnPasswordRequest"
                                     },
                                     {
@@ -225,6 +276,23 @@
                                 "discriminator": {
                                     "propertyName": "method",
                                     "mapping": {
+                                        "admin.MembershipAdminServices.add#TenantMember": "#/components/schemas/AddTenantMemberRequest",
+                                        "admin.MembershipAdminServices.remove#TenantMember": "#/components/schemas/RemoveTenantMemberRequest",
+                                        "admin.MembershipAdminServices.update#TenantMemberRole": "#/components/schemas/UpdateTenantMemberRoleRequest",
+                                        "admin.ObserveAdminServices.get#AdminSessionInfo": "#/components/schemas/GetAdminSessionInfoRequest",
+                                        "admin.TenantAdminServices.create#Tenant": "#/components/schemas/CreateTenantRequest",
+                                        "admin.TenantAdminServices.deactivate#Tenant": "#/components/schemas/DeactivateTenantRequest",
+                                        "admin.TenantAdminServices.get#TenantDetail": "#/components/schemas/GetTenantDetailRequest",
+                                        "admin.TenantAdminServices.get#TenantList": "#/components/schemas/GetTenantListRequest",
+                                        "admin.TenantAdminServices.reactivate#Tenant": "#/components/schemas/ReactivateTenantRequest",
+                                        "admin.TenantAdminServices.update#Tenant": "#/components/schemas/UpdateTenantRequest",
+                                        "admin.UserAdminServices.create#UserAccount": "#/components/schemas/CreateUserAccountRequest",
+                                        "admin.UserAdminServices.disable#UserAccount": "#/components/schemas/DisableUserAccountRequest",
+                                        "admin.UserAdminServices.enable#UserAccount": "#/components/schemas/EnableUserAccountRequest",
+                                        "admin.UserAdminServices.get#UserDetail": "#/components/schemas/GetUserDetailRequest",
+                                        "admin.UserAdminServices.get#UserList": "#/components/schemas/GetUserListRequest",
+                                        "admin.UserAdminServices.reset#Password": "#/components/schemas/ResetPasswordRequest",
+                                        "admin.UserAdminServices.update#UserAccount": "#/components/schemas/UpdateUserAccountRequest",
                                         "facade.AuthFacadeServices.change#OwnPassword": "#/components/schemas/ChangeOwnPasswordRequest",
                                         "facade.AuthFacadeServices.get#SessionInfo": "#/components/schemas/GetSessionInfoRequest",
                                         "facade.AuthFacadeServices.login#Session": "#/components/schemas/LoginSessionRequest",
@@ -306,6 +374,57 @@
                                     "oneOf": [
                                         {
                                             "$ref": "#/components/schemas/JsonRpcErrorResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/AddTenantMemberResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RemoveTenantMemberResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UpdateTenantMemberRoleResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetAdminSessionInfoResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/CreateTenantResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/DeactivateTenantResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetTenantDetailResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetTenantListResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ReactivateTenantResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UpdateTenantResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/CreateUserAccountResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/DisableUserAccountResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/EnableUserAccountResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetUserDetailResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetUserListResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ResetPasswordResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UpdateUserAccountResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ChangeOwnPasswordResponse"
@@ -574,6 +693,1643 @@
                 "required": [
                     "jsonrpc",
                     "error"
+                ]
+            },
+            "AddTenantMemberParams": {
+                "type": "object",
+                "properties": {
+                    "userId": {
+                        "type": "string",
+                        "description": "User to add."
+                    },
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "Target tenant."
+                    },
+                    "permissionUserGroupId": {
+                        "type": "string",
+                        "description": "One of the assignable tenant roles\n                (DARPAN_TENANT_ADMIN, DARPAN_TENANT_USER, DARPAN_COMPANY_EDITOR, DARPAN_COMPANY_VIEW_ONLY)."
+                    }
+                },
+                "required": [
+                    "userId",
+                    "tenantUserGroupId",
+                    "permissionUserGroupId"
+                ],
+                "description": "Add a user to a tenant with a tenant-scoped role. Writes UserGroupMember and\n            TenantUserPermissionGroupMember atomically \u2014 never one without the other."
+            },
+            "AddTenantMemberResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the member was added."
+                    }
+                }
+            },
+            "AddTenantMemberRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.MembershipAdminServices.add#TenantMember",
+                "x-darpan-method": "admin.MembershipAdminServices.add#TenantMember",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.MembershipAdminServices.add#TenantMember"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/AddTenantMemberParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "AddTenantMemberResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.MembershipAdminServices.add#TenantMember. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/AddTenantMemberResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RemoveTenantMemberParams": {
+                "type": "object",
+                "properties": {
+                    "userId": {
+                        "type": "string",
+                        "description": "Member to remove."
+                    },
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "Tenant to remove the member from."
+                    }
+                },
+                "required": [
+                    "userId",
+                    "tenantUserGroupId"
+                ],
+                "description": "Remove a user from a tenant: thruDate both membership entities (no row deletes) and\n            clear the user's active-tenant preference when it pointed at the removed tenant."
+            },
+            "RemoveTenantMemberResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the member was removed."
+                    }
+                }
+            },
+            "RemoveTenantMemberRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.MembershipAdminServices.remove#TenantMember",
+                "x-darpan-method": "admin.MembershipAdminServices.remove#TenantMember",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.MembershipAdminServices.remove#TenantMember"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RemoveTenantMemberParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RemoveTenantMemberResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.MembershipAdminServices.remove#TenantMember. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RemoveTenantMemberResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UpdateTenantMemberRoleParams": {
+                "type": "object",
+                "properties": {
+                    "userId": {
+                        "type": "string",
+                        "description": "Member whose role changes."
+                    },
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "Tenant the membership belongs to."
+                    },
+                    "permissionUserGroupId": {
+                        "type": "string",
+                        "description": "New assignable tenant role."
+                    }
+                },
+                "required": [
+                    "userId",
+                    "tenantUserGroupId",
+                    "permissionUserGroupId"
+                ],
+                "description": "Change a member's tenant role: thruDate the old permission row, create the new one."
+            },
+            "UpdateTenantMemberRoleResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the role was changed."
+                    }
+                }
+            },
+            "UpdateTenantMemberRoleRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.MembershipAdminServices.update#TenantMemberRole",
+                "x-darpan-method": "admin.MembershipAdminServices.update#TenantMemberRole",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.MembershipAdminServices.update#TenantMemberRole"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UpdateTenantMemberRoleParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UpdateTenantMemberRoleResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.MembershipAdminServices.update#TenantMemberRole. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UpdateTenantMemberRoleResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetAdminSessionInfoParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "Fence probe + admin-app route guard: returns the operator identity when the caller\n            passes the DARPAN_ADMIN_API artifact fence and the isSuperAdmin() content gate.\n            A non-super-admin caller is denied at the artifact layer before this body runs."
+            },
+            "GetAdminSessionInfoResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the caller is a super admin."
+                    },
+                    "adminSessionInfo": {
+                        "type": "object",
+                        "properties": {
+                            "userId": {
+                                "type": "string"
+                            },
+                            "username": {
+                                "type": "string"
+                            },
+                            "isSuperAdmin": {
+                                "type": "boolean"
+                            }
+                        },
+                        "description": "Operator identity for the admin app shell."
+                    }
+                }
+            },
+            "GetAdminSessionInfoRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.ObserveAdminServices.get#AdminSessionInfo",
+                "x-darpan-method": "admin.ObserveAdminServices.get#AdminSessionInfo",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.ObserveAdminServices.get#AdminSessionInfo"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAdminSessionInfoParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAdminSessionInfoResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.ObserveAdminServices.get#AdminSessionInfo. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAdminSessionInfoResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "CreateTenantParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "Uppercase tenant id, e.g. KREWE."
+                    },
+                    "label": {
+                        "type": "string",
+                        "description": "Display label for tenant pickers."
+                    },
+                    "timeZone": {
+                        "type": "string",
+                        "description": "Tenant display timezone; defaults to UTC."
+                    }
+                },
+                "required": [
+                    "tenantUserGroupId",
+                    "label"
+                ],
+                "description": "Create a Darpan tenant: UserGroup (UgtDarpanCompany) + TenantSetting in one transaction."
+            },
+            "CreateTenantResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the tenant was created."
+                    },
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "Id of the created tenant."
+                    }
+                }
+            },
+            "CreateTenantRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.TenantAdminServices.create#Tenant",
+                "x-darpan-method": "admin.TenantAdminServices.create#Tenant",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.TenantAdminServices.create#Tenant"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/CreateTenantParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "CreateTenantResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.TenantAdminServices.create#Tenant. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/CreateTenantResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "DeactivateTenantParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "Tenant to deactivate."
+                    }
+                },
+                "required": [
+                    "tenantUserGroupId"
+                ],
+                "description": "Hide the tenant from the tenant app (availableTenants + active-tenant selection). Flag, not delete."
+            },
+            "DeactivateTenantResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when deactivated."
+                    }
+                }
+            },
+            "DeactivateTenantRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.TenantAdminServices.deactivate#Tenant",
+                "x-darpan-method": "admin.TenantAdminServices.deactivate#Tenant",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.TenantAdminServices.deactivate#Tenant"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DeactivateTenantParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DeactivateTenantResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.TenantAdminServices.deactivate#Tenant. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DeactivateTenantResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetTenantDetailParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "Tenant to read."
+                    }
+                },
+                "required": [
+                    "tenantUserGroupId"
+                ],
+                "description": "One tenant with settings and active members, for the admin tenant detail board."
+            },
+            "GetTenantDetailResult": {
+                "type": "object",
+                "properties": {
+                    "tenantDetail": {
+                        "type": "object",
+                        "properties": {
+                            "tenantUserGroupId": {
+                                "type": "string"
+                            },
+                            "label": {
+                                "type": "string"
+                            },
+                            "timeZone": {
+                                "type": "string"
+                            },
+                            "disabled": {
+                                "type": "boolean"
+                            },
+                            "createdDate": {
+                                "oneOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "number"
+                                    }
+                                ],
+                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                            },
+                            "members": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "member": {
+                                            "type": "object",
+                                            "properties": {
+                                                "userId": {
+                                                    "type": "string"
+                                                },
+                                                "username": {
+                                                    "type": "string"
+                                                },
+                                                "permissionUserGroupId": {
+                                                    "type": "string"
+                                                },
+                                                "fromDate": {
+                                                    "oneOf": [
+                                                        {
+                                                            "type": "string"
+                                                        },
+                                                        {
+                                                            "type": "number"
+                                                        }
+                                                    ],
+                                                    "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "description": "Tenant detail or null when not found."
+                    }
+                }
+            },
+            "GetTenantDetailRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.TenantAdminServices.get#TenantDetail",
+                "x-darpan-method": "admin.TenantAdminServices.get#TenantDetail",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.TenantAdminServices.get#TenantDetail"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetTenantDetailParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetTenantDetailResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.TenantAdminServices.get#TenantDetail. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetTenantDetailResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetTenantListParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "All tenants (including deactivated) with member counts, for the admin Tenants board."
+            },
+            "GetTenantListResult": {
+                "type": "object",
+                "properties": {
+                    "tenantList": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "tenant": {
+                                    "type": "object",
+                                    "properties": {
+                                        "tenantUserGroupId": {
+                                            "type": "string"
+                                        },
+                                        "label": {
+                                            "type": "string"
+                                        },
+                                        "disabled": {
+                                            "type": "boolean"
+                                        },
+                                        "memberCount": {
+                                            "type": "integer"
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "description": "All tenants sorted by label."
+                    }
+                }
+            },
+            "GetTenantListRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.TenantAdminServices.get#TenantList",
+                "x-darpan-method": "admin.TenantAdminServices.get#TenantList",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.TenantAdminServices.get#TenantList"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetTenantListParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetTenantListResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.TenantAdminServices.get#TenantList. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetTenantListResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ReactivateTenantParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "Tenant to reactivate."
+                    }
+                },
+                "required": [
+                    "tenantUserGroupId"
+                ],
+                "description": "Re-enable a deactivated tenant."
+            },
+            "ReactivateTenantResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when reactivated."
+                    }
+                }
+            },
+            "ReactivateTenantRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.TenantAdminServices.reactivate#Tenant",
+                "x-darpan-method": "admin.TenantAdminServices.reactivate#Tenant",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.TenantAdminServices.reactivate#Tenant"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ReactivateTenantParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ReactivateTenantResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.TenantAdminServices.reactivate#Tenant. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ReactivateTenantResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UpdateTenantParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "Tenant to update."
+                    },
+                    "label": {
+                        "type": "string",
+                        "description": "New display label; unchanged when omitted."
+                    },
+                    "timeZone": {
+                        "type": "string",
+                        "description": "New timezone; unchanged when omitted."
+                    }
+                },
+                "required": [
+                    "tenantUserGroupId"
+                ],
+                "description": "Rename a tenant and/or change its timezone."
+            },
+            "UpdateTenantResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when updated."
+                    }
+                }
+            },
+            "UpdateTenantRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.TenantAdminServices.update#Tenant",
+                "x-darpan-method": "admin.TenantAdminServices.update#Tenant",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.TenantAdminServices.update#Tenant"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UpdateTenantParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UpdateTenantResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.TenantAdminServices.update#Tenant. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UpdateTenantResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "CreateUserAccountParams": {
+                "type": "object",
+                "properties": {
+                    "username": {
+                        "type": "string",
+                        "description": "Login username."
+                    },
+                    "userFullName": {
+                        "type": "string",
+                        "description": "Display name."
+                    },
+                    "emailAddress": {
+                        "type": "string",
+                        "description": "Contact email; must be unique when provided."
+                    },
+                    "tempPassword": {
+                        "type": "string",
+                        "description": "Temporary password; user must change it at first login."
+                    }
+                },
+                "required": [
+                    "username",
+                    "tempPassword"
+                ],
+                "description": "Create a user with a temporary password (change forced at first login) and\n            DARPAN_USER group membership. Credentials are shared out-of-band; there is no email invite."
+            },
+            "CreateUserAccountResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the user was created."
+                    },
+                    "userId": {
+                        "type": "string",
+                        "description": "Id of the created user."
+                    }
+                }
+            },
+            "CreateUserAccountRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.UserAdminServices.create#UserAccount",
+                "x-darpan-method": "admin.UserAdminServices.create#UserAccount",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.UserAdminServices.create#UserAccount"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/CreateUserAccountParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "CreateUserAccountResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.UserAdminServices.create#UserAccount. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/CreateUserAccountResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "DisableUserAccountParams": {
+                "type": "object",
+                "properties": {
+                    "userId": {
+                        "type": "string",
+                        "description": "User to disable."
+                    }
+                },
+                "required": [
+                    "userId"
+                ],
+                "description": "Disable a user and revoke their live login keys. Self-disable is refused."
+            },
+            "DisableUserAccountResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when disabled."
+                    }
+                }
+            },
+            "DisableUserAccountRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.UserAdminServices.disable#UserAccount",
+                "x-darpan-method": "admin.UserAdminServices.disable#UserAccount",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.UserAdminServices.disable#UserAccount"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DisableUserAccountParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DisableUserAccountResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.UserAdminServices.disable#UserAccount. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DisableUserAccountResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "EnableUserAccountParams": {
+                "type": "object",
+                "properties": {
+                    "userId": {
+                        "type": "string",
+                        "description": "User to enable."
+                    }
+                },
+                "required": [
+                    "userId"
+                ],
+                "description": "Re-enable a disabled user."
+            },
+            "EnableUserAccountResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when enabled."
+                    }
+                }
+            },
+            "EnableUserAccountRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.UserAdminServices.enable#UserAccount",
+                "x-darpan-method": "admin.UserAdminServices.enable#UserAccount",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.UserAdminServices.enable#UserAccount"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/EnableUserAccountParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "EnableUserAccountResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.UserAdminServices.enable#UserAccount. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/EnableUserAccountResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetUserDetailParams": {
+                "type": "object",
+                "properties": {
+                    "userId": {
+                        "type": "string",
+                        "description": "User to read."
+                    }
+                },
+                "required": [
+                    "userId"
+                ],
+                "description": "One user with account state and active tenant memberships, for the admin user detail board."
+            },
+            "GetUserDetailResult": {
+                "type": "object",
+                "properties": {
+                    "userDetail": {
+                        "type": "object",
+                        "properties": {
+                            "userId": {
+                                "type": "string"
+                            },
+                            "username": {
+                                "type": "string"
+                            },
+                            "userFullName": {
+                                "type": "string"
+                            },
+                            "emailAddress": {
+                                "type": "string"
+                            },
+                            "disabled": {
+                                "type": "boolean"
+                            },
+                            "requirePasswordChange": {
+                                "type": "boolean"
+                            },
+                            "memberships": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "membership": {
+                                            "type": "object",
+                                            "properties": {
+                                                "tenantUserGroupId": {
+                                                    "type": "string"
+                                                },
+                                                "permissionUserGroupId": {
+                                                    "type": "string"
+                                                },
+                                                "fromDate": {
+                                                    "oneOf": [
+                                                        {
+                                                            "type": "string"
+                                                        },
+                                                        {
+                                                            "type": "number"
+                                                        }
+                                                    ],
+                                                    "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "description": "User detail or null when not found."
+                    }
+                }
+            },
+            "GetUserDetailRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.UserAdminServices.get#UserDetail",
+                "x-darpan-method": "admin.UserAdminServices.get#UserDetail",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.UserAdminServices.get#UserDetail"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetUserDetailParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetUserDetailResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.UserAdminServices.get#UserDetail. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetUserDetailResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetUserListParams": {
+                "type": "object",
+                "properties": {
+                    "searchText": {
+                        "type": "string",
+                        "description": "Case-insensitive substring filter; all users when omitted."
+                    },
+                    "pageIndex": {
+                        "type": "integer",
+                        "description": "Zero-based page; defaults to 0."
+                    },
+                    "pageSize": {
+                        "type": "integer",
+                        "description": "Rows per page; defaults to 25."
+                    }
+                },
+                "description": "Paged user search over username, email, and display name for the admin Users board."
+            },
+            "GetUserListResult": {
+                "type": "object",
+                "properties": {
+                    "users": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "user": {
+                                    "type": "object",
+                                    "properties": {
+                                        "userId": {
+                                            "type": "string"
+                                        },
+                                        "username": {
+                                            "type": "string"
+                                        },
+                                        "userFullName": {
+                                            "type": "string"
+                                        },
+                                        "emailAddress": {
+                                            "type": "string"
+                                        },
+                                        "disabled": {
+                                            "type": "boolean"
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "description": "Users on the requested page, sorted by username."
+                    },
+                    "totalCount": {
+                        "type": "integer",
+                        "description": "Total matches across all pages."
+                    }
+                }
+            },
+            "GetUserListRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.UserAdminServices.get#UserList",
+                "x-darpan-method": "admin.UserAdminServices.get#UserList",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.UserAdminServices.get#UserList"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetUserListParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetUserListResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.UserAdminServices.get#UserList. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetUserListResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ResetPasswordParams": {
+                "type": "object",
+                "properties": {
+                    "userId": {
+                        "type": "string",
+                        "description": "User whose password resets."
+                    },
+                    "tempPassword": {
+                        "type": "string",
+                        "description": "Temporary password."
+                    }
+                },
+                "required": [
+                    "userId",
+                    "tempPassword"
+                ],
+                "description": "Set a temporary password for a user (change forced at next login) and revoke\n            their live login keys. The temp password is shared out-of-band."
+            },
+            "ResetPasswordResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when reset."
+                    }
+                }
+            },
+            "ResetPasswordRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.UserAdminServices.reset#Password",
+                "x-darpan-method": "admin.UserAdminServices.reset#Password",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.UserAdminServices.reset#Password"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ResetPasswordParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ResetPasswordResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.UserAdminServices.reset#Password. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ResetPasswordResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UpdateUserAccountParams": {
+                "type": "object",
+                "properties": {
+                    "userId": {
+                        "type": "string",
+                        "description": "User to update."
+                    },
+                    "userFullName": {
+                        "type": "string",
+                        "description": "New display name; unchanged when omitted."
+                    },
+                    "emailAddress": {
+                        "type": "string",
+                        "description": "New email; unchanged when omitted."
+                    }
+                },
+                "required": [
+                    "userId"
+                ],
+                "description": "Update a user's display name and/or email."
+            },
+            "UpdateUserAccountResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when updated."
+                    }
+                }
+            },
+            "UpdateUserAccountRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.UserAdminServices.update#UserAccount",
+                "x-darpan-method": "admin.UserAdminServices.update#UserAccount",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.UserAdminServices.update#UserAccount"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UpdateUserAccountParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UpdateUserAccountResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.UserAdminServices.update#UserAccount. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UpdateUserAccountResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
                 ]
             },
             "ChangeOwnPasswordParams": {
@@ -11302,6 +13058,23 @@
         }
     },
     "x-darpan-methods": {
+        "admin.MembershipAdminServices.add#TenantMember": "AddTenantMember",
+        "admin.MembershipAdminServices.remove#TenantMember": "RemoveTenantMember",
+        "admin.MembershipAdminServices.update#TenantMemberRole": "UpdateTenantMemberRole",
+        "admin.ObserveAdminServices.get#AdminSessionInfo": "GetAdminSessionInfo",
+        "admin.TenantAdminServices.create#Tenant": "CreateTenant",
+        "admin.TenantAdminServices.deactivate#Tenant": "DeactivateTenant",
+        "admin.TenantAdminServices.get#TenantDetail": "GetTenantDetail",
+        "admin.TenantAdminServices.get#TenantList": "GetTenantList",
+        "admin.TenantAdminServices.reactivate#Tenant": "ReactivateTenant",
+        "admin.TenantAdminServices.update#Tenant": "UpdateTenant",
+        "admin.UserAdminServices.create#UserAccount": "CreateUserAccount",
+        "admin.UserAdminServices.disable#UserAccount": "DisableUserAccount",
+        "admin.UserAdminServices.enable#UserAccount": "EnableUserAccount",
+        "admin.UserAdminServices.get#UserDetail": "GetUserDetail",
+        "admin.UserAdminServices.get#UserList": "GetUserList",
+        "admin.UserAdminServices.reset#Password": "ResetPassword",
+        "admin.UserAdminServices.update#UserAccount": "UpdateUserAccount",
         "facade.AuthFacadeServices.change#OwnPassword": "ChangeOwnPassword",
         "facade.AuthFacadeServices.get#SessionInfo": "GetSessionInfo",
         "facade.AuthFacadeServices.login#Session": "LoginSession",

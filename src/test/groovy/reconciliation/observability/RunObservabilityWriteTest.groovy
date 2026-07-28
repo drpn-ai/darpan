@@ -7,6 +7,7 @@ import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 class RunObservabilityWriteTest {
@@ -92,6 +93,23 @@ class RunObservabilityWriteTest {
 
         assertEquals(255, (step.get("errorMessage") as String).length())
         assertEquals(RunObservability.STATUS_FAILED, step.get("statusEnumId"))
+    }
+
+    @Test
+    void beginStepClearsRunProgressPercentFromPriorStage() {
+        // The run-level progressPercent mirrors the CURRENT stage's advisory progress (only the
+        // extract stages report one today). Advancing to a new stage must clear the mirror, or the
+        // UI shows the old extract percent against the new stage label ("Comparing records · 99%").
+        def ec = new FakeEc()
+        String runId = RunObservability.beginRun(ec, [savedRunId: "SR1", companyUserGroupId: "KREWE"])
+        RunObservability.beginStep(ec, runId, [companyUserGroupId: "KREWE"], RunObservability.STAGE_EXTRACT_FILE2)
+        RunObservability.heartbeatStageProgress(ec, runId, RunObservability.STAGE_EXTRACT_FILE2, 4200, 4213)
+        def run = ec.store.find { it.entityName == RunObservability.RUN_RESULT_ENTITY }
+        assertEquals(99, run.get("progressPercent"))
+
+        RunObservability.beginStep(ec, runId, [companyUserGroupId: "KREWE"], RunObservability.STAGE_COMPARE)
+        assertEquals(RunObservability.STAGE_COMPARE, run.get("currentStage"))
+        assertNull(run.get("progressPercent"))
     }
 
     @Test

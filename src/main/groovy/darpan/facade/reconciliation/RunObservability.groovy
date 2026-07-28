@@ -117,6 +117,10 @@ class RunObservability {
                 def run = ec.entity.find(RUN_RESULT_ENTITY).condition("reconciliationRunResultId", runId).useCache(false).one()
                 if (run != null) {
                     run.set("currentStage", stageCode)
+                    // progressPercent mirrors the current stage's advisory progress; the prior
+                    // stage's value must not survive the transition or the UI pairs it with the
+                    // new stage label.
+                    run.set("progressPercent", null)
                     run.set("lastHeartbeatDate", now)
                     run.set("lastUpdatedDate", now)
                     run.update()

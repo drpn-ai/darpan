@@ -699,6 +699,37 @@ class TenantAccessSupportTests {
         assertEquals(["KREWE"], tenants*.userGroupId)
     }
 
+    // Regression guard for the live-fence-proof finding fixed in 6f13dc3: darpan.auth.TenantSetting's
+    // only ArtifactAuthz grant is the framework ADMIN group, but listDisabledTenantIds runs on
+    // EVERY request via syncUserContext()'s <before-request> hook — before the target endpoint's
+    // own authz check — so an unguarded read there 403'd every non-ADMIN authenticated user on
+    // every request, system-wide. The two tests above only assert the filtered tenant list, which
+    // passes identically whether or not disableAuthz() is called; this test pins the guard itself
+    // so a future refactor that drops it fails CI instead of only failing a live-server proof.
+    @Test
+    void listAvailableTenantsDisablesAuthzOnTenantSettingFinderForDisabledTenantLookup() {
+        EntityFacadeStub entityFacadeStub = new EntityFacadeStub(finders: [
+                "moqui.security.UserGroupMember": new FinderStub(oneResult: [
+                        userGroupId: TenantAccessSupport.DARPAN_SUPER_ADMIN_GROUP_ID,
+                        userId     : "SA_USER",
+                ]),
+                "moqui.security.UserGroup": new FinderStub(listResult: [
+                        [userGroupId: "KREWE", description: "Krewe",
+                         groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID],
+                ]),
+                "darpan.auth.TenantSetting": new FinderStub(listResult: []),
+        ])
+        def ec = executionContext(user: new UserStub(userId: "SA_USER"), entity: entityFacadeStub)
+
+        TenantAccessSupport.listAvailableTenants(ec)
+
+        List<FinderStub> tenantSettingFinders = entityFacadeStub.issuedFinders["darpan.auth.TenantSetting"]
+        assertTrue(tenantSettingFinders && tenantSettingFinders.every { it.disableAuthzCalled },
+                "listDisabledTenantIds must call disableAuthz() on its TenantSetting finder — that " +
+                "entity's only ArtifactAuthz grant is the framework ADMIN group, and this read runs " +
+                "on every request via the before-request hook, for every user")
+    }
+
     private static Expando executionContext(Map overrides = [:]) {
         return new Expando(
                 user: overrides.user ?: new UserStub(),
@@ -745,6 +776,12 @@ class TenantAccessSupportTests {
     static class EntityFacadeStub {
         Map<String, FinderStub> finders = [:]
 
+        // Every finder instance actually handed out by find(), keyed by entity name, in call
+        // order. Since find() below returns a fresh instance per call (never the template),
+        // this is the only way a test can inspect what happened on the actual instance the
+        // code under test used (e.g. was disableAuthz() called on it).
+        Map<String, List<FinderStub>> issuedFinders = [:]
+
         // Mirrors real ec.entity.find(): every call returns a fresh finder/condition-builder
         // (never accumulating conditions across unrelated queries), backed by the same
         // configured dataset for that entity name. Without this, two independent queries
@@ -756,7 +793,9 @@ class TenantAccessSupportTests {
                 template = new FinderStub()
                 finders[entityName] = template
             }
-            return new FinderStub(oneResult: template.oneResult, listResult: template.listResult)
+            FinderStub issued = new FinderStub(oneResult: template.oneResult, listResult: template.listResult)
+            issuedFinders.computeIfAbsent(entityName) { [] as List<FinderStub> } << issued
+            return issued
         }
     }
 
@@ -764,6 +803,7 @@ class TenantAccessSupportTests {
         Map<String, Object> conditions = [:]
         Object oneResult
         List listResult = []
+        boolean disableAuthzCalled = false
 
         FinderStub condition(String field, Object value) {
             conditions[field] = value
@@ -793,6 +833,7 @@ class TenantAccessSupportTests {
         }
 
         FinderStub disableAuthz() {
+            disableAuthzCalled = true
             return this
         }
     }

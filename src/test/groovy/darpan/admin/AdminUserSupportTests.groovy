@@ -12,6 +12,7 @@ class AdminUserSupportTests {
                         MessageFacadeStub message = new MessageFacadeStub()) {
         finders["moqui.security.UserGroupMember"] = finders["moqui.security.UserGroupMember"] ?:
                 new FinderStub(oneResult: [userGroupId: "DARPAN_SUPER_ADMIN", userId: "ADMIN_USER"])
+        service.message = message
         executionContext(
                 user: new UserStub(userId: "ADMIN_USER", username: "darpan.admin"),
                 entity: new EntityFacadeStub(finders: finders),
@@ -80,6 +81,26 @@ class AdminUserSupportTests {
         assertNotNull(keyDelete, "live sessions must be revoked on password reset")
         assertEquals("key-2", keyDelete.parametersMap.loginKey)
         assertTrue(service.calls*.serviceName.contains("create#darpan.admin.AdminAuditLog"))
+    }
+
+    @Test
+    void resetPasswordStopsWhenFrameworkServiceFailsWritesNothingFurther() {
+        def service = new ServiceFacadeStub()
+        service.errorsByName["org.moqui.impl.UserServices.update#PasswordInternal"] =
+                "Found issues with password so not updating"
+        def message = new MessageFacadeStub()
+        def ec = adminEc([
+                "moqui.security.UserAccount": new FinderStub(oneResult: [userId: "TARGET_USER", username: "target.user"]),
+                "moqui.security.UserLoginKey": new FinderStub(listResult: [[userId: "TARGET_USER", loginKey: "key-3"]]),
+        ], service, message)
+
+        assertFalse(AdminUserSupport.resetPassword(ec, "TARGET_USER", "weak"))
+        assertTrue(service.calls*.serviceName.contains("org.moqui.impl.UserServices.update#PasswordInternal"),
+                "the framework call itself must still happen")
+        assertFalse(service.calls*.serviceName.contains("delete#moqui.security.UserLoginKey"),
+                "no login-key revocation when the framework password update failed")
+        assertFalse(service.calls*.serviceName.contains("create#darpan.admin.AdminAuditLog"),
+                "no audit row when the framework password update failed")
     }
 
     @Test
@@ -210,6 +231,11 @@ class AdminUserSupportTests {
     static class ServiceFacadeStub {
         List<ServiceCallStub> calls = []
         Map<String, Map> resultsByName = [:]
+        // Simulates a framework service call that fails: keyed by full service name, the error
+        // text is added to the wired MessageFacadeStub when that call() runs (mirrors a real
+        // service's <return error="true".../> setting ec.message in the caller's context).
+        Map<String, String> errorsByName = [:]
+        MessageFacadeStub message
         ServiceCallStub lastCall
 
         ServiceCallStub sync() {
@@ -235,6 +261,8 @@ class AdminUserSupportTests {
         }
 
         Map<String, Object> call() {
+            String error = facade?.errorsByName?.get(serviceName)
+            if (error) facade?.message?.addError(error)
             return facade?.resultsByName?.get(serviceName) ?: [:]
         }
     }

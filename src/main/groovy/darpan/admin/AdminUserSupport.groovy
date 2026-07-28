@@ -35,9 +35,10 @@ class AdminUserSupport {
         ec.service.sync().name("org.moqui.impl.UserServices.update#UserAccount").parameters([
             userId: userId, userFullName: userFullName?.trim(), emailAddress: emailAddress?.trim(),
         ]).call()
+        if (ec.message.hasError()) return false
         AdminAuditSupport.record(ec, "admin.UserAdminServices.update#UserAccount", "User", userId,
                 "Updated profile for user ${userId}.")
-        return !ec.message.hasError()
+        return true
     }
 
     static boolean setUserDisabled(def ec, String userId, boolean disabled) {
@@ -49,10 +50,11 @@ class AdminUserSupport {
         String frameworkService = disabled ? "disable#UserAccount" : "enable#UserAccount"
         ec.service.sync().name("org.moqui.impl.UserServices.${frameworkService}")
                 .parameters([userId: userId]).call()
+        if (ec.message.hasError()) return false
         if (disabled) revokeLoginKeys(ec, userId)
         AdminAuditSupport.record(ec, "admin.UserAdminServices.${disabled ? 'disable' : 'enable'}#UserAccount",
                 "User", userId, "${disabled ? 'Disabled' : 'Enabled'} user ${userId}.")
-        return !ec.message.hasError()
+        return true
     }
 
     static boolean resetPassword(def ec, String userId, String tempPassword) {
@@ -63,10 +65,11 @@ class AdminUserSupport {
             userId: userId, newPassword: tempPassword, newPasswordVerify: tempPassword,
             requirePasswordChange: "Y",
         ]).call()
+        if (ec.message.hasError()) return false
         revokeLoginKeys(ec, userId)
         AdminAuditSupport.record(ec, "admin.UserAdminServices.reset#Password", "User", userId,
                 "Reset password for user ${userId}; change forced at next login.")
-        return !ec.message.hasError()
+        return true
     }
 
     static Map<String, Object> listUsers(def ec, String searchText, Integer pageIndex, Integer pageSize) {

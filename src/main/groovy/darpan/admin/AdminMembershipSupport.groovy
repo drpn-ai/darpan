@@ -62,6 +62,11 @@ class AdminMembershipSupport {
 
     static boolean removeTenantMember(def ec, String userId, String tenantUserGroupId) {
         if (!AdminAccessSupport.requireSuperAdmin(ec)) return false
+        // Deliberately NOT validateActiveTenant: removal from a DEACTIVATED tenant must stay legal.
+        // But the group must still exist and be a real Darpan tenant, or the raw UserGroupMember
+        // lookup below would match ANY group (e.g. DARPAN_SUPER_ADMIN, ADMIN, DARPAN_USER) and let
+        // this thruDate a caller's own super-admin membership or a user's base facade-access group.
+        if (!validateTenantExists(ec, tenantUserGroupId)) return false
         List permissionRows = findActiveMembershipRows(ec, userId, tenantUserGroupId)
         List groupRows = (ec.entity.find("moqui.security.UserGroupMember")
                 .condition("userGroupId", tenantUserGroupId).condition("userId", userId)
@@ -95,16 +100,23 @@ class AdminMembershipSupport {
     }
 
     private static boolean validateActiveTenant(def ec, String tenantUserGroupId) {
-        def group = tenantUserGroupId ? ec.entity.find("moqui.security.UserGroup")
-                .condition("userGroupId", tenantUserGroupId).one() : null
-        if (group == null || group.groupTypeEnumId != TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID) {
-            ec.message.addError("Tenant ${tenantUserGroupId ?: '(missing)'} was not found.")
-            return false
-        }
+        if (!validateTenantExists(ec, tenantUserGroupId)) return false
         def setting = ec.entity.find("darpan.auth.TenantSetting")
                 .condition("companyUserGroupId", tenantUserGroupId).one()
         if (setting?.disabled == "Y") {
             ec.message.addError("Tenant ${tenantUserGroupId} is deactivated.")
+            return false
+        }
+        return true
+    }
+
+    /** Existence-and-type check only (no active/disabled opinion) — shared by callers that must
+     *  reject non-tenant groups but still allow acting on a deactivated tenant. */
+    private static boolean validateTenantExists(def ec, String tenantUserGroupId) {
+        def group = tenantUserGroupId ? ec.entity.find("moqui.security.UserGroup")
+                .condition("userGroupId", tenantUserGroupId).one() : null
+        if (group == null || group.groupTypeEnumId != TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID) {
+            ec.message.addError("Tenant ${tenantUserGroupId ?: '(missing)'} was not found.")
             return false
         }
         return true

@@ -32,9 +32,14 @@ class AdminUserSupport {
     static boolean updateUser(def ec, String userId, String userFullName, String emailAddress) {
         if (!AdminAccessSupport.requireSuperAdmin(ec)) return false
         if (findUser(ec, userId) == null) return false
-        ec.service.sync().name("org.moqui.impl.UserServices.update#UserAccount").parameters([
-            userId: userId, userFullName: userFullName?.trim(), emailAddress: emailAddress?.trim(),
-        ]).call()
+        // Entity-auto update applies EXPLICIT nulls (setIfEmpty), so an omitted field must be left
+        // out of the parameter map entirely — putting userFullName: null would wipe the display
+        // name on an email-only update, contradicting the "unchanged when omitted" service contract.
+        Map<String, Object> params = [userId: userId]
+        if (userFullName?.trim()) params.userFullName = userFullName.trim()
+        if (emailAddress?.trim()) params.emailAddress = emailAddress.trim()
+        if (params.size() == 1) { ec.message.addError("Nothing to update."); return false }
+        ec.service.sync().name("org.moqui.impl.UserServices.update#UserAccount").parameters(params).call()
         if (ec.message.hasError()) return false
         AdminAuditSupport.record(ec, "admin.UserAdminServices.update#UserAccount", "User", userId,
                 "Updated profile for user ${userId}.")

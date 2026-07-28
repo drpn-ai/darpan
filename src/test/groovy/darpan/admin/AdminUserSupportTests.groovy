@@ -39,6 +39,39 @@ class AdminUserSupportTests {
     }
 
     @Test
+    void updateUserWithOnlyEmailOmitsUserFullNameKeepingItUnchanged() {
+        // Entity-auto update applies EXPLICIT nulls (setIfEmpty). If userFullName were sent as
+        // null, an "update email only" call would wipe the display name - contradicting the
+        // service's "unchanged when omitted" contract.
+        def service = new ServiceFacadeStub()
+        def ec = adminEc([
+                "moqui.security.UserAccount": new FinderStub(oneResult: [userId: "TARGET_USER", username: "target.user"]),
+        ], service)
+
+        assertTrue(AdminUserSupport.updateUser(ec, "TARGET_USER", null, "new@x.co"))
+
+        def updateCall = service.calls.find { it.serviceName == "org.moqui.impl.UserServices.update#UserAccount" }
+        assertEquals("TARGET_USER", updateCall.parametersMap.userId)
+        assertEquals("new@x.co", updateCall.parametersMap.emailAddress)
+        assertFalse(updateCall.parametersMap.containsKey("userFullName"),
+                "omitted userFullName must not be sent as an explicit null")
+        assertTrue(service.calls*.serviceName.contains("create#darpan.admin.AdminAuditLog"))
+    }
+
+    @Test
+    void updateUserWithNeitherFieldFailsWithNoWrites() {
+        def service = new ServiceFacadeStub()
+        def message = new MessageFacadeStub()
+        def ec = adminEc([
+                "moqui.security.UserAccount": new FinderStub(oneResult: [userId: "TARGET_USER", username: "target.user"]),
+        ], service, message)
+
+        assertFalse(AdminUserSupport.updateUser(ec, "TARGET_USER", null, null))
+        assertTrue(message.errors.any { it.contains("Nothing to update") })
+        assertEquals(0, service.calls.size())
+    }
+
+    @Test
     void disableUserRefusesSelf() {
         def service = new ServiceFacadeStub()
         def message = new MessageFacadeStub()

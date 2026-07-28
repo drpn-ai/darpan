@@ -130,6 +130,58 @@ class AdminMembershipSupportTests {
     }
 
     @Test
+    void removeTenantMemberRejectsNonTenantGroupPreventingSelfLockout() {
+        // Regression for the self-lockout hole: removeTenantMember(ec, <self>, "DARPAN_SUPER_ADMIN")
+        // must NOT thruDate the caller's own super-admin membership just because a raw
+        // UserGroupMember row happens to match. DARPAN_SUPER_ADMIN is a UgtDarpanPermission-type
+        // group, not a Darpan tenant, so the tenant-type guard must reject it before any write.
+        def service = new ServiceFacadeStub()
+        def message = new MessageFacadeStub()
+        def finders = [
+                "moqui.security.UserGroup"      : new FinderStub(oneResult: [
+                        userGroupId: "DARPAN_SUPER_ADMIN",
+                        groupTypeEnumId: TenantAccessSupport.DARPAN_PERMISSION_GROUP_TYPE_ENUM_ID]),
+                "moqui.security.UserGroupMember": new FinderStub(
+                        oneResult: [userGroupId: "DARPAN_SUPER_ADMIN", userId: "ADMIN_USER"],
+                        listResult: [[userGroupId: "DARPAN_SUPER_ADMIN", userId: "ADMIN_USER",
+                                      fromDate: new Timestamp(1L), thruDate: null]]),
+        ]
+        def ec = adminEc(finders, service, message)
+
+        assertFalse(AdminMembershipSupport.removeTenantMember(ec, "ADMIN_USER", "DARPAN_SUPER_ADMIN"),
+                "must not let the caller remove their own super-admin membership via a non-tenant group id")
+        assertTrue(message.errors.any { it.contains("was not found") })
+        assertEquals(0, service.calls.size(), "no membership row may be touched for a non-tenant group")
+    }
+
+    @Test
+    void removeTenantMemberSucceedsForDeactivatedTenant() {
+        // Pins that the tenant-type guard checks existence/type ONLY, not active state: removal
+        // from a deactivated tenant is legitimate cleanup and must not be blocked.
+        def service = new ServiceFacadeStub()
+        def finders = healthyTenantFinders()
+        finders["darpan.auth.TenantSetting"] = new FinderStub(oneResult: [companyUserGroupId: "KREWE", disabled: "Y"])
+        finders["darpan.auth.TenantUserPermissionGroupMember"] = new FinderStub(listResult: [
+                [tenantUserGroupId: "KREWE", userId: "TARGET_USER",
+                 permissionUserGroupId: "DARPAN_TENANT_USER", fromDate: new Timestamp(1L), thruDate: null]])
+        finders["moqui.security.UserGroupMember"] = new FinderStub(
+                oneResult: [userGroupId: "DARPAN_SUPER_ADMIN", userId: "ADMIN_USER"],
+                listResult: [[userGroupId: "KREWE", userId: "TARGET_USER", fromDate: new Timestamp(1L), thruDate: null]])
+        def ec = adminEc(finders, service)
+
+        assertTrue(AdminMembershipSupport.removeTenantMember(ec, "TARGET_USER", "KREWE"),
+                "removal from a deactivated tenant must remain legal")
+
+        assertTrue(service.calls.any {
+            it.serviceName == "update#moqui.security.UserGroupMember" && it.parametersMap.thruDate != null
+        })
+        assertTrue(service.calls.any {
+            it.serviceName == "update#darpan.auth.TenantUserPermissionGroupMember" && it.parametersMap.thruDate != null
+        })
+        assertTrue(service.calls*.serviceName.contains("create#darpan.admin.AdminAuditLog"))
+    }
+
+    @Test
     void updateTenantMemberRoleThruDatesOldRowAndCreatesNew() {
         def service = new ServiceFacadeStub()
         def finders = healthyTenantFinders()

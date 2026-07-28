@@ -29,6 +29,11 @@
         <field name="timeZone" type="text-short" default="'UTC'">
             <description>Timezone used for tenant-facing timestamp display and tenant workflow interpretation.</description>
         </field>
+        <field name="disabled" type="text-indicator" default="'N'">
+            <description>Y hides this tenant from availableTenants and blocks active-tenant selection.
+                Set only by admin.TenantAdminServices deactivate/reactivate. Deactivation is a flag,
+                never a delete — run history and settings keep their FK targets.</description>
+        </field>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>
 

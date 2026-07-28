@@ -145,10 +145,12 @@ class TenantAccessSupport {
 
     static List<Map<String, Object>> listAvailableTenants(def ec) {
         List companyRecords = isSuperAdmin(ec) ? listAllTenantRecords(ec) : listTenantMembershipRecords(ec)
+        Set<String> disabledTenantIds = listDisabledTenantIds(ec)
         return companyRecords
                 .collect { record ->
                     String userGroupId = extractString(record, "userGroupId")
                     if (!userGroupId || userGroupId in [ADMIN_USER_GROUP_ID, ALL_USERS_GROUP_ID]) return null
+                    if (userGroupId in disabledTenantIds) return null
 
                     [
                         userGroupId: userGroupId,
@@ -510,6 +512,20 @@ class TenantAccessSupport {
 
         def companyList = finder.list()
         return companyList instanceof Collection ? companyList as List : []
+    }
+
+    /** Tenants flagged disabled on TenantSetting are hidden from the tenant app for every caller. */
+    private static Set<String> listDisabledTenantIds(def ec) {
+        def finder = ec?.entity?.find(TENANT_SETTING_ENTITY_NAME)
+        if (finder == null) return [] as Set<String>
+
+        finder.condition("disabled", "Y")
+        if (finder.metaClass.respondsTo(finder, "useCache", Boolean)) finder.useCache(true)
+
+        def rows = finder.list()
+        return (rows instanceof Collection ? rows : [])
+                .collect { extractString(it, "companyUserGroupId") }
+                .findAll { it } as Set<String>
     }
 
     /**

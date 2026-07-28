@@ -653,6 +653,52 @@ class TenantAccessSupportTests {
         assertEquals(["Tenant user cannot edit."], message.errors)
     }
 
+    @Test
+    void listAvailableTenantsExcludesDeactivatedTenantForMember() {
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_USER"),
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupAndMember": new FinderStub(listResult: [
+                                [userGroupId: "KREWE", userId: "EX_USER", description: "Krewe",
+                                 groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID],
+                                [userGroupId: "ACME", userId: "EX_USER", description: "Acme",
+                                 groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID],
+                        ]),
+                        "darpan.auth.TenantSetting": new FinderStub(listResult: [
+                                [companyUserGroupId: "ACME", disabled: "Y"],
+                        ]),
+                ]))
+
+        List tenants = TenantAccessSupport.listAvailableTenants(ec)
+
+        assertEquals(["KREWE"], tenants*.userGroupId, "deactivated ACME must be excluded")
+    }
+
+    @Test
+    void listAvailableTenantsExcludesDeactivatedTenantForSuperAdmin() {
+        def ec = executionContext(
+                user: new UserStub(userId: "SA_USER"),
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupMember": new FinderStub(oneResult: [
+                                userGroupId: TenantAccessSupport.DARPAN_SUPER_ADMIN_GROUP_ID,
+                                userId     : "SA_USER",
+                        ]),
+                        "moqui.security.UserGroup": new FinderStub(listResult: [
+                                [userGroupId: "KREWE", description: "Krewe",
+                                 groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID],
+                                [userGroupId: "ACME", description: "Acme",
+                                 groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID],
+                        ]),
+                        "darpan.auth.TenantSetting": new FinderStub(listResult: [
+                                [companyUserGroupId: "ACME", disabled: "Y"],
+                        ]),
+                ]))
+
+        List tenants = TenantAccessSupport.listAvailableTenants(ec)
+
+        assertEquals(["KREWE"], tenants*.userGroupId)
+    }
+
     private static Expando executionContext(Map overrides = [:]) {
         return new Expando(
                 user: overrides.user ?: new UserStub(),
@@ -699,13 +745,18 @@ class TenantAccessSupportTests {
     static class EntityFacadeStub {
         Map<String, FinderStub> finders = [:]
 
+        // Mirrors real ec.entity.find(): every call returns a fresh finder/condition-builder
+        // (never accumulating conditions across unrelated queries), backed by the same
+        // configured dataset for that entity name. Without this, two independent queries
+        // against the same entity in one call chain (e.g. a list-all-disabled query and a
+        // single-record-by-PK query) would corrupt each other's conditions.
         FinderStub find(String entityName) {
-            FinderStub finder = finders[entityName]
-            if (finder == null) {
-                finder = new FinderStub()
-                finders[entityName] = finder
+            FinderStub template = finders[entityName]
+            if (template == null) {
+                template = new FinderStub()
+                finders[entityName] = template
             }
-            return finder
+            return new FinderStub(oneResult: template.oneResult, listResult: template.listResult)
         }
     }
 

@@ -247,4 +247,24 @@
     <moqui.basic.Enumeration enumId="DARPAN_SFTP_ADMIN"
             description="Admin/platform-owned SFTP server"
             enumTypeId="DarpanSftpScope"/>
+
+    <!-- Admin API fence: the admin.* service namespace is the platform-operator surface
+         (tenant lifecycle, user management, membership). Granted ONLY to DARPAN_SUPER_ADMIN and
+         framework ADMIN — the same two groups that satisfy isSuperAdmin(). Deliberately NOT
+         granted to DARPAN_USER/editor tiers, and deliberately carrying NO ArtifactAuthzFilter:
+         admin services are cross-tenant. Never name an admin service facade.* (auto-grant trap)
+         and never widen this group with additional members. -->
+    <moqui.security.ArtifactGroup artifactGroupId="DARPAN_ADMIN_API"
+            description="Darpan platform-admin APIs (admin.* services) — super-admin only, cross-tenant."/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_ADMIN_API"
+            artifactName="admin\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y" inheritAuthz="Y"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_ADMIN_API_SUPER_ADMIN" userGroupId="DARPAN_SUPER_ADMIN"
+            artifactGroupId="DARPAN_ADMIN_API" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_ADMIN_API_ADMIN" userGroupId="ADMIN"
+            artifactGroupId="DARPAN_ADMIN_API" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+
+    <!-- Privileged password ops (admin.user.reset#Password / create) go through framework
+         update#PasswordInternal; ADMIN_PASSWORD also lets update#Password skip oldPassword. -->
+    <moqui.security.UserGroupPermission userGroupId="DARPAN_SUPER_ADMIN"
+            userPermissionId="ADMIN_PASSWORD" fromDate="2026-07-28 00:00:00.000"/>
 </entity-facade-xml>

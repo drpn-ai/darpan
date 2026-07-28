@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+1.2.0: DARPAN_ADMIN_API fence + ADMIN_PASSWORD for super admins (admin app backend)
+-->
+<entity-facade-xml type="darpan-seed">
+    <!-- Added records from data/SecuritySeedData.xml -->
+    <moqui.security.ArtifactGroup artifactGroupId="DARPAN_ADMIN_API"
+            description="Darpan platform-admin APIs (admin.* services) — super-admin only, cross-tenant."/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_ADMIN_API"
+            artifactName="admin\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y" inheritAuthz="Y"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_ADMIN_API_SUPER_ADMIN" userGroupId="DARPAN_SUPER_ADMIN"
+            artifactGroupId="DARPAN_ADMIN_API" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_ADMIN_API_ADMIN" userGroupId="ADMIN"
+            artifactGroupId="DARPAN_ADMIN_API" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.UserGroupPermission userGroupId="DARPAN_SUPER_ADMIN"
+            userPermissionId="ADMIN_PASSWORD" fromDate="2026-07-28 00:00:00.000"/>
+</entity-facade-xml>

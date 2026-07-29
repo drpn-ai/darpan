@@ -63,6 +63,8 @@
             artifactName="darpan.reconciliation.ReconciliationRunResult" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
             artifactName="darpan.reconciliation.TenantNotificationSetting" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.reconciliation.TenantChatSpace" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.reconciliation.ReconciliationRunNotifySubscription" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
             artifactName="darpan.reconciliation.ReconciliationAutomation" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP"
@@ -179,6 +181,9 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.reconciliation.TenantNotificationSetting"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <!-- No EntityFilter for ReconciliationRunNotifySubscription: it has no companyUserGroupId,
+         every read is keyed by the caller's own userId or goes through TenantScopedFinder.findGlobalUnscoped. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_TENANT_CHAT_SPACE" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.TenantChatSpace" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUTOMATION"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.reconciliation.ReconciliationAutomation"
@@ -235,6 +240,9 @@
             enumTypeId="UserPreferenceKey"/>
     <moqui.basic.Enumeration enumId="darpan.dashboard.pinnedMappingIds"
             description="Pinned dashboard reconciliation mappings"
+            enumTypeId="UserPreferenceKey"/>
+    <moqui.basic.Enumeration enumId="darpan.notification.defaultChatSpaceId"
+            description="Default Google Chat space per tenant (JSON map companyUserGroupId to chatSpaceId)"
             enumTypeId="UserPreferenceKey"/>
     <moqui.basic.EnumerationType enumTypeId="DarpanSftpScope"
             description="Darpan SFTP server scope"/>

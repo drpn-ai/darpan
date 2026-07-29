@@ -12,6 +12,8 @@ class DarpanEntityConstants {
     static final String NS_AUTH_CONFIG = "darpan.reconciliation.NsAuthConfig"
     static final String NS_RESTLET_CONFIG = "darpan.reconciliation.NsRestletConfig"
     static final String TENANT_NOTIFICATION_SETTING = "darpan.reconciliation.TenantNotificationSetting"
+    static final String TENANT_CHAT_SPACE = "darpan.reconciliation.TenantChatSpace"
+    static final String RUN_NOTIFY_SUBSCRIPTION = "darpan.reconciliation.ReconciliationRunNotifySubscription"
 
     // Auth / tenant
     static final String TENANT_SETTING = "darpan.auth.TenantSetting"

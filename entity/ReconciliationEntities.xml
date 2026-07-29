@@ -174,6 +174,47 @@
         </relationship>
     </entity>
 
+    <entity entity-name="TenantChatSpace" package="darpan.reconciliation" use="configuration">
+        <description>Named Google Chat space registry entry for one tenant. Users pick a default
+            from this list and automations link to one; replaces the single-webhook
+            TenantNotificationSetting (retired).</description>
+        <field name="chatSpaceId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="spaceName" type="text-medium" not-null="true">
+            <description>Display label, unique per tenant (case-insensitive, service-validated).</description>
+        </field>
+        <field name="googleChatWebhookUrl" type="text-very-long" encrypt="true">
+            <description>Google Chat incoming webhook URL. Treat as a secret and never return raw in facade responses.</description>
+        </field>
+        <field name="isActive" type="text-indicator" default="'Y'"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="lastUpdatedDate" type="date-time"/>
+        <relationship type="one" title="Company" related="moqui.security.UserGroup" fk-name="TCSPACE_COMPANY">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+        <relationship type="one" title="CreatedBy" related="moqui.security.UserAccount" fk-name="TCSPACE_CREATED_BY">
+            <key-map field-name="createdByUserId" related-field-name="userId"/>
+        </relationship>
+    </entity>
+    <entity entity-name="ReconciliationRunNotifySubscription" package="darpan.reconciliation" use="transactional" cache="never">
+        <description>One user's notify-me subscription on one running reconciliation. chatSpaceId is a
+            snapshot of the user's default chat space at click time; unsubscribe deletes the row.</description>
+        <field name="reconciliationRunResultId" type="id" is-pk="true"/>
+        <field name="userId" type="id" is-pk="true"/>
+        <field name="chatSpaceId" type="id" not-null="true"/>
+        <field name="subscribedDate" type="date-time"/>
+        <relationship type="one" related="darpan.reconciliation.ReconciliationRunResult" fk-name="RNSUB_RESULT">
+            <key-map field-name="reconciliationRunResultId"/>
+        </relationship>
+        <relationship type="one" title="Subscriber" related="moqui.security.UserAccount" fk-name="RNSUB_USER">
+            <key-map field-name="userId" related-field-name="userId"/>
+        </relationship>
+        <relationship type="one" related="darpan.reconciliation.TenantChatSpace" fk-name="RNSUB_SPACE">
+            <key-map field-name="chatSpaceId"/>
+        </relationship>
+    </entity>
+
     <entity entity-name="ReconciliationAutomation" package="darpan.reconciliation" use="configuration">
         <description>Tenant-owned automation configuration for scheduled API extraction or SFTP polling against a saved reconciliation run.</description>
         <field name="automationId" type="id" is-pk="true"/>
@@ -215,6 +256,9 @@
         <field name="safeConfigJson" type="text-long">
             <description>Non-secret automation metadata safe to show in diagnostics.</description>
         </field>
+        <field name="chatSpaceId" type="id">
+            <description>Optional TenantChatSpace this automation posts run-completion notifications to; null = no notifications.</description>
+        </field>
         <field name="isActive" type="text-indicator" default="'Y'"/>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>
@@ -242,6 +286,9 @@
         </relationship>
         <relationship type="one" related="darpan.rule.RuleSetCompareScope" fk-name="RECAUT_SCOPE">
             <key-map field-name="compareScopeId"/>
+        </relationship>
+        <relationship type="one" related="darpan.reconciliation.TenantChatSpace" fk-name="RECAUT_CHAT_SPACE">
+            <key-map field-name="chatSpaceId"/>
         </relationship>
         <relationship type="many" related="darpan.reconciliation.ReconciliationAutomationSource" short-alias="sources">
             <key-map field-name="automationId"/>

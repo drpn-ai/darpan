@@ -64,6 +64,7 @@ facade.ReconciliationFacadeServices.save#Mapping
 facade.ReconciliationFacadeServices.save#RuleSetRun
 facade.ReconciliationFacadeServices.save#SavedRunName
 facade.SearchFacadeServices.search#NavigationTargets
+facade.SettingsFacadeServices.delete#TenantChatSpace
 facade.SettingsFacadeServices.get#LlmSettings
 facade.SettingsFacadeServices.get#TenantNotificationSettings
 facade.SettingsFacadeServices.get#TenantSettings
@@ -71,10 +72,12 @@ facade.SettingsFacadeServices.list#EnumOptions
 facade.SettingsFacadeServices.list#NsAuthConfigs
 facade.SettingsFacadeServices.list#NsRestletConfigs
 facade.SettingsFacadeServices.list#SftpServers
+facade.SettingsFacadeServices.list#TenantChatSpaces
 facade.SettingsFacadeServices.save#LlmSettings
 facade.SettingsFacadeServices.save#NsAuthConfig
 facade.SettingsFacadeServices.save#NsRestletConfig
 facade.SettingsFacadeServices.save#SftpServer
+facade.SettingsFacadeServices.save#TenantChatSpace
 facade.SettingsFacadeServices.save#TenantNotificationSettings
 facade.SettingsFacadeServices.save#TenantSettings
 facade.ShopifyFacadeServices.delete#ShopifyAuthConfig

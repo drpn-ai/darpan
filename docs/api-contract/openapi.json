@@ -222,6 +222,9 @@
                                         "$ref": "#/components/schemas/SearchNavigationTargetsRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/DeleteTenantChatSpaceRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetLlmSettingsRequest"
                                     },
                                     {
@@ -243,6 +246,9 @@
                                         "$ref": "#/components/schemas/ListSftpServersRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/ListTenantChatSpacesRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/SaveLlmSettingsRequest"
                                     },
                                     {
@@ -253,6 +259,9 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveSftpServerRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveTenantChatSpaceRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveTenantNotificationSettingsRequest"
@@ -342,6 +351,7 @@
                                         "facade.ReconciliationFacadeServices.save#RuleSetRun": "#/components/schemas/SaveRuleSetRunRequest",
                                         "facade.ReconciliationFacadeServices.save#SavedRunName": "#/components/schemas/SaveSavedRunNameRequest",
                                         "facade.SearchFacadeServices.search#NavigationTargets": "#/components/schemas/SearchNavigationTargetsRequest",
+                                        "facade.SettingsFacadeServices.delete#TenantChatSpace": "#/components/schemas/DeleteTenantChatSpaceRequest",
                                         "facade.SettingsFacadeServices.get#LlmSettings": "#/components/schemas/GetLlmSettingsRequest",
                                         "facade.SettingsFacadeServices.get#TenantNotificationSettings": "#/components/schemas/GetTenantNotificationSettingsRequest",
                                         "facade.SettingsFacadeServices.get#TenantSettings": "#/components/schemas/GetTenantSettingsRequest",
@@ -349,10 +359,12 @@
                                         "facade.SettingsFacadeServices.list#NsAuthConfigs": "#/components/schemas/ListNsAuthConfigsRequest",
                                         "facade.SettingsFacadeServices.list#NsRestletConfigs": "#/components/schemas/ListNsRestletConfigsRequest",
                                         "facade.SettingsFacadeServices.list#SftpServers": "#/components/schemas/ListSftpServersRequest",
+                                        "facade.SettingsFacadeServices.list#TenantChatSpaces": "#/components/schemas/ListTenantChatSpacesRequest",
                                         "facade.SettingsFacadeServices.save#LlmSettings": "#/components/schemas/SaveLlmSettingsRequest",
                                         "facade.SettingsFacadeServices.save#NsAuthConfig": "#/components/schemas/SaveNsAuthConfigRequest",
                                         "facade.SettingsFacadeServices.save#NsRestletConfig": "#/components/schemas/SaveNsRestletConfigRequest",
                                         "facade.SettingsFacadeServices.save#SftpServer": "#/components/schemas/SaveSftpServerRequest",
+                                        "facade.SettingsFacadeServices.save#TenantChatSpace": "#/components/schemas/SaveTenantChatSpaceRequest",
                                         "facade.SettingsFacadeServices.save#TenantNotificationSettings": "#/components/schemas/SaveTenantNotificationSettingsRequest",
                                         "facade.SettingsFacadeServices.save#TenantSettings": "#/components/schemas/SaveTenantSettingsRequest",
                                         "facade.ShopifyFacadeServices.delete#ShopifyAuthConfig": "#/components/schemas/DeleteShopifyAuthConfigRequest",
@@ -574,6 +586,9 @@
                                             "$ref": "#/components/schemas/SearchNavigationTargetsResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/DeleteTenantChatSpaceResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/GetLlmSettingsResponse"
                                         },
                                         {
@@ -595,6 +610,9 @@
                                             "$ref": "#/components/schemas/ListSftpServersResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/ListTenantChatSpacesResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/SaveLlmSettingsResponse"
                                         },
                                         {
@@ -605,6 +623,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveSftpServerResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveTenantChatSpaceResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveTenantNotificationSettingsResponse"
@@ -10691,6 +10712,98 @@
                     "result"
                 ]
             },
+            "DeleteTenantChatSpaceParams": {
+                "type": "object",
+                "properties": {
+                    "chatSpaceId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "chatSpaceId"
+                ],
+                "description": "Hard-delete an unreferenced chat space; referenced spaces must be deactivated instead."
+            },
+            "DeleteTenantChatSpaceResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "DeleteTenantChatSpaceRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SettingsFacadeServices.delete#TenantChatSpace",
+                "x-darpan-method": "facade.SettingsFacadeServices.delete#TenantChatSpace",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SettingsFacadeServices.delete#TenantChatSpace"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DeleteTenantChatSpaceParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DeleteTenantChatSpaceResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SettingsFacadeServices.delete#TenantChatSpace. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DeleteTenantChatSpaceResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "GetLlmSettingsParams": {
                 "type": "object",
                 "properties": {
@@ -11659,6 +11772,144 @@
                     "result"
                 ]
             },
+            "ListTenantChatSpacesParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "List active-tenant Google Chat spaces with webhook redaction."
+            },
+            "ListTenantChatSpacesResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "chatSpaces": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "chatSpaceId": {
+                                    "type": "string"
+                                },
+                                "spaceName": {
+                                    "type": "string"
+                                },
+                                "googleChatConfigured": {
+                                    "type": "boolean"
+                                },
+                                "googleChatWebhookUrlMasked": {
+                                    "type": "string"
+                                },
+                                "isActive": {
+                                    "type": "string"
+                                },
+                                "inUse": {
+                                    "type": "boolean"
+                                },
+                                "createdByUserId": {
+                                    "type": "string"
+                                },
+                                "createdDate": {
+                                    "oneOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "type": "number"
+                                        }
+                                    ],
+                                    "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                },
+                                "lastUpdatedDate": {
+                                    "oneOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "type": "number"
+                                        }
+                                    ],
+                                    "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "ListTenantChatSpacesRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SettingsFacadeServices.list#TenantChatSpaces",
+                "x-darpan-method": "facade.SettingsFacadeServices.list#TenantChatSpaces",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SettingsFacadeServices.list#TenantChatSpaces"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ListTenantChatSpacesParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ListTenantChatSpacesResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SettingsFacadeServices.list#TenantChatSpaces. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ListTenantChatSpacesResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "SaveLlmSettingsParams": {
                 "type": "object",
                 "properties": {
@@ -12245,6 +12496,110 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/SaveSftpServerResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SaveTenantChatSpaceParams": {
+                "type": "object",
+                "properties": {
+                    "chatSpaceId": {
+                        "type": "string"
+                    },
+                    "spaceName": {
+                        "type": "string"
+                    },
+                    "googleChatWebhookUrl": {
+                        "type": "string"
+                    },
+                    "isActive": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "spaceName"
+                ],
+                "description": "Create or update one named Google Chat space for the active tenant. Webhook URL is write-only."
+            },
+            "SaveTenantChatSpaceResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "chatSpace": {
+                        "type": "object"
+                    }
+                }
+            },
+            "SaveTenantChatSpaceRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SettingsFacadeServices.save#TenantChatSpace",
+                "x-darpan-method": "facade.SettingsFacadeServices.save#TenantChatSpace",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SettingsFacadeServices.save#TenantChatSpace"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveTenantChatSpaceParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveTenantChatSpaceResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SettingsFacadeServices.save#TenantChatSpace. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveTenantChatSpaceResult"
                     }
                 },
                 "required": [
@@ -13124,6 +13479,7 @@
         "facade.ReconciliationFacadeServices.save#RuleSetRun": "SaveRuleSetRun",
         "facade.ReconciliationFacadeServices.save#SavedRunName": "SaveSavedRunName",
         "facade.SearchFacadeServices.search#NavigationTargets": "SearchNavigationTargets",
+        "facade.SettingsFacadeServices.delete#TenantChatSpace": "DeleteTenantChatSpace",
         "facade.SettingsFacadeServices.get#LlmSettings": "GetLlmSettings",
         "facade.SettingsFacadeServices.get#TenantNotificationSettings": "GetTenantNotificationSettings",
         "facade.SettingsFacadeServices.get#TenantSettings": "GetTenantSettings",
@@ -13131,10 +13487,12 @@
         "facade.SettingsFacadeServices.list#NsAuthConfigs": "ListNsAuthConfigs",
         "facade.SettingsFacadeServices.list#NsRestletConfigs": "ListNsRestletConfigs",
         "facade.SettingsFacadeServices.list#SftpServers": "ListSftpServers",
+        "facade.SettingsFacadeServices.list#TenantChatSpaces": "ListTenantChatSpaces",
         "facade.SettingsFacadeServices.save#LlmSettings": "SaveLlmSettings",
         "facade.SettingsFacadeServices.save#NsAuthConfig": "SaveNsAuthConfig",
         "facade.SettingsFacadeServices.save#NsRestletConfig": "SaveNsRestletConfig",
         "facade.SettingsFacadeServices.save#SftpServer": "SaveSftpServer",
+        "facade.SettingsFacadeServices.save#TenantChatSpace": "SaveTenantChatSpace",
         "facade.SettingsFacadeServices.save#TenantNotificationSettings": "SaveTenantNotificationSettings",
         "facade.SettingsFacadeServices.save#TenantSettings": "SaveTenantSettings",
         "facade.ShopifyFacadeServices.delete#ShopifyAuthConfig": "DeleteShopifyAuthConfig",

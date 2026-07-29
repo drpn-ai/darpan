@@ -227,6 +227,7 @@ class AutomationExecutionSupport {
                         reconcileRunner.call(ec, automation, file1Source, file2Source, file1Result, file2Result, window, executionParams)
                 )
                 autoPersistedSources = (reconcileResult.persistedSources ?: []) as List
+                requireReconcileOutput(ec, reconcileResult)
                 ensureAutomationResultArtifact(ec, automation, file1Source, file2Source, reconcileResult, window, executionParams)
                 String resultDataManagerPath = normalizeDataManagerPath(ec,
                         reconcileResult.resultDataManagerPath ?: reconcileResult.diffLocation ?: reconcileResult.diffFileName)
@@ -1123,6 +1124,39 @@ class AutomationExecutionSupport {
 
     protected static Map<String, Object> normalizeReconcileResult(Object rawResult) {
         return rawResult instanceof Map ? new LinkedHashMap<String, Object>((Map) rawResult) : [:]
+    }
+
+    /**
+     * Gorjana prod 2026-07-28 regression: a message-level error in the compare chain never throws —
+     * Moqui sync calls short-circuit once ec.message has errors and every pipeline stage guards its
+     * out-params with !ec.message.hasError() — so the compare returns an EMPTY map and the execution
+     * was stamped SUCCEEDED with no differenceCount, no result artifact, and no run-result row.
+     * Fail loudly instead: consume the accumulated errors (leftover facade state would short-circuit
+     * every later sync call in the same scan sweep) and throw so buildFailureFields classifies the
+     * failure (permanent -> FAILED, transient -> PENDING retry). SUCCEEDED therefore always carries
+     * compare output.
+     */
+    protected static void requireReconcileOutput(def ec, Map<String, Object> reconcileResult) {
+        String messageErrors = consumeMessageFacadeErrors(ec)
+        boolean hasOutput = reconcileResult.diffDf != null || reconcileResult.differenceCount != null ||
+                normalize(reconcileResult.resultDataManagerPath ?: reconcileResult.diffLocation ?: reconcileResult.diffFileName)
+        if (messageErrors == null && hasOutput) return
+        throw new IllegalStateException(messageErrors != null ?
+                "Reconcile compare stage reported errors: ${messageErrors}".toString() :
+                "Reconcile compare stage returned no result (no difference count and no diff artifact)")
+    }
+
+    /** Accumulated ec.message error text, cleared as it is read; null when there are none (or the ec has no message facade). */
+    protected static String consumeMessageFacadeErrors(def ec) {
+        try {
+            def message = ec?.message
+            if (message == null || message.hasError() != true) return null
+            String errorsText = normalize(message.getErrorsString())
+            message.clearErrors()
+            return errorsText ?: "unspecified error"
+        } catch (Exception ignored) {
+            return null
+        }
     }
 
     protected static Map<String, Object> ensureAutomationResultArtifact(def ec, def automation, def file1Source, def file2Source,

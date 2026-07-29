@@ -867,6 +867,71 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
+    void reconcileMessageLevelErrorRecordsFailureNotSilentSuccess() {
+        // Gorjana prod 2026-07-28: a message-level error in the compare chain does not throw — Moqui
+        // sync calls short-circuit once ec.message has errors and every pipeline stage guards its
+        // out-params with !ec.message.hasError(), so the compare returns an EMPTY map. The execution
+        // must record the failure with the error text, never SUCCEEDED with no result fields.
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                return [
+                        dataAvailable: true,
+                        fileLocation : "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName     : "${call.params.fileSide}.json".toString(),
+                        recordCount  : 3748,
+                ]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                ec.message.addError("Compare scope SCOPE_ORDER was not found")
+                return [:]
+            }
+            return [:]
+        }
+
+        AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+        FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+        assertEquals(AutomationExecutionSupport.STATUS_FAILED, execution.statusEnumId)
+        assertTrue(((String) execution.errorMessage).contains("Compare scope SCOPE_ORDER was not found"))
+        assertNotNull(execution.completedDate)
+        assertNull(execution.resultDataManagerPath)
+        assertEquals(0, ec.entity.createdValues("darpan.reconciliation.ReconciliationRunResult").size())
+        // The accumulated errors are consumed so later windows/automations in the same scan are not
+        // short-circuited by leftover message-facade state.
+        assertFalse(ec.message.hasError())
+    }
+
+    @Test
+    void emptyReconcileResultWithoutErrorIsRetriedNotSilentSuccess() {
+        // Companion invariant: SUCCEEDED must be unrepresentable without compare output. An empty
+        // reconcile result with no message error has no permanent-failure marker, so it takes the
+        // transient path — requeued PENDING with a backoff, never stamped SUCCEEDED.
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                return [
+                        dataAvailable: true,
+                        fileLocation : "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName     : "${call.params.fileSide}.json".toString(),
+                        recordCount  : 5,
+                ]
+            }
+            return [:]
+        }
+
+        AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+        FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+        assertEquals(AutomationExecutionSupport.STATUS_PENDING, execution.statusEnumId)
+        assertNotNull(execution.nextRetryDate)
+        assertNull(execution.completedDate)
+        assertEquals(0, ec.entity.createdValues("darpan.reconciliation.ReconciliationRunResult").size())
+    }
+
+    @Test
     void reprocessDueRetriesDeadLettersExhaustedExecution() {
         // DAR-300: a due retry row that has reached maxRetryCount is dead-lettered, not re-driven.
         FakeEc ec = fakeEc()
@@ -1028,6 +1093,7 @@ class AutomationExecutionSupportTests {
                 entity: new FakeEntityFacade(),
                 service: new FakeServiceFacade(),
                 transaction: new FakeTransactionFacade(),
+                message: new FakeMessageFacade(),
                 resource: new Expando(properties: [:]),
                 user: new Expando(nowTimestamp: NOW, userId: "tester"),
         )
@@ -1137,8 +1203,21 @@ class AutomationExecutionSupportTests {
         FakeEntityFacade entity
         FakeServiceFacade service
         FakeTransactionFacade transaction
+        FakeMessageFacade message
         Object resource
         Object user
+    }
+
+    private static class FakeMessageFacade {
+        List<String> errors = []
+
+        void addError(String error) { errors << error }
+
+        boolean hasError() { return !errors.isEmpty() }
+
+        String getErrorsString() { return errors.join("\n") }
+
+        void clearErrors() { errors.clear() }
     }
 
     private static class FakeEntityFacade {

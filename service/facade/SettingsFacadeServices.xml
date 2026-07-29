@@ -256,6 +256,123 @@
         </actions>
     </service>
 
+    <service verb="list" noun="TenantChatSpaces" authz-action="view" allow-remote="true" authenticate="true">
+        <description>List active-tenant Google Chat spaces with webhook redaction.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="chatSpaces" type="List">
+                <parameter name="chatSpaceId"/><parameter name="spaceName"/>
+                <parameter name="googleChatConfigured" type="Boolean"/>
+                <parameter name="googleChatWebhookUrlMasked"/>
+                <parameter name="isActive"/><parameter name="inUse" type="Boolean"/>
+                <parameter name="createdByUserId"/>
+                <parameter name="createdDate" type="Timestamp"/><parameter name="lastUpdatedDate" type="Timestamp"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="spaceRows" from="tenantId ? (ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('companyUserGroupId', tenantId).orderBy('spaceName').disableAuthz().useCache(false).list() ?: []) : []"/>
+            <set field="automationSpaceIds" from="tenantId ? (ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).list().collect { ((it.chatSpaceId)?.toString()?.trim()) }.findAll { it } as Set) : ([] as Set)"/>
+            <set field="subscriptionSpaceIds" from="spaceRows ? (ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('chatSpaceId', 'in', spaceRows.collect { it.chatSpaceId }).disableAuthz().useCache(false).list().collect { ((it.chatSpaceId)?.toString()?.trim()) }.findAll { it } as Set) : ([] as Set)"/>
+            <set field="chatSpaces" from="spaceRows.collect { row -> [chatSpaceId: row.chatSpaceId, spaceName: row.spaceName, googleChatConfigured: !!((row.googleChatWebhookUrl)?.toString()?.trim()), googleChatWebhookUrlMasked: darpan.reconciliation.notification.TenantNotificationSupport.maskGoogleChatWebhookUrl(row.googleChatWebhookUrl), isActive: ((row.isActive)?.toString()?.trim()) ?: 'Y', inUse: automationSpaceIds.contains(row.chatSpaceId) || subscriptionSpaceIds.contains(row.chatSpaceId), createdByUserId: row.createdByUserId, createdDate: row.createdDate, lastUpdatedDate: row.lastUpdatedDate] }"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="TenantChatSpace" allow-remote="true" authenticate="true">
+        <description>Create or update one named Google Chat space for the active tenant. Webhook URL is write-only.</description>
+        <in-parameters>
+            <parameter name="chatSpaceId"/>
+            <parameter name="spaceName" required="true"/>
+            <parameter name="googleChatWebhookUrl" allow-html="true"/>
+            <parameter name="isActive" type="Boolean" default-value="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="chatSpace" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><message error="true">Active tenant is required for chat spaces.</message></if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for chat spaces.')"/>
+            </if>
+            <set field="chatSpaceIdValue" from="((chatSpaceId)?.toString()?.trim())"/>
+            <set field="spaceNameValue" from="((spaceName)?.toString()?.trim())"/>
+            <set field="existingSpace" from="(!ec.message.hasError() &amp;&amp; chatSpaceIdValue) ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('chatSpaceId', chatSpaceIdValue).condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).one() : null"/>
+            <if condition="!ec.message.hasError() &amp;&amp; chatSpaceIdValue &amp;&amp; existingSpace == null">
+                <message error="true">Chat space '${chatSpaceIdValue}' was not found.</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <if condition="!spaceNameValue"><message error="true">Chat space name is required.</message></if>
+                <set field="nameClash" from="ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).list().find { it.chatSpaceId != chatSpaceIdValue &amp;&amp; ((it.spaceName)?.toString()?.trim())?.equalsIgnoreCase(spaceNameValue) }"/>
+                <if condition="spaceNameValue &amp;&amp; nameClash != null">
+                    <message error="true">A chat space named '${spaceNameValue}' already exists.</message>
+                </if>
+                <set field="googleChatWebhookUrlValue" from="((googleChatWebhookUrl)?.toString()?.trim())"/>
+                <set field="googleChatWebhookUrlToSave" from="googleChatWebhookUrlValue ?: ((existingSpace?.googleChatWebhookUrl)?.toString()?.trim())"/>
+                <if condition="!googleChatWebhookUrlToSave"><message error="true">Google Chat webhook URL is required.</message></if>
+                <set field="validationError" from="darpan.reconciliation.notification.TenantNotificationSupport.validateGoogleChatWebhookUrl(googleChatWebhookUrlToSave)"/>
+                <if condition="validationError"><message error="true">${validationError}</message></if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="nowTs" from="ec.user.nowTimestamp"/>
+                <set field="isActiveValue" from="isActive == null ? 'Y' : ((isActive instanceof Boolean ? isActive : ['Y', 'YES', 'TRUE', '1', 'ON'].contains(isActive.toString().trim().toUpperCase(Locale.ROOT))) ? 'Y' : 'N')"/>
+                <set field="chatSpaceMap" from="[chatSpaceId: chatSpaceIdValue ?: null, companyUserGroupId: tenantId, spaceName: spaceNameValue, googleChatWebhookUrl: googleChatWebhookUrlToSave, isActive: isActiveValue, createdByUserId: ((existingSpace?.createdByUserId)?.toString()?.trim()) ?: darpan.facade.common.TenantAccessSupport.currentUserId(ec), createdDate: existingSpace?.createdDate ?: nowTs, lastUpdatedDate: nowTs].findAll { it.value != null }"/>
+                <service-call name="store#darpan.reconciliation.TenantChatSpace" in-map="chatSpaceMap" out-map="storeResult"/>
+                <set field="chatSpaceIdValue" from="chatSpaceIdValue ?: ((storeResult?.chatSpaceId)?.toString()?.trim())"/>
+                <if condition="!ec.message.hasError()"><message>Saved chat space.</message></if>
+            </if>
+            <set field="savedSpace" from="chatSpaceIdValue ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('chatSpaceId', chatSpaceIdValue).condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).one() : null"/>
+            <set field="chatSpace" from="savedSpace ? [chatSpaceId: savedSpace.chatSpaceId, spaceName: savedSpace.spaceName, googleChatConfigured: !!((savedSpace.googleChatWebhookUrl)?.toString()?.trim()), googleChatWebhookUrlMasked: darpan.reconciliation.notification.TenantNotificationSupport.maskGoogleChatWebhookUrl(savedSpace.googleChatWebhookUrl), isActive: ((savedSpace.isActive)?.toString()?.trim()) ?: 'Y', inUse: false, createdByUserId: savedSpace.createdByUserId, createdDate: savedSpace.createdDate, lastUpdatedDate: savedSpace.lastUpdatedDate] : null"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="delete" noun="TenantChatSpace" allow-remote="true" authenticate="true">
+        <description>Hard-delete an unreferenced chat space; referenced spaces must be deactivated instead.</description>
+        <in-parameters><parameter name="chatSpaceId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><message error="true">Active tenant is required for chat spaces.</message></if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for chat spaces.')"/>
+            </if>
+            <set field="chatSpaceIdValue" from="((chatSpaceId)?.toString()?.trim())"/>
+            <set field="spaceRow" from="(!ec.message.hasError() &amp;&amp; chatSpaceIdValue) ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('chatSpaceId', chatSpaceIdValue).condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).one() : null"/>
+            <if condition="!ec.message.hasError() &amp;&amp; spaceRow == null">
+                <message error="true">Chat space '${chatSpaceIdValue}' was not found.</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="automationRefCount" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('chatSpaceId', chatSpaceIdValue).disableAuthz().useCache(false).count()"/>
+                <set field="subscriptionRefCount" from="ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('chatSpaceId', chatSpaceIdValue).disableAuthz().useCache(false).count()"/>
+                <if condition="automationRefCount &gt; 0 || subscriptionRefCount &gt; 0">
+                    <message error="true">Chat space '${spaceRow.spaceName}' is in use; deactivate it instead of deleting.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreDelete" from="spaceRow.delete()"/>
+                <message>Deleted chat space.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
     <service verb="list" noun="SftpServers" authz-action="view" allow-remote="true" authenticate="true">
         <description>List SFTP server configs with secret redaction indicators.</description>
         <in-parameters>

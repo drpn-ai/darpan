@@ -3,6 +3,7 @@ import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
+import darpan.facade.reconciliation.ExchangePairVerificationSupport
 import darpan.facade.reconciliation.MissingDiffVerificationSupport
 import darpan.facade.reconciliation.ReconciliationApiWindowSupport
 import darpan.facade.reconciliation.ReconciliationOutputSupport
@@ -11,6 +12,7 @@ import darpan.facade.reconciliation.RunObservability
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.core.ReconciliationServices
 import darpan.reconciliation.notification.TenantNotificationSupport
+import groovy.json.JsonOutput
 import org.slf4j.LoggerFactory
 
 import java.sql.Timestamp
@@ -148,6 +150,16 @@ def runInternalService = { String serviceName, Map params ->
             .parameters((params ?: [:]).findAll { entry -> entry.value != null })
             .disableAuthz()
             .call() ?: [:]) as Map
+}
+// Lifted from resolveOutputFile's primary resolution branch below (exact same location-string ->
+// File semantics) so the exchange verify pass can resolve the manifest sidecar location, which has
+// no serviceResult-style diffFileName fallback to search for.
+def resolveLocationFile = { String location ->
+    String locationValue = normalize(location)
+    if (!locationValue) return null
+    return locationValue.startsWith("/") ?
+            new File(locationValue) :
+            ec.resource.getLocationReference(locationValue)?.getFile()
 }
 def resolveOutputFile = { Map serviceResult ->
     File outputFile = null
@@ -435,6 +447,99 @@ def buildVerificationLookup = { Object source ->
     }
 }
 
+// Exchange pair verify stage (spec 2026-07-30): the OMS-side extract may have written an
+// exchange-manifest sidecar (excluded exchange orders). When one side's connector declares
+// pairLookupServiceName and the other declares exchangeStateLookupServiceName, each manifest
+// pair is point-checked against both sources of record. Best-effort like the missing-diff pass.
+def resolveConnectorFor = { Object source ->
+    if (source == null) return null
+    String sourceConfigType = normalize(source?.sourceConfigType)
+    Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, normalize(source?.systemEnumId))
+    if (connector == null || normalize(connector.expectedSourceConfigType) != sourceConfigType) {
+        connector = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(ec, sourceConfigType)
+    }
+    return connector
+}
+
+def buildFencedLookup = { Map<String, Object> connector, String serviceName, Object source, String idsParameterName ->
+    if (connector == null || serviceName == null) return null
+    if (!SourceSystemConnectorSupport.isAllowedLookupServiceShape(serviceName)) return null
+    String configId = normalize(source?.sourceConfigId)
+    if (configId == null) return null
+    String configParameterName = normalize(connector.configParameterName) ?: "sourceConfigId"
+    return { List<String> ids -> runInternalService(serviceName, [(configParameterName): configId, (idsParameterName): ids]) }
+}
+
+def runExchangeVerificationPass = { Map serviceResult, Object file1Source, Object file2Source,
+                                    Map file1Result, Map file2Result ->
+    if (serviceResult.ruleExecutionFailed == true) return
+    List sides = [[source: file1Source, extractResult: file1Result], [source: file2Source, extractResult: file2Result]]
+    def omsSide = null, shopifySide = null
+    Map omsConnector = null, shopifyConnector = null
+    for (Map side : sides) {
+        Map<String, Object> connector = resolveConnectorFor(side.source)
+        if (connector == null) continue
+        if (omsSide == null && normalize(connector.pairLookupServiceName)) { omsSide = side; omsConnector = connector }
+        else if (shopifySide == null && normalize(connector.exchangeStateLookupServiceName)) { shopifySide = side; shopifyConnector = connector }
+    }
+    if (omsSide == null || shopifySide == null) return
+
+    String omsFileLocation = normalize(omsSide.extractResult?.fileLocation)
+    if (omsFileLocation == null) return
+    File manifestFile = resolveLocationFile(omsFileLocation.replaceAll(/(?i)\.json$/, "") + ".exchange-manifest.json")
+    if (manifestFile == null || !manifestFile.isFile()) return
+    File diffFile = resolveOutputFile(serviceResult)
+    if (diffFile == null || !diffFile.isFile()) return
+
+    Closure omsPairLookupService = (Closure) buildFencedLookup(omsConnector,
+            normalize(omsConnector.pairLookupServiceName), omsSide.source, "externalIds")
+    Closure shopifyLookupService = (Closure) buildFencedLookup(shopifyConnector,
+            normalize(shopifyConnector.exchangeStateLookupServiceName), shopifySide.source, "orderIds")
+    if (omsPairLookupService == null || shopifyLookupService == null) return
+
+    def exchangeStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_VERIFY) : null
+    Map verification
+    try {
+        verification = ExchangePairVerificationSupport.verifyExchangePairs([
+                manifestFile : manifestFile,
+                diffFile     : diffFile,
+                nowMillis    : System.currentTimeMillis(),
+                shopifyLookup: { List<String> ids ->
+                    Map out = (Map) shopifyLookupService.call(ids)
+                    [ok: out?.ok, statesByOrderId: out?.statesByOrderId ?: [:], errors: out?.errors ?: []]
+                },
+                omsPairLookup: { List<String> ids ->
+                    Map out = (Map) omsPairLookupService.call(ids)
+                    [ok: out?.ok, ordersByExternalId: out?.ordersByExternalId ?: [:], errors: out?.errors ?: []]
+                },
+        ])
+    } catch (Throwable t) {
+        verification = [performed: true, appendedCount: 0, lookupFailed: true, checkedPairCount: 0,
+                warnings: ["Exchange verification failed: ${normalize(t.message) ?: t.class.simpleName}".toString()], auditNote: null] as Map
+    }
+    if (ec.message.hasError()) {
+        verification.warnings = ((verification.warnings ?: []) as List) + ((ec.message.getErrors() ?: []) as List)
+        verification.lookupFailed = true
+        ec.message.clearErrors()
+    }
+    if ((verification.appendedCount ?: 0) as long > 0L) {
+        serviceResult.differenceCount = ((serviceResult.differenceCount ?: 0) as long) + ((verification.appendedCount ?: 0) as long)
+    }
+    List exchangeNotes = []
+    if (verification.auditNote) exchangeNotes.add(verification.auditNote)
+    exchangeNotes.addAll((verification.warnings ?: []) as List)
+    if (exchangeNotes) serviceResult.processingWarnings = ((serviceResult.processingWarnings ?: []) as List) + exchangeNotes
+    // Task 7 note: unresolvedShopifyCount (Task 6 contract addition) has no dedicated run-step
+    // column, but ReconciliationRunStep.metricsJson is exactly the "optional non-secret per-stage
+    // metrics" natural key for it, so it rides along in the STAGE_VERIFY step detail here in
+    // addition to the warnings ExchangePairVerificationSupport already raises per unresolved id.
+    RunObservability.endStep(ec, exchangeStep,
+            verification.lookupFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
+            [recordCount : verification.checkedPairCount ?: 0,
+             errorMessage: verification.lookupFailed && verification.warnings ? verification.warnings.first().toString() : null,
+             metricsJson : JsonOutput.toJson([unresolvedShopifyCount: verification.unresolvedShopifyCount ?: 0])])
+}
+
 def runVerificationPass = { Map serviceResult, Object file1Source, Object file2Source, String file1Label, String file2Label ->
     // Rule execution failure preserves partial diffs for investigation — never rewrite those.
     if (serviceResult.ruleExecutionFailed == true) return
@@ -675,6 +780,8 @@ try {
                                     // Verification pass reads and may rewrite the artifact writeRuleSetOutput
                                     // just produced, and adjusts serviceResult counts BEFORE they are persisted.
                                     runVerificationPass(serviceResult, file1Source, file2Source, file1Label, file2Label)
+                                    runExchangeVerificationPass(serviceResult, file1Source, file2Source,
+                                            (Map) file1Result, (Map) file2Result)
                                     String resultDataManagerPath = serviceResult.diffLocation ?
                                             (DataManagerSupport.relativeDataManagerPath(ec, new File(serviceResult.diffLocation as String)) ?: serviceResult.diffFileName) :
                                             serviceResult.diffFileName

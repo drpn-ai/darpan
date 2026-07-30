@@ -727,6 +727,7 @@ SERVICE get ReconciliationRunStatus
     steps : List
     steps.completedDate : Timestamp
     steps.errorMessage : String
+    steps.metricsJson : String
     steps.recordCount : Integer
     steps.stageCode : String
     steps.stageSequence : Integer

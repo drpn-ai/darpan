@@ -710,6 +710,144 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
+    void missingReconciliationRunResultIdSkipsAsNoResultId() {
+        // Review fix round 1, finding 1: NO_RESULT_ID is new logic (the old single-webhook code had no
+        // resultId-shaped guard at all) — a context map with no reconciliationRunResultId must skip
+        // before any entity read, with zero deliveries.
+        FakeEc ec = fakeEc()
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        try {
+            Map<String, Object> result = TenantNotificationSupport.notifyRunCompleted(ec, [
+                    companyUserGroupId: "TENANT_A",
+            ])
+
+            assertEquals("NO_RESULT_ID", result.skippedReason)
+            assertFalse((boolean) result.attempted)
+            assertTrue(deliveries.isEmpty())
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+    }
+
+    @Test
+    void resultNotFoundWhenRunResultRowIsMissing() {
+        // Review fix round 1, finding 1: a resultId that resolves to no row (RESULT_NOT_FOUND) must
+        // skip cleanly rather than NPE or fall through to destination resolution.
+        FakeEc ec = fakeEc()
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        try {
+            Map<String, Object> result = TenantNotificationSupport.notifyRunCompleted(ec, [
+                    companyUserGroupId       : "TENANT_A",
+                    reconciliationRunResultId: "RUN_RESULT_GHOST",
+            ])
+
+            assertEquals("RESULT_NOT_FOUND", result.skippedReason)
+            assertFalse((boolean) result.attempted)
+            assertTrue(deliveries.isEmpty())
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+    }
+
+    @Test
+    void tenantMismatchSkipsWithoutStampingNotifiedDate() {
+        // Review fix round 1, finding 1: the run-result row belongs to TENANT_B but the caller's
+        // context claims TENANT_A — this is precisely the cross-tenant guard call out in the review
+        // ("a future refactor could silently invert or drop the comparison"). Must refuse with
+        // TENANT_MISMATCH, zero deliveries, and critically must NOT stamp notifiedDate on a row the
+        // call was refused access to (a spoofed tenantId must not be able to burn a real dedupe stamp).
+        FakeEc ec = fakeEc()
+        ec.entity.add("darpan.reconciliation.ReconciliationRunResult", [
+                reconciliationRunResultId: "RUN_RESULT_1",
+                companyUserGroupId       : "TENANT_B",
+        ])
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        Map<String, Object> result
+        try {
+            result = TenantNotificationSupport.notifyRunCompleted(ec, [
+                    companyUserGroupId       : "TENANT_A",
+                    reconciliationRunResultId: "RUN_RESULT_1",
+            ])
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+
+        assertEquals("TENANT_MISMATCH", result.skippedReason)
+        assertFalse((boolean) result.attempted)
+        assertTrue(deliveries.isEmpty())
+        FakeValue runResultRow = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"].find {
+            it.reconciliationRunResultId == "RUN_RESULT_1"
+        }
+        assertNull(runResultRow.notifiedDate)
+    }
+
+    @Test
+    void secondCallForSameRunAfterDestinationsResolvedIsAlreadyNotified() {
+        // Review fix round 1, finding 2: atomic claim-then-deliver dedupe. Two sequential calls for the
+        // SAME run-result with a valid destination must deliver exactly once — the first call's
+        // claimNotification() wins the conditional update (notifiedDate IS NULL -> set), the second
+        // call's claim then matches zero rows (notifiedDate no longer null) and returns
+        // ALREADY_NOTIFIED without delivering again. This is the TOCTOU guard: a plain read-then-write
+        // would let both calls pass the read-only ALREADY_NOTIFIED check before either stamped.
+        FakeEc ec = fakeEc()
+        String webhookUrl = "https://chat.googleapis.com/v1/spaces/OPS_SPACE/messages?key=test-key&token=test-token"
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_OPS",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Ops",
+                googleChatWebhookUrl: webhookUrl,
+                isActive            : "Y",
+        ])
+        ec.entity.add("darpan.reconciliation.ReconciliationRunResult", [
+                reconciliationRunResultId: "RUN_RESULT_1",
+                companyUserGroupId       : "TENANT_A",
+        ])
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        Map<String, Object> firstResult
+        Map<String, Object> secondResult
+        try {
+            firstResult = TenantNotificationSupport.notifyRunCompleted(ec, [
+                    companyUserGroupId       : "TENANT_A",
+                    reconciliationRunResultId: "RUN_RESULT_1",
+                    chatSpaceId              : "CS_OPS",
+            ])
+            secondResult = TenantNotificationSupport.notifyRunCompleted(ec, [
+                    companyUserGroupId       : "TENANT_A",
+                    reconciliationRunResultId: "RUN_RESULT_1",
+                    chatSpaceId              : "CS_OPS",
+            ])
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+
+        assertEquals(1, deliveries.size())
+        assertTrue((boolean) firstResult.ok)
+        assertEquals(1, firstResult.deliveredCount)
+        assertEquals("ALREADY_NOTIFIED", secondResult.skippedReason)
+        assertFalse((boolean) secondResult.attempted)
+    }
+
+    @Test
     void apiExecutionRecordsNoDataWhenOneSourceIsEmpty() {
         FakeEc ec = fakeEc()
         seedApiAutomation(ec)
@@ -1469,10 +1607,26 @@ class AutomationExecutionSupportTests {
             entity.listCounts[entityName] = (entity.listCounts[entityName] ?: 0) + 1
             List<FakeValue> matchedRows = entity.rows[entityName].findAll { value ->
                 conditions.every { fieldName, expected ->
+                    // A null condition value means IS NULL (mirrors Moqui EntityFind semantics) — a
+                    // missing/absent key on the row map already reads as null via Groovy Map.get(), so
+                    // the same equality check below is IS-NULL-compatible with no special-casing.
                     value[fieldName] == expected
                 }
             }
             return maxRows != null ? matchedRows.take(maxRows) : matchedRows
+        }
+
+        // Atomic claim-then-deliver support (Task 6 fix round 1): bulk-update every row matching the
+        // accumulated conditions and report how many rows were touched, mirroring Moqui's
+        // EntityFind.updateAll(Map) contract (long row count). Reuses list() so the null-means-IS-NULL
+        // condition semantics stay identical between reads and this conditional write.
+        long updateAll(Map<String, Object> fieldsToSet) {
+            List<FakeValue> matchedRows = list()
+            matchedRows.each { FakeValue row ->
+                fieldsToSet.each { fieldName, value -> row.set(fieldName, value) }
+                row.updated = true
+            }
+            return matchedRows.size() as long
         }
     }
 

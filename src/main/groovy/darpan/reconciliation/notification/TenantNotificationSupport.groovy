@@ -97,9 +97,16 @@ class TenantNotificationSupport {
         List<Map<String, Object>> destinations = resolveDestinationChatSpaces(
                 ec, tenantId, ((context.chatSpaceId)?.toString()?.trim()), resultId)
         if (!destinations) {
-            stampNotified(ec, resultRow)
-            return [ok: true, attempted: false, skippedReason: "NO_DESTINATIONS"]
+            return claimNotification(ec, resultId) ?
+                    [ok: true, attempted: false, skippedReason: "NO_DESTINATIONS"] :
+                    [ok: true, attempted: false, skippedReason: "ALREADY_NOTIFIED"]
         }
+        // Atomic claim-then-deliver: the conditional update below (WHERE notifiedDate IS NULL) is the
+        // race guard — two concurrent calls for the same run-result can both pass the read-only
+        // ALREADY_NOTIFIED check above, but only one can win this claim. The loser reports
+        // ALREADY_NOTIFIED without delivering. A failed delivery still consumes the claim (no
+        // automatic retries) — same semantics as the prior post-delivery stamp.
+        if (!claimNotification(ec, resultId)) return [ok: true, attempted: false, skippedReason: "ALREADY_NOTIFIED"]
 
         Map<String, Object> payload = ((ec.service.sync()
                 .name("reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload")
@@ -123,7 +130,6 @@ class TenantNotificationSupport {
                         tenantId, resultId, destination.spaceName, t.message)
             }
         }
-        stampNotified(ec, resultRow)
         return [ok: failedCount == 0, attempted: true, deliveredCount: deliveredCount, failedCount: failedCount]
     }
 
@@ -156,12 +162,18 @@ class TenantNotificationSupport {
         return destinations
     }
 
-    private static void stampNotified(def ec, def resultRow) {
+    private static boolean claimNotification(def ec, String resultId) {
         try {
-            resultRow.set("notifiedDate", ec.user.nowTimestamp)
-            resultRow.update()
+            long updated = TenantScopedFinder.findGlobalUnscoped(ec,
+                            DarpanEntityConstants.RECONCILIATION_RUN_RESULT,
+                            "atomic notify claim — conditional update keyed by run-result id where notifiedDate is null")
+                    ?.condition("reconciliationRunResultId", resultId)
+                    ?.condition("notifiedDate", null)
+                    ?.updateAll([notifiedDate: ec.user.nowTimestamp]) ?: 0
+            return updated > 0
         } catch (Throwable t) {
-            logger.warn("Failed to stamp notifiedDate on run result {}: {}", resultRow.reconciliationRunResultId, t.message)
+            logger.warn("Failed to claim notification for run result {}: {}", resultId, t.message)
+            return false
         }
     }
 

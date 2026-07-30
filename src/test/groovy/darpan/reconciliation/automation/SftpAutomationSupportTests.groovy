@@ -356,9 +356,24 @@ class SftpAutomationSupportTests {
         List<FakeValue> list() {
             return entity.rows[entityName].findAll { value ->
                 conditions.every { fieldName, expected ->
+                    // A null condition value means IS NULL (mirrors Moqui EntityFind semantics) — a
+                    // missing/absent key on the row map already reads as null via Groovy Map.get(), so
+                    // the same equality check above is IS-NULL-compatible with no special-casing.
                     value[fieldName] == expected
                 }
             }
+        }
+
+        // Atomic claim-then-deliver support (Task 6 fix round 1): bulk-update every row matching the
+        // accumulated conditions and report how many rows were touched, mirroring Moqui's
+        // EntityFind.updateAll(Map) contract (long row count).
+        long updateAll(Map<String, Object> fieldsToSet) {
+            List<FakeValue> matchedRows = list()
+            matchedRows.each { FakeValue row ->
+                fieldsToSet.each { fieldName, value -> row.set(fieldName, value) }
+                row.updated = true
+            }
+            return matchedRows.size() as long
         }
     }
 

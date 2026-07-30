@@ -51,14 +51,17 @@ class SftpAutomationSupportTests {
                 description    : "Tenant A",
         ])
         String webhookUrl = "https://chat.googleapis.com/v1/spaces/TENANT_A_SPACE/messages?key=test-key&token=test-token"
-        ec.entity.add("darpan.reconciliation.TenantNotificationSetting", [
-                companyUserGroupId   : "TENANT_A",
-                createdByUserId      : "tester",
-                googleChatWebhookUrl : webhookUrl,
-                isActive             : "Y",
-                createdDate          : NOW,
-                lastUpdatedDate      : NOW,
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_OPS",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Ops",
+                googleChatWebhookUrl: webhookUrl,
+                isActive            : "Y",
         ])
+        FakeValue notifyAutomation = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find {
+            it.automationId == "AUTO_SFTP"
+        }
+        notifyAutomation.put("chatSpaceId", "CS_OPS")
         ec.service.nextResult = [
                 dataAvailable       : true,
                 statusMessage       : "Complete",

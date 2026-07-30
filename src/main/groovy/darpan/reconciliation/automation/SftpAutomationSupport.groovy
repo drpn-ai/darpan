@@ -174,6 +174,7 @@ class SftpAutomationSupport {
                         savedRunId               : normalize(readField(automation, "savedRunId")),
                         reconciliationRunId      : normalize(readField(automation, "reconciliationRunId")),
                         companyUserGroupId       : normalize(readField(automation, "companyUserGroupId")),
+                        chatSpaceId              : normalize(readField(automation, "chatSpaceId")),
                         resultDataManagerPath    : resultDataManagerPath,
                         file1SystemEnumId        : normalize(readField(file1Source, "systemEnumId")),
                         file2SystemEnumId        : normalize(readField(file2Source, "systemEnumId")),

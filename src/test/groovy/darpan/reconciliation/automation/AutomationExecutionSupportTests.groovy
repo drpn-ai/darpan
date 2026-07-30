@@ -454,14 +454,17 @@ class AutomationExecutionSupportTests {
                 description    : "Tenant A",
         ])
         String webhookUrl = "https://chat.googleapis.com/v1/spaces/TENANT_A_SPACE/messages?key=test-key&token=test-token"
-        ec.entity.add("darpan.reconciliation.TenantNotificationSetting", [
-                companyUserGroupId   : "TENANT_A",
-                createdByUserId      : "tester",
-                googleChatWebhookUrl : webhookUrl,
-                isActive             : "Y",
-                createdDate          : NOW,
-                lastUpdatedDate      : NOW,
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_OPS",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Ops",
+                googleChatWebhookUrl: webhookUrl,
+                isActive            : "Y",
         ])
+        FakeValue notifyAutomation = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find {
+            it.automationId == "AUTO_API"
+        }
+        notifyAutomation.put("chatSpaceId", "CS_OPS")
         ec.service.responder = { FakeServiceCall call ->
             if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
                 return [
@@ -513,6 +516,197 @@ class AutomationExecutionSupportTests {
         } finally {
             TenantNotificationSupport.resetDeliveryHook()
         }
+    }
+
+    @Test
+    void notifiesAutomationSpaceAndSubscriberSpacesDeduped() {
+        // Task 6 fan-out: the automation's own chat space (CS_OPS) plus notify-me subscriber spaces
+        // (CS_ME via USER_A, CS_OPS again via USER_B) must be deduped into exactly 2 deliveries.
+        FakeEc ec = fakeEc()
+        String opsWebhookUrl = "https://chat.googleapis.com/v1/spaces/OPS_SPACE/messages?key=test-key&token=test-token"
+        String meWebhookUrl = "https://chat.googleapis.com/v1/spaces/ME_SPACE/messages?key=test-key&token=test-token"
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_OPS",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Ops",
+                googleChatWebhookUrl: opsWebhookUrl,
+                isActive            : "Y",
+        ])
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_ME",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Me",
+                googleChatWebhookUrl: meWebhookUrl,
+                isActive            : "Y",
+        ])
+        ec.entity.add("darpan.reconciliation.ReconciliationRunResult", [
+                reconciliationRunResultId: "RUN_RESULT_1",
+                companyUserGroupId       : "TENANT_A",
+        ])
+        ec.entity.add("darpan.reconciliation.ReconciliationRunNotifySubscription", [
+                reconciliationRunResultId: "RUN_RESULT_1",
+                userId                   : "USER_A",
+                chatSpaceId              : "CS_ME",
+        ])
+        ec.entity.add("darpan.reconciliation.ReconciliationRunNotifySubscription", [
+                reconciliationRunResultId: "RUN_RESULT_1",
+                userId                   : "USER_B",
+                chatSpaceId              : "CS_OPS",
+        ])
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        try {
+            Map<String, Object> result = TenantNotificationSupport.notifyRunCompleted(ec, [
+                    companyUserGroupId       : "TENANT_A",
+                    reconciliationRunResultId: "RUN_RESULT_1",
+                    chatSpaceId              : "CS_OPS",
+                    runName                  : "API Automation",
+            ])
+
+            assertEquals(2, deliveries.size())
+            Set<String> deliveredUrls = deliveries*.webhookUrl as Set<String>
+            assertTrue(deliveredUrls.contains(opsWebhookUrl))
+            assertTrue(deliveredUrls.contains(meWebhookUrl))
+            assertTrue((boolean) result.ok)
+            assertEquals(2, result.deliveredCount)
+            assertEquals(0, result.failedCount)
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+    }
+
+    @Test
+    void skipsWhenAlreadyNotified() {
+        // Dedupe guard: a run-result row that already carries notifiedDate must be skipped entirely —
+        // no destinations resolved, no deliveries attempted.
+        FakeEc ec = fakeEc()
+        ec.entity.add("darpan.reconciliation.ReconciliationRunResult", [
+                reconciliationRunResultId: "RUN_RESULT_1",
+                companyUserGroupId       : "TENANT_A",
+                notifiedDate             : NOW,
+        ])
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        try {
+            Map<String, Object> result = TenantNotificationSupport.notifyRunCompleted(ec, [
+                    companyUserGroupId       : "TENANT_A",
+                    reconciliationRunResultId: "RUN_RESULT_1",
+            ])
+
+            assertEquals("ALREADY_NOTIFIED", result.skippedReason)
+            assertFalse((boolean) result.attempted)
+            assertTrue(deliveries.isEmpty())
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+    }
+
+    @Test
+    void inactiveOrForeignSpacesAreDropped() {
+        // A subscription pointing at an inactive space and one at a space owned by another tenant must
+        // both be dropped — zero deliveries — but notifiedDate is still stamped (the run WAS processed;
+        // there was simply nothing valid to deliver to).
+        FakeEc ec = fakeEc()
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_INACTIVE",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Inactive",
+                googleChatWebhookUrl: "https://chat.googleapis.com/v1/spaces/INACTIVE_SPACE/messages?key=test-key&token=test-token",
+                isActive            : "N",
+        ])
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_FOREIGN",
+                companyUserGroupId  : "TENANT_B",
+                spaceName           : "Foreign",
+                googleChatWebhookUrl: "https://chat.googleapis.com/v1/spaces/FOREIGN_SPACE/messages?key=test-key&token=test-token",
+                isActive            : "Y",
+        ])
+        ec.entity.add("darpan.reconciliation.ReconciliationRunResult", [
+                reconciliationRunResultId: "RUN_RESULT_1",
+                companyUserGroupId       : "TENANT_A",
+        ])
+        ec.entity.add("darpan.reconciliation.ReconciliationRunNotifySubscription", [
+                reconciliationRunResultId: "RUN_RESULT_1",
+                userId                   : "USER_A",
+                chatSpaceId              : "CS_INACTIVE",
+        ])
+        ec.entity.add("darpan.reconciliation.ReconciliationRunNotifySubscription", [
+                reconciliationRunResultId: "RUN_RESULT_1",
+                userId                   : "USER_B",
+                chatSpaceId              : "CS_FOREIGN",
+        ])
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        Map<String, Object> result
+        try {
+            result = TenantNotificationSupport.notifyRunCompleted(ec, [
+                    companyUserGroupId       : "TENANT_A",
+                    reconciliationRunResultId: "RUN_RESULT_1",
+            ])
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+
+        assertEquals("NO_DESTINATIONS", result.skippedReason)
+        assertTrue(deliveries.isEmpty())
+        FakeValue runResultRow = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"].find {
+            it.reconciliationRunResultId == "RUN_RESULT_1"
+        }
+        assertNotNull(runResultRow.notifiedDate)
+    }
+
+    @Test
+    void deliveryFailureIsWarnOnly() {
+        // A hard delivery failure (non-2xx) must be recorded as a failed count, not propagate as an
+        // exception — notification is best-effort and must never break the run it is reporting on.
+        FakeEc ec = fakeEc()
+        String webhookUrl = "https://chat.googleapis.com/v1/spaces/FAIL_SPACE/messages?key=test-key&token=test-token"
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_OPS",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Ops",
+                googleChatWebhookUrl: webhookUrl,
+                isActive            : "Y",
+        ])
+        ec.entity.add("darpan.reconciliation.ReconciliationRunResult", [
+                reconciliationRunResultId: "RUN_RESULT_1",
+                companyUserGroupId       : "TENANT_A",
+        ])
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            return [ok: false, statusCode: 500]
+        }
+
+        Map<String, Object> result
+        try {
+            result = TenantNotificationSupport.notifyRunCompleted(ec, [
+                    companyUserGroupId       : "TENANT_A",
+                    reconciliationRunResultId: "RUN_RESULT_1",
+                    chatSpaceId              : "CS_OPS",
+            ])
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+
+        assertFalse((boolean) result.ok)
+        assertTrue((boolean) result.attempted)
+        assertEquals(1, result.failedCount)
+        assertEquals(0, result.deliveredCount)
+        FakeValue runResultRow = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"].find {
+            it.reconciliationRunResultId == "RUN_RESULT_1"
+        }
+        assertNotNull(runResultRow.notifiedDate)
     }
 
     @Test

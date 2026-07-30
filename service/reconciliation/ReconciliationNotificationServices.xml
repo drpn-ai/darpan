@@ -27,6 +27,7 @@
                  ruleset does not produce a normal "completed" alert. -->
             <parameter name="statusEnumId"/>
             <parameter name="processingWarnings" type="List"/>
+            <parameter name="terminationReason"/>
         </in-parameters>
         <out-parameters>
             <parameter name="payload" type="Map"/>
@@ -48,6 +49,10 @@
             <set field="lines" from="[headerPrefix + runNameValue]"/>
             <if condition="runFailed">
                 <set field="ignoreLine" from="lines.add('⚠ Status: FAILED — the ruleset did not fully evaluate; results may be incomplete.')"/>
+            </if>
+            <set field="terminationReasonValue" from="((terminationReason)?.toString()?.trim())"/>
+            <if condition="terminationReasonValue">
+                <set field="ignoreLine" from="lines.add('⚠ ' + terminationReasonValue)"/>
             </if>
             <if condition="tenantLabelValue">
                 <set field="ignoreLine" from="lines.add('Tenant: ' + tenantLabelValue)"/>

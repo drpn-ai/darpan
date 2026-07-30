@@ -81,21 +81,24 @@ class TenantNotificationSupport {
         String tenantId = ((context.companyUserGroupId)?.toString()?.trim())
         String resultId = ((context.reconciliationRunResultId)?.toString()?.trim())
         if (!tenantId) return [ok: true, attempted: false, skippedReason: "NO_TENANT"]
+        if (!resultId) return [ok: true, attempted: false, skippedReason: "NO_RESULT_ID"]
 
-        // Notification setting is read by the run-result's tenantId (trusted server-side value from
-        // the completed run, not the caller's active-tenant preference). Use findGlobalUnscoped with
-        // an explicit companyUserGroupId condition so the lookup is pinned to exactly one tenant —
-        // no global fall-open (the condition is mandatory, not conditional).
-        def settings = TenantScopedFinder.findGlobalUnscoped(ec,
-                        DarpanEntityConstants.TENANT_NOTIFICATION_SETTING,
-                        "notification-setting keyed by run-result tenantId — explicit companyUserGroupId condition always applied")
-                ?.condition("companyUserGroupId", tenantId)
-                ?.useCache(false)
-                ?.one()
-        String webhookUrl = ((settings?.googleChatWebhookUrl)?.toString()?.trim())
-        boolean active = ((settings?.isActive)?.toString()?.trim()) != "N"
-        if (!settings || !active || !webhookUrl) {
-            return [ok: true, attempted: false, skippedReason: "NOT_CONFIGURED"]
+        // Dedupe + tenant re-check read the trusted run-result row, not caller input.
+        def resultRow = TenantScopedFinder.findGlobalUnscoped(ec,
+                        DarpanEntityConstants.RECONCILIATION_RUN_RESULT,
+                        "notify dedupe read keyed by run-result id — tenant re-checked against the row")
+                ?.condition("reconciliationRunResultId", resultId)
+                ?.useCache(false)?.one()
+        if (resultRow == null) return [ok: true, attempted: false, skippedReason: "RESULT_NOT_FOUND"]
+        if (((resultRow.companyUserGroupId)?.toString()?.trim()) != tenantId)
+            return [ok: true, attempted: false, skippedReason: "TENANT_MISMATCH"]
+        if (resultRow.notifiedDate != null) return [ok: true, attempted: false, skippedReason: "ALREADY_NOTIFIED"]
+
+        List<Map<String, Object>> destinations = resolveDestinationChatSpaces(
+                ec, tenantId, ((context.chatSpaceId)?.toString()?.trim()), resultId)
+        if (!destinations) {
+            stampNotified(ec, resultRow)
+            return [ok: true, attempted: false, skippedReason: "NO_DESTINATIONS"]
         }
 
         Map<String, Object> payload = ((ec.service.sync()
@@ -103,28 +106,62 @@ class TenantNotificationSupport {
                 .parameters(context)
                 .disableAuthz()
                 .call()?.payload) ?: [:]) as Map<String, Object>
-        try {
-            Map<String, Object> delivery = deliverGoogleChat(webhookUrl, payload)
-            boolean ok = delivery.ok == true
-            if (!ok) {
-                logger.warn("Google Chat run notification returned status {} for tenant {} result {}",
-                        delivery.statusCode, tenantId, resultId ?: "unknown")
+
+        int deliveredCount = 0
+        int failedCount = 0
+        for (Map<String, Object> destination : destinations) {
+            try {
+                Map<String, Object> delivery = deliverGoogleChat((String) destination.webhookUrl, payload)
+                if (delivery.ok == true) { deliveredCount++ } else {
+                    failedCount++
+                    logger.warn("Google Chat run notification returned status {} for tenant {} result {} space {}",
+                            delivery.statusCode, tenantId, resultId, destination.spaceName)
+                }
+            } catch (Throwable t) {
+                failedCount++
+                logger.warn("Google Chat run notification failed for tenant {} result {} space {}: {}",
+                        tenantId, resultId, destination.spaceName, t.message)
             }
-            return [
-                    ok              : ok,
-                    attempted       : true,
-                    statusCode      : delivery.statusCode,
-                    webhookUrlMasked: maskGoogleChatWebhookUrl(webhookUrl),
-            ]
+        }
+        stampNotified(ec, resultRow)
+        return [ok: failedCount == 0, attempted: true, deliveredCount: deliveredCount, failedCount: failedCount]
+    }
+
+    static List<Map<String, Object>> resolveDestinationChatSpaces(def ec, String tenantId,
+                                                                  String automationChatSpaceId, String resultId) {
+        Set<String> chatSpaceIds = new LinkedHashSet<String>()
+        if (automationChatSpaceId) chatSpaceIds.add(automationChatSpaceId)
+        def subscriptionRows = TenantScopedFinder.findGlobalUnscoped(ec,
+                        DarpanEntityConstants.RUN_NOTIFY_SUBSCRIPTION,
+                        "subscription rows keyed by run-result id — space rows re-pinned to run tenant below")
+                ?.condition("reconciliationRunResultId", resultId)
+                ?.useCache(false)?.list() ?: []
+        for (def subscriptionRow : subscriptionRows) {
+            String chatSpaceId = ((subscriptionRow.chatSpaceId)?.toString()?.trim())
+            if (chatSpaceId) chatSpaceIds.add(chatSpaceId)
+        }
+        List<Map<String, Object>> destinations = []
+        for (String chatSpaceId : chatSpaceIds) {
+            def spaceRow = TenantScopedFinder.findGlobalUnscoped(ec,
+                            DarpanEntityConstants.TENANT_CHAT_SPACE,
+                            "chat-space read pinned to run-result tenantId — explicit companyUserGroupId condition always applied")
+                    ?.condition("chatSpaceId", chatSpaceId)
+                    ?.condition("companyUserGroupId", tenantId)
+                    ?.useCache(false)?.one()
+            String webhookUrl = ((spaceRow?.googleChatWebhookUrl)?.toString()?.trim())
+            if (spaceRow != null && ((spaceRow.isActive)?.toString()?.trim()) != "N" && webhookUrl) {
+                destinations.add([chatSpaceId: chatSpaceId, spaceName: spaceRow.spaceName, webhookUrl: webhookUrl])
+            }
+        }
+        return destinations
+    }
+
+    private static void stampNotified(def ec, def resultRow) {
+        try {
+            resultRow.set("notifiedDate", ec.user.nowTimestamp)
+            resultRow.update()
         } catch (Throwable t) {
-            logger.warn("Google Chat run notification failed for tenant {} result {}: {}",
-                    tenantId, resultId ?: "unknown", t.message)
-            return [
-                    ok              : false,
-                    attempted       : true,
-                    errorMessage    : t.message,
-                    webhookUrlMasked: maskGoogleChatWebhookUrl(webhookUrl),
-            ]
+            logger.warn("Failed to stamp notifiedDate on run result {}: {}", resultRow.reconciliationRunResultId, t.message)
         }
     }
 

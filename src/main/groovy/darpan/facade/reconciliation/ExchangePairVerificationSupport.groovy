@@ -32,6 +32,7 @@ class ExchangePairVerificationSupport {
     static final BigDecimal DEFAULT_AMOUNT_TOLERANCE = new BigDecimal("0.01")
 
     private static final String DIFFERENCES_HEADER = "\"differences\":["
+    private static final String PROCESSING_WARNINGS_PREFIX = "\"processingWarnings\":"
     private static final Pattern TOTAL_DIFFERENCES_COUNT = Pattern.compile(/("totalDifferences":)(\d+)/)
 
     static Map<String, Object> verifyExchangePairs(Map<String, Object> args) {
@@ -129,9 +130,21 @@ class ExchangePairVerificationSupport {
             }
         }
 
+        // Built before the append so the SAME rewrite pass that adds the rows also injects this note
+        // into the artifact's processingWarnings — otherwise a reopened saved run shows the new rows
+        // with no explanation (the in-memory auditNote never reached the file on its own). rows.size()
+        // stands in for the eventual result.appendedCount (identical value; appendedCount is only
+        // assigned below, after a successful append, since a failed append must leave it at 0).
+        String auditNote = "Exchange pair verification checked ${result.checkedPairCount} pair(s): " +
+                "${rows.size()} discrepancy row(s) appended, ${result.pendingCount} pending (younger than ${graceDays}d), " +
+                "${result.skippedCancelledCount} cancelled skipped."
+        if ((result.unresolvedShopifyCount as int) > 0) {
+            auditNote += " ${result.unresolvedShopifyCount} unresolved in Shopify."
+        }
+
         if (rows) {
             try {
-                appendDiffRows(diffFile, rows)
+                appendDiffRows(diffFile, rows, auditNote)
             } catch (Exception e) {
                 warnings.add("Exchange verification could not write diff rows: ${e.message}".toString())
                 result.lookupFailed = true
@@ -139,12 +152,6 @@ class ExchangePairVerificationSupport {
             }
             result.appendedCount = rows.size()
             result.appendedByType = rows.countBy { it.diffType }
-        }
-        String auditNote = "Exchange pair verification checked ${result.checkedPairCount} pair(s): " +
-                "${result.appendedCount} discrepancy row(s) appended, ${result.pendingCount} pending (younger than ${graceDays}d), " +
-                "${result.skippedCancelledCount} cancelled skipped."
-        if ((result.unresolvedShopifyCount as int) > 0) {
-            auditNote += " ${result.unresolvedShopifyCount} unresolved in Shopify."
         }
         result.auditNote = auditNote
         return result
@@ -168,12 +175,19 @@ class ExchangePairVerificationSupport {
     /**
      * Streaming append: rows live one-per-line inside "differences":[ ... ]; the last row line ends
      * with "]". Rewrites line by line to a temp file, converts the last row's "]" to ",", writes the
-     * new rows, and bumps "totalDifferences" in the summary line. Atomic same-directory move.
+     * new rows, bumps "totalDifferences" in the summary line, and — mirroring
+     * MissingDiffVerificationSupport's PROCESSING_WARNINGS_PREFIX handling exactly — injects
+     * auditNote into the artifact's "processingWarnings" array in the same single pass, so a
+     * reopened saved run explains the appended rows instead of only surfacing them silently.
+     * If the document has no "processingWarnings" line (never true for writeDiffDatasetOutput's
+     * real output, but true for slimmer test fixtures) nothing is injected and no such line is
+     * created — same as the sibling's behavior when that header is absent. Atomic same-directory move.
      */
-    protected static void appendDiffRows(File diffFile, List<Map> rows) {
+    protected static void appendDiffRows(File diffFile, List<Map> rows, String auditNote) {
         File tempFile = File.createTempFile(diffFile.name + "-", ".exchange-verify", diffFile.parentFile)
         boolean committed = false
         try {
+            JsonSlurper slurper = new JsonSlurper()
             List<String> rowJson = rows.collect { JsonOutput.toJson(it) }
             tempFile.withWriter("UTF-8") { Writer writer ->
                 boolean inRows = false
@@ -184,6 +198,10 @@ class ExchangePairVerificationSupport {
                     if (!inRows && countMatcher.find()) {
                         long bumped = Long.parseLong(countMatcher.group(2)) + rows.size()
                         outLine = countMatcher.replaceFirst('$1' + bumped)
+                    }
+                    if (!inRows && auditNote && outLine.startsWith(PROCESSING_WARNINGS_PREFIX)) {
+                        outLine = PROCESSING_WARNINGS_PREFIX +
+                                JsonOutput.toJson(appendedWarnings(slurper, outLine, auditNote)) + ","
                     }
                     if (!appended) {
                         if (!inRows && outLine.startsWith(DIFFERENCES_HEADER)) {
@@ -216,6 +234,26 @@ class ExchangePairVerificationSupport {
             committed = true
         } finally {
             if (!committed) tempFile.delete()
+        }
+    }
+
+    /** Mirrors MissingDiffVerificationSupport.appendedWarnings exactly: parse the existing
+     *  "processingWarnings" array (empty list if unparseable), append auditNote when present. */
+    private static List appendedWarnings(JsonSlurper slurper, String warningsLine, String auditNote) {
+        Object fragment = headerFragment(slurper, warningsLine, PROCESSING_WARNINGS_PREFIX)
+        List warningsList = fragment instanceof List ? new ArrayList((List) fragment) : []
+        if (auditNote) warningsList.add(auditNote)
+        return warningsList
+    }
+
+    /** Mirrors MissingDiffVerificationSupport.headerFragment exactly. */
+    private static Object headerFragment(JsonSlurper slurper, String line, String prefix) {
+        String fragment = line.substring(prefix.length()).trim()
+        if (fragment.endsWith(",")) fragment = fragment.substring(0, fragment.length() - 1)
+        try {
+            return slurper.parseText(fragment)
+        } catch (Exception ignored) {
+            return null
         }
     }
 

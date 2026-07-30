@@ -6910,6 +6910,9 @@
                                 },
                                 "errorMessage": {
                                     "type": "string"
+                                },
+                                "metricsJson": {
+                                    "type": "string"
                                 }
                             }
                         }

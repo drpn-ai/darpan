@@ -2581,6 +2581,7 @@
                 <parameter name="completedDate" type="Timestamp"/>
                 <parameter name="recordCount" type="Integer"/>
                 <parameter name="errorMessage"/>
+                <parameter name="metricsJson"/>
             </parameter>
             <parameter name="mySubscription" type="Boolean"/>
             <parameter name="mySubscriptionSpaceName"/>
@@ -2603,7 +2604,7 @@
                 <set field="completedDate" from="runRow.completedDate"/>
                 <set field="errorMessage" from="runRow.errorMessage"/>
                 <set field="stepRows" from="ec.entity.find('darpan.reconciliation.ReconciliationRunStep').condition('reconciliationRunResultId', runIdValue).orderBy('stageSequence').disableAuthz().useCache(false).list() ?: []"/>
-                <set field="steps" from="stepRows.collect { row -> [stageCode: row.stageCode, stageSequence: row.stageSequence, statusEnumId: row.statusEnumId, startedDate: row.startedDate, completedDate: row.completedDate, recordCount: row.recordCount, errorMessage: row.errorMessage] }"/>
+                <set field="steps" from="stepRows.collect { row -> [stageCode: row.stageCode, stageSequence: row.stageSequence, statusEnumId: row.statusEnumId, startedDate: row.startedDate, completedDate: row.completedDate, recordCount: row.recordCount, errorMessage: row.errorMessage, metricsJson: row.metricsJson] }"/>
                 <set field="subscriptionRow" from="ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('reconciliationRunResultId', runIdValue).condition('userId', ec.user.userId).disableAuthz().useCache(false).one()"/>
                 <set field="mySubscription" from="subscriptionRow != null"/>
                 <set field="mySubscriptionSpaceName" from="subscriptionRow ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('chatSpaceId', subscriptionRow.chatSpaceId).disableAuthz().useCache(false).one()?.spaceName : null"/>

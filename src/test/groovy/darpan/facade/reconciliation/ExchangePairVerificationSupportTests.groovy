@@ -57,6 +57,21 @@ class ExchangePairVerificationSupportTests {
         return f
     }
 
+    /** Full writeDiffDatasetOutput shape (metadata/summary/validationErrors/processingWarnings/
+     *  differences) — the slimmer diffFile() fixture above has no "processingWarnings" line at all,
+     *  so it can't exercise the audit-note injection into the artifact (review finding, Task 7). */
+    private File diffFileWithProcessingWarnings() {
+        File f = tempDir.resolve("diff-with-warnings.json").toFile()
+        f.text = '{\n"metadata":{"file1Label":"OMS","file2Label":"SHOPIFY"},\n' +
+                '"summary":{"totalDifferences":1,"missingObjectDifferenceCount":1},\n' +
+                '"validationErrors":[],\n' +
+                '"processingWarnings":["compare warning"],\n' +
+                '"differences":[\n' +
+                '{"diffType":"MISSING_OBJECT","primaryId":"OTHER1","missingIn":"SHOPIFY","data":{}}]\n' +
+                '}\n'
+        return f
+    }
+
     private static Map entry(Map overrides = [:]) {
         [omsOrderId: "M750653", externalId: "6941645013123", orderName: "EXC-#GOR196990495-1",
          toOrderId: "M686331", grandTotal: 50.0, orderDate: 1785260782199L, statusId: "ORDER_COMPLETED"] + overrides
@@ -104,6 +119,29 @@ class ExchangePairVerificationSupportTests {
         Map parsed = (Map) new JsonSlurper().parseText(text)   // document must stay valid JSON
         assertEquals(2, ((List) parsed.differences).size())
         assertEquals("6941645013123", ((Map) ((List) parsed.differences).last()).primaryId)
+    }
+
+    @Test
+    void appendedRowsInjectAuditNoteIntoArtifactProcessingWarnings() {
+        // Review finding (Task 7): appended rows must not show up in a reopened saved run with no
+        // explanation — the audit note has to land in the artifact's own processingWarnings during
+        // the same rewrite pass that adds the rows, mirroring MissingDiffVerificationSupport.
+        File diff = diffFileWithProcessingWarnings()
+        Map result = ExchangePairVerificationSupport.verifyExchangePairs([
+                manifestFile: manifestFile([entry()]), diffFile: diff, nowMillis: NOW,
+                shopifyLookup: { List ids -> shopifyOk(new BigDecimal("185.71"), false) },
+                omsPairLookup: { List ids -> omsPairOk() }])
+        assertEquals(1, result.appendedCount)
+        assertNotNull(result.auditNote)
+        assertTrue(result.auditNote.toString().contains("1 discrepancy row(s) appended"))
+
+        Map parsed = (Map) new JsonSlurper().parseText(diff.text)   // document must stay valid JSON
+        List processingWarnings = (List) parsed.processingWarnings
+        assertEquals(2, processingWarnings.size())
+        assertEquals("compare warning", processingWarnings[0])       // pre-existing warning preserved
+        assertEquals(result.auditNote, processingWarnings[1])        // audit note appended, not replaced
+        assertEquals(2, ((List) parsed.differences).size())
+        assertEquals(2, ((Map) parsed.summary).totalDifferences)
     }
 
     @Test

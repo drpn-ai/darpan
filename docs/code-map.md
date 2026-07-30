@@ -21,7 +21,8 @@ This wiki lives in `runtime/component/darpan/docs/Home.md`. The Darpan component
   (`poll#SftpAndReconcile`, `run#SftpFileAutomation`, `execute#Automation`,
   `scan#DueAutomations`, `sweep#StuckReconciliationRuns`)
 - Run-completion notifications: `service/reconciliation/ReconciliationNotificationServices.xml`
-  (`build#RunCompletedPayload` for the Google Chat payload)
+  (`build#RunCompletedPayload` for the Google Chat payload; `migrate#TenantNotificationSettings`
+  is the one-time v1.2.0 upgrade service, internal only — see Shared Resources below)
 - JSON schema: `service/jsonschema/JsonSchemaServices.xml`
 - UI facade (JSON-RPC surface for `darpan-ui`): `service/facade/AuthFacadeServices.xml`,
   `SettingsFacadeServices.xml`, `ReconciliationFacadeServices.xml`,
@@ -42,7 +43,10 @@ This wiki lives in `runtime/component/darpan/docs/Home.md`. The Darpan component
   `SftpAutomationSupport.groovy`, `pollSftpAndRunReconciliation.groovy`,
   `StuckRunReaper.groovy` (stale RUNNING/PENDING reaper behind `sweep#StuckReconciliationRuns`)
 - Notifications: `reconciliation/notification/TenantNotificationSupport.groovy`
-  (`notifyRunCompleted`, webhook validation/masking, Google Chat delivery)
+  (`notifyRunCompleted` — chat-space registry fan-out + claim-then-deliver dedupe on
+  `notifiedDate`, webhook validation/masking, Google Chat delivery),
+  `facade/settings/UserNotificationPreferenceSupport.groovy` (per-user default chat space, stored
+  as a per-tenant `UserPreference` JSON map)
 - Facade auth/session: `facade/auth/AuthFacadeSupport.groovy`, `facade/auth/AuthSessionSupport.groovy`
 - Facade shared support: `facade/common/FacadeSupport.groovy`, `TenantAccessSupport.groovy`
   (active-tenant scoping), `PaginationSupport.groovy`, `DataManagerSupport.groovy` (safe
@@ -76,7 +80,9 @@ This wiki lives in `runtime/component/darpan/docs/Home.md`. The Darpan component
 ## Shared Resources
 
 - Entities: `entity/ReconciliationEntities.xml` (runs, results, automations, SFTP/NetSuite
-  settings, `TenantNotificationSetting`), `entity/RuleEntities.xml` (RuleSet, Rule, compare
+  settings, `TenantChatSpace` + `ReconciliationRunNotifySubscription` for the Google Chat
+  notification registry, `TenantNotificationSetting` RETIRED 2026-07-29 — kept one release as
+  `migrate#TenantNotificationSettings` input only), `entity/RuleEntities.xml` (RuleSet, Rule, compare
   scopes/sources), `entity/MappingEntities.xml`, `entity/AuthEntities.xml` (tenant permission
   membership, tenant settings), `entity/JsonSchemaEntities.xml` (`darpan.reconciliation.JsonSchema`)
 - Setup seed data: generic source files in `data/` (for example type, security, system-message,
@@ -92,6 +98,18 @@ This wiki lives in `runtime/component/darpan/docs/Home.md`. The Darpan component
   reader type, and the `component://darpan/data/upgrade-data.xml` location
 - Release upgrade records must also be reflected in the appropriate generic source data file; release preflight generates upgrade candidates from generic source data diffs against the previous tag
 - Archived release upgrade data: versioned files such as `data/releases/pre-reset/2.0.0/upgrade-data.xml`; these are generated release artifacts and should not be treated as source seed files when diffing upgrade data
+- **v1.2.0 one-time migration action** (not covered by `loadDarpanUpgradeData`, which only loads
+  declarative seed data): `reconciliation.ReconciliationNotificationServices.migrate#TenantNotificationSettings`
+  copies each tenant's retired `TenantNotificationSetting` webhook into a new `TenantChatSpace`
+  named "Default space" and links that tenant's webhook-less automations to it. The service is
+  `authenticate="false"` and has no `allow-remote="true"` — it is **not** reachable through
+  `/rpc/json` and must be invoked once per environment from a server-side context with authz
+  disabled (a system/admin execution context, for example a Moqui Tools service-run screen under
+  an `ADMIN` login, or a one-off `ec.service.sync().name(...).disableAuthz().call()` script), never
+  as a normal tenant-user request — `create#darpan.reconciliation.TenantChatSpace` inside the
+  migration is tenant-scope-filtered when a normal user context is active, so running it as a
+  regular authenticated user silently creates nothing. It is idempotent: tenants that already have
+  any `TenantChatSpace` row are skipped, so it is safe to invoke more than once.
 - Theme library: `theme-library/css/tokens.css`, `theme-library/css/components.css`, `theme-library/js/theme-runtime.js`, `theme-library/html/blocks.html`
 - Build config + organization guardrails: `build.gradle` (JDK 21 toolchain, Spark/Drools/MVEL2
   pins, `sparkJava21Opens` JVM flags, `verifyOrganization`) — see `docs/runtime-baseline.md`

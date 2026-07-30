@@ -56,8 +56,10 @@ credentials/secrets; not app-global / super-admin config; rate-limitable; stable
 ### Internal-only (do not expose)
 - Auth / session lifecycle: `login#Session`, `get#SessionInfo`, `logout#*`, `save#ActiveTenant`,
   `save#UserSettings`, `verify/change#OwnPassword`.
-- Tenant & platform settings: `get/save#TenantSettings`, `get/save#TenantNotificationSettings`,
-  `get/save#LlmSettings`, `list#EnumOptions`.
+- Tenant & platform settings: `get/save#TenantSettings`, `list#TenantChatSpaces`,
+  `save/delete#TenantChatSpace`, `get/save#UserNotificationDefault`,
+  `subscribe/unsubscribe#RunNotification`, `get/save#LlmSettings`, `list#EnumOptions`.
+  (`get/save#TenantNotificationSettings` is retired — replaced by the chat-space registry above.)
 - Schema authoring: `save#JsonSchemaText`, `save#RefinedSchema`, `infer/flatten#JsonSchema`,
   `delete#JsonSchema`.
 - Operational setup: `save#Mapping`, `delete#SavedRun`, `save#DashboardPinned*`,

@@ -89,8 +89,11 @@ Without the dedicated facade authz, authenticated users can still get errors lik
 - `save#LlmSettings`
 - `get#TenantSettings`
 - `save#TenantSettings`
-- `get#TenantNotificationSettings`
-- `save#TenantNotificationSettings`
+- `list#TenantChatSpaces`
+- `save#TenantChatSpace`
+- `delete#TenantChatSpace`
+- `get#UserNotificationDefault`
+- `save#UserNotificationDefault`
 - `list#SftpServers`
 - `save#SftpServer`
 - `list#NsAuthConfigs`
@@ -105,6 +108,8 @@ Shared-tenant rule:
 - `save#TenantSettings` requires active-tenant write access and stores timezone on `darpan.auth.TenantSetting`, not on the current user.
 - `list#EnumOptions`, `get#LlmSettings`, and `save#LlmSettings` require Darpan Admin access.
 - `list#EnumOptions` now deduplicates `DarpanSystemSource` rows by logical system code and prefers canonical enum ids such as `OMS` over legacy duplicates such as `DarSysOms`.
+- `list#TenantChatSpaces`, `save#TenantChatSpace`, and `delete#TenantChatSpace` are tenant-scoped through `companyUserGroupId`; `save#TenantChatSpace` and `delete#TenantChatSpace` require active-tenant write access, and `delete#TenantChatSpace` rejects a space still referenced by an automation or a live `ReconciliationRunNotifySubscription` (deactivate it instead). Webhook URLs are write-only and validated as HTTPS `chat.googleapis.com` space-message endpoints; reads only ever return `googleChatWebhookUrlMasked`.
+- `get#UserNotificationDefault` and `save#UserNotificationDefault` are personal preferences (stored per-tenant on `UserPreference`, not a tenant-owned entity) — no active-tenant write access is required. The retired `get#TenantNotificationSettings` / `save#TenantNotificationSettings` pair (one webhook per tenant) no longer exists; existing tenant webhooks were migrated to `TenantChatSpace` by the one-time `migrate#TenantNotificationSettings` service during the v1.2.0 upgrade (see `docs/code-map.md`).
 
 ### `facade.JsonSchemaFacadeServices`
 - `list#JsonSchemas`
@@ -132,6 +137,9 @@ Shared-tenant rule:
 - `save#SavedRunName`
 - `delete#SavedRun`
 - `run#SavedRunDiff`
+- `get#ReconciliationRunStatus`
+- `subscribe#RunNotification`
+- `unsubscribe#RunNotification`
 - `list#Automations`
 - `get#Automation`
 - `save#Automation`
@@ -159,6 +167,8 @@ Contract notes:
 - Rule payload expression JSON may include structured `preActions`, with each entry identifying a `fieldSide` (`file1` or `file2`) and an `action` such as `STRING_TO_INT` or `STRING_TO_NUMBER`; those are returned with saved-run rule summaries so the rule-maker UI can reopen the same per-field pre-operator normalization choices.
 - Each `create#RuleSetRun` side may be either file-upload backed or API-backed. File-upload sides provide file type, optional JSON schema, and primary ID expression. API-backed sides provide `sourceTypeEnumId=AUT_SRC_API` plus either `systemMessageRemoteId` or `nsRestletConfigId`, and do not require file type or primary ID during run setup.
 - `run#SavedRunDiff` preserves the two-file payload for file-upload saved runs. When either RuleSet compare source is `AUT_SRC_API`, callers provide one `windowStartDate`/`windowEndDate` pair for the API side or sides; only file-backed sides still provide `fileName` and `fileText`. The facade creates a `ReconciliationRunResult` row with `AUT_STAT_RUNNING` before extraction starts, stages API output and uploaded file text into the same run artifact folder, then updates that row to `AUT_STAT_SUCCESS` with the result path after the RuleSet compare-scope engine completes.
+- `get#ReconciliationRunStatus` returns live run/step status for polling plus the caller's own notification state on that run: `mySubscription` (boolean) and `mySubscriptionSpaceName` (the snapshotted chat-space name, or `null` if not subscribed).
+- `subscribe#RunNotification` snapshots the caller's default chat space (`get#UserNotificationDefault`) onto a `ReconciliationRunNotifySubscription` row for one run; only callable while the run is `AUT_STAT_PENDING` or `AUT_STAT_RUNNING`, and it fails with `needsDefaultChatSpace=true` if the caller has no active default. `unsubscribe#RunNotification` deletes the row. Both are personal actions — no active-tenant write access required.
 - `get#GeneratedOutput` accepts the safe data-manager relative result path returned by list/run responses, including `reconciliation-runs/**/{runId}_result.json` paths whose tenant can be resolved from the result metadata if the `ReconciliationRunResult` manifest is stale or missing. It returns `outputFile.sourceDetails` when the generated result is backed by a manifest. The details include `mode` (`FILES` or `API`), optional `dateRange.start`/`dateRange.end`, and a `files` list with `side`, display `label`, source `fileName`, safe `filePath`, `downloadFileName`, `sourceFormat`, and `canDownload`. The same service can download those source artifacts when the UI passes one of the returned `filePath` values and the source format.
 - `create#RuleSetRun` must allow a basic-diff-only saved run with no initial DRL. In that case the saved run executes only the base missing-object and matched-pair compare stages until rules are added later.
 - `create#RuleSetRun` no longer asks the user for a compared-object type and does not stamp a hidden default. New compare scopes are created without an `objectType` value unless later internal logic sets one explicitly.

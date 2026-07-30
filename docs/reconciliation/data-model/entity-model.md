@@ -3,11 +3,12 @@
 This document maps the reconciliation configuration entities to their Moqui definitions in this repo.
 The model focuses on configuration, definition storage, and the run-result artifact manifest used to
 locate persisted source/result files. Automation execution records track scheduled windows, artifacts,
-counts, and sanitized errors. Run-completion alerting is part of the model through
-`TenantNotificationSetting` (per-tenant Google Chat webhook; see
-[reconciliation-flow](../reconciliation-flow.md) for the notification path); per-rule evaluation
-history remains out of scope — rule failures are emitted as Diff rows in the generated result
-artifact, not stored per rule.
+counts, and sanitized errors. Run-completion alerting is part of the model through `TenantChatSpace`
+(a named Google Chat space registry per tenant) and `ReconciliationRunNotifySubscription` (per-run
+"notify me" opt-ins); see [reconciliation-flow](../reconciliation-flow.md) for the notification path.
+The prior one-webhook-per-tenant `TenantNotificationSetting` entity is retired (2026-07-29) in favor
+of the registry. Per-rule evaluation history remains out of scope — rule failures are emitted as Diff
+rows in the generated result artifact, not stored per rule.
 
 ## Source of Truth (Code)
 
@@ -526,25 +527,66 @@ Stores NetSuite Restlet endpoint connectivity for inventory adjustment retrieval
 - `readTimeoutSeconds`
 - `isActive`
 
-### TenantNotificationSetting (darpan.reconciliation.TenantNotificationSetting)
-Stores the tenant-level notification configuration for reconciliation run completion events.
+### TenantNotificationSetting (darpan.reconciliation.TenantNotificationSetting) — RETIRED
+**RETIRED 2026-07-29**, replaced by `TenantChatSpace`. Kept for one release purely as migration
+input for the one-time `migrate#TenantNotificationSettings` service (see
+[code-map.md](../../code-map.md#shared-resources)); no facade service reads or writes it anymore
+(`get#TenantNotificationSettings` / `save#TenantNotificationSettings` are removed). Previously held
+one Google Chat webhook per tenant (`companyUserGroupId` primary key).
+
+### TenantChatSpace (darpan.reconciliation.TenantChatSpace)
+Named Google Chat space registry entry for one tenant. Replaces the single-webhook
+`TenantNotificationSetting`.
 
 **Purpose**
-- One row per tenant (`companyUserGroupId` is the primary key)
+- Multiple named spaces per tenant instead of exactly one; users pick a personal default from this
+  list and automations link one space each for completion notifications.
 - Holds the Google Chat incoming webhook URL, encrypted at rest; facade responses only return
-  configured status and a masked URL, never the raw secret
-- Read by `TenantNotificationSupport.notifyRunCompleted` after manual saved-run, API-window
-  automation, and SFTP automation completions
-- Managed through `facade.SettingsFacadeServices.get#TenantNotificationSettings` /
-  `save#TenantNotificationSettings`
+  configured status and a masked URL, never the raw secret.
+- Read by `TenantNotificationSupport.resolveDestinationChatSpaces` when fan-out resolves an
+  automation's linked space and per-run subscriber snapshots.
+- Managed through `facade.SettingsFacadeServices.list#TenantChatSpaces` / `save#TenantChatSpace` /
+  `delete#TenantChatSpace` — write requires active-tenant write access; a space referenced by an
+  automation or a live subscription must be deactivated (`isActive='N'`) rather than deleted.
 
 **Key Fields**
-- `companyUserGroupId` (PK)
-- `createdByUserId`
+- `chatSpaceId` (PK)
+- `companyUserGroupId`
+- `spaceName` (unique per tenant, case-insensitive, service-validated)
 - `googleChatWebhookUrl` (encrypted)
 - `isActive`
+- `createdByUserId`
 - `createdDate`
 - `lastUpdatedDate`
+
+### ReconciliationRunNotifySubscription (darpan.reconciliation.ReconciliationRunNotifySubscription)
+One user's "notify me" opt-in on one in-flight reconciliation run.
+
+**Purpose**
+- Lets any user request a personal completion notification for a run that is still
+  `AUT_STAT_PENDING` or `AUT_STAT_RUNNING`, independent of the automation's own linked chat space.
+- `chatSpaceId` is a snapshot of the user's default chat space (`UserNotificationDefault`) at the
+  moment they subscribed, not a live pointer — later changes to the user's default do not move an
+  existing subscription.
+- Read by `TenantNotificationSupport.resolveDestinationChatSpaces` as part of fan-out; unsubscribe
+  deletes the row outright (no soft-delete).
+- Managed through `facade.ReconciliationFacadeServices.subscribe#RunNotification` /
+  `unsubscribe#RunNotification`; `get#ReconciliationRunStatus` reports the caller's own
+  `mySubscription` / `mySubscriptionSpaceName` for a run.
+
+**Key Fields**
+- `reconciliationRunResultId` (PK)
+- `userId` (PK)
+- `chatSpaceId`
+- `subscribedDate`
+
+### UserNotificationDefault (personal preference, not a dedicated entity)
+Each user's default chat space is stored as a JSON map on `moqui.security.UserPreference`, keyed
+by tenant so one user can have a different default per tenant they belong to. Read/write through
+`facade.SettingsFacadeServices.get#UserNotificationDefault` / `save#UserNotificationDefault` in
+`darpan.facade.settings.UserNotificationPreferenceSupport`. This is a personal preference, not a
+tenant-owned record — no tenant write access is required to set it, and it does not itself appear
+in the entity diagram above.
 
 ### RuleSet and Rule (darpan.rule.RuleSet, darpan.rule.Rule)
 Defines executable DRL decisioning for reconciliation runs.
@@ -671,8 +713,8 @@ The current reconciliation baseline and planned target keep these responsibiliti
 - Data pull results
 - Per-rule evaluation result storage (rule failures are Diff rows in the generated result
   artifact, not per-rule history records)
-- Per-event notification delivery history (notification config is stored in
-  `TenantNotificationSetting`; deliveries are fire-and-forget to the tenant webhook)
+- Per-event notification delivery history (notification config is stored in `TenantChatSpace` and
+  `ReconciliationRunNotifySubscription`; deliveries are fire-and-forget to each resolved webhook)
 
 The automation execution record stores only the operational manifest. Detailed payload storage should
 stay in generated data-manager artifacts.
@@ -680,5 +722,5 @@ stay in generated data-manager artifacts.
 ## Future Enhancements
 
 - Rule evaluation result storage
-- Additional notification channels and delivery/audit history beyond the current per-tenant
-  Google Chat webhook
+- Additional notification channels and delivery/audit history beyond the current chat-space
+  registry Google Chat fan-out

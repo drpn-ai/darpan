@@ -7,7 +7,7 @@ Production reconciliation flows (file ingest, current Mapping-backed source extr
 ## Production Entrypoints
 
 - Route: `runtime/component/darpan/screen/Reconciliation.xml`
-- Services: `runtime/component/darpan/service/reconciliation/ReconciliationCoreServices.xml`, `ReconciliationGenericServices.xml`, `ReconciliationJsonServices.xml`, `ReconciliationMixedServices.xml`, `ReconciliationRuleEngineServices.xml`, `ReconciliationAutomationServices.xml` (SFTP polling, scheduled execution, stuck-run reaper), `ReconciliationNotificationServices.xml` (run-completed Google Chat payload)
+- Services: `runtime/component/darpan/service/reconciliation/ReconciliationCoreServices.xml`, `ReconciliationGenericServices.xml`, `ReconciliationJsonServices.xml`, `ReconciliationMixedServices.xml`, `ReconciliationRuleEngineServices.xml`, `ReconciliationAutomationServices.xml` (SFTP polling, scheduled execution, stuck-run reaper), `ReconciliationNotificationServices.xml` (run-completed Google Chat payload; also the one-time `migrate#TenantNotificationSettings` v1.2.0 upgrade service — internal only, not remote-callable)
 - Core processing/helpers: `runtime/component/darpan/src/main/groovy/darpan/reconciliation/core/ReconciliationServices.groovy`, `core/RuleSetCompareScopeAdapter.groovy`, `core/reconcileFilesByMapping.groovy`, `rule/RuleEngineSupport.groovy`, `automation/AutomationExecutionSupport.groovy`, `automation/StuckRunReaper.groovy`, `notification/TenantNotificationSupport.groovy`
 - End-to-end pipeline description: `runtime/component/darpan/docs/reconciliation/reconciliation-flow.md`
 

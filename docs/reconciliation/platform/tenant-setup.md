@@ -48,7 +48,7 @@ Collect these before setup:
 | Users | `alex@example.com`, `sam@example.com` | User accounts should already exist unless the target environment has a user-provisioning service. |
 | Role per user | `DARPAN_TENANT_ADMIN` or `DARPAN_TENANT_USER` | Assign per user and per tenant. |
 | Optional default active tenant | `ACME` | Set for users who should land in the new tenant immediately. |
-| Optional tenant settings | timezone, SFTP, NetSuite, notification settings | Create only after the active tenant is set correctly. |
+| Optional tenant settings | timezone, SFTP, NetSuite, Google Chat spaces | Create only after the active tenant is set correctly. |
 
 For creating the login account itself, see [Darpan Tenant User Setup Tutorial](tenant-user-setup.md).
 
@@ -244,9 +244,13 @@ Create tenant-owned settings only after the active tenant is correct.
 | SFTP | `facade.SettingsFacadeServices.save#SftpServer` | `SftpServer.companyUserGroupId` is the active tenant. |
 | NetSuite auth | `facade.SettingsFacadeServices.save#NsAuthConfig` | `NsAuthConfig.companyUserGroupId` is the active tenant. |
 | NetSuite endpoint | `facade.SettingsFacadeServices.save#NsRestletConfig` | Endpoint auth binding must be visible in the active tenant. |
-| Google Chat notifications | `facade.SettingsFacadeServices.save#TenantNotificationSettings` | Readback must return only masked webhook status. |
+| Google Chat spaces | `facade.SettingsFacadeServices.save#TenantChatSpace` | Readback (`list#TenantChatSpaces`) must return only masked webhook status per named space. |
 
 Do not create tenant-specific LLM provider settings in the current data model. LLM and enum/global settings are Darpan-admin-only app-level settings.
+
+After a chat space exists, each user sets their own default through
+`facade.SettingsFacadeServices.save#UserNotificationDefault` (personal preference, no tenant write
+access needed), and automations pick their notification space from the registry when saved.
 
 ## Troubleshooting
 

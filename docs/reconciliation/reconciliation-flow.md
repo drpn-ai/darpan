@@ -11,7 +11,7 @@ ingest (file upload | API window | SFTP poll)
   -> Spark base compare (missing-object Diffs + matched pairs)
   -> Drools RuleSet execution on matched pairs (rule failures -> Diff rows)
   -> persist result JSON + ReconciliationRunResult manifest
-  -> Google Chat run-completed notification (per-tenant webhook)
+  -> Google Chat run-completed notification (chat-space registry fan-out, all terminal states)
 ```
 
 ## 1. Ingestion
@@ -99,26 +99,59 @@ Runtime stack note: Drools 7.73 with MVEL2 forced to 2.5.x — MVEL2 2.4.x fails
 
 ## 6. Alert / notification path
 
-Every successful run completion can notify the owning tenant:
+Every run that reaches a terminal state — `AUT_STAT_SUCCESS` (including success with rule
+processing warnings), `AUT_STAT_FAILED`, or a reaper-killed stale run — can notify the owning
+tenant. The silent no-op statuses `AUT_STAT_NO_DATA` and `AUT_STAT_SKIP_DUP` never trigger
+notification.
 
-1. The three completion call sites invoke
+1. Four terminal-state call sites invoke
    `darpan.reconciliation.notification.TenantNotificationSupport.notifyRunCompleted(...)`:
    - `darpan/facade/reconciliation/runSavedRunDiff.groovy` — manual saved-run executions
+     (success and failure)
    - `darpan/reconciliation/automation/AutomationExecutionSupport.groovy` — scheduled API-window
-     automations
+     automations (success and failure)
    - `darpan/reconciliation/automation/SftpAutomationSupport.groovy` — SFTP automations
-2. `notifyRunCompleted` loads the tenant's `darpan.reconciliation.TenantNotificationSetting`
-   row (one per `companyUserGroupId`; the Google Chat webhook URL is encrypted at rest and only
-   ever returned masked by the facade).
-3. `reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload` builds the
+     (best-effort: wrapped so a notify failure never fails the run)
+   - `darpan/reconciliation/automation/StuckRunReaper.groovy` — stale `RUNNING`/`PENDING` runs the
+     reaper flips to `AUT_STAT_FAILED`; the payload gets an extra watchdog `terminationReason` line
+2. `notifyRunCompleted` re-reads the trusted `ReconciliationRunResult` row (not caller input) to
+   re-check the tenant and dedupe, then resolves fan-out destinations in
+   `resolveDestinationChatSpaces`: the union of the run's automation-linked
+   `darpan.reconciliation.TenantChatSpace` (via `ReconciliationAutomation.chatSpaceId`, when set)
+   and every `darpan.reconciliation.ReconciliationRunNotifySubscription` row for that run — one
+   per user who opted in with "notify me," each snapshotting that user's default chat space at
+   subscribe time. Destinations are deduplicated by chat-space ID and re-pinned to the run's
+   tenant; retired (`isActive='N'`) or webhook-less registry rows are dropped from the fan-out. No
+   destinations means no delivery attempt (`NO_DESTINATIONS`).
+3. Delivery is dedupe-guarded by an atomic claim-then-deliver compare-and-swap on `notifiedDate`:
+   a conditional `updateAll` (`WHERE reconciliationRunResultId = ? AND notifiedDate IS NULL`) is
+   the race guard, so only one concurrent caller can claim a given run result; the loser reports
+   `ALREADY_NOTIFIED` without delivering. A failed delivery still consumes the claim — there are no
+   automatic retries. Other skip reasons: `NO_TENANT`, `NO_RESULT_ID`, `RESULT_NOT_FOUND`,
+   `TENANT_MISMATCH`.
+4. `reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload` builds the
    Google Chat text payload: run name, tenant label, result ID, a deep link to the run result
    (base URL from the `DARPAN_APP_BASE_URL` env var, the `darpan.app.baseUrl` property, or the
-   first allowed web origin), and the three difference counts.
-4. `TenantNotificationSupport.deliverGoogleChat` posts the payload to the webhook. URLs are
-   validated to be HTTPS `chat.googleapis.com` space-message endpoints with key/token parameters.
+   first allowed web origin), the three difference counts, and — for failed or reaper-killed runs
+   — a status/termination-reason warning line.
+5. `TenantNotificationSupport.deliverGoogleChat` posts the payload to each resolved destination's
+   webhook. URLs are validated to be HTTPS `chat.googleapis.com` space-message endpoints with
+   key/token parameters.
 
-Tenants configure this through `facade.SettingsFacadeServices.get#TenantNotificationSettings` /
-`save#TenantNotificationSettings`.
+Tenants manage the named chat-space registry through
+`facade.SettingsFacadeServices.list#TenantChatSpaces` / `save#TenantChatSpace` /
+`delete#TenantChatSpace` (tenant write access required; a space still referenced by an automation
+or a subscription must be deactivated, not deleted). Each user's personal default chat space is
+`get#UserNotificationDefault` / `save#UserNotificationDefault` — a personal preference, so no
+tenant write access is required. Per-run opt-in notifications use
+`facade.ReconciliationFacadeServices.subscribe#RunNotification` /
+`unsubscribe#RunNotification`, callable only while the run is `AUT_STAT_PENDING` or
+`AUT_STAT_RUNNING`; `get#ReconciliationRunStatus` reports the caller's `mySubscription` /
+`mySubscriptionSpaceName` for that run. The one-webhook-per-tenant
+`darpan.reconciliation.TenantNotificationSetting` entity and its `get#TenantNotificationSettings`
+/ `save#TenantNotificationSettings` facade services are retired; existing tenant webhooks migrate
+to the registry through the one-time `migrate#TenantNotificationSettings` service (invocation
+mechanics: [code-map.md](../code-map.md#shared-resources)).
 
 ## 7. Automation: scheduling and supervision
 

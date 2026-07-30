@@ -38,6 +38,12 @@ Execution is handled by internal services in `reconciliation.ReconciliationAutom
 
 `save#Automation` persists one tenant-owned `ReconciliationAutomation` row and exactly two `ReconciliationAutomationSource` rows, one for `FILE_1` and one for `FILE_2`. Each source must match the selected saved-run file side.
 
+An automation may also set `chatSpaceId`, pointing at one `darpan.reconciliation.TenantChatSpace`
+row from the tenant's Google Chat space registry (`facade.SettingsFacadeServices.list#TenantChatSpaces`).
+When set, every terminal-state execution of that automation notifies the linked space in addition
+to any per-run subscriber snapshots; when unset, the automation only notifies subscribers who
+opted in for that specific run.
+
 ## API Date-Range Mode
 
 API date-range automations use `inputModeEnumId=AUT_IN_API_RANGE` and source rows with `sourceTypeEnumId=AUT_SRC_API`.
@@ -126,7 +132,15 @@ The SFTP path selects the newest matching file on each side, stages both files u
 
 Each execution writes a `ReconciliationAutomationExecution` row. Successful API and SFTP runs also persist a `ReconciliationRunResult` row and attach the result id plus data-manager result path to the execution row.
 
-When the active tenant has `TenantNotificationSetting.isActive=Y` and a Google Chat webhook configured, successful API and SFTP automation runs send a run-completion message after the result row is stored. Manual saved-run execution uses the same tenant notification setting. Notification failures are logged and do not convert a completed reconciliation run into a failed run.
+Every terminal-state run — success, success-with-issues, failed, or reaper-killed — sends a
+run-completion message after the result row is stored (`AUT_STAT_NO_DATA` and `AUT_STAT_SKIP_DUP`
+stay silent). Destinations are the automation's linked `chatSpaceId` (if set) plus any per-run
+"notify me" subscriber snapshots, deduplicated; API, SFTP, and manual saved-run execution all
+resolve destinations the same way. Delivery is guarded by an atomic claim on the result row's
+`notifiedDate` so exactly one delivery attempt happens per run even under concurrent completion
+paths (for example a reaper sweep racing a slow in-flight execution). Notification failures are
+logged and do not convert a completed reconciliation run into a failed run; SFTP notify calls are
+additionally wrapped so a notify exception never fails the SFTP run.
 
 Common statuses:
 
@@ -152,7 +166,7 @@ Run these checks before closing the automation feature for production handoff:
 - Verify a reconciliation result artifact and execution history row.
 - Create an SFTP-file automation from the same saved run.
 - Drop two test files, run the automation manually, verify the result artifact, and confirm consumed-file archive behavior.
-- Configure a tenant Google Chat webhook through Settings, run a successful manual or automation execution, and confirm exactly one completion message is posted for the tenant.
+- Configure a tenant Google Chat space through Settings, link it to the automation as `chatSpaceId`, run a manual or automation execution to a terminal state, and confirm exactly one completion message per resolved destination (linked space plus any subscriber snapshots) is posted for the tenant. Repeat for a failed run and confirm the failure/termination-reason line appears.
 - Confirm a view-only tenant session cannot mutate automations or source settings.
 - Confirm cross-tenant automation, SFTP, Shopify, OMS, saved-run, and result access is denied.
 

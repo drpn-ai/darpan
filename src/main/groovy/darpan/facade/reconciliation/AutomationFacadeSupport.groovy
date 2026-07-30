@@ -78,7 +78,7 @@ class AutomationFacadeSupport {
 
         String chatSpaceId = normalize(input.chatSpaceId) ?: null
         if (!ec.message.hasError() && chatSpaceId) {
-            validateChatSpace(ec, TenantAccessSupport.currentActiveTenantUserGroupId(ec), chatSpaceId)
+            validateChatSpace(ec, chatSpaceId)
         }
 
         Map<String, Object> automationFields = null
@@ -358,11 +358,13 @@ class AutomationFacadeSupport {
         }
     }
 
-    protected static void validateChatSpace(def ec, String tenantId, String chatSpaceId) {
-        def chatSpaceRow = ec.entity.find(DarpanEntityConstants.TENANT_CHAT_SPACE)
+    protected static void validateChatSpace(def ec, String chatSpaceId) {
+        // P0 #4: tenant condition pre-applied by TenantScopedFinder (no bare disableAuthz — see
+        // DisableAuthzRatchetTest); equivalent to the old explicit companyUserGroupId condition
+        // since findTenantScoped resolves the same currentActiveTenantUserGroupId internally.
+        def chatSpaceRow = TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.TENANT_CHAT_SPACE)
                 .condition("chatSpaceId", chatSpaceId)
-                .condition("companyUserGroupId", tenantId)
-                .disableAuthz().useCache(false).one()
+                .useCache(false).one()
         if (chatSpaceRow == null || ((chatSpaceRow.isActive)?.toString()?.trim()) == "N") {
             ec.message.addError("Chat space '${chatSpaceId}' was not found or is inactive.")
         }
@@ -555,8 +557,10 @@ class AutomationFacadeSupport {
 
     protected static Map<String, Object> resolveChatSpaceSummary(def ec, def automation) {
         String chatSpaceId = readString(automation, "chatSpaceId")
-        def chatSpaceRow = chatSpaceId ? ec.entity.find(DarpanEntityConstants.TENANT_CHAT_SPACE)
-                .condition("chatSpaceId", chatSpaceId).disableAuthz().useCache(true).one() : null
+        // P0 #4: tenant-scoped read (no bare disableAuthz — see DisableAuthzRatchetTest); the
+        // automation's chatSpaceId was already validated against the active tenant at save time.
+        def chatSpaceRow = chatSpaceId ? TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.TENANT_CHAT_SPACE)
+                .condition("chatSpaceId", chatSpaceId).useCache(true).one() : null
         return [
                 chatSpaceId    : chatSpaceId,
                 chatSpaceName  : chatSpaceRow?.spaceName,

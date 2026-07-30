@@ -30,6 +30,10 @@ class ExchangePairVerificationSupport {
     static final int DEFAULT_GRACE_DAYS = 7
     static final int DEFAULT_MAX_PAIRS = 500
     static final BigDecimal DEFAULT_AMOUNT_TOLERANCE = new BigDecimal("0.01")
+    // Mirrors OmsRestSourceSupport.PAIR_LOOKUP_MAX_IDS (darpan-hotwax): the OMS pair lookup service
+    // hard-rejects any single call requesting more than this many externalIds, so a manifest with
+    // more pairs than this must be split across multiple omsPairLookup.call() invocations.
+    static final int OMS_PAIR_LOOKUP_CHUNK_SIZE = 100
 
     private static final String DIFFERENCES_HEADER = "\"differences\":["
     private static final String PROCESSING_WARNINGS_PREFIX = "\"processingWarnings\":"
@@ -84,7 +88,7 @@ class ExchangePairVerificationSupport {
 
         List<String> externalIds = new ArrayList<>(entriesByExternalId.keySet())
         Map shopify = invokeLookup("Shopify exchange-state", shopifyLookup, externalIds, warnings)
-        Map omsPairs = invokeLookup("OMS pair", omsPairLookup, externalIds, warnings)
+        Map omsPairs = invokeChunkedOmsPairLookup(omsPairLookup, externalIds, warnings)
         if (shopify == null || omsPairs == null) { result.lookupFailed = true; return result }
 
         Map statesByOrderId = (Map) (shopify.statesByOrderId ?: [:])
@@ -155,6 +159,24 @@ class ExchangePairVerificationSupport {
         }
         result.auditNote = auditNote
         return result
+    }
+
+    /**
+     * The OMS pair lookup service hard-rejects calls above OMS_PAIR_LOOKUP_CHUNK_SIZE ids, so a
+     * manifest of up to maxPairs (default 500) must be split into ≤100-id chunks, calling
+     * omsPairLookup once per chunk and merging the returned ordersByExternalId maps. Conservative
+     * posture is unchanged: the first chunk that fails (ok != true) or throws stops the loop and
+     * makes the whole lookup fail exactly as a single failed lookup does today — no partial merge
+     * is returned to the caller.
+     */
+    private static Map invokeChunkedOmsPairLookup(Closure omsPairLookup, List<String> externalIds, List<String> warnings) {
+        Map<String, Object> mergedOrdersByExternalId = new LinkedHashMap<>()
+        for (List<String> chunk : externalIds.collate(OMS_PAIR_LOOKUP_CHUNK_SIZE)) {
+            Map chunkResult = invokeLookup("OMS pair", omsPairLookup, chunk, warnings)
+            if (chunkResult == null) return null
+            mergedOrdersByExternalId.putAll((Map) (chunkResult.ordersByExternalId ?: [:]))
+        }
+        return [ok: true, ordersByExternalId: mergedOrdersByExternalId]
     }
 
     private static Map invokeLookup(String label, Closure lookup, List<String> externalIds, List<String> warnings) {

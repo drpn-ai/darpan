@@ -272,6 +272,72 @@ class ExchangePairVerificationSupportTests {
      * IllegalStateException path a genuinely malformed/foreign diff document would trigger.
      * verifyExchangePairs must catch it, warn, and leave the file untouched with no rows counted.
      */
+    /** 150 distinct externalIds so the entriesByExternalId map (150) stays under maxPairs (500)
+     *  but must still be split across two omsPairLookup calls at the 100-id service cap. */
+    private static List manifestOf(int count) {
+        (1..count).collect { int i ->
+            entry([omsOrderId: "M${1000 + i}".toString(), externalId: "EXT${100000 + i}".toString(),
+                   orderName: "EXC-${i}".toString()])
+        }
+    }
+
+    private static Map omsPairOkFor(List<String> ids) {
+        [ok: true, errors: [], ordersByExternalId: ids.collectEntries { String id ->
+            [(id): [[omsOrderId: "orig-${id}".toString(), externalId: id, orderTypeId: "SALES_ORDER",
+                      statusId: "ORDER_COMPLETED", grandTotal: 10.0, orderDate: 1784227520000L, hasExchangeAssoc: false],
+                     [omsOrderId: "exch-${id}".toString(), externalId: id, orderTypeId: "SALES_ORDER",
+                      statusId: "ORDER_COMPLETED", grandTotal: 10.0, orderDate: 1785260782199L, hasExchangeAssoc: true]]]
+        }]
+    }
+
+    private static Map shopifyOkForIds(List<String> ids) {
+        [ok: true, errors: [], statesByOrderId: ids.collectEntries { String id ->
+            [(id): [returnStatus: "RETURNED", currentTotalAmount: new BigDecimal("20.00"), currentTotalCurrency: "USD",
+                     exchanges: [[returnId: "gid://shopify/Return/1", status: "CLOSED",
+                             createdAt: "2026-07-23T17:07:40Z", exchangeLineItems: [[id: "x", quantity: 1, lineItems: []]]]]]]
+        }]
+    }
+
+    @Test
+    void largeManifestChunksOmsPairLookupToTheServiceCap() {
+        // Finding: verifyExchangePairs sent ALL externalIds (up to maxPairs=500) in one
+        // omsPairLookup.call(), but the OMS pair lookup service hard-rejects >100 ids per call —
+        // silently no-oping verification for 101-500 pairs. 150 distinct pairs must now be split
+        // into chunks of [100, 50], with every pair still checked.
+        List entries = manifestOf(150)
+        List<Integer> chunkSizes = []
+        Map result = ExchangePairVerificationSupport.verifyExchangePairs([
+                manifestFile: manifestFile(entries), diffFile: diffFile(), nowMillis: NOW,
+                shopifyLookup: { List ids -> shopifyOkForIds(ids as List<String>) },
+                omsPairLookup: { List ids -> chunkSizes.add(ids.size()); omsPairOkFor(ids as List<String>) }])
+
+        assertEquals([100, 50], chunkSizes)
+        assertEquals(150, result.checkedPairCount)
+        assertEquals(0, result.appendedCount)   // every pair is healthy: no rows appended
+    }
+
+    @Test
+    void secondChunkFailureFailsTheWholeLookupAndLeavesDiffUntouched() {
+        File diff = diffFile()
+        String before = diff.text
+        List entries = manifestOf(150)
+        List<Integer> chunkSizes = []
+        Map result = ExchangePairVerificationSupport.verifyExchangePairs([
+                manifestFile: manifestFile(entries), diffFile: diff, nowMillis: NOW,
+                shopifyLookup: { List ids -> shopifyOkForIds(ids as List<String>) },
+                omsPairLookup: { List ids ->
+                    chunkSizes.add(ids.size())
+                    if (chunkSizes.size() == 2) return [ok: false, errors: ["HTTP 500"], ordersByExternalId: [:]]
+                    return omsPairOkFor(ids as List<String>)
+                }])
+
+        assertEquals([100, 50], chunkSizes)   // stopped after the failing (second) chunk, no third call
+        assertTrue(result.lookupFailed as boolean)
+        assertEquals(0, result.appendedCount)
+        assertEquals(before, diff.text)   // byte-identical: nothing appended
+        assertFalse((result.warnings as List).isEmpty())
+    }
+
     @Test
     void diffDocumentWithoutDifferencesSectionIsInertWithWarning() {
         File diff = diffFileWithoutDifferencesSection()

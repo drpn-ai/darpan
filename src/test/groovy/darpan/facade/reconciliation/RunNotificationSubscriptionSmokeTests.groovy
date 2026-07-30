@@ -1,5 +1,6 @@
 package darpan.facade.reconciliation
 
+import darpan.reconciliation.notification.TenantNotificationSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -127,6 +128,61 @@ class RunNotificationSubscriptionSmokeTests {
         // next service invocation outright unless cleared (same convention as
         // TenantChatSpaceFacadeSmokeTests, which clears errors after every intentionally-failed call).
         ec.message.clearErrors()
+    }
+
+    @Test
+    void notifyRunCompletedPurgesSubscriptionAndClearsStatusFlag() {
+        // Final-review fix, finding 1: exercised through the real Moqui boot this class already pays
+        // for — subscribe while RUNNING, flip to a terminal status the way a real run completion
+        // would, then call the same TenantNotificationSupport.notifyRunCompleted the automation/SFTP/
+        // reaper call sites use. mySubscription must flip back to false and the subscription row must
+        // be gone — not just left around forever pointing at a run that already notified.
+        String runId = seedRun("AUT_STAT_RUNNING")
+
+        def save = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace",
+                [spaceName: "Completion space", googleChatWebhookUrl: WEBHOOK, isActive: true])
+        assertTrue(save.ok as boolean)
+        String chatSpaceId = save.chatSpace.chatSpaceId
+
+        def saveDefault = callFacade("facade.SettingsFacadeServices.save#UserNotificationDefault",
+                [chatSpaceId: chatSpaceId])
+        assertTrue(saveDefault.ok as boolean)
+
+        def subscribe = callFacade("facade.ReconciliationFacadeServices.subscribe#RunNotification",
+                [reconciliationRunResultId: runId])
+        assertTrue(subscribe.ok as boolean)
+        assertEquals(1L, countSubscriptions(runId))
+
+        def statusWhileRunning = callFacade("facade.ReconciliationFacadeServices.get#ReconciliationRunStatus",
+                [reconciliationRunResultId: runId])
+        assertTrue(statusWhileRunning.mySubscription as boolean)
+
+        ec.entity.find("darpan.reconciliation.ReconciliationRunResult")
+                .condition("reconciliationRunResultId", runId)
+                .disableAuthz()
+                .one()
+                .set("statusEnumId", "AUT_STAT_SUCCESS")
+                .update()
+
+        TenantNotificationSupport.setDeliveryHook { String url, Map payload -> [ok: true, statusCode: 200] }
+        try {
+            Map<String, Object> notifyResult = TenantNotificationSupport.notifyRunCompleted(ec, [
+                    reconciliationRunResultId: runId,
+                    companyUserGroupId       : TENANT_ID,
+                    statusEnumId             : "AUT_STAT_SUCCESS",
+            ])
+            assertTrue((boolean) notifyResult.attempted)
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+
+        assertEquals(0L, countSubscriptions(runId))
+        assertNull(findSubscription(runId))
+
+        def statusAfterNotify = callFacade("facade.ReconciliationFacadeServices.get#ReconciliationRunStatus",
+                [reconciliationRunResultId: runId])
+        assertTrue(statusAfterNotify.ok as boolean)
+        assertFalse(statusAfterNotify.mySubscription as boolean)
     }
 
     private String seedRun(String statusEnumId) {

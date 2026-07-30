@@ -709,6 +709,12 @@ class AutomationExecutionSupportTests {
             assertTrue((boolean) result.ok)
             assertEquals(2, result.deliveredCount)
             assertEquals(0, result.failedCount)
+
+            // Final-review fix, finding 1: both subscription rows for this run must be purged once
+            // the run is notified — otherwise they linger forever (permanent TenantChatSpace inUse,
+            // stale mySubscription:true, unbounded growth).
+            assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"]
+                    .findAll { it.reconciliationRunResultId == "RUN_RESULT_1" }.isEmpty())
         } finally {
             TenantNotificationSupport.resetDeliveryHook()
         }
@@ -800,6 +806,12 @@ class AutomationExecutionSupportTests {
             it.reconciliationRunResultId == "RUN_RESULT_1"
         }
         assertNotNull(runResultRow.notifiedDate)
+
+        // Final-review fix, finding 1: even though neither subscription resolved to a deliverable
+        // space, the claim still succeeded (NO_DESTINATIONS, not ALREADY_NOTIFIED) — so both stale
+        // rows must be purged, not left behind forever.
+        assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"]
+                .findAll { it.reconciliationRunResultId == "RUN_RESULT_1" }.isEmpty())
     }
 
     @Test
@@ -818,6 +830,14 @@ class AutomationExecutionSupportTests {
         ec.entity.add("darpan.reconciliation.ReconciliationRunResult", [
                 reconciliationRunResultId: "RUN_RESULT_1",
                 companyUserGroupId       : "TENANT_A",
+        ])
+        // Final-review fix, finding 1: a subscriber on the SAME space the delivery will fail against —
+        // the claim is still consumed (the row transitions past "notify attempted"), so the
+        // subscription row must be purged even though delivery itself failed.
+        ec.entity.add("darpan.reconciliation.ReconciliationRunNotifySubscription", [
+                reconciliationRunResultId: "RUN_RESULT_1",
+                userId                   : "USER_A",
+                chatSpaceId              : "CS_OPS",
         ])
         TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
             return [ok: false, statusCode: 500]
@@ -842,6 +862,66 @@ class AutomationExecutionSupportTests {
             it.reconciliationRunResultId == "RUN_RESULT_1"
         }
         assertNotNull(runResultRow.notifiedDate)
+        assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"]
+                .findAll { it.reconciliationRunResultId == "RUN_RESULT_1" }.isEmpty())
+    }
+
+    @Test
+    void automationLinkedSpaceDropIsWarnedAndSubscriberDeliveryStillHappens() {
+        // Final-review fix, finding 3: the spec promised a warn log when the AUTOMATION's own linked
+        // space is dropped (deactivated here); functionally this must exclude CS_OPS from deliveries
+        // while the unrelated subscriber space CS_ME still gets notified normally. (The warn log
+        // itself is not asserted here — no log-capture harness exists in this test suite yet — but
+        // the code path that triggers it is exercised: automationChatSpaceId resolves to a real,
+        // inactive space, distinct from the "space simply not found" case already covered by
+        // inactiveOrForeignSpacesAreDropped, which uses a subscriber-only chatSpaceId.)
+        FakeEc ec = fakeEc()
+        String meWebhookUrl = "https://chat.googleapis.com/v1/spaces/ME_SPACE/messages?key=test-key&token=test-token"
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_OPS",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Ops",
+                googleChatWebhookUrl: "https://chat.googleapis.com/v1/spaces/OPS_SPACE/messages?key=test-key&token=test-token",
+                isActive            : "N",
+        ])
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_ME",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Me",
+                googleChatWebhookUrl: meWebhookUrl,
+                isActive            : "Y",
+        ])
+        ec.entity.add("darpan.reconciliation.ReconciliationRunResult", [
+                reconciliationRunResultId: "RUN_RESULT_1",
+                companyUserGroupId       : "TENANT_A",
+        ])
+        ec.entity.add("darpan.reconciliation.ReconciliationRunNotifySubscription", [
+                reconciliationRunResultId: "RUN_RESULT_1",
+                userId                   : "USER_A",
+                chatSpaceId              : "CS_ME",
+        ])
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        try {
+            Map<String, Object> result = TenantNotificationSupport.notifyRunCompleted(ec, [
+                    companyUserGroupId       : "TENANT_A",
+                    reconciliationRunResultId: "RUN_RESULT_1",
+                    chatSpaceId              : "CS_OPS",
+            ])
+
+            assertEquals(1, deliveries.size())
+            assertEquals(meWebhookUrl, deliveries[0].webhookUrl)
+            assertTrue((boolean) result.ok)
+            assertEquals(1, result.deliveredCount)
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+        assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"]
+                .findAll { it.reconciliationRunResultId == "RUN_RESULT_1" }.isEmpty())
     }
 
     @Test
@@ -1784,6 +1864,7 @@ class AutomationExecutionSupportTests {
         FakeEntityFacade entity
         boolean created
         boolean updated
+        boolean deleted
 
         FakeValue(Map fields = [:], String entityName = null, FakeEntityFacade entity = null) {
             super(fields)
@@ -1814,6 +1895,15 @@ class AutomationExecutionSupportTests {
         FakeValue update() {
             entity?.updateHook?.call(this)
             updated = true
+            return this
+        }
+
+        // Task: final-review fix, finding 1 — TenantNotificationSupport.purgeRunSubscriptions calls
+        // .delete() on the EntityValue rows it already loaded; mirror real Moqui EntityValue.delete()
+        // semantics (self-removes from the backing store) so the fan-out tests can assert cleanup.
+        FakeValue delete() {
+            entity?.rows?.get(entityName)?.remove(this)
+            deleted = true
             return this
         }
     }

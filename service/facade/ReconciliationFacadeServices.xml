@@ -2607,7 +2607,7 @@
                 <set field="steps" from="stepRows.collect { row -> [stageCode: row.stageCode, stageSequence: row.stageSequence, statusEnumId: row.statusEnumId, startedDate: row.startedDate, completedDate: row.completedDate, recordCount: row.recordCount, errorMessage: row.errorMessage, metricsJson: row.metricsJson] }"/>
                 <set field="subscriptionRow" from="ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('reconciliationRunResultId', runIdValue).condition('userId', ec.user.userId).disableAuthz().useCache(false).one()"/>
                 <set field="mySubscription" from="subscriptionRow != null"/>
-                <set field="mySubscriptionSpaceName" from="subscriptionRow ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('chatSpaceId', subscriptionRow.chatSpaceId).disableAuthz().useCache(false).one()?.spaceName : null"/>
+                <set field="mySubscriptionSpaceName" from="subscriptionRow ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('chatSpaceId', subscriptionRow.chatSpaceId).condition('companyUserGroupId', runRow.companyUserGroupId).disableAuthz().useCache(false).one()?.spaceName : null"/>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

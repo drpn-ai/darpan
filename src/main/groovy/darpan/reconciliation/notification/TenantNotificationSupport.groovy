@@ -94,10 +94,17 @@ class TenantNotificationSupport {
             return [ok: true, attempted: false, skippedReason: "TENANT_MISMATCH"]
         if (resultRow.notifiedDate != null) return [ok: true, attempted: false, skippedReason: "ALREADY_NOTIFIED"]
 
-        List<Map<String, Object>> destinations = resolveDestinationChatSpaces(
+        Map<String, Object> resolution = resolveDestinationChatSpaces(
                 ec, tenantId, ((context.chatSpaceId)?.toString()?.trim()), resultId)
+        List<Map<String, Object>> destinations = (List<Map<String, Object>>) resolution.destinations
+        List subscriptionRows = (List) resolution.subscriptionRows
         if (!destinations) {
-            return claimNotification(ec, resultId) ?
+            boolean claimed = claimNotification(ec, resultId)
+            // Terminal-state cleanup (review finding 1): the run is done either way once the claim is
+            // won, so any subscription rows for it — even ones that resolved to nothing deliverable
+            // (inactive/foreign space) — are stale and must not linger forever.
+            if (claimed) purgeRunSubscriptions(subscriptionRows, resultId)
+            return claimed ?
                     [ok: true, attempted: false, skippedReason: "NO_DESTINATIONS"] :
                     [ok: true, attempted: false, skippedReason: "ALREADY_NOTIFIED"]
         }
@@ -107,6 +114,10 @@ class TenantNotificationSupport {
         // ALREADY_NOTIFIED without delivering. A failed delivery still consumes the claim (no
         // automatic retries) — same semantics as the prior post-delivery stamp.
         if (!claimNotification(ec, resultId)) return [ok: true, attempted: false, skippedReason: "ALREADY_NOTIFIED"]
+        // Purge right after the claim is won — subscriptions are terminal-run scoped and every path
+        // past this point (successful delivery or warn-only failure) equally means the run is done
+        // being watched. Best-effort: never let a purge error take down a notification (or the run).
+        purgeRunSubscriptions(subscriptionRows, resultId)
 
         Map<String, Object> payload = ((ec.service.sync()
                 .name("reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload")
@@ -133,8 +144,18 @@ class TenantNotificationSupport {
         return [ok: failedCount == 0, attempted: true, deliveredCount: deliveredCount, failedCount: failedCount]
     }
 
-    static List<Map<String, Object>> resolveDestinationChatSpaces(def ec, String tenantId,
-                                                                  String automationChatSpaceId, String resultId) {
+    /**
+     * Resolves every chat space this run's completion should notify: the automation's own linked
+     * space plus one per distinct notify-me subscriber space, deduped and filtered to
+     * active/webhook-configured spaces in the run's own tenant.
+     *
+     * @return a Map with {@code destinations} (List of {@code [chatSpaceId, spaceName, webhookUrl]})
+     *         and {@code subscriptionRows} (the raw, already-loaded subscription rows for
+     *         {@code resultId} — callers use these to purge terminal-run subscriptions without a
+     *         second query; review finding 1).
+     */
+    static Map<String, Object> resolveDestinationChatSpaces(def ec, String tenantId,
+                                                              String automationChatSpaceId, String resultId) {
         Set<String> chatSpaceIds = new LinkedHashSet<String>()
         if (automationChatSpaceId) chatSpaceIds.add(automationChatSpaceId)
         def subscriptionRows = TenantScopedFinder.findGlobalUnscoped(ec,
@@ -155,11 +176,39 @@ class TenantNotificationSupport {
                     ?.condition("companyUserGroupId", tenantId)
                     ?.useCache(false)?.one()
             String webhookUrl = ((spaceRow?.googleChatWebhookUrl)?.toString()?.trim())
-            if (spaceRow != null && ((spaceRow.isActive)?.toString()?.trim()) != "N" && webhookUrl) {
+            boolean spaceUsable = spaceRow != null && ((spaceRow.isActive)?.toString()?.trim()) != "N" && webhookUrl
+            if (spaceUsable) {
                 destinations.add([chatSpaceId: chatSpaceId, spaceName: spaceRow.spaceName, webhookUrl: webhookUrl])
+            } else if (chatSpaceId == automationChatSpaceId) {
+                // Spec-promised warn (review finding 3): dropping a subscriber's own space is expected
+                // self-service churn and stays silent, but dropping the AUTOMATION's linked space is an
+                // operator-facing configuration gap (deactivated space, or one that lost its webhook) —
+                // surface it. Never log the webhook URL itself.
+                String reason = spaceRow == null ? "space not found for this tenant" :
+                        (((spaceRow.isActive)?.toString()?.trim()) == "N" ? "space is deactivated" : "space has no webhook configured")
+                logger.warn("Automation-linked chat space dropped from run notification: space {} ({}) result {} — {}",
+                        spaceRow?.spaceName, chatSpaceId, resultId, reason)
             }
         }
-        return destinations
+        return [destinations: destinations, subscriptionRows: subscriptionRows]
+    }
+
+    /**
+     * Best-effort delete of every notify-me subscription row for a terminal run (review finding 1).
+     * Called only after {@link #claimNotification} wins, so it runs at most once per run-result.
+     * Never allowed to fail the notification path or the run it is reporting on — any per-row delete
+     * error is logged and skipped.
+     */
+    private static void purgeRunSubscriptions(List subscriptionRows, String resultId) {
+        if (!subscriptionRows) return
+        for (def subscriptionRow : subscriptionRows) {
+            try {
+                subscriptionRow.delete()
+            } catch (Throwable t) {
+                logger.warn("Failed to purge run notification subscription for result {} user {}: {}",
+                        resultId, subscriptionRow?.userId, t.message)
+            }
+        }
     }
 
     private static boolean claimNotification(def ec, String resultId) {

@@ -167,7 +167,9 @@ class SftpAutomationSupport {
                 updateFields.errorMessage = normalize(pollResult.statusMessage) ?: "SFTP automation run failed"
             }
             updateAutomationExecution(ec, execution, updateFields)
-            if (outputProduced && reconciliationRunResultId) {
+            // Task 7: notify on every terminal state that minted a run-result row (including a failed
+            // rule execution), not only the pure success case — NO_DATA (no row minted anyway) stays silent.
+            if (reconciliationRunResultId && statusEnumId != AUTOMATION_STATUS_NO_DATA) {
                 TenantNotificationSupport.notifyRunCompleted(ec, [
                         reconciliationRunResultId: reconciliationRunResultId,
                         runName                  : normalize(readField(automation, "automationName")),

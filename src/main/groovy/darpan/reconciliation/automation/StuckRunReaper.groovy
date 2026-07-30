@@ -1,6 +1,8 @@
 package darpan.reconciliation.automation
 
+import darpan.common.DarpanEntityConstants
 import darpan.facade.common.TenantScopedFinder
+import darpan.reconciliation.notification.TenantNotificationSupport
 import groovy.transform.CompileStatic
 
 import org.moqui.context.ExecutionContext
@@ -88,6 +90,24 @@ class StuckRunReaper {
                     }
                     row.update()
                     updated++
+                    // Task 7: the reaper has no automation/interactive-run context to carry a chatSpaceId,
+                    // so subscriber spaces (ReconciliationRunNotifySubscription) are the only destinations.
+                    // Best-effort — a notify failure must never stop the sweep from reaping other rows.
+                    if (DarpanEntityConstants.RECONCILIATION_RUN_RESULT == entityName) {
+                        try {
+                            TenantNotificationSupport.notifyRunCompleted(ec, [
+                                    reconciliationRunResultId: row.get("reconciliationRunResultId"),
+                                    companyUserGroupId       : row.get("companyUserGroupId"),
+                                    runName                  : row.get("savedRunId"),
+                                    savedRunId               : row.get("savedRunId"),
+                                    resultDataManagerPath    : row.get("resultDataManagerPath"),
+                                    statusEnumId             : STATUS_FAILED,
+                                    terminationReason        : "Run stalled and was marked FAILED by the stuck-run watchdog.",
+                            ] as Map<String, Object>)
+                        } catch (Throwable notifyError) {
+                            logger.warn("StuckRunReaper notification failed (best-effort): ${notifyError.message}")
+                        }
+                    }
                 } catch (Throwable t) {
                     logger.warn("StuckRunReaper failed to flip ${entityName} row: ${t.message}")
                 }

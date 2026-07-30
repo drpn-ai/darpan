@@ -519,6 +519,141 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
+    void automationFailureNotifiesWithFailedStatus() {
+        // Task 7: a run-result row IS minted (persist succeeds) but the SUCCESS-path execution-row write
+        // that follows fails — mintedRunResultId must still be visible in the catch so the NEW failure-path
+        // notify fires with STATUS_FAILED exactly once. (The success-path notify at line ~261 is never
+        // reached here, so this is the only delivery — no double-notify / CAS burn risk.)
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        ec.entity.add("moqui.security.UserGroup", [
+                userGroupId    : "TENANT_A",
+                groupTypeEnumId: "UgtDarpanCompany",
+                description    : "Tenant A",
+        ])
+        String webhookUrl = "https://chat.googleapis.com/v1/spaces/TENANT_A_SPACE/messages?key=test-key&token=test-token"
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_OPS",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Ops",
+                googleChatWebhookUrl: webhookUrl,
+                isActive            : "Y",
+        ])
+        FakeValue notifyAutomation = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find {
+            it.automationId == "AUTO_API"
+        }
+        notifyAutomation.put("chatSpaceId", "CS_OPS")
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                return [
+                        dataAvailable: true,
+                        fileLocation : "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName     : "${call.params.fileSide}.json".toString(),
+                        recordCount  : call.params.fileSide == "FILE_1" ? 10 : 9,
+                ]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                return [
+                        reconciliationType: "ORDER",
+                        diffLocation      : "reconciliation-runs/AUTO_API/20260501/result.json",
+                        diffFileName      : "result.json",
+                        differenceCount   : 4,
+                        onlyInFile1Count  : 1,
+                        onlyInFile2Count  : 3,
+                        validationErrors  : [],
+                        processingWarnings: [],
+                ]
+            }
+            return [:]
+        }
+        // Simulate a transient write failure on the execution row's SUCCESS-fields update, strictly AFTER
+        // persistAutomationRunResult already committed the run-result row.
+        ec.entity.updateHook = { FakeValue value ->
+            if (value.entityName == "darpan.reconciliation.ReconciliationAutomationExecution" &&
+                    value.statusEnumId == AutomationExecutionSupport.STATUS_SUCCEEDED) {
+                throw new IllegalArgumentException("execution status write failed")
+            }
+        }
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        try {
+            Map result = AutomationExecutionSupport.executeAutomation(ec, [
+                    automationId     : "AUTO_API",
+                    scheduledFireTime: NOW,
+            ])
+
+            assertEquals(1, result.failedCount)
+            assertEquals(1, ec.entity.createdValues("darpan.reconciliation.ReconciliationRunResult").size())
+            FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+            assertEquals(AutomationExecutionSupport.STATUS_FAILED, execution.statusEnumId)
+            assertEquals(1, deliveries.size())
+            assertEquals(webhookUrl, deliveries[0].webhookUrl)
+            String text = deliveries[0].payload.text as String
+            assertTrue(text.contains("Status: FAILED"))
+            assertTrue(text.contains("execution status write failed"))
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+    }
+
+    @Test
+    void noDataRunDoesNotNotify() {
+        // Task 7: NO_DATA never mints a run-result row, so the failure/success notify wiring must stay
+        // silent even when the automation has a configured chatSpaceId.
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        ec.entity.add("moqui.security.UserGroup", [
+                userGroupId    : "TENANT_A",
+                groupTypeEnumId: "UgtDarpanCompany",
+                description    : "Tenant A",
+        ])
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_OPS",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Ops",
+                googleChatWebhookUrl: "https://chat.googleapis.com/v1/spaces/TENANT_A_SPACE/messages?key=test-key&token=test-token",
+                isActive            : "Y",
+        ])
+        FakeValue notifyAutomation = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find {
+            it.automationId == "AUTO_API"
+        }
+        notifyAutomation.put("chatSpaceId", "CS_OPS")
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                return [
+                        dataAvailable: call.params.fileSide == "FILE_1",
+                        fileLocation : call.params.fileSide == "FILE_1" ? "runtime://tmp/file1.json" : null,
+                        fileName     : "${call.params.fileSide}.json".toString(),
+                        recordCount  : call.params.fileSide == "FILE_1" ? 10 : 0,
+                ]
+            }
+            throw new IllegalStateException("Reconcile should not run for no-data windows")
+        }
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        try {
+            Map result = AutomationExecutionSupport.executeAutomation(ec, [
+                    automationId     : "AUTO_API",
+                    scheduledFireTime: NOW,
+            ])
+
+            assertEquals(1, result.noDataCount)
+            assertTrue(deliveries.isEmpty())
+            assertEquals(0, ec.entity.createdValues("darpan.reconciliation.ReconciliationRunResult").size())
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+    }
+
+    @Test
     void notifiesAutomationSpaceAndSubscriberSpacesDeduped() {
         // Task 6 fan-out: the automation's own chat space (CS_OPS) plus notify-me subscriber spaces
         // (CS_ME via USER_A, CS_OPS again via USER_B) must be deduped into exactly 2 deliveries.
@@ -1521,13 +1656,23 @@ class AutomationExecutionSupportTests {
                     value instanceof Number ? ((Number) value).intValue().toString() :
                             (((value)?.toString()?.trim()) ?: "0")
         }
-        List<String> lines = ["Darpan run completed: ${runName}".toString()]
+        // Task 7: mirror the real build#RunCompletedPayload template's failure rendering (see
+        // ReconciliationNotificationServices.xml) so failure-path tests can assert on 'Status: FAILED'.
+        List<String> warningList = (params.processingWarnings instanceof List ? (List) params.processingWarnings : [])
+                .collect { ((it)?.toString()?.trim()) }.findAll { it }
+        boolean runFailed = ((params.statusEnumId)?.toString()?.trim()) == AutomationExecutionSupport.STATUS_FAILED
+        String headerPrefix = (runFailed || warningList) ? "Darpan run completed WITH ISSUES: " : "Darpan run completed: "
+        List<String> lines = ["${headerPrefix}${runName}".toString()]
+        if (runFailed) lines << "⚠ Status: FAILED — the ruleset did not fully evaluate; results may be incomplete.".toString()
+        String terminationReasonValue = ((params.terminationReason)?.toString()?.trim())
+        if (terminationReasonValue) lines << "⚠ ${terminationReasonValue}".toString()
         if (tenantLabel) lines << "Tenant: ${tenantLabel}".toString()
         if (resultId) lines << "Result ID: ${resultId}".toString()
         if (resultUrl) lines << "Run result: <${resultUrl}|Open run result>".toString()
         lines << "Differences: ${displayCount(params.differenceCount)}".toString()
         lines << "Only in ${file1SystemLabel ?: "File 1"}: ${displayCount(params.onlyInFile1Count)}".toString()
         lines << "Only in ${file2SystemLabel ?: "File 2"}: ${displayCount(params.onlyInFile2Count)}".toString()
+        if (warningList) lines << "Warnings (${warningList.size()}): ${warningList.take(3).join('; ')}${warningList.size() > 3 ? ' …' : ''}".toString()
         return [payload: [text: lines.join("\n")]]
     }
 
@@ -1557,6 +1702,10 @@ class AutomationExecutionSupportTests {
         Map<String, Integer> listCounts = [:].withDefault { 0 }
         int automationExecutionSeq = 1
         int runResultSeq = 1
+        // Task 7: injection point for automationFailureNotifiesWithFailedStatus — lets a test simulate an
+        // entity-row update failure AFTER a prior row (e.g. the run-result) already committed, so the
+        // failure-path notify wiring (mintedRunResultId visible in the catch) can be exercised directly.
+        Closure updateHook = null
 
         FakeFind find(String entityName) {
             return new FakeFind(entity: this, entityName: entityName)
@@ -1663,6 +1812,7 @@ class AutomationExecutionSupportTests {
         }
 
         FakeValue update() {
+            entity?.updateHook?.call(this)
             updated = true
             return this
         }

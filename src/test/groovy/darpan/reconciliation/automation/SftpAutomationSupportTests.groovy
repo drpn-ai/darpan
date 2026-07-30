@@ -143,6 +143,72 @@ class SftpAutomationSupportTests {
     }
 
     @Test
+    void sftpFailureWithRunResultNotifies() {
+        // Task 7: a poll that produced data but whose rule execution failed still mints a run-result row
+        // (status FAILED, since outputProduced only depends on dataAvailable/serviceReportedError) — the
+        // guard (reconciliationRunResultId present && statusEnumId != NO_DATA) must still notify once,
+        // unlike the true NO_DATA / unminted-row case in sftpFileAutomationRecordsNoDataWithoutDateWindowConfig.
+        FakeEc ec = fakeEc()
+        seedSftpAutomation(ec)
+        ec.entity.add("moqui.security.UserGroup", [
+                userGroupId    : "TENANT_A",
+                groupTypeEnumId: "UgtDarpanCompany",
+                description    : "Tenant A",
+        ])
+        String webhookUrl = "https://chat.googleapis.com/v1/spaces/TENANT_A_SPACE/messages?key=test-key&token=test-token"
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_OPS",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Ops",
+                googleChatWebhookUrl: webhookUrl,
+                isActive            : "Y",
+        ])
+        FakeValue notifyAutomation = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find {
+            it.automationId == "AUTO_SFTP"
+        }
+        notifyAutomation.put("chatSpaceId", "CS_OPS")
+        ec.service.nextResult = [
+                dataAvailable       : true,
+                ruleExecutionFailed : true,
+                statusMessage       : "Ruleset did not fully evaluate",
+                file1Source         : "sftp://source-a:22/incoming/shopify",
+                file2Source         : "sftp://source-b:22/incoming/netsuite",
+                file1SelectedName   : "shopify.csv",
+                file2SelectedName   : "netsuite.csv",
+                file1StagedLocation : "/tmp/shopify.csv",
+                file2StagedLocation : "/tmp/netsuite.csv",
+                reconciliationType  : "ORDER",
+                diffLocation        : "reconciliation-runs/AUTO_SFTP/20260501/result.json",
+                diffFileName        : "result.json",
+                differenceCount     : 0,
+                onlyInFile1Count    : 0,
+                onlyInFile2Count    : 0,
+                validationErrors    : [],
+                processingWarnings  : [],
+        ]
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        Map result
+        try {
+            result = SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+
+        assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_FAILED, result.statusEnumId)
+        assertEquals("RUN_RESULT_1", result.reconciliationRunResultId)
+        FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+        assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_FAILED, execution.statusEnumId)
+        assertEquals(1, ec.entity.createdValues("darpan.reconciliation.ReconciliationRunResult").size())
+        assertEquals(1, deliveries.size())
+        assertEquals(webhookUrl, deliveries[0].webhookUrl)
+    }
+
+    @Test
     void sftpFileAutomationRecordsNoDataWithoutDateWindowConfig() {
         FakeEc ec = fakeEc()
         seedSftpAutomation(ec)

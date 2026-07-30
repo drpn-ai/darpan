@@ -188,6 +188,10 @@ class AutomationExecutionSupport {
             // Audit 2026-06-11 #16: hold the Spark Datasets persisted by reconcile#RuleSetCompareScope
             // so the finally below unpersists them on every exit path of this automation execution.
             List autoPersistedSources = []
+            // Task 7 (gchat notifications): visible in the catch below so a failure AFTER the run-result
+            // row is minted (e.g. the execution-row status write itself fails) still notifies FAILED —
+            // a failure before any row is minted has nothing to notify about (guarded by this staying null).
+            String mintedRunResultId = null
             try {
                 Timestamp startedTimestamp = nowTimestamp(ec)
                 updateAutomationExecution(ec, execution, [
@@ -233,6 +237,7 @@ class AutomationExecutionSupport {
                         reconcileResult.resultDataManagerPath ?: reconcileResult.diffLocation ?: reconcileResult.diffFileName)
                 String reconciliationRunResultId = persistAutomationRunResult(ec, automation, file1Result, file2Result,
                         reconcileResult, resultDataManagerPath)
+                mintedRunResultId = reconciliationRunResultId
 
                 Timestamp completedTimestamp = nowTimestamp(ec)
                 // Audit 2026-06-11 #4: a rule build/eval failure does not throw, so an automation run
@@ -285,6 +290,23 @@ class AutomationExecutionSupport {
                 Timestamp completedTimestamp = nowTimestamp(ec)
                 Map<String, Object> failureFields = buildFailureFields(ec, execution, t, completedTimestamp, window)
                 updateAutomationExecution(ec, execution, failureFields)
+                // Task 7: the run-result row (if one was minted before the failure) never got its
+                // success-path notify, so notify FAILED here — best-effort, must never mask the real error.
+                if (mintedRunResultId) {
+                    try {
+                        TenantNotificationSupport.notifyRunCompleted(ec, [
+                                reconciliationRunResultId: mintedRunResultId,
+                                runName                  : normalize(readField(automation, "automationName")),
+                                savedRunId               : normalize(readField(automation, "savedRunId")),
+                                companyUserGroupId       : normalize(readField(automation, "companyUserGroupId")),
+                                chatSpaceId              : normalize(readField(automation, "chatSpaceId")),
+                                statusEnumId             : STATUS_FAILED,
+                                processingWarnings       : [t.message ?: t.toString()],
+                        ])
+                    } catch (Throwable notifyError) {
+                        logger.warn("Automation failure notification failed (best-effort): ${notifyError.message}")
+                    }
+                }
                 executionResults << failureFields + [
                         automationExecutionId: automationExecutionId,
                         childWindowStartDate : window.childWindowStartDate,

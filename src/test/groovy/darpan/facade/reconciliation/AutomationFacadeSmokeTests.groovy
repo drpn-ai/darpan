@@ -28,6 +28,7 @@ class AutomationFacadeSmokeTests {
     private static final String GORJANA = "GORJANA"
     private static final Timestamp TEST_FROM_DATE = Timestamp.valueOf("2026-04-23 00:00:00")
     private static final Timestamp RUN_NOW_TIME = Timestamp.valueOf("2026-05-01 10:00:00")
+    private static final String CHAT_SPACE_WEBHOOK = "https://chat.googleapis.com/v1/spaces/AAAA1234ZZZZ/messages?key=k&token=t"
 
     private ExecutionContext ec
 
@@ -239,6 +240,102 @@ class AutomationFacadeSmokeTests {
         assertEquals(2, deleteResult.deletedSourceCount)
         assertEquals(2, deleteResult.deletedExecutionCount)
         assertNull(findOne("darpan.reconciliation.ReconciliationAutomation", [automationId: automationId]))
+    }
+
+    @Test
+    void saveAutomationPersistsChatSpace() {
+        Map<String, Object> chatSpaceSave = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace", [
+                spaceName           : "Automation Notify Space",
+                googleChatWebhookUrl: CHAT_SPACE_WEBHOOK,
+                isActive            : true,
+        ])
+        assertTrue((Boolean) chatSpaceSave.ok, chatSpaceSave.errors?.toString())
+        String chatSpaceId = ((Map) chatSpaceSave.chatSpace).chatSpaceId as String
+
+        ec.message.clearErrors()
+        Map<String, Object> saveResult = saveSftpAutomation("Chat Space Automation", [chatSpaceId: chatSpaceId])
+        assertTrue((Boolean) saveResult.ok, saveResult.errors?.toString())
+        Map<String, Object> savedAutomation = (Map<String, Object>) saveResult.automation
+        String automationId = savedAutomation.automationId as String
+        assertEquals(chatSpaceId, savedAutomation.chatSpaceId)
+        assertEquals("Automation Notify Space", savedAutomation.chatSpaceName)
+        assertEquals(true, savedAutomation.chatSpaceActive)
+
+        ec.message.clearErrors()
+        Map<String, Object> getResult = callFacade("facade.ReconciliationFacadeServices.get#Automation", [
+                automationId: automationId,
+        ])
+        assertTrue((Boolean) getResult.ok, getResult.errors?.toString())
+        Map<String, Object> fetchedAutomation = (Map<String, Object>) getResult.automation
+        assertEquals(chatSpaceId, fetchedAutomation.chatSpaceId)
+        assertEquals("Automation Notify Space", fetchedAutomation.chatSpaceName)
+        assertEquals(true, fetchedAutomation.chatSpaceActive)
+    }
+
+    @Test
+    void saveAutomationRejectsForeignOrInactiveSpace() {
+        Map<String, Object> fabricatedResult = saveSftpAutomation("Fabricated Chat Space Automation", [
+                chatSpaceId: "NOT_A_REAL_CHAT_SPACE",
+        ])
+        assertFalse((Boolean) fabricatedResult.ok)
+        assertTrue((fabricatedResult.errors ?: []).join(" ").contains("not found or is inactive"))
+
+        ec.message.clearErrors()
+        Map<String, Object> chatSpaceSave = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace", [
+                spaceName           : "Soon Inactive Space",
+                googleChatWebhookUrl: CHAT_SPACE_WEBHOOK,
+                isActive            : true,
+        ])
+        assertTrue((Boolean) chatSpaceSave.ok, chatSpaceSave.errors?.toString())
+        String chatSpaceId = ((Map) chatSpaceSave.chatSpace).chatSpaceId as String
+
+        ec.message.clearErrors()
+        Map<String, Object> deactivateResult = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace", [
+                chatSpaceId: chatSpaceId,
+                spaceName  : "Soon Inactive Space",
+                isActive   : false,
+        ])
+        assertTrue((Boolean) deactivateResult.ok, deactivateResult.errors?.toString())
+
+        ec.message.clearErrors()
+        Map<String, Object> inactiveResult = saveSftpAutomation("Inactive Chat Space Automation", [
+                chatSpaceId: chatSpaceId,
+        ])
+        assertFalse((Boolean) inactiveResult.ok)
+        assertTrue((inactiveResult.errors ?: []).join(" ").contains("not found or is inactive"))
+        ec.message.clearErrors()
+    }
+
+    @Test
+    void saveAutomationWithoutChatSpaceClearsIt() {
+        Map<String, Object> chatSpaceSave = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace", [
+                spaceName           : "Clearable Space",
+                googleChatWebhookUrl: CHAT_SPACE_WEBHOOK,
+                isActive            : true,
+        ])
+        assertTrue((Boolean) chatSpaceSave.ok, chatSpaceSave.errors?.toString())
+        String chatSpaceId = ((Map) chatSpaceSave.chatSpace).chatSpaceId as String
+
+        ec.message.clearErrors()
+        Map<String, Object> saveResult = saveSftpAutomation("Clear Chat Space Automation", [chatSpaceId: chatSpaceId])
+        assertTrue((Boolean) saveResult.ok, saveResult.errors?.toString())
+        String automationId = ((Map) saveResult.automation).automationId as String
+        assertEquals(chatSpaceId, ((Map) saveResult.automation).chatSpaceId)
+
+        ec.message.clearErrors()
+        Map<String, Object> resaveResult = saveSftpAutomation("Clear Chat Space Automation", [
+                automationId: automationId,
+                chatSpaceId : "",
+        ])
+        assertTrue((Boolean) resaveResult.ok, resaveResult.errors?.toString())
+        assertNull(((Map) resaveResult.automation).chatSpaceId)
+
+        ec.message.clearErrors()
+        Map<String, Object> getResult = callFacade("facade.ReconciliationFacadeServices.get#Automation", [
+                automationId: automationId,
+        ])
+        assertTrue((Boolean) getResult.ok, getResult.errors?.toString())
+        assertNull(((Map) getResult.automation).chatSpaceId)
     }
 
     @Test
@@ -493,8 +590,8 @@ class AutomationFacadeSmokeTests {
         assertTrue(ec.message.errors.any { String message -> message.contains("file1PrimaryIdExpression is required") })
     }
 
-    private Map<String, Object> saveSftpAutomation(String automationName) {
-        return callFacade("facade.ReconciliationFacadeServices.save#Automation", [
+    private Map<String, Object> saveSftpAutomation(String automationName, Map<String, Object> extraParams = [:]) {
+        Map<String, Object> params = [
                 automationName : automationName,
                 inputModeEnumId: "AUT_IN_SFTP_FILES",
                 savedRunId     : "OrderIdSchemaMap",
@@ -518,7 +615,9 @@ class AutomationFacadeSmokeTests {
                                 remotePathTemplate: "/incoming/shopify",
                         ],
                 ],
-        ])
+        ]
+        params.putAll(extraParams)
+        return callFacade("facade.ReconciliationFacadeServices.save#Automation", params)
     }
 
     private void configureApiExecutionHooks() {

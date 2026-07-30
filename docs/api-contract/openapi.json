@@ -7597,6 +7597,15 @@
                                 "active": {
                                     "type": "boolean"
                                 },
+                                "chatSpaceId": {
+                                    "type": "string"
+                                },
+                                "chatSpaceName": {
+                                    "type": "string"
+                                },
+                                "chatSpaceActive": {
+                                    "type": "boolean"
+                                },
                                 "executionCount": {
                                     "type": "integer"
                                 },
@@ -9510,6 +9519,9 @@
                         "type": "string"
                     },
                     "safeConfigJson": {
+                        "type": "string"
+                    },
+                    "chatSpaceId": {
                         "type": "string"
                     },
                     "isActive": {

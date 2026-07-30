@@ -76,6 +76,11 @@ class AutomationFacadeSupport {
             validateSources(ec, inputModeEnumId, sourceEntries, savedRunResolution.savedRun as Map)
         }
 
+        String chatSpaceId = normalize(input.chatSpaceId) ?: null
+        if (!ec.message.hasError() && chatSpaceId) {
+            validateChatSpace(ec, TenantAccessSupport.currentActiveTenantUserGroupId(ec), chatSpaceId)
+        }
+
         Map<String, Object> automationFields = null
         if (!ec.message.hasError()) {
             Timestamp now = nowTimestamp(ec)
@@ -101,6 +106,7 @@ class AutomationFacadeSupport {
                     splitWindowDays       : input.splitWindowDays,
                     windowTimeZone        : input.windowTimeZone ?: "UTC",
                     safeConfigJson        : input.safeConfigJson,
+                    chatSpaceId           : chatSpaceId,
                     isActive              : input.isActive == false ? "N" : "Y",
                     lastUpdatedDate       : now,
             ] as Map<String, Object>
@@ -119,6 +125,7 @@ class AutomationFacadeSupport {
         Map<String, Object> savedRun = resolveSavedRunSummary(ec, automation)
         String inputModeEnumId = readString(automation, "inputModeEnumId")
         String isActive = readString(automation, "isActive") ?: "Y"
+        Map<String, Object> chatSpaceSummary = resolveChatSpaceSummary(ec, automation)
         Map<String, Object> row = [
                 automationId          : automationId,
                 automationName        : readString(automation, "automationName"),
@@ -149,6 +156,9 @@ class AutomationFacadeSupport {
                 splitWindowDays       : readField(automation, "splitWindowDays"),
                 isActive              : isActive,
                 active                : isActive != "N",
+                chatSpaceId           : chatSpaceSummary.chatSpaceId,
+                chatSpaceName         : chatSpaceSummary.chatSpaceName,
+                chatSpaceActive       : chatSpaceSummary.chatSpaceActive,
                 lastExecution         : executionRows ? buildExecutionRow(ec, executionRows.first()) : null,
                 executionCount        : executionRows.size(),
                 permissions           : buildPermissions(ec, isActive),
@@ -348,6 +358,16 @@ class AutomationFacadeSupport {
         }
     }
 
+    protected static void validateChatSpace(def ec, String tenantId, String chatSpaceId) {
+        def chatSpaceRow = ec.entity.find(DarpanEntityConstants.TENANT_CHAT_SPACE)
+                .condition("chatSpaceId", chatSpaceId)
+                .condition("companyUserGroupId", tenantId)
+                .disableAuthz().useCache(false).one()
+        if (chatSpaceRow == null || ((chatSpaceRow.isActive)?.toString()?.trim()) == "N") {
+            ec.message.addError("Chat space '${chatSpaceId}' was not found or is inactive.")
+        }
+    }
+
     protected static void validateSourceMatchesSavedRun(def ec, Map<String, Object> source, Map<String, Object> savedRun) {
         if (!savedRun) return
         String fileSide = source.fileSide as String
@@ -531,6 +551,17 @@ class AutomationFacadeSupport {
         String savedRunId = readString(automation, "savedRunId")
         if (!savedRunId) return null
         return ReconciliationSavedRunSupport.findSavedRunById(ec, savedRunId)
+    }
+
+    protected static Map<String, Object> resolveChatSpaceSummary(def ec, def automation) {
+        String chatSpaceId = readString(automation, "chatSpaceId")
+        def chatSpaceRow = chatSpaceId ? ec.entity.find(DarpanEntityConstants.TENANT_CHAT_SPACE)
+                .condition("chatSpaceId", chatSpaceId).disableAuthz().useCache(true).one() : null
+        return [
+                chatSpaceId    : chatSpaceId,
+                chatSpaceName  : chatSpaceRow?.spaceName,
+                chatSpaceActive: chatSpaceRow != null && ((chatSpaceRow.isActive)?.toString()?.trim()) != "N",
+        ]
     }
 
     protected static String buildSourceSummary(def ec, String inputModeEnumId, List sources) {

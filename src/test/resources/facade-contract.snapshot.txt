@@ -834,6 +834,9 @@ SERVICE list Automations
     automations.active : Boolean
     automations.automationId : String
     automations.automationName : String
+    automations.chatSpaceActive : Boolean
+    automations.chatSpaceId : String
+    automations.chatSpaceName : String
     automations.companyLabel : String
     automations.companyUserGroupId : String
     automations.compareScopeId : String
@@ -1157,6 +1160,7 @@ SERVICE save Automation
   IN:
     automationId : String
     automationName : String [required]
+    chatSpaceId : String
     customWindowEndDate : Timestamp
     customWindowStartDate : Timestamp
     description : String

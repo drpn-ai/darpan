@@ -1785,6 +1785,7 @@
                 <parameter name="splitWindowDays" type="Integer"/>
                 <parameter name="isActive"/>
                 <parameter name="active" type="Boolean"/>
+                <parameter name="chatSpaceId"/><parameter name="chatSpaceName"/><parameter name="chatSpaceActive" type="Boolean"/>
                 <parameter name="executionCount" type="Integer"/>
                 <parameter name="lastExecution" type="Map"/>
                 <parameter name="permissions" type="Map"/>
@@ -1874,6 +1875,7 @@
             <parameter name="splitWindowDays" type="Integer" default-value="28"/>
             <parameter name="windowTimeZone" default-value="UTC"/>
             <parameter name="safeConfigJson" allow-html="true"/>
+            <parameter name="chatSpaceId"/>
             <parameter name="isActive" type="Boolean" default-value="true"/>
             <parameter name="sources" type="List">
                 <parameter name="fileSide"/>
@@ -1917,6 +1919,7 @@
             <set field="relativeWindowTypeEnumIdValue" from="((relativeWindowTypeEnumId)?.toString()?.trim())"/>
             <set field="windowTimeZoneValue" from="((windowTimeZone)?.toString()?.trim()) ?: 'UTC'"/>
             <set field="safeConfigJsonValue" from="darpan.facade.reconciliation.AutomationFacadeSupport.canonicalJsonText(ec, safeConfigJson, 'safeConfigJson')"/>
+            <set field="chatSpaceIdValue" from="((chatSpaceId)?.toString()?.trim())"/>
             <set field="sourceList" from="sources ?: []"/>
             <set field="sourceEntries" from="[]"/>
             <iterate list="sourceList" entry="source">
@@ -1984,6 +1987,7 @@
                     splitWindowDays: splitWindowDays,
                     windowTimeZone: windowTimeZoneValue,
                     safeConfigJson: safeConfigJsonValue,
+                    chatSpaceId: chatSpaceIdValue,
                     isActive: isActive,
                     sourceEntries: sourceEntries
             ]"/>
@@ -2015,6 +2019,7 @@
                 <set field="ignoreSetSplitWindow" from="automationRecord.set('splitWindowDays', automationFields.splitWindowDays)"/>
                 <set field="ignoreSetTimeZone" from="automationRecord.set('windowTimeZone', automationFields.windowTimeZone)"/>
                 <set field="ignoreSetSafeConfig" from="automationRecord.set('safeConfigJson', automationFields.safeConfigJson)"/>
+                <set field="ignoreSetChatSpace" from="automationRecord.set('chatSpaceId', automationFields.chatSpaceId)"/>
                 <set field="ignoreSetIsActive" from="automationRecord.set('isActive', automationFields.isActive)"/>
                 <set field="ignoreSetUpdatedDate" from="automationRecord.set('lastUpdatedDate', automationFields.lastUpdatedDate)"/>
                 <set field="ignoreAutomationUpdate" from="automationRecord.update()"/>

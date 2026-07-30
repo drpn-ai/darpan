@@ -41,6 +41,22 @@ class ExchangePairVerificationSupportTests {
         return f
     }
 
+    /** writeDiffDatasetOutput's zero-row shape: header and closing "]" collapse onto one line. */
+    private File emptyDifferencesDiffFile() {
+        File f = tempDir.resolve("empty-diff.json").toFile()
+        f.text = '{\n"summary":{"totalDifferences":0},\n' +
+                '"differences":[]\n' +
+                '}\n'
+        return f
+    }
+
+    /** No "differences":[ line anywhere — exercises appendDiffRows' has-no-differences-section guard. */
+    private File diffFileWithoutDifferencesSection() {
+        File f = tempDir.resolve("no-diffs-section.json").toFile()
+        f.text = '{\n"summary":{"totalDifferences":0}\n}\n'
+        return f
+    }
+
     private static Map entry(Map overrides = [:]) {
         [omsOrderId: "M750653", externalId: "6941645013123", orderName: "EXC-#GOR196990495-1",
          toOrderId: "M686331", grandTotal: 50.0, orderDate: 1785260782199L, statusId: "ORDER_COMPLETED"] + overrides
@@ -88,6 +104,24 @@ class ExchangePairVerificationSupportTests {
         Map parsed = (Map) new JsonSlurper().parseText(text)   // document must stay valid JSON
         assertEquals(2, ((List) parsed.differences).size())
         assertEquals("6941645013123", ((Map) ((List) parsed.differences).last()).primaryId)
+    }
+
+    @Test
+    void unresolvedShopifyOrderAppendsNothingAndCountsUnresolved() {
+        // ok:true but no entry for the externalId at all (deleted/archived/never-Shopify id) is
+        // evidence-free, not evidence of a missing exchange — must not become a V1 row. Use a
+        // fixture where the OMS pair has the original present so V3 does not also fire.
+        File diff = diffFile()
+        String before = diff.text
+        Map result = ExchangePairVerificationSupport.verifyExchangePairs([
+                manifestFile: manifestFile([entry()]), diffFile: diff, nowMillis: NOW,
+                shopifyLookup: { List ids -> [ok: true, errors: [], statesByOrderId: [:]] },
+                omsPairLookup: { List ids -> omsPairOk() }])
+        assertEquals(0, result.appendedCount)
+        assertEquals(1, result.unresolvedShopifyCount)
+        assertEquals(1, result.checkedPairCount)
+        assertTrue((result.warnings as List).any { it.toString().contains("could not resolve") })
+        assertEquals(before, diff.text)
     }
 
     @Test
@@ -146,5 +180,70 @@ class ExchangePairVerificationSupportTests {
                 manifestFile: tempDir.resolve("nope.json").toFile(), diffFile: diffFile(), nowMillis: NOW,
                 shopifyLookup: { List ids -> shopifyOk() }, omsPairLookup: { List ids -> omsPairOk() }])
         assertFalse(result.performed as boolean)
+    }
+
+    @Test
+    void emptyDifferencesDocumentAcceptsAppendedRow() {
+        File diff = emptyDifferencesDiffFile()
+        Map result = ExchangePairVerificationSupport.verifyExchangePairs([
+                manifestFile: manifestFile([entry()]), diffFile: diff, nowMillis: NOW,
+                shopifyLookup: { List ids -> shopifyOk(new BigDecimal("185.71"), false) },
+                omsPairLookup: { List ids -> omsPairOk() }])
+        assertEquals(1, result.appendedCount)
+        String text = diff.text
+        assertTrue(text.contains('"totalDifferences":1'))
+        Map parsed = (Map) new JsonSlurper().parseText(text)   // document must stay valid JSON
+        assertEquals(1, ((List) parsed.differences).size())
+        assertEquals("6941645013123", ((Map) ((List) parsed.differences).first()).primaryId)
+    }
+
+    @Test
+    void overCapPairsSkipsWithWarningAndLeavesFileUntouched() {
+        File diff = diffFile()
+        String before = diff.text
+        List entries = [entry(), entry([omsOrderId: "M999", externalId: "8888888888888"])]
+        Map result = ExchangePairVerificationSupport.verifyExchangePairs([
+                manifestFile: manifestFile(entries), diffFile: diff, nowMillis: NOW, maxPairs: 1,
+                shopifyLookup: { List ids -> fail("should not look up over-cap pairs") },
+                omsPairLookup: { List ids -> fail("should not look up over-cap pairs") }])
+        assertTrue(result.performed as boolean)
+        assertEquals(0, result.appendedCount)
+        assertEquals(0, result.checkedPairCount)
+        assertTrue((result.warnings as List).any { it.toString().contains("cap") })
+        assertEquals(before, diff.text)
+    }
+
+    @Test
+    void malformedManifestJsonIsInertWithWarning() {
+        File manifest = tempDir.resolve("bad.exchange-manifest.json").toFile()
+        manifest.text = "{ not valid json"
+        File diff = diffFile()
+        String before = diff.text
+        Map result = ExchangePairVerificationSupport.verifyExchangePairs([
+                manifestFile: manifest, diffFile: diff, nowMillis: NOW,
+                shopifyLookup: { List ids -> fail("should not look up on malformed manifest") },
+                omsPairLookup: { List ids -> fail("should not look up on malformed manifest") }])
+        assertFalse(result.performed as boolean)
+        assertTrue((result.warnings as List).any { it.toString().contains("unreadable") })
+        assertEquals(before, diff.text)
+    }
+
+    /**
+     * No clean injection point exists to force an I/O failure mid-write, so this hits
+     * appendDiffRows' "no differences section to append to" precondition instead — the same
+     * IllegalStateException path a genuinely malformed/foreign diff document would trigger.
+     * verifyExchangePairs must catch it, warn, and leave the file untouched with no rows counted.
+     */
+    @Test
+    void diffDocumentWithoutDifferencesSectionIsInertWithWarning() {
+        File diff = diffFileWithoutDifferencesSection()
+        String before = diff.text
+        Map result = ExchangePairVerificationSupport.verifyExchangePairs([
+                manifestFile: manifestFile([entry()]), diffFile: diff, nowMillis: NOW,
+                shopifyLookup: { List ids -> shopifyOk(new BigDecimal("185.71"), false) },
+                omsPairLookup: { List ids -> omsPairOk() }])
+        assertEquals(0, result.appendedCount)
+        assertTrue((result.warnings as List).any { it.toString().contains("could not write diff rows") })
+        assertEquals(before, diff.text)
     }
 }

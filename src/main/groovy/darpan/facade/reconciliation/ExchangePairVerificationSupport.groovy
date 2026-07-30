@@ -17,6 +17,11 @@ import java.util.regex.Pattern
  * MissingDiffVerificationSupport streams; see that class's fixtures for the format this mirrors.
  * The on-disk summary object's running total lives under the key "totalDifferences" (not
  * "differenceCount" — that name is only used for in-memory result maps elsewhere in this codebase).
+ *
+ * An externalId the Shopify lookup did not resolve at all (state == null — deleted/archived/never a
+ * Shopify id) is evidence-free for the V1 check, not evidence of a missing exchange: it is counted in
+ * unresolvedShopifyCount and warned about, never turned into an EXCHANGE_MISSING_IN_SHOPIFY row. V3
+ * (original-missing-in-OMS) is unaffected since its evidence is the OMS pair lookup, which did resolve.
  */
 class ExchangePairVerificationSupport {
     static final String TYPE_MISSING_IN_SHOPIFY = "EXCHANGE_MISSING_IN_SHOPIFY"
@@ -32,7 +37,8 @@ class ExchangePairVerificationSupport {
     static Map<String, Object> verifyExchangePairs(Map<String, Object> args) {
         List<String> warnings = []
         Map<String, Object> result = [performed: false, appendedCount: 0, appendedByType: [:], pendingCount: 0,
-                skippedCancelledCount: 0, checkedPairCount: 0, lookupFailed: false, warnings: warnings, auditNote: null]
+                skippedCancelledCount: 0, checkedPairCount: 0, unresolvedShopifyCount: 0, lookupFailed: false,
+                warnings: warnings, auditNote: null]
         File manifestFile = (File) args.manifestFile
         File diffFile = (File) args.diffFile
         Closure shopifyLookup = (Closure) args.shopifyLookup
@@ -91,7 +97,13 @@ class ExchangePairVerificationSupport {
             String exchangeNames = manifestEntries.collect { "${it.orderName} (${it.omsOrderId})" }.join(", ")
 
             boolean shopifyHasExchange = state != null && ((List) (state.get('exchanges') ?: []))
-            if (!shopifyHasExchange) {
+            if (state == null) {
+                // No evidence either way — Shopify never resolved this externalId at all (deleted,
+                // archived, or never a Shopify id). Flagging EXCHANGE_MISSING_IN_SHOPIFY here would
+                // assert something the source of record never confirmed; stay conservative instead.
+                result.unresolvedShopifyCount = (result.unresolvedShopifyCount as int) + 1
+                warnings.add("Shopify could not resolve order ${externalId} for exchange verification.".toString())
+            } else if (!shopifyHasExchange) {
                 rows.add([diffType: TYPE_MISSING_IN_SHOPIFY, primaryId: externalId,
                         note: "OMS exchange order(s) ${exchangeNames} have no exchange on Shopify order ${externalId}.".toString(),
                         data: [manifestEntries: manifestEntries, shopifyReturnStatus: state?.get('returnStatus')]])
@@ -128,9 +140,13 @@ class ExchangePairVerificationSupport {
             result.appendedCount = rows.size()
             result.appendedByType = rows.countBy { it.diffType }
         }
-        result.auditNote = "Exchange pair verification checked ${result.checkedPairCount} pair(s): " +
+        String auditNote = "Exchange pair verification checked ${result.checkedPairCount} pair(s): " +
                 "${result.appendedCount} discrepancy row(s) appended, ${result.pendingCount} pending (younger than ${graceDays}d), " +
                 "${result.skippedCancelledCount} cancelled skipped."
+        if ((result.unresolvedShopifyCount as int) > 0) {
+            auditNote += " ${result.unresolvedShopifyCount} unresolved in Shopify."
+        }
+        result.auditNote = auditNote
         return result
     }
 
@@ -156,45 +172,51 @@ class ExchangePairVerificationSupport {
      */
     protected static void appendDiffRows(File diffFile, List<Map> rows) {
         File tempFile = File.createTempFile(diffFile.name + "-", ".exchange-verify", diffFile.parentFile)
-        List<String> rowJson = rows.collect { JsonOutput.toJson(it) }
-        tempFile.withWriter("UTF-8") { Writer writer ->
-            boolean inRows = false
-            boolean appended = false
-            diffFile.eachLine("UTF-8") { String line ->
-                String outLine = line
-                Matcher countMatcher = TOTAL_DIFFERENCES_COUNT.matcher(line)
-                if (!inRows && countMatcher.find()) {
-                    long bumped = Long.parseLong(countMatcher.group(2)) + rows.size()
-                    outLine = countMatcher.replaceFirst('$1' + bumped)
-                }
-                if (!appended) {
-                    if (!inRows && outLine.startsWith(DIFFERENCES_HEADER)) {
-                        if (outLine.startsWith(DIFFERENCES_HEADER + "]")) {
-                            // empty differences array on one line: open it and append
-                            writer.write(DIFFERENCES_HEADER + "\n")
+        boolean committed = false
+        try {
+            List<String> rowJson = rows.collect { JsonOutput.toJson(it) }
+            tempFile.withWriter("UTF-8") { Writer writer ->
+                boolean inRows = false
+                boolean appended = false
+                diffFile.eachLine("UTF-8") { String line ->
+                    String outLine = line
+                    Matcher countMatcher = TOTAL_DIFFERENCES_COUNT.matcher(line)
+                    if (!inRows && countMatcher.find()) {
+                        long bumped = Long.parseLong(countMatcher.group(2)) + rows.size()
+                        outLine = countMatcher.replaceFirst('$1' + bumped)
+                    }
+                    if (!appended) {
+                        if (!inRows && outLine.startsWith(DIFFERENCES_HEADER)) {
+                            if (outLine.startsWith(DIFFERENCES_HEADER + "]")) {
+                                // empty differences array on one line: open it and append
+                                writer.write(DIFFERENCES_HEADER + "\n")
+                                rowJson.eachWithIndex { String json, int i ->
+                                    writer.write(json + (i == rowJson.size() - 1 ? "]" : ",") + "\n")
+                                }
+                                String rest = outLine.substring((DIFFERENCES_HEADER + "]").length())
+                                if (rest) writer.write(rest + "\n")
+                                appended = true
+                                return
+                            }
+                            inRows = true
+                        } else if (inRows && outLine.endsWith("]")) {
+                            writer.write(outLine.substring(0, outLine.length() - 1) + ",\n")
                             rowJson.eachWithIndex { String json, int i ->
                                 writer.write(json + (i == rowJson.size() - 1 ? "]" : ",") + "\n")
                             }
-                            String rest = outLine.substring((DIFFERENCES_HEADER + "]").length())
-                            if (rest) writer.write(rest + "\n")
                             appended = true
                             return
                         }
-                        inRows = true
-                    } else if (inRows && outLine.endsWith("]")) {
-                        writer.write(outLine.substring(0, outLine.length() - 1) + ",\n")
-                        rowJson.eachWithIndex { String json, int i ->
-                            writer.write(json + (i == rowJson.size() - 1 ? "]" : ",") + "\n")
-                        }
-                        appended = true
-                        return
                     }
+                    writer.write(outLine + "\n")
                 }
-                writer.write(outLine + "\n")
+                if (!appended) throw new IllegalStateException("diff document has no differences section to append to")
             }
-            if (!appended) throw new IllegalStateException("diff document has no differences section to append to")
+            replaceFile(tempFile, diffFile)
+            committed = true
+        } finally {
+            if (!committed) tempFile.delete()
         }
-        replaceFile(tempFile, diffFile)
     }
 
     private static void replaceFile(File source, File target) {

@@ -46,6 +46,8 @@
                 <parameter name="displayName" type="String"/>
                 <parameter name="locale" type="String"/>
                 <parameter name="timeZone" type="String"/>
+                <parameter name="userTimeZone" type="String"/>
+                <parameter name="tenantTimeZone" type="String"/>
                 <parameter name="lastLoginDate" type="Timestamp"/>
                 <parameter name="lastRun" type="Map">
                     <parameter name="reconciliationRunResultId" type="String"/>
@@ -108,6 +110,8 @@
                 <parameter name="displayName" type="String"/>
                 <parameter name="locale" type="String"/>
                 <parameter name="timeZone" type="String"/>
+                <parameter name="userTimeZone" type="String"/>
+                <parameter name="tenantTimeZone" type="String"/>
                 <parameter name="lastLoginDate" type="Timestamp"/>
                 <parameter name="lastRun" type="Map">
                     <parameter name="reconciliationRunResultId" type="String"/>
@@ -177,6 +181,8 @@
                 <parameter name="displayName" type="String"/>
                 <parameter name="locale" type="String"/>
                 <parameter name="timeZone" type="String"/>
+                <parameter name="userTimeZone" type="String"/>
+                <parameter name="tenantTimeZone" type="String"/>
                 <parameter name="lastLoginDate" type="Timestamp"/>
                 <parameter name="lastRun" type="Map">
                     <parameter name="reconciliationRunResultId" type="String"/>
@@ -222,6 +228,9 @@
             <parameter name="displayName">
                 <description>Optional user display name shown by darpan-ui instead of username.</description>
             </parameter>
+            <parameter name="timeZone">
+                <description>Optional preferred display timezone (IANA id). Empty string clears the preference; absent leaves it unchanged.</description>
+            </parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean">
@@ -245,6 +254,8 @@
                 <parameter name="displayName" type="String"/>
                 <parameter name="locale" type="String"/>
                 <parameter name="timeZone" type="String"/>
+                <parameter name="userTimeZone" type="String"/>
+                <parameter name="tenantTimeZone" type="String"/>
                 <parameter name="lastLoginDate" type="Timestamp"/>
                 <parameter name="lastRun" type="Map">
                     <parameter name="reconciliationRunResultId" type="String"/>
@@ -272,7 +283,7 @@
         <actions>
             <set field="authenticated" from="((ec.user.userId)?.toString()?.trim()) != null"/>
             <if condition="authenticated">
-                <set field="userSettingsSaved" from="darpan.facade.common.TenantAccessSupport.saveUserSettings(ec, displayName)"/>
+                <set field="userSettingsSaved" from="darpan.facade.common.TenantAccessSupport.saveUserSettings(ec, displayName, timeZone)"/>
                 <set field="sessionInfo" from="darpan.facade.common.TenantAccessSupport.buildSessionInfo(ec)"/>
             </if>
             <if condition="!authenticated">
@@ -316,6 +327,8 @@
                 <parameter name="displayName" type="String"/>
                 <parameter name="locale" type="String"/>
                 <parameter name="timeZone" type="String"/>
+                <parameter name="userTimeZone" type="String"/>
+                <parameter name="tenantTimeZone" type="String"/>
                 <parameter name="lastLoginDate" type="Timestamp"/>
                 <parameter name="lastRun" type="Map">
                     <parameter name="reconciliationRunResultId" type="String"/>
@@ -389,6 +402,8 @@
                 <parameter name="displayName" type="String"/>
                 <parameter name="locale" type="String"/>
                 <parameter name="timeZone" type="String"/>
+                <parameter name="userTimeZone" type="String"/>
+                <parameter name="tenantTimeZone" type="String"/>
                 <parameter name="lastLoginDate" type="Timestamp"/>
                 <parameter name="lastRun" type="Map">
                     <parameter name="reconciliationRunResultId" type="String"/>

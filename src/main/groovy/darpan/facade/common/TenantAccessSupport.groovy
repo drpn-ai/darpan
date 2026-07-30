@@ -261,19 +261,21 @@ class TenantAccessSupport {
 
     static Map<String, Object> buildSessionInfo(def ec) {
         Map<String, Object> sessionInfo = [
-            userId       : ec?.user?.userId,
-            username     : ec?.user?.username,
-            displayName  : resolveDisplayName(ec),
-            locale       : ec?.l10n?.locale?.toLanguageTag(),
-            timeZone     : resolveActiveTenantTimeZone(ec),
-            lastLoginDate: resolveLastLoginDate(ec),
-            lastRun      : resolveLastRun(ec),
+            userId        : ec?.user?.userId,
+            username      : ec?.user?.username,
+            displayName   : resolveDisplayName(ec),
+            locale        : ec?.l10n?.locale?.toLanguageTag(),
+            timeZone      : resolveActiveTenantTimeZone(ec),
+            userTimeZone  : normalizeTimeZoneId(ec?.user?.userAccount?.timeZone),
+            tenantTimeZone: resolveRawTenantTimeZone(ec),
+            lastLoginDate : resolveLastLoginDate(ec),
+            lastRun       : resolveLastRun(ec),
         ]
         applyScopeToSessionInfo(ec, sessionInfo)
         return sessionInfo
     }
 
-    static boolean saveUserSettings(def ec, Object rawDisplayName) {
+    static boolean saveUserSettings(def ec, Object rawDisplayName, Object rawTimeZone = null) {
         if (!currentUserId(ec)) {
             ec?.message?.addError("Authentication required to save user settings.")
             return false
@@ -281,7 +283,23 @@ class TenantAccessSupport {
 
         String displayName = normalize(rawDisplayName)
         ec?.user?.setPreference(DISPLAY_NAME_PREFERENCE_KEY, displayName)
-        return true
+
+        if (rawTimeZone == null) return true
+        String timeZone = normalizeTimeZoneId(rawTimeZone)
+        if (timeZone) {
+            String validationError = validateTimeZone(timeZone)
+            if (validationError) {
+                ec?.message?.addError(validationError)
+                return false
+            }
+        }
+        // Facade services carry inheritAuthz=Y, so this own-user write is authorized
+        // the same way saveActiveTenantSettings' store#TenantSetting call is.
+        ec?.service?.sync()
+                ?.name("update#moqui.security.UserAccount")
+                ?.parameters([userId: currentUserId(ec), timeZone: timeZone ?: null])
+                ?.call()
+        return !(ec?.message?.hasError() ?: false)
     }
 
     static Map<String, Object> readActiveTenantSettings(def ec) {
@@ -328,6 +346,12 @@ class TenantAccessSupport {
         String tenantId = currentActiveTenantUserGroupId(ec)
         def tenantSettings = tenantId ? findTenantSettingsForTenant(ec, tenantId) : null
         return resolveTenantSettingsTimeZone(tenantSettings, ec)
+    }
+
+    static String resolveRawTenantTimeZone(def ec) {
+        String tenantId = currentActiveTenantUserGroupId(ec)
+        def tenantSettings = tenantId ? findTenantSettingsForTenant(ec, tenantId) : null
+        return normalizeTimeZoneId(tenantSettings?.timeZone)
     }
 
     static String validateTimeZone(Object rawTimeZone) {

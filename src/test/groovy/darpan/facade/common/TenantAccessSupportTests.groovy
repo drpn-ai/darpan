@@ -521,6 +521,28 @@ class TenantAccessSupportTests {
     }
 
     @Test
+    void buildSessionInfoExposesRawUserAndTenantTimeZones() {
+        FinderStub companyFinder = new FinderStub(listResult: [
+                [userGroupId: "GORJANA", userId: "EX_USER", description: "Gorjana", groupTypeEnumId: "UgtDarpanCompany"],
+        ])
+        FinderStub tenantSettingFinder = new FinderStub(oneResult: [companyUserGroupId: "GORJANA", timeZone: "America/New_York"])
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_USER", userAccount: [timeZone: "Asia/Kolkata"], preferences: [
+                        (TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY): "GORJANA",
+                ]),
+                entity: new EntityFacadeStub(finders: [
+                        "moqui.security.UserGroupAndMember"             : companyFinder,
+                        (TenantAccessSupport.TENANT_SETTING_ENTITY_NAME): tenantSettingFinder,
+                ])
+        )
+
+        Map<String, Object> sessionInfo = TenantAccessSupport.buildSessionInfo(ec)
+
+        assertEquals("Asia/Kolkata", sessionInfo.userTimeZone)
+        assertEquals("America/New_York", sessionInfo.tenantTimeZone)
+    }
+
+    @Test
     void saveActiveTenantSettingsStoresTimezoneForActiveTenant() {
         Timestamp now = Timestamp.valueOf("2026-05-02 10:00:00")
         FinderStub companyFinder = new FinderStub(listResult: [
@@ -578,6 +600,62 @@ class TenantAccessSupportTests {
         TenantAccessSupport.saveActiveTenantSettings(ec, "Not/AZone")
 
         assertEquals(["Timezone is invalid."], message.errors)
+        assertEquals(null, service.lastCall)
+    }
+
+    @Test
+    void saveUserSettingsPersistsValidTimeZoneToUserAccount() {
+        ServiceFacadeStub service = new ServiceFacadeStub()
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_USER"),
+                service: service,
+        )
+
+        boolean saved = TenantAccessSupport.saveUserSettings(ec, "HotWax", "Asia/Kolkata")
+
+        assertTrue(saved)
+        assertEquals("update#moqui.security.UserAccount", service.lastCall.serviceName)
+        assertEquals("EX_USER", service.lastCall.parametersMap.userId)
+        assertEquals("Asia/Kolkata", service.lastCall.parametersMap.timeZone)
+    }
+
+    @Test
+    void saveUserSettingsRejectsInvalidTimeZoneWithoutWriting() {
+        ServiceFacadeStub service = new ServiceFacadeStub()
+        MessageFacadeStub message = new MessageFacadeStub()
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_USER"),
+                service: service,
+                message: message,
+        )
+
+        boolean saved = TenantAccessSupport.saveUserSettings(ec, "HotWax", "Not/AZone")
+
+        assertFalse(saved)
+        assertTrue(message.errors.contains("Timezone is invalid."))
+        assertEquals(null, service.lastCall)
+    }
+
+    @Test
+    void saveUserSettingsClearsTimeZoneOnEmptyString() {
+        ServiceFacadeStub service = new ServiceFacadeStub()
+        def ec = executionContext(user: new UserStub(userId: "EX_USER"), service: service)
+
+        boolean saved = TenantAccessSupport.saveUserSettings(ec, "HotWax", "")
+
+        assertTrue(saved)
+        assertEquals("update#moqui.security.UserAccount", service.lastCall.serviceName)
+        assertEquals(null, service.lastCall.parametersMap.timeZone)
+    }
+
+    @Test
+    void saveUserSettingsLeavesTimeZoneUntouchedWhenParameterAbsent() {
+        ServiceFacadeStub service = new ServiceFacadeStub()
+        def ec = executionContext(user: new UserStub(userId: "EX_USER"), service: service)
+
+        boolean saved = TenantAccessSupport.saveUserSettings(ec, "HotWax", null)
+
+        assertTrue(saved)
         assertEquals(null, service.lastCall)
     }
 

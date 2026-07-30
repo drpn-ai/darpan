@@ -2437,6 +2437,12 @@
                             "timeZone": {
                                 "type": "string"
                             },
+                            "userTimeZone": {
+                                "type": "string"
+                            },
+                            "tenantTimeZone": {
+                                "type": "string"
+                            },
                             "lastLoginDate": {
                                 "oneOf": [
                                     {
@@ -2636,6 +2642,12 @@
                                 "type": "string"
                             },
                             "timeZone": {
+                                "type": "string"
+                            },
+                            "userTimeZone": {
+                                "type": "string"
+                            },
+                            "tenantTimeZone": {
                                 "type": "string"
                             },
                             "lastLoginDate": {
@@ -2864,6 +2876,12 @@
                                 "type": "string"
                             },
                             "timeZone": {
+                                "type": "string"
+                            },
+                            "userTimeZone": {
+                                "type": "string"
+                            },
+                            "tenantTimeZone": {
                                 "type": "string"
                             },
                             "lastLoginDate": {
@@ -3268,6 +3286,12 @@
                             "timeZone": {
                                 "type": "string"
                             },
+                            "userTimeZone": {
+                                "type": "string"
+                            },
+                            "tenantTimeZone": {
+                                "type": "string"
+                            },
                             "lastLoginDate": {
                                 "oneOf": [
                                     {
@@ -3425,6 +3449,10 @@
                     "displayName": {
                         "type": "string",
                         "description": "Optional user display name shown by darpan-ui instead of username."
+                    },
+                    "timeZone": {
+                        "type": "string",
+                        "description": "Optional preferred display timezone (IANA id). Empty string clears the preference; absent leaves it unchanged."
                     }
                 },
                 "description": "Persist authenticated user-level settings and return refreshed session metadata."
@@ -3470,6 +3498,12 @@
                                 "type": "string"
                             },
                             "timeZone": {
+                                "type": "string"
+                            },
+                            "userTimeZone": {
+                                "type": "string"
+                            },
+                            "tenantTimeZone": {
                                 "type": "string"
                             },
                             "lastLoginDate": {
@@ -3681,6 +3715,12 @@
                                 "type": "string"
                             },
                             "timeZone": {
+                                "type": "string"
+                            },
+                            "userTimeZone": {
+                                "type": "string"
+                            },
+                            "tenantTimeZone": {
                                 "type": "string"
                             },
                             "lastLoginDate": {

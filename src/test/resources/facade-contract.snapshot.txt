@@ -36,8 +36,10 @@ SERVICE change OwnPassword
     sessionInfo.lastRun : Map
     sessionInfo.locale : String
     sessionInfo.scopeType : String
+    sessionInfo.tenantTimeZone : String
     sessionInfo.timeZone : String
     sessionInfo.userId : String
+    sessionInfo.userTimeZone : String
     sessionInfo.username : String
 
 SERVICE get SessionInfo
@@ -69,8 +71,10 @@ SERVICE get SessionInfo
     sessionInfo.lastRun : Map
     sessionInfo.locale : String
     sessionInfo.scopeType : String
+    sessionInfo.tenantTimeZone : String
     sessionInfo.timeZone : String
     sessionInfo.userId : String
+    sessionInfo.userTimeZone : String
     sessionInfo.username : String
 
 SERVICE login Session
@@ -108,8 +112,10 @@ SERVICE login Session
     sessionInfo.lastRun : Map
     sessionInfo.locale : String
     sessionInfo.scopeType : String
+    sessionInfo.tenantTimeZone : String
     sessionInfo.timeZone : String
     sessionInfo.userId : String
+    sessionInfo.userTimeZone : String
     sessionInfo.username : String
 
 SERVICE logout AllSessions
@@ -173,8 +179,10 @@ SERVICE save ActiveTenant
     sessionInfo.lastRun : Map
     sessionInfo.locale : String
     sessionInfo.scopeType : String
+    sessionInfo.tenantTimeZone : String
     sessionInfo.timeZone : String
     sessionInfo.userId : String
+    sessionInfo.userTimeZone : String
     sessionInfo.username : String
 
 SERVICE save UserSettings
@@ -184,6 +192,7 @@ SERVICE save UserSettings
   allow-remote: true
   IN:
     displayName : String
+    timeZone : String
   OUT:
     authenticated : Boolean
     errors : List
@@ -207,8 +216,10 @@ SERVICE save UserSettings
     sessionInfo.lastRun : Map
     sessionInfo.locale : String
     sessionInfo.scopeType : String
+    sessionInfo.tenantTimeZone : String
     sessionInfo.timeZone : String
     sessionInfo.userId : String
+    sessionInfo.userTimeZone : String
     sessionInfo.username : String
 
 SERVICE verify OwnPassword
@@ -242,8 +253,10 @@ SERVICE verify OwnPassword
     sessionInfo.lastRun : Map
     sessionInfo.locale : String
     sessionInfo.scopeType : String
+    sessionInfo.tenantTimeZone : String
     sessionInfo.timeZone : String
     sessionInfo.userId : String
+    sessionInfo.userTimeZone : String
     sessionInfo.username : String
 
 SERVICE delete JsonSchema

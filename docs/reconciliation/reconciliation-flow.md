@@ -102,7 +102,7 @@ Runtime stack note: Drools 7.73 with MVEL2 forced to 2.5.x — MVEL2 2.4.x fails
 Every run that reaches a terminal state — `AUT_STAT_SUCCESS` (including success with rule
 processing warnings), `AUT_STAT_FAILED`, or a reaper-killed stale run — can notify the owning
 tenant. The silent no-op statuses `AUT_STAT_NO_DATA` and `AUT_STAT_SKIP_DUP` never trigger
-notification.
+notification, and neither does a retry-exhausted `AUT_STAT_DEAD_LETTER` automation execution.
 
 1. Four terminal-state call sites invoke
    `darpan.reconciliation.notification.TenantNotificationSupport.notifyRunCompleted(...)`:
@@ -120,9 +120,11 @@ notification.
    `darpan.reconciliation.TenantChatSpace` (via `ReconciliationAutomation.chatSpaceId`, when set)
    and every `darpan.reconciliation.ReconciliationRunNotifySubscription` row for that run — one
    per user who opted in with "notify me," each snapshotting that user's default chat space at
-   subscribe time. Destinations are deduplicated by chat-space ID and re-pinned to the run's
-   tenant; retired (`isActive='N'`) or webhook-less registry rows are dropped from the fan-out. No
-   destinations means no delivery attempt (`NO_DESTINATIONS`).
+   subscribe time. The reaper call site has no automation context to read a `chatSpaceId` from, so
+   a reaper-killed run only reaches subscriber destinations, never the automation's linked space.
+   Destinations are deduplicated by chat-space ID and re-pinned to the run's tenant; retired
+   (`isActive='N'`) or webhook-less registry rows are dropped from the fan-out. No destinations
+   means no delivery attempt (`NO_DESTINATIONS`).
 3. Delivery is dedupe-guarded by an atomic claim-then-deliver compare-and-swap on `notifiedDate`:
    a conditional `updateAll` (`WHERE reconciliationRunResultId = ? AND notifiedDate IS NULL`) is
    the race guard, so only one concurrent caller can claim a given run result; the loser reports

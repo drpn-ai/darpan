@@ -136,7 +136,9 @@ Every terminal-state run — success, success-with-issues, failed, or reaper-kil
 run-completion message after the result row is stored (`AUT_STAT_NO_DATA` and `AUT_STAT_SKIP_DUP`
 stay silent). Destinations are the automation's linked `chatSpaceId` (if set) plus any per-run
 "notify me" subscriber snapshots, deduplicated; API, SFTP, and manual saved-run execution all
-resolve destinations the same way. Delivery is guarded by an atomic claim on the result row's
+resolve destinations the same way. The stuck-run reaper has no automation context, so a
+reaper-killed run only reaches subscriber snapshots, never the automation's linked space, even
+when one is configured. Delivery is guarded by an atomic claim on the result row's
 `notifiedDate` so exactly one delivery attempt happens per run even under concurrent completion
 paths (for example a reaper sweep racing a slow in-flight execution). Notification failures are
 logged and do not convert a completed reconciliation run into a failed run; SFTP notify calls are

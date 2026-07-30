@@ -209,6 +209,60 @@ class SftpAutomationSupportTests {
     }
 
     @Test
+    void sftpNotifyFailureDoesNotOverwriteTerminalStatus() {
+        // Fix round 1 (review finding 2, SFTP regression guard for finding 1): before finding 1's fix,
+        // this unguarded throw — from the payload-build call, which (unlike the delivery loop) has no
+        // internal try/catch — would propagate out of the unwrapped notify call, be caught by the
+        // method's outer catch(Throwable), unconditionally overwrite statusEnumId to
+        // AUTOMATION_STATUS_FAILED, and re-throw — corrupting an otherwise-successful run and its
+        // already-correct terminal status. With the fix, the notify failure is absorbed locally: the
+        // terminal status set moments earlier by updateAutomationExecution stands, and nothing propagates.
+        FakeEc ec = fakeEc()
+        seedSftpAutomation(ec)
+        // A destination MUST resolve, or notifyRunCompleted short-circuits before ever reaching the
+        // payload-build call (NO_DESTINATIONS), which would make explodeOnBuildPayload below a no-op.
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_OPS",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Ops",
+                googleChatWebhookUrl: "https://chat.googleapis.com/v1/spaces/AAA/messages?key=test-key&token=test-token",
+                isActive            : "Y",
+        ])
+        FakeValue notifyAutomation = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find {
+            it.automationId == "AUTO_SFTP"
+        }
+        notifyAutomation.put("chatSpaceId", "CS_OPS")
+        ec.service.nextResult = [
+                dataAvailable       : true,
+                statusMessage       : "Complete",
+                file1Source         : "sftp://source-a:22/incoming/shopify",
+                file2Source         : "sftp://source-b:22/incoming/netsuite",
+                file1SelectedName   : "shopify.csv",
+                file2SelectedName   : "netsuite.csv",
+                file1StagedLocation : "/tmp/shopify.csv",
+                file2StagedLocation : "/tmp/netsuite.csv",
+                reconciliationType  : "ORDER",
+                diffLocation        : "reconciliation-runs/AUTO_SFTP/20260501/result.json",
+                diffFileName        : "result.json",
+                differenceCount     : 3,
+                onlyInFile1Count    : 1,
+                onlyInFile2Count    : 2,
+                validationErrors    : [],
+                processingWarnings  : [],
+        ]
+        ec.service.explodeOnBuildPayload = true
+
+        // No delivery hook is set/needed: the payload-build call throws before deliverGoogleChat is ever
+        // reached. If this regresses (the best-effort wrap removed), runSftpFileAutomation itself throws.
+        Map result = SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
+
+        assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_COMPLETED, result.statusEnumId)
+        FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+        assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_COMPLETED, execution.statusEnumId)
+        assertEquals(1, ec.entity.createdValues("darpan.reconciliation.ReconciliationRunResult").size())
+    }
+
+    @Test
     void sftpFileAutomationRecordsNoDataWithoutDateWindowConfig() {
         FakeEc ec = fakeEc()
         seedSftpAutomation(ec)
@@ -485,6 +539,11 @@ class SftpAutomationSupportTests {
         Map<String, Object> nextResult = [:]
         List<FakeServiceCall> calls = []
         FakeEc ec
+        // Fix round 1 (review finding 2): forces the build#RunCompletedPayload call itself to throw —
+        // that call has no internal try/catch (unlike the delivery loop), so this is the genuine
+        // unguarded-escape mechanism sftpNotifyFailureDoesNotOverwriteTerminalStatus needs to regression
+        // guard finding 1's best-effort wrap.
+        boolean explodeOnBuildPayload = false
 
         FakeServiceCall sync() {
             return new FakeServiceCall(service: this)
@@ -511,6 +570,7 @@ class SftpAutomationSupportTests {
         Map<String, Object> call() {
             service.calls << this
             if (serviceName == "reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload") {
+                if (service.explodeOnBuildPayload) throw new RuntimeException("payload build failed")
                 return buildNotificationPayload(service.ec, params)
             }
             return service.nextResult

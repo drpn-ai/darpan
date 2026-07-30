@@ -27,6 +27,7 @@ import static darpan.reconciliation.automation.AutomationRuntimeSupport.truncate
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.updateAutomationExecution
 
 class SftpAutomationSupport {
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(SftpAutomationSupport)
     static final String AUTOMATION_INPUT_SFTP_FILES = "AUT_IN_SFTP_FILES"
     static final String AUTOMATION_SOURCE_SFTP = "AUT_SRC_SFTP"
     static final String AUTOMATION_STATUS_RUNNING = "AUT_STAT_RUNNING"
@@ -169,25 +170,34 @@ class SftpAutomationSupport {
             updateAutomationExecution(ec, execution, updateFields)
             // Task 7: notify on every terminal state that minted a run-result row (including a failed
             // rule execution), not only the pure success case — NO_DATA (no row minted anyway) stays silent.
+            // Fix round 1 (review finding 1): the notify call must be its own best-effort try/catch — this
+            // whole block sits inside the method's outer try, and an unwrapped throw here (e.g. from the
+            // payload-build service call, which unlike the delivery loop has no internal try/catch) would
+            // be caught by the outer catch(Throwable), overwriting the already-correct terminal status to
+            // AUTOMATION_STATUS_FAILED and re-throwing — silently corrupting a successful/no-op run.
             if (reconciliationRunResultId && statusEnumId != AUTOMATION_STATUS_NO_DATA) {
-                TenantNotificationSupport.notifyRunCompleted(ec, [
-                        reconciliationRunResultId: reconciliationRunResultId,
-                        runName                  : normalize(readField(automation, "automationName")),
-                        savedRunId               : normalize(readField(automation, "savedRunId")),
-                        reconciliationRunId      : normalize(readField(automation, "reconciliationRunId")),
-                        companyUserGroupId       : normalize(readField(automation, "companyUserGroupId")),
-                        chatSpaceId              : normalize(readField(automation, "chatSpaceId")),
-                        resultDataManagerPath    : resultDataManagerPath,
-                        file1SystemEnumId        : normalize(readField(file1Source, "systemEnumId")),
-                        file2SystemEnumId        : normalize(readField(file2Source, "systemEnumId")),
-                        file1SystemLabel         : normalize(pollResult.file1Label),
-                        file2SystemLabel         : normalize(pollResult.file2Label),
-                        differenceCount          : updateFields.differenceCount,
-                        onlyInFile1Count         : updateFields.onlyInFile1Count,
-                        onlyInFile2Count         : updateFields.onlyInFile2Count,
-                        statusEnumId             : statusEnumId,
-                        processingWarnings       : (pollResult.processingWarnings ?: []) as List,
-                ])
+                try {
+                    TenantNotificationSupport.notifyRunCompleted(ec, [
+                            reconciliationRunResultId: reconciliationRunResultId,
+                            runName                  : normalize(readField(automation, "automationName")),
+                            savedRunId               : normalize(readField(automation, "savedRunId")),
+                            reconciliationRunId      : normalize(readField(automation, "reconciliationRunId")),
+                            companyUserGroupId       : normalize(readField(automation, "companyUserGroupId")),
+                            chatSpaceId              : normalize(readField(automation, "chatSpaceId")),
+                            resultDataManagerPath    : resultDataManagerPath,
+                            file1SystemEnumId        : normalize(readField(file1Source, "systemEnumId")),
+                            file2SystemEnumId        : normalize(readField(file2Source, "systemEnumId")),
+                            file1SystemLabel         : normalize(pollResult.file1Label),
+                            file2SystemLabel         : normalize(pollResult.file2Label),
+                            differenceCount          : updateFields.differenceCount,
+                            onlyInFile1Count         : updateFields.onlyInFile1Count,
+                            onlyInFile2Count         : updateFields.onlyInFile2Count,
+                            statusEnumId             : statusEnumId,
+                            processingWarnings       : (pollResult.processingWarnings ?: []) as List,
+                    ])
+                } catch (Throwable notifyError) {
+                    logger.warn("SFTP automation notification failed (best-effort): ${notifyError.message}")
+                }
             }
 
             Map<String, Object> result = [:]

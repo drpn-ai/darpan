@@ -81,10 +81,17 @@ class StuckRunReaperNotifyTests {
 
     @Test
     void reaperSweepSurvivesNotifyFailure() {
-        // A delivery-hook failure must never stop the sweep from flipping the row and counting it — the
-        // reaper's own catch around notifyRunCompleted (and notifyRunCompleted's own per-destination
-        // catch) must absorb it, warn-only.
+        // Fix round 1 (review finding 2): a delivery-hook throw never reaches StuckRunReaper's own catch
+        // — notifyRunCompleted's per-destination delivery loop already absorbs delivery exceptions
+        // internally (TenantNotificationSupport.groovy ~lines 120-131), so that mechanism doesn't exercise
+        // what this test claims. Instead force the exception out of the payload-BUILD call itself (the
+        // `ec.service.sync()...build#RunCompletedPayload...call()` invocation has no internal try/catch,
+        // unlike the delivery loop — see TenantNotificationSupport.notifyRunCompleted ~lines 111-115), so
+        // it genuinely escapes notifyRunCompleted unguarded and must be absorbed by the reaper's own
+        // best-effort catch: the row still flips FAILED and the count is still correct, no exception
+        // propagates out of sweep().
         FakeStore store = new FakeStore()
+        store.explodeOnBuildPayload = true
         Timestamp stale = new Timestamp(System.currentTimeMillis() - (200 * 60_000L))
         store.add(DarpanEntityConstants.RECONCILIATION_RUN_RESULT, [
                 reconciliationRunResultId: "RUN_1",
@@ -107,16 +114,10 @@ class StuckRunReaperNotifyTests {
         ])
 
         ExecutionContext ec = fakeEc(store)
-        TenantNotificationSupport.setDeliveryHook { String webhookUrl, Map<String, Object> payload ->
-            throw new RuntimeException("Google Chat unreachable")
-        }
 
-        Map<String, Object> result
-        try {
-            result = StuckRunReaper.sweep(ec, 120)
-        } finally {
-            TenantNotificationSupport.resetDeliveryHook()
-        }
+        // No delivery hook is needed/set here: the payload-build call throws before deliverGoogleChat is
+        // ever reached, so if this test regresses (production catch removed), sweep() itself would throw.
+        Map<String, Object> result = StuckRunReaper.sweep(ec, 120)
 
         assertEquals(1, result.reapedRunResultCount)
         Map<String, Object> row = store.rows[DarpanEntityConstants.RECONCILIATION_RUN_RESULT][0]

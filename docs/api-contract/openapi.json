@@ -219,6 +219,12 @@
                                         "$ref": "#/components/schemas/SaveSavedRunNameRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/SubscribeRunNotificationRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/UnsubscribeRunNotificationRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/SearchNavigationTargetsRequest"
                                     },
                                     {
@@ -356,6 +362,8 @@
                                         "facade.ReconciliationFacadeServices.save#Mapping": "#/components/schemas/SaveMappingRequest",
                                         "facade.ReconciliationFacadeServices.save#RuleSetRun": "#/components/schemas/SaveRuleSetRunRequest",
                                         "facade.ReconciliationFacadeServices.save#SavedRunName": "#/components/schemas/SaveSavedRunNameRequest",
+                                        "facade.ReconciliationFacadeServices.subscribe#RunNotification": "#/components/schemas/SubscribeRunNotificationRequest",
+                                        "facade.ReconciliationFacadeServices.unsubscribe#RunNotification": "#/components/schemas/UnsubscribeRunNotificationRequest",
                                         "facade.SearchFacadeServices.search#NavigationTargets": "#/components/schemas/SearchNavigationTargetsRequest",
                                         "facade.SettingsFacadeServices.delete#TenantChatSpace": "#/components/schemas/DeleteTenantChatSpaceRequest",
                                         "facade.SettingsFacadeServices.get#LlmSettings": "#/components/schemas/GetLlmSettingsRequest",
@@ -589,6 +597,12 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveSavedRunNameResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SubscribeRunNotificationResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/UnsubscribeRunNotificationResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/SearchNavigationTargetsResponse"
@@ -6913,6 +6927,12 @@
                                 }
                             }
                         }
+                    },
+                    "mySubscription": {
+                        "type": "boolean"
+                    },
+                    "mySubscriptionSpaceName": {
+                        "type": "string"
                     }
                 }
             },
@@ -10567,6 +10587,202 @@
                     "result"
                 ]
             },
+            "SubscribeRunNotificationParams": {
+                "type": "object",
+                "properties": {
+                    "reconciliationRunResultId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "reconciliationRunResultId"
+                ],
+                "description": "Subscribe the caller to completion notification for one active run, snapshotting their default chat space."
+            },
+            "SubscribeRunNotificationResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "subscribed": {
+                        "type": "boolean"
+                    },
+                    "needsDefaultChatSpace": {
+                        "type": "boolean"
+                    },
+                    "chatSpaceName": {
+                        "type": "string"
+                    }
+                }
+            },
+            "SubscribeRunNotificationRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.subscribe#RunNotification",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.subscribe#RunNotification",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.subscribe#RunNotification"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SubscribeRunNotificationParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SubscribeRunNotificationResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.subscribe#RunNotification. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SubscribeRunNotificationResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "UnsubscribeRunNotificationParams": {
+                "type": "object",
+                "properties": {
+                    "reconciliationRunResultId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "reconciliationRunResultId"
+                ],
+                "description": "Remove the caller's notify-me subscription for one run."
+            },
+            "UnsubscribeRunNotificationResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "subscribed": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "UnsubscribeRunNotificationRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.unsubscribe#RunNotification",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.unsubscribe#RunNotification",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.unsubscribe#RunNotification"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/UnsubscribeRunNotificationParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "UnsubscribeRunNotificationResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.unsubscribe#RunNotification. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/UnsubscribeRunNotificationResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "SearchNavigationTargetsParams": {
                 "type": "object",
                 "properties": {
@@ -13696,6 +13912,8 @@
         "facade.ReconciliationFacadeServices.save#Mapping": "SaveMapping",
         "facade.ReconciliationFacadeServices.save#RuleSetRun": "SaveRuleSetRun",
         "facade.ReconciliationFacadeServices.save#SavedRunName": "SaveSavedRunName",
+        "facade.ReconciliationFacadeServices.subscribe#RunNotification": "SubscribeRunNotification",
+        "facade.ReconciliationFacadeServices.unsubscribe#RunNotification": "UnsubscribeRunNotification",
         "facade.SearchFacadeServices.search#NavigationTargets": "SearchNavigationTargets",
         "facade.SettingsFacadeServices.delete#TenantChatSpace": "DeleteTenantChatSpace",
         "facade.SettingsFacadeServices.get#LlmSettings": "GetLlmSettings",

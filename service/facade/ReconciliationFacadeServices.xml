@@ -2577,6 +2577,8 @@
                 <parameter name="recordCount" type="Integer"/>
                 <parameter name="errorMessage"/>
             </parameter>
+            <parameter name="mySubscription" type="Boolean"/>
+            <parameter name="mySubscriptionSpaceName"/>
         </out-parameters>
         <actions>
             <set field="runIdValue" from="((reconciliationRunResultId)?.toString()?.trim())"/>
@@ -2597,7 +2599,77 @@
                 <set field="errorMessage" from="runRow.errorMessage"/>
                 <set field="stepRows" from="ec.entity.find('darpan.reconciliation.ReconciliationRunStep').condition('reconciliationRunResultId', runIdValue).orderBy('stageSequence').disableAuthz().useCache(false).list() ?: []"/>
                 <set field="steps" from="stepRows.collect { row -> [stageCode: row.stageCode, stageSequence: row.stageSequence, statusEnumId: row.statusEnumId, startedDate: row.startedDate, completedDate: row.completedDate, recordCount: row.recordCount, errorMessage: row.errorMessage] }"/>
+                <set field="subscriptionRow" from="ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('reconciliationRunResultId', runIdValue).condition('userId', ec.user.userId).disableAuthz().useCache(false).one()"/>
+                <set field="mySubscription" from="subscriptionRow != null"/>
+                <set field="mySubscriptionSpaceName" from="subscriptionRow ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('chatSpaceId', subscriptionRow.chatSpaceId).disableAuthz().useCache(false).one()?.spaceName : null"/>
             </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="subscribe" noun="RunNotification" allow-remote="true" authenticate="true">
+        <description>Subscribe the caller to completion notification for one active run, snapshotting their default chat space.</description>
+        <in-parameters><parameter name="reconciliationRunResultId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="subscribed" type="Boolean"/>
+            <parameter name="needsDefaultChatSpace" type="Boolean"/>
+            <parameter name="chatSpaceName"/>
+        </out-parameters>
+        <actions>
+            <set field="needsDefaultChatSpace" from="false"/>
+            <set field="subscribed" from="false"/>
+            <set field="runIdValue" from="((reconciliationRunResultId)?.toString()?.trim())"/>
+            <set field="runRow" from="runIdValue ? ec.entity.find('darpan.reconciliation.ReconciliationRunResult').condition('reconciliationRunResultId', runIdValue).disableAuthz().useCache(false).one() : null"/>
+            <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, runRow)">
+                <message error="true">Reconciliation run '${runIdValue}' was not found.</message>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; !['AUT_STAT_PENDING', 'AUT_STAT_RUNNING'].contains(((runRow.statusEnumId)?.toString()?.trim()))">
+                <message error="true">Run '${runIdValue}' has already completed.</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+                <set field="defaultChatSpaceId" from="darpan.facade.settings.UserNotificationPreferenceSupport.getDefaultChatSpaceId(ec, tenantId)"/>
+                <set field="spaceRow" from="defaultChatSpaceId ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('chatSpaceId', defaultChatSpaceId).condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).one() : null"/>
+                <if condition="spaceRow == null || ((spaceRow.isActive)?.toString()?.trim()) == 'N'">
+                    <set field="needsDefaultChatSpace" from="true"/>
+                    <message error="true">Set a default chat space to get notified.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <service-call name="store#darpan.reconciliation.ReconciliationRunNotifySubscription"
+                        in-map="[reconciliationRunResultId: runIdValue, userId: ec.user.userId, chatSpaceId: spaceRow.chatSpaceId, subscribedDate: ec.user.nowTimestamp]"/>
+                <set field="subscribed" from="true"/>
+                <set field="chatSpaceName" from="spaceRow.spaceName"/>
+                <message>You will be notified in '${spaceRow.spaceName}' when this run ends.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="unsubscribe" noun="RunNotification" allow-remote="true" authenticate="true">
+        <description>Remove the caller's notify-me subscription for one run.</description>
+        <in-parameters><parameter name="reconciliationRunResultId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="subscribed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="runIdValue" from="((reconciliationRunResultId)?.toString()?.trim())"/>
+            <set field="subscriptionRow" from="runIdValue ? ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('reconciliationRunResultId', runIdValue).condition('userId', ec.user.userId).disableAuthz().useCache(false).one() : null"/>
+            <if condition="subscriptionRow != null">
+                <set field="ignoreDelete" from="subscriptionRow.delete()"/>
+                <message>Notification cancelled.</message>
+            </if>
+            <set field="subscribed" from="false"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

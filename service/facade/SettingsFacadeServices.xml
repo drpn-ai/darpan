@@ -374,6 +374,57 @@
         </actions>
     </service>
 
+    <service verb="get" noun="UserNotificationDefault" authz-action="view" allow-remote="true" authenticate="true">
+        <description>Get the caller's default chat space for the active tenant; stale or inactive pointers read as not configured.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="userNotificationDefault" type="Map">
+                <parameter name="chatSpaceId"/><parameter name="spaceName"/><parameter name="isActive"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="defaultChatSpaceId" from="darpan.facade.settings.UserNotificationPreferenceSupport.getDefaultChatSpaceId(ec, tenantId)"/>
+            <set field="spaceRow" from="defaultChatSpaceId ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('chatSpaceId', defaultChatSpaceId).condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).one() : null"/>
+            <set field="userNotificationDefault" from="(spaceRow != null &amp;&amp; ((spaceRow.isActive)?.toString()?.trim()) != 'N') ? [chatSpaceId: spaceRow.chatSpaceId, spaceName: spaceRow.spaceName, isActive: ((spaceRow.isActive)?.toString()?.trim()) ?: 'Y'] : null"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="UserNotificationDefault" allow-remote="true" authenticate="true">
+        <description>Set or clear the caller's default chat space for the active tenant. Personal preference — no tenant write access required.</description>
+        <in-parameters><parameter name="chatSpaceId"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="userNotificationDefault" type="Map">
+                <parameter name="chatSpaceId"/><parameter name="spaceName"/><parameter name="isActive"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><message error="true">Active tenant is required for notification defaults.</message></if>
+            <set field="chatSpaceIdValue" from="((chatSpaceId)?.toString()?.trim())"/>
+            <set field="spaceRow" from="(!ec.message.hasError() &amp;&amp; chatSpaceIdValue) ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('chatSpaceId', chatSpaceIdValue).condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).one() : null"/>
+            <if condition="!ec.message.hasError() &amp;&amp; chatSpaceIdValue &amp;&amp; (spaceRow == null || ((spaceRow.isActive)?.toString()?.trim()) == 'N')">
+                <message error="true">Chat space '${chatSpaceIdValue}' was not found or is inactive.</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <script>darpan.facade.settings.UserNotificationPreferenceSupport.saveDefaultChatSpaceId(ec, tenantId, chatSpaceIdValue)</script>
+                <message>${chatSpaceIdValue ? 'Saved default chat space.' : 'Cleared default chat space.'}</message>
+            </if>
+            <set field="userNotificationDefault" from="(spaceRow != null &amp;&amp; chatSpaceIdValue) ? [chatSpaceId: spaceRow.chatSpaceId, spaceName: spaceRow.spaceName, isActive: ((spaceRow.isActive)?.toString()?.trim()) ?: 'Y'] : null"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
     <service verb="list" noun="SftpServers" authz-action="view" allow-remote="true" authenticate="true">
         <description>List SFTP server configs with secret redaction indicators.</description>
         <in-parameters>

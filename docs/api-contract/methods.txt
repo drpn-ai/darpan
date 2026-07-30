@@ -68,6 +68,7 @@ facade.SettingsFacadeServices.delete#TenantChatSpace
 facade.SettingsFacadeServices.get#LlmSettings
 facade.SettingsFacadeServices.get#TenantNotificationSettings
 facade.SettingsFacadeServices.get#TenantSettings
+facade.SettingsFacadeServices.get#UserNotificationDefault
 facade.SettingsFacadeServices.list#EnumOptions
 facade.SettingsFacadeServices.list#NsAuthConfigs
 facade.SettingsFacadeServices.list#NsRestletConfigs
@@ -80,6 +81,7 @@ facade.SettingsFacadeServices.save#SftpServer
 facade.SettingsFacadeServices.save#TenantChatSpace
 facade.SettingsFacadeServices.save#TenantNotificationSettings
 facade.SettingsFacadeServices.save#TenantSettings
+facade.SettingsFacadeServices.save#UserNotificationDefault
 facade.ShopifyFacadeServices.delete#ShopifyAuthConfig
 facade.ShopifyFacadeServices.get#ShopifyAuthConfig
 facade.ShopifyFacadeServices.list#ShopifyAuthConfigs

@@ -234,6 +234,9 @@
                                         "$ref": "#/components/schemas/GetTenantSettingsRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetUserNotificationDefaultRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ListEnumOptionsRequest"
                                     },
                                     {
@@ -268,6 +271,9 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveTenantSettingsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveUserNotificationDefaultRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/DeleteShopifyAuthConfigRequest"
@@ -355,6 +361,7 @@
                                         "facade.SettingsFacadeServices.get#LlmSettings": "#/components/schemas/GetLlmSettingsRequest",
                                         "facade.SettingsFacadeServices.get#TenantNotificationSettings": "#/components/schemas/GetTenantNotificationSettingsRequest",
                                         "facade.SettingsFacadeServices.get#TenantSettings": "#/components/schemas/GetTenantSettingsRequest",
+                                        "facade.SettingsFacadeServices.get#UserNotificationDefault": "#/components/schemas/GetUserNotificationDefaultRequest",
                                         "facade.SettingsFacadeServices.list#EnumOptions": "#/components/schemas/ListEnumOptionsRequest",
                                         "facade.SettingsFacadeServices.list#NsAuthConfigs": "#/components/schemas/ListNsAuthConfigsRequest",
                                         "facade.SettingsFacadeServices.list#NsRestletConfigs": "#/components/schemas/ListNsRestletConfigsRequest",
@@ -367,6 +374,7 @@
                                         "facade.SettingsFacadeServices.save#TenantChatSpace": "#/components/schemas/SaveTenantChatSpaceRequest",
                                         "facade.SettingsFacadeServices.save#TenantNotificationSettings": "#/components/schemas/SaveTenantNotificationSettingsRequest",
                                         "facade.SettingsFacadeServices.save#TenantSettings": "#/components/schemas/SaveTenantSettingsRequest",
+                                        "facade.SettingsFacadeServices.save#UserNotificationDefault": "#/components/schemas/SaveUserNotificationDefaultRequest",
                                         "facade.ShopifyFacadeServices.delete#ShopifyAuthConfig": "#/components/schemas/DeleteShopifyAuthConfigRequest",
                                         "facade.ShopifyFacadeServices.get#ShopifyAuthConfig": "#/components/schemas/GetShopifyAuthConfigRequest",
                                         "facade.ShopifyFacadeServices.list#ShopifyAuthConfigs": "#/components/schemas/ListShopifyAuthConfigsRequest",
@@ -598,6 +606,9 @@
                                             "$ref": "#/components/schemas/GetTenantSettingsResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/GetUserNotificationDefaultResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/ListEnumOptionsResponse"
                                         },
                                         {
@@ -632,6 +643,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveTenantSettingsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveUserNotificationDefaultResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/DeleteShopifyAuthConfigResponse"
@@ -11183,6 +11197,107 @@
                     "result"
                 ]
             },
+            "GetUserNotificationDefaultParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "Get the caller's default chat space for the active tenant; stale or inactive pointers read as not configured."
+            },
+            "GetUserNotificationDefaultResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "userNotificationDefault": {
+                        "type": "object",
+                        "properties": {
+                            "chatSpaceId": {
+                                "type": "string"
+                            },
+                            "spaceName": {
+                                "type": "string"
+                            },
+                            "isActive": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "GetUserNotificationDefaultRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SettingsFacadeServices.get#UserNotificationDefault",
+                "x-darpan-method": "facade.SettingsFacadeServices.get#UserNotificationDefault",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SettingsFacadeServices.get#UserNotificationDefault"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetUserNotificationDefaultParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetUserNotificationDefaultResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SettingsFacadeServices.get#UserNotificationDefault. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetUserNotificationDefaultResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "ListEnumOptionsParams": {
                 "type": "object",
                 "properties": {
@@ -12876,6 +12991,109 @@
                     "result"
                 ]
             },
+            "SaveUserNotificationDefaultParams": {
+                "type": "object",
+                "properties": {
+                    "chatSpaceId": {
+                        "type": "string"
+                    }
+                },
+                "description": "Set or clear the caller's default chat space for the active tenant. Personal preference \u2014 no tenant write access required."
+            },
+            "SaveUserNotificationDefaultResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "userNotificationDefault": {
+                        "type": "object",
+                        "properties": {
+                            "chatSpaceId": {
+                                "type": "string"
+                            },
+                            "spaceName": {
+                                "type": "string"
+                            },
+                            "isActive": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "SaveUserNotificationDefaultRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SettingsFacadeServices.save#UserNotificationDefault",
+                "x-darpan-method": "facade.SettingsFacadeServices.save#UserNotificationDefault",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SettingsFacadeServices.save#UserNotificationDefault"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveUserNotificationDefaultParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveUserNotificationDefaultResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SettingsFacadeServices.save#UserNotificationDefault. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveUserNotificationDefaultResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "DeleteShopifyAuthConfigParams": {
                 "type": "object",
                 "properties": {
@@ -13483,6 +13701,7 @@
         "facade.SettingsFacadeServices.get#LlmSettings": "GetLlmSettings",
         "facade.SettingsFacadeServices.get#TenantNotificationSettings": "GetTenantNotificationSettings",
         "facade.SettingsFacadeServices.get#TenantSettings": "GetTenantSettings",
+        "facade.SettingsFacadeServices.get#UserNotificationDefault": "GetUserNotificationDefault",
         "facade.SettingsFacadeServices.list#EnumOptions": "ListEnumOptions",
         "facade.SettingsFacadeServices.list#NsAuthConfigs": "ListNsAuthConfigs",
         "facade.SettingsFacadeServices.list#NsRestletConfigs": "ListNsRestletConfigs",
@@ -13495,6 +13714,7 @@
         "facade.SettingsFacadeServices.save#TenantChatSpace": "SaveTenantChatSpace",
         "facade.SettingsFacadeServices.save#TenantNotificationSettings": "SaveTenantNotificationSettings",
         "facade.SettingsFacadeServices.save#TenantSettings": "SaveTenantSettings",
+        "facade.SettingsFacadeServices.save#UserNotificationDefault": "SaveUserNotificationDefault",
         "facade.ShopifyFacadeServices.delete#ShopifyAuthConfig": "DeleteShopifyAuthConfig",
         "facade.ShopifyFacadeServices.get#ShopifyAuthConfig": "GetShopifyAuthConfig",
         "facade.ShopifyFacadeServices.list#ShopifyAuthConfigs": "ListShopifyAuthConfigs",

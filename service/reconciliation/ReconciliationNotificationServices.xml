@@ -73,4 +73,37 @@
         </actions>
     </service>
 
+    <service verb="migrate" noun="TenantNotificationSettings" authenticate="false">
+        <description>One-time v1.2.0 upgrade: copy each tenant's TenantNotificationSetting webhook into a
+            TenantChatSpace named 'Default space' and link that tenant's automations (without a space) to it.
+            Idempotent — tenants that already have any chat space are skipped. Internal only, not remote.</description>
+        <out-parameters>
+            <parameter name="migratedTenantCount" type="Integer"/>
+            <parameter name="linkedAutomationCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="migratedTenantCount" from="0"/>
+            <set field="linkedAutomationCount" from="0"/>
+            <set field="settingRows" from="ec.entity.find('darpan.reconciliation.TenantNotificationSetting').disableAuthz().useCache(false).list() ?: []"/>
+            <iterate list="settingRows" entry="settingRow">
+                <set field="tenantIdValue" from="((settingRow.companyUserGroupId)?.toString()?.trim())"/>
+                <set field="webhookValue" from="((settingRow.googleChatWebhookUrl)?.toString()?.trim())"/>
+                <set field="existingSpaceCount" from="tenantIdValue ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('companyUserGroupId', tenantIdValue).disableAuthz().useCache(false).count() : 1"/>
+                <if condition="tenantIdValue &amp;&amp; webhookValue &amp;&amp; existingSpaceCount == 0">
+                    <service-call name="create#darpan.reconciliation.TenantChatSpace" out-map="createdSpace"
+                            in-map="[companyUserGroupId: tenantIdValue, spaceName: 'Default space', googleChatWebhookUrl: webhookValue, isActive: ((settingRow.isActive)?.toString()?.trim()) ?: 'Y', createdByUserId: settingRow.createdByUserId, createdDate: ec.user.nowTimestamp, lastUpdatedDate: ec.user.nowTimestamp]"/>
+                    <set field="migratedTenantCount" from="migratedTenantCount + 1"/>
+                    <set field="automationRows" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('companyUserGroupId', tenantIdValue).disableAuthz().useCache(false).list() ?: []"/>
+                    <iterate list="automationRows" entry="automationRow">
+                        <if condition="!((automationRow.chatSpaceId)?.toString()?.trim())">
+                            <set field="ignoreSet" from="automationRow.set('chatSpaceId', createdSpace.chatSpaceId)"/>
+                            <set field="ignoreUpdate" from="automationRow.update()"/>
+                            <set field="linkedAutomationCount" from="linkedAutomationCount + 1"/>
+                        </if>
+                    </iterate>
+                </if>
+            </iterate>
+        </actions>
+    </service>
+
 </services>

@@ -234,9 +234,6 @@
                                         "$ref": "#/components/schemas/GetLlmSettingsRequest"
                                     },
                                     {
-                                        "$ref": "#/components/schemas/GetTenantNotificationSettingsRequest"
-                                    },
-                                    {
                                         "$ref": "#/components/schemas/GetTenantSettingsRequest"
                                     },
                                     {
@@ -271,9 +268,6 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveTenantChatSpaceRequest"
-                                    },
-                                    {
-                                        "$ref": "#/components/schemas/SaveTenantNotificationSettingsRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveTenantSettingsRequest"
@@ -367,7 +361,6 @@
                                         "facade.SearchFacadeServices.search#NavigationTargets": "#/components/schemas/SearchNavigationTargetsRequest",
                                         "facade.SettingsFacadeServices.delete#TenantChatSpace": "#/components/schemas/DeleteTenantChatSpaceRequest",
                                         "facade.SettingsFacadeServices.get#LlmSettings": "#/components/schemas/GetLlmSettingsRequest",
-                                        "facade.SettingsFacadeServices.get#TenantNotificationSettings": "#/components/schemas/GetTenantNotificationSettingsRequest",
                                         "facade.SettingsFacadeServices.get#TenantSettings": "#/components/schemas/GetTenantSettingsRequest",
                                         "facade.SettingsFacadeServices.get#UserNotificationDefault": "#/components/schemas/GetUserNotificationDefaultRequest",
                                         "facade.SettingsFacadeServices.list#EnumOptions": "#/components/schemas/ListEnumOptionsRequest",
@@ -380,7 +373,6 @@
                                         "facade.SettingsFacadeServices.save#NsRestletConfig": "#/components/schemas/SaveNsRestletConfigRequest",
                                         "facade.SettingsFacadeServices.save#SftpServer": "#/components/schemas/SaveSftpServerRequest",
                                         "facade.SettingsFacadeServices.save#TenantChatSpace": "#/components/schemas/SaveTenantChatSpaceRequest",
-                                        "facade.SettingsFacadeServices.save#TenantNotificationSettings": "#/components/schemas/SaveTenantNotificationSettingsRequest",
                                         "facade.SettingsFacadeServices.save#TenantSettings": "#/components/schemas/SaveTenantSettingsRequest",
                                         "facade.SettingsFacadeServices.save#UserNotificationDefault": "#/components/schemas/SaveUserNotificationDefaultRequest",
                                         "facade.ShopifyFacadeServices.delete#ShopifyAuthConfig": "#/components/schemas/DeleteShopifyAuthConfigRequest",
@@ -614,9 +606,6 @@
                                             "$ref": "#/components/schemas/GetLlmSettingsResponse"
                                         },
                                         {
-                                            "$ref": "#/components/schemas/GetTenantNotificationSettingsResponse"
-                                        },
-                                        {
                                             "$ref": "#/components/schemas/GetTenantSettingsResponse"
                                         },
                                         {
@@ -651,9 +640,6 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveTenantChatSpaceResponse"
-                                        },
-                                        {
-                                            "$ref": "#/components/schemas/SaveTenantNotificationSettingsResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveTenantSettingsResponse"
@@ -11167,138 +11153,6 @@
                     "result"
                 ]
             },
-            "GetTenantNotificationSettingsParams": {
-                "type": "object",
-                "properties": {
-                    
-                },
-                "description": "Get active-tenant notification settings with Google Chat webhook redaction."
-            },
-            "GetTenantNotificationSettingsResult": {
-                "type": "object",
-                "properties": {
-                    "ok": {
-                        "type": "boolean"
-                    },
-                    "messages": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "errors": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "tenantNotificationSettings": {
-                        "type": "object",
-                        "properties": {
-                            "companyUserGroupId": {
-                                "type": "string"
-                            },
-                            "companyLabel": {
-                                "type": "string"
-                            },
-                            "googleChatConfigured": {
-                                "type": "boolean"
-                            },
-                            "googleChatWebhookUrlMasked": {
-                                "type": "string"
-                            },
-                            "isActive": {
-                                "type": "string"
-                            },
-                            "createdByUserId": {
-                                "type": "string"
-                            },
-                            "createdDate": {
-                                "oneOf": [
-                                    {
-                                        "type": "string"
-                                    },
-                                    {
-                                        "type": "number"
-                                    }
-                                ],
-                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
-                            },
-                            "lastUpdatedDate": {
-                                "oneOf": [
-                                    {
-                                        "type": "string"
-                                    },
-                                    {
-                                        "type": "number"
-                                    }
-                                ],
-                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
-                            }
-                        }
-                    }
-                }
-            },
-            "GetTenantNotificationSettingsRequest": {
-                "type": "object",
-                "description": "JSON-RPC request envelope for facade.SettingsFacadeServices.get#TenantNotificationSettings",
-                "x-darpan-method": "facade.SettingsFacadeServices.get#TenantNotificationSettings",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "method": {
-                        "type": "string",
-                        "const": "facade.SettingsFacadeServices.get#TenantNotificationSettings"
-                    },
-                    "params": {
-                        "$ref": "#/components/schemas/GetTenantNotificationSettingsParams"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "id",
-                    "method"
-                ]
-            },
-            "GetTenantNotificationSettingsResponse": {
-                "type": "object",
-                "description": "JSON-RPC success envelope for facade.SettingsFacadeServices.get#TenantNotificationSettings. Check result.ok / result.errors for business failures.",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "result": {
-                        "$ref": "#/components/schemas/GetTenantNotificationSettingsResult"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "result"
-                ]
-            },
             "GetTenantSettingsParams": {
                 "type": "object",
                 "properties": {
@@ -12950,143 +12804,6 @@
                     "result"
                 ]
             },
-            "SaveTenantNotificationSettingsParams": {
-                "type": "object",
-                "properties": {
-                    "googleChatWebhookUrl": {
-                        "type": "string"
-                    },
-                    "isActive": {
-                        "type": "boolean"
-                    }
-                },
-                "description": "Save one Google Chat run-completion webhook for the active tenant."
-            },
-            "SaveTenantNotificationSettingsResult": {
-                "type": "object",
-                "properties": {
-                    "ok": {
-                        "type": "boolean"
-                    },
-                    "messages": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "errors": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "tenantNotificationSettings": {
-                        "type": "object",
-                        "properties": {
-                            "companyUserGroupId": {
-                                "type": "string"
-                            },
-                            "companyLabel": {
-                                "type": "string"
-                            },
-                            "googleChatConfigured": {
-                                "type": "boolean"
-                            },
-                            "googleChatWebhookUrlMasked": {
-                                "type": "string"
-                            },
-                            "isActive": {
-                                "type": "string"
-                            },
-                            "createdByUserId": {
-                                "type": "string"
-                            },
-                            "createdDate": {
-                                "oneOf": [
-                                    {
-                                        "type": "string"
-                                    },
-                                    {
-                                        "type": "number"
-                                    }
-                                ],
-                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
-                            },
-                            "lastUpdatedDate": {
-                                "oneOf": [
-                                    {
-                                        "type": "string"
-                                    },
-                                    {
-                                        "type": "number"
-                                    }
-                                ],
-                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
-                            }
-                        }
-                    }
-                }
-            },
-            "SaveTenantNotificationSettingsRequest": {
-                "type": "object",
-                "description": "JSON-RPC request envelope for facade.SettingsFacadeServices.save#TenantNotificationSettings",
-                "x-darpan-method": "facade.SettingsFacadeServices.save#TenantNotificationSettings",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "method": {
-                        "type": "string",
-                        "const": "facade.SettingsFacadeServices.save#TenantNotificationSettings"
-                    },
-                    "params": {
-                        "$ref": "#/components/schemas/SaveTenantNotificationSettingsParams"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "id",
-                    "method"
-                ]
-            },
-            "SaveTenantNotificationSettingsResponse": {
-                "type": "object",
-                "description": "JSON-RPC success envelope for facade.SettingsFacadeServices.save#TenantNotificationSettings. Check result.ok / result.errors for business failures.",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "result": {
-                        "$ref": "#/components/schemas/SaveTenantNotificationSettingsResult"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "result"
-                ]
-            },
             "SaveTenantSettingsParams": {
                 "type": "object",
                 "properties": {
@@ -13929,7 +13646,6 @@
         "facade.SearchFacadeServices.search#NavigationTargets": "SearchNavigationTargets",
         "facade.SettingsFacadeServices.delete#TenantChatSpace": "DeleteTenantChatSpace",
         "facade.SettingsFacadeServices.get#LlmSettings": "GetLlmSettings",
-        "facade.SettingsFacadeServices.get#TenantNotificationSettings": "GetTenantNotificationSettings",
         "facade.SettingsFacadeServices.get#TenantSettings": "GetTenantSettings",
         "facade.SettingsFacadeServices.get#UserNotificationDefault": "GetUserNotificationDefault",
         "facade.SettingsFacadeServices.list#EnumOptions": "ListEnumOptions",
@@ -13942,7 +13658,6 @@
         "facade.SettingsFacadeServices.save#NsRestletConfig": "SaveNsRestletConfig",
         "facade.SettingsFacadeServices.save#SftpServer": "SaveSftpServer",
         "facade.SettingsFacadeServices.save#TenantChatSpace": "SaveTenantChatSpace",
-        "facade.SettingsFacadeServices.save#TenantNotificationSettings": "SaveTenantNotificationSettings",
         "facade.SettingsFacadeServices.save#TenantSettings": "SaveTenantSettings",
         "facade.SettingsFacadeServices.save#UserNotificationDefault": "SaveUserNotificationDefault",
         "facade.ShopifyFacadeServices.delete#ShopifyAuthConfig": "DeleteShopifyAuthConfig",

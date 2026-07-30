@@ -11,6 +11,7 @@ Review each record before loading into an environment.
     <!-- Added records from data/DarpanSystemSourceSeedData.xml -->
     <moqui.basic.Enumeration enumId="DATABASE" enumTypeId="DarpanSystemSource" enumCode="DATABASE" description="Database" sequenceNum="5"/>
     <!-- Added records from data/SecuritySeedData.xml -->
+    <moqui.basic.Enumeration enumId="darpan.notification.defaultChatSpaceId" enumTypeId="UserPreferenceKey" description="Default Google Chat space per tenant (JSON map companyUserGroupId to chatSpaceId)"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.rule.RuleSetCompareSourceKeyField" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULE_SOURCE_KEY_FIELD" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.rule.RuleSetCompareSourceKeyField" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.reconciliation.TenantChatSpace" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>

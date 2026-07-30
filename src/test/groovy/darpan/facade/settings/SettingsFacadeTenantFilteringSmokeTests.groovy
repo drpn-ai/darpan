@@ -82,12 +82,12 @@ class SettingsFacadeTenantFilteringSmokeTests {
         assertNoRawCredentialFields(endpoints)
 
         ec.message.clearErrors()
-        Map<String, Object> notificationResult = getFacade("facade.SettingsFacadeServices.get#TenantNotificationSettings")
-        Map<String, Object> notificationSettings = (Map<String, Object>) notificationResult.tenantNotificationSettings
-        assertEquals(KREWE, notificationSettings.companyUserGroupId)
-        assertTrue(notificationSettings.googleChatConfigured as boolean)
-        assertTrue((notificationSettings.googleChatWebhookUrlMasked as String).contains("key=...&token=..."))
-        assertNoRawCredentialFields(notificationSettings)
+        Map<String, Object> chatSpaceResult = getFacade("facade.SettingsFacadeServices.list#TenantChatSpaces")
+        List<Map<String, Object>> chatSpaces = (List<Map<String, Object>>) (chatSpaceResult.chatSpaces ?: [])
+        assertEquals(["KREWE_SPACE"], chatSpaces.collect { Map<String, Object> row -> row.chatSpaceId })
+        assertTrue(chatSpaces.first().googleChatConfigured as boolean)
+        assertTrue((chatSpaces.first().googleChatWebhookUrlMasked as String).contains("key=...&token=..."))
+        assertNoRawCredentialFields(chatSpaces)
 
         ec.message.clearErrors()
         Map<String, Object> tenantSettingsResult = getFacade("facade.SettingsFacadeServices.get#TenantSettings")
@@ -155,14 +155,16 @@ class SettingsFacadeTenantFilteringSmokeTests {
         assertNull(findOne("darpan.reconciliation.SftpServer", [sftpServerId: "KREWE_VIEW_ONLY_CREATE"]))
 
         ec.message.clearErrors()
-        Map<String, Object> notificationResult = saveFacade("facade.SettingsFacadeServices.save#TenantNotificationSettings", [
+        Map<String, Object> chatSpaceResult = saveFacade("facade.SettingsFacadeServices.save#TenantChatSpace", [
+                chatSpaceId         : "KREWE_SPACE",
+                spaceName           : "Krewe space renamed",
                 googleChatWebhookUrl: "https://chat.googleapis.com/v1/spaces/KREWE_NEW/messages?key=blocked&token=blocked",
                 isActive            : "Y",
         ])
-        assertFalse((Boolean) notificationResult.ok)
-        assertTrue((notificationResult.errors ?: []).join(" ").contains("view access"))
-        assertEquals("https://chat.googleapis.com/v1/spaces/KREWE_SPACE/messages?key=krewe-key&token=krewe-token",
-                findOne("darpan.reconciliation.TenantNotificationSetting", [companyUserGroupId: KREWE]).googleChatWebhookUrl)
+        assertFalse((Boolean) chatSpaceResult.ok)
+        assertTrue((chatSpaceResult.errors ?: []).join(" ").contains("view access"))
+        assertEquals("Krewe space",
+                findOne("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "KREWE_SPACE"]).spaceName)
 
         ec.message.clearErrors()
         Map<String, Object> tenantSettingsResult = saveFacade("facade.SettingsFacadeServices.save#TenantSettings", [
@@ -231,37 +233,43 @@ class SettingsFacadeTenantFilteringSmokeTests {
     }
 
     @Test
-    void tenantNotificationSettingsStayOnePerActiveTenant() {
+    void tenantChatSpaceSavesScopedToActiveTenantAndCreator() {
         ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, GORJANA)
 
-        Map<String, Object> saveResult = saveFacade("facade.SettingsFacadeServices.save#TenantNotificationSettings", [
+        Map<String, Object> saveResult = saveFacade("facade.SettingsFacadeServices.save#TenantChatSpace", [
+                spaceName           : "Gorjana new space",
                 googleChatWebhookUrl: "https://chat.googleapis.com/v1/spaces/GORJANA_NEW/messages?key=new-key&token=new-token",
                 isActive            : "Y",
         ])
         assertTrue((Boolean) saveResult.ok, saveResult.errors?.toString())
-        Map<String, Object> settings = (Map<String, Object>) saveResult.tenantNotificationSettings
-        assertEquals(GORJANA, settings.companyUserGroupId)
-        assertEquals(true, settings.googleChatConfigured)
-        assertTrue((settings.googleChatWebhookUrlMasked as String).contains("key=...&token=..."))
-        assertNoRawCredentialFields(settings)
+        Map<String, Object> chatSpace = (Map<String, Object>) saveResult.chatSpace
+        assertEquals("Gorjana new space", chatSpace.spaceName)
+        assertEquals(true, chatSpace.googleChatConfigured)
+        assertTrue((chatSpace.googleChatWebhookUrlMasked as String).contains("key=...&token=..."))
+        assertNoRawCredentialFields(chatSpace)
 
-        List notificationRows = ec.entity.find("darpan.reconciliation.TenantNotificationSetting")
-                .condition("companyUserGroupId", GORJANA)
-                .disableAuthz()
-                .useCache(false)
-                .list()
-        assertEquals(1, notificationRows.size())
-        assertTenantOwnership("darpan.reconciliation.TenantNotificationSetting", [companyUserGroupId: GORJANA])
+        String chatSpaceId = chatSpace.chatSpaceId as String
+        assertTenantOwnership("darpan.reconciliation.TenantChatSpace", [chatSpaceId: chatSpaceId])
         assertEquals("https://chat.googleapis.com/v1/spaces/GORJANA_NEW/messages?key=new-key&token=new-token",
-                notificationRows.first().googleChatWebhookUrl)
+                findOne("darpan.reconciliation.TenantChatSpace", [chatSpaceId: chatSpaceId]).googleChatWebhookUrl)
+
+        // Clean up: this class shares one ec/DB across all @Test methods in the class (PER_CLASS,
+        // JUnit method order is name-hash-based, not declaration order), and other tests assert an
+        // exact one-space-per-tenant list for GORJANA_SPACE. Leaving this newly-created space behind
+        // would make those assertions order-dependent, so remove it before returning.
+        ec.message.clearErrors()
+        Map<String, Object> deleteResult = saveFacade("facade.SettingsFacadeServices.delete#TenantChatSpace", [chatSpaceId: chatSpaceId])
+        assertTrue((Boolean) deleteResult.ok, deleteResult.errors?.toString())
     }
 
     @Test
-    void tenantNotificationSettingsRejectInvalidWebhookWithoutOverwritingExistingSetting() {
+    void tenantChatSpaceRejectsInvalidWebhookWithoutOverwritingExistingSpace() {
         ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, GORJANA)
-        String existingWebhookUrl = findOne("darpan.reconciliation.TenantNotificationSetting", [companyUserGroupId: GORJANA]).googleChatWebhookUrl
+        String existingWebhookUrl = findOne("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "GORJANA_SPACE"]).googleChatWebhookUrl
 
-        Map<String, Object> saveResult = saveFacade("facade.SettingsFacadeServices.save#TenantNotificationSettings", [
+        Map<String, Object> saveResult = saveFacade("facade.SettingsFacadeServices.save#TenantChatSpace", [
+                chatSpaceId         : "GORJANA_SPACE",
+                spaceName           : "Gorjana space",
                 googleChatWebhookUrl: "http://chat.googleapis.com/v1/spaces/GORJANA_BAD/messages?key=bad&token=bad",
                 isActive            : "Y",
         ])
@@ -269,7 +277,7 @@ class SettingsFacadeTenantFilteringSmokeTests {
         assertFalse((Boolean) saveResult.ok)
         assertTrue((saveResult.errors ?: []).join(" ").contains("Google Chat webhook URL must use https."))
         assertEquals(existingWebhookUrl,
-                findOne("darpan.reconciliation.TenantNotificationSetting", [companyUserGroupId: GORJANA]).googleChatWebhookUrl)
+                findOne("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "GORJANA_SPACE"]).googleChatWebhookUrl)
     }
 
     private void assertTenantVisibleRows(String tenantId, String expectedSftpId, String expectedAuthId, String expectedEndpointId) {
@@ -298,11 +306,11 @@ class SettingsFacadeTenantFilteringSmokeTests {
         assertTrue(endpoints.every { Map<String, Object> row -> row.nsAuthConfigId == expectedAuthId })
 
         ec.message.clearErrors()
-        Map<String, Object> notificationResult = getFacade("facade.SettingsFacadeServices.get#TenantNotificationSettings")
+        Map<String, Object> chatSpaceResult = getFacade("facade.SettingsFacadeServices.list#TenantChatSpaces")
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())
-        Map<String, Object> notificationSettings = (Map<String, Object>) notificationResult.tenantNotificationSettings
-        assertEquals(tenantId, notificationSettings.companyUserGroupId)
-        assertTrue(notificationSettings.googleChatConfigured as boolean)
+        List<Map<String, Object>> chatSpaces = (List<Map<String, Object>>) (chatSpaceResult.chatSpaces ?: [])
+        assertEquals([tenantId == KREWE ? "KREWE_SPACE" : "GORJANA_SPACE"], chatSpaces.collect { Map<String, Object> row -> row.chatSpaceId })
+        assertTrue(chatSpaces.first().googleChatConfigured as boolean)
 
         ec.message.clearErrors()
         Map<String, Object> tenantSettingsResult = getFacade("facade.SettingsFacadeServices.get#TenantSettings")
@@ -501,16 +509,21 @@ class SettingsFacadeTenantFilteringSmokeTests {
                 privateKeyPem        : "legacy-gorjana-private-key",
         ])
 
-        upsertEntityValue("darpan.reconciliation.TenantNotificationSetting", [companyUserGroupId: KREWE], [
+        // TenantNotificationSetting retired 2026-07-29 — TenantChatSpace is the fixture now.
+        upsertEntityValue("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "KREWE_SPACE"], [
+                chatSpaceId          : "KREWE_SPACE",
                 companyUserGroupId   : KREWE,
+                spaceName            : "Krewe space",
                 createdByUserId      : TEST_USER_ID,
                 googleChatWebhookUrl : "https://chat.googleapis.com/v1/spaces/KREWE_SPACE/messages?key=krewe-key&token=krewe-token",
                 isActive             : "Y",
                 createdDate          : TEST_FROM_DATE,
                 lastUpdatedDate      : TEST_FROM_DATE,
         ])
-        upsertEntityValue("darpan.reconciliation.TenantNotificationSetting", [companyUserGroupId: GORJANA], [
+        upsertEntityValue("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "GORJANA_SPACE"], [
+                chatSpaceId          : "GORJANA_SPACE",
                 companyUserGroupId   : GORJANA,
+                spaceName            : "Gorjana space",
                 createdByUserId      : TEST_USER_ID,
                 googleChatWebhookUrl : "https://chat.googleapis.com/v1/spaces/GORJANA_SPACE/messages?key=gorjana-key&token=gorjana-token",
                 isActive             : "Y",

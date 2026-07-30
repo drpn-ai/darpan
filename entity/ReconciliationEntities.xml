@@ -156,7 +156,8 @@
     </entity>
 
     <entity entity-name="TenantNotificationSetting" package="darpan.reconciliation" use="configuration">
-        <description>Tenant-level notification settings for reconciliation run completion events.</description>
+        <description>Tenant-level notification settings for reconciliation run completion events.
+            RETIRED 2026-07-29 — replaced by TenantChatSpace; kept one release for migration, remove after v1.2.0.</description>
         <field name="companyUserGroupId" type="id" is-pk="true" not-null="true"/>
         <field name="createdByUserId" type="id"/>
         <field name="googleChatWebhookUrl" type="text-very-long" encrypt="true">

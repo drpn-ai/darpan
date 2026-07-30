@@ -36,8 +36,12 @@ class SettingsFacadeSupportTests {
         assertIterableEquals(["HotWax", "SHOPIFY", "NETSUITE"], deduplicated.collect { it.label })
     }
 
+    // TenantNotificationSetting + get#/save#TenantNotificationSettings retired 2026-07-29 (replaced by
+    // TenantChatSpace + save#TenantChatSpace, migrated by migrate#TenantNotificationSettings). These
+    // support statics are unchanged and now back save#TenantChatSpace instead — this case keeps the
+    // raw-URL-never-echoed invariant covered under its new name.
     @Test
-    void googleChatWebhookValidationAndMaskingKeepSecretsOutOfResponses() {
+    void googleChatWebhookValidationAndMaskingKeepSecretsOutOfTenantChatSpaceResponses() {
         String webhookUrl = "https://chat.googleapis.com/v1/spaces/AAQAayYEtUA/messages?key=test-key&token=test-token"
 
         assertNull(TenantNotificationSupport.validateGoogleChatWebhookUrl(webhookUrl))

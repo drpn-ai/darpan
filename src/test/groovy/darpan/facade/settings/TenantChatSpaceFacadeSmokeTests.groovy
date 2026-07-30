@@ -103,6 +103,16 @@ class TenantChatSpaceFacadeSmokeTests {
                 .useCache(false)
                 .one()
         assertNotNull(row)
+
+        // The blocked delete above is an intentional error-producing call; ServiceCallSyncImpl
+        // refuses to run a new top-level service while a prior error is still set
+        // (ignorePreviousError defaults to false), so clear it before the next call.
+        ec.message.clearErrors()
+
+        def resave = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace",
+                [chatSpaceId: chatSpaceId, spaceName: "Ops space renamed", googleChatWebhookUrl: WEBHOOK, isActive: true])
+        assertTrue(resave.ok as boolean)
+        assertTrue(resave.chatSpace.inUse as boolean)
     }
 
     private Map<String, Object> callFacade(String serviceName, Map<String, Object> parameters) {

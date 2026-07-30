@@ -616,6 +616,17 @@
                 rows the lookup confirms present (bulk-export index-skew false positives). Blank
                 disables the verification pass for this connector.</description>
         </field>
+        <field name="pairLookupServiceName" type="text-medium">
+            <description>Optional lookup#* service returning full order groups keyed by the compare join
+                key (e.g. Shopify externalId) — the OMS side of the exchange pair verify stage. Same
+                lookup fence as lookupServiceName. Blank disables exchange pair verification for runs
+                where this connector is a side.</description>
+        </field>
+        <field name="exchangeStateLookupServiceName" type="text-medium">
+            <description>Optional lookup#* service returning per-order exchange state (returns with
+                exchange line items, current totals) — the Shopify side of the exchange pair verify
+                stage. Same lookup fence as lookupServiceName. Blank disables exchange pair verification.</description>
+        </field>
         <field name="enabled" type="text-indicator" default="'Y'"/>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>

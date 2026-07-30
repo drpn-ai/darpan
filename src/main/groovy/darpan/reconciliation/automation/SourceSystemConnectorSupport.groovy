@@ -166,6 +166,8 @@ class SourceSystemConnectorSupport {
                 keepFieldsParameterName    : readString(record, "keepFieldsParameterName"),
                 keepFieldsBase             : readString(record, "keepFieldsBase"),
                 lookupServiceName          : readString(record, "lookupServiceName"),
+                pairLookupServiceName          : readString(record, "pairLookupServiceName"),
+                exchangeStateLookupServiceName : readString(record, "exchangeStateLookupServiceName"),
                 enabled                    : isEnabled(record),
         ] as Map<String, Object>
     }

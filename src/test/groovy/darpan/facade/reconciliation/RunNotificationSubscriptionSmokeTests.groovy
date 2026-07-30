@@ -43,6 +43,13 @@ class RunNotificationSubscriptionSmokeTests {
         // seedCompanyScope logs in as the KREWE-tenant test user, seeds the KREWE UserGroup with
         // editor permission, sets it as the active tenant, and clears any prior message state.
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
+        // @TestInstance(PER_CLASS) shares this ec/session (and the underlying user preference row)
+        // across every test method, and JUnit 5's default method ordering is
+        // deterministic-but-unspecified. subscribeWithoutDefaultSetsNeedsFlag's "no default set yet"
+        // premise only holds if a prior test (subscribeUnsubscribeRoundTripAndStatusFlag) hasn't
+        // already saved a default for this user+tenant, so clear it unconditionally before every
+        // test rather than relying on run order.
+        callFacade("facade.SettingsFacadeServices.save#UserNotificationDefault", [chatSpaceId: ""])
     }
 
     @Test

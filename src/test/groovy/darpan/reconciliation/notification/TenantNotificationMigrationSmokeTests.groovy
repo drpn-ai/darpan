@@ -12,6 +12,7 @@ import java.nio.file.Path
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertNull
 
 /**
  * v1.2.0 upgrade migration: reconciliation.ReconciliationNotificationServices.migrate#TenantNotificationSettings
@@ -77,6 +78,14 @@ class TenantNotificationMigrationSmokeTests {
         String tenBSpaceId = createdBSpace.chatSpaceId as String
         assertNotNull(tenBSpaceId)
         String automationB1 = createAutomation(TEN_B, "TEN_B automation 1", tenBSpaceId)
+        // Named edge (Important finding, fix round 1): TEN_B also has a SECOND automation with a
+        // blank chatSpaceId — i.e. it looks exactly like a TEN_A automation that still needs linking.
+        // Today space-creation and automation-linking share one <if existingSpaceCount == 0> block,
+        // so TEN_B's blank-chatSpaceId automation is never even considered once TEN_B is skipped. A
+        // future refactor that backfills unlinked automations independently of the per-tenant guard
+        // would silently violate "tenants with ANY existing chat space are skipped entirely" — this
+        // automation must stay unlinked and uncounted across both runs to catch that regression.
+        String automationB2 = createAutomation(TEN_B, "TEN_B automation 2 (unlinked)", null)
 
         // First run: only TEN_A qualifies (no existing chat space).
         Map firstRun = (Map) ec.service.sync().name(MIGRATE_SERVICE).parameters([:]).call()
@@ -96,12 +105,15 @@ class TenantNotificationMigrationSmokeTests {
         assertEquals(tenASpace.chatSpaceId, findAutomation(automationA1).chatSpaceId)
         assertEquals(tenASpace.chatSpaceId, findAutomation(automationA2).chatSpaceId)
 
-        // TEN_B untouched: still exactly its one pre-existing chat space, automation link unchanged.
+        // TEN_B untouched: still exactly its one pre-existing chat space, automation link unchanged,
+        // and its SECOND automation (blank chatSpaceId) stays unlinked — the skip guard applies to
+        // the whole tenant, not per-automation.
         List<Map> tenBSpaces = ec.entity.find("darpan.reconciliation.TenantChatSpace")
                 .condition("companyUserGroupId", TEN_B).disableAuthz().useCache(false).list()
         assertEquals(1, tenBSpaces.size())
         assertEquals("Existing space", tenBSpaces.first().spaceName)
         assertEquals(tenBSpaceId, findAutomation(automationB1).chatSpaceId)
+        assertNull(findAutomation(automationB2).chatSpaceId)
 
         // Second run: fully idempotent — every tenant with a TenantNotificationSetting row already
         // has a chat space, so nothing migrates and nothing re-links.
@@ -113,6 +125,10 @@ class TenantNotificationMigrationSmokeTests {
         List<Map> tenASpacesAfter = ec.entity.find("darpan.reconciliation.TenantChatSpace")
                 .condition("companyUserGroupId", TEN_A).disableAuthz().useCache(false).list()
         assertEquals(1, tenASpacesAfter.size())
+
+        // TEN_B's unlinked automation is still unlinked after the second run too — the skip guard
+        // never backfills it, on either run.
+        assertNull(findAutomation(automationB2).chatSpaceId)
     }
 
     private void createNotificationSetting(String tenantId, String createdByUserId, String webhookUrl) {

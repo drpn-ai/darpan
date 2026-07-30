@@ -165,6 +165,10 @@ class SettingsFacadeTenantFilteringSmokeTests {
         assertTrue((chatSpaceResult.errors ?: []).join(" ").contains("view access"))
         assertEquals("Krewe space",
                 findOne("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "KREWE_SPACE"]).spaceName)
+        // The blocked payload carried a different (attacker) webhook URL — prove it never landed,
+        // not just that the display name is untouched.
+        assertEquals("https://chat.googleapis.com/v1/spaces/KREWE_SPACE/messages?key=krewe-key&token=krewe-token",
+                findOne("darpan.reconciliation.TenantChatSpace", [chatSpaceId: "KREWE_SPACE"]).googleChatWebhookUrl)
 
         ec.message.clearErrors()
         Map<String, Object> tenantSettingsResult = saveFacade("facade.SettingsFacadeServices.save#TenantSettings", [

@@ -133,15 +133,19 @@ class ExchangePairVerificationSupport {
                         data: [manifestEntries: manifestEntries, omsOrders: omsOrders]])
             }
             if (shopifyHasExchange && originalPresent) {
-                BigDecimal omsPairTotal = omsOrders.inject(BigDecimal.ZERO) { BigDecimal acc, Object order ->
-                    Object total = order instanceof Map ? ((Map) order).get('grandTotal') : null
+                // V2 comparand is the ORIGINAL order(s) alone — live data (2026-07-31, 19/19 pairs)
+                // proved HotWax mutates the original's grandTotal to the current net state, so adding
+                // the exchange order's own total double-counts it by exactly that amount.
+                BigDecimal omsOriginalTotal = omsOrders.inject(BigDecimal.ZERO) { BigDecimal acc, Object order ->
+                    if (!(order instanceof Map) || ((Map) order).get('hasExchangeAssoc') == true) return acc
+                    Object total = ((Map) order).get('grandTotal')
                     total == null ? acc : acc + new BigDecimal(total.toString())
                 }
                 BigDecimal shopifyTotal = (BigDecimal) state.get('currentTotalAmount')
-                if (shopifyTotal != null && (omsPairTotal - shopifyTotal).abs() > tolerance) {
+                if (shopifyTotal != null && (omsOriginalTotal - shopifyTotal).abs() > tolerance) {
                     rows.add([diffType: TYPE_PAIR_AMOUNT_MISMATCH, primaryId: externalId,
-                            note: "OMS pair total ${omsPairTotal.toPlainString()} differs from Shopify current total ${shopifyTotal.toPlainString()} for order ${externalId}.".toString(),
-                            data: [omsPairTotal: omsPairTotal, shopifyCurrentTotal: shopifyTotal,
+                            note: "OMS original total ${omsOriginalTotal.toPlainString()} differs from Shopify current total ${shopifyTotal.toPlainString()} for order ${externalId}.".toString(),
+                            data: [omsOriginalTotal: omsOriginalTotal, shopifyCurrentTotal: shopifyTotal,
                                    omsOrders: omsOrders, exchanges: state.get('exchanges')]])
                 }
             }

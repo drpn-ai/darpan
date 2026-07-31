@@ -77,10 +77,12 @@ class ExchangePairVerificationSupportTests {
          toOrderId: "M686331", grandTotal: 50.0, orderDate: 1785260782199L, statusId: "ORDER_COMPLETED"] + overrides
     }
 
+    /** Real-world shape (live-verified): the ORIGINAL's grandTotal already equals Shopify's current
+     *  total — the exchange order's own total rides alongside and must not be added to it. */
     private static Map omsPairOk() {
         [ok: true, errors: [], ordersByExternalId: ["6941645013123": [
             [omsOrderId: "M686331", externalId: "6941645013123", orderTypeId: "SALES_ORDER",
-             statusId: "ORDER_COMPLETED", grandTotal: 135.71, orderDate: 1784227520000L, hasExchangeAssoc: false],
+             statusId: "ORDER_COMPLETED", grandTotal: 185.71, orderDate: 1784227520000L, hasExchangeAssoc: false],
             [omsOrderId: "M750653", externalId: "6941645013123", orderTypeId: "SALES_ORDER",
              statusId: "ORDER_COMPLETED", grandTotal: 50.0, orderDate: 1785260782199L, hasExchangeAssoc: true]]]]
     }
@@ -164,14 +166,36 @@ class ExchangePairVerificationSupportTests {
 
     @Test
     void amountMismatchBeyondToleranceAppendsV2Row() {
+        // V2 compares the ORIGINAL order's total against Shopify's current total. Live data
+        // (2026-07-31, 19/19 pairs) proved HotWax mutates the original to the current net state,
+        // so summing the exchange order's total double-counts it by exactly that amount.
         File diff = diffFile()
         Map result = ExchangePairVerificationSupport.verifyExchangePairs([
                 manifestFile: manifestFile([entry()]), diffFile: diff, nowMillis: NOW,
                 shopifyLookup: { List ids -> shopifyOk(new BigDecimal("100.00")) },
                 omsPairLookup: { List ids -> omsPairOk() }])
         assertEquals(1, result.appendedByType.EXCHANGE_PAIR_AMOUNT_MISMATCH)
-        assertTrue(diff.text.contains('"omsPairTotal":185.71'))
+        assertTrue(diff.text.contains('"omsOriginalTotal":185.71'))
         assertTrue(diff.text.contains('"shopifyCurrentTotal":100.00') || diff.text.contains('"shopifyCurrentTotal":100.0'))
+    }
+
+    @Test
+    void healthyEvenExchangeDoesNotFlagV2WhenOriginalMatchesShopifyCurrent() {
+        // The real-world healthy shape: OMS original 185.71 == Shopify current 185.71, exchange
+        // order carries its own 50.00. The old pair-sum comparand flagged 100% of these.
+        Map omsPair = [ok: true, errors: [], ordersByExternalId: ["6941645013123": [
+                [omsOrderId: "M686331", externalId: "6941645013123", orderTypeId: "SALES_ORDER",
+                 statusId: "ORDER_COMPLETED", grandTotal: 185.71, orderDate: 1784227520000L, hasExchangeAssoc: false],
+                [omsOrderId: "M750653", externalId: "6941645013123", orderTypeId: "SALES_ORDER",
+                 statusId: "ORDER_COMPLETED", grandTotal: 50.0, orderDate: 1785260782199L, hasExchangeAssoc: true]]]]
+        File diff = diffFile()
+        String before = diff.text
+        Map result = ExchangePairVerificationSupport.verifyExchangePairs([
+                manifestFile: manifestFile([entry()]), diffFile: diff, nowMillis: NOW,
+                shopifyLookup: { List ids -> shopifyOk(new BigDecimal("185.71")) },
+                omsPairLookup: { List ids -> omsPair }])
+        assertEquals(0, result.appendedCount)
+        assertEquals(before, diff.text)
     }
 
     @Test
@@ -317,7 +341,7 @@ class ExchangePairVerificationSupportTests {
     private static Map omsPairOkFor(List<String> ids) {
         [ok: true, errors: [], ordersByExternalId: ids.collectEntries { String id ->
             [(id): [[omsOrderId: "orig-${id}".toString(), externalId: id, orderTypeId: "SALES_ORDER",
-                      statusId: "ORDER_COMPLETED", grandTotal: 10.0, orderDate: 1784227520000L, hasExchangeAssoc: false],
+                      statusId: "ORDER_COMPLETED", grandTotal: 20.0, orderDate: 1784227520000L, hasExchangeAssoc: false],
                      [omsOrderId: "exch-${id}".toString(), externalId: id, orderTypeId: "SALES_ORDER",
                       statusId: "ORDER_COMPLETED", grandTotal: 10.0, orderDate: 1785260782199L, hasExchangeAssoc: true]]]
         }]

@@ -28,16 +28,20 @@ class ReconciliationSmokeTestSupport {
         resetDatabaseFiles(testDbBasePath)
         String testDbPath = testDbBasePath.toString()
         String safeTestToken = testDbName.replaceAll(/[^A-Za-z0-9_-]/, "_")
-        Path atomikosLogPath = backendRoot.resolve("runtime/tmp/test-atomikos/${safeTestToken}")
+        Path txLogPath = backendRoot.resolve("runtime/tmp/test-txlog/${safeTestToken}")
 
         System.setProperty("moqui.runtime", runtimePath)
         System.setProperty("moqui_runtime", runtimePath)
         System.setProperty("entity_ds_url", "jdbc:h2:${testDbPath};lock_timeout=30000")
         System.setProperty("darpan.data.manager.location", "runtime://tmp/test-data-manager/${safeTestToken}")
-        resetDirectory(atomikosLogPath)
-        System.setProperty("com.atomikos.icatch.log_base_dir", atomikosLogPath.toString())
-        System.setProperty("com.atomikos.icatch.log_base_name", safeTestToken)
-        System.setProperty("com.atomikos.icatch.tm_unique_name", "tm_${safeTestToken}")
+        // Bitronix is the JTA TM (moqui-atomikos retired). bitronix-default-config.properties points the
+        // journal at ${moqui.runtime}/txlog, which a locally running dev-stack holds an exclusive lock on —
+        // without this the whole smoke suite dies at ECFI init with "cannot open disk journal". Give each
+        // test class its own journal and serverId (forkEvery=1, so the config is read fresh per JVM).
+        resetDirectory(txLogPath)
+        System.setProperty("bitronix.tm.journal.disk.logPart1Filename", txLogPath.resolve("btm1.tlog").toString())
+        System.setProperty("bitronix.tm.journal.disk.logPart2Filename", txLogPath.resolve("btm2.tlog").toString())
+        System.setProperty("bitronix.tm.serverId", "test-${safeTestToken}".toString().take(45))
 
         // MACH P0 #5 — several smoke fixtures seed TENANT rulesets with hand-written raw DRL as a
         // shortcut (real tenants use regenerated FIELD_COMPARISON rules). RuleEngineSupport now fails

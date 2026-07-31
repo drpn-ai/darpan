@@ -650,6 +650,58 @@ class ReconciliationOutputSupportTests {
                 "The single returned entry must belong to GORJANA")
     }
 
+    /**
+     * Ghost-card bug (2026-07-31): a FAILED run has no output file, and excluding it from the
+     * listing made failures invisible — the UI's optimistic "Running" card ghosted for 15 minutes
+     * and then vanished with no failure ever shown. Failed file-less rows must be listed so the
+     * history page can render them and reconcile its local pending markers against them.
+     */
+    @Test
+    void listGeneratedOutputFilesIncludesFailedRunsWithoutFiles(@TempDir File dataManagerRoot) {
+        Map<String, Object> failedResult = [
+                reconciliationRunResultId: "RRR_GORJANA_FAILED",
+                savedRunId               : "RS_GORJANA",
+                companyUserGroupId       : "GORJANA",
+                statusEnumId             : ReconciliationOutputSupport.STATUS_FAILED,
+                resultDataManagerPath    : null,
+        ]
+        Map<String, Object> noDataResult = [
+                reconciliationRunResultId: "RRR_GORJANA_NO_DATA",
+                savedRunId               : "RS_GORJANA",
+                companyUserGroupId       : "GORJANA",
+                statusEnumId             : ReconciliationOutputSupport.STATUS_NO_DATA,
+                resultDataManagerPath    : null,
+        ]
+
+        def gorjanaEc = new Expando(
+                resource: new FakeResource(dataManagerRoot),
+                user    : new Expando(
+                        userId      : "gorjana-user",
+                        nowTimestamp: Timestamp.valueOf("2026-07-31 10:00:00"),
+                        getPreference: { String key ->
+                            key == TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY ? "GORJANA" : null
+                        }
+                ),
+                entity  : new FakeEntity([
+                        "darpan.reconciliation.ReconciliationRunResult": [failedResult, noDataResult],
+                        "moqui.security.UserGroupAndMember"            : [[
+                                userId         : "gorjana-user",
+                                groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID,
+                                userGroupId    : "GORJANA",
+                        ]],
+                        "moqui.security.UserGroupMember"               : [],
+                ])
+        )
+
+        List<Map<String, Object>> outputFiles = ReconciliationOutputSupport.listGeneratedOutputFiles(gorjanaEc)
+
+        // FAILED is listed; NO_DATA keeps its existing hidden-when-fileless behavior.
+        assertEquals(1, outputFiles.size(),
+                "Expected exactly 1 run-result entry (the FAILED row), got: ${outputFiles.collect { it.runResult?.statusEnumId }}")
+        assertEquals(ReconciliationOutputSupport.STATUS_FAILED, outputFiles[0].runResult?.statusEnumId,
+                "The file-less FAILED run must be listed so the UI can surface the failure")
+    }
+
     static class FakeResource {
         Map<String, Object> properties = [:]
         File dataManagerRoot

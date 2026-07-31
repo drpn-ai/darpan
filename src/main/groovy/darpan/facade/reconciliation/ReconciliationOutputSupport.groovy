@@ -501,7 +501,11 @@ class ReconciliationOutputSupport {
     }
 
     protected static boolean shouldListRunResultWithoutFile(def runResult) {
-        return normalize(runResult?.reconciliationRunResultId) && isActiveRunResultStatus(runResult?.statusEnumId)
+        // FAILED rows are listed too: a failed run produces no file, and hiding it made failures
+        // invisible in run history (the UI's optimistic Running card ghosted with no failure shown).
+        String statusEnumId = normalize(runResult?.statusEnumId)
+        return normalize(runResult?.reconciliationRunResultId) &&
+                (isActiveRunResultStatus(statusEnumId) || STATUS_FAILED == statusEnumId)
     }
 
     protected static boolean canAccessRunResult(def ec, def runResult) {

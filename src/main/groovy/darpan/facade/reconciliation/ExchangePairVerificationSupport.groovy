@@ -47,7 +47,7 @@ class ExchangePairVerificationSupport {
     static Map<String, Object> verifyExchangePairs(Map<String, Object> args) {
         List<String> warnings = []
         Map<String, Object> result = [performed: false, appendedCount: 0, sweepExchangeCount: 0,
-                matchedCount: 0, confirmedPresentCount: 0, pendingCount: 0, deferredLookupCount: 0,
+                matchedCount: 0, confirmedPresentCount: 0, pendingCount: 0, deferredLookupCount: 0, inTransitCount: 0,
                 sweepTruncated: false, lookupFailed: false, warnings: warnings, auditNote: null]
         File manifestFile = (File) args.manifestFile   // OPTIONAL: no sidecar just means zero OMS exchanges
         File diffFile = (File) args.diffFile
@@ -124,6 +124,10 @@ class ExchangePairVerificationSupport {
                         ? ((Number) exchange.get('exchangeReturnCount')).intValue() : 1
                 if (omsExchangeOrderCount >= exchangeReturnCount) {
                     result.confirmedPresentCount = (result.confirmedPresentCount as int) + 1
+                } else if (!"CLOSED".equalsIgnoreCase(exchange.get('returnStatus')?.toString() ?: "")) {
+                    // Ruling 2026-07-31: a return that has not CLOSED legitimately has no OMS
+                    // exchange order yet (item still travelling back) — in transit, not missing.
+                    result.inTransitCount = (result.inTransitCount as int) + 1
                 } else {
                     String shortfall = exchangeReturnCount > 1
                             ? "has ${exchangeReturnCount} Shopify exchange(s) but only ${omsExchangeOrderCount} exchange order(s) in ${omsSideLabel}"
@@ -178,6 +182,7 @@ class ExchangePairVerificationSupport {
         String note = "Exchange presence check: ${result.sweepExchangeCount} Shopify exchange(s) in window — " +
                 "${result.matchedCount} matched in ${omsSideLabel}, ${result.confirmedPresentCount} confirmed by lookup, " +
                 "${missingRowCount} missing from ${omsSideLabel}, ${result.pendingCount} pending (younger than ${graceHours}h)."
+        if ((result.inTransitCount as int) > 0) note += " ${result.inTransitCount} in transit (return not yet closed)."
         if ((result.deferredLookupCount as int) > 0) note += " ${result.deferredLookupCount} deferred to a later run."
         if (result.sweepTruncated) note += " Sweep truncated — partial coverage."
         return note

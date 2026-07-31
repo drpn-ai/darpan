@@ -554,7 +554,7 @@ def runExchangeVerificationPass = { Map serviceResult, Object file1Source, Objec
             [recordCount : verification.sweepExchangeCount ?: 0,
              errorMessage: verification.lookupFailed && verification.warnings ? verification.warnings.first().toString() : null,
              metricsJson : JsonOutput.toJson([sweepExchangeCount: verification.sweepExchangeCount ?: 0,
-                     matchedCount: verification.matchedCount ?: 0, missingCount: appended,
+                     matchedCount: verification.matchedCount ?: 0, missingCount: appended, inTransitCount: verification.inTransitCount ?: 0,
                      pendingCount: verification.pendingCount ?: 0, deferredLookupCount: verification.deferredLookupCount ?: 0])])
 }
 

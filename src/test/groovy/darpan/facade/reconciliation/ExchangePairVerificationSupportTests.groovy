@@ -110,6 +110,32 @@ class ExchangePairVerificationSupportTests {
     }
 
     @Test
+    void openReturnAbsenceCountsAsInTransitNotMissing() {
+        // Ruling 2026-07-31: an exchange whose return is not yet CLOSED legitimately has no OMS
+        // exchange order (item still travelling back). Report it as in transit, never as missing.
+        File diff = diffFile()
+        String before = diff.text
+        Map openExchange = sweepExchange("777") + [returnStatus: "OPEN"]
+        Map result = runCheck([diffFile: diff, manifestFile: manifestFile([]),
+                shopifySweep: { long s, long e -> sweepOk([openExchange]) },
+                omsPairLookup: { List ids -> omsLookupWithoutExchange(ids as List<String>) }])
+        assertEquals(0, result.appendedCount)
+        assertEquals(1, result.inTransitCount)
+        assertEquals(before, diff.text)
+        assertTrue(result.auditNote.toString().contains("1 in transit"))
+    }
+
+    @Test
+    void closedReturnAbsenceStillFlagsMissing() {
+        File diff = diffFile()
+        Map result = runCheck([diffFile: diff, manifestFile: manifestFile([]),
+                shopifySweep: { long s, long e -> sweepOk([sweepExchange("778")]) },   // fixture status CLOSED
+                omsPairLookup: { List ids -> omsLookupWithoutExchange(ids as List<String>) }])
+        assertEquals(1, result.appendedCount)
+        assertEquals(0, result.inTransitCount)
+    }
+
+    @Test
     void confirmedAbsenceAppendsMissingFromOmsRowAndBumpsTiles() {
         File diff = diffFile()
         Map result = runCheck([diffFile: diff, manifestFile: manifestFile([]),

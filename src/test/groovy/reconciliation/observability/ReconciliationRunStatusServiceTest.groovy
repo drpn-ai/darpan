@@ -13,6 +13,7 @@ import java.nio.file.Path
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -71,6 +72,80 @@ class ReconciliationRunStatusServiceTest {
         assertTrue(steps.size() >= 1)
         assertEquals(RunObservability.STAGE_EXTRACT_FILE1, ((Map) steps[0]).stageCode)
         assertEquals(5, ((Map) steps[0]).recordCount)
+    }
+
+    @Test
+    void midRunSourceFilesAndResultFileNameTrackTheRunRow() {
+        String runId = RunObservability.beginRun(ec, [savedRunId: "SRX", companyUserGroupId: "KREWE"])
+        def runRow = ec.entity.find(RunObservability.RUN_RESULT_ENTITY)
+                .condition("reconciliationRunResultId", runId).useCache(false).disableAuthz().one()
+        runRow.set("file1Name", "RS_TEST_file1.json")
+        runRow.set("file1DataManagerPath", "reconciliation/RS_TEST_file1.json")
+        runRow.update()
+
+        Map midRun = (Map) ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.get#ReconciliationRunStatus")
+                .parameters([reconciliationRunResultId: runId]).disableAuthz().call()
+
+        assertEquals(true, midRun.ok)
+        Map sourceDetails = (Map) midRun.sourceDetails
+        assertNotNull(sourceDetails, "file1 landed, so sourceDetails must already be visible mid-run")
+        List files = (List) sourceDetails.files
+        assertEquals(1, files.size(), "only file1 has been extracted so far")
+        assertEquals("file1", ((Map) files[0]).side)
+        assertEquals("RS_TEST_file1.json", ((Map) files[0]).fileName)
+        assertTrue(!(midRun.resultFileName), "no result file before WRITE_OUTPUT, got: ${midRun.resultFileName}")
+
+        runRow.set("file2Name", "RS_TEST_file2.json")
+        runRow.set("file2DataManagerPath", "reconciliation/RS_TEST_file2.json")
+        runRow.set("resultDataManagerPath", "reconciliation/RS_TEST_result.json")
+        runRow.update()
+
+        Map afterWrite = (Map) ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.get#ReconciliationRunStatus")
+                .parameters([reconciliationRunResultId: runId]).disableAuthz().call()
+
+        assertEquals(2, ((List) ((Map) afterWrite.sourceDetails).files).size())
+        assertEquals("reconciliation/RS_TEST_result.json", afterWrite.resultFileName)
+    }
+
+    @Test
+    void cancelStopsAnActiveRunAtItsNextCheckpoint() {
+        String runId = RunObservability.beginRun(ec, [savedRunId: "SRX", companyUserGroupId: "KREWE"])
+        def step = RunObservability.beginStep(ec, runId, [companyUserGroupId: "KREWE"], RunObservability.STAGE_EXTRACT_FILE2)
+
+        Map cancelResult = (Map) ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.cancel#ReconciliationRun")
+                .parameters([reconciliationRunResultId: runId]).disableAuthz().call()
+        assertEquals(true, cancelResult.ok)
+        assertEquals(true, cancelResult.cancelRequested)
+
+        // Still RUNNING until the run itself notices — cancellation is cooperative, not a kill.
+        Map afterRequest = (Map) ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.get#ReconciliationRunStatus")
+                .parameters([reconciliationRunResultId: runId]).disableAuthz().call()
+        assertEquals(RunObservability.STATUS_RUNNING, afterRequest.statusEnumId)
+        assertNotNull(afterRequest.cancelRequestedDate, "the UI needs this to show the run is stopping")
+
+        // The next checkpoint the run reaches unwinds it.
+        assertThrows(RunObservability.RunCancelledException) {
+            RunObservability.checkpointCancel(ec, runId)
+        }
+        RunObservability.cancelRun(ec, runId, step, RunObservability.STAGE_EXTRACT_FILE2)
+
+        Map afterStop = (Map) ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.get#ReconciliationRunStatus")
+                .parameters([reconciliationRunResultId: runId]).disableAuthz().call()
+        assertEquals(RunObservability.STATUS_CANCELLED, afterStop.statusEnumId)
+        assertEquals(RunObservability.STATUS_CANCELLED, ((Map) ((List) afterStop.steps)[0]).statusEnumId)
+
+        // A finished run cannot be cancelled again.
+        Map secondCancel = (Map) ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.cancel#ReconciliationRun")
+                .parameters([reconciliationRunResultId: runId]).disableAuthz().call()
+        assertEquals(false, secondCancel.ok)
+        assertTrue(((List) secondCancel.errors).any { it.toString().contains("already finished") },
+                "expected an already-finished error, got: ${secondCancel.errors}")
     }
 
     @Test

@@ -34,6 +34,7 @@ facade.JsonSchemaFacadeServices.list#JsonSchemas
 facade.JsonSchemaFacadeServices.save#JsonSchemaText
 facade.JsonSchemaFacadeServices.save#RefinedSchema
 facade.JsonSchemaFacadeServices.validate#JsonTextAgainstSchema
+facade.ReconciliationFacadeServices.cancel#ReconciliationRun
 facade.ReconciliationFacadeServices.create#CsvRun
 facade.ReconciliationFacadeServices.create#Mapping
 facade.ReconciliationFacadeServices.create#RuleSetRun

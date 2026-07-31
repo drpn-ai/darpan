@@ -101,6 +101,24 @@ class OutputDescriptorSupport {
         if (runResult == null) return buildGeneratedOutputSourceDetailsFromArtifactFolder(ec, rawFileName, outputDocument)
 
         Map<String, Object> metadata = outputDocument?.metadata instanceof Map ? (Map<String, Object>) outputDocument.metadata : [:]
+        return buildRunResultSourceDetails(ec, runResult, metadata)
+    }
+
+    /** Normalized result-file path for a run row, empty until WRITE_OUTPUT sets resultDataManagerPath. */
+    static String resolveRunResultFileName(def ec, def runResult) {
+        return OutputPathSupport.normalizeDataManagerRelativePath(ec, runResult?.resultDataManagerPath)
+    }
+
+    /**
+     * Source details straight off a ReconciliationRunResult row, usable mid-run before any output
+     * document exists. When metadata carries no labels the descriptor omits label entirely —
+     * darpan-ui falls back to its per-side system labels, which beats baking in a "File 1"
+     * placeholder here. File descriptors appear as extract stages populate the file paths on
+     * the run row, which is what lets the live run view show files incrementally.
+     */
+    static Map<String, Object> buildRunResultSourceDetails(def ec, def runResult, Map<String, Object> metadata) {
+        if (runResult == null) return null
+        metadata = metadata ?: [:]
         def automationExecution = resolveAutomationExecutionForRunResult(ec, runResult)
 
         // Lazy chain: artifact headers are only consulted when the diff document and execution row
@@ -110,8 +128,8 @@ class OutputDescriptorSupport {
                 firstDateRange(readArtifactMetadataHeader(ec, runResult.file2DataManagerPath))
 
         List<Map<String, Object>> files = [
-                sourceFileDescriptor(ec, runResult, "file1", normalize(metadata.file1Label ?: metadata.json1Label) ?: "File 1"),
-                sourceFileDescriptor(ec, runResult, "file2", normalize(metadata.file2Label ?: metadata.json2Label) ?: "File 2"),
+                sourceFileDescriptor(ec, runResult, "file1", normalize(metadata.file1Label ?: metadata.json1Label)),
+                sourceFileDescriptor(ec, runResult, "file2", normalize(metadata.file2Label ?: metadata.json2Label)),
         ].findAll { it != null } as List<Map<String, Object>>
 
         if (!files && !dateRange) return null

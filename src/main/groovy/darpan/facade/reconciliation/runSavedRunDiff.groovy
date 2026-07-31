@@ -744,6 +744,7 @@ try {
                         // the finally unpersists them on every exit path of this saved-run execution.
                         List ruleSetPersistedSources = []
                         try {
+                            RunObservability.checkpointCancel(ec, obsRunId)
                             obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_EXTRACT_FILE1) : null
                             obsStage = RunObservability.STAGE_EXTRACT_FILE1
                             file1Result = file1UsesApiSource ?
@@ -751,6 +752,8 @@ try {
                                     stageTextInput(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, inputFile1Name, file1TextValue, artifactContext)
                             if (!ec.message.hasError()) {
                                 RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [recordCount: file1Result.recordCount])
+                                RunObservability.recordSourceArtifact(ec, obsRunId, "file1", file1Result.fileName, file1Result.dataManagerPath)
+                                RunObservability.checkpointCancel(ec, obsRunId)
                                 obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_EXTRACT_FILE2) : null
                                 obsStage = RunObservability.STAGE_EXTRACT_FILE2
                             }
@@ -760,11 +763,13 @@ try {
                                     !ec.message.hasError() ? stageTextInput(file2Source, ReconciliationSavedRunSupport.FILE_SIDE_2, inputFile2Name, file2TextValue, artifactContext) : [:]
                             if (!ec.message.hasError()) {
                                 RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [recordCount: file2Result.recordCount])
+                                RunObservability.recordSourceArtifact(ec, obsRunId, "file2", file2Result.fileName, file2Result.dataManagerPath)
                                 obsStep = null
                                 obsNoData = file1Result.recordCount == 0 && file2Result.recordCount == 0
                             }
 
                             if (!ec.message.hasError()) {
+                                RunObservability.checkpointCancel(ec, obsRunId)
                                 obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_COMPARE) : null
                                 obsStage = RunObservability.STAGE_COMPARE
                                 Map serviceResult = runInternalService("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope", [
@@ -978,7 +983,12 @@ try {
     // --- Observability terminal guarantee: no path may leave a minted run row RUNNING.
     // (Pre-validated requests never minted a row: obsRunId is null and nothing is written.) ---
     if (obsRunId) {
-        if (ec.message.hasError()) {
+        // A cancel outranks whatever the abort looked like on the way out: an extractor may have
+        // turned the cancel throw into an errors list, and reporting that as FAILED would tell the
+        // operator their own cancellation was a run failure.
+        if (RunObservability.isCancelRequested(ec, obsRunId)) {
+            RunObservability.cancelRun(ec, obsRunId, obsStep, obsStage)
+        } else if (ec.message.hasError()) {
             RunObservability.failRun(ec, obsRunId, obsStep, obsStage,
                     ec.message.errors ? ec.message.errors.join("; ") : "reconciliation run failed")
             // Task 7: the success-path notify above never runs on this branch (ec.message has errors), so
@@ -1018,8 +1028,20 @@ try {
         }
     }
     obsTerminalWritten = true
+} catch (RunObservability.RunCancelledException cancelled) {
+    // The operator asked for this: end the run CANCELLED and return a normal envelope rather
+    // than propagating an exception the caller would report as a crash.
+    if (obsRunId) RunObservability.cancelRun(ec, obsRunId, obsStep, obsStage)
+    obsTerminalWritten = true
+    ec.message.addMessage(cancelled.message)
 } catch (Throwable obsError) {
-    if (obsRunId) RunObservability.failRun(ec, obsRunId, obsStep, obsStage, obsError.message ?: obsError.toString())
+    if (obsRunId) {
+        if (RunObservability.isCancelRequested(ec, obsRunId)) {
+            RunObservability.cancelRun(ec, obsRunId, obsStep, obsStage)
+        } else {
+            RunObservability.failRun(ec, obsRunId, obsStep, obsStage, obsError.message ?: obsError.toString())
+        }
+    }
     obsTerminalWritten = true
     throw obsError
 } finally {

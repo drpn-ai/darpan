@@ -81,6 +81,10 @@
         <field name="notifiedDate" type="date-time">
             <description>Alert-dedupe stamp; set once so completion/watchdog/reaper cannot double-send.</description>
         </field>
+        <field name="cancelRequestedDate" type="date-time">
+            <description>Set when an operator asks to stop this run; the run loop checks it at stage boundaries and extract-progress ticks, then ends the run AUT_STAT_CANCELLED.</description>
+        </field>
+        <field name="cancelRequestedByUserId" type="id"/>
 
         <relationship type="one" related="darpan.reconciliation.ReconciliationRun" fk-name="RECRES_RUN">
             <key-map field-name="reconciliationRunId"/>

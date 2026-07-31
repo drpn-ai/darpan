@@ -68,6 +68,11 @@
             enumCode="DEAD_LETTER"
             description="Dead-lettered after exhausting transient-failure retries"
             sequenceNum="7"/>
+    <moqui.basic.Enumeration enumId="AUT_STAT_CANCELLED"
+            enumTypeId="AutomationExecStatus"
+            enumCode="CANCELLED"
+            description="Cancelled by an operator"
+            sequenceNum="8"/>
 
     <moqui.basic.EnumerationType enumTypeId="AutomationRelWindow"
             description="Automation relative date window"/>

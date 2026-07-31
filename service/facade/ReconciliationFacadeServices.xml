@@ -2585,6 +2585,28 @@
             </parameter>
             <parameter name="mySubscription" type="Boolean"/>
             <parameter name="mySubscriptionSpaceName"/>
+            <parameter name="cancelRequestedDate" type="Timestamp">
+                <description>Set once an operator asked to stop the run; it stays RUNNING until the next cancel checkpoint.</description>
+            </parameter>
+            <parameter name="resultFileName">
+                <description>Normalized result path once WRITE_OUTPUT lands; lets the live view swap to the saved result on completion.</description>
+            </parameter>
+            <parameter name="sourceDetails" type="Map">
+                <parameter name="mode"/>
+                <parameter name="dateRange" type="Map">
+                    <parameter name="start"/>
+                    <parameter name="end"/>
+                </parameter>
+                <parameter name="files" type="List">
+                    <parameter name="side"/>
+                    <parameter name="label"/>
+                    <parameter name="fileName"/>
+                    <parameter name="filePath"/>
+                    <parameter name="downloadFileName"/>
+                    <parameter name="sourceFormat"/>
+                    <parameter name="canDownload" type="Boolean"/>
+                </parameter>
+            </parameter>
         </out-parameters>
         <actions>
             <set field="runIdValue" from="((reconciliationRunResultId)?.toString()?.trim())"/>
@@ -2608,6 +2630,54 @@
                 <set field="subscriptionRow" from="ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('reconciliationRunResultId', runIdValue).condition('userId', ec.user.userId).disableAuthz().useCache(false).one()"/>
                 <set field="mySubscription" from="subscriptionRow != null"/>
                 <set field="mySubscriptionSpaceName" from="subscriptionRow ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('chatSpaceId', subscriptionRow.chatSpaceId).condition('companyUserGroupId', runRow.companyUserGroupId).disableAuthz().useCache(false).one()?.spaceName : null"/>
+                <set field="cancelRequestedDate" from="runRow.cancelRequestedDate"/>
+                <set field="resultFileName" from="darpan.facade.reconciliation.OutputDescriptorSupport.resolveRunResultFileName(ec, runRow)"/>
+                <set field="sourceDetails" from="darpan.facade.reconciliation.OutputDescriptorSupport.buildRunResultSourceDetails(ec, runRow, [:])"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <!-- No authz-action override on purpose: like run#SavedRunDiff this infers the strictest
+         action, so exactly the users who may start a run in this tenant may stop one. -->
+    <service verb="cancel" noun="ReconciliationRun" allow-remote="true" authenticate="true">
+        <description>
+            Ask a running reconciliation to stop. Tenant-gated. Cancellation is cooperative: this
+            records the request and the run ends itself AUT_STAT_CANCELLED at its next checkpoint
+            (a stage boundary, or an extract progress tick during a long paged extract), so the
+            run may still report RUNNING for a few seconds after this returns.
+        </description>
+        <in-parameters><parameter name="reconciliationRunResultId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="cancelRequested" type="Boolean"/>
+            <parameter name="statusEnumId"/>
+        </out-parameters>
+        <actions>
+            <set field="cancelRequested" from="false"/>
+            <set field="runIdValue" from="((reconciliationRunResultId)?.toString()?.trim())"/>
+            <set field="runRow" from="runIdValue ? ec.entity.find('darpan.reconciliation.ReconciliationRunResult').condition('reconciliationRunResultId', runIdValue).disableAuthz().useCache(false).one() : null"/>
+            <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, runRow)">
+                <message error="true">Reconciliation run '${runIdValue}' was not found.</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="statusEnumId" from="runRow.statusEnumId"/>
+                <if condition="darpan.facade.reconciliation.RunObservability.isTerminalStatus(((statusEnumId)?.toString()?.trim()))">
+                    <message error="true">Run '${runIdValue}' has already finished.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="cancelRequested" from="darpan.facade.reconciliation.RunObservability.requestCancel(ec, runIdValue, ec.user.userId)"/>
+                <if condition="cancelRequested">
+                    <message>Stopping this run.</message>
+                <else>
+                    <message error="true">Run '${runIdValue}' could not be cancelled; it may have just finished.</message>
+                </else>
+                </if>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

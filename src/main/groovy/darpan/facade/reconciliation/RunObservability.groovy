@@ -24,9 +24,12 @@ class RunObservability {
     static final String STATUS_FAILED   = "AUT_STAT_FAILED"
     static final String STATUS_NO_DATA  = "AUT_STAT_NO_DATA"
     static final String STATUS_SKIP_DUP = "AUT_STAT_SKIP_DUP"
+    static final String STATUS_CANCELLED = "AUT_STAT_CANCELLED"
+
+    static final String CANCEL_REASON = "Run cancelled by an operator."
 
     static final Set<String> ACTIVE_STATUSES   = [STATUS_PENDING, STATUS_RUNNING].toSet()
-    static final Set<String> TERMINAL_STATUSES = [STATUS_SUCCESS, STATUS_FAILED, STATUS_NO_DATA, STATUS_SKIP_DUP].toSet()
+    static final Set<String> TERMINAL_STATUSES = [STATUS_SUCCESS, STATUS_FAILED, STATUS_NO_DATA, STATUS_SKIP_DUP, STATUS_CANCELLED].toSet()
 
     static final String STAGE_RESOLVE       = "RESOLVE"
     static final String STAGE_EXTRACT_FILE1 = "EXTRACT_FILE1"
@@ -134,6 +137,32 @@ class RunObservability {
         return step
     }
 
+    /**
+     * Stamp one side's extracted artifact (name + data-manager path) onto the run row as soon as
+     * that extract stage finishes. The full run row is only persisted after WRITE_OUTPUT, so
+     * without this a live viewer sees no compared files until the whole run is done — and for
+     * API-sourced runs the row starts with no file name at all. Best-effort: never fails a run.
+     */
+    static void recordSourceArtifact(def ec, Object runId, String side, Object fileName, Object dataManagerPath) {
+        String runIdValue = norm(runId)
+        String fileNameValue = norm(fileName)
+        String pathValue = norm(dataManagerPath)
+        if (!runIdValue || (!fileNameValue && !pathValue)) return
+        boolean file1 = side == "file1"
+        try {
+            ec.transaction.runUseOrBegin(30, "Error recording reconciliation source artifact", {
+                def run = ec.entity.find(RUN_RESULT_ENTITY).condition("reconciliationRunResultId", runIdValue).useCache(false).one()
+                if (run == null) return
+                if (fileNameValue) run.set(file1 ? "file1Name" : "file2Name", fileNameValue)
+                if (pathValue) run.set(file1 ? "file1DataManagerPath" : "file2DataManagerPath", pathValue)
+                run.set("lastUpdatedDate", nowSafe(ec))
+                run.update()
+            })
+        } catch (Throwable t) {
+            logger.warn("RunObservability.recordSourceArtifact best-effort failure (runId=${runIdValue}, side=${side}): ${t.message}")
+        }
+    }
+
     /** Bump heartbeat + optional progress on the step (and mirror onto the run for cheap live display). */
     /**
      * Advisory extract progress from a source extractor: finds the RUNNING step for the stage and
@@ -141,6 +170,10 @@ class RunObservability {
      * other side's record count). Never throws — progress must never fail a run.
      */
     static void heartbeatStageProgress(def ec, Object runId, String stageCode, Object processedCount, Object expectedCount) {
+        // Cancel check first, and deliberately outside the swallow-everything block below: a
+        // multi-minute paged extract is where a cancel most needs to take effect, and this tick
+        // is the only place the run loop is reachable mid-stage.
+        checkpointCancel(ec, runId)
         try {
             String runIdValue = norm(runId)
             if (!runIdValue) return
@@ -258,6 +291,83 @@ class RunObservability {
         }
         logger.warn("recon run failed stage={} runId={} reason={}", stageCode, runId, shortReason)
         DarpanMdcSupport.clearRun()
+    }
+
+    /**
+     * Ask a running reconciliation to stop. Cancellation is cooperative: this only stamps the
+     * request, and the run ends itself at its next checkpoint (a stage boundary, or an extract
+     * progress tick during a long paged extract). Returns false when the run is already terminal.
+     */
+    static boolean requestCancel(def ec, String runId, Object requestedByUserId) {
+        Timestamp now = nowSafe(ec)
+        boolean requested = false
+        try {
+            ec.transaction.runUseOrBegin(30, "Error requesting reconciliation run cancel", {
+                def run = ec.entity.find(RUN_RESULT_ENTITY).condition("reconciliationRunResultId", runId).useCache(false).one()
+                if (run == null || isTerminalStatus(norm(run.get("statusEnumId")))) return
+                run.set("cancelRequestedDate", now)
+                run.set("cancelRequestedByUserId", norm(requestedByUserId))
+                run.set("lastUpdatedDate", now)
+                run.update()
+                requested = true
+            })
+        } catch (Throwable t) {
+            logger.warn("RunObservability.requestCancel failure (runId=${runId}): ${t.message}")
+        }
+        if (requested) logger.info("recon run cancel requested runId={} byUserId={}", runId, norm(requestedByUserId))
+        return requested
+    }
+
+    static boolean isCancelRequested(def ec, Object runId) {
+        String runIdValue = norm(runId)
+        if (!runIdValue) return false
+        try {
+            def run = ec.entity.find(RUN_RESULT_ENTITY).condition("reconciliationRunResultId", runIdValue).useCache(false).one()
+            return run?.get("cancelRequestedDate") != null
+        } catch (Throwable t) {
+            // A failed read must not stop a healthy run; the next checkpoint tries again.
+            logger.warn("RunObservability.isCancelRequested read failure (runId=${runIdValue}): ${t.message}")
+            return false
+        }
+    }
+
+    /** Throw out of the run loop when a cancel has been requested. No-op otherwise. */
+    static void checkpointCancel(def ec, Object runId) {
+        if (isCancelRequested(ec, runId)) throw new RunCancelledException(norm(runId))
+    }
+
+    /** Terminal CANCELLED; closes the open step so the timeline shows where the run stopped. */
+    static void cancelRun(def ec, String runId, Object openStepOrNull, String stageCode) {
+        Timestamp now = nowSafe(ec)
+        try {
+            if (openStepOrNull != null && !isTerminalStatus(norm(openStepOrNull.get("statusEnumId")))) {
+                endStep(ec, openStepOrNull, STATUS_CANCELLED, [errorMessage: CANCEL_REASON])
+            }
+            ec.transaction.runUseOrBegin(30, "Error cancelling reconciliation run", {
+                def run = ec.entity.find(RUN_RESULT_ENTITY).condition("reconciliationRunResultId", runId).useCache(false).one()
+                if (run != null) {
+                    run.set("statusEnumId", STATUS_CANCELLED)
+                    if (stageCode != null) run.set("currentStage", stageCode)
+                    run.set("errorMessage", CANCEL_REASON)
+                    run.set("completedDate", now)
+                    run.set("lastUpdatedDate", now)
+                    run.update()
+                }
+            })
+        } catch (Throwable t) {
+            logger.warn("RunObservability.cancelRun best-effort failure (runId=${runId}): ${t.message}")
+        }
+        logger.info("recon run cancelled stage={} runId={}", stageCode, runId)
+        DarpanMdcSupport.clearRun()
+    }
+
+    /** Raised by a cancel checkpoint to unwind the run loop. */
+    static class RunCancelledException extends RuntimeException {
+        final String reconciliationRunResultId
+        RunCancelledException(String runId) {
+            super(CANCEL_REASON)
+            this.reconciliationRunResultId = runId
+        }
     }
 
     private static String norm(Object v) { v?.toString()?.trim() ?: null }

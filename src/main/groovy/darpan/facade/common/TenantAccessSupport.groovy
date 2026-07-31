@@ -281,24 +281,46 @@ class TenantAccessSupport {
             return false
         }
 
-        String displayName = normalize(rawDisplayName)
-        ec?.user?.setPreference(DISPLAY_NAME_PREFERENCE_KEY, displayName)
-
-        if (rawTimeZone == null) return true
-        String timeZone = normalizeTimeZoneId(rawTimeZone)
-        if (timeZone) {
-            String validationError = validateTimeZone(timeZone)
-            if (validationError) {
-                ec?.message?.addError(validationError)
-                return false
+        // Validate BEFORE writing anything: an invalid timezone must leave both the display-name
+        // preference and the UserAccount row untouched, not just skip the UserAccount write.
+        boolean timeZoneProvided = rawTimeZone != null
+        String timeZone = null
+        if (timeZoneProvided) {
+            timeZone = normalizeTimeZoneId(rawTimeZone)
+            if (timeZone) {
+                String validationError = validateTimeZone(timeZone)
+                if (validationError) {
+                    ec?.message?.addError(validationError)
+                    return false
+                }
             }
         }
-        // Facade services carry inheritAuthz=Y, so this own-user write is authorized
-        // the same way saveActiveTenantSettings' store#TenantSetting call is.
-        ec?.service?.sync()
-                ?.name("update#moqui.security.UserAccount")
-                ?.parameters([userId: currentUserId(ec), timeZone: timeZone ?: null])
-                ?.call()
+
+        // rawDisplayName == null means the caller didn't send displayName at all (e.g. a
+        // timezone-only save) — leave the existing preference alone rather than wiping it to null.
+        if (rawDisplayName != null) {
+            String displayName = normalize(rawDisplayName)
+            ec?.user?.setPreference(DISPLAY_NAME_PREFERENCE_KEY, displayName)
+        }
+
+        if (timeZoneProvided) {
+            // Facade services carry inheritAuthz=Y, so this own-user write is authorized
+            // the same way saveActiveTenantSettings' store#TenantSetting call is.
+            ec?.service?.sync()
+                    ?.name("update#moqui.security.UserAccount")
+                    ?.parameters([userId: currentUserId(ec), timeZone: timeZone ?: null])
+                    ?.call()
+            // ec.user.userAccount is populated once per request (UserFacadeImpl.setInfo), so
+            // without an explicit refresh, buildSessionInfo's userTimeZone read (and timeZone's
+            // userAccount fallback) would still see the pre-write value for the rest of this
+            // request/response cycle. respondsTo-guarded because unit-test stubs for userAccount
+            // don't all implement refresh().
+            def userAccount = ec?.user?.userAccount
+            if (!ec?.message?.hasError() && userAccount != null
+                    && userAccount.metaClass.respondsTo(userAccount, "refresh")) {
+                userAccount.refresh()
+            }
+        }
         return !(ec?.message?.hasError() ?: false)
     }
 

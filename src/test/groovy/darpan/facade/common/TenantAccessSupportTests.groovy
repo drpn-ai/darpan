@@ -623,8 +623,9 @@ class TenantAccessSupportTests {
     void saveUserSettingsRejectsInvalidTimeZoneWithoutWriting() {
         ServiceFacadeStub service = new ServiceFacadeStub()
         MessageFacadeStub message = new MessageFacadeStub()
+        UserStub user = new UserStub(userId: "EX_USER")
         def ec = executionContext(
-                user: new UserStub(userId: "EX_USER"),
+                user: user,
                 service: service,
                 message: message,
         )
@@ -634,6 +635,49 @@ class TenantAccessSupportTests {
         assertFalse(saved)
         assertTrue(message.errors.contains("Timezone is invalid."))
         assertEquals(null, service.lastCall)
+        // Validation must run BEFORE any write: an invalid timezone leaves displayName untouched
+        // too, not just the UserAccount row — a rejected save must be all-or-nothing.
+        assertTrue(user.preferenceCalls.isEmpty())
+    }
+
+    @Test
+    void saveUserSettingsWithTimeZoneOnlyLeavesDisplayNamePreferenceUntouched() {
+        ServiceFacadeStub service = new ServiceFacadeStub()
+        UserStub user = new UserStub(userId: "EX_USER")
+        def ec = executionContext(user: user, service: service)
+
+        boolean saved = TenantAccessSupport.saveUserSettings(ec, null, "Asia/Kolkata")
+
+        assertTrue(saved)
+        assertEquals("update#moqui.security.UserAccount", service.lastCall.serviceName)
+        assertEquals("Asia/Kolkata", service.lastCall.parametersMap.timeZone)
+        // rawDisplayName == null means the caller didn't send displayName (a timezone-only save),
+        // so the existing preference must be left alone — not overwritten with a normalized null.
+        assertTrue(user.preferenceCalls.isEmpty())
+    }
+
+    @Test
+    void saveUserSettingsRefreshesUserAccountSoBuildSessionInfoSeesNewTimeZone() {
+        Map<String, Object> backingRow = [timeZone: "UTC"]
+        RefreshableUserAccountStub userAccount = new RefreshableUserAccountStub(backingRow)
+        ServiceFacadeStub service = new ServiceFacadeStub(onCall: { String serviceName, Map<String, Object> parametersMap ->
+            if (serviceName == "update#moqui.security.UserAccount") {
+                backingRow.timeZone = parametersMap.timeZone
+            }
+        })
+        def ec = executionContext(
+                user: new UserStub(userId: "EX_USER", userAccount: userAccount),
+                service: service,
+        )
+
+        boolean saved = TenantAccessSupport.saveUserSettings(ec, null, "Asia/Kolkata")
+
+        assertTrue(saved)
+        // ec.user.userAccount is a per-request snapshot (populated once, like the real
+        // UserFacadeImpl) — without saveUserSettings refreshing it after a successful write,
+        // this read of the SAME ec still sees the stale pre-save value.
+        Map<String, Object> sessionInfo = TenantAccessSupport.buildSessionInfo(ec)
+        assertEquals("Asia/Kolkata", sessionInfo.userTimeZone)
     }
 
     @Test
@@ -827,12 +871,38 @@ class TenantAccessSupportTests {
         Map<String, Object> context = [:]
         Object userAccount = new Expando(timeZone: "UTC")
 
+        // Every setPreference() call, in order — lets a test assert a preference was NEVER
+        // touched (e.g. a timezone-only save must not write displayName), which a plain
+        // "preferences" map snapshot can't distinguish from "written back to the same value".
+        List<Map<String, Object>> preferenceCalls = []
+
         Object getPreference(String preferenceKey) {
             return preferences[preferenceKey]
         }
 
         void setPreference(String preferenceKey, Object preferenceValue) {
+            preferenceCalls << [key: preferenceKey, value: preferenceValue]
             preferences[preferenceKey] = preferenceValue
+        }
+    }
+
+    // Models the real ec.user.userAccount contract just enough for the refresh-after-write test:
+    // a per-request EntityValue snapshot (stale timeZone) whose refresh() re-reads a backing row
+    // that the ServiceFacadeStub's onCall hook mutates when update#moqui.security.UserAccount is
+    // "called" — mirroring how EntityValueBase.refresh() re-reads the DB after another service's
+    // write, per EntityValueBase.java:1794.
+    static class RefreshableUserAccountStub {
+        private final Map<String, Object> backingRow
+        String timeZone
+        String userFullName = null
+
+        RefreshableUserAccountStub(Map<String, Object> backingRow) {
+            this.backingRow = backingRow
+            this.timeZone = backingRow.timeZone
+        }
+
+        void refresh() {
+            timeZone = backingRow.timeZone
         }
     }
 
@@ -919,8 +989,14 @@ class TenantAccessSupportTests {
     static class ServiceFacadeStub {
         ServiceCallStub lastCall
 
+        // Optional side effect invoked as call(serviceName, parametersMap) when .call() runs —
+        // lets a test simulate the real service actually writing a row (e.g. so a
+        // RefreshableUserAccountStub's backing map reflects the write). Null by default so every
+        // pre-existing test that doesn't need it is unaffected.
+        Closure onCall
+
         ServiceCallStub sync() {
-            lastCall = new ServiceCallStub()
+            lastCall = new ServiceCallStub(onCall: onCall)
             return lastCall
         }
     }
@@ -928,6 +1004,7 @@ class TenantAccessSupportTests {
     static class ServiceCallStub {
         String serviceName
         Map<String, Object> parametersMap = [:]
+        Closure onCall
 
         ServiceCallStub name(String serviceName) {
             this.serviceName = serviceName
@@ -940,6 +1017,7 @@ class TenantAccessSupportTests {
         }
 
         Map<String, Object> call() {
+            onCall?.call(serviceName, parametersMap)
             return [:]
         }
     }

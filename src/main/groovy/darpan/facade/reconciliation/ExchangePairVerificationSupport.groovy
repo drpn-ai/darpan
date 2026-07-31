@@ -27,8 +27,16 @@ class ExchangePairVerificationSupport {
     static final String TYPE_MISSING_IN_SHOPIFY = "EXCHANGE_MISSING_IN_SHOPIFY"
     static final String TYPE_ORIGINAL_MISSING_IN_OMS = "EXCHANGE_ORIGINAL_MISSING_IN_OMS"
     static final String TYPE_PAIR_AMOUNT_MISMATCH = "EXCHANGE_PAIR_AMOUNT_MISMATCH"
-    static final int DEFAULT_GRACE_DAYS = 7
-    static final int DEFAULT_MAX_PAIRS = 500
+    // Product rule (2026-07-31): ignore exchanges/returns within 3 hours of creation — they may
+    // still be syncing into OMS. Anything older is due immediately: the OMS exchange order's
+    // creation date IS the return-processing date (Shopify return -> OMS return record observed at
+    // ~38 minutes), so a longer wait would guard against a lag that does not exist in this direction.
+    static final int DEFAULT_GRACE_HOURS = 3
+    // Per-run latency bound, not a completeness cap: pairs beyond this are counted as deferred and
+    // reported, never silently skipped. The OMS pair lookup is one sequential GET per externalId
+    // (~1-3s each on the long-haul link), and high-exchange tenants run ~486/day (gorjana,
+    // measured 2026-07-31) — checking everything in one interactive run would stall it for minutes.
+    static final int DEFAULT_MAX_PAIRS = 50
     static final BigDecimal DEFAULT_AMOUNT_TOLERANCE = new BigDecimal("0.01")
     // Mirrors OmsRestSourceSupport.PAIR_LOOKUP_MAX_IDS (darpan-hotwax): the OMS pair lookup service
     // hard-rejects any single call requesting more than this many externalIds, so a manifest with
@@ -42,14 +50,14 @@ class ExchangePairVerificationSupport {
     static Map<String, Object> verifyExchangePairs(Map<String, Object> args) {
         List<String> warnings = []
         Map<String, Object> result = [performed: false, appendedCount: 0, appendedByType: [:], pendingCount: 0,
-                skippedCancelledCount: 0, checkedPairCount: 0, unresolvedShopifyCount: 0, lookupFailed: false,
-                warnings: warnings, auditNote: null]
+                skippedCancelledCount: 0, checkedPairCount: 0, unresolvedShopifyCount: 0, deferredPairCount: 0,
+                lookupFailed: false, warnings: warnings, auditNote: null]
         File manifestFile = (File) args.manifestFile
         File diffFile = (File) args.diffFile
         Closure shopifyLookup = (Closure) args.shopifyLookup
         Closure omsPairLookup = (Closure) args.omsPairLookup
         long nowMillis = ((Number) args.nowMillis).longValue()
-        int graceDays = (args.graceDays instanceof Number) ? ((Number) args.graceDays).intValue() : DEFAULT_GRACE_DAYS
+        int graceHours = (args.graceHours instanceof Number) ? ((Number) args.graceHours).intValue() : DEFAULT_GRACE_HOURS
         int maxPairs = (args.maxPairs instanceof Number) ? ((Number) args.maxPairs).intValue() : DEFAULT_MAX_PAIRS
         BigDecimal tolerance = args.amountTolerance instanceof BigDecimal ? (BigDecimal) args.amountTolerance : DEFAULT_AMOUNT_TOLERANCE
 
@@ -67,7 +75,7 @@ class ExchangePairVerificationSupport {
         if (!manifest) return result
         result.performed = true
 
-        long graceFloor = nowMillis - graceDays * 86400000L
+        long graceFloor = nowMillis - graceHours * 3600000L
         Map<String, List<Map>> entriesByExternalId = new LinkedHashMap<>()
         manifest.each { Object raw ->
             if (!(raw instanceof Map)) return
@@ -80,13 +88,18 @@ class ExchangePairVerificationSupport {
             if (orderDate != null && orderDate > graceFloor) { result.pendingCount = (result.pendingCount as int) + 1; return }
             entriesByExternalId.computeIfAbsent(externalId) { [] }.add(entry)
         }
-        if (!entriesByExternalId) return result
-        if (entriesByExternalId.size() > maxPairs) {
-            warnings.add("Exchange verification skipped: ${entriesByExternalId.size()} pairs exceeds the ${maxPairs}-pair cap.".toString())
+        if (!entriesByExternalId) {
+            result.auditNote = buildAuditNote(result, 0, graceHours)
             return result
         }
-
         List<String> externalIds = new ArrayList<>(entriesByExternalId.keySet())
+        if (externalIds.size() > maxPairs) {
+            // Latency bound, not a skip: check the first maxPairs (manifest order) and report the
+            // rest as deferred so busy tenants always make bounded progress with a visible queue.
+            result.deferredPairCount = externalIds.size() - maxPairs
+            externalIds = new ArrayList<>(externalIds.subList(0, maxPairs))
+            warnings.add("Exchange verification checking the first ${maxPairs} of ${maxPairs + (result.deferredPairCount as int)} due pairs; ${result.deferredPairCount} deferred to a later run.".toString())
+        }
         Map shopify = invokeLookup("Shopify exchange-state", shopifyLookup, externalIds, warnings)
         Map omsPairs = invokeChunkedOmsPairLookup(omsPairLookup, externalIds, warnings)
         if (shopify == null || omsPairs == null) { result.lookupFailed = true; return result }
@@ -139,12 +152,7 @@ class ExchangePairVerificationSupport {
         // with no explanation (the in-memory auditNote never reached the file on its own). rows.size()
         // stands in for the eventual result.appendedCount (identical value; appendedCount is only
         // assigned below, after a successful append, since a failed append must leave it at 0).
-        String auditNote = "Exchange pair verification checked ${result.checkedPairCount} pair(s): " +
-                "${rows.size()} discrepancy row(s) appended, ${result.pendingCount} pending (younger than ${graceDays}d), " +
-                "${result.skippedCancelledCount} cancelled skipped."
-        if ((result.unresolvedShopifyCount as int) > 0) {
-            auditNote += " ${result.unresolvedShopifyCount} unresolved in Shopify."
-        }
+        String auditNote = buildAuditNote(result, rows.size(), graceHours)
 
         if (rows) {
             try {
@@ -159,6 +167,16 @@ class ExchangePairVerificationSupport {
         }
         result.auditNote = auditNote
         return result
+    }
+
+    /** One sentence the operator always gets — even an all-pending run must show its queue. */
+    private static String buildAuditNote(Map<String, Object> result, int appendedRowCount, int graceHours) {
+        String note = "Exchange pair verification checked ${result.checkedPairCount} pair(s): " +
+                "${appendedRowCount} discrepancy row(s) appended, ${result.pendingCount} pending (younger than ${graceHours}h), " +
+                "${result.skippedCancelledCount} cancelled skipped."
+        if ((result.deferredPairCount as int) > 0) note += " ${result.deferredPairCount} deferred to a later run."
+        if ((result.unresolvedShopifyCount as int) > 0) note += " ${result.unresolvedShopifyCount} unresolved in Shopify."
+        return note
     }
 
     /**

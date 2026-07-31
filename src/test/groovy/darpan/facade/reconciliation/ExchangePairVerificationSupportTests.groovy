@@ -23,8 +23,8 @@ import static org.junit.jupiter.api.Assertions.*
 class ExchangePairVerificationSupportTests {
     @TempDir Path tempDir
 
-    static final long NOW = 1785999999999L        // > manifest orderDate + 7d grace
-    static final long RECENT = NOW - 86400000L    // 1 day old -> pending
+    static final long NOW = 1785999999999L        // > manifest orderDate + 3h grace
+    static final long RECENT = NOW - 2 * 3600000L // 2 hours old -> pending (inside the 3h sync grace)
 
     private File manifestFile(List entries) {
         File f = tempDir.resolve("m.exchange-manifest.json").toFile()
@@ -196,6 +196,31 @@ class ExchangePairVerificationSupportTests {
         assertEquals(1, result.skippedCancelledCount)
         assertEquals(0, result.checkedPairCount)
         assertEquals(0, result.appendedCount)
+        // The operator must see the queue even when nothing was checked — an all-pending run
+        // previously surfaced no audit note at all and read as a clean pass.
+        assertNotNull(result.auditNote)
+        assertTrue(result.auditNote.toString().contains("1 pending"))
+        assertTrue(result.auditNote.toString().contains("1 cancelled"))
+    }
+
+    @Test
+    void graceWindowIsThreeHoursFromCreation() {
+        // Product rule (2026-07-31): ignore exchanges within 3 hours of creation — they may still
+        // be syncing into OMS. Anything older is due immediately: the OMS exchange order's creation
+        // date IS the return-processing date (sync itself observed at ~38 minutes), so the old
+        // 7-day wait was guarding against a lag that does not exist in this direction.
+        long twoHours59 = NOW - (2 * 3600000L + 59 * 60000L)   // 2h59m old -> still pending
+        long threeHours01 = NOW - (3 * 3600000L + 60000L)      // 3h01m old -> due for checking
+        List entries = [entry([orderDate: twoHours59]),
+                        entry([omsOrderId: "M2", externalId: "777", orderName: "EXC-2", orderDate: threeHours01])]
+        List<String> lookedUp = []
+        Map result = ExchangePairVerificationSupport.verifyExchangePairs([
+                manifestFile: manifestFile(entries), diffFile: diffFile(), nowMillis: NOW,
+                shopifyLookup: { List ids -> lookedUp.addAll(ids as List<String>); shopifyOkForIds(ids as List<String>) },
+                omsPairLookup: { List ids -> omsPairOkFor(ids as List<String>) }])
+        assertEquals(1, result.pendingCount)
+        assertEquals(1, result.checkedPairCount)
+        assertEquals(["777"], lookedUp)
     }
 
     @Test
@@ -236,18 +261,26 @@ class ExchangePairVerificationSupportTests {
     }
 
     @Test
-    void overCapPairsSkipsWithWarningAndLeavesFileUntouched() {
+    void overCapPairsCheckTheFirstChunkAndDeferTheRest() {
+        // Volume finding (2026-07-31, gorjana ~486 exchanges/day): skipping everything when the
+        // pair count exceeds the cap meant busy tenants would never get ANY pair verified. The cap
+        // is now a per-run latency bound: check the first maxPairs, count the rest as deferred, and
+        // say so — never skip-all, never stall the interactive run.
         File diff = diffFile()
         String before = diff.text
-        List entries = [entry(), entry([omsOrderId: "M999", externalId: "8888888888888"])]
+        List<String> lookedUp = []
+        List entries = [entry(), entry([omsOrderId: "M999", externalId: "8888888888888", orderName: "EXC-9"])]
         Map result = ExchangePairVerificationSupport.verifyExchangePairs([
                 manifestFile: manifestFile(entries), diffFile: diff, nowMillis: NOW, maxPairs: 1,
-                shopifyLookup: { List ids -> fail("should not look up over-cap pairs") },
-                omsPairLookup: { List ids -> fail("should not look up over-cap pairs") }])
+                shopifyLookup: { List ids -> lookedUp.addAll(ids as List<String>); shopifyOkForIds(ids as List<String>) },
+                omsPairLookup: { List ids -> omsPairOkFor(ids as List<String>) }])
         assertTrue(result.performed as boolean)
-        assertEquals(0, result.appendedCount)
-        assertEquals(0, result.checkedPairCount)
-        assertTrue((result.warnings as List).any { it.toString().contains("cap") })
+        assertEquals(1, result.checkedPairCount)
+        assertEquals(1, result.deferredPairCount)
+        assertEquals(["6941645013123"], lookedUp)   // manifest order: first pair in, second deferred
+        assertEquals(0, result.appendedCount)       // the checked pair is healthy
+        assertTrue((result.warnings as List).any { it.toString().contains("deferred") })
+        assertTrue(result.auditNote.toString().contains("1 deferred"))
         assertEquals(before, diff.text)
     }
 
@@ -307,7 +340,7 @@ class ExchangePairVerificationSupportTests {
         List entries = manifestOf(150)
         List<Integer> chunkSizes = []
         Map result = ExchangePairVerificationSupport.verifyExchangePairs([
-                manifestFile: manifestFile(entries), diffFile: diffFile(), nowMillis: NOW,
+                manifestFile: manifestFile(entries), diffFile: diffFile(), nowMillis: NOW, maxPairs: 500,
                 shopifyLookup: { List ids -> shopifyOkForIds(ids as List<String>) },
                 omsPairLookup: { List ids -> chunkSizes.add(ids.size()); omsPairOkFor(ids as List<String>) }])
 
@@ -323,7 +356,7 @@ class ExchangePairVerificationSupportTests {
         List entries = manifestOf(150)
         List<Integer> chunkSizes = []
         Map result = ExchangePairVerificationSupport.verifyExchangePairs([
-                manifestFile: manifestFile(entries), diffFile: diff, nowMillis: NOW,
+                manifestFile: manifestFile(entries), diffFile: diff, nowMillis: NOW, maxPairs: 500,
                 shopifyLookup: { List ids -> shopifyOkForIds(ids as List<String>) },
                 omsPairLookup: { List ids ->
                     chunkSizes.add(ids.size())

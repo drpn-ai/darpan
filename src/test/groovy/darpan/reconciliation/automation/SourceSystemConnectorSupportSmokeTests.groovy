@@ -164,5 +164,12 @@ class SourceSystemConnectorSupportSmokeTests {
         assertNotNull(shopify, "SHOPIFY connector row should resolve")
         assertEquals("reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderExchangeState",
                 shopify.exchangeStateLookupServiceName)
+
+        // Shopify side: exchangeSweepServiceName enumerates in-window Shopify exchanges for the
+        // presence check (every Shopify exchange must have been imported into OMS).
+        assertTrue(SourceSystemConnectorSupport.isAllowedLookupServiceShape(
+                "reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyExchangeSweep"))
+        assertEquals("reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyExchangeSweep",
+                shopify.exchangeSweepServiceName)
     }
 }

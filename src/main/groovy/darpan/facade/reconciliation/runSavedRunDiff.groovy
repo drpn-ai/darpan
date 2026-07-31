@@ -471,73 +471,91 @@ def buildFencedLookup = { Map<String, Object> connector, String serviceName, Obj
 }
 
 def runExchangeVerificationPass = { Map serviceResult, Object file1Source, Object file2Source,
-                                    Map file1Result, Map file2Result ->
+                                    Map file1Result, Map file2Result, String file1Label, String file2Label ->
     if (serviceResult.ruleExecutionFailed == true) return
-    List sides = [[source: file1Source, extractResult: file1Result], [source: file2Source, extractResult: file2Result]]
+    // Presence semantics need a window: exchanges are enumerated from Shopify by return date.
+    if (windowStartDate == null || windowEndDate == null) return
+    List sides = [[source: file1Source, extractResult: file1Result, fileSide: "FILE_1", label: file1Label],
+                  [source: file2Source, extractResult: file2Result, fileSide: "FILE_2", label: file2Label]]
     def omsSide = null, shopifySide = null
     Map omsConnector = null, shopifyConnector = null
     for (Map side : sides) {
         Map<String, Object> connector = resolveConnectorFor(side.source)
         if (connector == null) continue
         if (omsSide == null && normalize(connector.pairLookupServiceName)) { omsSide = side; omsConnector = connector }
-        else if (shopifySide == null && normalize(connector.exchangeStateLookupServiceName)) { shopifySide = side; shopifyConnector = connector }
+        else if (shopifySide == null && normalize(connector.exchangeSweepServiceName)) { shopifySide = side; shopifyConnector = connector }
     }
     if (omsSide == null || shopifySide == null) return
 
+    // The manifest sidecar is OPTIONAL context (fast matching): an OMS window with zero exchange
+    // orders writes none, and the presence check must still run — Shopify exchanges that were never
+    // imported are exactly what it exists to catch.
+    File manifestFile = null
     String omsFileLocation = normalize(omsSide.extractResult?.fileLocation)
-    if (omsFileLocation == null) return
-    File manifestFile = resolveLocationFile(omsFileLocation.replaceAll(/(?i)\.json$/, "") + ".exchange-manifest.json")
-    if (manifestFile == null || !manifestFile.isFile()) return
+    if (omsFileLocation != null) {
+        manifestFile = resolveLocationFile(omsFileLocation.replaceAll(/(?i)\.json$/, "") + ".exchange-manifest.json")
+    }
     File diffFile = resolveOutputFile(serviceResult)
     if (diffFile == null || !diffFile.isFile()) return
 
     Closure omsPairLookupService = (Closure) buildFencedLookup(omsConnector,
             normalize(omsConnector.pairLookupServiceName), omsSide.source, "externalIds")
-    Closure shopifyLookupService = (Closure) buildFencedLookup(shopifyConnector,
-            normalize(shopifyConnector.exchangeStateLookupServiceName), shopifySide.source, "orderIds")
-    if (omsPairLookupService == null || shopifyLookupService == null) return
+    String sweepServiceName = normalize(shopifyConnector.exchangeSweepServiceName)
+    String shopifyConfigId = normalize(shopifySide.source?.sourceConfigId)
+    String shopifyConfigParameterName = normalize(shopifyConnector.configParameterName) ?: "sourceConfigId"
+    if (omsPairLookupService == null || shopifyConfigId == null
+            || !SourceSystemConnectorSupport.isAllowedLookupServiceShape(sweepServiceName)) return
 
     def exchangeStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_VERIFY) : null
     Map verification
     try {
         verification = ExchangePairVerificationSupport.verifyExchangePairs([
-                manifestFile : manifestFile,
-                diffFile     : diffFile,
-                nowMillis    : System.currentTimeMillis(),
-                shopifyLookup: { List<String> ids ->
-                    Map out = (Map) shopifyLookupService.call(ids)
-                    [ok: out?.ok, statesByOrderId: out?.statesByOrderId ?: [:], errors: out?.errors ?: []]
+                manifestFile     : manifestFile,
+                diffFile         : diffFile,
+                nowMillis        : System.currentTimeMillis(),
+                windowStartMillis: windowStartDate.time,
+                windowEndMillis  : windowEndDate.time,
+                omsSideLabel     : omsSide.label,
+                omsFileSide      : omsSide.fileSide,
+                shopifySweep     : { long sweepStartMillis, long sweepEndMillis ->
+                    Map out = (Map) runInternalService(sweepServiceName, [(shopifyConfigParameterName): shopifyConfigId,
+                            windowStartMillis: sweepStartMillis, windowEndMillis: sweepEndMillis])
+                    [ok: out?.ok, exchanges: out?.exchanges ?: [], truncated: out?.truncated == true, errors: out?.errors ?: []]
                 },
-                omsPairLookup: { List<String> ids ->
+                omsPairLookup    : { List<String> ids ->
                     Map out = (Map) omsPairLookupService.call(ids)
                     [ok: out?.ok, ordersByExternalId: out?.ordersByExternalId ?: [:], errors: out?.errors ?: []]
                 },
         ])
     } catch (Throwable t) {
-        verification = [performed: true, appendedCount: 0, lookupFailed: true, checkedPairCount: 0,
-                warnings: ["Exchange verification failed: ${normalize(t.message) ?: t.class.simpleName}".toString()], auditNote: null] as Map
+        verification = [performed: true, appendedCount: 0, lookupFailed: true, sweepExchangeCount: 0,
+                warnings: ["Exchange presence check failed: ${normalize(t.message) ?: t.class.simpleName}".toString()], auditNote: null] as Map
     }
     if (ec.message.hasError()) {
         verification.warnings = ((verification.warnings ?: []) as List) + ((ec.message.getErrors() ?: []) as List)
         verification.lookupFailed = true
         ec.message.clearErrors()
     }
-    if ((verification.appendedCount ?: 0) as long > 0L) {
-        serviceResult.differenceCount = ((serviceResult.differenceCount ?: 0) as long) + ((verification.appendedCount ?: 0) as long)
+    long appended = ((verification.appendedCount ?: 0) as long)
+    if (appended > 0L) {
+        serviceResult.differenceCount = ((serviceResult.differenceCount ?: 0) as long) + appended
+        String missingCountKey = "FILE_1" == omsSide.fileSide ? "missingInFile1Count" : "missingInFile2Count"
+        serviceResult[missingCountKey] = ((serviceResult[missingCountKey] ?: 0) as long) + appended
+        if (serviceResult.missingObjectDifferenceCount != null) {
+            serviceResult.missingObjectDifferenceCount = (serviceResult.missingObjectDifferenceCount as long) + appended
+        }
     }
     List exchangeNotes = []
     if (verification.auditNote) exchangeNotes.add(verification.auditNote)
     exchangeNotes.addAll((verification.warnings ?: []) as List)
     if (exchangeNotes) serviceResult.processingWarnings = ((serviceResult.processingWarnings ?: []) as List) + exchangeNotes
-    // Task 7 note: unresolvedShopifyCount (Task 6 contract addition) has no dedicated run-step
-    // column, but ReconciliationRunStep.metricsJson is exactly the "optional non-secret per-stage
-    // metrics" natural key for it, so it rides along in the STAGE_VERIFY step detail here in
-    // addition to the warnings ExchangePairVerificationSupport already raises per unresolved id.
     RunObservability.endStep(ec, exchangeStep,
             verification.lookupFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
-            [recordCount : verification.checkedPairCount ?: 0,
+            [recordCount : verification.sweepExchangeCount ?: 0,
              errorMessage: verification.lookupFailed && verification.warnings ? verification.warnings.first().toString() : null,
-             metricsJson : JsonOutput.toJson([unresolvedShopifyCount: verification.unresolvedShopifyCount ?: 0])])
+             metricsJson : JsonOutput.toJson([sweepExchangeCount: verification.sweepExchangeCount ?: 0,
+                     matchedCount: verification.matchedCount ?: 0, missingCount: appended,
+                     pendingCount: verification.pendingCount ?: 0, deferredLookupCount: verification.deferredLookupCount ?: 0])])
 }
 
 def runVerificationPass = { Map serviceResult, Object file1Source, Object file2Source, String file1Label, String file2Label ->
@@ -781,7 +799,7 @@ try {
                                     // just produced, and adjusts serviceResult counts BEFORE they are persisted.
                                     runVerificationPass(serviceResult, file1Source, file2Source, file1Label, file2Label)
                                     runExchangeVerificationPass(serviceResult, file1Source, file2Source,
-                                            (Map) file1Result, (Map) file2Result)
+                                            (Map) file1Result, (Map) file2Result, file1Label, file2Label)
                                     String resultDataManagerPath = serviceResult.diffLocation ?
                                             (DataManagerSupport.relativeDataManagerPath(ec, new File(serviceResult.diffLocation as String)) ?: serviceResult.diffFileName) :
                                             serviceResult.diffFileName

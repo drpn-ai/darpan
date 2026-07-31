@@ -48,6 +48,7 @@
             preserveWindowInstants="Y"
             lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderIds"
             exchangeStateLookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderExchangeState"
+            exchangeSweepServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyExchangeSweep"
             enabled="Y"/>
 
     <!-- NETSUITE has no automation extractor; this row exists so the saved-run path resolves its

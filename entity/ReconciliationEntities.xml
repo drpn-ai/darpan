@@ -627,6 +627,12 @@
                 exchange line items, current totals) — the Shopify side of the exchange pair verify
                 stage. Same lookup fence as lookupServiceName. Blank disables exchange pair verification.</description>
         </field>
+        <field name="exchangeSweepServiceName" type="text-medium">
+            <description>Optional lookup#* service enumerating exchanges created in this source system
+                within a return-date window — the Shopify side of the exchange presence check (every
+                Shopify exchange must have been imported into OMS). Same lookup fence as
+                lookupServiceName. Blank disables the exchange presence check.</description>
+        </field>
         <field name="enabled" type="text-indicator" default="'Y'"/>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>

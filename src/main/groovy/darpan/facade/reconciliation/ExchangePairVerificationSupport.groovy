@@ -34,8 +34,9 @@ class ExchangePairVerificationSupport {
     // anything older than the grace with no OMS exchange order is a genuine import gap.
     static final int DEFAULT_GRACE_HOURS = 3
     // Per-run latency bound on CONFIRMING point lookups (manifest matching is free): only unmatched
-    // candidates need a lookup, so this caps the pathological case, not the daily volume.
-    static final int DEFAULT_MAX_LOOKUPS = 50
+    // candidates need a lookup. 200 covers the largest observed daily candidate set (102, gorjana
+    // 2026-07-30) with headroom; the deferral path stays as the pathological-case backstop.
+    static final int DEFAULT_MAX_LOOKUPS = 200
     // Mirrors OmsRestSourceSupport.PAIR_LOOKUP_MAX_IDS (darpan-hotwax): the OMS pair lookup service
     // hard-rejects any single call requesting more than this many externalIds.
     static final int OMS_PAIR_LOOKUP_CHUNK_SIZE = 100
@@ -91,7 +92,13 @@ class ExchangePairVerificationSupport {
 
         List<Map> candidates = []
         eligible.each { Map exchange ->
-            if (omsExchangeExternalIds.contains(exchange.get('externalId').toString())) {
+            int exchangeReturnCount = exchange.get('exchangeReturnCount') instanceof Number
+                    ? ((Number) exchange.get('exchangeReturnCount')).intValue() : 1
+            // The manifest shortcut only proves "≥1 exchange order in this OMS window", so it can
+            // only settle single-exchange orders. Repeat-exchange orders (count > 1) always go to
+            // the point lookup, which counts OMS exchange orders — a missing second exchange must
+            // not hide behind an earlier imported one.
+            if (exchangeReturnCount <= 1 && omsExchangeExternalIds.contains(exchange.get('externalId').toString())) {
                 result.matchedCount = (result.matchedCount as int) + 1
             } else {
                 candidates.add(exchange)
@@ -112,15 +119,22 @@ class ExchangePairVerificationSupport {
             candidates.each { Map exchange ->
                 String externalId = exchange.get('externalId').toString()
                 List omsOrders = (List) (ordersByExternalId.get(externalId) ?: [])
-                boolean exchangeOrderExists = omsOrders.any { it instanceof Map && ((Map) it).get('hasExchangeAssoc') == true }
-                if (exchangeOrderExists) {
+                int omsExchangeOrderCount = omsOrders.count { it instanceof Map && ((Map) it).get('hasExchangeAssoc') == true } as int
+                int exchangeReturnCount = exchange.get('exchangeReturnCount') instanceof Number
+                        ? ((Number) exchange.get('exchangeReturnCount')).intValue() : 1
+                if (omsExchangeOrderCount >= exchangeReturnCount) {
                     result.confirmedPresentCount = (result.confirmedPresentCount as int) + 1
                 } else {
+                    String shortfall = exchangeReturnCount > 1
+                            ? "has ${exchangeReturnCount} Shopify exchange(s) but only ${omsExchangeOrderCount} exchange order(s) in ${omsSideLabel}"
+                            : "has no exchange order in ${omsSideLabel}"
                     rows.add([diffType: TYPE_MISSING_IN_OMS, primaryId: externalId, missingIn: omsSideLabel,
-                            note: "Shopify exchange on order ${exchange.get('orderName')} (return ${exchange.get('returnName') ?: exchange.get('returnId')}) has no exchange order in ${omsSideLabel}.".toString(),
+                            note: "Shopify exchange on order ${exchange.get('orderName')} (return ${exchange.get('returnName') ?: exchange.get('returnId')}) ${shortfall}.".toString(),
                             data: [orderName: exchange.get('orderName'), returnId: exchange.get('returnId'),
                                    returnName: exchange.get('returnName'), returnStatus: exchange.get('returnStatus'),
                                    returnCreatedAtMillis: exchange.get('returnCreatedAtMillis'),
+                                   shopifyExchangeReturnCount: exchangeReturnCount,
+                                   omsExchangeOrderCount: omsExchangeOrderCount,
                                    omsOrdersSharingExternalId: omsOrders]])
                 }
             }

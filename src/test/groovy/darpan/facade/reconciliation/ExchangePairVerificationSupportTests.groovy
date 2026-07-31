@@ -165,6 +165,41 @@ class ExchangePairVerificationSupportTests {
     }
 
     @Test
+    void repeatExchangeShortfallIsNotMaskedByAnEarlierImportedExchange() {
+        // Order 900 has 2 Shopify exchanges; OMS has only 1 exchange order (the earlier one).
+        // Per-order presence would call it present; per-exchange counting must flag the shortfall —
+        // and the manifest shortcut must NOT settle repeat-exchange orders.
+        File diff = diffFile()
+        Map exchange = sweepExchange("900") + [exchangeReturnCount: 2]
+        Map omsOneExchange = [ok: true, errors: [], ordersByExternalId: ["900": [
+                [omsOrderId: "orig-900", externalId: "900", hasExchangeAssoc: false],
+                [omsOrderId: "exch-900-1", externalId: "900", hasExchangeAssoc: true]]]]
+        Map result = runCheck([diffFile: diff, manifestFile: manifestFile([manifestEntry("900")]),
+                shopifySweep: { long s, long e -> sweepOk([exchange]) },
+                omsPairLookup: { List ids -> omsOneExchange }])
+        assertEquals(0, result.matchedCount)   // manifest shortcut refused for count > 1
+        assertEquals(1, result.appendedCount)
+        Map row = (Map) ((List) ((Map) new JsonSlurper().parseText(diff.text)).differences).last()
+        assertTrue(row.note.toString().contains("2 Shopify exchange(s) but only 1 exchange order(s)"))
+        assertEquals(2, ((Map) row.data).shopifyExchangeReturnCount)
+        assertEquals(1, ((Map) row.data).omsExchangeOrderCount)
+    }
+
+    @Test
+    void repeatExchangeFullyImportedCountsAsPresent() {
+        Map exchange = sweepExchange("901") + [exchangeReturnCount: 2]
+        Map omsTwoExchanges = [ok: true, errors: [], ordersByExternalId: ["901": [
+                [omsOrderId: "orig-901", externalId: "901", hasExchangeAssoc: false],
+                [omsOrderId: "exch-901-1", externalId: "901", hasExchangeAssoc: true],
+                [omsOrderId: "exch-901-2", externalId: "901", hasExchangeAssoc: true]]]]
+        Map result = runCheck([manifestFile: manifestFile([manifestEntry("901")]),
+                shopifySweep: { long s, long e -> sweepOk([exchange]) },
+                omsPairLookup: { List ids -> omsTwoExchanges }])
+        assertEquals(1, result.confirmedPresentCount)
+        assertEquals(0, result.appendedCount)
+    }
+
+    @Test
     void lookupCapDefersExcessCandidatesWithVisibleQueue() {
         File diff = diffFile()
         String before = diff.text

@@ -1444,7 +1444,16 @@ class AutomationExecutionSupportTests {
         assertTrue(((String) execution.errorMessage).contains("Compare scope SCOPE_ORDER was not found"))
         assertNotNull(execution.completedDate)
         assertNull(execution.resultDataManagerPath)
-        assertEquals(0, ec.entity.createdValues("darpan.reconciliation.ReconciliationRunResult").size())
+        // This used to assert ZERO run-result rows, as a proxy for "no silent success" — a row implied
+        // success back when statusEnumId defaulted to AUT_STAT_SUCCESS. A terminal failure now mints its
+        // own row, explicitly FAILED, so it can be notified at all (notifyRunCompleted is keyed on this
+        // entity) and so it appears in run history (ReconciliationOutputSupport.shouldListRunResultWithoutFile
+        // already lists FAILED/no-file rows). The real invariant is unchanged and asserted directly:
+        // a failed run must never produce a SUCCESS row.
+        List runResults = ec.entity.createdValues("darpan.reconciliation.ReconciliationRunResult")
+        assertEquals(1, runResults.size())
+        assertEquals(AutomationExecutionSupport.STATUS_FAILED, runResults[0].statusEnumId)
+        assertNull(runResults[0].resultDataManagerPath)
         // The accumulated errors are consumed so later windows/automations in the same scan are not
         // short-circuited by leftover message-facade state.
         assertFalse(ec.message.hasError())

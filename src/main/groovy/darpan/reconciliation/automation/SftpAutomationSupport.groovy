@@ -94,10 +94,29 @@ class SftpAutomationSupport {
         return DataManagerSupport.resolveReconciliationRunLocation(ec, runId, timestamp)
     }
 
+    /**
+     * Entry point for SFTP-file automations, reached both from {@code run#SftpFileAutomation} (which
+     * calls this directly, NOT through {@code execute#Automation}) and from the API runner's SFTP
+     * dispatch.
+     *
+     * <p>Same defect as the API path (UAT 2026-07-31): {@code run#SftpFileAutomation} is
+     * {@code authenticate="anonymous-all"}, so the {@code resolveRunScope} default below finds no
+     * active tenant and the run dies with "runTenantUserGroupId is required for tenant-scoped SFTP
+     * automation". Publish the automation's own asserted tenant before any of that runs. Nesting is
+     * safe — when the API runner delegates here it has already published the same tenant.</p>
+     */
     static Map<String, Object> runSftpFileAutomation(def ec, Map params) {
         Map input = params ?: [:]
         String automationId = requireNormalized(input.automationId, "automationId is required")
         def automation = loadAutomation(ec, automationId)
+        return TenantAccessSupport.withSystemTenant(
+                AutomationExecutionSupport.resolveSystemTenantId(ec, automation)) {
+            return runSftpFileAutomationForTenant(ec, input, automation)
+        }
+    }
+
+    private static Map<String, Object> runSftpFileAutomationForTenant(def ec, Map input, def automation) {
+        String automationId = normalize(readField(automation, "automationId"))
         String inputModeEnumId = normalize(readField(automation, "inputModeEnumId"))
         if (inputModeEnumId != AUTOMATION_INPUT_SFTP_FILES) {
             throw new IllegalArgumentException("Automation ${automationId} must use ${AUTOMATION_INPUT_SFTP_FILES} input mode")

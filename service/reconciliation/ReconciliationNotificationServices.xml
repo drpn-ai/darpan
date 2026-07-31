@@ -28,6 +28,10 @@
             <parameter name="statusEnumId"/>
             <parameter name="processingWarnings" type="List"/>
             <parameter name="terminationReason"/>
+            <!-- UAT 2026-07-31: a run that died before producing any result has no counts to report.
+                 The standard body ("run completed" + "Differences: 0") reads as a clean sync for those,
+                 which is worse than silence — this switches to a did-not-complete body instead. -->
+            <parameter name="noOutputProduced" type="Boolean" default-value="false"/>
         </in-parameters>
         <out-parameters>
             <parameter name="payload" type="Map"/>
@@ -45,9 +49,14 @@
             <set field="onlyInFile2CountValue" from="onlyInFile2Count == null ? '0' : (onlyInFile2Count instanceof Number ? ((Number) onlyInFile2Count).intValue().toString() : (((onlyInFile2Count)?.toString()?.trim()) ?: '0'))"/>
             <set field="warningList" from="(processingWarnings instanceof java.util.List ? processingWarnings : []).collect { ((it)?.toString()?.trim()) }.findAll { it }"/>
             <set field="runFailed" from="((statusEnumId)?.toString()?.trim()) == 'AUT_STAT_FAILED'"/>
-            <set field="headerPrefix" from="(runFailed || warningList) ? 'Darpan run completed WITH ISSUES: ' : 'Darpan run completed: '"/>
+            <set field="noOutput" from="runFailed &amp;&amp; noOutputProduced == true"/>
+            <set field="headerPrefix" from="noOutput ? 'Darpan run FAILED: ' :
+                    ((runFailed || warningList) ? 'Darpan run completed WITH ISSUES: ' : 'Darpan run completed: ')"/>
             <set field="lines" from="[headerPrefix + runNameValue]"/>
-            <if condition="runFailed">
+            <if condition="noOutput">
+                <set field="ignoreLine" from="lines.add('⚠ Status: FAILED — the run did not finish and produced no results. Nothing was reconciled.')"/>
+            </if>
+            <if condition="runFailed &amp;&amp; !noOutput">
                 <set field="ignoreLine" from="lines.add('⚠ Status: FAILED — the ruleset did not fully evaluate; results may be incomplete.')"/>
             </if>
             <set field="terminationReasonValue" from="((terminationReason)?.toString()?.trim())"/>
@@ -63,9 +72,13 @@
             <if condition="resultUrl">
                 <set field="ignoreLine" from="lines.add('Run result: &lt;' + resultUrl + '|Open run result&gt;')"/>
             </if>
-            <set field="ignoreLine" from="lines.add('Differences: ' + differenceCountValue)"/>
-            <set field="ignoreLine" from="lines.add('Only in ' + (file1SystemLabelValue ?: 'File 1') + ': ' + onlyInFile1CountValue)"/>
-            <set field="ignoreLine" from="lines.add('Only in ' + (file2SystemLabelValue ?: 'File 2') + ': ' + onlyInFile2CountValue)"/>
+            <!-- Counts are omitted entirely for a no-output failure: zeros there are not "no differences",
+                 they are "never computed", and an operator cannot tell those apart from the numbers. -->
+            <if condition="!noOutput">
+                <set field="ignoreLine" from="lines.add('Differences: ' + differenceCountValue)"/>
+                <set field="ignoreLine" from="lines.add('Only in ' + (file1SystemLabelValue ?: 'File 1') + ': ' + onlyInFile1CountValue)"/>
+                <set field="ignoreLine" from="lines.add('Only in ' + (file2SystemLabelValue ?: 'File 2') + ': ' + onlyInFile2CountValue)"/>
+            </if>
             <if condition="warningList">
                 <set field="ignoreLine" from="lines.add('Warnings (' + warningList.size() + '): ' + warningList.take(3).join('; ') + (warningList.size() > 3 ? ' …' : ''))"/>
             </if>

@@ -10,6 +10,13 @@ import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.sanitizeFileToken
 
 class TenantAccessSupport {
+    /**
+     * Fallback active tenant for server-side entry points that have no interactive user (the
+     * reconciliation scheduler). Set only through {@link #withSystemTenant}, never from a service
+     * parameter, and only consulted when the user resolves no tenant of their own.
+     */
+    private static final ThreadLocal<String> SYSTEM_TENANT_USER_GROUP_ID = new ThreadLocal<String>()
+
     static final String ADMIN_USER_GROUP_ID = "ADMIN"
     static final String ALL_USERS_GROUP_ID = "ALL_USERS"
     static final String ACTIVE_TENANT_PREFERENCE_KEY = "darpan.auth.activeTenantUserGroupId"
@@ -198,10 +205,63 @@ class TenantAccessSupport {
         return true
     }
 
+    /**
+     * Resolves the active tenant for the current context.
+     *
+     * <p>Normally this is derived from the logged-in user's tenant memberships. System entry points
+     * that have no interactive user — the reconciliation scheduler in particular — have no such
+     * membership to derive from, so they publish an already-asserted tenant via
+     * {@link #withSystemTenant} and it is used as the fallback here.</p>
+     *
+     * <p>Order matters and is a security property: a user-derived tenant ALWAYS wins. An
+     * authenticated request can never have its scope changed by a system tenant context, and there
+     * is no service parameter that can set one — {@link #withSystemTenant} is server-side only.</p>
+     */
     static String currentActiveTenantUserGroupId(def ec) {
+        String userTenantUserGroupId = userDerivedActiveTenantUserGroupId(ec)
+        if (userTenantUserGroupId) return userTenantUserGroupId
+        return activeSystemTenantUserGroupId()
+    }
+
+    private static String userDerivedActiveTenantUserGroupId(def ec) {
         if (!currentUserId(ec)) return null
         List<Map<String, Object>> availableTenants = listAvailableTenants(ec)
         return resolveActiveTenant(availableTenants, readPreferredActiveTenantUserGroupId(ec))?.userGroupId
+    }
+
+    /**
+     * Runs {@code work} with {@code tenantUserGroupId} as the fallback active tenant for this thread.
+     *
+     * <p>UAT 2026-07-31: the {@code scan_ReconciliationAutomations_5m} job runs with the anonymous
+     * {@code _NA_} user (via {@code authenticate="anonymous-all"}), which belongs to no tenant. Every
+     * read the automation runner owns already carries an explicit {@code companyUserGroupId}, but the
+     * reconcile pipeline it calls resolves the tenant from the user — so the RuleSet gate in
+     * {@code prepare#RuleSetCompareScope} fail-closed on every scheduled run while interactive
+     * "Run now" worked. This publishes the tenant the runner has already asserted so the whole
+     * downstream pipeline scopes to it instead of to nothing.</p>
+     *
+     * <p>Strictly scoped: the previous value is restored in a {@code finally}, so a pooled worker
+     * thread cannot carry one automation's tenant into the next job, and a throwing run cannot leave
+     * the thread poisoned. Nesting is supported (inner value wins, outer is restored).</p>
+     *
+     * @param tenantUserGroupId an ALREADY-VALIDATED tenant id (see
+     *        {@code AutomationExecutionSupport.assertSystemWriteTenant}); blank clears the fallback
+     * @param work the work to run under that fallback
+     */
+    static <T> T withSystemTenant(String tenantUserGroupId, Closure<T> work) {
+        String previous = SYSTEM_TENANT_USER_GROUP_ID.get()
+        SYSTEM_TENANT_USER_GROUP_ID.set(normalize(tenantUserGroupId))
+        try {
+            return work.call()
+        } finally {
+            if (previous == null) SYSTEM_TENANT_USER_GROUP_ID.remove()
+            else SYSTEM_TENANT_USER_GROUP_ID.set(previous)
+        }
+    }
+
+    /** The system tenant published by an enclosing {@link #withSystemTenant}, or null. */
+    static String activeSystemTenantUserGroupId() {
+        return SYSTEM_TENANT_USER_GROUP_ID.get()
     }
 
     static List<String> currentActiveTenantPermissionGroupIds(def ec) {

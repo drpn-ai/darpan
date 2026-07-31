@@ -3,6 +3,7 @@ package darpan.reconciliation.automation
 import darpan.common.DarpanEntityConstants
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
+import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
 import darpan.reconciliation.core.ReconciliationServices
@@ -147,10 +148,31 @@ class AutomationExecutionSupport {
         reconcileRunner = DEFAULT_RECONCILE_RUNNER
     }
 
+    /**
+     * Entry point for both the scheduler (via {@code execute#Automation}) and interactive
+     * {@code run#AutomationNow}.
+     *
+     * <p>The scheduled path has no interactive user — {@code authenticate="anonymous-all"} logs in
+     * {@code _NA_}, which belongs to no tenant — so every tenant-scoped read in the reconcile
+     * pipeline it calls would fail closed (UAT 2026-07-31: "RuleSet ... is not accessible in your
+     * active tenant" from {@code prepare#RuleSetCompareScope}, on every scheduled run). The runner
+     * already trusts {@code automation.companyUserGroupId} as its tenant anchor for its own reads;
+     * publish that same anchor so the pipeline downstream scopes to it too.</p>
+     *
+     * <p>Interactive callers are unaffected: a user-derived tenant always wins in
+     * {@link TenantAccessSupport#currentActiveTenantUserGroupId}.</p>
+     */
     static Map<String, Object> executeAutomation(def ec, Map params) {
         Map<String, Object> input = params ?: [:]
         String automationId = requireNormalized(input.automationId, "automationId is required")
         def automation = loadAutomation(ec, automationId)
+        return TenantAccessSupport.withSystemTenant(resolveSystemTenantId(ec, automation)) {
+            return executeAutomationForTenant(ec, input, automation)
+        }
+    }
+
+    private static Map<String, Object> executeAutomationForTenant(def ec, Map<String, Object> input, def automation) {
+        String automationId = normalize(readField(automation, "automationId"))
         String inputModeEnumId = normalize(readField(automation, "inputModeEnumId"))
 
         if (inputModeEnumId == AUTOMATION_INPUT_SFTP_FILES) {
@@ -290,22 +312,15 @@ class AutomationExecutionSupport {
                 Timestamp completedTimestamp = nowTimestamp(ec)
                 Map<String, Object> failureFields = buildFailureFields(ec, execution, t, completedTimestamp, window)
                 updateAutomationExecution(ec, execution, failureFields)
-                // Task 7: the run-result row (if one was minted before the failure) never got its
-                // success-path notify, so notify FAILED here — best-effort, must never mask the real error.
-                if (mintedRunResultId) {
-                    try {
-                        TenantNotificationSupport.notifyRunCompleted(ec, [
-                                reconciliationRunResultId: mintedRunResultId,
-                                runName                  : normalize(readField(automation, "automationName")),
-                                savedRunId               : normalize(readField(automation, "savedRunId")),
-                                companyUserGroupId       : normalize(readField(automation, "companyUserGroupId")),
-                                chatSpaceId              : normalize(readField(automation, "chatSpaceId")),
-                                statusEnumId             : STATUS_FAILED,
-                                processingWarnings       : [t.message ?: t.toString()],
-                        ])
-                    } catch (Throwable notifyError) {
-                        logger.warn("Automation failure notification failed (best-effort): ${notifyError.message}")
-                    }
+                // UAT 2026-07-31: this notify used to be guarded by `if (mintedRunResultId)`, i.e. only a
+                // run that had ALREADY produced output could report its own failure. Every run that died
+                // earlier — the entire scheduled-automation outage — failed in total silence. A terminal
+                // failure now mints its own FAILED run-result row so it is both notified and visible in
+                // run history. A failure queued for retry is NOT terminal and stays quiet.
+                if (failureFields.statusEnumId == STATUS_FAILED) {
+                    notifyAutomationFailure(ec, automation,
+                            mintedRunResultId ?: persistFailureRunResult(ec, automation, t, completedTimestamp),
+                            mintedRunResultId != null, sanitizeErrorMessage(t))
                 }
                 executionResults << failureFields + [
                         automationExecutionId: automationExecutionId,
@@ -443,6 +458,20 @@ class AutomationExecutionSupport {
                         maxRetryCount  : maxRetry,
                         lastUpdatedDate: stamp,
                 ])
+                // Dead-lettering means the automation has given up entirely — the one outcome an
+                // operator most needs told about, and previously the quietest. Best-effort, and never
+                // allowed to stop the rest of the retry sweep.
+                try {
+                    def deadLetterAutomation = loadAutomation(ec, automationId)
+                    String failureReason = "Automation gave up after ${maxRetry} retries. " +
+                            "Last error: ${normalize(readField(row, "errorMessage")) ?: "unknown"}"
+                    String runResultId = normalize(readField(row, "reconciliationRunResultId")) ?:
+                            persistFailureRunResult(ec, deadLetterAutomation,
+                                    new IllegalStateException(failureReason), stamp)
+                    notifyAutomationFailure(ec, deadLetterAutomation, runResultId, false, failureReason)
+                } catch (Throwable deadLetterNotifyError) {
+                    logger.warn("Dead-letter notification failed (best-effort): ${deadLetterNotifyError.message}")
+                }
                 results << [automationExecutionId: execId, automationId: automationId, statusEnumId: STATUS_DEAD_LETTER]
                 return
             }
@@ -756,16 +785,31 @@ class AutomationExecutionSupport {
             throw new IllegalStateException("Automation ${automationId} has no companyUserGroupId; " +
                     "refusing system write without an asserted tenant identity")
         }
-        def group = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserGroup",
-                        "system-write tenant assertion — validating automation companyUserGroupId against UserGroup")
-                .condition("userGroupId", tenantId)
-                .useCache(true)
-                .one()
-        if (group == null) {
+        if (resolveSystemTenantId(ec, automation) == null) {
             throw new IllegalStateException("Automation ${automationId} companyUserGroupId ${tenantId} " +
                     "does not match any UserGroup; refusing system write with a stale tenant identity")
         }
         return tenantId
+    }
+
+    /**
+     * Non-throwing counterpart to {@link #assertSystemWriteTenant}: returns the automation's
+     * companyUserGroupId only if it still names a real UserGroup, else null.
+     *
+     * <p>Used to publish the system tenant context at the top of a run. It must NOT throw: an
+     * automation with a blank or stale tenant has always failed later, fail-closed, at the write
+     * assertion — with a message naming the problem — and that stays the behaviour rather than
+     * moving the failure earlier and changing what operators see.</p>
+     */
+    protected static String resolveSystemTenantId(def ec, def automation) {
+        String tenantId = normalize(readField(automation, "companyUserGroupId"))
+        if (!tenantId) return null
+        def group = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserGroup",
+                        "system tenant assertion — validating automation companyUserGroupId against UserGroup")
+                .condition("userGroupId", tenantId)
+                .useCache(true)
+                .one()
+        return group == null ? null : tenantId
     }
 
     protected static Map<String, Object> findOrCreateExecution(def ec, def automation, Timestamp scheduledFireTime,
@@ -1295,6 +1339,75 @@ class AutomationExecutionSupport {
             runResultValue.create()
             return normalize(readField(runResultValue, "reconciliationRunResultId"))
         }) as String
+    }
+
+    /**
+     * Mints a FAILED {@code ReconciliationRunResult} for a run that died before producing any output.
+     *
+     * <p>The notification path is anchored on that entity — {@code notifyRunCompleted} returns
+     * {@code NO_RESULT_ID} without a row, and the {@code notifiedDate} claim-then-deliver CAS is the
+     * only dedupe there is. Minting the row is therefore what makes a no-output failure notifiable at
+     * all; it also puts the failed run in run history, where it was previously invisible.</p>
+     *
+     * <p>{@code AUT_STAT_FAILED} is terminal and not in {@code ACTIVE_STATUSES}, so this cannot block
+     * a re-trigger. Best-effort: a failure to record must never replace the failure being recorded.</p>
+     */
+    protected static String persistFailureRunResult(def ec, def automation, Throwable t, Timestamp failedAt) {
+        try {
+            String assertedTenantId = assertSystemWriteTenant(ec, automation)
+            return runInTransaction(ec, "Error saving reconciliation automation failure result", {
+                def runResultValue = ec.entity.makeValue(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
+                runResultValue.set("savedRunId", normalize(readField(automation, "savedRunId")))
+                runResultValue.set("savedRunType", normalize(readField(automation, "savedRunType")) ?: "ruleset")
+                runResultValue.set("reconciliationRunId", normalize(readField(automation, "reconciliationRunId")))
+                runResultValue.set("reconciliationMappingId", normalize(readField(automation, "reconciliationMappingId")))
+                runResultValue.set("ruleSetId", normalize(readField(automation, "ruleSetId")))
+                runResultValue.set("compareScopeId", normalize(readField(automation, "compareScopeId")))
+                runResultValue.set("companyUserGroupId", assertedTenantId)
+                runResultValue.set("createdByUserId", normalize(readField(automation, "createdByUserId")) ?: currentUserId(ec))
+                runResultValue.set("statusEnumId", STATUS_FAILED)
+                runResultValue.set("errorMessage", truncate(sanitizeErrorMessage(t), 3900))
+                runResultValue.set("errorDetail", truncate(sanitizeErrorDetail(t), 12000))
+                runResultValue.set("createdDate", failedAt)
+                runResultValue.set("completedDate", failedAt)
+                runResultValue.setSequencedIdPrimary()
+                runResultValue.create()
+                return normalize(readField(runResultValue, "reconciliationRunResultId"))
+            }) as String
+        } catch (Throwable persistError) {
+            logger.warn("Could not record automation failure run result (best-effort): ${persistError.message}")
+            return null
+        }
+    }
+
+    /**
+     * Best-effort terminal-failure notification. Never allowed to throw — the run's own failure is the
+     * thing that matters and must reach the caller unchanged.
+     *
+     * @param outputProduced true when the run got far enough to persist a real result; drives the
+     *        payload away from reporting difference counts it never computed.
+     */
+    protected static void notifyAutomationFailure(def ec, def automation, String runResultId,
+            boolean outputProduced, String reason) {
+        if (!runResultId) return
+        try {
+            TenantNotificationSupport.notifyRunCompleted(ec, [
+                    reconciliationRunResultId: runResultId,
+                    runName                  : normalize(readField(automation, "automationName")),
+                    savedRunId               : normalize(readField(automation, "savedRunId")),
+                    reconciliationRunId      : normalize(readField(automation, "reconciliationRunId")),
+                    companyUserGroupId       : normalize(readField(automation, "companyUserGroupId")),
+                    chatSpaceId              : normalize(readField(automation, "chatSpaceId")),
+                    statusEnumId             : STATUS_FAILED,
+                    noOutputProduced         : !outputProduced,
+                    // A run that produced output keeps the original shape (reason as a warning line).
+                    // A no-output run has no warnings to report, so the reason IS the message.
+                    terminationReason        : outputProduced ? null : reason,
+                    processingWarnings       : outputProduced && reason ? [reason] : [],
+            ])
+        } catch (Throwable notifyError) {
+            logger.warn("Automation failure notification failed (best-effort): ${notifyError.message}")
+        }
     }
 
     protected static void updateAutomation(def ec, def automation, Map<String, Object> fields) {

@@ -13265,6 +13265,14 @@
                     },
                     "configId": {
                         "type": "string"
+                    },
+                    "stage": {
+                        "type": "string",
+                        "description": "Run only this stage, as reported by a previous call's nextStage. Lets a\n                    caller render each check the moment the server finishes it."
+                    },
+                    "staged": {
+                        "type": "boolean",
+                        "description": "Start a staged run: with no stage, runs only the connector's first stage.\n                    Leave false (and stage blank) to run the whole probe in one call."
                     }
                 },
                 "required": [
@@ -13296,6 +13304,10 @@
                     },
                     "connectionOk": {
                         "type": "boolean"
+                    },
+                    "nextStage": {
+                        "type": "string",
+                        "description": "Stage to pass back to continue a staged run, or blank when finished \u2014\n                    either the probe completed or a failure made the remaining stages meaningless."
                     },
                     "durationMillis": {
                         "type": "integer"

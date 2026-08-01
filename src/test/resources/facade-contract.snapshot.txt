@@ -1880,6 +1880,8 @@ SERVICE test SourceConnection
   allow-remote: true
   IN:
     configId : String [required]
+    stage : String
+    staged : Boolean
     systemEnumId : String [required]
   OUT:
     available : Boolean
@@ -1891,5 +1893,6 @@ SERVICE test SourceConnection
     errors.error : String
     messages : List
     messages.message : String
+    nextStage : String
     ok : Boolean
 

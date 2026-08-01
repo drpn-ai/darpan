@@ -7,6 +7,7 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
 import static darpan.common.ValueSupport.normalize
+import static darpan.common.ValueSupport.normalizeBool
 
 /**
  * Operator-initiated connection diagnostics, dispatched off the SourceSystemConnector registry.
@@ -29,10 +30,18 @@ class SourceConnectionDiagnosticsSupport {
 
     private static final Set<String> ALLOWED_STATUSES = [STATUS_PASS, STATUS_FAIL, STATUS_SKIP].toSet()
 
+    /**
+     * Sentinel meaning "whichever stage you run first". Every probe understands it, so core can start
+     * a staged run without knowing any connector's stage names — the probe stays the authority on its
+     * own sequence, exactly as it is on its own checks.
+     */
+    static final String STAGE_FIRST = "@first"
+
     /** Same message for "no such config" and "another tenant's config" — no cross-tenant existence oracle. */
     private static final String UNKNOWN_CONFIG_MESSAGE = "Unable to find that configuration for the active tenant."
 
-    static Map<String, Object> testSourceConnection(def ec, Object rawSystemEnumId, Object rawConfigId) {
+    static Map<String, Object> testSourceConnection(def ec, Object rawSystemEnumId, Object rawConfigId,
+                                                     Object rawStage = null, Object rawStaged = null) {
         long startedAt = System.currentTimeMillis()
 
         String systemEnumId = normalize(rawSystemEnumId)
@@ -85,13 +94,23 @@ class SourceConnectionDiagnosticsSupport {
             return unavailable(startedAt)
         }
 
+        // Staged mode lets the caller show each check as the server finishes it. `stage` names the
+        // stage to run; `staged` with no stage means "just the first one". Neither set runs the whole
+        // probe in one call, so a single invocation still yields a complete verdict.
+        String stage = normalize(rawStage)
+        boolean staged = stage != null || normalizeBool(rawStaged, false)
+
         List<Map<String, Object>> checks
+        String nextStage = null
         try {
+            Map<String, Object> parameters = [(configParameterName): configId] as Map<String, Object>
+            if (staged) parameters.put("stage", stage ?: STAGE_FIRST)
             Map<String, Object> result = ec.service.sync()
                     .name(probeServiceName)
-                    .parameters([(configParameterName): configId] as Map<String, Object>)
+                    .parameters(parameters)
                     .call() as Map<String, Object>
             checks = normalizeChecks(result?.get("checks"))
+            nextStage = staged ? normalize(result?.get("nextStage")) : null
         } catch (Throwable t) {
             // A probe that blows up is a defect, but the operator should see a diagnostic verdict
             // rather than a stack trace — and never the exception text, which can carry request context.
@@ -107,12 +126,14 @@ class SourceConnectionDiagnosticsSupport {
         boolean connectionOk = checks.every { it.status != STATUS_FAIL }
         long durationMillis = System.currentTimeMillis() - startedAt
         logger.info("Connection diagnostics: system=${connector.systemEnumId} config=${configId} " +
-                "user=${ec.user?.userId} verdict=${connectionOk ? 'OK' : 'FAILED'} durationMillis=${durationMillis}")
+                "user=${ec.user?.userId} stage=${stage ?: 'ALL'} verdict=${connectionOk ? 'OK' : 'FAILED'} " +
+                "durationMillis=${durationMillis}")
 
         return [
                 available     : true,
                 connectionOk  : connectionOk,
                 checks        : checks,
+                nextStage     : nextStage,
                 durationMillis: durationMillis,
         ] as Map<String, Object>
     }
@@ -155,6 +176,7 @@ class SourceConnectionDiagnosticsSupport {
                 available     : false,
                 connectionOk  : false,
                 checks        : [],
+                nextStage     : null,
                 durationMillis: System.currentTimeMillis() - startedAt,
         ] as Map<String, Object>
     }

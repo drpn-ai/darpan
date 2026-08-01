@@ -819,6 +819,14 @@
         <in-parameters>
             <parameter name="systemEnumId" required="true"/>
             <parameter name="configId" required="true"/>
+            <parameter name="stage">
+                <description>Run only this stage, as reported by a previous call's nextStage. Lets a
+                    caller render each check the moment the server finishes it.</description>
+            </parameter>
+            <parameter name="staged" type="Boolean" default-value="false">
+                <description>Start a staged run: with no stage, runs only the connector's first stage.
+                    Leave false (and stage blank) to run the whole probe in one call.</description>
+            </parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -826,6 +834,10 @@
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
             <parameter name="available" type="Boolean"/>
             <parameter name="connectionOk" type="Boolean"/>
+            <parameter name="nextStage">
+                <description>Stage to pass back to continue a staged run, or blank when finished —
+                    either the probe completed or a failure made the remaining stages meaningless.</description>
+            </parameter>
             <parameter name="durationMillis" type="Long"/>
             <parameter name="checks" type="List">
                 <parameter name="check" type="Map">
@@ -838,7 +850,7 @@
             </parameter>
         </out-parameters>
         <actions>
-            <script>context.putAll(darpan.facade.settings.SourceConnectionDiagnosticsSupport.testSourceConnection(ec, systemEnumId, configId))</script>
+            <script>context.putAll(darpan.facade.settings.SourceConnectionDiagnosticsSupport.testSourceConnection(ec, systemEnumId, configId, stage, staged))</script>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

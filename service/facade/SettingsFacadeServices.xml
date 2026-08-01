@@ -812,4 +812,37 @@
         </actions>
     </service>
 
+    <service verb="test" noun="SourceConnection" allow-remote="true" authenticate="true">
+        <description>Run connection diagnostics against a saved connector config, using only the stored
+            credentials. Dispatched off the SourceSystemConnector registry, so core names no connector.
+            `ok` reports that the diagnostic ran; `connectionOk` reports the verdict.</description>
+        <in-parameters>
+            <parameter name="systemEnumId" required="true"/>
+            <parameter name="configId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="available" type="Boolean"/>
+            <parameter name="connectionOk" type="Boolean"/>
+            <parameter name="durationMillis" type="Long"/>
+            <parameter name="checks" type="List">
+                <parameter name="check" type="Map">
+                    <parameter name="key"/>
+                    <parameter name="label"/>
+                    <parameter name="status"/>
+                    <parameter name="detail"/>
+                    <parameter name="durationMillis" type="Long"/>
+                </parameter>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <script>context.putAll(darpan.facade.settings.SourceConnectionDiagnosticsSupport.testSourceConnection(ec, systemEnumId, configId))</script>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
 </services>

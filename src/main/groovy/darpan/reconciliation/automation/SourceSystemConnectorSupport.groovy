@@ -134,6 +134,20 @@ class SourceSystemConnectorSupport {
         return s != null && LOOKUP_SERVICE_NAME.matcher(s).matches()
     }
 
+    /**
+     * Recognized connection-diagnostics service-name shape. `probe#` is reserved for this slot alone:
+     * a registry row is data, so anyone able to write the table could otherwise aim the diagnostics
+     * sink at an extract/execute/framework service. Reserving a verb no other slot dispatches keeps
+     * this the narrowest fence of the three.
+     */
+    private static final Pattern PROBE_SERVICE_NAME =
+            Pattern.compile(/^(reconciliation|facade)\.[A-Za-z0-9]+(Extraction|Facade)Services\.probe#[A-Za-z0-9]+$/)
+
+    static boolean isAllowedProbeServiceShape(String serviceName) {
+        String s = normalize(serviceName)
+        return s != null && PROBE_SERVICE_NAME.matcher(s).matches()
+    }
+
     protected static boolean isEnabled(def record) {
         return normalizeBool(readField(record, "enabled"), true)
     }
@@ -169,6 +183,7 @@ class SourceSystemConnectorSupport {
                 pairLookupServiceName          : readString(record, "pairLookupServiceName"),
                 exchangeStateLookupServiceName : readString(record, "exchangeStateLookupServiceName"),
                 exchangeSweepServiceName       : readString(record, "exchangeSweepServiceName"),
+                healthCheckServiceName     : readString(record, "healthCheckServiceName"),
                 enabled                    : isEnabled(record),
         ] as Map<String, Object>
     }

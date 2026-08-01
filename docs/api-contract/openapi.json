@@ -279,6 +279,9 @@
                                         "$ref": "#/components/schemas/SaveUserNotificationDefaultRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/TestSourceConnectionRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/DeleteShopifyAuthConfigRequest"
                                     },
                                     {
@@ -379,6 +382,7 @@
                                         "facade.SettingsFacadeServices.save#TenantChatSpace": "#/components/schemas/SaveTenantChatSpaceRequest",
                                         "facade.SettingsFacadeServices.save#TenantSettings": "#/components/schemas/SaveTenantSettingsRequest",
                                         "facade.SettingsFacadeServices.save#UserNotificationDefault": "#/components/schemas/SaveUserNotificationDefaultRequest",
+                                        "facade.SettingsFacadeServices.test#SourceConnection": "#/components/schemas/TestSourceConnectionRequest",
                                         "facade.ShopifyFacadeServices.delete#ShopifyAuthConfig": "#/components/schemas/DeleteShopifyAuthConfigRequest",
                                         "facade.ShopifyFacadeServices.get#ShopifyAuthConfig": "#/components/schemas/GetShopifyAuthConfigRequest",
                                         "facade.ShopifyFacadeServices.list#ShopifyAuthConfigs": "#/components/schemas/ListShopifyAuthConfigsRequest",
@@ -653,6 +657,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveUserNotificationDefaultResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/TestSourceConnectionResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/DeleteShopifyAuthConfigResponse"
@@ -13250,6 +13257,139 @@
                     "result"
                 ]
             },
+            "TestSourceConnectionParams": {
+                "type": "object",
+                "properties": {
+                    "systemEnumId": {
+                        "type": "string"
+                    },
+                    "configId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "systemEnumId",
+                    "configId"
+                ],
+                "description": "Run connection diagnostics against a saved connector config, using only the stored\n            credentials. Dispatched off the SourceSystemConnector registry, so core names no connector.\n            `ok` reports that the diagnostic ran; `connectionOk` reports the verdict."
+            },
+            "TestSourceConnectionResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "available": {
+                        "type": "boolean"
+                    },
+                    "connectionOk": {
+                        "type": "boolean"
+                    },
+                    "durationMillis": {
+                        "type": "integer"
+                    },
+                    "checks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "check": {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {
+                                            "type": "string"
+                                        },
+                                        "label": {
+                                            "type": "string"
+                                        },
+                                        "status": {
+                                            "type": "string"
+                                        },
+                                        "detail": {
+                                            "type": "string"
+                                        },
+                                        "durationMillis": {
+                                            "type": "integer"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "TestSourceConnectionRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SettingsFacadeServices.test#SourceConnection",
+                "x-darpan-method": "facade.SettingsFacadeServices.test#SourceConnection",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SettingsFacadeServices.test#SourceConnection"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/TestSourceConnectionParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "TestSourceConnectionResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SettingsFacadeServices.test#SourceConnection. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/TestSourceConnectionResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "DeleteShopifyAuthConfigParams": {
                 "type": "object",
                 "properties": {
@@ -13872,6 +14012,7 @@
         "facade.SettingsFacadeServices.save#TenantChatSpace": "SaveTenantChatSpace",
         "facade.SettingsFacadeServices.save#TenantSettings": "SaveTenantSettings",
         "facade.SettingsFacadeServices.save#UserNotificationDefault": "SaveUserNotificationDefault",
+        "facade.SettingsFacadeServices.test#SourceConnection": "TestSourceConnection",
         "facade.ShopifyFacadeServices.delete#ShopifyAuthConfig": "DeleteShopifyAuthConfig",
         "facade.ShopifyFacadeServices.get#ShopifyAuthConfig": "GetShopifyAuthConfig",
         "facade.ShopifyFacadeServices.list#ShopifyAuthConfigs": "ListShopifyAuthConfigs",

@@ -637,6 +637,13 @@
                 Shopify exchange must have been imported into OMS). Same lookup fence as
                 lookupServiceName. Blank disables the exchange presence check.</description>
         </field>
+        <field name="healthCheckServiceName" type="text-medium">
+            <description>Optional connection-diagnostics probe (probe#* shape only, enforced by the
+                probe fence) that exercises this connector's stored credentials against the remote
+                system and returns a normalized check list. Invoked only by the operator-initiated
+                test#SourceConnection facade service — never by a run. Blank disables diagnostics
+                for this connector, which is reported as unavailable rather than as an error.</description>
+        </field>
         <field name="enabled" type="text-indicator" default="'Y'"/>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>

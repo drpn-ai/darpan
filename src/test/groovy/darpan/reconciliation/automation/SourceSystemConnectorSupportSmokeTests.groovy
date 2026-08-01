@@ -172,4 +172,47 @@ class SourceSystemConnectorSupportSmokeTests {
         assertEquals("reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyExchangeSweep",
                 shopify.exchangeSweepServiceName)
     }
+
+    @Test
+    void probeFenceAcceptsOnlyProbeShapedServiceNames() {
+        assertTrue(SourceSystemConnectorSupport.isAllowedProbeServiceShape(
+                "facade.ShopifyFacadeServices.probe#ShopifyAuthConnection"))
+        assertTrue(SourceSystemConnectorSupport.isAllowedProbeServiceShape(
+                "facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"))
+
+        // The probe sink stays narrower than the extraction and lookup fences: every other verb is
+        // rejected, so a mutated registry row cannot aim diagnostics at an extract/execute service.
+        assertFalse(SourceSystemConnectorSupport.isAllowedProbeServiceShape(
+                "reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders"))
+        assertFalse(SourceSystemConnectorSupport.isAllowedProbeServiceShape(
+                "facade.ShopifyFacadeServices.execute#ShopifyGraphql"))
+        assertFalse(SourceSystemConnectorSupport.isAllowedProbeServiceShape(
+                "reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderIds"))
+        assertFalse(SourceSystemConnectorSupport.isAllowedProbeServiceShape(
+                "org.moqui.impl.EntityServices.create#Entity"))
+        // Must end in ExtractionServices/FacadeServices — a bare *Services name is not enough.
+        assertFalse(SourceSystemConnectorSupport.isAllowedProbeServiceShape("facade.SomeServices.probe#Thing"))
+        assertFalse(SourceSystemConnectorSupport.isAllowedProbeServiceShape("admin.TenantAdminServices.probe#Thing"))
+        assertFalse(SourceSystemConnectorSupport.isAllowedProbeServiceShape(null))
+        assertFalse(SourceSystemConnectorSupport.isAllowedProbeServiceShape(""))
+    }
+
+    @Test
+    void healthCheckServiceNameRoundTripsFromTheSeedRows() {
+        Map<String, Object> shopify = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY")
+        assertNotNull(shopify, "SHOPIFY connector row should resolve")
+        assertEquals("facade.ShopifyFacadeServices.probe#ShopifyAuthConnection", shopify.healthCheckServiceName)
+        assertTrue(SourceSystemConnectorSupport.isAllowedProbeServiceShape((String) shopify.healthCheckServiceName))
+
+        Map<String, Object> oms = SourceSystemConnectorSupport.resolve(ec, "OMS")
+        assertNotNull(oms, "OMS connector row should resolve")
+        assertEquals("facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection", oms.healthCheckServiceName)
+        assertTrue(SourceSystemConnectorSupport.isAllowedProbeServiceShape((String) oms.healthCheckServiceName))
+
+        // NETSUITE declares no probe: diagnostics are unavailable for it, which is a reported
+        // state rather than an error.
+        Map<String, Object> netsuite = SourceSystemConnectorSupport.resolve(ec, "NETSUITE")
+        assertNotNull(netsuite, "NETSUITE connector row should resolve")
+        assertNull(netsuite.healthCheckServiceName)
+    }
 }

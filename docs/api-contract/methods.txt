@@ -83,6 +83,7 @@ facade.SettingsFacadeServices.save#SftpServer
 facade.SettingsFacadeServices.save#TenantChatSpace
 facade.SettingsFacadeServices.save#TenantSettings
 facade.SettingsFacadeServices.save#UserNotificationDefault
+facade.SettingsFacadeServices.test#SourceConnection
 facade.ShopifyFacadeServices.delete#ShopifyAuthConfig
 facade.ShopifyFacadeServices.get#ShopifyAuthConfig
 facade.ShopifyFacadeServices.list#ShopifyAuthConfigs

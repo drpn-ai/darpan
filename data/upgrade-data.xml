@@ -1,23 +1,48 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Candidate release-scoped upgrade data for Darpan 1.1.0.
-Generated from backend compare range: v1.0.3..main
+Release-scoped upgrade data for Darpan 1.2.0.
+Generated from backend compare range: v1.1.0..HEAD, then hand-ordered for referential integrity.
 Records must also live in generic source data files under runtime/component/darpan/data/.
-Review each record before loading into an environment.
+Load with: ./gradlew loadDarpanUpgradeData
+
+ORDERING NOTE: records are grouped parent-before-child, not alphabetically. moqui.security
+ArtifactGroupMember and ArtifactAuthz both carry a foreign key to ArtifactGroup, so the new
+DARPAN_ADMIN_API group must be inserted before anything that references it. Do not re-sort.
 -->
 <entity-facade-xml type="darpan-seed">
-    <!-- Added records from data/AutomationSeedData.xml -->
-    <moqui.basic.Enumeration enumId="AUT_SRC_DB" enumTypeId="AutomationSourceType" enumCode="DB" description="Database source" sequenceNum="3"/>
-    <!-- Added records from data/DarpanSystemSourceSeedData.xml -->
-    <moqui.basic.Enumeration enumId="DATABASE" enumTypeId="DarpanSystemSource" enumCode="DATABASE" description="Database" sequenceNum="5"/>
-    <!-- Added records from data/SecuritySeedData.xml -->
-    <moqui.basic.Enumeration enumId="darpan.notification.defaultChatSpaceId" enumTypeId="UserPreferenceKey" description="Default Google Chat space per tenant (JSON map companyUserGroupId to chatSpaceId)"/>
-    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.rule.RuleSetCompareSourceKeyField" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULE_SOURCE_KEY_FIELD" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.rule.RuleSetCompareSourceKeyField" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+
+    <!-- Admin API fence (from data/SecuritySeedData.xml).
+         Gates the admin.* service namespace — tenant lifecycle, user management, membership —
+         to DARPAN_SUPER_ADMIN and framework ADMIN only. Required before the Darpan admin app
+         can authenticate against this backend. ArtifactGroup MUST precede its members/authz. -->
+    <moqui.security.ArtifactGroup artifactGroupId="DARPAN_ADMIN_API" description="Darpan platform-admin APIs (admin.* services) — super-admin only, cross-tenant."/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_ADMIN_API" artifactName="admin\..*" artifactTypeEnumId="AT_SERVICE" nameIsPattern="Y" inheritAuthz="Y"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_ADMIN_API_SUPER_ADMIN" userGroupId="DARPAN_SUPER_ADMIN" artifactGroupId="DARPAN_ADMIN_API" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_ADMIN_API_ADMIN" userGroupId="ADMIN" artifactGroupId="DARPAN_ADMIN_API" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+
+    <!-- Privileged password ops (admin.user.reset#Password / create) route through the framework
+         update#PasswordInternal; ADMIN_PASSWORD also lets update#Password skip oldPassword. -->
+    <moqui.security.UserGroupPermission userGroupId="DARPAN_SUPER_ADMIN" userPermissionId="ADMIN_PASSWORD" fromDate="2026-07-28 00:00:00.000"/>
+
+    <!-- Chat-space registry entity exposure (from data/SecuritySeedData.xml).
+         TenantChatSpace replaces the retired tenant-wide webhook setting.
+         No EntityFilter for ReconciliationRunNotifySubscription by design: it has no
+         companyUserGroupId — every read is keyed by the caller's own userId or goes through
+         TenantScopedFinder.findGlobalUnscoped. -->
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.reconciliation.TenantChatSpace" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_APP" artifactName="darpan.reconciliation.ReconciliationRunNotifySubscription" artifactTypeEnumId="AT_ENTITY" inheritAuthz="Y"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_TENANT_CHAT_SPACE" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.TenantChatSpace" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
-    <!-- Modified records from data/SourceSystemConnectorSeedData.xml -->
-    <darpan.reconciliation.SourceSystemConnector systemEnumId="OMS" extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders" dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="HOTWAX_OMS_REST" configParameterName="omsRestSourceConfigId" configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig" remoteId="HOTWAX_ORDERS_API" endpointLabel="Orders API" sendUrlTemplate="{baseUrl}/rest/s1/oms/orders" remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders" systemAliases="OMS,HOTWAX,DAR_SYS_OMS" preserveWindowInstants="N" keepFieldsParameterName="keepRecordFields" keepFieldsBase="orderId,orderName,externalId,grandTotal,orderDate,statusId" enabled="Y"/>
-    <darpan.reconciliation.SourceSystemConnector systemEnumId="SHOPIFY" extractServiceName="reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders" dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="SHOPIFY_AUTH" configParameterName="shopifyAuthConfigId" configEntityName="darpan.shopify.ShopifyAuthConfig" remoteId="SHOPIFY_REMOTE" endpointLabel="Admin GraphQL Orders" sendUrlTemplate="https://{shop}.myshopify.com/admin/api/{apiVersion}/graphql.json" remoteSendServiceName="facade.ShopifyFacadeServices.execute#ShopifyGraphql" systemAliases="SHOPIFY,DAR_SYS_SHOPIFY" preserveWindowInstants="Y" lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderIds" enabled="Y"/>
+
+    <!-- Per-user default chat space preference key (from data/SecuritySeedData.xml). -->
+    <moqui.basic.Enumeration enumId="darpan.notification.defaultChatSpaceId" description="Default Google Chat space per tenant (JSON map companyUserGroupId to chatSpaceId)" enumTypeId="UserPreferenceKey"/>
+
+    <!-- Required before a run can be cancelled (from data/AutomationSeedData.xml):
+         ReconciliationRunResult.statusEnumId is FK-checked against moqui.basic.Enumeration. -->
+    <moqui.basic.Enumeration enumId="AUT_STAT_CANCELLED" enumTypeId="AutomationExecStatus" enumCode="CANCELLED" description="Cancelled by an operator" sequenceNum="8"/>
+
+    <!-- Connector registry updates (from data/SourceSystemConnectorSeedData.xml).
+         Adds the connection-diagnostics probe slots (healthCheckServiceName) and the
+         exchange-reconciliation lookup slots. Existing rows are updated in place. -->
+    <darpan.reconciliation.SourceSystemConnector systemEnumId="OMS" extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders" dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="HOTWAX_OMS_REST" configParameterName="omsRestSourceConfigId" configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig" remoteId="HOTWAX_ORDERS_API" endpointLabel="Orders API" sendUrlTemplate="{baseUrl}/rest/s1/oms/orders" remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders" systemAliases="OMS,HOTWAX,DAR_SYS_OMS" preserveWindowInstants="N" keepFieldsParameterName="keepRecordFields" keepFieldsBase="orderId,orderName,externalId,grandTotal,orderDate,statusId" pairLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId" healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection" enabled="Y"/>
+    <darpan.reconciliation.SourceSystemConnector systemEnumId="SHOPIFY" extractServiceName="reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders" dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="SHOPIFY_AUTH" configParameterName="shopifyAuthConfigId" configEntityName="darpan.shopify.ShopifyAuthConfig" remoteId="SHOPIFY_REMOTE" endpointLabel="Admin GraphQL Orders" sendUrlTemplate="https://{shop}.myshopify.com/admin/api/{apiVersion}/graphql.json" remoteSendServiceName="facade.ShopifyFacadeServices.execute#ShopifyGraphql" systemAliases="SHOPIFY,DAR_SYS_SHOPIFY" preserveWindowInstants="Y" lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderIds" exchangeStateLookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderExchangeState" exchangeSweepServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyExchangeSweep" healthCheckServiceName="facade.ShopifyFacadeServices.probe#ShopifyAuthConnection" enabled="Y"/>
 </entity-facade-xml>

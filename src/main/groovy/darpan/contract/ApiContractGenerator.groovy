@@ -40,7 +40,7 @@ class ApiContractGenerator {
      * removed method, removed/renamed parameter or out-field, or a type change — together with
      * updating the compat baseline. Additive changes never bump it (additive-only policy).
      */
-    static final int CONTRACT_VERSION = 1
+    static final int CONTRACT_VERSION = 2
 
     static final Map<String, Map<String, Object>> SCALAR_TYPES = [
             String    : [type: "string"],

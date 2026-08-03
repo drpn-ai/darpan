@@ -39,6 +39,24 @@
                 <parameter name="enabled"/>
                 <parameter name="severity"/>
             </parameter>
+            <parameter name="file1ExcludeFilters" type="List">
+                <parameter name="excludeFilter" type="Map">
+                    <parameter name="fieldExpression"/>
+                    <parameter name="operator"/>
+                    <parameter name="values" type="List"><parameter name="value"/></parameter>
+                </parameter>
+                <description>Record-exclusion rules for FILE_1, created alongside the compare source.
+                    Omitted or empty means no exclusion filters at creation.</description>
+            </parameter>
+            <parameter name="file2ExcludeFilters" type="List">
+                <parameter name="excludeFilter" type="Map">
+                    <parameter name="fieldExpression"/>
+                    <parameter name="operator"/>
+                    <parameter name="values" type="List"><parameter name="value"/></parameter>
+                </parameter>
+                <description>Record-exclusion rules for FILE_2, created alongside the compare source.
+                    Omitted or empty means no exclusion filters at creation.</description>
+            </parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -359,6 +377,21 @@
                                 in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_1', sequenceNum: file1KeyFieldSequence, fieldExpression: file1KeyFieldExpression, companyUserGroupId: ruleSetValue.companyUserGroupId, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
                     </iterate>
                 </if>
+                <!-- Exclusion filter rows created alongside the compare source: same validation as
+                     save#RuleSetRun's validateExcludeFilterPayload (including the parseRules second
+                     gate that catches anything the getter would later reject), but no delete pass — a
+                     freshly created compare source has no pre-existing rows, so omitted and empty both
+                     simply mean "create none". -->
+                <set field="file1FilterRows" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.validateExcludeFilterPayload(file1ExcludeFilters, 'Source 1')"/>
+                <set field="file1FilterSequence" from="0"/>
+                <iterate list="file1FilterRows" entry="file1FilterRow">
+                    <set field="file1FilterSequence" from="file1FilterSequence + 1"/>
+                    <service-call name="create#darpan.rule.RuleSetCompareSourceFilter" disable-authz="true"
+                            in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_1', sequenceNum: file1FilterSequence,
+                                     fieldExpression: file1FilterRow.fieldExpression, operator: file1FilterRow.operator,
+                                     filterValues: file1FilterRow.filterValues, companyUserGroupId: ruleSetValue.companyUserGroupId,
+                                     createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                </iterate>
                 <service-call name="create#darpan.rule.RuleSetCompareSource"
                         disable-authz="true"
                         in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', companyUserGroupId: ruleSetValue.companyUserGroupId, systemEnumId: file2SystemEnumIdValue, sourceTypeEnumId: file2SourceTypeEnumIdValue, systemMessageRemoteId: file2SystemMessageRemoteIdValue, nsRestletConfigId: file2NsRestletConfigIdValue, sourceConfigId: file2UsesConnectorSource ? file2SourceConfigIdValue : null, sourceConfigType: file2UsesConnectorSource ? file2SourceConfigTypeValue : null, fileTypeEnumId: file2FileTypeEnumIdValue, schemaFileName: file2UsesConnectorSource ? null : file2SchemaFileNameValue, recordRootExpression: file2UsesConnectorSource ? null : file2RecordRootExpressionValue, primaryIdExpression: resolvedFile2PrimaryIdExpressionsValue.size() &gt; 1 ? null : (resolvedFile2PrimaryIdExpressionsValue.isEmpty() ? resolvedFile2PrimaryIdExpressionValue : resolvedFile2PrimaryIdExpressionsValue[0]), createdDate: nowTs, lastUpdatedDate: nowTs]"/>
@@ -371,6 +404,17 @@
                                 in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', sequenceNum: file2KeyFieldSequence, fieldExpression: file2KeyFieldExpression, companyUserGroupId: ruleSetValue.companyUserGroupId, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
                     </iterate>
                 </if>
+                <!-- See the FILE_1 exclusion-filter comment above. -->
+                <set field="file2FilterRows" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.validateExcludeFilterPayload(file2ExcludeFilters, 'Source 2')"/>
+                <set field="file2FilterSequence" from="0"/>
+                <iterate list="file2FilterRows" entry="file2FilterRow">
+                    <set field="file2FilterSequence" from="file2FilterSequence + 1"/>
+                    <service-call name="create#darpan.rule.RuleSetCompareSourceFilter" disable-authz="true"
+                            in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', sequenceNum: file2FilterSequence,
+                                     fieldExpression: file2FilterRow.fieldExpression, operator: file2FilterRow.operator,
+                                     filterValues: file2FilterRow.filterValues, companyUserGroupId: ruleSetValue.companyUserGroupId,
+                                     createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                </iterate>
             </if>
 
             <if condition="!ec.message.hasError() &amp;&amp; !ruleEntries.isEmpty()">

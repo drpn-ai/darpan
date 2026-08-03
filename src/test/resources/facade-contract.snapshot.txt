@@ -532,6 +532,8 @@ SERVICE create RuleSetRun
   allow-remote: true
   IN:
     description : String
+    file1ExcludeFilters : List
+    file1ExcludeFilters.excludeFilter : Map
     file1FileTypeEnumId : String
     file1NsRestletConfigId : String
     file1PrimaryIdExpression : String
@@ -543,6 +545,8 @@ SERVICE create RuleSetRun
     file1SourceTypeEnumId : String
     file1SystemEnumId : String [required]
     file1SystemMessageRemoteId : String
+    file2ExcludeFilters : List
+    file2ExcludeFilters.excludeFilter : Map
     file2FileTypeEnumId : String
     file2NsRestletConfigId : String
     file2PrimaryIdExpression : String

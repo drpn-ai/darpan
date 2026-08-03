@@ -1696,23 +1696,107 @@ end'''
         assertEquals(["POS_SALES_CHANNEL", "DRAFT_SALES_CHANNEL"], filters[0].values)
     }
 
+    // FILE_1's save/persist/load block is a structural mirror of FILE_2's throughout
+    // ReconciliationFacadeServices.xml and buildExcludeFilterResponse, but every other test in this
+    // file exercises FILE_2 only — prove FILE_1 independently so a copy-paste error there cannot hide.
+    @Test
+    void savingFile1ExcludeFiltersPersistsAndLoadsThemTheSameWayAsFile2() {
+        String savedRunId = createRuleSetRun()
+        Map<String, Object> result = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.save#RuleSetRun")
+                .parameters(baseRuleSetSaveParams(savedRunId) +
+                        ([file1ExcludeFilters: [[fieldExpression: "warehouseId", values: ["WH_DROPSHIP"]]]] as Map<String, Object>))
+                .disableAuthz()
+                .call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+
+        List rows = findFilterRows(savedRunId, "FILE_1")
+        assertEquals(1, rows.size())
+        assertEquals("warehouseId", rows[0].fieldExpression)
+        assertEquals("WH_DROPSHIP", rows[0].filterValues)
+        assertEquals(0, findFilterRows(savedRunId, "FILE_2").size())
+
+        Map loaded = loadRuleSetRun(savedRunId)
+        List filters = loaded.file1ExcludeFilters as List
+        assertEquals(1, filters.size())
+        assertEquals("warehouseId", filters[0].fieldExpression)
+        assertEquals(["WH_DROPSHIP"], filters[0].values)
+    }
+
+    // Pins validate-before-delete: both tests below first save a VALID exclusion, then attempt an
+    // invalid save, then assert the original rule survived. A fresh-run-with-nothing-to-delete version
+    // of this test would still pass even if a future refactor reordered the FILE_2 block to delete
+    // existing rows before validating the new payload — which would destroy an operator's
+    // already-configured exclusions on a rejected save.
     @Test
     void blankFieldExpressionIsRejectedAtSave() {
         String savedRunId = createRuleSetRun()
+        saveRuleSetWithFilters(savedRunId, [[fieldExpression: "salesChannelEnumId", values: ["POS_SALES_CHANNEL"]]])
 
         Map result = trySaveRuleSetWithFilters(savedRunId, [[fieldExpression: "  ", values: ["POS_SALES_CHANNEL"]]])
 
         assertTrue(result.errorMessage.toString().toLowerCase().contains("field"))
-        assertEquals(0, findFilterRows(savedRunId, "FILE_2").size())
+        List rows = findFilterRows(savedRunId, "FILE_2")
+        assertEquals(1, rows.size())
+        assertEquals("salesChannelEnumId", rows[0].fieldExpression)
     }
 
     @Test
     void emptyValueListIsRejectedAtSave() {
         String savedRunId = createRuleSetRun()
+        saveRuleSetWithFilters(savedRunId, [[fieldExpression: "salesChannelEnumId", values: ["POS_SALES_CHANNEL"]]])
 
-        Map result = trySaveRuleSetWithFilters(savedRunId, [[fieldExpression: "salesChannelEnumId", values: []]])
+        Map result = trySaveRuleSetWithFilters(savedRunId, [[fieldExpression: "statusId", values: []]])
 
         assertTrue(result.errorMessage.toString().toLowerCase().contains("value"))
+        List rows = findFilterRows(savedRunId, "FILE_2")
+        assertEquals(1, rows.size())
+        assertEquals("salesChannelEnumId", rows[0].fieldExpression)
+    }
+
+    // ── Fix round 1: create#RuleSetRun must be symmetric with save#RuleSetRun, not silently drop
+    // exclusion filters (Moqui strips undeclared in-parameters before the action script ever runs —
+    // "undeclared" is fail-silent, not fail-closed). ──
+
+    @Test
+    void creatingRuleSetRunWithExcludeFiltersPersistsThem() {
+        String savedRunId = createRuleSetRun(
+                [file2ExcludeFilters: [[fieldExpression: "salesChannelEnumId", values: ["POS_SALES_CHANNEL"]]]] as Map<String, Object>)
+
+        List rows = findFilterRows(savedRunId, "FILE_2")
+        assertEquals(1, rows.size())
+        assertEquals("salesChannelEnumId", rows[0].fieldExpression)
+        assertEquals("POS_SALES_CHANNEL", rows[0].filterValues)
+        assertNotNull(rows[0].companyUserGroupId)
+    }
+
+    @Test
+    void creatingRuleSetRunWithoutExcludeFilterKeysPersistsNone() {
+        String savedRunId = createRuleSetRun()
+
+        assertEquals(0, findFilterRows(savedRunId, "FILE_1").size())
+        assertEquals(0, findFilterRows(savedRunId, "FILE_2").size())
+    }
+
+    @Test
+    void creatingRuleSetRunWithAnInvalidExcludeFilterRejectsTheCreate() {
+        Map<String, Object> createParams = baseRuleSetCreateParams() +
+                ([file2ExcludeFilters: [[fieldExpression: "  ", values: ["POS_SALES_CHANNEL"]]]] as Map<String, Object>)
+
+        ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters(createParams)
+                .disableAuthz()
+                .call()
+
+        assertTrue(ec.message.hasError())
+        assertTrue(ec.message.errors.any { String message -> message.toLowerCase().contains("field") })
+        // The invalid FILE_2 payload is validated after RuleSet/CompareScope/FILE_1 source rows are
+        // already created within the same transaction — this proves the whole create rolled back
+        // rather than leaving a partial RuleSet row behind under that run name.
+        assertEquals(0, ec.entity.find("darpan.rule.RuleSet")
+                .condition("ruleSetName", createParams.runName)
+                .disableAuthz().useCache(false).list().size())
     }
 
     private void seedCrossTenantMappingUsingReadableSchemas() {
@@ -2069,22 +2153,30 @@ end'''
 
     // ── Task 7 fixtures: save#RuleSetRun exclusion-filter persistence and list#SavedRuns load ──
 
-    // RULE_SET has a unique (companyUserGroupId, ruleSetName) constraint (RULESET_TENANT_NAME) — this
-    // helper is called once per test method here, so runName must be unique per call, not just the
-    // generated ruleSetId (generateRuleSetId only dedupes the id, not the name).
-    private String createRuleSetRun() {
+    // RULE_SET has a unique (companyUserGroupId, ruleSetName) constraint (RULESET_TENANT_NAME) — every
+    // call needs a unique runName, not just the generated ruleSetId (generateRuleSetId only dedupes
+    // the id, not the name).
+    private Map<String, Object> baseRuleSetCreateParams() {
+        return [
+                runName                 : "Exclude Filter Save Fixture ${UUID.randomUUID()}".toString(),
+                file1SystemEnumId       : "OMS",
+                file1FileTypeEnumId     : "DftCsv",
+                file1PrimaryIdExpression: "order_id",
+                file2SystemEnumId       : "SHOPIFY",
+                file2FileTypeEnumId     : "DftCsv",
+                file2PrimaryIdExpression: "order_id",
+                rules                   : [],
+        ] as Map<String, Object>
+    }
+
+    // extraParams layers on top of baseRuleSetCreateParams — used by the create-time exclude-filter
+    // tests to pass file1ExcludeFilters/file2ExcludeFilters without duplicating the six required
+    // source fields. Asserts success; use the raw ec.service.sync() call directly (see
+    // creatingRuleSetRunWithAnInvalidExcludeFilterRejectsTheCreate) to test a rejected create.
+    private String createRuleSetRun(Map<String, Object> extraParams = [:]) {
         Map<String, Object> createResult = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
-                .parameters([
-                        runName                 : "Exclude Filter Save Fixture ${UUID.randomUUID()}".toString(),
-                        file1SystemEnumId       : "OMS",
-                        file1FileTypeEnumId     : "DftCsv",
-                        file1PrimaryIdExpression: "order_id",
-                        file2SystemEnumId       : "SHOPIFY",
-                        file2FileTypeEnumId     : "DftCsv",
-                        file2PrimaryIdExpression: "order_id",
-                        rules                   : [],
-                ])
+                .parameters(baseRuleSetCreateParams() + extraParams)
                 .disableAuthz()
                 .call()
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())

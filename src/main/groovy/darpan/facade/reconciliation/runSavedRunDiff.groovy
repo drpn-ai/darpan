@@ -366,11 +366,18 @@ def extractApiSource = { Object source, String fileSide, Map artifactContext, Ma
         if (keepFields) extractParams[keepFieldsParameterName] = keepFields
     }
 
-    // Live extract progress: the second side knows the first side's record count for the same
-    // window, so the extractor can heartbeat a real percent onto the run's step timeline.
-    if (progressContext?.reconciliationRunResultId && progressContext?.expectedRecordCount) {
+    // Live extract progress: the extractor heartbeats a running record count onto this stage's
+    // step so the live view can show the count climbing during a multi-minute paged extract. The
+    // count is the progress and needs no denominator; expectedRecordCount is optional and only
+    // adds a percent, which only the second side can have (it divides against the first side's
+    // finished count for the same window). Gating the whole thing on a denominator is what left
+    // the first extract reporting nothing at all.
+    if (progressContext?.reconciliationRunResultId) {
         extractParams.reconciliationRunResultId = progressContext.reconciliationRunResultId
-        extractParams.expectedRecordCount = progressContext.expectedRecordCount
+        extractParams.progressStageCode = progressContext.progressStageCode
+        if (progressContext?.expectedRecordCount) {
+            extractParams.expectedRecordCount = progressContext.expectedRecordCount
+        }
     }
 
     Map extraction = runInternalService(extractServiceName, extractParams)
@@ -748,7 +755,8 @@ try {
                             obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_EXTRACT_FILE1) : null
                             obsStage = RunObservability.STAGE_EXTRACT_FILE1
                             file1Result = file1UsesApiSource ?
-                                    extractApiSource(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, artifactContext) :
+                                    extractApiSource(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, artifactContext,
+                                            [reconciliationRunResultId: obsRunId, progressStageCode: RunObservability.STAGE_EXTRACT_FILE1]) :
                                     stageTextInput(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, inputFile1Name, file1TextValue, artifactContext)
                             if (!ec.message.hasError()) {
                                 RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [recordCount: file1Result.recordCount])
@@ -759,7 +767,8 @@ try {
                             }
                             file2Result = !ec.message.hasError() && file2UsesApiSource ?
                                     extractApiSource(file2Source, ReconciliationSavedRunSupport.FILE_SIDE_2, artifactContext,
-                                            [reconciliationRunResultId: obsRunId, expectedRecordCount: file1Result.recordCount]) :
+                                            [reconciliationRunResultId: obsRunId, progressStageCode: RunObservability.STAGE_EXTRACT_FILE2,
+                                             expectedRecordCount: file1Result.recordCount]) :
                                     !ec.message.hasError() ? stageTextInput(file2Source, ReconciliationSavedRunSupport.FILE_SIDE_2, inputFile2Name, file2TextValue, artifactContext) : [:]
                             if (!ec.message.hasError()) {
                                 RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [recordCount: file2Result.recordCount])

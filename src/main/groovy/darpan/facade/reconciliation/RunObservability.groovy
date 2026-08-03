@@ -166,8 +166,10 @@ class RunObservability {
     /** Bump heartbeat + optional progress on the step (and mirror onto the run for cheap live display). */
     /**
      * Advisory extract progress from a source extractor: finds the RUNNING step for the stage and
-     * heartbeats processed count + a 0..99 progressPercent against the expected total (typically the
-     * other side's record count). Never throws — progress must never fail a run.
+     * heartbeats the processed count onto it. The count is the progress — a percent is reported only
+     * when the caller knows an expected total, which is the case for the second extract of a run
+     * (it can divide against the first side's finished count) but never for the first, where nothing
+     * has completed yet. Never throws — progress must never fail a run.
      */
     static void heartbeatStageProgress(def ec, Object runId, String stageCode, Object processedCount, Object expectedCount) {
         // Cancel check first, and deliberately outside the swallow-everything block below: a
@@ -178,16 +180,19 @@ class RunObservability {
             String runIdValue = norm(runId)
             if (!runIdValue) return
             Integer processed = processedCount as Integer
-            Integer expected = expectedCount as Integer
-            if (processed == null || expected == null || expected <= 0) return
+            if (processed == null) return
             def step = ec.entity.find(RUN_STEP_ENTITY)
                     .condition("reconciliationRunResultId", runIdValue)
                     .condition("stageCode", norm(stageCode))
                     .condition("statusEnumId", STATUS_RUNNING)
                     .useCache(false).one()
             if (step == null) return
-            int percent = Math.min(99, (int) Math.floor(processed * 100.0d / expected))
-            heartbeat(ec, step, [recordCount: processed, progressPercent: percent] as Map<String, Object>)
+            Map<String, Object> progress = [recordCount: processed] as Map<String, Object>
+            Integer expected = expectedCount as Integer
+            if (expected != null && expected > 0) {
+                progress.put("progressPercent", Math.min(99, (int) Math.floor(processed * 100.0d / expected)))
+            }
+            heartbeat(ec, step, progress)
         } catch (Exception ignored) {
         }
     }

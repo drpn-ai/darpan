@@ -113,6 +113,25 @@ class RunObservabilityWriteTest {
     }
 
     @Test
+    void heartbeatStageProgressCountsRecordsWithoutAnExpectedTotal() {
+        // The first extract of a run has no denominator to divide by — nothing has finished yet —
+        // so its progress is a running count. Requiring an expected total meant file1 reported no
+        // progress at all for the whole stage, leaving the live view frozen on "Running".
+        def ec = new FakeEc()
+        String runId = RunObservability.beginRun(ec, [savedRunId: "SR1", companyUserGroupId: "KREWE"])
+        def step = RunObservability.beginStep(ec, runId, [companyUserGroupId: "KREWE"], RunObservability.STAGE_EXTRACT_FILE1)
+
+        RunObservability.heartbeatStageProgress(ec, runId, RunObservability.STAGE_EXTRACT_FILE1, 8450, null)
+
+        assertEquals(8450, step.get("recordCount"))
+        assertNotNull(step.get("heartbeatDate"))
+        // No denominator means no percent to report — the count is the progress.
+        def run = ec.store.find { it.entityName == RunObservability.RUN_RESULT_ENTITY }
+        assertNull(run.get("progressPercent"))
+        assertNotNull(run.get("lastHeartbeatDate"))
+    }
+
+    @Test
     void failRunSetsFailedAndClosesOpenStep() {
         def ec = new FakeEc()
         String runId = RunObservability.beginRun(ec, [savedRunId: "SR1", companyUserGroupId: "KREWE"])

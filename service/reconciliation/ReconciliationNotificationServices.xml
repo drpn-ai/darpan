@@ -119,4 +119,41 @@
         </actions>
     </service>
 
+    <!-- Task 13 fix round 1, Critical 2: originally named facade.ReconciliationFacadeServices.migrate#
+         AutomationExcludeFilters with allow-remote="true"/authenticate="true". data/SecuritySeedData.xml
+         warns that facade.* is an auto-grant trap — the facade.* ArtifactGroupMember grants AUTHZA_ALL
+         to every tenant tier, so any authenticated user (including a view-only member of one tenant)
+         could invoke a cross-tenant migration and read the global automationsScanned count. Moved out of
+         facade.* and matched to this file's own migrate#TenantNotificationSettings posture: authenticate
+         ="false", no allow-remote (defaults false, so it is not reachable via /rpc/json at all). -->
+    <service verb="migrate" noun="AutomationExcludeFilters" authenticate="false" transaction="ignore">
+        <description>One-time backfill: copy each ruleset-backed automation's exclusion filters from its
+            rule set into the automation's own snapshot, across every tenant. Idempotent — a side that
+            already has filter rows is left untouched. Run once after deploying exclusion filters;
+            automations created afterwards are seeded at save time and do not need it. Internal only, not
+            remote: this reads and writes across every tenant with no per-request authorization check, so
+            it must be invoked from a trusted internal/admin path, never exposed to the SPA or
+            /rpc/json.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="automationsScanned" type="Integer"/>
+            <parameter name="automationsSkipped" type="Integer"/>
+            <parameter name="sidesSeeded" type="Integer"/>
+            <parameter name="rowsCreated" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="backfillResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.backfillAutomationExcludeFilters(ec)"/>
+            <set field="automationsScanned" from="backfillResult.automationsScanned"/>
+            <set field="automationsSkipped" from="backfillResult.automationsSkipped"/>
+            <set field="sidesSeeded" from="backfillResult.sidesSeeded"/>
+            <set field="rowsCreated" from="backfillResult.rowsCreated"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+            <message>Backfilled ${rowsCreated} exclusion filter rows across ${sidesSeeded} source sides (${automationsScanned} automations scanned, ${automationsSkipped} skipped).</message>
+        </actions>
+    </service>
+
 </services>

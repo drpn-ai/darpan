@@ -186,9 +186,6 @@
                                         "$ref": "#/components/schemas/ListSavedRunsRequest"
                                     },
                                     {
-                                        "$ref": "#/components/schemas/MigrateAutomationExcludeFiltersRequest"
-                                    },
-                                    {
                                         "$ref": "#/components/schemas/PauseAutomationRequest"
                                     },
                                     {
@@ -354,7 +351,6 @@
                                         "facade.ReconciliationFacadeServices.list#GeneratedOutputs": "#/components/schemas/ListGeneratedOutputsRequest",
                                         "facade.ReconciliationFacadeServices.list#Mappings": "#/components/schemas/ListMappingsRequest",
                                         "facade.ReconciliationFacadeServices.list#SavedRuns": "#/components/schemas/ListSavedRunsRequest",
-                                        "facade.ReconciliationFacadeServices.migrate#AutomationExcludeFilters": "#/components/schemas/MigrateAutomationExcludeFiltersRequest",
                                         "facade.ReconciliationFacadeServices.pause#Automation": "#/components/schemas/PauseAutomationRequest",
                                         "facade.ReconciliationFacadeServices.reprocess#AutomationExecution": "#/components/schemas/ReprocessAutomationExecutionRequest",
                                         "facade.ReconciliationFacadeServices.resume#Automation": "#/components/schemas/ResumeAutomationRequest",
@@ -568,9 +564,6 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/ListSavedRunsResponse"
-                                        },
-                                        {
-                                            "$ref": "#/components/schemas/MigrateAutomationExcludeFiltersResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/PauseAutomationResponse"
@@ -8773,90 +8766,6 @@
                     "result"
                 ]
             },
-            "MigrateAutomationExcludeFiltersParams": {
-                "type": "object",
-                "properties": {
-                    
-                },
-                "description": "One-time backfill: copy each ruleset-backed automation's exclusion filters from its\n            rule set into the automation's own snapshot. Idempotent \u2014 a side that already has filter rows is\n            left untouched. Run once after deploying exclusion filters; automations created afterwards are\n            seeded at save time and do not need it."
-            },
-            "MigrateAutomationExcludeFiltersResult": {
-                "type": "object",
-                "properties": {
-                    "automationsScanned": {
-                        "type": "integer"
-                    },
-                    "automationsSkipped": {
-                        "type": "integer"
-                    },
-                    "sidesSeeded": {
-                        "type": "integer"
-                    },
-                    "rowsCreated": {
-                        "type": "integer"
-                    }
-                }
-            },
-            "MigrateAutomationExcludeFiltersRequest": {
-                "type": "object",
-                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.migrate#AutomationExcludeFilters",
-                "x-darpan-method": "facade.ReconciliationFacadeServices.migrate#AutomationExcludeFilters",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "method": {
-                        "type": "string",
-                        "const": "facade.ReconciliationFacadeServices.migrate#AutomationExcludeFilters"
-                    },
-                    "params": {
-                        "$ref": "#/components/schemas/MigrateAutomationExcludeFiltersParams"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "id",
-                    "method"
-                ]
-            },
-            "MigrateAutomationExcludeFiltersResponse": {
-                "type": "object",
-                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.migrate#AutomationExcludeFilters. Check result.ok / result.errors for business failures.",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "result": {
-                        "$ref": "#/components/schemas/MigrateAutomationExcludeFiltersResult"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "result"
-                ]
-            },
             "PauseAutomationParams": {
                 "type": "object",
                 "properties": {
@@ -14382,7 +14291,6 @@
         "facade.ReconciliationFacadeServices.list#GeneratedOutputs": "ListGeneratedOutputs",
         "facade.ReconciliationFacadeServices.list#Mappings": "ListMappings",
         "facade.ReconciliationFacadeServices.list#SavedRuns": "ListSavedRuns",
-        "facade.ReconciliationFacadeServices.migrate#AutomationExcludeFilters": "MigrateAutomationExcludeFilters",
         "facade.ReconciliationFacadeServices.pause#Automation": "PauseAutomation",
         "facade.ReconciliationFacadeServices.reprocess#AutomationExecution": "ReprocessAutomationExecution",
         "facade.ReconciliationFacadeServices.resume#Automation": "ResumeAutomation",

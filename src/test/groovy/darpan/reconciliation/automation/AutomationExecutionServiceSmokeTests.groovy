@@ -25,6 +25,13 @@ class AutomationExecutionServiceSmokeTests {
     private static final JsonSlurper JSON_SLURPER = new JsonSlurper()
     private static final String TEST_USER_ID = "TEST_CUSTOMER_USER"
     private static final String TEST_COMPANY_USER_GROUP_ID = "KREWE"
+    // Task 13 fix round 1, Important 5: a second tenant, deliberately never made active for this
+    // session, so a test can prove the backfill sweep is not scoped to the caller's active tenant.
+    // GORJANA is already seeded as a real moqui.security.UserGroup by
+    // ReconciliationSmokeTestSupport.seedSftpServerFixtures (called from setup() below) — reused
+    // here rather than inventing a new tenant id, since companyUserGroupId is FK-checked against
+    // UserGroup and an unseeded id fails the entity create outright.
+    private static final String OTHER_TENANT_USER_GROUP_ID = "GORJANA"
     private static final String FILTER_TEST_MAPPING_ID = "AUTO_FILTER_TEST_MAPPING"
 
     private ExecutionContext ec
@@ -348,6 +355,63 @@ class AutomationExecutionServiceSmokeTests {
         assertEquals("statusId", rows[1].fieldExpression)
     }
 
+    @Test
+    void backfillSweepsEveryTenantAndStampsEachAutomationsOwnCompanyUserGroupId() {
+        // Task 13 fix round 1, Critical 1 + Important 5 — the central regression this round exists
+        // for. Every other fixture in this file saves through save#Automation, which stamps the
+        // caller's active session tenant (KREWE) onto everything, so no combination of them can tell
+        // "the sweep processes every tenant" apart from "the sweep processes only mine". Build a
+        // second tenant's rule set + automation directly (bypassing save#Automation) with no active
+        // session tenant ever pointed at it, and prove the sweep still finds it, seeds it from its OWN
+        // rule set (not an empty read silently swallowed by session-tenant scoping), and stamps the
+        // new row with ITS OWN companyUserGroupId rather than the session's.
+        Map otherTenantScope = createRuleSetCompareScopeWithFilterForTenant(
+                OTHER_TENANT_USER_GROUP_ID, "FILE_2", "salesChannelEnumId", "POS_SALES_CHANNEL")
+        String otherTenantAutomationId = createAutomationForTenant(OTHER_TENANT_USER_GROUP_ID,
+                otherTenantScope.compareScopeId as String, otherTenantScope.ruleSetId as String)
+
+        String sameTenantCompareScopeId = createRuleSetCompareScopeWithFilter("FILE_2", "statusId", "ORDER_CANCELLED")
+        String sameTenantAutomationId = saveAutomationForCompareScope(sameTenantCompareScopeId)
+        clearAutomationFilterRows(sameTenantAutomationId)
+
+        runBackfill()
+
+        List otherTenantRows = findAutomationFilterRows(otherTenantAutomationId, "FILE_2")
+        assertEquals(1, otherTenantRows.size(),
+                "second tenant's automation was not seeded — the sweep is scoped to the caller's session tenant")
+        assertEquals("salesChannelEnumId", otherTenantRows[0].fieldExpression)
+        assertEquals(OTHER_TENANT_USER_GROUP_ID, otherTenantRows[0].companyUserGroupId)
+
+        List sameTenantRows = findAutomationFilterRows(sameTenantAutomationId, "FILE_2")
+        assertEquals(1, sameTenantRows.size())
+        assertEquals("statusId", sameTenantRows[0].fieldExpression)
+        assertEquals(TEST_COMPANY_USER_GROUP_ID, sameTenantRows[0].companyUserGroupId)
+    }
+
+    @Test
+    void backfillSeedsAnEmptySideIndependentlyWhenTheOtherSideIsAlreadyPopulated() {
+        // Minor, bundled with fix round 1: a regression that hoisted the existing-filter-rows check
+        // out of the per-fileSide loop (checking once per automation instead of once per side) would
+        // pass all the other backfill tests, since every other test starts from BOTH sides empty. Start
+        // from FILE_1 already populated (seeded on the real first save) and only FILE_2 cleared, so a
+        // per-automation (rather than per-fileSide) existence check would wrongly skip FILE_2 too.
+        String compareScopeId = createRuleSetCompareScopeWithFilter("FILE_1", "displayFinancialStatus", "PENDING")
+        addRuleSetCompareSourceFilter(compareScopeId, "FILE_2", "salesChannelEnumId", "POS_SALES_CHANNEL")
+        String automationId = saveAutomationForCompareScope(compareScopeId)
+        assertEquals(1, findAutomationFilterRows(automationId, "FILE_1").size(),
+                "test setup assumption failed: FILE_1 should already be seeded from the real first save")
+        clearAutomationFilterRowsForSide(automationId, "FILE_2")
+
+        runBackfill()
+
+        List file1Rows = findAutomationFilterRows(automationId, "FILE_1")
+        assertEquals(1, file1Rows.size())
+        assertEquals("displayFinancialStatus", file1Rows[0].fieldExpression)
+        List file2Rows = findAutomationFilterRows(automationId, "FILE_2")
+        assertEquals(1, file2Rows.size())
+        assertEquals("salesChannelEnumId", file2Rows[0].fieldExpression)
+    }
+
     private void seedApiAutomation() {
         upsertEntityValue("darpan.reconciliation.ReconciliationAutomation", [automationId: "AUTO_API_ARTIFACT"], [
                 automationId            : "AUTO_API_ARTIFACT",
@@ -642,14 +706,116 @@ class AutomationExecutionServiceSmokeTests {
         ]).create()
     }
 
-    /** Calls the one-time backfill service and returns its result map. */
+    /**
+     * Calls the one-time backfill service and returns its result map. Task 13 fix round 1, Critical
+     * 2: moved from facade.ReconciliationFacadeServices (auto-grant trap for facade.*, allow-remote)
+     * to reconciliation.ReconciliationNotificationServices, matching migrate#TenantNotificationSettings's
+     * authenticate="false"/no-allow-remote posture — internal only, not reachable via /rpc/json.
+     */
     private Map<String, Object> runBackfill() {
         Map<String, Object> result = (Map<String, Object>) ec.service.sync()
-                .name("facade.ReconciliationFacadeServices.migrate#AutomationExcludeFilters")
+                .name("reconciliation.ReconciliationNotificationServices.migrate#AutomationExcludeFilters")
                 .disableAuthz()
                 .call()
-        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertTrue((Boolean) result.ok, result.errors?.toString())
         return result
+    }
+
+    /** Deletes ReconciliationAutomationSourceFilter rows for one automation/fileSide only. */
+    private void clearAutomationFilterRowsForSide(String automationId, String fileSide) {
+        ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter")
+                .condition("automationId", automationId)
+                .condition("fileSide", fileSide)
+                .disableAuthz().useCache(false).deleteAll()
+    }
+
+    /**
+     * Same as {@link #createRuleSetCompareScopeWithFilter}, but stamps the RuleSet and the filter row
+     * for an explicit tenant instead of the fixed {@code TEST_COMPANY_USER_GROUP_ID} session tenant.
+     * Task 13 fix round 1, Important 5: every other fixture in this file ends up owned by the same
+     * session tenant, so no combination of them can distinguish "the sweep processes every tenant"
+     * from "the sweep processes only the caller's active tenant" — this fixture exists so a test can
+     * build a genuinely different tenant's rule set to tell the two apart.
+     */
+    private Map<String, Object> createRuleSetCompareScopeWithFilterForTenant(String tenantUserGroupId, String fileSide,
+            String fieldExpression, String value) {
+        String ruleSetId = nextFilterFixtureId("RSTEN")
+        String compareScopeId = nextFilterFixtureId("SCTEN")
+        ec.entity.makeValue("darpan.rule.RuleSet").setAll([
+                ruleSetId         : ruleSetId,
+                ruleSetName       : "Tenant RuleSet ${ruleSetId}".toString(),
+                version           : "1.0",
+                companyUserGroupId: tenantUserGroupId,
+                createdByUserId   : TEST_USER_ID,
+        ]).create()
+        ec.entity.makeValue("darpan.rule.RuleSetCompareScope").setAll([
+                compareScopeId: compareScopeId,
+                ruleSetId     : ruleSetId,
+                objectType    : "ORDER",
+                description   : "Tenant compare scope ${compareScopeId}".toString(),
+        ]).create()
+        ["FILE_1", "FILE_2"].each { String side ->
+            ec.entity.makeValue("darpan.rule.RuleSetCompareSource").setAll([
+                    compareScopeId     : compareScopeId,
+                    fileSide           : side,
+                    systemEnumId       : side == "FILE_1" ? "SHOPIFY" : "OMS",
+                    fileTypeEnumId     : "DftJson",
+                    primaryIdExpression: "id",
+            ]).create()
+        }
+        ec.entity.makeValue("darpan.rule.RuleSetCompareSourceFilter").setAll([
+                compareScopeId    : compareScopeId,
+                fileSide          : fileSide,
+                sequenceNum       : 1,
+                fieldExpression   : fieldExpression,
+                operator          : "EXCLUDE_IN",
+                filterValues      : value,
+                companyUserGroupId: tenantUserGroupId,
+        ]).create()
+        return [ruleSetId: ruleSetId, compareScopeId: compareScopeId]
+    }
+
+    /**
+     * Creates a ReconciliationAutomation row directly for an explicit tenant, bypassing
+     * save#Automation — which stamps the SESSION's active tenant, not an arbitrary one. This is the
+     * shape every production automation actually has: created independently of whichever tenant an
+     * operator's session happens to be scoped to when the one-time backfill later runs.
+     */
+    private String createAutomationForTenant(String tenantUserGroupId, String compareScopeId, String ruleSetId) {
+        String automationId = nextFilterFixtureId("AUTOTEN")
+        ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomation").setAll([
+                automationId      : automationId,
+                automationName    : "Tenant automation ${automationId}".toString(),
+                companyUserGroupId: tenantUserGroupId,
+                createdByUserId   : TEST_USER_ID,
+                inputModeEnumId   : AutomationExecutionSupport.AUTOMATION_INPUT_SFTP_FILES,
+                savedRunId        : ruleSetId,
+                savedRunType      : "ruleset",
+                ruleSetId         : ruleSetId,
+                compareScopeId    : compareScopeId,
+                isActive          : "Y",
+                createdDate       : ec.user.nowTimestamp,
+                lastUpdatedDate   : ec.user.nowTimestamp,
+        ]).create()
+        // ReconciliationAutomationSourceFilter FKs to ReconciliationAutomationSource(automationId,
+        // fileSide) — exactly the row every pre-existing production automation already has on both
+        // sides (that is why the create-time seed can never fire for them). Without these, every
+        // filter-row insert the backfill attempts for this automation fails with a referential-
+        // integrity violation.
+        ["FILE_1", "FILE_2"].each { String side ->
+            ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomationSource").setAll([
+                    automationId      : automationId,
+                    fileSide          : side,
+                    companyUserGroupId: tenantUserGroupId,
+                    createdByUserId   : TEST_USER_ID,
+                    sourceTypeEnumId  : AutomationExecutionSupport.AUTOMATION_SOURCE_API,
+                    systemEnumId      : side == "FILE_1" ? "SHOPIFY" : "OMS",
+                    fileTypeEnumId    : "DftJson",
+                    createdDate       : ec.user.nowTimestamp,
+                    lastUpdatedDate   : ec.user.nowTimestamp,
+            ]).create()
+        }
+        return automationId
     }
 
     private String ensureFilterTestMapping() {

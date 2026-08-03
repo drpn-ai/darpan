@@ -1576,6 +1576,38 @@ end'''
         assertTrue(((List) (postDeleteOutputListResult.generatedOutputs ?: [])).isEmpty())
     }
 
+    @Test
+    void excludeFiltersAreLoadedInSequenceOrderForTheSource() {
+        // Fixture: a compare source with two exclusion rows created out of order.
+        String compareScopeId = createCompareScopeWithSource("FILE_2")
+        createExcludeFilterRow(compareScopeId, "FILE_2", 2, "statusId", "ORDER_CANCELLED")
+        createExcludeFilterRow(compareScopeId, "FILE_2", 1, "salesChannelEnumId", "POS_SALES_CHANNEL,DRAFT_SALES_CHANNEL")
+
+        def source = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition("compareScopeId", compareScopeId).condition("fileSide", "FILE_2")
+                .disableAuthz().useCache(false).one()
+
+        List<Map<String, Object>> filters = ReconciliationSavedRunSupport.resolveExtractExcludeFilters(ec, source)
+
+        assertEquals(2, filters.size())
+        assertEquals(1, filters[0].sequenceNum)
+        assertEquals("salesChannelEnumId", filters[0].fieldExpression)
+        assertEquals("EXCLUDE_IN", filters[0].operator)
+        assertEquals("POS_SALES_CHANNEL,DRAFT_SALES_CHANNEL", filters[0].filterValues)
+        assertEquals(2, filters[1].sequenceNum)
+    }
+
+    @Test
+    void sourceWithNoExcludeFilterRowsReturnsAnEmptyList() {
+        String compareScopeId = createCompareScopeWithSource("FILE_1")
+
+        def source = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition("compareScopeId", compareScopeId).condition("fileSide", "FILE_1")
+                .disableAuthz().useCache(false).one()
+
+        assertEquals([], ReconciliationSavedRunSupport.resolveExtractExcludeFilters(ec, source))
+    }
+
     private void seedCrossTenantMappingUsingReadableSchemas() {
         upsertEntity("moqui.security.UserGroup", [userGroupId: GORJANA], [
                 userGroupId    : GORJANA,
@@ -1861,6 +1893,47 @@ end'''
         }
         ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, tenantId)
         ec.message.clearErrors()
+    }
+
+    // Creates a full rule-set compare scope (both file sides) through the real create#RuleSetRun
+    // facade path, so the resulting RuleSetCompareScope/RuleSetCompareSource rows carry the same
+    // denormalized companyUserGroupId tenant stamp production runs produce. fileSide only varies the
+    // run name so repeated calls within one test do not collide.
+    private String createCompareScopeWithSource(String fileSide) {
+        Map<String, Object> createResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters([
+                        runName                 : "Exclude Filter Fixture ${fileSide}",
+                        file1SystemEnumId       : "OMS",
+                        file1FileTypeEnumId     : "DftCsv",
+                        file1PrimaryIdExpression: "order_id",
+                        file2SystemEnumId       : "SHOPIFY",
+                        file2FileTypeEnumId     : "DftCsv",
+                        file2PrimaryIdExpression: "order_id",
+                        rules                   : [],
+                ])
+                .disableAuthz()
+                .call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        return createResult.savedRun.compareScopeId as String
+    }
+
+    // RuleSetCompareSourceFilter carries its own denormalized companyUserGroupId (mirroring
+    // RuleSetCompareSourceKeyField), so the fixture stamps it explicitly to KREWE — the active tenant
+    // this file logs in as by default (see clearErrors()) — the same way production create#RuleSetRun
+    // stamps sibling child rows from the parent RuleSet.
+    private void createExcludeFilterRow(String compareScopeId, String fileSide, int sequenceNum,
+                                        String fieldExpression, String filterValues) {
+        ec.service.sync().name("create#darpan.rule.RuleSetCompareSourceFilter").parameters([
+                compareScopeId    : compareScopeId,
+                fileSide          : fileSide,
+                sequenceNum       : sequenceNum,
+                fieldExpression   : fieldExpression,
+                operator          : "EXCLUDE_IN",
+                filterValues      : filterValues,
+                companyUserGroupId: KREWE,
+        ]).disableAuthz().call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
     }
 
     private void upsertEntity(String entityName, Map<String, Object> pkFields, Map<String, Object> fields) {

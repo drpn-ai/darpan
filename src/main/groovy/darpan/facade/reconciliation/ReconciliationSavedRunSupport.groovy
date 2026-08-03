@@ -612,6 +612,32 @@ class ReconciliationSavedRunSupport {
     }
 
     /**
+     * Configured exclusion rules for one compare source, ordered by sequenceNum. Returns an empty
+     * list when the source has no rows, which is what keeps pre-feature rule sets extracting exactly
+     * as they did before this feature. RuleSetCompareSourceFilter carries its own denormalized
+     * companyUserGroupId (same shape as RuleSetCompareSourceKeyField above), so it is read the same
+     * way — directly tenant-scoped, not via the transitively-owned findGlobalUnscoped pattern used
+     * for RuleSetCompareSource itself.
+     */
+    static List<Map<String, Object>> resolveExtractExcludeFilters(def ec, Object source) {
+        String compareScopeId = normalize(source?.compareScopeId)
+        String fileSide = normalize(source?.fileSide)
+        if (!compareScopeId || !fileSide) return []
+
+        List filterRows = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSourceFilter")
+                .condition("compareScopeId", compareScopeId).condition("fileSide", fileSide)
+                .orderBy("sequenceNum").useCache(false).list() ?: []
+        return filterRows.collect { Object row ->
+            [
+                    sequenceNum    : row.sequenceNum,
+                    fieldExpression: normalize(row.fieldExpression),
+                    operator       : normalize(row.operator),
+                    filterValues   : normalize(row.filterValues),
+            ] as Map<String, Object>
+        }
+    }
+
+    /**
      * Derives the top-level record field a JSONPath-style compare expression reads, e.g.
      * {@code $.records[*].externalId} → {@code externalId}, {@code $.records[*].items[*].sku} →
      * {@code items} (keeping the whole nested field), plain {@code id} → {@code id}.

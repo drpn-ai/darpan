@@ -366,6 +366,15 @@ def extractApiSource = { Object source, String fileSide, Map artifactContext, Ma
         if (keepFields) extractParams[keepFieldsParameterName] = keepFields
     }
 
+    // Registry-driven record exclusion: when the connector declares a filter parameter, hand it the
+    // source's configured rules so unwanted records are dropped inside the getter, before they reach
+    // the extract file. Connectors that declare no parameter never receive filters.
+    String filterParameterName = normalize(connector.filterParameterName)
+    if (filterParameterName) {
+        List<Map<String, Object>> excludeFilters = ReconciliationSavedRunSupport.resolveExtractExcludeFilters(ec, source)
+        if (excludeFilters) extractParams[filterParameterName] = excludeFilters
+    }
+
     // Live extract progress: the extractor heartbeats a running record count onto this stage's
     // step so the live view can show the count climbing during a multi-minute paged extract. The
     // count is the progress and needs no denominator; expectedRecordCount is optional and only

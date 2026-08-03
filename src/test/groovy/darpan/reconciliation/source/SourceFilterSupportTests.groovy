@@ -147,7 +147,13 @@ class SourceFilterSupportTests {
 
     @Test
     void missingOperatorDefaultsToExcludeIn() {
-        assertEquals("EXCLUDE_IN", channelRule("POS_SALES_CHANNEL")[0].operator)
+        List<Map<String, Object>> rules = SourceFilterSupport.parseRules([[
+                sequenceNum    : 1,
+                fieldExpression: "salesChannelEnumId",
+                filterValues   : "POS_SALES_CHANNEL",
+        ]])
+
+        assertEquals("EXCLUDE_IN", rules[0].operator)
     }
 
     @Test

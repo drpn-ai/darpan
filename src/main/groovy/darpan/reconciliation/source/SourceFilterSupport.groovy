@@ -1,5 +1,7 @@
 package darpan.reconciliation.source
 
+import java.util.Locale
+
 import static darpan.common.ValueSupport.normalize
 
 /**
@@ -53,7 +55,7 @@ class SourceFilterSupport {
             if (!fieldExpression) {
                 throw new IllegalArgumentException("Source exclusion filter ${sequenceNum} has no field to test.".toString())
             }
-            String operator = (normalize(row.get("operator")) ?: OPERATOR_EXCLUDE_IN).toUpperCase()
+            String operator = (normalize(row.get("operator")) ?: OPERATOR_EXCLUDE_IN).toUpperCase(Locale.ROOT)
             if (operator != OPERATOR_EXCLUDE_IN) {
                 throw new IllegalArgumentException(
                         "Source exclusion filter ${sequenceNum} uses unsupported operator '${operator}'.".toString())
@@ -67,7 +69,7 @@ class SourceFilterSupport {
                         "Source exclusion filter ${sequenceNum} lists ${values.size()} values; the maximum is ${MAX_VALUES_PER_RULE}.".toString())
             }
             Set<String> matchValues = new LinkedHashSet<>()
-            values.each { String value -> matchValues.add(value.toUpperCase()) }
+            values.each { String value -> matchValues.add(value.toUpperCase(Locale.ROOT)) }
 
             Map<String, Object> rule = [
                     sequenceNum    : sequenceNum,
@@ -91,7 +93,7 @@ class SourceFilterSupport {
             Object rawValue = row.find { key, ignored -> normalize(key) == fieldExpression }?.value
             String candidate = normalize(rawValue)
             if (!candidate) continue
-            if (((Set<String>) rule.get("matchValues")).contains(candidate.toUpperCase())) return rule
+            if (((Set<String>) rule.get("matchValues")).contains(candidate.toUpperCase(Locale.ROOT))) return rule
         }
         return null
     }

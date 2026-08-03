@@ -1673,6 +1673,38 @@ class AutomationExecutionSupportTests {
         assertFalse(serviceParams.containsKey("sourceFilters"))
     }
 
+    @Test
+    void automationSourceFiltersAreReturnedInSequenceOrder() {
+        // Fix round 1: SourceFilterSupport.firstMatchingRule returns the FIRST matching rule in list
+        // order, and that rule owns the excluded count (ReconciliationEntities.xml:381-382 on
+        // ReconciliationAutomationSourceFilter.sequenceNum). Seed the rows through the fake OUT of
+        // sequence order (sequenceNum 2 before 1) — a loader that lost its .orderBy("sequenceNum") call
+        // would return them in this insertion order, [2, 1], and this test would fail.
+        FakeEc ec = fakeEc()
+        ec.entity.add("darpan.reconciliation.ReconciliationAutomationSourceFilter", [
+                automationId   : "AUTO_API",
+                fileSide       : "FILE_1",
+                sequenceNum    : 2,
+                fieldExpression: "returnStatus",
+                operator       : "EXCLUDE_IN",
+                filterValues   : "RETURNED",
+        ])
+        ec.entity.add("darpan.reconciliation.ReconciliationAutomationSourceFilter", [
+                automationId   : "AUTO_API",
+                fileSide       : "FILE_1",
+                sequenceNum    : 1,
+                fieldExpression: "salesChannelEnumId",
+                operator       : "EXCLUDE_IN",
+                filterValues   : "POS_SALES_CHANNEL",
+        ])
+
+        List<Map<String, Object>> filters = AutomationRuntimeSupport.loadAutomationSourceFilters(ec, "AUTO_API", "FILE_1")
+
+        assertEquals([1, 2], filters*.sequenceNum)
+        assertEquals("salesChannelEnumId", filters[0].fieldExpression)
+        assertEquals("returnStatus", filters[1].fieldExpression)
+    }
+
     private static FakeEc fakeEc() {
         FakeEc ec = new FakeEc(
                 entity: new FakeEntityFacade(),
@@ -1851,6 +1883,11 @@ class AutomationExecutionSupportTests {
         String entityName
         Map<String, Object> conditions = [:]
         Integer maxRows
+        // Task 6 exclusion filters, fix round 1: orderBy is honoured, not a no-op — see list() below.
+        // Deliberately null until orderBy() is called: a test proving ordering matters must fail when the
+        // production .orderBy("sequenceNum") call is removed, which only happens if this fake sorts ONLY
+        // when told to, not unconditionally.
+        String orderByField
 
         FakeFind condition(String fieldName, Object value) {
             conditions[fieldName] = value
@@ -1862,12 +1899,15 @@ class AutomationExecutionSupportTests {
             return this
         }
 
-        // Task 6 (automation exclusion filters): loadAutomationSourceFilters chains .orderBy("sequenceNum")
-        // on every extractor dispatch, including runs with zero configured filter rows. No test here
-        // asserts on ordering itself (rows are inserted in fixture order and stay that way), so this is a
-        // pass-through — but it must exist or every full executeAutomation() test breaks with a
-        // MissingMethodException the moment the real production code calls .orderBy() on this fake finder.
-        FakeFind orderBy(String fieldName) { return this }
+        // Task 6 (automation exclusion filters), fix round 1: loadAutomationSourceFilters chains
+        // .orderBy("sequenceNum") on every extractor dispatch — the ordering is load-bearing (the first
+        // matching rule in SourceFilterSupport.firstMatchingRule owns the excluded count). list() below
+        // sorts by this field ONLY when orderBy() was actually called, so a dropped/typo'd .orderBy(...)
+        // call in production code changes the returned order and fails automationSourceFiltersAreReturnedInSequenceOrder.
+        FakeFind orderBy(String fieldName) {
+            this.orderByField = fieldName
+            return this
+        }
 
         FakeFind disableAuthz() { return this }
 
@@ -1886,6 +1926,9 @@ class AutomationExecutionSupportTests {
                     // the same equality check below is IS-NULL-compatible with no special-casing.
                     value[fieldName] == expected
                 }
+            }
+            if (orderByField) {
+                matchedRows = matchedRows.sort(false) { FakeValue row -> row[orderByField] as Comparable }
             }
             return maxRows != null ? matchedRows.take(maxRows) : matchedRows
         }

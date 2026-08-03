@@ -383,6 +383,89 @@ class AutomationFacadeSupport {
         }
     }
 
+    /**
+     * One-time backfill for automations created before exclusion filters existed. The create-time
+     * seed only fires for a fileSide with no ReconciliationAutomationSource row, and every existing
+     * automation has both — so without this there is no write path at all for their filter rows and
+     * every pre-existing schedule silently disagrees with its interactive run.
+     *
+     * Idempotent and non-destructive: a side that already has filter rows is left completely alone,
+     * so a snapshot deliberately frozen at an older rule-set state is never refreshed.
+     *
+     * Known limitation: a side with zero rows because an operator deliberately cleared it is
+     * indistinguishable from one that was never seeded, and will be re-seeded. That is acceptable
+     * today because no UI path can clear an automation's exclusions — the automation wizard never
+     * submits them — so zero rows means never-seeded in practice.
+     */
+    static Map<String, Object> backfillAutomationExcludeFilters(def ec) {
+        int automationsScanned = 0
+        int automationsSkipped = 0
+        int sidesSeeded = 0
+        int rowsCreated = 0
+
+        List automations = TenantScopedFinder.findGlobalUnscoped(
+                ec, "darpan.reconciliation.ReconciliationAutomation",
+                "one-time backfill sweeps every tenant's automations by design; no active tenant, no user entry point")
+                .useCache(false).list() ?: []
+
+        Timestamp nowTs = ec.user.nowTimestamp
+        for (def automation : automations) {
+            automationsScanned++
+            String automationId = normalize(automation.automationId)
+            String compareScopeId = normalize(automation.compareScopeId)
+            if (!compareScopeId) { automationsSkipped++; continue }
+
+            for (String fileSide : FILE_SIDES) {
+                // Same unscoped-read pattern as AutomationRuntimeSupport.loadAutomationSourceFilters:
+                // the automation was already resolved via the unscoped sweep above, so this is a
+                // continuation of the same tenant-neutral migration read, not a fresh access decision
+                // (P0 #4 — bare disableAuthz is CI-banned by DisableAuthzRatchetTest).
+                List existing = TenantScopedFinder.findGlobalUnscoped(
+                        ec, "darpan.reconciliation.ReconciliationAutomationSourceFilter",
+                        "one-time backfill checks whether this automation/fileSide already has filter rows before seeding")
+                        .condition("automationId", automationId)
+                        .condition("fileSide", fileSide)
+                        .useCache(false).list() ?: []
+                if (existing) continue
+
+                List<Map<String, Object>> seeded = seedFromRuleSet(ec, compareScopeId, fileSide)
+                if (!seeded) continue
+
+                sidesSeeded++
+                int sequenceNum = 0
+                for (Map<String, Object> row : seeded) {
+                    sequenceNum++
+                    // Write, not a read — TenantScopedFinder has no create-side equivalent, so this
+                    // stays a bare disableAuthz service call, same category as the other cross-tenant
+                    // migration writes already allowlisted in DisableAuthzRatchetTest (KEPT BARE).
+                    ec.service.sync().name("create#darpan.reconciliation.ReconciliationAutomationSourceFilter")
+                            .parameters([
+                                    automationId      : automationId,
+                                    fileSide          : fileSide,
+                                    sequenceNum       : sequenceNum,
+                                    fieldExpression   : row.fieldExpression,
+                                    operator          : row.operator,
+                                    filterValues      : row.filterValues,
+                                    // Stamped from the automation, not the session: the sweep runs
+                                    // across every tenant with no active tenant of its own, and the
+                                    // tenant-scoped capture on the save path cannot see an unstamped row.
+                                    companyUserGroupId: normalize(automation.companyUserGroupId),
+                                    createdByUserId   : normalize(automation.createdByUserId),
+                                    createdDate       : nowTs,
+                                    lastUpdatedDate   : nowTs,
+                            ]).disableAuthz().call()
+                    rowsCreated++
+                }
+            }
+        }
+        return [
+                automationsScanned: automationsScanned,
+                automationsSkipped: automationsSkipped,
+                sidesSeeded       : sidesSeeded,
+                rowsCreated       : rowsCreated,
+        ] as Map<String, Object>
+    }
+
     protected static Map<String, Object> resolveSavedRunForSave(def ec, Map input) {
         Map savedRunPayload = (input.savedRun instanceof Map ? input.savedRun :
                 input.newSavedRun instanceof Map ? input.newSavedRun : null) as Map

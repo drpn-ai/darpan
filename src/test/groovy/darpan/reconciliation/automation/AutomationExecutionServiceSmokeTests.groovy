@@ -259,6 +259,95 @@ class AutomationExecutionServiceSmokeTests {
         assertEquals([], file1Source.excludeFilters ?: [])
     }
 
+    // -- One-time backfill for pre-existing automations (Task 13) -----------------------------------
+
+    @Test
+    void backfillSeedsAnExistingAutomationThatHasNoFilterRows() {
+        // The state every production automation is in: created before the feature existed, so both
+        // source rows exist (which is exactly why the create-time seed can never fire for it).
+        String compareScopeId = createRuleSetCompareScopeWithFilter("FILE_2", "salesChannelEnumId", "POS_SALES_CHANNEL")
+        String automationId = saveAutomationForCompareScope(compareScopeId)
+        clearAutomationFilterRows(automationId)
+
+        Map result = runBackfill()
+
+        List rows = findAutomationFilterRows(automationId, "FILE_2")
+        assertEquals(1, rows.size())
+        assertEquals("salesChannelEnumId", rows[0].fieldExpression)
+        assertEquals("POS_SALES_CHANNEL", rows[0].filterValues)
+        assertNotNull(rows[0].companyUserGroupId)
+        assertTrue((result.rowsCreated as Integer) >= 1)
+    }
+
+    @Test
+    void backfillIsIdempotentAndNeverOverwritesAnExistingSnapshot() {
+        // Re-running must be safe: a snapshot deliberately frozen at an older rule-set state must
+        // not be silently refreshed to the current one.
+        String compareScopeId = createRuleSetCompareScopeWithFilter("FILE_2", "salesChannelEnumId", "POS_SALES_CHANNEL")
+        String automationId = saveAutomationForCompareScope(compareScopeId)
+        replaceAutomationFilterRows(automationId, "FILE_2", "statusId", "ORDER_CANCELLED")
+
+        runBackfill()
+        runBackfill()
+
+        List rows = findAutomationFilterRows(automationId, "FILE_2")
+        assertEquals(1, rows.size())
+        assertEquals("statusId", rows[0].fieldExpression)
+    }
+
+    @Test
+    void backfillSkipsAutomationsWithNoCompareScope() {
+        String automationId = saveAutomationWithoutCompareScope()
+
+        Map result = runBackfill()
+
+        assertEquals(0, findAutomationFilterRows(automationId, "FILE_2").size())
+        assertTrue((result.automationsSkipped as Integer) >= 1)
+    }
+
+    @Test
+    void backfillSeedsNothingWhenTheRuleSetHasNoExclusions() {
+        String compareScopeId = createCompareScopeWithNoFilters()
+        String automationId = saveAutomationForCompareScope(compareScopeId)
+        clearAutomationFilterRows(automationId)
+
+        runBackfill()
+
+        assertEquals(0, findAutomationFilterRows(automationId, "FILE_1").size())
+        assertEquals(0, findAutomationFilterRows(automationId, "FILE_2").size())
+    }
+
+    @Test
+    void backfillCopiesBothSidesIndependently() {
+        String compareScopeId = createRuleSetCompareScopeWithFilter("FILE_1", "displayFinancialStatus", "PENDING")
+        addRuleSetCompareSourceFilter(compareScopeId, "FILE_2", "salesChannelEnumId", "POS_SALES_CHANNEL")
+        String automationId = saveAutomationForCompareScope(compareScopeId)
+        clearAutomationFilterRows(automationId)
+
+        runBackfill()
+
+        assertEquals("displayFinancialStatus", findAutomationFilterRows(automationId, "FILE_1")[0].fieldExpression)
+        assertEquals("salesChannelEnumId", findAutomationFilterRows(automationId, "FILE_2")[0].fieldExpression)
+    }
+
+    @Test
+    void backfillPreservesSequenceOrderAcrossTheCopy() {
+        String compareScopeId = createRuleSetCompareScopeWithFilter("FILE_2", "salesChannelEnumId", "POS_SALES_CHANNEL")
+        addRuleSetCompareSourceFilter(compareScopeId, "FILE_2", "statusId", "ORDER_CANCELLED")
+        String automationId = saveAutomationForCompareScope(compareScopeId)
+        clearAutomationFilterRows(automationId)
+
+        runBackfill()
+
+        List rows = findAutomationFilterRows(automationId, "FILE_2")
+        // sequenceNum is a Moqui number-integer field, which the real EntityFacade returns as Long —
+        // normalize to int before comparing against an Integer literal list (List.equals is strict
+        // element-wise .equals(), with no numeric coercion, unlike the scalar assertEquals below).
+        assertEquals([1, 2], (rows*.sequenceNum as List<Number>)*.intValue())
+        assertEquals("salesChannelEnumId", rows[0].fieldExpression)
+        assertEquals("statusId", rows[1].fieldExpression)
+    }
+
     private void seedApiAutomation() {
         upsertEntityValue("darpan.reconciliation.ReconciliationAutomation", [automationId: "AUTO_API_ARTIFACT"], [
                 automationId            : "AUTO_API_ARTIFACT",
@@ -492,6 +581,75 @@ class AutomationExecutionServiceSmokeTests {
             ]).create()
         }
         return scope.compareScopeId as String
+    }
+
+    /** Adds one more exclusion-filter row to an existing compare scope, after any already seeded there. */
+    private void addRuleSetCompareSourceFilter(String compareScopeId, String fileSide, String fieldExpression, String value) {
+        List existingRows = ec.entity.find("darpan.rule.RuleSetCompareSourceFilter")
+                .condition("compareScopeId", compareScopeId)
+                .condition("fileSide", fileSide)
+                .disableAuthz().useCache(false).list() ?: []
+        int nextSequenceNum = existingRows ? ((existingRows*.sequenceNum) as List<Integer>).max() + 1 : 1
+        ec.entity.makeValue("darpan.rule.RuleSetCompareSourceFilter").setAll([
+                compareScopeId    : compareScopeId,
+                fileSide          : fileSide,
+                sequenceNum       : nextSequenceNum,
+                fieldExpression   : fieldExpression,
+                operator          : "EXCLUDE_IN",
+                filterValues      : value,
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID,
+        ]).create()
+    }
+
+    /** A fresh RuleSet compare scope with no RuleSetCompareSourceFilter rows on either side. */
+    private String createCompareScopeWithNoFilters() {
+        return createRuleSetCompareScope().compareScopeId as String
+    }
+
+    /** Saves a fresh automation backed by a mapping saved run, so it genuinely has no compareScopeId. */
+    private String saveAutomationWithoutCompareScope() {
+        return saveAutomationWithSourceFilters(null)
+    }
+
+    /** Deletes every ReconciliationAutomationSourceFilter row for an automation, on both sides. */
+    private void clearAutomationFilterRows(String automationId) {
+        ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter")
+                .condition("automationId", automationId)
+                .disableAuthz().useCache(false).deleteAll()
+    }
+
+    /**
+     * Replaces an automation's filter rows on one side with a single row of the given shape,
+     * simulating a snapshot frozen at an older rule-set state — used to prove the backfill never
+     * overwrites an existing snapshot.
+     */
+    private void replaceAutomationFilterRows(String automationId, String fileSide, String fieldExpression, String value) {
+        ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter")
+                .condition("automationId", automationId)
+                .condition("fileSide", fileSide)
+                .disableAuthz().useCache(false).deleteAll()
+        ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomationSourceFilter").setAll([
+                automationId      : automationId,
+                fileSide          : fileSide,
+                sequenceNum       : 1,
+                fieldExpression   : fieldExpression,
+                operator          : "EXCLUDE_IN",
+                filterValues      : value,
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID,
+                createdByUserId   : TEST_USER_ID,
+                createdDate       : ec.user.nowTimestamp,
+                lastUpdatedDate   : ec.user.nowTimestamp,
+        ]).create()
+    }
+
+    /** Calls the one-time backfill service and returns its result map. */
+    private Map<String, Object> runBackfill() {
+        Map<String, Object> result = (Map<String, Object>) ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.migrate#AutomationExcludeFilters")
+                .disableAuthz()
+                .call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        return result
     }
 
     private String ensureFilterTestMapping() {

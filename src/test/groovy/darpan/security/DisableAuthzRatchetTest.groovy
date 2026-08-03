@@ -43,6 +43,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  *       guarded by {@code metaClass.respondsTo}. KEPT BARE.</li>
  *   <li>{@code reconciliation/notification/TenantNotificationSupport.groovy:104} — service call.
  *       KEPT BARE.</li>
+ *   <li>{@code facade/reconciliation/AutomationFacadeSupport.groovy} (second site, in
+ *       {@code backfillAutomationExcludeFilters}) — one-time cross-tenant migration write; creates a
+ *       {@code ReconciliationAutomationSourceFilter} row via {@code ec.service.sync()...call()}.
+ *       {@code TenantScopedFinder} has no create-side equivalent (it only wraps reads), so this stays
+ *       a bare service call like the other writes above. The read side of the same sweep
+ *       ({@code ReconciliationAutomation} list and the per-automation/fileSide existence check) both
+ *       route through {@code TenantScopedFinder.findGlobalUnscoped}, matching
+ *       {@code AutomationRuntimeSupport.loadAutomationSourceFilters}, and add nothing to this count.
+ *       KEPT BARE.</li>
  * </ul>
  *
  * <p><strong>Ratchet rule (step 5 — fail-mode):</strong> the count MUST equal {@code BASELINE}
@@ -57,13 +66,17 @@ class DisableAuthzRatchetTest {
      * {@link darpan.facade.common.TenantScopedFinder}. Lowered 12 -> 11 by DAR-295 (Phase 3), which
      * collapsed the two per-system ensureVirtual{HotWax,Shopify}OrdersRemote builders in
      * ReconciliationSavedRunSupport into one registry-driven ensureVirtualApiOrdersRemote (net -1 bare
-     * service call). Remaining 11 calls are service calls
+     * service call). Raised 11 -> 12 by the exclusion-filter backfill (Task 13,
+     * {@code AutomationFacadeSupport.backfillAutomationExcludeFilters}): one new bare service-call
+     * write (create a filter row for a pre-existing automation) that has no
+     * {@code TenantScopedFinder} write equivalent; its own reads use
+     * {@code findGlobalUnscoped} instead and add nothing. Remaining calls are service calls
      * (guarded {@code metaClass.respondsTo} patterns) or the two entity-read sites that cannot
      * safely use {@code findGlobalUnscoped} without breaking test-stub compatibility
      * ({@code FacadeSupport:32}, {@code ReconciliationOutputSupport:140}). See class Javadoc
      * for the full per-site breakdown.
      */
-    static final int BASELINE = 11
+    static final int BASELINE = 12
 
     /**
      * Allowlisted files matched by their path <em>relative to srcRoot</em>

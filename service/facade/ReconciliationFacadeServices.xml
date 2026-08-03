@@ -2410,6 +2410,27 @@
         </actions>
     </service>
 
+    <service verb="migrate" noun="AutomationExcludeFilters" allow-remote="true" authenticate="true">
+        <description>One-time backfill: copy each ruleset-backed automation's exclusion filters from its
+            rule set into the automation's own snapshot. Idempotent — a side that already has filter rows is
+            left untouched. Run once after deploying exclusion filters; automations created afterwards are
+            seeded at save time and do not need it.</description>
+        <out-parameters>
+            <parameter name="automationsScanned" type="Integer"/>
+            <parameter name="automationsSkipped" type="Integer"/>
+            <parameter name="sidesSeeded" type="Integer"/>
+            <parameter name="rowsCreated" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="backfillResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.backfillAutomationExcludeFilters(ec)"/>
+            <set field="automationsScanned" from="backfillResult.automationsScanned"/>
+            <set field="automationsSkipped" from="backfillResult.automationsSkipped"/>
+            <set field="sidesSeeded" from="backfillResult.sidesSeeded"/>
+            <set field="rowsCreated" from="backfillResult.rowsCreated"/>
+            <message>Backfilled ${rowsCreated} exclusion filter rows across ${sidesSeeded} source sides.</message>
+        </actions>
+    </service>
+
     <service verb="run" noun="AutomationNow" transaction="ignore" allow-remote="true" authenticate="true">
         <description>Run one automation immediately after active-tenant ownership and run-permission validation.</description>
         <in-parameters>

@@ -144,15 +144,25 @@
             <parameter name="rowsCreated" type="Integer"/>
         </out-parameters>
         <actions>
+            <!-- Task 13 fix round 2, minor: snapshot BEFORE calling the sweep so ok/errors below
+                 reflect only what THIS call produced, not a stale error already sitting on ec.message
+                 from something unrelated earlier on the same execution context (ec.message is never
+                 cleared between service calls; a bare !ec.message.hasError() stays poisoned by that
+                 forever, as the round-1 fix report's own cross-test cascade demonstrated). -->
+            <set field="preCallErrorCount" from="darpan.facade.common.FacadeSupport.getErrors(ec).size()"/>
             <set field="backfillResult" from="darpan.facade.reconciliation.AutomationFacadeSupport.backfillAutomationExcludeFilters(ec)"/>
             <set field="automationsScanned" from="backfillResult.automationsScanned"/>
             <set field="automationsSkipped" from="backfillResult.automationsSkipped"/>
             <set field="sidesSeeded" from="backfillResult.sidesSeeded"/>
             <set field="rowsCreated" from="backfillResult.rowsCreated"/>
-            <set field="ok" from="!ec.message.hasError()"/>
-            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
-            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+            <!-- Task 13 fix round 2, New Important 1: <message> must run BEFORE the messages set below
+                 — FacadeSupport.getMessages(ec) returns a snapshot, so a <message> added after that set
+                 already ran never appears in the messages out-parameter, matching every sibling service
+                 in ReconciliationFacadeServices.xml. -->
             <message>Backfilled ${rowsCreated} exclusion filter rows across ${sidesSeeded} source sides (${automationsScanned} automations scanned, ${automationsSkipped} skipped).</message>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec).drop(preCallErrorCount)"/>
+            <set field="ok" from="errors.isEmpty()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
         </actions>
     </service>
 

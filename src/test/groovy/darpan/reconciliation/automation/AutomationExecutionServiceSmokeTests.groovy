@@ -1,6 +1,7 @@
 package darpan.reconciliation.automation
 
 import darpan.facade.common.DataManagerSupport
+import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonSlurper
@@ -412,6 +413,89 @@ class AutomationExecutionServiceSmokeTests {
         assertEquals("salesChannelEnumId", file2Rows[0].fieldExpression)
     }
 
+    @Test
+    void backfillOneAutomationsFailureDoesNotBlockALaterAutomationInTheSameSweep() {
+        // Task 13 fix round 2 — discovered while addressing the "ok scoped to this call's own
+        // errors" minor finding: Moqui's ServiceCallSyncImpl.callSingle refuses to run ANY service —
+        // including the NEXT automation's own create# calls — while ec.message.hasError() is true
+        // (checked at the very top of every single service call, framework-wide, before that
+        // service's own actions ever run). Leaving a failed automation's error sitting on ec.message
+        // for the rest of the sweep would silently no-op every automation processed after it: each
+        // blocked create# call returns null without adding a NEW error, so the per-create# delta
+        // check sees nothing to react to, and rowsCreated/sidesSeeded increment for rows that were
+        // never actually written. Build one automation guaranteed to fail (compareScopeId set but no
+        // matching ReconciliationAutomationSource rows — a real referential-integrity violation, the
+        // same failure mode round 1's own fixture bug hit by accident) with an EXPLICIT id that sorts
+        // before a normal, valid automation's own EXPLICIT id (the sweep reads in automationId order;
+        // a Moqui sequenced id, as save#Automation would assign, is not lexicographically predictable
+        // relative to a hand-picked prefix, so both ids here are explicit), and prove the valid one
+        // still gets seeded and counted correctly despite running later in the very same sweep.
+        String failingAutomationId = "A_BACKFILL_SWEEP_FAIL_${nextFilterFixtureId('X')}".toString()
+        String validAutomationId = "B_BACKFILL_SWEEP_VALID_${nextFilterFixtureId('X')}".toString()
+        assertTrue(failingAutomationId < validAutomationId,
+                "test setup assumption failed: the failing automation id must sort before the valid one")
+
+        Map<String, Object> failingScope = createRuleSetCompareScopeWithFilterForTenant(
+                TEST_COMPANY_USER_GROUP_ID, "FILE_2", "salesChannelEnumId", "POS_SALES_CHANNEL")
+        // withSourceRows=false: deliberately no ReconciliationAutomationSource rows, so this
+        // automation's create# call trips a real referential-integrity violation.
+        createAutomationForTenant(failingAutomationId, TEST_COMPANY_USER_GROUP_ID,
+                failingScope.compareScopeId as String, failingScope.ruleSetId as String, false)
+
+        Map<String, Object> validScope = createRuleSetCompareScopeWithFilterForTenant(
+                TEST_COMPANY_USER_GROUP_ID, "FILE_2", "statusId", "ORDER_CANCELLED")
+        createAutomationForTenant(validAutomationId, TEST_COMPANY_USER_GROUP_ID,
+                validScope.compareScopeId as String, validScope.ruleSetId as String, true)
+
+        // Not runBackfill() — this run is expected to report ok=false, unlike every other backfill
+        // test, so it calls the service directly rather than through the shared ok=true-asserting helper.
+        Map<String, Object> result = (Map<String, Object>) ec.service.sync()
+                .name("reconciliation.ReconciliationNotificationServices.migrate#AutomationExcludeFilters")
+                .disableAuthz()
+                .call()
+
+        assertFalse((Boolean) result.ok)
+        assertTrue((result.errors as List).any { it.toString().contains(failingAutomationId) },
+                "errors did not mention the failing automation: ${result.errors}")
+        List rows = findAutomationFilterRows(validAutomationId, "FILE_2")
+        assertEquals(1, rows.size(),
+                "the valid automation, swept after the failing one, was not seeded — a prior failure blocked it")
+        assertEquals("statusId", rows[0].fieldExpression)
+
+        // The failing automation is deliberately never fixed (that is the point of this test) — every
+        // later test in this @TestInstance(PER_CLASS) class shares this same database and would
+        // otherwise re-sweep it on every runBackfill() call for the rest of the run, permanently
+        // failing their ok=true assertion. Remove it now that this test is done with it.
+        ec.entity.find("darpan.reconciliation.ReconciliationAutomation")
+                .condition("automationId", failingAutomationId)
+                .disableAuthz().useCache(false).deleteAll()
+    }
+
+    @Test
+    void validationErrorsAreInvisibleToEcMessageGetErrorsButCaughtByFacadeSupportGetErrors() {
+        // Task 13 fix round 2, New Important 2 regression coverage: AutomationFacadeSupport's
+        // per-create# delta check now uses FacadeSupport.getErrors(ec) — errorList + validationErrorList
+        // — instead of the narrower bare ec.message.getErrors() (errorList only). A create# that fails
+        // Moqui PARAMETER validation adds a ValidationError, not a plain Error, and was previously
+        // invisible to the delta check, letting rowsCreated increment for a row that was never
+        // actually written. Moqui's own MessageFacadeImpl keeps these in genuinely separate lists
+        // (getErrors() returns errorList only; addValidationError appends to validationErrorList), so
+        // this calls addValidationError directly — the same public MessageFacade method the framework
+        // itself uses internally on a real parameter-validation failure — to prove the distinction
+        // deterministically, without depending on which internal Moqui code path a given malformed
+        // value happens to be routed through.
+        int errorCountBefore = ec.message.getErrors().size()
+        int facadeErrorCountBefore = FacadeSupport.getErrors(ec).size()
+
+        ec.message.addValidationError(null, "someField", "someService", "deliberately injected validation error", null)
+
+        assertEquals(errorCountBefore, ec.message.getErrors().size(),
+                "a validation error should NOT land in the narrower ec.message.errorList")
+        assertEquals(facadeErrorCountBefore + 1, FacadeSupport.getErrors(ec).size(),
+                "a validation error should be visible via FacadeSupport.getErrors (errorList + validationErrorList)")
+        ec.message.clearErrors()
+    }
+
     private void seedApiAutomation() {
         upsertEntityValue("darpan.reconciliation.ReconciliationAutomation", [automationId: "AUTO_API_ARTIFACT"], [
                 automationId            : "AUTO_API_ARTIFACT",
@@ -718,6 +802,13 @@ class AutomationExecutionServiceSmokeTests {
                 .disableAuthz()
                 .call()
         assertTrue((Boolean) result.ok, result.errors?.toString())
+        // Task 13 fix round 2, New Important 1 regression coverage: the <message> summary line must
+        // actually reach the messages out-parameter (it previously ran AFTER the messages set already
+        // captured its snapshot, so it silently never appeared). Checked here so every existing and
+        // future test that calls runBackfill() covers it, not just one dedicated test.
+        List<String> messages = (result.messages ?: []) as List<String>
+        assertTrue(messages.any { it?.toString()?.contains("Backfilled") },
+                "messages out-parameter did not contain the backfill summary: ${messages}")
         return result
     }
 
@@ -782,7 +873,19 @@ class AutomationExecutionServiceSmokeTests {
      * operator's session happens to be scoped to when the one-time backfill later runs.
      */
     private String createAutomationForTenant(String tenantUserGroupId, String compareScopeId, String ruleSetId) {
-        String automationId = nextFilterFixtureId("AUTOTEN")
+        return createAutomationForTenant(nextFilterFixtureId("AUTOTEN"), tenantUserGroupId, compareScopeId, ruleSetId, true)
+    }
+
+    /**
+     * Same as the 3-arg overload, but with an explicit automationId (save#Automation and the 3-arg
+     * overload both let Moqui's sequenced-id generator pick the id, which is not lexicographically
+     * predictable relative to another automation's id — some tests need to control sort order
+     * directly) and an option to skip creating the ReconciliationAutomationSource rows, to
+     * deliberately reproduce the referential-integrity failure a source-less automation's create#
+     * calls hit.
+     */
+    private String createAutomationForTenant(String automationId, String tenantUserGroupId, String compareScopeId,
+            String ruleSetId, boolean withSourceRows) {
         ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomation").setAll([
                 automationId      : automationId,
                 automationName    : "Tenant automation ${automationId}".toString(),
@@ -797,23 +900,25 @@ class AutomationExecutionServiceSmokeTests {
                 createdDate       : ec.user.nowTimestamp,
                 lastUpdatedDate   : ec.user.nowTimestamp,
         ]).create()
-        // ReconciliationAutomationSourceFilter FKs to ReconciliationAutomationSource(automationId,
-        // fileSide) — exactly the row every pre-existing production automation already has on both
-        // sides (that is why the create-time seed can never fire for them). Without these, every
-        // filter-row insert the backfill attempts for this automation fails with a referential-
-        // integrity violation.
-        ["FILE_1", "FILE_2"].each { String side ->
-            ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomationSource").setAll([
-                    automationId      : automationId,
-                    fileSide          : side,
-                    companyUserGroupId: tenantUserGroupId,
-                    createdByUserId   : TEST_USER_ID,
-                    sourceTypeEnumId  : AutomationExecutionSupport.AUTOMATION_SOURCE_API,
-                    systemEnumId      : side == "FILE_1" ? "SHOPIFY" : "OMS",
-                    fileTypeEnumId    : "DftJson",
-                    createdDate       : ec.user.nowTimestamp,
-                    lastUpdatedDate   : ec.user.nowTimestamp,
-            ]).create()
+        if (withSourceRows) {
+            // ReconciliationAutomationSourceFilter FKs to ReconciliationAutomationSource(automationId,
+            // fileSide) — exactly the row every pre-existing production automation already has on both
+            // sides (that is why the create-time seed can never fire for them). Without these, every
+            // filter-row insert the backfill attempts for this automation fails with a referential-
+            // integrity violation.
+            ["FILE_1", "FILE_2"].each { String side ->
+                ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomationSource").setAll([
+                        automationId      : automationId,
+                        fileSide          : side,
+                        companyUserGroupId: tenantUserGroupId,
+                        createdByUserId   : TEST_USER_ID,
+                        sourceTypeEnumId  : AutomationExecutionSupport.AUTOMATION_SOURCE_API,
+                        systemEnumId      : side == "FILE_1" ? "SHOPIFY" : "OMS",
+                        fileTypeEnumId    : "DftJson",
+                        createdDate       : ec.user.nowTimestamp,
+                        lastUpdatedDate   : ec.user.nowTimestamp,
+                ]).create()
+            }
         }
         return automationId
     }

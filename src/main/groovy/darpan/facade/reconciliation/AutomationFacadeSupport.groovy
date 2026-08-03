@@ -435,15 +435,20 @@ class AutomationFacadeSupport {
      * so a snapshot deliberately frozen at an older rule-set state is never refreshed.
      *
      * Transaction semantics: each automation's read-then-write is chunked into its own transaction via
-     * {@code AutomationRuntimeSupport.runInTransaction} (the same suspend/resume mechanism already used
-     * to fix the request-transaction-timeout class of bug on the scheduled-run path — see the "UAT run
-     * tx-timeout root cause" fix). A large instance's full automation set is not made to fit inside the
-     * ~60s default request transaction as one all-or-nothing unit, and a failure partway through one
-     * automation rolls back only that automation's own writes, not every automation already committed
-     * before it. A failure on one automation is caught, recorded as an {@code ec.message} error
-     * (surfaced via the {@code ok}/{@code errors} out-parameters), and does not stop the sweep from
-     * continuing to the rest. Re-running after a partial failure is safe: already-seeded sides are
-     * skipped (idempotent), so re-running only retries the automations that did not get a row.
+     * {@code AutomationRuntimeSupport.runInNewTransaction} — {@code runRequireNew}, not
+     * {@code runUseOrBegin} — so the guarantee holds unconditionally, even if this is ever invoked
+     * from inside an already-open ambient transaction (a bare {@code runUseOrBegin}-based chunk would
+     * silently join that transaction instead of starting its own, restoring the all-or-nothing
+     * exposure this exists to remove — Task 13 fix round 2, New Important 3). This is the same
+     * suspend/resume mechanism already used to fix the request-transaction-timeout class of bug on
+     * the scheduled-run path (see the "UAT run tx-timeout root cause" fix). A large instance's full
+     * automation set is not made to fit inside the ~60s default request transaction as one
+     * all-or-nothing unit, and a failure partway through one automation rolls back only that
+     * automation's own writes, not every automation already committed before it. A failure on one
+     * automation is caught, recorded as an {@code ec.message} error (surfaced via the
+     * {@code ok}/{@code errors} out-parameters), and does not stop the sweep from continuing to the
+     * rest. Re-running after a partial failure is safe: already-seeded sides are skipped (idempotent),
+     * so re-running only retries the automations that did not get a row.
      *
      * Known limitation: a side with zero rows because an operator deliberately cleared it is
      * indistinguishable from one that was never seeded, and will be re-seeded. That is acceptable
@@ -455,10 +460,22 @@ class AutomationFacadeSupport {
         int automationsSkipped = 0
         int sidesSeeded = 0
         int rowsCreated = 0
+        // Collected here, not added to ec.message inside the loop: Moqui's ServiceCallSyncImpl
+        // refuses to run ANY service — including the next automation's own create# calls — while
+        // ec.message.hasError() is true (checked at the top of every single service call, framework-
+        // wide, before its own actions ever run). Adding an error via ec.message.addError inside the
+        // loop would silently no-op every automation processed after the first failure: their
+        // create# calls would return null without adding a NEW error, the per-create# delta check
+        // would see nothing to react to, and rowsCreated would increment for rows that were never
+        // actually written (Task 13 fix round 2 — discovered while closing the "ok scoped to this
+        // call's own errors" minor finding). Errors are batched into ec.message once, after the loop,
+        // instead.
+        List<String> failureMessages = []
 
         List automations = TenantScopedFinder.findGlobalUnscoped(
                 ec, "darpan.reconciliation.ReconciliationAutomation",
                 "one-time backfill sweeps every tenant's automations by design; no active tenant, no user entry point")
+                .orderBy("automationId")
                 .useCache(false).list() ?: []
 
         for (def automation : automations) {
@@ -471,7 +488,7 @@ class AutomationFacadeSupport {
             String createdByUserId = normalize(automation.createdByUserId)
 
             try {
-                Map<String, Integer> automationCounts = AutomationRuntimeSupport.runInTransaction(ec,
+                Map<String, Integer> automationCounts = AutomationRuntimeSupport.runInNewTransaction(ec,
                         "One-time backfill: seed exclusion filters for automation ${automationId}".toString(), {
                     return backfillOneAutomation(ec, automationId, compareScopeId, tenantUserGroupId, createdByUserId)
                 }) as Map<String, Integer>
@@ -479,9 +496,16 @@ class AutomationFacadeSupport {
                 rowsCreated += automationCounts.rowsCreated
             } catch (Exception e) {
                 logger.warn("Exclusion-filter backfill failed for automation ${automationId}; skipping — safe to re-run", e)
-                ec.message.addError("Exclusion-filter backfill failed for automation ${automationId}: ${e.message}".toString())
+                failureMessages << "Exclusion-filter backfill failed for automation ${automationId}: ${e.message}".toString()
+            } finally {
+                // See the comment above failureMessages: clear whatever this automation's failure (or
+                // seedFromRuleSetGlobal / the existing-rows read) left on ec.message so the NEXT
+                // automation's create# calls are not silently blocked by it.
+                if (ec.message.hasError()) ec.message.clearErrors()
             }
         }
+        failureMessages.each { ec.message.addError(it) }
+
         return [
                 automationsScanned: automationsScanned,
                 automationsSkipped: automationsSkipped,
@@ -491,7 +515,7 @@ class AutomationFacadeSupport {
     }
 
     /**
-     * One automation's worth of backfill work — the unit {@code AutomationRuntimeSupport.runInTransaction}
+     * One automation's worth of backfill work — the unit {@code AutomationRuntimeSupport.runInNewTransaction}
      * chunks a transaction around, so either both sides of one automation commit or neither does.
      */
     private static Map<String, Integer> backfillOneAutomation(def ec, String automationId, String compareScopeId,
@@ -523,7 +547,13 @@ class AutomationFacadeSupport {
             int sequenceNum = 0
             for (Map<String, Object> row : seeded) {
                 sequenceNum++
-                int errorCountBefore = (ec.message.getErrors() ?: []).size()
+                // FacadeSupport.getErrors (errorList + validationErrorList), not the narrower bare
+                // ec.message.getErrors (errorList only): a create# that fails Moqui PARAMETER
+                // validation (e.g. a value that cannot convert to the target field's type) adds a
+                // ValidationError, not an Error — invisible to ec.message.getErrors() alone, which
+                // would let rowsCreated increment for a row that was never actually written (Task 13
+                // fix round 2, New Important 2).
+                int errorCountBefore = FacadeSupport.getErrors(ec).size()
                 // Write, not a read — TenantScopedFinder has no create-side equivalent, so this
                 // stays a bare disableAuthz service call, same category as the other cross-tenant
                 // migration writes already allowlisted in DisableAuthzRatchetTest (KEPT BARE).
@@ -548,7 +578,7 @@ class AutomationFacadeSupport {
                 // same ec, and a bare hasError() would stay tripped by an earlier automation's failure
                 // for the rest of the run, mis-flagging every later create as failed too (Task 13 fix
                 // round 1, Important 3).
-                List<String> newErrors = (ec.message.getErrors() ?: []).drop(errorCountBefore)
+                List<String> newErrors = FacadeSupport.getErrors(ec).drop(errorCountBefore)
                 if (newErrors) {
                     throw new IllegalStateException(
                             "create#ReconciliationAutomationSourceFilter failed for automation ${automationId} " +

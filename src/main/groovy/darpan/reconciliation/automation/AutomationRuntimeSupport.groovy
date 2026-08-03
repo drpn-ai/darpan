@@ -84,6 +84,28 @@ class AutomationRuntimeSupport {
         return work.call()
     }
 
+    /**
+     * Runs {@code work} in its OWN new transaction (Moqui's {@code runRequireNew}), suspending any
+     * transaction already in place for the duration and resuming it afterward. Unlike
+     * {@link #runInTransaction}, which JOINS an ambient transaction if one is already open,
+     * {@code work} here is guaranteed to commit or roll back independently of whatever transaction
+     * the caller happens to be running inside.
+     *
+     * Task 13 fix round 2, New Important 3: {@code backfillAutomationExcludeFilters} chunks its sweep
+     * per automation specifically so one automation's failure cannot roll back automations already
+     * committed. {@code runInTransaction} would silently give up that guarantee if ever invoked from
+     * inside an already-open ambient transaction (it would join that transaction instead of starting
+     * its own), restoring the all-or-nothing exposure the chunking exists to remove. Use this helper
+     * wherever per-unit transactional isolation must hold unconditionally, not just when there is no
+     * ambient transaction. {@code runInTransaction}'s existing callers are unchanged.
+     */
+    static Object runInNewTransaction(def ec, String message, Closure work) {
+        if (ec?.transaction?.metaClass?.respondsTo(ec.transaction, "runRequireNew", Integer, String, Closure)) {
+            return ec.transaction.runRequireNew(30, message, work)
+        }
+        return work.call()
+    }
+
     static String normalizeDataManagerPath(def ec, Object rawPath) {
         String normalized = normalize(rawPath)
         if (!normalized) return null

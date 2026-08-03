@@ -1226,6 +1226,7 @@ SERVICE save Automation
     sources.apiResponsePathExpression : String
     sources.dateFromParameterName : String
     sources.dateToParameterName : String
+    sources.excludeFilters : List
     sources.fileNamePattern : String
     sources.fileSide : String
     sources.fileTypeEnumId : String

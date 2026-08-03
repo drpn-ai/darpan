@@ -25,8 +25,10 @@ class AutomationExecutionServiceSmokeTests {
     private static final JsonSlurper JSON_SLURPER = new JsonSlurper()
     private static final String TEST_USER_ID = "TEST_CUSTOMER_USER"
     private static final String TEST_COMPANY_USER_GROUP_ID = "KREWE"
+    private static final String FILTER_TEST_MAPPING_ID = "AUTO_FILTER_TEST_MAPPING"
 
     private ExecutionContext ec
+    private int filterFixtureCounter = 0
 
     @BeforeAll
     void setup() {
@@ -34,6 +36,12 @@ class AutomationExecutionServiceSmokeTests {
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "api-automation-execution-smoke")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AutomationSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompareScopeFixtures(ec)
+        // Task 8 filter fixtures save real automations through save#Automation, which needs a source
+        // type simple enough to pass validateSources without extra wiring. AUT_SRC_DB looks simplest
+        // but databaseSourceQueryId is not actually threaded through save#Automation's sourceEntry
+        // builder yet (a pre-existing, unrelated gap), so SFTP — the same source type
+        // AutomationFacadeSmokeTests uses for its own non-API fixtures — is used instead.
+        ReconciliationSmokeTestSupport.seedSftpServerFixtures(ec)
     }
 
     @AfterAll
@@ -114,6 +122,87 @@ class AutomationExecutionServiceSmokeTests {
         assertEquals(TEST_COMPANY_USER_GROUP_ID, runResult.companyUserGroupId)
     }
 
+    @Test
+    void automationSaveCopiesSourceExclusionFilters() {
+        String automationId = saveAutomationWithSourceFilters([
+                [fieldExpression: "salesChannelEnumId", values: ["POS_SALES_CHANNEL", "DRAFT_SALES_CHANNEL"]],
+        ])
+
+        List rows = findAutomationFilterRows(automationId, "FILE_2")
+
+        assertEquals(1, rows.size())
+        assertEquals(1, rows[0].sequenceNum)
+        assertEquals("salesChannelEnumId", rows[0].fieldExpression)
+        assertEquals("POS_SALES_CHANNEL,DRAFT_SALES_CHANNEL", rows[0].filterValues)
+        assertNotNull(rows[0].companyUserGroupId)
+    }
+
+    @Test
+    void resavingWithoutTheKeyPreservesFiltersAcrossTheSourceRecreate() {
+        // The save deletes and recreates every source row, so the filters' parent disappears on each
+        // save. "Leave unchanged" therefore has to survive a delete-and-recreate, not just a no-op.
+        String automationId = saveAutomationWithSourceFilters([
+                [fieldExpression: "salesChannelEnumId", values: ["POS_SALES_CHANNEL"]],
+        ])
+        resaveAutomationWithoutFilterKeys(automationId)
+
+        List rows = findAutomationFilterRows(automationId, "FILE_2")
+
+        assertEquals(1, rows.size())
+        assertEquals("salesChannelEnumId", rows[0].fieldExpression)
+    }
+
+    @Test
+    void resavingWithAnEmptyListClearsFilters() {
+        String automationId = saveAutomationWithSourceFilters([
+                [fieldExpression: "salesChannelEnumId", values: ["POS_SALES_CHANNEL"]],
+        ])
+        resaveAutomationWithSourceFilters(automationId, [])
+
+        assertEquals(0, findAutomationFilterRows(automationId, "FILE_2").size())
+    }
+
+    @Test
+    void firstSaveSeedsFiltersFromTheRuleSet() {
+        // Exclusions are only editable on the rules board, so a new automation submits none. Without
+        // the seed it would run with no exclusions while its rule set has them.
+        String compareScopeId = createRuleSetCompareScopeWithFilter("FILE_2", "salesChannelEnumId", "POS_SALES_CHANNEL")
+        String automationId = saveAutomationForCompareScope(compareScopeId)
+
+        List rows = findAutomationFilterRows(automationId, "FILE_2")
+
+        assertEquals(1, rows.size())
+        assertEquals("salesChannelEnumId", rows[0].fieldExpression)
+        assertEquals("POS_SALES_CHANNEL", rows[0].filterValues)
+    }
+
+    @Test
+    void laterSavesDoNotReSeedOverAClearedSide() {
+        String compareScopeId = createRuleSetCompareScopeWithFilter("FILE_2", "salesChannelEnumId", "POS_SALES_CHANNEL")
+        String automationId = saveAutomationForCompareScope(compareScopeId)
+        resaveAutomationWithSourceFilters(automationId, [])
+        resaveAutomationWithoutFilterKeys(automationId)
+
+        assertEquals(0, findAutomationFilterRows(automationId, "FILE_2").size())
+    }
+
+    @Test
+    void automationWithoutACompareScopeSeedsNothing() {
+        String automationId = saveAutomationWithSourceFilters(null)
+
+        assertEquals(0, findAutomationFilterRows(automationId, "FILE_2").size())
+    }
+
+    @Test
+    void deletingAnAutomationRemovesItsFilterRows() {
+        String automationId = saveAutomationWithSourceFilters([
+                [fieldExpression: "salesChannelEnumId", values: ["POS_SALES_CHANNEL"]],
+        ])
+        deleteAutomation(automationId)
+
+        assertEquals(0, findAutomationFilterRows(automationId, "FILE_2").size())
+    }
+
     private void seedApiAutomation() {
         upsertEntityValue("darpan.reconciliation.ReconciliationAutomation", [automationId: "AUTO_API_ARTIFACT"], [
                 automationId            : "AUTO_API_ARTIFACT",
@@ -173,5 +262,211 @@ class AutomationExecutionServiceSmokeTests {
         ec.entity.makeValue(entityName)
                 .setAll(fields)
                 .create()
+    }
+
+    // -- Source-exclusion-filter fixtures (Task 8) --------------------------------------------------
+
+    private List findAutomationFilterRows(String automationId, String fileSide) {
+        return ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter")
+                .condition("automationId", automationId)
+                .condition("fileSide", fileSide)
+                .orderBy("sequenceNum").disableAuthz().useCache(false).list() ?: []
+    }
+
+    /**
+     * Saves a brand-new automation. A non-null {@code file2Filters} is submitted explicitly on FILE_2
+     * (backed by a fresh, filter-less RuleSet compare scope, since explicit submission always wins
+     * regardless of what the rule set has). A null argument omits excludeFilters entirely on both
+     * sides AND backs the automation with a "mapping" saved run instead of a ruleset one, so the saved
+     * automation genuinely has no compareScopeId — exercising the "not ruleset-backed" seeding skip.
+     */
+    private String saveAutomationWithSourceFilters(List<Map<String, Object>> file2Filters) {
+        Map<String, Object> savedRunRef
+        if (file2Filters == null) {
+            savedRunRef = [savedRunId: ensureFilterTestMapping(), savedRunType: "mapping"]
+        } else {
+            Map<String, Object> scope = createRuleSetCompareScope()
+            savedRunRef = [savedRunId: scope.ruleSetId, savedRunType: "ruleset"]
+        }
+        Map<String, Object> file2Source = sftpSource("FILE_2", "OMS", "OMS_TEST_SFTP")
+        if (file2Filters != null) file2Source.excludeFilters = file2Filters
+
+        Map<String, Object> result = callFacade("facade.ReconciliationFacadeServices.save#Automation", [
+                automationName : "Filter Automation ${nextFilterFixtureId('AUTOFLT')}".toString(),
+                inputModeEnumId: AutomationExecutionSupport.AUTOMATION_INPUT_SFTP_FILES,
+                savedRunId     : savedRunRef.savedRunId,
+                savedRunType   : savedRunRef.savedRunType,
+                scheduleExpr   : "PT1H",
+                sources        : [
+                        sftpSource("FILE_1", "SHOPIFY", "SHOPIFY_TEST_SFTP"),
+                        file2Source,
+                ],
+        ])
+        assertTrue((Boolean) result.ok, result.errors?.toString())
+        return ((Map) result.automation).automationId as String
+    }
+
+    /** First save of a fresh automation against an existing rule set compare scope; submits no excludeFilters. */
+    private String saveAutomationForCompareScope(String compareScopeId) {
+        def scope = ec.entity.find("darpan.rule.RuleSetCompareScope")
+                .condition("compareScopeId", compareScopeId)
+                .disableAuthz().useCache(false).one()
+        assertNotNull(scope, "compare scope ${compareScopeId} was not seeded".toString())
+        String ruleSetId = scope.ruleSetId as String
+
+        Map<String, Object> result = callFacade("facade.ReconciliationFacadeServices.save#Automation", [
+                automationName : "Filter Automation ${nextFilterFixtureId('AUTOFLT')}".toString(),
+                inputModeEnumId: AutomationExecutionSupport.AUTOMATION_INPUT_SFTP_FILES,
+                savedRunId     : ruleSetId,
+                savedRunType   : "ruleset",
+                scheduleExpr   : "PT1H",
+                sources        : [
+                        sftpSource("FILE_1", "SHOPIFY", "SHOPIFY_TEST_SFTP"),
+                        sftpSource("FILE_2", "OMS", "OMS_TEST_SFTP"),
+                ],
+        ])
+        assertTrue((Boolean) result.ok, result.errors?.toString())
+        return ((Map) result.automation).automationId as String
+    }
+
+    /** Resaves without submitting excludeFilters on either side — "leave unchanged" semantics. */
+    private void resaveAutomationWithoutFilterKeys(String automationId) {
+        Map<String, Object> savedRunRef = currentAutomationSavedRun(automationId)
+        Map<String, Object> result = callFacade("facade.ReconciliationFacadeServices.save#Automation", [
+                automationId   : automationId,
+                automationName : "Filter Automation Resave".toString(),
+                inputModeEnumId: AutomationExecutionSupport.AUTOMATION_INPUT_SFTP_FILES,
+                savedRunId     : savedRunRef.savedRunId,
+                savedRunType   : savedRunRef.savedRunType,
+                scheduleExpr   : "PT1H",
+                sources        : [
+                        sftpSource("FILE_1", "SHOPIFY", "SHOPIFY_TEST_SFTP"),
+                        sftpSource("FILE_2", "OMS", "OMS_TEST_SFTP"),
+                ],
+        ])
+        assertTrue((Boolean) result.ok, result.errors?.toString())
+    }
+
+    /** Resaves with an explicit FILE_2 excludeFilters list (including an empty one, to clear). */
+    private void resaveAutomationWithSourceFilters(String automationId, List<Map<String, Object>> file2Filters) {
+        Map<String, Object> savedRunRef = currentAutomationSavedRun(automationId)
+        Map<String, Object> file2Source = sftpSource("FILE_2", "OMS", "OMS_TEST_SFTP")
+        file2Source.excludeFilters = file2Filters
+
+        Map<String, Object> result = callFacade("facade.ReconciliationFacadeServices.save#Automation", [
+                automationId   : automationId,
+                automationName : "Filter Automation Resave".toString(),
+                inputModeEnumId: AutomationExecutionSupport.AUTOMATION_INPUT_SFTP_FILES,
+                savedRunId     : savedRunRef.savedRunId,
+                savedRunType   : savedRunRef.savedRunType,
+                scheduleExpr   : "PT1H",
+                sources        : [
+                        sftpSource("FILE_1", "SHOPIFY", "SHOPIFY_TEST_SFTP"),
+                        file2Source,
+                ],
+        ])
+        assertTrue((Boolean) result.ok, result.errors?.toString())
+    }
+
+    private void deleteAutomation(String automationId) {
+        Map<String, Object> result = callFacade("facade.ReconciliationFacadeServices.delete#Automation", [
+                automationId: automationId,
+        ])
+        assertTrue((Boolean) result.ok, result.errors?.toString())
+    }
+
+    /** A fresh RuleSet + single RuleSetCompareScope + FILE_1/FILE_2 sources, with no filter rows. */
+    private Map<String, Object> createRuleSetCompareScope() {
+        String ruleSetId = nextFilterFixtureId("AFRS")
+        String compareScopeId = nextFilterFixtureId("AFSC")
+        ec.entity.makeValue("darpan.rule.RuleSet").setAll([
+                ruleSetId         : ruleSetId,
+                ruleSetName       : "Automation filter test RuleSet ${ruleSetId}".toString(),
+                version           : "1.0",
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID,
+                createdByUserId   : TEST_USER_ID,
+        ]).create()
+        ec.entity.makeValue("darpan.rule.RuleSetCompareScope").setAll([
+                compareScopeId: compareScopeId,
+                ruleSetId     : ruleSetId,
+                objectType    : "ORDER",
+                description   : "Automation filter test compare scope ${compareScopeId}".toString(),
+        ]).create()
+        ec.entity.makeValue("darpan.rule.RuleSetCompareSource").setAll([
+                compareScopeId     : compareScopeId,
+                fileSide           : "FILE_1",
+                systemEnumId       : "SHOPIFY",
+                fileTypeEnumId     : "DftJson",
+                primaryIdExpression: "id",
+        ]).create()
+        ec.entity.makeValue("darpan.rule.RuleSetCompareSource").setAll([
+                compareScopeId     : compareScopeId,
+                fileSide           : "FILE_2",
+                systemEnumId       : "OMS",
+                fileTypeEnumId     : "DftJson",
+                primaryIdExpression: "id",
+        ]).create()
+        return [ruleSetId: ruleSetId, compareScopeId: compareScopeId]
+    }
+
+    /** Same as {@link #createRuleSetCompareScope()}, plus one exclusion-filter row on the given side. */
+    private String createRuleSetCompareScopeWithFilter(String fileSide, String fieldExpression, String value) {
+        Map<String, Object> scope = createRuleSetCompareScope()
+        ec.entity.makeValue("darpan.rule.RuleSetCompareSourceFilter").setAll([
+                compareScopeId    : scope.compareScopeId,
+                fileSide          : fileSide,
+                sequenceNum       : 1,
+                fieldExpression   : fieldExpression,
+                operator          : "EXCLUDE_IN",
+                filterValues      : value,
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID,
+        ]).create()
+        return scope.compareScopeId as String
+    }
+
+    private String ensureFilterTestMapping() {
+        def existing = ec.entity.find("darpan.mapping.ReconciliationMapping")
+                .condition("reconciliationMappingId", FILTER_TEST_MAPPING_ID)
+                .disableAuthz().useCache(false).one()
+        if (!existing) {
+            ec.entity.makeValue("darpan.mapping.ReconciliationMapping").setAll([
+                    reconciliationMappingId: FILTER_TEST_MAPPING_ID,
+                    mappingName            : "Automation filter test mapping",
+                    companyUserGroupId     : TEST_COMPANY_USER_GROUP_ID,
+                    createdByUserId        : TEST_USER_ID,
+            ]).create()
+        }
+        return FILTER_TEST_MAPPING_ID
+    }
+
+    private Map<String, Object> currentAutomationSavedRun(String automationId) {
+        def automationRecord = ec.entity.find("darpan.reconciliation.ReconciliationAutomation")
+                .condition("automationId", automationId)
+                .disableAuthz().useCache(false).one()
+        return [savedRunId: automationRecord.savedRunId, savedRunType: automationRecord.savedRunType]
+    }
+
+    private Map<String, Object> sftpSource(String fileSide, String systemEnumId, String sftpServerId) {
+        return [
+                fileSide          : fileSide,
+                sourceTypeEnumId  : "AUT_SRC_SFTP",
+                systemEnumId      : systemEnumId,
+                fileTypeEnumId    : "DftCsv",
+                sftpServerId      : sftpServerId,
+                remotePathTemplate: "/incoming/${fileSide.toLowerCase()}".toString(),
+        ]
+    }
+
+    private String nextFilterFixtureId(String prefix) {
+        filterFixtureCounter++
+        return "${prefix}${filterFixtureCounter}".toString()
+    }
+
+    private Map<String, Object> callFacade(String serviceName, Map<String, Object> parameters) {
+        return (Map<String, Object>) ec.service.sync()
+                .name(serviceName)
+                .parameters(parameters)
+                .disableAuthz()
+                .call()
     }
 }

@@ -2061,6 +2061,18 @@
                 <parameter name="sourceConfigId"/>
                 <parameter name="shopifyAuthConfigId"/>
                 <parameter name="omsRestSourceConfigId"/>
+                <parameter name="excludeFilters" type="List">
+                    <parameter name="excludeFilter" type="Map">
+                        <parameter name="fieldExpression"/>
+                        <parameter name="operator"/>
+                        <parameter name="values" type="List"><parameter name="value"/></parameter>
+                    </parameter>
+                    <description>Record-exclusion rules for this source's fileSide, mirroring the rule
+                        set's own filters. Omitted means leave the previously-saved rows unchanged (or, on
+                        a first save, seed from the rule set); an explicit list (including an empty one)
+                        replaces them. See save#Automation's source-recreate comment for why omission
+                        cannot mean "no-op" here the way it does elsewhere.</description>
+                </parameter>
             </parameter>
         </in-parameters>
         <out-parameters>
@@ -2106,7 +2118,8 @@
                         optionKey: ((source.optionKey)?.toString()?.trim()),
                         sourceConfigId: ((source.sourceConfigId)?.toString()?.trim()),
                         shopifyAuthConfigId: ((source.shopifyAuthConfigId)?.toString()?.trim()),
-                        omsRestSourceConfigId: ((source.omsRestSourceConfigId)?.toString()?.trim())
+                        omsRestSourceConfigId: ((source.omsRestSourceConfigId)?.toString()?.trim()),
+                        excludeFilters: source.excludeFilters
                 ].findAll { it.value != null }"/>
                 <set field="ignoreSourceEntryAdd" from="sourceEntries.add(sourceEntry)"/>
             </iterate>
@@ -2201,6 +2214,17 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="sourceUpdatedDate" from="ec.user.nowTimestamp"/>
+                <!-- Sources are deleted and recreated on every save, so a filter row's parent always
+                     disappears. Capture the existing rules first: a source entry that omits
+                     excludeFilters keeps what it had, matching the rule set path's presence
+                     semantics, while an explicit empty list clears them. -->
+                <!-- Resolved here, not inside the iterate: automationRecord is not set until after the
+                     loop (create path), so the compare scope is read from automationFields — already
+                     resolved above and exactly what gets persisted to automationRecord.compareScopeId
+                     either way — rather than from automationRecord itself. -->
+                <set field="automationCompareScopeId" from="automationFields.compareScopeId"/>
+                <set field="existingAutomationFilters" from="darpan.facade.reconciliation.AutomationFacadeSupport.captureSourceFiltersByFileSide(ec, savedAutomationId)"/>
+                <set field="ignoreDeleteAutomationFilters" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSourceFilter').condition('automationId', savedAutomationId).disableAuthz().useCache(false).deleteAll()"/>
                 <set field="ignoreDeleteAutomationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', savedAutomationId).disableAuthz().useCache(false).deleteAll()"/>
                 <iterate list="sourceEntries" entry="sourceEntry">
                     <set field="sourceCreateMap" from="[
@@ -2231,6 +2255,18 @@
                     <service-call name="create#darpan.reconciliation.ReconciliationAutomationSource"
                             disable-authz="true"
                             in-map="sourceCreateMap"/>
+                    <set field="resolvedSourceFilters" from="darpan.facade.reconciliation.AutomationFacadeSupport.resolveSourceFilters(ec, automationCompareScopeId, sourceEntry, existingAutomationFilters)"/>
+                    <set field="sourceFilterSequence" from="0"/>
+                    <iterate list="resolvedSourceFilters" entry="sourceFilterRow">
+                        <set field="sourceFilterSequence" from="sourceFilterSequence + 1"/>
+                        <service-call name="create#darpan.reconciliation.ReconciliationAutomationSourceFilter" disable-authz="true"
+                                in-map="[automationId: savedAutomationId, fileSide: sourceEntry.fileSide, sequenceNum: sourceFilterSequence,
+                                         fieldExpression: sourceFilterRow.fieldExpression, operator: sourceFilterRow.operator,
+                                         filterValues: sourceFilterRow.filterValues,
+                                         companyUserGroupId: darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec),
+                                         createdByUserId: darpan.facade.common.TenantAccessSupport.currentUserId(ec),
+                                         createdDate: sourceUpdatedDate, lastUpdatedDate: sourceUpdatedDate]"/>
+                    </iterate>
                 </iterate>
                 <set field="automationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', savedAutomationId).disableAuthz().useCache(false).one()"/>
                 <set field="automationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', savedAutomationId).orderBy('fileSide').disableAuthz().useCache(false).list() ?: []"/>
@@ -2277,6 +2313,10 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
+                <!-- Filter rows FK to the source row (RECAUTSF_SOURCE on automationId+fileSide), so they
+                     must be cleared before their ReconciliationAutomationSource parent or the parent
+                     delete would orphan them (or fail on the foreign key, depending on datasource). -->
+                <set field="deletedFilterCount" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSourceFilter').condition('automationId', automationIdValue).disableAuthz().useCache(false).deleteAll()"/>
                 <set field="deletedSourceCount" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', automationIdValue).disableAuthz().useCache(false).deleteAll()"/>
                 <set field="deletedExecutionCount" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).disableAuthz().useCache(false).deleteAll()"/>
                 <set field="ignoreAutomationDelete" from="automationRecord.delete()"/>

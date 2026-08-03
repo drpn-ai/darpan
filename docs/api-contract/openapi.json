@@ -5826,6 +5826,58 @@
                                 }
                             }
                         }
+                    },
+                    "file1ExcludeFilters": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "excludeFilter": {
+                                    "type": "object",
+                                    "properties": {
+                                        "fieldExpression": {
+                                            "type": "string"
+                                        },
+                                        "operator": {
+                                            "type": "string"
+                                        },
+                                        "values": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "description": "Record-exclusion rules for FILE_1, created alongside the compare source.\n                    Omitted or empty means no exclusion filters at creation."
+                    },
+                    "file2ExcludeFilters": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "excludeFilter": {
+                                    "type": "object",
+                                    "properties": {
+                                        "fieldExpression": {
+                                            "type": "string"
+                                        },
+                                        "operator": {
+                                            "type": "string"
+                                        },
+                                        "values": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "description": "Record-exclusion rules for FILE_2, created alongside the compare source.\n                    Omitted or empty means no exclusion filters at creation."
                     }
                 },
                 "required": [
@@ -6001,6 +6053,62 @@
                                                         "type": "string"
                                                     },
                                                     "action": {
+                                                        "type": "string"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            "file1ExcludeFilters": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "excludeFilter": {
+                                            "type": "object",
+                                            "properties": {
+                                                "sequenceNum": {
+                                                    "type": "integer"
+                                                },
+                                                "fieldExpression": {
+                                                    "type": "string"
+                                                },
+                                                "operator": {
+                                                    "type": "string"
+                                                },
+                                                "values": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            "file2ExcludeFilters": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "excludeFilter": {
+                                            "type": "object",
+                                            "properties": {
+                                                "sequenceNum": {
+                                                    "type": "integer"
+                                                },
+                                                "fieldExpression": {
+                                                    "type": "string"
+                                                },
+                                                "operator": {
+                                                    "type": "string"
+                                                },
+                                                "values": {
+                                                    "type": "array",
+                                                    "items": {
                                                         "type": "string"
                                                     }
                                                 }
@@ -8536,6 +8644,62 @@
                                             }
                                         }
                                     }
+                                },
+                                "file1ExcludeFilters": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "excludeFilter": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "sequenceNum": {
+                                                        "type": "integer"
+                                                    },
+                                                    "fieldExpression": {
+                                                        "type": "string"
+                                                    },
+                                                    "operator": {
+                                                        "type": "string"
+                                                    },
+                                                    "values": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "file2ExcludeFilters": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "excludeFilter": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "sequenceNum": {
+                                                        "type": "integer"
+                                                    },
+                                                    "fieldExpression": {
+                                                        "type": "string"
+                                                    },
+                                                    "operator": {
+                                                        "type": "string"
+                                                    },
+                                                    "values": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -9801,6 +9965,32 @@
                                 },
                                 "omsRestSourceConfigId": {
                                     "type": "string"
+                                },
+                                "excludeFilters": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "excludeFilter": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "fieldExpression": {
+                                                        "type": "string"
+                                                    },
+                                                    "operator": {
+                                                        "type": "string"
+                                                    },
+                                                    "values": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "description": "Record-exclusion rules for this source's fileSide, mirroring the rule\n                        set's own filters. Omitted means leave the previously-saved rows unchanged (or, on\n                        a first save, seed from the rule set); an explicit list (including an empty one)\n                        replaces them. See save#Automation's source-recreate comment for why omission\n                        cannot mean \"no-op\" here the way it does elsewhere."
                                 }
                             }
                         }
@@ -10353,6 +10543,58 @@
                                 }
                             }
                         }
+                    },
+                    "file1ExcludeFilters": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "excludeFilter": {
+                                    "type": "object",
+                                    "properties": {
+                                        "fieldExpression": {
+                                            "type": "string"
+                                        },
+                                        "operator": {
+                                            "type": "string"
+                                        },
+                                        "values": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "description": "Record-exclusion rules for FILE_1. Omit to leave existing rules unchanged;\n                    send an empty list to clear them."
+                    },
+                    "file2ExcludeFilters": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "excludeFilter": {
+                                    "type": "object",
+                                    "properties": {
+                                        "fieldExpression": {
+                                            "type": "string"
+                                        },
+                                        "operator": {
+                                            "type": "string"
+                                        },
+                                        "values": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "description": "Record-exclusion rules for FILE_2. Omit to leave existing rules unchanged;\n                    send an empty list to clear them."
                     }
                 },
                 "required": [
@@ -10529,6 +10771,62 @@
                                                         "type": "string"
                                                     },
                                                     "action": {
+                                                        "type": "string"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            "file1ExcludeFilters": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "excludeFilter": {
+                                            "type": "object",
+                                            "properties": {
+                                                "sequenceNum": {
+                                                    "type": "integer"
+                                                },
+                                                "fieldExpression": {
+                                                    "type": "string"
+                                                },
+                                                "operator": {
+                                                    "type": "string"
+                                                },
+                                                "values": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            "file2ExcludeFilters": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "excludeFilter": {
+                                            "type": "object",
+                                            "properties": {
+                                                "sequenceNum": {
+                                                    "type": "integer"
+                                                },
+                                                "fieldExpression": {
+                                                    "type": "string"
+                                                },
+                                                "operator": {
+                                                    "type": "string"
+                                                },
+                                                "values": {
+                                                    "type": "array",
+                                                    "items": {
                                                         "type": "string"
                                                     }
                                                 }

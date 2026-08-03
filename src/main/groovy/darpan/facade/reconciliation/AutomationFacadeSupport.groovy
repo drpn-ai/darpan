@@ -8,6 +8,7 @@ import darpan.facade.settings.SettingsFacadeSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.SftpAutomationSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
+import darpan.reconciliation.source.SourceFilterSupport
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import org.slf4j.Logger
@@ -166,7 +167,11 @@ class AutomationFacadeSupport {
                 lastUpdatedDate       : readField(automation, "lastUpdatedDate"),
         ].findAll { it.value != null } as Map<String, Object>
         if (includeSources) {
-            row.sources = sourceRows.collect { source -> buildSourceRow(ec, source) }
+            // Reused whole-automation lookup rather than one query per source: cheap for the
+            // single-record get/save/pause/resume paths this runs on (list#Automations passes
+            // includeSources=false and never reaches here).
+            Map<String, List<Map<String, Object>>> filtersByFileSide = captureSourceFiltersByFileSide(ec, automationId)
+            row.sources = sourceRows.collect { source -> buildSourceRow(ec, source, filtersByFileSide) }
             row.savedRun = savedRun
         }
         return row
@@ -242,12 +247,13 @@ class AutomationFacadeSupport {
         ]
     }
 
-    protected static Map<String, Object> buildSourceRow(def ec, def source) {
+    protected static Map<String, Object> buildSourceRow(def ec, def source, Map<String, List<Map<String, Object>>> filtersByFileSide = [:]) {
         String sourceTypeEnumId = readString(source, "sourceTypeEnumId")
         String systemEnumId = readString(source, "systemEnumId")
+        String fileSide = readString(source, "fileSide")
         return [
                 automationId          : readString(source, "automationId"),
-                fileSide              : readString(source, "fileSide"),
+                fileSide              : fileSide,
                 companyUserGroupId    : readString(source, "companyUserGroupId"),
                 sourceTypeEnumId      : sourceTypeEnumId,
                 sourceTypeLabel       : enumLabel(ec, sourceTypeEnumId),
@@ -270,9 +276,111 @@ class AutomationFacadeSupport {
                 dateFromParameterName : readString(source, "dateFromParameterName"),
                 dateToParameterName   : readString(source, "dateToParameterName"),
                 safeMetadataJson      : readString(source, "safeMetadataJson"),
+                excludeFilters        : buildSourceExcludeFilterResponse(filtersByFileSide?.get(fileSide)),
                 createdDate           : readField(source, "createdDate"),
                 lastUpdatedDate       : readField(source, "lastUpdatedDate"),
         ].findAll { it.value != null } as Map<String, Object>
+    }
+
+    /** Captured filter rows (stored shape) in wire shape: values as a List, not the stored CSV string. */
+    protected static List<Map<String, Object>> buildSourceExcludeFilterResponse(List<Map<String, Object>> capturedRows) {
+        if (!capturedRows) return []
+        return capturedRows.collect { Map<String, Object> row ->
+            [
+                    fieldExpression: row.fieldExpression,
+                    operator       : row.operator,
+                    values         : SourceFilterSupport.splitValues(row.filterValues as String),
+            ] as Map<String, Object>
+        }
+    }
+
+    /**
+     * Existing automation source-exclusion-filter rows grouped by fileSide, in stored shape
+     * (filterValues as the comma-joined string), ordered by sequenceNum.
+     *
+     * A fileSide that currently has a ReconciliationAutomationSource row is always represented as a
+     * key here — with an empty list when it has no filter rows — never simply omitted. The automation
+     * save deletes and recreates every source row on every save (see save#Automation), so a source row
+     * existing is exactly the signal that this side has been saved before. Without that empty-list
+     * entry, a side with zero filter rows (e.g. explicitly cleared on a prior save) would be
+     * indistinguishable from a side that has never been configured, and the very next omitted-key
+     * resave would silently re-seed it from the rule set (see resolveSourceFilters/seedFromRuleSet)
+     * instead of staying cleared — the scheduled automation would then quietly diverge from what the
+     * operator intentionally cleared.
+     */
+    static Map<String, List<Map<String, Object>>> captureSourceFiltersByFileSide(def ec, String automationId) {
+        Map<String, List<Map<String, Object>>> byFileSide = [:]
+        if (!automationId) return byFileSide
+        // Both entities carry their own companyUserGroupId (directly tenant-owned, not transitively via
+        // a parent), so this routes through TenantScopedFinder rather than a bare disableAuthz (P0 #4 —
+        // bare disableAuthz is CI-banned by DisableAuthzRatchetTest). Callers of this function (the
+        // save#Automation capture-before-delete step and buildAutomationRow's load path) have already
+        // established an active tenant matching the automation before reaching here.
+        List existingSources = TenantScopedFinder.findTenantScoped(ec, "darpan.reconciliation.ReconciliationAutomationSource")
+                .condition("automationId", automationId)
+                .useCache(false).list() ?: []
+        existingSources.each { def existingSource ->
+            String existingFileSide = normalize(existingSource.fileSide)
+            if (existingFileSide) byFileSide.putIfAbsent(existingFileSide, [])
+        }
+        List rows = TenantScopedFinder.findTenantScoped(ec, "darpan.reconciliation.ReconciliationAutomationSourceFilter")
+                .condition("automationId", automationId)
+                .orderBy("fileSide,sequenceNum")
+                .useCache(false).list() ?: []
+        rows.each { def row ->
+            String fileSide = normalize(row.fileSide)
+            byFileSide.computeIfAbsent(fileSide, { ignored -> [] }).add([
+                    fieldExpression: normalize(row.fieldExpression),
+                    operator       : normalize(row.operator),
+                    filterValues   : normalize(row.filterValues),
+            ] as Map<String, Object>)
+        }
+        return byFileSide
+    }
+
+    /**
+     * The filter rows to write for one source entry. An entry that omits excludeFilters keeps the
+     * rules captured before the source delete; an explicit list (including an empty one) replaces them.
+     *
+     * On a FIRST save there is nothing captured and the automation UI submits nothing (exclusions are
+     * only editable on the rules board, which belongs to the rule set — the automation wizard never
+     * submits them), so without the seed below an automation would run with no exclusions while its
+     * rule set has them — the scheduled job silently disagreeing with the interactive run. The seed
+     * copies the rule set's rows once, at creation; it is frozen thereafter (later rule-set edits do
+     * not reach an existing automation), which is the snapshot property the mirrored tables exist for.
+     */
+    static List<Map<String, Object>> resolveSourceFilters(def ec, String compareScopeId, Object sourceEntry,
+                                                          Map<String, List<Map<String, Object>>> capturedByFileSide) {
+        Map entry = (sourceEntry instanceof Map) ? (Map) sourceEntry : [:]
+        String fileSide = normalize(entry.get("fileSide"))
+        if (entry.containsKey("excludeFilters") && entry.get("excludeFilters") != null) {
+            return ReconciliationSavedRunSupport.validateExcludeFilterPayload(
+                    entry.get("excludeFilters"), "Automation ${fileSide ?: 'source'}".toString())
+        }
+        List<Map<String, Object>> captured = capturedByFileSide?.get(fileSide)
+        if (captured != null) return captured
+        return seedFromRuleSet(ec, compareScopeId, fileSide)
+    }
+
+    /** Rule set rows for this automation's compare scope and side; empty when it has no compareScopeId. */
+    protected static List<Map<String, Object>> seedFromRuleSet(def ec, String rawCompareScopeId, String fileSide) {
+        String compareScopeId = normalize(rawCompareScopeId)
+        if (!compareScopeId || !fileSide) return []
+        // Same entity, same directly-tenant-owned read pattern as
+        // ReconciliationSavedRunSupport.resolveExtractExcludeFilters (P0 #4 — bare disableAuthz is
+        // CI-banned by DisableAuthzRatchetTest).
+        List rows = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSourceFilter")
+                .condition("compareScopeId", compareScopeId)
+                .condition("fileSide", fileSide)
+                .orderBy("sequenceNum")
+                .useCache(false).list() ?: []
+        return rows.collect { def row ->
+            [
+                    fieldExpression: normalize(row.fieldExpression),
+                    operator       : normalize(row.operator),
+                    filterValues   : normalize(row.filterValues),
+            ] as Map<String, Object>
+        }
     }
 
     protected static Map<String, Object> resolveSavedRunForSave(def ec, Map input) {

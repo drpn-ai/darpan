@@ -649,6 +649,10 @@
             <description>Comma-separated record fields always kept when projection is active: identity and
                 operator-display fields (for the OMS connector, the RQ-2 export field set).</description>
         </field>
+        <field name="filterParameterName" type="text-medium">
+            <description>Service parameter this connector's extractor accepts for record-exclusion rules.
+                Absent means the connector does not support exclusion filters and never receives them.</description>
+        </field>
         <field name="lookupServiceName" type="text-medium">
             <description>Optional point-lookup service (lookup#* shape only, enforced by the lookup fence)
                 that checks record ids directly against the source's primary datastore. When set, the

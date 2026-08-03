@@ -215,4 +215,18 @@ class SourceSystemConnectorSupportSmokeTests {
         assertNotNull(netsuite, "NETSUITE connector row should resolve")
         assertNull(netsuite.healthCheckServiceName)
     }
+
+    @Test
+    void omsConnectorDeclaresTheExclusionFilterParameter() {
+        Map<String, Object> oms = SourceSystemConnectorSupport.resolve(ec, "OMS")
+        assertNotNull(oms, "OMS connector row should resolve")
+        assertEquals("sourceFilters", oms.filterParameterName)
+    }
+
+    @Test
+    void shopifyConnectorDeclaresNoFilterParameterUntilItOptsIn() {
+        Map<String, Object> shopify = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY")
+        assertNotNull(shopify, "SHOPIFY connector row should resolve")
+        assertNull(shopify.filterParameterName)
+    }
 }

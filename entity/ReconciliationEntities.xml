@@ -369,6 +369,42 @@
         </relationship>
     </entity>
 
+    <entity entity-name="ReconciliationAutomationSourceFilter" package="darpan.reconciliation" use="configuration">
+        <description>One record-exclusion rule for an automation source, mirroring RuleSetCompareSourceFilter.
+            Automations snapshot their own source wiring, so these rows are the automation's own copy and are
+            not read through to the rule set.</description>
+        <field name="automationId" type="id" is-pk="true" not-null="true"/>
+        <field name="fileSide" type="text-short" is-pk="true" not-null="true">
+            <description>Logical file side for the automation source: FILE_1 or FILE_2.</description>
+        </field>
+        <field name="sequenceNum" type="number-integer" is-pk="true" not-null="true">
+            <description>Rule evaluation and display order. The first matching rule owns the excluded count.</description>
+        </field>
+        <field name="fieldExpression" type="text-medium" not-null="true"/>
+        <field name="operator" type="text-short" not-null="true" default="'EXCLUDE_IN'"/>
+        <field name="filterValues" type="text-long" not-null="true">
+            <description>Comma-separated exact values to exclude, matched trimmed and case-insensitively.</description>
+        </field>
+        <field name="companyUserGroupId" type="id"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="lastUpdatedDate" type="date-time"/>
+
+        <relationship type="one" related="darpan.reconciliation.ReconciliationAutomationSource" fk-name="RECAUTSF_SOURCE">
+            <key-map field-name="automationId"/>
+            <key-map field-name="fileSide"/>
+        </relationship>
+        <relationship type="one" title="Company" related="moqui.security.UserGroup" fk-name="RECAUTSF_COMPANY">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+        <relationship type="one" title="CreatedBy" related="moqui.security.UserAccount" fk-name="RECAUTSF_CREATED_BY">
+            <key-map field-name="createdByUserId" related-field-name="userId"/>
+        </relationship>
+        <index name="RECAUTSF_TENANT">
+            <index-field name="companyUserGroupId"/>
+        </index>
+    </entity>
+
     <entity entity-name="ReconciliationAutomationExecution" package="darpan.reconciliation" use="transactional" cache="never">
         <description>Execution record for one scheduled automation run or one child window split from a larger automation request.</description>
         <field name="automationExecutionId" type="id" is-pk="true"/>

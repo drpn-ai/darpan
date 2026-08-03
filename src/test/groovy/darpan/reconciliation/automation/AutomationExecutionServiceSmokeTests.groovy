@@ -133,8 +133,10 @@ class AutomationExecutionServiceSmokeTests {
         assertEquals(1, rows.size())
         assertEquals(1, rows[0].sequenceNum)
         assertEquals("salesChannelEnumId", rows[0].fieldExpression)
+        assertEquals("EXCLUDE_IN", rows[0].operator)
         assertEquals("POS_SALES_CHANNEL,DRAFT_SALES_CHANNEL", rows[0].filterValues)
         assertNotNull(rows[0].companyUserGroupId)
+        assertEquals(TEST_USER_ID, rows[0].createdByUserId)
     }
 
     @Test
@@ -173,7 +175,30 @@ class AutomationExecutionServiceSmokeTests {
 
         assertEquals(1, rows.size())
         assertEquals("salesChannelEnumId", rows[0].fieldExpression)
+        assertEquals("EXCLUDE_IN", rows[0].operator)
         assertEquals("POS_SALES_CHANNEL", rows[0].filterValues)
+        // The seed is scoped to the fileSide it was written for — assert it did not also spray FILE_1.
+        assertEquals(0, findAutomationFilterRows(automationId, "FILE_1").size())
+    }
+
+    @Test
+    void firstSaveSeedsFiltersInRuleSetSequenceOrderRegardlessOfCreationOrder() {
+        // Two rows created out of sequenceNum order, so a copy that (incorrectly) preserved creation
+        // order instead of re-sorting by sequenceNum would be caught here.
+        String compareScopeId = createRuleSetCompareScopeWithFilters("FILE_2", [
+                [sequenceNum: 2, fieldExpression: "channelB", filterValues: "VALUE_B"],
+                [sequenceNum: 1, fieldExpression: "channelA", filterValues: "VALUE_A"],
+        ])
+        String automationId = saveAutomationForCompareScope(compareScopeId)
+
+        List rows = findAutomationFilterRows(automationId, "FILE_2")
+
+        assertEquals(2, rows.size())
+        assertEquals(1, rows[0].sequenceNum)
+        assertEquals("channelA", rows[0].fieldExpression)
+        assertEquals(2, rows[1].sequenceNum)
+        assertEquals("channelB", rows[1].fieldExpression)
+        assertEquals(0, findAutomationFilterRows(automationId, "FILE_1").size())
     }
 
     @Test
@@ -201,6 +226,37 @@ class AutomationExecutionServiceSmokeTests {
         deleteAutomation(automationId)
 
         assertEquals(0, findAutomationFilterRows(automationId, "FILE_2").size())
+    }
+
+    @Test
+    void loadedAutomationReturnsExcludeFiltersInWireShape() {
+        // Every other test here reads ReconciliationAutomationSourceFilter directly. None of them would
+        // catch buildSourceExcludeFilterResponse regressing to [] for a populated side — which would
+        // make the wizard rehydrate a draft showing no exclusions and a subsequent resave could then
+        // submit [] explicitly, silently clearing the snapshot. Go through get#Automation (the load
+        // path, not the save response) and assert wire shape: values as a List, not the stored CSV string.
+        String automationId = saveAutomationWithSourceFilters([
+                [fieldExpression: "salesChannelEnumId", operator: "EXCLUDE_IN", values: ["POS_SALES_CHANNEL", "DRAFT_SALES_CHANNEL"]],
+        ])
+
+        Map<String, Object> loadResult = callFacade("facade.ReconciliationFacadeServices.get#Automation", [
+                automationId: automationId,
+        ])
+        assertTrue((Boolean) loadResult.ok, loadResult.errors?.toString())
+
+        List<Map<String, Object>> sources = ((Map) loadResult.automation).sources as List<Map<String, Object>>
+        Map<String, Object> file2Source = sources.find { it.fileSide == "FILE_2" }
+        assertNotNull(file2Source, "load result did not include a FILE_2 source")
+        List<Map<String, Object>> file2Filters = file2Source.excludeFilters as List<Map<String, Object>>
+        assertNotNull(file2Filters, "FILE_2 source did not carry an excludeFilters key")
+        assertEquals(1, file2Filters.size())
+        assertEquals("salesChannelEnumId", file2Filters[0].fieldExpression)
+        assertEquals("EXCLUDE_IN", file2Filters[0].operator)
+        assertEquals(["POS_SALES_CHANNEL", "DRAFT_SALES_CHANNEL"], file2Filters[0].values)
+
+        Map<String, Object> file1Source = sources.find { it.fileSide == "FILE_1" }
+        assertNotNull(file1Source, "load result did not include a FILE_1 source")
+        assertEquals([], file1Source.excludeFilters ?: [])
     }
 
     private void seedApiAutomation() {
@@ -411,16 +467,30 @@ class AutomationExecutionServiceSmokeTests {
 
     /** Same as {@link #createRuleSetCompareScope()}, plus one exclusion-filter row on the given side. */
     private String createRuleSetCompareScopeWithFilter(String fileSide, String fieldExpression, String value) {
+        return createRuleSetCompareScopeWithFilters(fileSide, [
+                [sequenceNum: 1, fieldExpression: fieldExpression, filterValues: value],
+        ])
+    }
+
+    /**
+     * Same as {@link #createRuleSetCompareScope()}, plus one exclusion-filter row per entry in
+     * {@code filters} (each a map of sequenceNum/fieldExpression/filterValues), created in the given
+     * list order — callers that want to prove sequenceNum-based sorting (not creation-order) survives
+     * the copy should list entries out of sequenceNum order.
+     */
+    private String createRuleSetCompareScopeWithFilters(String fileSide, List<Map<String, Object>> filters) {
         Map<String, Object> scope = createRuleSetCompareScope()
-        ec.entity.makeValue("darpan.rule.RuleSetCompareSourceFilter").setAll([
-                compareScopeId    : scope.compareScopeId,
-                fileSide          : fileSide,
-                sequenceNum       : 1,
-                fieldExpression   : fieldExpression,
-                operator          : "EXCLUDE_IN",
-                filterValues      : value,
-                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID,
-        ]).create()
+        filters.each { Map<String, Object> filter ->
+            ec.entity.makeValue("darpan.rule.RuleSetCompareSourceFilter").setAll([
+                    compareScopeId    : scope.compareScopeId,
+                    fileSide          : fileSide,
+                    sequenceNum       : filter.sequenceNum,
+                    fieldExpression   : filter.fieldExpression,
+                    operator          : "EXCLUDE_IN",
+                    filterValues      : filter.filterValues,
+                    companyUserGroupId: TEST_COMPANY_USER_GROUP_ID,
+            ]).create()
+        }
         return scope.compareScopeId as String
     }
 

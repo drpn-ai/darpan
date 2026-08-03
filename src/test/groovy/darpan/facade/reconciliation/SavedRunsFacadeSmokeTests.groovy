@@ -3,6 +3,7 @@ package darpan.facade.reconciliation
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -30,6 +31,13 @@ class SavedRunsFacadeSmokeTests {
 
     private ExecutionContext ec
 
+    // Task 7: (ruleSetId, compareScopeId) pairs from createRuleSetRun(), cleaned up after each test so
+    // these throwaway fixtures don't linger in the shared PER_CLASS DB and shift the unfiltered,
+    // paginated list#SavedRuns ordering other tests in this file (e.g.
+    // csvRunCanBeCreatedListedAndExecutedThroughTheSavedRunFacade's "OrderIdSchemaMap" page-1 check)
+    // depend on.
+    private final List<Map<String, String>> ruleSetRunFixturesToCleanUp = []
+
     @BeforeAll
     void setup() {
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
@@ -51,6 +59,19 @@ class SavedRunsFacadeSmokeTests {
         replaceTenantPermission(KREWE, TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID)
         ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, KREWE)
         ec.message.clearErrors()
+    }
+
+    @AfterEach
+    void cleanUpRuleSetRunFixtures() {
+        // finally-clear so one bad entry can never poison every later test's cleanup pass — leaving a
+        // stale entry in this PER_CLASS-shared list would otherwise re-throw on every subsequent test.
+        try {
+            ruleSetRunFixturesToCleanUp.each { Map<String, String> ids ->
+                deleteRuleSetRunEntities(ids.ruleSetId, ids.compareScopeId)
+            }
+        } finally {
+            ruleSetRunFixturesToCleanUp.clear()
+        }
     }
 
     @Test
@@ -1608,6 +1629,92 @@ end'''
         assertEquals([], ReconciliationSavedRunSupport.resolveExtractExcludeFilters(ec, source))
     }
 
+    @Test
+    void savingExcludeFiltersPersistsThemInSubmittedOrder() {
+        String savedRunId = createRuleSetRun()
+        saveRuleSetWithFilters(savedRunId, [
+                [fieldExpression: "salesChannelEnumId", operator: "EXCLUDE_IN",
+                 values: ["POS_SALES_CHANNEL", "DRAFT_SALES_CHANNEL"]],
+                [fieldExpression: "statusId", operator: "EXCLUDE_IN", values: ["ORDER_CANCELLED"]],
+        ])
+
+        List rows = findFilterRows(savedRunId, "FILE_2")
+
+        assertEquals(2, rows.size())
+        assertEquals(1, rows[0].sequenceNum)
+        assertEquals("salesChannelEnumId", rows[0].fieldExpression)
+        assertEquals("POS_SALES_CHANNEL,DRAFT_SALES_CHANNEL", rows[0].filterValues)
+        assertEquals(2, rows[1].sequenceNum)
+        assertNotNull(rows[0].companyUserGroupId)
+    }
+
+    @Test
+    void resavingReplacesRowsWithoutAccumulatingOrOrphaning() {
+        String savedRunId = createRuleSetRun()
+        saveRuleSetWithFilters(savedRunId, [[fieldExpression: "salesChannelEnumId", values: ["POS_SALES_CHANNEL"]]])
+        saveRuleSetWithFilters(savedRunId, [[fieldExpression: "statusId", values: ["ORDER_CANCELLED"]]])
+
+        List rows = findFilterRows(savedRunId, "FILE_2")
+
+        assertEquals(1, rows.size())
+        assertEquals("statusId", rows[0].fieldExpression)
+    }
+
+    @Test
+    void explicitEmptyArrayClearsTheSidesRules() {
+        String savedRunId = createRuleSetRun()
+        saveRuleSetWithFilters(savedRunId, [[fieldExpression: "salesChannelEnumId", values: ["POS_SALES_CHANNEL"]]])
+        saveRuleSetWithFilters(savedRunId, [])
+
+        assertEquals(0, findFilterRows(savedRunId, "FILE_2").size())
+    }
+
+    @Test
+    void omittingTheKeyLeavesExistingRulesAlone() {
+        // An older or partial client must never silently wipe a configured exclusion.
+        String savedRunId = createRuleSetRun()
+        saveRuleSetWithFilters(savedRunId, [[fieldExpression: "salesChannelEnumId", values: ["POS_SALES_CHANNEL"]]])
+        saveRuleSetWithoutFilterKeys(savedRunId)
+
+        List rows = findFilterRows(savedRunId, "FILE_2")
+
+        assertEquals(1, rows.size())
+        assertEquals("salesChannelEnumId", rows[0].fieldExpression)
+    }
+
+    @Test
+    void loadedRuleSetReturnsItsExcludeFilters() {
+        String savedRunId = createRuleSetRun()
+        saveRuleSetWithFilters(savedRunId, [[fieldExpression: "salesChannelEnumId",
+                                             values         : ["POS_SALES_CHANNEL", "DRAFT_SALES_CHANNEL"]]])
+
+        Map loaded = loadRuleSetRun(savedRunId)
+
+        List filters = loaded.file2ExcludeFilters as List
+        assertEquals(1, filters.size())
+        assertEquals("salesChannelEnumId", filters[0].fieldExpression)
+        assertEquals(["POS_SALES_CHANNEL", "DRAFT_SALES_CHANNEL"], filters[0].values)
+    }
+
+    @Test
+    void blankFieldExpressionIsRejectedAtSave() {
+        String savedRunId = createRuleSetRun()
+
+        Map result = trySaveRuleSetWithFilters(savedRunId, [[fieldExpression: "  ", values: ["POS_SALES_CHANNEL"]]])
+
+        assertTrue(result.errorMessage.toString().toLowerCase().contains("field"))
+        assertEquals(0, findFilterRows(savedRunId, "FILE_2").size())
+    }
+
+    @Test
+    void emptyValueListIsRejectedAtSave() {
+        String savedRunId = createRuleSetRun()
+
+        Map result = trySaveRuleSetWithFilters(savedRunId, [[fieldExpression: "salesChannelEnumId", values: []]])
+
+        assertTrue(result.errorMessage.toString().toLowerCase().contains("value"))
+    }
+
     private void seedCrossTenantMappingUsingReadableSchemas() {
         upsertEntity("moqui.security.UserGroup", [userGroupId: GORJANA], [
                 userGroupId    : GORJANA,
@@ -1772,6 +1879,19 @@ end'''
     }
 
     private void deleteRuleSetRunEntities(String ruleSetId, String compareScopeId) {
+        // RuleSetCompareSourceFilter/KeyField FK-reference RuleSetCompareSource (RSCFL_SOURCE/
+        // RSCKF_SOURCE on compareScopeId+fileSide) — delete children first or the parent delete below
+        // throws a constraint violation for any fixture that created exclusion filters or key fields.
+        ec.entity.find("darpan.rule.RuleSetCompareSourceFilter")
+                .condition("compareScopeId", compareScopeId)
+                .disableAuthz()
+                .useCache(false)
+                .deleteAll()
+        ec.entity.find("darpan.rule.RuleSetCompareSourceKeyField")
+                .condition("compareScopeId", compareScopeId)
+                .disableAuthz()
+                .useCache(false)
+                .deleteAll()
         ec.entity.find("darpan.rule.RuleSetCompareSource")
                 .condition("compareScopeId", compareScopeId)
                 .disableAuthz()
@@ -1945,5 +2065,108 @@ end'''
         if (existing != null) return
 
         ReconciliationSmokeTestSupport.insertEntityDirect(ec, entityName, fields)
+    }
+
+    // ── Task 7 fixtures: save#RuleSetRun exclusion-filter persistence and list#SavedRuns load ──
+
+    // RULE_SET has a unique (companyUserGroupId, ruleSetName) constraint (RULESET_TENANT_NAME) — this
+    // helper is called once per test method here, so runName must be unique per call, not just the
+    // generated ruleSetId (generateRuleSetId only dedupes the id, not the name).
+    private String createRuleSetRun() {
+        Map<String, Object> createResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters([
+                        runName                 : "Exclude Filter Save Fixture ${UUID.randomUUID()}".toString(),
+                        file1SystemEnumId       : "OMS",
+                        file1FileTypeEnumId     : "DftCsv",
+                        file1PrimaryIdExpression: "order_id",
+                        file2SystemEnumId       : "SHOPIFY",
+                        file2FileTypeEnumId     : "DftCsv",
+                        file2PrimaryIdExpression: "order_id",
+                        rules                   : [],
+                ])
+                .disableAuthz()
+                .call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        String savedRunId = createResult.savedRun.savedRunId as String
+        String compareScopeId = createResult.savedRun.compareScopeId as String
+        ruleSetRunFixturesToCleanUp.add([ruleSetId: savedRunId, compareScopeId: compareScopeId])
+        return savedRunId
+    }
+
+    // Every field save#RuleSetRun requires besides savedRunId itself; filter-specific tests only vary
+    // the file2ExcludeFilters key layered on top of this, matching ruleSetRunSaveUpdatesRunSetupWithoutTouchingRules above.
+    // runName is derived from savedRunId (not a fixed literal) so repeated saves within one test
+    // re-assert the same name (no-op, no collision) while different tests' distinct rule sets never
+    // collide on the RULESET_TENANT_NAME (companyUserGroupId, ruleSetName) unique constraint.
+    private Map<String, Object> baseRuleSetSaveParams(String savedRunId) {
+        return [
+                savedRunId              : savedRunId,
+                runName                 : "Exclude Filter Save Fixture ${savedRunId}".toString(),
+                file1SystemEnumId       : "OMS",
+                file1FileTypeEnumId     : "DftCsv",
+                file1PrimaryIdExpression: "order_id",
+                file2SystemEnumId       : "SHOPIFY",
+                file2FileTypeEnumId     : "DftCsv",
+                file2PrimaryIdExpression: "order_id",
+        ] as Map<String, Object>
+    }
+
+    private Map<String, Object> saveRuleSetWithFilters(String savedRunId, List filters) {
+        Map<String, Object> result = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.save#RuleSetRun")
+                .parameters(baseRuleSetSaveParams(savedRunId) + ([file2ExcludeFilters: filters] as Map<String, Object>))
+                .disableAuthz()
+                .call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        return result
+    }
+
+    private void saveRuleSetWithoutFilterKeys(String savedRunId) {
+        Map<String, Object> result = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.save#RuleSetRun")
+                .parameters(baseRuleSetSaveParams(savedRunId))
+                .disableAuthz()
+                .call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+    }
+
+    // Unlike saveRuleSetWithFilters, this never asserts success — it hands back whatever ec.message
+    // accumulated so the caller can assert on the rejection instead of an uncaught exception. Moqui's
+    // ServiceCallSyncImpl catches Throwable from service actions and converts it into ec.message
+    // errors rather than letting it propagate, so validateExcludeFilterPayload's thrown
+    // IllegalArgumentException surfaces here, not as a Groovy exception at the call site.
+    private Map<String, Object> trySaveRuleSetWithFilters(String savedRunId, List filters) {
+        Map<String, Object> result = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.save#RuleSetRun")
+                .parameters(baseRuleSetSaveParams(savedRunId) + ([file2ExcludeFilters: filters] as Map<String, Object>))
+                .disableAuthz()
+                .call()
+        String errorMessage = ec.message.hasError() ? ec.message.errors.join("; ") : ""
+        return ((result ?: [:]) as Map<String, Object>) + ([errorMessage: errorMessage] as Map<String, Object>)
+    }
+
+    private Map<String, Object> loadRuleSetRun(String savedRunId) {
+        Map<String, Object> listResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.list#SavedRuns")
+                .parameters([pageIndex: 0, pageSize: 20, query: savedRunId])
+                .disableAuthz()
+                .call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        List<Map<String, Object>> savedRuns = (List<Map<String, Object>>) (listResult.savedRuns ?: [])
+        return savedRuns.find { Map<String, Object> row -> row.savedRunId == savedRunId } as Map<String, Object>
+    }
+
+    // NOTE: adapted from the task brief, which named the first parameter "compareScopeId" and passed
+    // savedRunId directly as if the two were interchangeable. They are not — generateCompareScopeId
+    // derives a distinct id (CS_RS_..._COMPARE_SCOPE) from the ruleSetId, so querying on savedRunId
+    // as compareScopeId would silently match zero rows. This resolves the real compareScopeId from
+    // the savedRunId (ruleSetId) first.
+    private List findFilterRows(String savedRunId, String fileSide) {
+        String compareScopeId = ReconciliationSavedRunSupport.resolveRuleSetRun(ec, savedRunId).compareScope?.compareScopeId as String
+        return ec.entity.find("darpan.rule.RuleSetCompareSourceFilter")
+                .condition("compareScopeId", compareScopeId)
+                .condition("fileSide", fileSide)
+                .orderBy("sequenceNum").disableAuthz().useCache(false).list() ?: []
     }
 }

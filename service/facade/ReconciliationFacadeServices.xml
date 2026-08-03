@@ -93,6 +93,22 @@
                         <parameter name="action"/>
                     </parameter>
                 </parameter>
+                <parameter name="file1ExcludeFilters" type="List">
+                    <parameter name="excludeFilter" type="Map">
+                        <parameter name="sequenceNum" type="Integer"/>
+                        <parameter name="fieldExpression"/>
+                        <parameter name="operator"/>
+                        <parameter name="values" type="List"><parameter name="value"/></parameter>
+                    </parameter>
+                </parameter>
+                <parameter name="file2ExcludeFilters" type="List">
+                    <parameter name="excludeFilter" type="Map">
+                        <parameter name="sequenceNum" type="Integer"/>
+                        <parameter name="fieldExpression"/>
+                        <parameter name="operator"/>
+                        <parameter name="values" type="List"><parameter name="value"/></parameter>
+                    </parameter>
+                </parameter>
             </parameter>
         </out-parameters>
         <actions>
@@ -644,6 +660,24 @@
                 <parameter name="enabled"/>
                 <parameter name="severity"/>
             </parameter>
+            <parameter name="file1ExcludeFilters" type="List">
+                <parameter name="excludeFilter" type="Map">
+                    <parameter name="fieldExpression"/>
+                    <parameter name="operator"/>
+                    <parameter name="values" type="List"><parameter name="value"/></parameter>
+                </parameter>
+                <description>Record-exclusion rules for FILE_1. Omit to leave existing rules unchanged;
+                    send an empty list to clear them.</description>
+            </parameter>
+            <parameter name="file2ExcludeFilters" type="List">
+                <parameter name="excludeFilter" type="Map">
+                    <parameter name="fieldExpression"/>
+                    <parameter name="operator"/>
+                    <parameter name="values" type="List"><parameter name="value"/></parameter>
+                </parameter>
+                <description>Record-exclusion rules for FILE_2. Omit to leave existing rules unchanged;
+                    send an empty list to clear them.</description>
+            </parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -696,6 +730,22 @@
                     <parameter name="preActions" type="List">
                         <parameter name="fieldSide"/>
                         <parameter name="action"/>
+                    </parameter>
+                </parameter>
+                <parameter name="file1ExcludeFilters" type="List">
+                    <parameter name="excludeFilter" type="Map">
+                        <parameter name="sequenceNum" type="Integer"/>
+                        <parameter name="fieldExpression"/>
+                        <parameter name="operator"/>
+                        <parameter name="values" type="List"><parameter name="value"/></parameter>
+                    </parameter>
+                </parameter>
+                <parameter name="file2ExcludeFilters" type="List">
+                    <parameter name="excludeFilter" type="Map">
+                        <parameter name="sequenceNum" type="Integer"/>
+                        <parameter name="fieldExpression"/>
+                        <parameter name="operator"/>
+                        <parameter name="values" type="List"><parameter name="value"/></parameter>
                     </parameter>
                 </parameter>
             </parameter>
@@ -987,6 +1037,35 @@
                     </iterate>
                 </if>
 
+                <!-- Exclusion filter rows follow the key-field pattern above: PK includes sequenceNum, so a
+                     save deletes and recreates rather than updating in place. Unlike key fields, an ABSENT
+                     file1ExcludeFilters parameter means "no opinion" and leaves existing rows alone, so a
+                     partial or older client can never silently wipe a configured exclusion; an explicit
+                     empty list clears the side, and a populated list replaces it. validateExcludeFilterPayload
+                     fails closed (throws) on a blank field, empty value list, unknown operator, or an
+                     oversized payload — the whole save then rolls back rather than persisting a filter Darpan
+                     would silently drop later. -->
+                <if condition="file1ExcludeFilters != null">
+                    <set field="file1FilterRows" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.validateExcludeFilterPayload(file1ExcludeFilters, 'Source 1')"/>
+                    <entity-find entity-name="darpan.rule.RuleSetCompareSourceFilter" list="file1ExistingFilters">
+                        <econdition field-name="compareScopeId" from="file1Source.compareScopeId"/>
+                        <econdition field-name="fileSide" value="FILE_1"/>
+                    </entity-find>
+                    <iterate list="file1ExistingFilters" entry="file1OldFilter">
+                        <service-call name="delete#darpan.rule.RuleSetCompareSourceFilter" disable-authz="true"
+                                in-map="[compareScopeId: file1OldFilter.compareScopeId, fileSide: file1OldFilter.fileSide, sequenceNum: file1OldFilter.sequenceNum]"/>
+                    </iterate>
+                    <set field="file1FilterSequence" from="0"/>
+                    <iterate list="file1FilterRows" entry="file1FilterRow">
+                        <set field="file1FilterSequence" from="file1FilterSequence + 1"/>
+                        <service-call name="create#darpan.rule.RuleSetCompareSourceFilter" disable-authz="true"
+                                in-map="[compareScopeId: file1Source.compareScopeId, fileSide: 'FILE_1', sequenceNum: file1FilterSequence,
+                                         fieldExpression: file1FilterRow.fieldExpression, operator: file1FilterRow.operator,
+                                         filterValues: file1FilterRow.filterValues, companyUserGroupId: file1Source.companyUserGroupId,
+                                         createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                    </iterate>
+                </if>
+
                 <set field="ignoreFile2System" from="file2Source.set('systemEnumId', file2SystemEnumIdValue)"/>
                 <set field="ignoreFile2SourceType" from="file2Source.set('sourceTypeEnumId', file2SourceTypeEnumIdValue)"/>
                 <set field="ignoreFile2SystemRemote" from="file2Source.set('systemMessageRemoteId', file2SystemMessageRemoteIdValue)"/>
@@ -1017,6 +1096,28 @@
                         <service-call name="create#darpan.rule.RuleSetCompareSourceKeyField"
                                 disable-authz="true"
                                 in-map="[compareScopeId: file2Source.compareScopeId, fileSide: 'FILE_2', sequenceNum: file2KeyFieldSequence, fieldExpression: file2KeyFieldExpression, companyUserGroupId: file2Source.companyUserGroupId, createdDate: file2KeyFieldCreatedDate, lastUpdatedDate: nowTs]"/>
+                    </iterate>
+                </if>
+
+                <!-- See the FILE_1 exclusion-filter comment above. -->
+                <if condition="file2ExcludeFilters != null">
+                    <set field="file2FilterRows" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.validateExcludeFilterPayload(file2ExcludeFilters, 'Source 2')"/>
+                    <entity-find entity-name="darpan.rule.RuleSetCompareSourceFilter" list="file2ExistingFilters">
+                        <econdition field-name="compareScopeId" from="file2Source.compareScopeId"/>
+                        <econdition field-name="fileSide" value="FILE_2"/>
+                    </entity-find>
+                    <iterate list="file2ExistingFilters" entry="file2OldFilter">
+                        <service-call name="delete#darpan.rule.RuleSetCompareSourceFilter" disable-authz="true"
+                                in-map="[compareScopeId: file2OldFilter.compareScopeId, fileSide: file2OldFilter.fileSide, sequenceNum: file2OldFilter.sequenceNum]"/>
+                    </iterate>
+                    <set field="file2FilterSequence" from="0"/>
+                    <iterate list="file2FilterRows" entry="file2FilterRow">
+                        <set field="file2FilterSequence" from="file2FilterSequence + 1"/>
+                        <service-call name="create#darpan.rule.RuleSetCompareSourceFilter" disable-authz="true"
+                                in-map="[compareScopeId: file2Source.compareScopeId, fileSide: 'FILE_2', sequenceNum: file2FilterSequence,
+                                         fieldExpression: file2FilterRow.fieldExpression, operator: file2FilterRow.operator,
+                                         filterValues: file2FilterRow.filterValues, companyUserGroupId: file2Source.companyUserGroupId,
+                                         createdDate: nowTs, lastUpdatedDate: nowTs]"/>
                     </iterate>
                 </if>
 
@@ -1125,6 +1226,22 @@
                     <parameter name="preActions" type="List">
                         <parameter name="fieldSide"/>
                         <parameter name="action"/>
+                    </parameter>
+                </parameter>
+                <parameter name="file1ExcludeFilters" type="List">
+                    <parameter name="excludeFilter" type="Map">
+                        <parameter name="sequenceNum" type="Integer"/>
+                        <parameter name="fieldExpression"/>
+                        <parameter name="operator"/>
+                        <parameter name="values" type="List"><parameter name="value"/></parameter>
+                    </parameter>
+                </parameter>
+                <parameter name="file2ExcludeFilters" type="List">
+                    <parameter name="excludeFilter" type="Map">
+                        <parameter name="sequenceNum" type="Integer"/>
+                        <parameter name="fieldExpression"/>
+                        <parameter name="operator"/>
+                        <parameter name="values" type="List"><parameter name="value"/></parameter>
                     </parameter>
                 </parameter>
             </parameter>

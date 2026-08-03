@@ -98,8 +98,14 @@ class SourceFilterSupport {
         return null
     }
 
-    /** Accepts a List of values or a comma-separated String; trims each and drops blanks. */
-    protected static List<String> splitValues(Object rawValues) {
+    /**
+     * Accepts a List of values or a comma-separated String; trims each and drops blanks. Public
+     * (not just used internally by parseRules): the facade save path (ReconciliationSavedRunSupport)
+     * reuses this to flatten a submitted values list into storage form and to re-expand the stored
+     * comma string back into a List for the wire-shape load response, so both directions share one
+     * definition of "how a value list is split" instead of drifting apart.
+     */
+    static List<String> splitValues(Object rawValues) {
         List<String> values = []
         if (rawValues instanceof Collection) {
             ((Collection) rawValues).each { Object value ->

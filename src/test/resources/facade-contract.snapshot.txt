@@ -577,6 +577,8 @@ SERVICE create RuleSetRun
     savedRun.defaultFile1SystemEnumId : String
     savedRun.defaultFile2SystemEnumId : String
     savedRun.description : String
+    savedRun.file1ExcludeFilters : List
+    savedRun.file2ExcludeFilters : List
     savedRun.requiresSystemSelection : Boolean
     savedRun.ruleSetId : String
     savedRun.rules : List
@@ -1028,6 +1030,8 @@ SERVICE list SavedRuns
     savedRuns.defaultFile1SystemEnumId : String
     savedRuns.defaultFile2SystemEnumId : String
     savedRuns.description : String
+    savedRuns.file1ExcludeFilters : List
+    savedRuns.file2ExcludeFilters : List
     savedRuns.reconciliationMappingId : String
     savedRuns.requiresSystemSelection : Boolean
     savedRuns.ruleSetId : String
@@ -1317,6 +1321,8 @@ SERVICE save RuleSetRun
   allow-remote: true
   IN:
     description : String
+    file1ExcludeFilters : List
+    file1ExcludeFilters.excludeFilter : Map
     file1FileTypeEnumId : String
     file1NsRestletConfigId : String
     file1PrimaryIdExpression : String
@@ -1328,6 +1334,8 @@ SERVICE save RuleSetRun
     file1SourceTypeEnumId : String
     file1SystemEnumId : String [required]
     file1SystemMessageRemoteId : String
+    file2ExcludeFilters : List
+    file2ExcludeFilters.excludeFilter : Map
     file2FileTypeEnumId : String
     file2NsRestletConfigId : String
     file2PrimaryIdExpression : String
@@ -1363,6 +1371,8 @@ SERVICE save RuleSetRun
     savedRun.defaultFile1SystemEnumId : String
     savedRun.defaultFile2SystemEnumId : String
     savedRun.description : String
+    savedRun.file1ExcludeFilters : List
+    savedRun.file2ExcludeFilters : List
     savedRun.requiresSystemSelection : Boolean
     savedRun.ruleSetId : String
     savedRun.rules : List

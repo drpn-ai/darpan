@@ -3,6 +3,7 @@ package darpan.facade.reconciliation
 import darpan.common.DarpanEntityConstants
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.core.CompareIdExpressionSupport
+import darpan.reconciliation.source.SourceFilterSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.PaginationSupport
 import darpan.facade.common.TenantAccessSupport
@@ -568,6 +569,12 @@ class ReconciliationSavedRunSupport {
                 defaultFile2SystemEnumId: canonicalSystemEnumId(sourceBySide[FILE_SIDE_2]?.systemEnumId),
                 systemOptions           : resolvedSystemOptions,
                 rules                   : collectRuleRows(ec, ruleSet.ruleSetId),
+                // Wire-shape exclusion filters (values as a List) for both sides, sourced from
+                // whatever RuleSetCompareSourceFilter rows currently exist — this Map builder is the
+                // one shared response path for create#RuleSetRun, save#RuleSetRun, list#SavedRuns, and
+                // resolveRuleSetRun/findSavedRunById, so wiring it here covers every "load" surface.
+                file1ExcludeFilters     : buildExcludeFilterResponse(ec, sourceBySide[FILE_SIDE_1]),
+                file2ExcludeFilters     : buildExcludeFilterResponse(ec, sourceBySide[FILE_SIDE_2]),
         ]
     }
 
@@ -633,6 +640,71 @@ class ReconciliationSavedRunSupport {
                     fieldExpression: normalize(row.fieldExpression),
                     operator       : normalize(row.operator),
                     filterValues   : normalize(row.filterValues),
+            ] as Map<String, Object>
+        }
+    }
+
+    /**
+     * Validate a submitted exclusion-filter payload and flatten each rule's value list into the
+     * comma-separated form the entity stores. Throws rather than dropping a bad rule: a filter the
+     * operator configured but Darpan silently ignored is the confusion this feature removes. The
+     * stored shape produced here is finally run through SourceFilterSupport.parseRules — the single
+     * source of truth for rule validity — so a save can never persist rows the getter would later
+     * reject mid-run.
+     */
+    static List<Map<String, Object>> validateExcludeFilterPayload(Object rawFilters, String sourceLabel) {
+        if (rawFilters == null) return []
+        if (!(rawFilters instanceof Collection)) {
+            throw new IllegalArgumentException("${sourceLabel} exclusion filters must be a list.".toString())
+        }
+        Collection rawList = (Collection) rawFilters
+        if (rawList.size() > SourceFilterSupport.MAX_RULES_PER_SOURCE) {
+            throw new IllegalArgumentException(
+                    "${sourceLabel} defines ${rawList.size()} exclusion filters; the maximum is ${SourceFilterSupport.MAX_RULES_PER_SOURCE}.".toString())
+        }
+        List<Map<String, Object>> rows = []
+        int position = 0
+        for (Object raw : rawList) {
+            position++
+            if (!(raw instanceof Map)) {
+                throw new IllegalArgumentException("${sourceLabel} exclusion filter ${position} is not a rule.".toString())
+            }
+            Map row = (Map) raw
+            String fieldExpression = normalize(row.get("fieldExpression"))
+            if (!fieldExpression) {
+                throw new IllegalArgumentException("${sourceLabel} exclusion filter ${position} needs a field.".toString())
+            }
+            String operator = (normalize(row.get("operator")) ?: SourceFilterSupport.OPERATOR_EXCLUDE_IN).toUpperCase()
+            List<String> values = SourceFilterSupport.splitValues(
+                    row.containsKey("values") ? row.get("values") : row.get("filterValues"))
+            if (!values) {
+                throw new IllegalArgumentException(
+                        "${sourceLabel} exclusion filter ${position} needs at least one value to exclude.".toString())
+            }
+            if (values.size() > SourceFilterSupport.MAX_VALUES_PER_RULE) {
+                throw new IllegalArgumentException(
+                        "${sourceLabel} exclusion filter ${position} lists ${values.size()} values; the maximum is ${SourceFilterSupport.MAX_VALUES_PER_RULE}.".toString())
+            }
+            if (values.any { String value -> value.contains(",") }) {
+                throw new IllegalArgumentException(
+                        "${sourceLabel} exclusion filter ${position} contains a comma inside a value, which is not supported.".toString())
+            }
+            rows.add([fieldExpression: fieldExpression, operator: operator, filterValues: values.join(",")] as Map<String, Object>)
+        }
+        // parseRules is the single source of truth for rule validity — run the stored shape through
+        // it now so a save can never persist rows the getter would later reject mid-run.
+        SourceFilterSupport.parseRules(rows)
+        return rows
+    }
+
+    /** Loaded rules in wire shape: values as a List, not the stored comma-separated string. */
+    static List<Map<String, Object>> buildExcludeFilterResponse(def ec, def source) {
+        return resolveExtractExcludeFilters(ec, source).collect { Map<String, Object> row ->
+            [
+                    sequenceNum    : row.sequenceNum,
+                    fieldExpression: row.fieldExpression,
+                    operator       : row.operator,
+                    values         : SourceFilterSupport.splitValues(row.filterValues),
             ] as Map<String, Object>
         }
     }

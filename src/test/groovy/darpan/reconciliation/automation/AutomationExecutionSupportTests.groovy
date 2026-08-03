@@ -1644,6 +1644,35 @@ class AutomationExecutionSupportTests {
         assertEquals("TENANT_A", AutomationExecutionSupport.assertSystemWriteTenant(ec, automation))
     }
 
+    @Test
+    void automationExtractorReceivesTheSourcesConfiguredExclusionFilters() {
+        Map<String, Object> serviceParams = AutomationExecutionSupport.applyExcludeFilterParameter(
+                [:],
+                [filterParameterName: "sourceFilters"],
+                [[sequenceNum: 1, fieldExpression: "salesChannelEnumId", operator: "EXCLUDE_IN",
+                  filterValues: "POS_SALES_CHANNEL"]])
+
+        assertEquals(1, (serviceParams.sourceFilters as List).size())
+        assertEquals("salesChannelEnumId", (serviceParams.sourceFilters as List)[0].fieldExpression)
+    }
+
+    @Test
+    void connectorWithoutAFilterParameterNeverReceivesFilters() {
+        Map<String, Object> serviceParams = AutomationExecutionSupport.applyExcludeFilterParameter(
+                [:], [filterParameterName: null],
+                [[sequenceNum: 1, fieldExpression: "salesChannelEnumId", filterValues: "POS_SALES_CHANNEL"]])
+
+        assertFalse(serviceParams.containsKey("sourceFilters"))
+    }
+
+    @Test
+    void emptyFilterListLeavesTheParameterUnset() {
+        Map<String, Object> serviceParams = AutomationExecutionSupport.applyExcludeFilterParameter(
+                [:], [filterParameterName: "sourceFilters"], [])
+
+        assertFalse(serviceParams.containsKey("sourceFilters"))
+    }
+
     private static FakeEc fakeEc() {
         FakeEc ec = new FakeEc(
                 entity: new FakeEntityFacade(),
@@ -1832,6 +1861,13 @@ class AutomationExecutionSupportTests {
             this.maxRows = maxRows
             return this
         }
+
+        // Task 6 (automation exclusion filters): loadAutomationSourceFilters chains .orderBy("sequenceNum")
+        // on every extractor dispatch, including runs with zero configured filter rows. No test here
+        // asserts on ordering itself (rows are inserted in fixture order and stay that way), so this is a
+        // pass-through — but it must exist or every full executeAutomation() test breaks with a
+        // MissingMethodException the moment the real production code calls .orderBy() on this fake finder.
+        FakeFind orderBy(String fieldName) { return this }
 
         FakeFind disableAuthz() { return this }
 

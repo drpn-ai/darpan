@@ -34,6 +34,7 @@ import static darpan.common.ValueSupport.normalizeInt
 import static darpan.common.ValueSupport.readField
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.currentUserId
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.loadAutomation
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.loadAutomationSourceFilters
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.loadAutomationSources
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.normalizeDataManagerPath
 import static darpan.reconciliation.automation.AutomationRuntimeSupport.nowTimestamp
@@ -945,6 +946,11 @@ class AutomationExecutionSupport {
         serviceParams[dateToParameterName] = window.childWindowEndDate
         if (connectorForService?.preserveWindowInstants) serviceParams.preserveWindowInstants = true
 
+        applyExcludeFilterParameter(serviceParams, connectorForService,
+                loadAutomationSourceFilters(ec,
+                        normalize(readField(automation, "automationId")),
+                        normalize(readField(source, "fileSide"))))
+
         def call = ec.service.sync().name(serviceName).parameters(serviceParams)
         if (call?.metaClass?.respondsTo(call, "disableAuthz")) call = call.disableAuthz()
         Map<String, Object> result = (call.call() ?: [:]) as Map<String, Object>
@@ -953,6 +959,15 @@ class AutomationExecutionSupport {
                 .findAll { String error -> error } as List<String>
         if (errors) throw new IllegalStateException(errors.join("; "))
         return result
+    }
+
+    /** Registry-driven: only a connector that declares a filter parameter receives exclusion rules. */
+    protected static Map<String, Object> applyExcludeFilterParameter(Map<String, Object> serviceParams,
+                                                                     Map<String, Object> connector,
+                                                                     List<Map<String, Object>> excludeFilters) {
+        String filterParameterName = normalize(connector?.get("filterParameterName"))
+        if (filterParameterName && excludeFilters) serviceParams.put(filterParameterName, excludeFilters)
+        return serviceParams
     }
 
     protected static Map<String, Object> resolveSourceExtractorConfigDefaults(def ec, def automation, Collection sources) {

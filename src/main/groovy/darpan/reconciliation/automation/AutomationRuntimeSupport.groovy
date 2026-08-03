@@ -41,6 +41,31 @@ class AutomationRuntimeSupport {
         } as Map<String, Object>
     }
 
+    /**
+     * Configured exclusion rules for one automation source side, ordered by sequenceNum.
+     * [P0#4 step 3] DUAL-CONTEXT: same as loadAutomationSources — the scheduled runner has no active
+     * tenant. Trust anchor is automation.companyUserGroupId, gated at run#AutomationNow for user calls.
+     */
+    static List<Map<String, Object>> loadAutomationSourceFilters(def ec, String automationId, String fileSide) {
+        if (!automationId || !fileSide) return []
+        List rows = TenantScopedFinder.findGlobalUnscoped(
+                ec, "darpan.reconciliation.ReconciliationAutomationSourceFilter",
+                "automation runner loads by automationId; tenant gated at run#AutomationNow user entry via canAccessTenantRecord")
+                .condition("automationId", automationId)
+                .condition("fileSide", fileSide)
+                .orderBy("sequenceNum")
+                .useCache(false)
+                .list() ?: []
+        return rows.collect { def row ->
+            [
+                    sequenceNum    : row.sequenceNum,
+                    fieldExpression: normalize(row.fieldExpression),
+                    operator       : normalize(row.operator),
+                    filterValues   : normalize(row.filterValues),
+            ] as Map<String, Object>
+        }
+    }
+
     static void updateAutomationExecution(def ec, def execution, Map<String, Object> fields) {
         if (!execution) return
         runInTransaction(ec, "Error updating reconciliation automation execution", {

@@ -34,15 +34,26 @@ class FacadeSupport {
         return finder.one()
     }
 
+    /**
+     * Display label for an enumeration.
+     *
+     * A source system is a proper noun the operator recognises — Shopify, HotWax, NetSuite — and its
+     * enumCode is a machine code (SHOPIFY, HOTWAX, NETSUITE). Showing the code made the same system
+     * read two different ways depending on the surface. So for DarpanSystemSource the description
+     * wins; this used to be special-cased for OMS alone, which fixed HotWax and left every other
+     * system showing its code.
+     *
+     * Every other enum type keeps enumCode-first: those codes are the short display strings the rest
+     * of the app already expects, and their descriptions are often longer prose.
+     */
     static String enumLabel(def item) {
-        if (isHotWaxOmsSystemSourceOption(item)) {
-            return normalize(item?.description) ?: "HotWax"
+        if (isDarpanSystemSourceOption(item)) {
+            return normalize(item?.description) ?: normalize(item?.enumCode) ?: normalize(item?.enumId)
         }
         return normalize(item?.enumCode) ?: normalize(item?.description) ?: normalize(item?.enumId)
     }
 
-    private static boolean isHotWaxOmsSystemSourceOption(def item) {
-        return normalize(item?.enumTypeId) == "DarpanSystemSource" &&
-                normalize(item?.enumId) == "OMS"
+    private static boolean isDarpanSystemSourceOption(def item) {
+        return normalize(item?.enumTypeId) == "DarpanSystemSource"
     }
 }

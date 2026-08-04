@@ -110,7 +110,11 @@ class AutomationFacadeSmokeTests {
         assertNotNull(automation.automationId)
         assertNotNull(automation.savedRunId)
         assertEquals("Daily API Saved Run", automation.savedRunName)
-        assertEquals("API: HotWax via OMS_REMOTE -> SHOPIFY via SHOPIFY_REMOTE", automation.sourceSummary)
+        // "Shopify", not "SHOPIFY": enumLabel used to return enumCode for every system except OMS,
+        // which had a hard-coded special case. That made one system read as its proper name and every
+        // other as its machine code — visible side by side in this very assertion. DarpanSystemSource
+        // now prefers the description for all of them.
+        assertEquals("API: HotWax via OMS_REMOTE -> Shopify via SHOPIFY_REMOTE", automation.sourceSummary)
         assertEquals("PT1H", automation.scheduleSummary)
         assertEquals(true, ((Map) automation.permissions).canRunNow)
         assertEquals(2, ((List) automation.sources).size())

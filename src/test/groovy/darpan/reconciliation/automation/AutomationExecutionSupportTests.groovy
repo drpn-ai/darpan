@@ -1,6 +1,7 @@
 package darpan.reconciliation.automation
 
 import darpan.reconciliation.notification.TenantNotificationSupport
+import darpan.reconciliation.source.SourceFilterSupport
 import org.junit.jupiter.api.Test
 
 import java.sql.Timestamp
@@ -1703,6 +1704,33 @@ class AutomationExecutionSupportTests {
         assertEquals([1, 2], filters*.sequenceNum)
         assertEquals("salesChannelEnumId", filters[0].fieldExpression)
         assertEquals("returnStatus", filters[1].fieldExpression)
+    }
+
+    @Test
+    void aBoardConfiguredJsonPathSnapshotActuallyExcludesARawRecordOnTheScheduledPath() {
+        // FINAL-REVIEW CRITICAL 1a, scheduled half. An automation's snapshot rows are copied VERBATIM
+        // from the rule set, so they carry the board's JSONPath — but the getter scans top-level record
+        // keys. Without the reduction in loadAutomationSourceFilters, a scheduled run silently excludes
+        // nothing while its interactive twin excludes correctly: exactly the divergence the mirrored
+        // snapshot exists to prevent.
+        FakeEc ec = fakeEc()
+        ec.entity.add("darpan.reconciliation.ReconciliationAutomationSourceFilter", [
+                automationId   : "AUTO_API",
+                fileSide       : "FILE_1",
+                sequenceNum    : 1,
+                fieldExpression: '$.records[*].salesChannelEnumId',
+                operator       : "EXCLUDE_IN",
+                filterValues   : "POS_SALES_CHANNEL",
+        ])
+
+        List<Map<String, Object>> filters = AutomationRuntimeSupport.loadAutomationSourceFilters(ec, "AUTO_API", "FILE_1")
+
+        assertEquals("salesChannelEnumId", filters[0].fieldExpression)
+        List<Map<String, Object>> parsed = SourceFilterSupport.parseRules(filters)
+        assertNotNull(SourceFilterSupport.firstMatchingRule(
+                [orderId: "O-1", salesChannelEnumId: "POS_SALES_CHANNEL"], parsed))
+        assertNull(SourceFilterSupport.firstMatchingRule(
+                [orderId: "O-2", salesChannelEnumId: "WEB_SALES_CHANNEL"], parsed))
     }
 
     private static FakeEc fakeEc() {

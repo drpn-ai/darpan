@@ -64,6 +64,30 @@ class AutomationFacadeSupport {
             [fieldPath: "\$.records[*].name", label: "Order name", type: "String"],
     ].asImmutable()
 
+    /**
+     * The fields the rules board offers as pills for an OMS source — a SUPERSET of
+     * {@link #HOTWAX_OMS_ORDER_PRIMARY_ID_OPTIONS}, which stays deliberately narrow because primary-ID
+     * selection wants key-like fields only.
+     *
+     * Contents = the OMS connector's {@code keepFieldsBase} (pinned against drift by
+     * SourceSystemConnectorSupportSmokeTests) PLUS {@code salesChannelEnumId}. Exclusion filters run
+     * BEFORE projection (OmsRestSourceSupport.prepareOrdersPage), so ANY raw-record field is testable
+     * and this list is a curated convenience, not a hard limit — salesChannelEnumId is here precisely
+     * because it is the shipping use case and is NOT in keepFieldsBase.
+     *
+     * Safe for comparison rules too: resolveExtractKeepFields disables projection entirely as soon as
+     * a rule set defines any rule, so a rule drawn on a non-keepFieldsBase field still sees its value.
+     */
+    static final List<Map<String, Object>> HOTWAX_OMS_ORDER_FIELD_OPTIONS = [
+            [fieldPath: "\$.records[*].orderId", label: "Order ID", type: "string"],
+            [fieldPath: "\$.records[*].orderName", label: "Order name", type: "string"],
+            [fieldPath: "\$.records[*].externalId", label: "External ID", type: "string"],
+            [fieldPath: "\$.records[*].grandTotal", label: "Grand total", type: "string"],
+            [fieldPath: "\$.records[*].orderDate", label: "Order date", type: "string"],
+            [fieldPath: "\$.records[*].statusId", label: "Status", type: "string"],
+            [fieldPath: "\$.records[*].salesChannelEnumId", label: "Sales channel", type: "string"],
+    ].asImmutable()
+
     static Map<String, Object> prepareAutomationSave(def ec, Map params = [:]) {
         Map input = params ?: [:]
         String automationName = input.automationName as String
@@ -439,11 +463,13 @@ class AutomationFacadeSupport {
      * {@code runUseOrBegin} — so the guarantee holds unconditionally, even if this is ever invoked
      * from inside an already-open ambient transaction (a bare {@code runUseOrBegin}-based chunk would
      * silently join that transaction instead of starting its own, restoring the all-or-nothing
-     * exposure this exists to remove — Task 13 fix round 2, New Important 3). This is the same
-     * suspend/resume mechanism already used to fix the request-transaction-timeout class of bug on
-     * the scheduled-run path (see the "UAT run tx-timeout root cause" fix). A large instance's full
-     * automation set is not made to fit inside the ~60s default request transaction as one
-     * all-or-nothing unit, and a failure partway through one automation rolls back only that
+     * exposure this exists to remove — Task 13 fix round 2, New Important 3). It addresses the same
+     * CLASS of bug as the request-transaction-timeout fix on the saved-run path (see the "UAT run
+     * tx-timeout root cause" fix) but by a different mechanism: that fix suspends the caller's
+     * transaction outright, while {@code runRequireNew} runs the work on a fresh thread with an empty
+     * transaction stack (TransactionFacadeImpl.requireNewThread is a {@code final static true}).
+     * A large instance's full automation set is not made to fit inside the ~60s default request
+     * transaction as one all-or-nothing unit, and a failure partway through one automation rolls back only that
      * automation's own writes, not every automation already committed before it. A failure on one
      * automation is caught, recorded as an {@code ec.message} error (surfaced via the
      * {@code ok}/{@code errors} out-parameters), and does not stop the sweep from continuing to the
@@ -1120,6 +1146,9 @@ class AutomationFacadeSupport {
         String endpointLabel = endpointLabelForSystem(OMS_SYSTEM_ENUM_ID, HOTWAX_ORDERS_REMOTE_ID,
                 readString(omsRemote, "description") ?: HOTWAX_ORDERS_ENDPOINT_LABEL)
 
+        // Resolved once, outside the row loop: it is the same registry row for every source config.
+        boolean omsSupportsExcludeFilters = supportsExcludeFiltersForSystem(ec, OMS_SYSTEM_ENUM_ID)
+
         try {
             // P0 #4 step 4b: tenant condition pre-applied by finder; additional conditions chained.
             List rows = TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG)
@@ -1144,6 +1173,8 @@ class AutomationFacadeSupport {
                         dateFromParameterName : HOTWAX_OMS_WINDOW_START_PARAMETER,
                         dateToParameterName   : HOTWAX_OMS_WINDOW_END_PARAMETER,
                         primaryIdOptions      : HOTWAX_OMS_ORDER_PRIMARY_ID_OPTIONS,
+                        fieldOptions          : fieldOptionsForSystem(OMS_SYSTEM_ENUM_ID),
+                        supportsExcludeFilters: omsSupportsExcludeFilters,
                         safeMetadataJson     : JsonOutput.toJson([
                                 extractServiceName: HOTWAX_OMS_ORDERS_EXTRACT_SERVICE,
                                 parameters        : [omsRestSourceConfigId: configId],
@@ -1166,6 +1197,7 @@ class AutomationFacadeSupport {
         String endpointLabel = endpointLabelForSystem(SHOPIFY_SYSTEM_ENUM_ID, SHOPIFY_ORDERS_REMOTE_ID,
                 readString(shopifyRemote, "description") ?: SHOPIFY_ORDERS_ENDPOINT_LABEL)
 
+        boolean shopifySupportsExcludeFilters = supportsExcludeFiltersForSystem(ec, SHOPIFY_SYSTEM_ENUM_ID)
         return listShopifyAuthConfigOptions(ec).collect { Map<String, Object> sourceConfig ->
             String sourceConfigId = readString(sourceConfig, "sourceConfigId")
             [
@@ -1183,6 +1215,8 @@ class AutomationFacadeSupport {
                     dateFromParameterName: SHOPIFY_WINDOW_START_PARAMETER,
                     dateToParameterName  : SHOPIFY_WINDOW_END_PARAMETER,
                     primaryIdOptions     : primaryIdOptionsForSystem(SHOPIFY_SYSTEM_ENUM_ID),
+                    fieldOptions         : fieldOptionsForSystem(SHOPIFY_SYSTEM_ENUM_ID),
+                    supportsExcludeFilters: shopifySupportsExcludeFilters,
                     safeMetadataJson     : JsonOutput.toJson([
                             extractServiceName: SHOPIFY_ORDERS_EXTRACT_SERVICE,
                             parameters        : [shopifyAuthConfigId: sourceConfigId],
@@ -1215,6 +1249,8 @@ class AutomationFacadeSupport {
                     systemEnumId         : systemEnumId,
                     systemLabel          : enumLabel(ec, systemEnumId),
                     primaryIdOptions     : primaryIdOptionsForSystem(systemEnumId),
+                    fieldOptions         : fieldOptionsForSystem(systemEnumId),
+                    supportsExcludeFilters: supportsExcludeFiltersForSystem(ec, systemEnumId),
                     label                : endpointLabel,
             ].findAll { it.value != null } as Map<String, Object>]
         } as List<Map<String, Object>>
@@ -1267,6 +1303,38 @@ class AutomationFacadeSupport {
                 return SHOPIFY_ORDER_PRIMARY_ID_OPTIONS
             default:
                 return []
+        }
+    }
+
+    /**
+     * The wider pill list the rules board uses, or null when this system has no curated superset —
+     * the board then falls back to {@code primaryIdOptions}, which is exactly today's behavior.
+     *
+     * Only OMS has one. Shopify deliberately does NOT: its connector declares no {@code keepFieldsBase}
+     * and its record shape comes from a per-tenant GraphQL request template, so any wider list would be
+     * guessed rather than derived — and it declares no {@code filterParameterName} either, so it can
+     * carry no exclusions for the wider list to serve.
+     */
+    protected static List<Map<String, Object>> fieldOptionsForSystem(String systemEnumId) {
+        return normalize(systemEnumId) == OMS_SYSTEM_ENUM_ID ? HOTWAX_OMS_ORDER_FIELD_OPTIONS : null
+    }
+
+    /**
+     * Whether a source on this system can actually carry exclusion filters — i.e. whether its
+     * connector declares the {@code filterParameterName} that runSavedRunDiff / AutomationExecutionSupport
+     * key exclusion dispatch on. The UI gates the exclusion mark on this so the board never offers a
+     * control that would validate, persist and then exclude nothing (design: fail closed and loudly).
+     * Registry-driven on purpose: a connector opting in later needs no UI change.
+     */
+    protected static boolean supportsExcludeFiltersForSystem(def ec, String systemEnumId) {
+        try {
+            Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, normalize(systemEnumId))
+            // Explicit truthiness, NOT `as boolean`: String.asType(Boolean) routes through
+            // Boolean.valueOf, which would turn "sourceFilters" into false.
+            return normalize(connector?.get("filterParameterName")) ? true : false
+        } catch (Exception e) {
+            logger.warn("Could not resolve exclusion-filter support for system ${systemEnumId}", e)
+            return false
         }
     }
 

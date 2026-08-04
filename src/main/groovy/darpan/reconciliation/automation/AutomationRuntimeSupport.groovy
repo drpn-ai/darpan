@@ -3,6 +3,7 @@ package darpan.reconciliation.automation
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
+import darpan.reconciliation.source.SourceFilterSupport
 import groovy.json.JsonOutput
 
 import java.sql.Timestamp
@@ -42,7 +43,13 @@ class AutomationRuntimeSupport {
     }
 
     /**
-     * Configured exclusion rules for one automation source side, ordered by sequenceNum.
+     * Configured exclusion rules for one automation source side, ordered by sequenceNum, in GETTER
+     * shape — {@code fieldExpression} reduced from the stored operator-facing JSONPath to the
+     * top-level record key SourceFilterSupport.firstMatchingRule tests. The snapshot rows are copied
+     * verbatim from the rule set, so they carry the same board-written expression the interactive
+     * path stores, and skipping this reduction would make every scheduled exclusion a silent no-op
+     * (the interactive equivalent is ReconciliationSavedRunSupport.resolveExtractExcludeFilters).
+     *
      * [P0#4 step 3] DUAL-CONTEXT: same as loadAutomationSources — the scheduled runner has no active
      * tenant. Trust anchor is automation.companyUserGroupId, gated at run#AutomationNow for user calls.
      */
@@ -56,14 +63,14 @@ class AutomationRuntimeSupport {
                 .orderBy("sequenceNum")
                 .useCache(false)
                 .list() ?: []
-        return rows.collect { def row ->
+        return SourceFilterSupport.toRecordFieldRules(rows.collect { def row ->
             [
                     sequenceNum    : row.sequenceNum,
                     fieldExpression: normalize(row.fieldExpression),
                     operator       : normalize(row.operator),
                     filterValues   : normalize(row.filterValues),
             ] as Map<String, Object>
-        }
+        } as List<Map<String, Object>>)
     }
 
     static void updateAutomationExecution(def ec, def execution, Map<String, Object> fields) {
@@ -85,11 +92,17 @@ class AutomationRuntimeSupport {
     }
 
     /**
-     * Runs {@code work} in its OWN new transaction (Moqui's {@code runRequireNew}), suspending any
-     * transaction already in place for the duration and resuming it afterward. Unlike
+     * Runs {@code work} in its OWN new transaction (Moqui's {@code runRequireNew}). Unlike
      * {@link #runInTransaction}, which JOINS an ambient transaction if one is already open,
      * {@code work} here is guaranteed to commit or roll back independently of whatever transaction
      * the caller happens to be running inside.
+     *
+     * Mechanism, verified against the framework rather than assumed: {@code runRequireNew}'s
+     * {@code requireNewThread} flag is a {@code final static true}, so the live path hands the work to
+     * a FRESH THREAD with an empty transaction stack; it does not suspend and resume the caller's
+     * transaction on the calling thread (the suspend/resume branch is dead code). The isolation
+     * guarantee is the same either way — the distinction matters only when reasoning about thread
+     * affinity, e.g. that {@code work} must not assume thread-local caller state.
      *
      * Task 13 fix round 2, New Important 3: {@code backfillAutomationExcludeFilters} chunks its sweep
      * per automation specifically so one automation's failure cannot roll back automations already

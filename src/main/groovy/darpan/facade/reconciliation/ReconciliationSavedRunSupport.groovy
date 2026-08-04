@@ -619,14 +619,18 @@ class ReconciliationSavedRunSupport {
     }
 
     /**
-     * Configured exclusion rules for one compare source, ordered by sequenceNum. Returns an empty
-     * list when the source has no rows, which is what keeps pre-feature rule sets extracting exactly
-     * as they did before this feature. RuleSetCompareSourceFilter carries its own denormalized
-     * companyUserGroupId (same shape as RuleSetCompareSourceKeyField above), so it is read the same
-     * way — directly tenant-scoped, not via the transitively-owned findGlobalUnscoped pattern used
-     * for RuleSetCompareSource itself.
+     * Stored exclusion rows for one compare source, ordered by sequenceNum, with {@code
+     * fieldExpression} exactly as the operator configured it (a JSONPath from the rules board).
+     * Returns an empty list when the source has no rows, which is what keeps pre-feature rule sets
+     * extracting exactly as they did before this feature. RuleSetCompareSourceFilter carries its own
+     * denormalized companyUserGroupId (same shape as RuleSetCompareSourceKeyField above), so it is
+     * read the same way — directly tenant-scoped, not via the transitively-owned findGlobalUnscoped
+     * pattern used for RuleSetCompareSource itself.
+     *
+     * This is the LOAD shape (round-tripped back onto the board). Anything handing rules to a getter
+     * wants {@link #resolveExtractExcludeFilters} instead.
      */
-    static List<Map<String, Object>> resolveExtractExcludeFilters(def ec, Object source) {
+    static List<Map<String, Object>> readExcludeFilterRows(def ec, Object source) {
         String compareScopeId = normalize(source?.compareScopeId)
         String fileSide = normalize(source?.fileSide)
         if (!compareScopeId || !fileSide) return []
@@ -642,6 +646,17 @@ class ReconciliationSavedRunSupport {
                     filterValues   : normalize(row.filterValues),
             ] as Map<String, Object>
         }
+    }
+
+    /**
+     * The same rules in GETTER shape: {@code fieldExpression} reduced from the stored JSONPath to the
+     * top-level record key SourceFilterSupport.firstMatchingRule actually tests. Without this step the
+     * board's {@code $.records[*].salesChannelEnumId} never matches a raw record key and every
+     * configured exclusion is a silent no-op. Mirrors what resolveExtractKeepFields already does for
+     * the sibling key-field expressions a hundred lines above.
+     */
+    static List<Map<String, Object>> resolveExtractExcludeFilters(def ec, Object source) {
+        return SourceFilterSupport.toRecordFieldRules(readExcludeFilterRows(ec, source))
     }
 
     /**
@@ -674,7 +689,17 @@ class ReconciliationSavedRunSupport {
             if (!fieldExpression) {
                 throw new IllegalArgumentException("${sourceLabel} exclusion filter ${position} needs a field.".toString())
             }
-            String operator = (normalize(row.get("operator")) ?: SourceFilterSupport.OPERATOR_EXCLUDE_IN).toUpperCase()
+            // Reject at SAVE what the getter would have to reject mid-run: the stored expression is
+            // reduced to a top-level record key at dispatch (SourceFilterSupport.toRecordFieldRules),
+            // and one that reduces to nothing could only ever match nothing.
+            if (!topLevelRecordField(fieldExpression)) {
+                throw new IllegalArgumentException(
+                        "${sourceLabel} exclusion filter ${position} names field '${fieldExpression}', which does not resolve to a record field.".toString())
+            }
+            // Locale.ROOT, not the default locale: on a tr_TR JVM "exclude_in" upper-cases to
+            // "EXCLUDE_İN" and the parseRules gate below rejects a rule the operator entered
+            // correctly. Same fix already applied in SourceFilterSupport.parseRules.
+            String operator = (normalize(row.get("operator")) ?: SourceFilterSupport.OPERATOR_EXCLUDE_IN).toUpperCase(Locale.ROOT)
             List<String> values = SourceFilterSupport.splitValues(
                     row.containsKey("values") ? row.get("values") : row.get("filterValues"))
             if (!values) {
@@ -697,9 +722,13 @@ class ReconciliationSavedRunSupport {
         return rows
     }
 
-    /** Loaded rules in wire shape: values as a List, not the stored comma-separated string. */
+    /**
+     * Loaded rules in wire shape: values as a List, not the stored comma-separated string, and
+     * {@code fieldExpression} left as the STORED expression. The board matches this against the field
+     * pill's own path, so reducing it to a bare record key here would orphan the mark.
+     */
     static List<Map<String, Object>> buildExcludeFilterResponse(def ec, def source) {
-        return resolveExtractExcludeFilters(ec, source).collect { Map<String, Object> row ->
+        return readExcludeFilterRows(ec, source).collect { Map<String, Object> row ->
             [
                     sequenceNum    : row.sequenceNum,
                     fieldExpression: row.fieldExpression,
@@ -714,23 +743,13 @@ class ReconciliationSavedRunSupport {
      * {@code $.records[*].externalId} → {@code externalId}, {@code $.records[*].items[*].sku} →
      * {@code items} (keeping the whole nested field), plain {@code id} → {@code id}.
      * Returns null when no safe field name can be derived (caller then skips that expression).
+     *
+     * Delegates to {@link CompareIdExpressionSupport#topLevelRecordField} — the implementation moved
+     * there so the scheduled-automation dispatch path can share it without depending on this facade
+     * package. This name stays as the facade-side entry point its existing callers and tests use.
      */
     static String topLevelRecordField(Object expression) {
-        String raw = normalize(expression)
-        if (!raw) return null
-        try {
-            String idExpr = (String) CompareIdExpressionSupport.splitIdExpression(raw).idExpr
-            String path = CompareIdExpressionSupport.normalizeSparkPath(
-                    CompareIdExpressionSupport.normalizeJsonIdExpr(idExpr))
-            if (!path) return null
-            int starIndex = path.indexOf("[*]")
-            if (starIndex >= 0) path = path.substring(starIndex + 3)
-            path = path.replaceFirst(/^\./, "")
-            String firstSegment = (path.tokenize(".")[0] ?: "").replaceAll(/\[.*$/, "")
-            return firstSegment ==~ /[A-Za-z0-9_]+/ ? firstSegment : null
-        } catch (Exception ignored) {
-            return null
-        }
+        return CompareIdExpressionSupport.topLevelRecordField(expression)
     }
 
     static List<Map<String, Object>> collectRuleRows(def ec, Object rawRuleSetId) {

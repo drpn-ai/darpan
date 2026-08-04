@@ -1,5 +1,7 @@
 package darpan.reconciliation.source
 
+import darpan.reconciliation.core.CompareIdExpressionSupport
+
 import java.util.Locale
 
 import static darpan.common.ValueSupport.normalize
@@ -96,6 +98,43 @@ class SourceFilterSupport {
             if (((Set<String>) rule.get("matchValues")).contains(candidate.toUpperCase(Locale.ROOT))) return rule
         }
         return null
+    }
+
+    /**
+     * Translate stored rules into the shape {@link #firstMatchingRule} actually tests.
+     *
+     * {@code fieldExpression} is STORED as the operator-facing expression the rules board writes — a
+     * JSONPath such as {@code $.records[*].salesChannelEnumId} — exactly like its sibling
+     * {@code RuleSetCompareSourceKeyField.fieldExpression}. {@link #firstMatchingRule} scans TOP-LEVEL
+     * RECORD KEYS, so handing it the stored form matches nothing at all: no rows dropped,
+     * {@code excludedCount} 0, and no error — the silent no-op this feature exists to remove. Every
+     * path that feeds rules to a getter must run them through here first.
+     *
+     * Normalizing at the READ boundary (rather than at save) is deliberate: storage keeps the
+     * operator-facing path so a saved run round-trips straight back onto the board with the pill it
+     * was configured from, and the key-field sibling already establishes exactly this convention
+     * (stored as an expression, reduced via topLevelRecordField at the point of use).
+     *
+     * Fails closed and loudly: an expression that reduces to no usable record field throws rather
+     * than being dropped or passed through to match nothing. The save path rejects the same shape, so
+     * this is a defense-in-depth check for rows written before that gate existed.
+     */
+    static List<Map<String, Object>> toRecordFieldRules(List<Map<String, Object>> rows) {
+        if (!rows) return Collections.emptyList()
+        return rows.collect { Map<String, Object> row ->
+            String stored = normalize(row.get("fieldExpression"))
+            String fieldName = CompareIdExpressionSupport.topLevelRecordField(stored)
+            if (!fieldName) {
+                throw new IllegalArgumentException(
+                        ("Source exclusion filter ${row.get('sequenceNum')} names field expression " +
+                                "'${stored}', which does not resolve to a record field.").toString())
+            }
+            // A plain mutable copy, matching the shape these loaders returned before: the rows travel
+            // on into Moqui service parameters, which is no place to hand out an unmodifiable Map.
+            Map<String, Object> mapped = new LinkedHashMap<String, Object>(row)
+            mapped.put("fieldExpression", fieldName)
+            return mapped
+        } as List<Map<String, Object>>
     }
 
     /**

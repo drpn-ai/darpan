@@ -192,4 +192,37 @@ class SourceFilterSupportTests {
         assertEquals(1, rules[0].sequenceNum)
         assertEquals(2, rules[1].sequenceNum)
     }
+
+    @Test
+    void storedJsonPathExpressionsAreReducedToTheRecordKeyTheGetterTests() {
+        // FINAL-REVIEW CRITICAL 1a: the board stores the field pill's JSONPath; firstMatchingRule
+        // scans top-level record keys. Everything feeding a getter runs through here first.
+        List<Map<String, Object>> reduced = SourceFilterSupport.toRecordFieldRules([
+                [sequenceNum: 1, fieldExpression: '$.records[*].salesChannelEnumId',
+                 operator   : "EXCLUDE_IN", filterValues: "POS_SALES_CHANNEL"],
+                [sequenceNum: 2, fieldExpression: "statusId",
+                 operator   : "EXCLUDE_IN", filterValues: "ORDER_CANCELLED"],
+        ])
+
+        assertEquals(["salesChannelEnumId", "statusId"], reduced*.fieldExpression)
+        // Everything else on the row survives untouched — the reduction is field-name-only.
+        assertEquals([1, 2], reduced*.sequenceNum)
+        assertEquals(["POS_SALES_CHANNEL", "ORDER_CANCELLED"], reduced*.filterValues)
+
+        List<Map<String, Object>> parsed = SourceFilterSupport.parseRules(reduced)
+        assertNotNull(SourceFilterSupport.firstMatchingRule([salesChannelEnumId: "POS_SALES_CHANNEL"], parsed))
+    }
+
+    @Test
+    void reducingRulesIsNullAndEmptySafe() {
+        assertEquals([], SourceFilterSupport.toRecordFieldRules(null))
+        assertEquals([], SourceFilterSupport.toRecordFieldRules([]))
+    }
+
+    @Test
+    void anExpressionThatResolvesToNoRecordFieldIsRejectedRatherThanMatchingNothing() {
+        assertThrows(IllegalArgumentException) {
+            SourceFilterSupport.toRecordFieldRules([[sequenceNum: 1, fieldExpression: '$[*]', filterValues: "X"]])
+        }
+    }
 }

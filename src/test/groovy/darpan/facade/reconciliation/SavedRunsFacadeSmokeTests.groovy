@@ -1,6 +1,7 @@
 package darpan.facade.reconciliation
 
 import darpan.facade.common.TenantAccessSupport
+import darpan.reconciliation.source.SourceFilterSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
@@ -1616,6 +1617,62 @@ end'''
         assertEquals("EXCLUDE_IN", filters[0].operator)
         assertEquals("POS_SALES_CHANNEL,DRAFT_SALES_CHANNEL", filters[0].filterValues)
         assertEquals(2, filters[1].sequenceNum)
+    }
+
+    @Test
+    void aBoardConfiguredJsonPathExclusionActuallyExcludesARawRecord() {
+        // FINAL-REVIEW CRITICAL 1a. The rules board writes fieldExpression as the field pill's own
+        // JSONPath ('$.records[*].salesChannelEnumId'); SourceFilterSupport.firstMatchingRule scans
+        // TOP-LEVEL RECORD KEYS. Before the fix these never met: the rule loaded fine, reported
+        // excludedCount 0, raised no error, and excluded nothing. Every assertion below is on the real
+        // save -> store -> dispatch -> match path, so it fails the moment that translation is dropped.
+        String savedRunId = createRuleSetRun()
+        saveRuleSetWithFilters(savedRunId, [
+                [fieldExpression: '$.records[*].salesChannelEnumId', operator: "EXCLUDE_IN",
+                 values         : ["POS_SALES_CHANNEL"]],
+        ])
+
+        // Storage keeps the operator-facing path, so the mark round-trips back onto the same pill.
+        List rows = findFilterRows(savedRunId, "FILE_2")
+        assertEquals(1, rows.size())
+        assertEquals('$.records[*].salesChannelEnumId', rows[0].fieldExpression)
+
+        String compareScopeId = ReconciliationSavedRunSupport.resolveRuleSetRun(ec, savedRunId).compareScope?.compareScopeId as String
+        def source = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition("compareScopeId", compareScopeId).condition("fileSide", "FILE_2")
+                .disableAuthz().useCache(false).one()
+
+        // The LOAD direction (what the UI hydrates its draft from) keeps the path.
+        List<Map<String, Object>> loaded = ReconciliationSavedRunSupport.buildExcludeFilterResponse(ec, source)
+        assertEquals(1, loaded.size())
+        assertEquals('$.records[*].salesChannelEnumId', loaded[0].fieldExpression)
+
+        // The DISPATCH direction (what the getter receives) is reduced to the record key.
+        List<Map<String, Object>> dispatched = ReconciliationSavedRunSupport.resolveExtractExcludeFilters(ec, source)
+        assertEquals(1, dispatched.size())
+        assertEquals("salesChannelEnumId", dispatched[0].fieldExpression)
+
+        // End to end: those dispatched rules, run through the getter's own parse + match, drop a raw
+        // OMS-shaped record and keep one carrying a different channel.
+        List<Map<String, Object>> parsed = SourceFilterSupport.parseRules(dispatched)
+        assertNotNull(SourceFilterSupport.firstMatchingRule(
+                [orderId: "O-1", salesChannelEnumId: "POS_SALES_CHANNEL"], parsed))
+        assertNull(SourceFilterSupport.firstMatchingRule(
+                [orderId: "O-2", salesChannelEnumId: "WEB_SALES_CHANNEL"], parsed))
+    }
+
+    @Test
+    void savingAnExclusionOnAnUnresolvableFieldExpressionIsRejected() {
+        // Fail closed at SAVE, not silently at extraction: an expression that reduces to no record
+        // field could only ever match nothing.
+        String savedRunId = createRuleSetRun()
+        Map<String, Object> result = trySaveRuleSetWithFilters(savedRunId, [
+                [fieldExpression: '$[*]', operator: "EXCLUDE_IN", values: ["POS_SALES_CHANNEL"]],
+        ])
+
+        assertTrue((result.errorMessage as String).contains("does not resolve to a record field"),
+                "expected an unresolvable-field rejection, got: ${result.errorMessage}")
+        assertEquals(0, findFilterRows(savedRunId, "FILE_2").size())
     }
 
     @Test

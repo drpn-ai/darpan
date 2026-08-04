@@ -434,6 +434,15 @@ class AutomationFacadeSmokeTests {
         assertEquals("windowEnd", omsSourceOption.dateToParameterName)
         List<Map<String, Object>> primaryIdOptions = (List<Map<String, Object>>) omsSourceOption.primaryIdOptions
         assertTrue(primaryIdOptions.any { it.fieldPath == "\$.records[*].orderId" && it.label == "Order ID" })
+        // FINAL-REVIEW CRITICAL 1b + IMPORTANT 3: the board's pill list is wider than primary-ID
+        // selection, and the exclusion capability is registry-driven, not assumed.
+        List<Map<String, Object>> omsFieldOptions = (List<Map<String, Object>>) omsSourceOption.fieldOptions
+        assertNotNull(omsFieldOptions, "OMS source option should carry the wider board field list")
+        assertTrue(omsFieldOptions.any { it.fieldPath == "\$.records[*].salesChannelEnumId" && it.label == "Sales channel" })
+        assertTrue(omsFieldOptions.size() > primaryIdOptions.size())
+        assertFalse(primaryIdOptions.any { it.fieldPath == "\$.records[*].salesChannelEnumId" },
+                "primary-ID selection must stay narrow")
+        assertEquals(true, omsSourceOption.supportsExcludeFilters)
         Map<String, Object> shopifySourceOption = ((List<Map<String, Object>>) optionsResult.systemRemotes).find {
             it.systemMessageRemoteId == "SHOPIFY_REMOTE"
         }
@@ -454,6 +463,11 @@ class AutomationFacadeSmokeTests {
         List<Map<String, Object>> shopifyPrimaryIdOptions = (List<Map<String, Object>>) shopifySourceOption.primaryIdOptions
         assertTrue(shopifyPrimaryIdOptions.any { it.fieldPath == "\$.records[*].id" && it.label == "Order ID" })
         assertTrue(shopifyPrimaryIdOptions.any { it.fieldPath == "\$.records[*].name" && it.label == "Order name" })
+        // Shopify declares no filterParameterName, so the UI must never offer it the exclusion mark;
+        // and it gets no wider field list (its record shape comes from a per-tenant GraphQL template),
+        // so the board falls back to primaryIdOptions exactly as before.
+        assertEquals(false, shopifySourceOption.supportsExcludeFilters)
+        assertNull(shopifySourceOption.fieldOptions)
         assertTrue(((List<Map<String, Object>>) optionsResult.savedRuns).any { it.savedRunId == "OrderIdSchemaMap" })
 
         ec.message.clearErrors()

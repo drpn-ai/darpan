@@ -81,6 +81,34 @@ class CompareIdExpressionSupport {
         }
     }
 
+    /**
+     * Derives the top-level record field a JSONPath-style compare expression reads, e.g.
+     * {@code $.records[*].externalId} → {@code externalId}, {@code $.records[*].items[*].sku} →
+     * {@code items} (keeping the whole nested field), plain {@code id} → {@code id}.
+     * Returns null when no safe field name can be derived (caller then skips or rejects).
+     *
+     * Lives here rather than on a facade class because THREE layers need the same translation and
+     * must not drift: the keep-fields projection (ReconciliationSavedRunSupport), the interactive
+     * exclusion-filter dispatch, and the scheduled-automation exclusion-filter dispatch
+     * (AutomationRuntimeSupport, which must not depend on the facade package).
+     */
+    static String topLevelRecordField(Object expression) {
+        String raw = normalize(expression)
+        if (!raw) return null
+        try {
+            String idExpr = (String) splitIdExpression(raw).idExpr
+            String path = normalizeSparkPath(normalizeJsonIdExpr(idExpr))
+            if (!path) return null
+            int starIndex = path.indexOf("[*]")
+            if (starIndex >= 0) path = path.substring(starIndex + 3)
+            path = path.replaceFirst(/^\./, "")
+            String firstSegment = (path.tokenize(".")[0] ?: "").replaceAll(/\[.*$/, "")
+            return firstSegment ==~ /[A-Za-z0-9_]+/ ? firstSegment : null
+        } catch (Exception ignored) {
+            return null
+        }
+    }
+
     static Map convertJsonPathToSpark(String jsonPath) {
         def path = normalizeSparkPath(jsonPath)
         if (!path) throw new IllegalArgumentException("JSONPath ${jsonPath} resolves to an empty field path.")

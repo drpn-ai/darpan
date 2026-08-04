@@ -1,5 +1,6 @@
 package darpan.reconciliation.automation
 
+import darpan.facade.reconciliation.AutomationFacadeSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -228,5 +229,27 @@ class SourceSystemConnectorSupportSmokeTests {
         Map<String, Object> shopify = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY")
         assertNotNull(shopify, "SHOPIFY connector row should resolve")
         assertNull(shopify.filterParameterName)
+    }
+
+    @Test
+    void theBoardsOmsFieldPillsCoverEveryKeepFieldsBaseField() {
+        // FINAL-REVIEW CRITICAL 1b. HOTWAX_OMS_ORDER_FIELD_OPTIONS is a hand-written mirror of the OMS
+        // connector's keepFieldsBase plus salesChannelEnumId. Pin the mirror: adding a field to
+        // keepFieldsBase without adding a pill would silently make it unselectable on the rules board.
+        Map<String, Object> oms = SourceSystemConnectorSupport.resolve(ec, "OMS")
+        assertNotNull(oms, "OMS connector row should resolve")
+
+        List<String> pillFields = AutomationFacadeSupport.HOTWAX_OMS_ORDER_FIELD_OPTIONS
+                .collect { Map<String, Object> option -> (option.fieldPath as String).substring("\$.records[*].".length()) }
+        List<String> keepFields = ((String) oms.keepFieldsBase).split(",").collect { it.trim() }.findAll { it }
+
+        assertTrue(pillFields.containsAll(keepFields),
+                "keepFieldsBase ${keepFields} not all offered as pills ${pillFields}")
+        // The whole point of the widening: the shipping use case is selectable even though it is NOT
+        // a keep field (exclusions run before projection, so any raw field is testable).
+        assertTrue(pillFields.contains("salesChannelEnumId"))
+        assertFalse(keepFields.contains("salesChannelEnumId"))
+        // Primary-ID selection stays deliberately narrow — widening the pills must not widen it.
+        assertEquals(3, AutomationFacadeSupport.HOTWAX_OMS_ORDER_PRIMARY_ID_OPTIONS.size())
     }
 }

@@ -1,6 +1,7 @@
 package darpan.reconciliation.automation
 
 import darpan.common.DarpanEntityConstants
+import darpan.common.TransactionDetachSupport
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
@@ -164,11 +165,21 @@ class AutomationExecutionSupport {
      * {@link TenantAccessSupport#currentActiveTenantUserGroupId}.</p>
      */
     static Map<String, Object> executeAutomation(def ec, Map params) {
-        Map<String, Object> input = params ?: [:]
-        String automationId = requireNormalized(input.automationId, "automationId is required")
-        def automation = loadAutomation(ec, automationId)
-        return TenantAccessSupport.withSystemTenant(resolveSystemTenantId(ec, automation)) {
-            return executeAutomationForTenant(ec, input, automation)
+        // Detached from the caller's request transaction, exactly like the interactive saved-run
+        // path (see runSavedRunDiff.groovy). run#AutomationNow arrives inside the JSON-RPC
+        // request's JTA transaction, whose 60s timeout is far shorter than a real API-range run;
+        // joining it meant the execution row was invisible until the whole run committed, and a
+        // gateway timeout rolled it back leaving no trace at all (prod 2026-08-05, automation
+        // 100000: 61.5s then a severed connection and "No previous runs"). Detached, each write
+        // commits in its own short transaction, so the PENDING/RUNNING row is readable while the
+        // run is still going and the UI can follow it live.
+        return (Map<String, Object>) TransactionDetachSupport.runDetachedFromCallerTransaction(ec) { ->
+            Map<String, Object> input = params ?: [:]
+            String automationId = requireNormalized(input.automationId, "automationId is required")
+            def automation = loadAutomation(ec, automationId)
+            return TenantAccessSupport.withSystemTenant(resolveSystemTenantId(ec, automation)) {
+                return executeAutomationForTenant(ec, input, automation)
+            }
         }
     }
 

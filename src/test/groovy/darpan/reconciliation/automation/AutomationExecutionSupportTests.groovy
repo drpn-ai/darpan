@@ -2061,6 +2061,15 @@ class AutomationExecutionSupportTests {
     }
 
     private static class FakeTransactionFacade {
+        // No ambient transaction here (mirrors scan#DueAutomations, not run#AutomationNow): without
+        // this, isTransactionInPlace() is undefined on this fake, so TransactionDetachSupport's call
+        // throws MissingMethodException, which it catches and downgrades to a "could not suspend"
+        // warning on every one of this file's ~19 executeAutomation calls — the detach ends up inert
+        // by accident (an uncaught exception, not a deliberate no-op) instead of proving anything
+        // about detached behavior, and floods the log with the same line an operator would grep for
+        // on a real suspend failure.
+        boolean isTransactionInPlace() { return false }
+
         Object runUseOrBegin(Integer timeout, String message, Closure work) {
             return work.call()
         }

@@ -40,23 +40,7 @@ class ReconciliationSavedRunSupport {
      * inside the caller's transaction exactly as before this guard existed.
      */
     static Object runDetachedFromCallerTransaction(def ec, Closure<?> work) {
-        boolean suspendedCallerTransaction = false
-        try {
-            if (ec.transaction.isTransactionInPlace()) suspendedCallerTransaction = ec.transaction.suspend()
-        } catch (Exception e) {
-            logger.warn("Could not suspend caller transaction before saved-run execution; continuing inside it: ${e.message}")
-        }
-        try {
-            return work.call()
-        } finally {
-            if (suspendedCallerTransaction) {
-                try {
-                    ec.transaction.resume()
-                } catch (Exception e) {
-                    logger.warn("Could not resume caller transaction after saved-run execution: ${e.message}")
-                }
-            }
-        }
+        return darpan.common.TransactionDetachSupport.runDetachedFromCallerTransaction(ec, work)
     }
 
     static final String RUN_TYPE_MAPPING = "mapping"

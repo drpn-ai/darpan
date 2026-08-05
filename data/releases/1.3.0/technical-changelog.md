@@ -38,7 +38,7 @@ agree again.
 - `55e39f9` Rule set facade saves and returns source exclusion filters.
 - `07c9329` Automation facade snapshots source exclusion filters at save time
   (`AutomationFacadeSupport.groovy`, +389).
-- `b4af86d` `facade.ReconciliationFacadeServices.migrate#AutomationExcludeFilters` — one-time,
+- `b4af86d` `reconciliation.ReconciliationNotificationServices.migrate#AutomationExcludeFilters` — one-time,
   idempotent, non-destructive backfill for automations that predate the feature. Seeds a side only
   when that side has zero filter rows; reuses the existing `seedFromRuleSet` reader.
 - `src/test/resources/facade-contract.snapshot.txt` (+15) records the widened facade contract.

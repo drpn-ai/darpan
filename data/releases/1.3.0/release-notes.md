@@ -6,8 +6,8 @@ Release date: `2026-08-05`
 
 Release `1.3.0` makes source exclusion filters a first-class part of reconciliation. Operators can
 now declare, on a rule set or a scheduled automation, which records a source system should leave out
-of a run — and the filter is pushed down into the source query itself rather than applied after the
-fact. The release also carries a visual consolidation of the UI onto its design system, and a live
+of a run — excluded records are dropped as the extract is built, so they never reach the comparison.
+The release also carries a visual consolidation of the UI onto its design system, and a live
 elapsed clock on in-progress runs.
 
 Deferred to a later release: exclusion filters are wired for the HotWax OMS orders getter only;
@@ -73,7 +73,7 @@ Two actions are required, in this order, after deploying the backend:
    existing OMS connector row, adding `filterParameterName`. Until this runs, exclusion filters are
    inert: the rules board saves exclusions that never reach the OMS query, and the exclusion popover
    renders empty.
-2. **Run the one-time backfill.** `facade.ReconciliationFacadeServices.migrate#AutomationExcludeFilters`
+2. **Run the one-time backfill.** `reconciliation.ReconciliationNotificationServices.migrate#AutomationExcludeFilters`
    seeds exclusion-filter rows for automations that already existed before this release. It is
    idempotent and non-destructive — it seeds a side only when that side has zero filter rows — so it
    is safe to run more than once. Automations created after this release are seeded at creation time

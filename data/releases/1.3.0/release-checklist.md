@@ -25,7 +25,7 @@
 
 - Generic source data file updated for every release upgrade record: yes — the single record originates in `data/SourceSystemConnectorSeedData.xml`, not hand-authored into `upgrade-data.xml`.
 - Candidate diff reviewed: yes — `upgrade-data-review.md` lists one modified record (OMS connector, `filterParameterName="sourceFilters"`).
-- Final load path decided: operators run `./gradlew loadDarpanUpgradeData`, then the one-time service `facade.ReconciliationFacadeServices.migrate#AutomationExcludeFilters`.
+- Final load path decided: operators run `./gradlew loadDarpanUpgradeData`, then the one-time service `reconciliation.ReconciliationNotificationServices.migrate#AutomationExcludeFilters`.
 - Current upgrade data file link or path: `runtime/component/darpan/data/upgrade-data.xml`
 - Previous upgrade data archived under prior tag folder: yes — `data/releases/1.2.0/upgrade-data.xml`, verified byte-identical to `git show v1.2.0:data/upgrade-data.xml`.
 

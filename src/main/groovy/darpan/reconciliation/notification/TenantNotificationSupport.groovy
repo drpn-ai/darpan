@@ -2,6 +2,8 @@ package darpan.reconciliation.notification
 
 import darpan.common.DarpanEntityConstants
 import darpan.facade.common.TenantScopedFinder
+import darpan.facade.reconciliation.ExchangePairVerificationSupport
+import darpan.facade.reconciliation.MissingDiffVerificationSupport
 import darpan.reconciliation.core.ReconciliationServices
 import groovy.json.JsonOutput
 import org.slf4j.Logger
@@ -247,6 +249,38 @@ class TenantNotificationSupport {
             "${URLEncoder.encode(entry.key, StandardCharsets.UTF_8.name())}=${URLEncoder.encode(entry.value, StandardCharsets.UTF_8.name())}"
         }.join("&")
         return "${appBaseUrl}${path}${queryText ? "?" + queryText : ""}".toString()
+    }
+
+    /**
+     * Splits a run's processingWarnings into genuinely actionable warnings and always-emitted audit
+     * notes.
+     *
+     * Both verification passes deliberately record one "show your work" sentence on EVERY run — see
+     * {@link darpan.facade.reconciliation.ExchangePairVerificationSupport#buildAuditNote} — into the
+     * same processingWarnings array that carries real failures. Unclassified, that made the chat
+     * header read "completed WITH ISSUES" on every exchange-enabled run, all-clear ones included; an
+     * alarm that is always on carries no signal, and it buried the runs that genuinely broke.
+     *
+     * Classification lives here, at the presentation layer, rather than at the producer: the stored
+     * artifact string stays byte-identical, so the run-result page's audit trail is untouched.
+     * Matching is on the exact producer-owned prefix constants — deliberately NOT a loose
+     * "Exchange presence check" match, because that pass's real warnings ("… confirming the first N",
+     * "… could not write diff rows", "… skipped: manifest unreadable") share that opening.
+     */
+    static Map<String, List<String>> partitionAuditNotes(Object rawWarnings) {
+        List<String> warnings = []
+        List<String> auditNotes = []
+        (rawWarnings instanceof List ? (List) rawWarnings : []).each { Object raw ->
+            String entry = ((raw)?.toString()?.trim())
+            if (!entry) return
+            if (entry.startsWith(ExchangePairVerificationSupport.AUDIT_NOTE_PREFIX) ||
+                    entry.startsWith(MissingDiffVerificationSupport.AUDIT_NOTE_PREFIX)) {
+                auditNotes.add(entry)
+            } else {
+                warnings.add(entry)
+            }
+        }
+        return [warnings: warnings, auditNotes: auditNotes]
     }
 
     static String resolveFileSystemLabel(def ec, Map<String, Object> context, String prefix, String fallback) {

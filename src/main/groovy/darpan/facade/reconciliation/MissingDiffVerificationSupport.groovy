@@ -30,6 +30,11 @@ class MissingDiffVerificationSupport {
      *  index skew, and point-checking it would hammer the source API for no signal. */
     static final int DEFAULT_MAX_LOOKUP_IDS = 1000
 
+    /** Opening phrase of this pass's audit sentence. Classified at the notification layer
+     *  (TenantNotificationSupport.partitionAuditNotes) so a successful verification is reported as a
+     *  note, not as a run issue. This pass's real warnings open with "Verification lookup for …". */
+    static final String AUDIT_NOTE_PREFIX = "Verification pass: "
+
     private static final String DIFFERENCES_HEADER = "\"differences\":["
     private static final String SUMMARY_PREFIX = "\"summary\":"
     private static final String PROCESSING_WARNINGS_PREFIX = "\"processingWarnings\":"
@@ -134,7 +139,7 @@ class MissingDiffVerificationSupport {
             if (removable) {
                 removeIdsByToken.put(token, removable)
                 removedCountByToken.put(token, removable.size())
-                auditSentences.add("Verification pass: ${removable.size()} of ${ids.size()} 'missing in ${side.label}' difference(s) confirmed present in ${side.label} by point lookup (bulk-export index gap) and removed; ${ids.size() - removable.size()} confirmed missing.".toString())
+                auditSentences.add("${AUDIT_NOTE_PREFIX}${removable.size()} of ${ids.size()} 'missing in ${side.label}' difference(s) confirmed present in ${side.label} by point lookup (bulk-export index gap) and removed; ${ids.size() - removable.size()} confirmed missing.".toString())
             }
         }
 

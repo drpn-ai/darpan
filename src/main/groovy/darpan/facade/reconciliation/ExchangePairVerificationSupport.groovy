@@ -40,6 +40,12 @@ class ExchangePairVerificationSupport {
     // Mirrors OmsRestSourceSupport.PAIR_LOOKUP_MAX_IDS (darpan-hotwax): the OMS pair lookup service
     // hard-rejects any single call requesting more than this many externalIds.
     static final int OMS_PAIR_LOOKUP_CHUNK_SIZE = 100
+    // Opening phrase of the always-emitted audit sentence, and the ONLY thing that distinguishes it
+    // from this class's genuine warnings — which also open with "Exchange presence check" but
+    // continue "confirming"/"could not"/"skipped:" rather than an immediate colon. The notification
+    // layer classifies on this exact constant (TenantNotificationSupport.partitionAuditNotes) so an
+    // all-clear run is not headlined WITH ISSUES; changing the sentence means changing it here.
+    static final String AUDIT_NOTE_PREFIX = "Exchange presence check: "
 
     private static final String DIFFERENCES_HEADER = "\"differences\":["
     private static final String PROCESSING_WARNINGS_PREFIX = "\"processingWarnings\":"
@@ -179,7 +185,7 @@ class ExchangePairVerificationSupport {
 
     /** One sentence the operator always gets — even an all-matched or all-pending run shows its work. */
     private static String buildAuditNote(Map<String, Object> result, int missingRowCount, int graceHours, String omsSideLabel) {
-        String note = "Exchange presence check: ${result.sweepExchangeCount} Shopify exchange(s) in window — " +
+        String note = "${AUDIT_NOTE_PREFIX}${result.sweepExchangeCount} Shopify exchange(s) in window — " +
                 "${result.matchedCount} matched in ${omsSideLabel}, ${result.confirmedPresentCount} confirmed by lookup, " +
                 "${missingRowCount} missing from ${omsSideLabel}, ${result.pendingCount} pending (younger than ${graceHours}h)."
         if ((result.inTransitCount as int) > 0) note += " ${result.inTransitCount} in transit (return not yet closed)."

@@ -47,7 +47,14 @@
             <set field="differenceCountValue" from="differenceCount == null ? '0' : (differenceCount instanceof Number ? ((Number) differenceCount).intValue().toString() : (((differenceCount)?.toString()?.trim()) ?: '0'))"/>
             <set field="onlyInFile1CountValue" from="onlyInFile1Count == null ? '0' : (onlyInFile1Count instanceof Number ? ((Number) onlyInFile1Count).intValue().toString() : (((onlyInFile1Count)?.toString()?.trim()) ?: '0'))"/>
             <set field="onlyInFile2CountValue" from="onlyInFile2Count == null ? '0' : (onlyInFile2Count instanceof Number ? ((Number) onlyInFile2Count).intValue().toString() : (((onlyInFile2Count)?.toString()?.trim()) ?: '0'))"/>
-            <set field="warningList" from="(processingWarnings instanceof java.util.List ? processingWarnings : []).collect { ((it)?.toString()?.trim()) }.findAll { it }"/>
+            <!-- Both verification passes emit one audit sentence on EVERY run, including all-clear ones,
+                 into this same list. Counting those as warnings headlined every exchange-enabled run
+                 "WITH ISSUES" (reported from prod 2026-08-05, Gorjana API Order Sync: 0 differences,
+                 0 missing, 0 pending — still flagged). Split them so the header reacts only to real
+                 warnings; the notes are still shown, under their own line. -->
+            <set field="partitionedWarnings" from="darpan.reconciliation.notification.TenantNotificationSupport.partitionAuditNotes(processingWarnings)"/>
+            <set field="warningList" from="partitionedWarnings.warnings"/>
+            <set field="auditNoteList" from="partitionedWarnings.auditNotes"/>
             <set field="runFailed" from="((statusEnumId)?.toString()?.trim()) == 'AUT_STAT_FAILED'"/>
             <set field="noOutput" from="runFailed &amp;&amp; noOutputProduced == true"/>
             <set field="headerPrefix" from="noOutput ? 'Darpan run FAILED: ' :
@@ -81,6 +88,11 @@
             </if>
             <if condition="warningList">
                 <set field="ignoreLine" from="lines.add('Warnings (' + warningList.size() + '): ' + warningList.take(3).join('; ') + (warningList.size() > 3 ? ' …' : ''))"/>
+            </if>
+            <!-- Audit notes last and unlabelled-by-count: they are the run showing its work, not a
+                 queue of things to action. -->
+            <if condition="auditNoteList">
+                <set field="ignoreLine" from="lines.add('Notes: ' + auditNoteList.join(' '))"/>
             </if>
             <set field="payload" from="[text: lines.join('\n')]"/>
         </actions>

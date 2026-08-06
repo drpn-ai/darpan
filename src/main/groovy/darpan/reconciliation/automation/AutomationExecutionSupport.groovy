@@ -713,7 +713,7 @@ class AutomationExecutionSupport {
      * State-based automations define their population by record status rather than by a date window.
      * The window they still carry is bookkeeping only — it keeps execution rows, the findOrCreateExecution
      * dedup key, run metadata and the UI window display working unchanged — and is never sent to the
-     * extractor (see buildExtractServiceParams).
+     * extractor (see applyWindowParameters).
      */
     static boolean isStateWindowMode(def automation) {
         return WINDOW_STATE == normalize(readField(automation, "relativeWindowTypeEnumId"))
@@ -1051,12 +1051,7 @@ class AutomationExecutionSupport {
         // up by the service being invoked (what the pre-registry switch keyed on). A source-level override
         // still wins; fall back to fromDate/toDate when no connector matches.
         Map<String, Object> connectorForService = SourceSystemConnectorSupport.resolveByExtractServiceName(ec, serviceName)
-        String dateFromParameterName = normalize(readField(source, "dateFromParameterName")) ?:
-                (normalize(connectorForService?.dateFromParameterName) ?: "fromDate")
-        String dateToParameterName = normalize(readField(source, "dateToParameterName")) ?:
-                (normalize(connectorForService?.dateToParameterName) ?: "toDate")
-        serviceParams[dateFromParameterName] = window.childWindowStartDate
-        serviceParams[dateToParameterName] = window.childWindowEndDate
+        applyWindowParameters(serviceParams, automation, source, connectorForService, window)
         if (connectorForService?.preserveWindowInstants) serviceParams.preserveWindowInstants = true
 
         applyExcludeFilterParameter(serviceParams, connectorForService,
@@ -1073,6 +1068,30 @@ class AutomationExecutionSupport {
                 .findAll { String error -> error } as List<String>
         if (errors) throw new IllegalStateException(errors.join("; "))
         return result
+    }
+
+    /**
+     * Date-parameter names are data-driven: a source-level override wins, then the connector, then
+     * fromDate/toDate. A state-mode automation on a connector that declares supportsStateExtract sends
+     * NO date parameters at all — its population is defined by status. The automation still carries a
+     * window (bookkeeping only), so the connector flag is what decides, not the presence of a window.
+     *
+     * Fail safe: a state-mode automation on a connector that cannot do state extraction still receives
+     * its window rather than an unbounded request. That combination is rejected at save time.
+     */
+    protected static Map<String, Object> applyWindowParameters(Map<String, Object> serviceParams,
+                                                               def automation, def source,
+                                                               Map<String, Object> connector,
+                                                               Map<String, Object> window) {
+        if (isStateWindowMode(automation) && connector?.supportsStateExtract) return serviceParams
+
+        String dateFromParameterName = normalize(readField(source, "dateFromParameterName")) ?:
+                (normalize(connector?.dateFromParameterName) ?: "fromDate")
+        String dateToParameterName = normalize(readField(source, "dateToParameterName")) ?:
+                (normalize(connector?.dateToParameterName) ?: "toDate")
+        serviceParams[dateFromParameterName] = window.childWindowStartDate
+        serviceParams[dateToParameterName] = window.childWindowEndDate
+        return serviceParams
     }
 
     /** Registry-driven: only a connector that declares a filter parameter receives exclusion rules. */

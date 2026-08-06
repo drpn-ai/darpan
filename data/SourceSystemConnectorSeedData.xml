@@ -88,6 +88,7 @@
             keepFieldsBase="orderId,orderName,orderDate,statusId,originFacilityId,grandTotal,currencyUom"
             filterParameterName="sourceFilters"
             windowFieldName="orderDate"
+            supportsStateExtract="Y"
             healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
             enabled="Y"/>
 </entity-facade-xml>

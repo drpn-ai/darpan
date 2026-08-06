@@ -656,6 +656,12 @@
                 transfer order's life spans create to receive, so a creation-date window can exclude a
                 transfer that moved inside the window.</description>
         </field>
+        <field name="supportsStateExtract" type="text-indicator" default="'N'">
+            <description>Whether this connector's extract service can define its record population by
+                status alone, with no date window. Only such a connector has its date parameters omitted
+                by a state-mode automation. Blank date-parameter names already mean "use the default", so
+                opting out of a window has to be an explicit flag rather than an omission.</description>
+        </field>
         <field name="filterParameterName" type="text-medium">
             <description>Service parameter this connector's extractor accepts for record-exclusion rules.
                 Absent means the connector does not support exclusion filters and never receives them.</description>

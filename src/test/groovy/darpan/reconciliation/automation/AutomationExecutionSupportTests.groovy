@@ -2352,6 +2352,52 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
+    void windowModeDispatchStillSendsDateParameters() {
+        Map<String, Object> serviceParams = [:]
+        AutomationExecutionSupport.applyWindowParameters(serviceParams,
+                [relativeWindowTypeEnumId: "AUT_WIN_LAST_DAYS"],
+                [:],
+                [dateFromParameterName: "windowStart", dateToParameterName: "windowEnd",
+                 supportsStateExtract: false],
+                [childWindowStartDate: Timestamp.valueOf("2026-08-05 00:00:00"),
+                 childWindowEndDate  : Timestamp.valueOf("2026-08-06 00:00:00")])
+
+        assertEquals(Timestamp.valueOf("2026-08-05 00:00:00"), serviceParams.windowStart)
+        assertEquals(Timestamp.valueOf("2026-08-06 00:00:00"), serviceParams.windowEnd)
+    }
+
+    @Test
+    void stateModeDispatchOmitsDateParametersEntirely() {
+        Map<String, Object> serviceParams = [:]
+        AutomationExecutionSupport.applyWindowParameters(serviceParams,
+                [relativeWindowTypeEnumId: "AUT_WIN_STATE"],
+                [:],
+                [dateFromParameterName: "windowStart", dateToParameterName: "windowEnd",
+                 supportsStateExtract: true],
+                [childWindowStartDate: Timestamp.valueOf("2026-08-05 00:00:00"),
+                 childWindowEndDate  : Timestamp.valueOf("2026-08-06 00:00:00")])
+
+        assertFalse(serviceParams.containsKey("windowStart"))
+        assertFalse(serviceParams.containsKey("windowEnd"))
+    }
+
+    @Test
+    void stateModeStillSendsDatesWhenTheConnectorDoesNotSupportStateExtraction() {
+        Map<String, Object> serviceParams = [:]
+        AutomationExecutionSupport.applyWindowParameters(serviceParams,
+                [relativeWindowTypeEnumId: "AUT_WIN_STATE"],
+                [:],
+                [dateFromParameterName: "windowStart", dateToParameterName: "windowEnd",
+                 supportsStateExtract: false],
+                [childWindowStartDate: Timestamp.valueOf("2026-08-05 00:00:00"),
+                 childWindowEndDate  : Timestamp.valueOf("2026-08-06 00:00:00")])
+
+        // Fail safe: a connector that cannot do state extraction gets the window it expects rather
+        // than a silently unbounded request. Task 11 rejects this combination at save time.
+        assertEquals(Timestamp.valueOf("2026-08-05 00:00:00"), serviceParams.windowStart)
+    }
+
+    @Test
     void automationSourceFiltersAreReturnedInSequenceOrder() {
         // Fix round 1: SourceFilterSupport.firstMatchingRule returns the FIRST matching rule in list
         // order, and that rule owns the excluded count (ReconciliationEntities.xml:381-382 on

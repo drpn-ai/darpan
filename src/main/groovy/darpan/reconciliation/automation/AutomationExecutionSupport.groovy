@@ -270,6 +270,11 @@ class AutomationExecutionSupport {
                     // eventually flip it to FAILED and alert on a run that simply had nothing to compare).
                     // NO_DATA still does not notify — that contract is unchanged.
                     completeAutomationRunResult(ec, automation, mintedRunResultId, STATUS_NO_DATA, completedTimestamp, [:])
+                    // ...and because it does not notify, nothing else will ever clean up a "notify me"
+                    // subscription taken against this row while it was RUNNING (purgeRunSubscriptions
+                    // only runs after a won notification claim). An orphan there never fires AND pins
+                    // its chat space against deletion forever, so purge it here.
+                    TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, mintedRunResultId)
                     executionResults << noDataFields + [
                             automationExecutionId: automationExecutionId,
                             childWindowStartDate : window.childWindowStartDate,
@@ -367,9 +372,17 @@ class AutomationExecutionSupport {
                 // only when that mint failed — it stays the create-a-row-to-notify-on fallback, and can
                 // no longer produce a second row for a run that already has one.)
                 if (failureFields.statusEnumId == STATUS_FAILED) {
+                    // notifyRunCompleted purges this run's subscriptions itself once its claim is won,
+                    // so the purge must NOT be hoisted above this call — it would delete the subscriber
+                    // destinations the alert is about to resolve.
                     notifyAutomationFailure(ec, automation,
                             mintedRunResultId ?: persistFailureRunResult(ec, automation, t, completedTimestamp),
                             runOutputPersisted, sanitizeErrorMessage(t))
+                } else {
+                    // Requeued for retry: this row is terminal, will never notify, and the re-drive
+                    // mints a fresh row — so any subscription pointing here is already dead. Left
+                    // behind it can never fire and permanently blocks deleting its chat space.
+                    TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, mintedRunResultId)
                 }
                 executionResults << failureFields + [
                         automationExecutionId: automationExecutionId,

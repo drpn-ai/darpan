@@ -196,8 +196,43 @@ class TenantNotificationSupport {
     }
 
     /**
+     * Best-effort purge of every notify-me subscription for a run that reached a terminal state
+     * WITHOUT ever notifying — the automation NO_DATA close, and a transient failure whose retry is
+     * re-driven under a brand-new run-result row.
+     *
+     * <p>Only for paths that do not notify. A run that notifies purges inside
+     * {@link #notifyRunCompleted} after its claim is won; calling this first would delete the very
+     * subscriber destinations that notification is about to resolve.</p>
+     *
+     * <p>Why it is needed at all: {@code subscribe#RunNotification} only accepts a PENDING/RUNNING
+     * run, and before the run-result row started being minted at RUNNING an automation run was never
+     * observable in that state, so it could not be subscribed to. Now it can — for the whole run — and
+     * a subscription left behind by a run that never notifies is permanent: it can never fire, and it
+     * counts forever as chat-space usage, which makes settings refuse to delete that space.</p>
+     *
+     * @return how many subscription rows were found for the run (best-effort; 0 on any read failure)
+     */
+    static int purgeSubscriptionsForUnnotifiedRun(def ec, Object reconciliationRunResultId) {
+        String resultId = ((reconciliationRunResultId)?.toString()?.trim())
+        if (!resultId) return 0
+        try {
+            List subscriptionRows = TenantScopedFinder.findGlobalUnscoped(ec,
+                            DarpanEntityConstants.RUN_NOTIFY_SUBSCRIPTION,
+                            "terminal-run subscription cleanup keyed by run-result id — rows are deleted, never returned to a caller")
+                    ?.condition("reconciliationRunResultId", resultId)
+                    ?.useCache(false)?.list() ?: []
+            purgeRunSubscriptions(subscriptionRows, resultId)
+            return subscriptionRows.size()
+        } catch (Throwable t) {
+            logger.warn("Failed to purge subscriptions for unnotified terminal run {}: {}", resultId, t.message)
+            return 0
+        }
+    }
+
+    /**
      * Best-effort delete of every notify-me subscription row for a terminal run (review finding 1).
-     * Called only after {@link #claimNotification} wins, so it runs at most once per run-result.
+     * Called after {@link #claimNotification} wins — so at most once per run-result — or from
+     * {@link #purgeSubscriptionsForUnnotifiedRun} for a terminal run that never notifies at all.
      * Never allowed to fail the notification path or the run it is reporting on — any per-row delete
      * error is logged and skipped.
      */

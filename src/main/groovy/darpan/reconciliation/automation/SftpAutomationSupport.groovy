@@ -5,6 +5,7 @@ import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
+import darpan.facade.reconciliation.RunObservability
 import darpan.reconciliation.notification.TenantNotificationSupport
 
 import java.sql.Timestamp
@@ -162,9 +163,25 @@ class SftpAutomationSupport {
             // exposed to StuckRunReaper's 120-minute lastUpdatedStamp sweep for that whole time.
             Map<String, Object> pollResult = pollSftpUntilAvailable(ec, pollParams, {
                 AutomationExecutionSupport.heartbeatAutomationRun(ec, automation, execution, mintedRunResultId)
+                // Task 6: the poll boundary is this path's cancel checkpoint, and it is the checkpoint
+                // that matters most anywhere in the runner — a poll runs pollTimeoutMinutes (60 by
+                // default) of attempt/sleep cycles, and since Task 2d the row is live on the progress
+                // view, offering "Cancel run", for that entire time. Throws out of the loop when the
+                // operator has asked to stop; caught below.
+                RunObservability.checkpointCancel(ec, mintedRunResultId)
             })
             boolean dataAvailable = pollResult.dataAvailable == true
             boolean serviceReportedError = !hadMessageErrors && hasMessageErrors(ec)
+            // A cancel OUTRANKS an abort that merely looks like a failure (mirrors
+            // runSavedRunDiff.groovy:1017). This path can reach a FAILED terminal WITHOUT throwing — a
+            // message-level error from the poll/reconcile service is just a flag here — so the catch
+            // below is not enough on its own: without this, a cancel that landed while the poll service
+            // was recording an error would be written FAILED and ALERTED to the operator as a run
+            // failure. Only checked on the error branch; a run that genuinely completed keeps its own
+            // outcome rather than being retitled by a cancel that arrived too late to stop anything.
+            if (serviceReportedError && RunObservability.isCancelRequested(ec, mintedRunResultId)) {
+                return cancelSftpAutomationRun(ec, automation, execution, automationExecutionId, mintedRunResultId)
+            }
             // Self-review #4: a rule build/eval failure does not raise a message error, so the run would
             // otherwise be recorded COMPLETED with a clean alert. Mark it FAILED while still persisting
             // and alerting on the (partial) output that was produced, so the broken sync surfaces.
@@ -297,7 +314,18 @@ class SftpAutomationSupport {
             result.reconciliationRunResultId = reconciliationRunResultId
             result.resultDataManagerPath = resultDataManagerPath
             return result
+        } catch (RunObservability.RunCancelledException cancelled) {
+            // The operator asked for this at the poll checkpoint. Return a normal result envelope rather
+            // than letting the throw reach the failure catch below, which would record FAILED on the row
+            // they are watching and send them a "your run failed" alert about their own cancellation.
+            return cancelSftpAutomationRun(ec, automation, execution, automationExecutionId, mintedRunResultId)
         } catch (Throwable t) {
+            // Cancel outranks an abort that merely looks like a failure — the throw may be a wrapped or
+            // translated cancel (a poll/reconcile service that caught the checkpoint's exception and
+            // re-raised its own). Same precedence as runSavedRunDiff.groovy:1067.
+            if (RunObservability.isCancelRequested(ec, mintedRunResultId)) {
+                return cancelSftpAutomationRun(ec, automation, execution, automationExecutionId, mintedRunResultId)
+            }
             try {
                 Timestamp completedTimestamp = nowTimestamp(ec)
                 try {
@@ -335,6 +363,31 @@ class SftpAutomationSupport {
             }
             throw t
         }
+    }
+
+    /**
+     * Terminal CANCELLED close for an SFTP run an operator stopped, plus the result envelope the service
+     * returns for it.
+     *
+     * <p>Delegates to {@code AutomationExecutionSupport.cancelAutomationExecution} so both input modes
+     * cancel identically — both rows CANCELLED, subscriptions purged, nothing notified. See that method
+     * for why a cancelled run is silent rather than alerting.</p>
+     *
+     * <p>Returns instead of re-throwing, unlike this runner's failure path: the cancel is the outcome the
+     * operator requested, not a crash, and propagating it would make {@code run#SftpFileAutomation}
+     * report their own stop as a service error. Mirrors runSavedRunDiff.groovy:1059-1064.</p>
+     */
+    private static Map<String, Object> cancelSftpAutomationRun(def ec, def automation, def execution,
+            String automationExecutionId, String runResultId) {
+        AutomationExecutionSupport.cancelAutomationExecution(ec, automation, execution, runResultId,
+                [mode: "SFTP_FILES"])
+        return [
+                automationExecutionId    : automationExecutionId,
+                statusEnumId             : AutomationExecutionSupport.STATUS_CANCELLED,
+                reconciliationRunResultId: runResultId,
+                dataAvailable            : false,
+                statusMessage            : RunObservability.CANCEL_REASON,
+        ] as Map<String, Object>
     }
 
     /**

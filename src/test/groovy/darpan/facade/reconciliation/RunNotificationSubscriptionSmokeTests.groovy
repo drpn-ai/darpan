@@ -131,6 +131,64 @@ class RunNotificationSubscriptionSmokeTests {
     }
 
     @Test
+    void unsubscribingWithNothingToRemoveReportsAnErrorInsteadOfSuccess() {
+        // Task 6 Part B. The miss branch used to silently do nothing, set subscribed=false and return
+        // ok=true with no message — indistinguishable, to any caller, from having actually removed a
+        // subscription. That is only harmless if a miss always means "already unsubscribed", and since
+        // retry carry-forward it does not (see the next test).
+        String runId = seedRun("AUT_STAT_RUNNING")
+
+        def unsubscribe = callFacade("facade.ReconciliationFacadeServices.unsubscribe#RunNotification",
+                [reconciliationRunResultId: runId])
+
+        assertFalse(unsubscribe.ok as boolean, "nothing was removed, so this must not report success")
+        assertTrue((unsubscribe.errors ?: []).join(" ").contains("nothing was cancelled"))
+
+        // ServiceCallSyncImpl.ignorePreviousError defaults to false, so a prior-call error blocks the
+        // next service invocation outright unless cleared.
+        ec.message.clearErrors()
+    }
+
+    @Test
+    void unsubscribingFromAnAttemptWhoseSubscriptionMovedToARetryDoesNotClaimSuccess() {
+        // The exact bug: TenantNotificationSupport.reassignRunSubscriptions carries a notify-me
+        // subscription forward onto the retry's run-result row (create-then-delete), so an operator whose
+        // page is still holding the OLD attempt's id clicks "stop notifying me" and hits the miss branch.
+        // It used to answer ok=true while the moved subscription went on to fire at the retry's terminal
+        // outcome.
+        String attemptOneRunId = seedRun("AUT_STAT_RUNNING")
+        seedDefaultChatSpace("Retry space")
+
+        def subscribe = callFacade("facade.ReconciliationFacadeServices.subscribe#RunNotification",
+                [reconciliationRunResultId: attemptOneRunId])
+        assertTrue(subscribe.ok as boolean)
+        assertEquals(1L, countSubscriptions(attemptOneRunId))
+
+        // The attempt fails transiently — its row goes FAILED without ever notifying — and the re-drive
+        // mints a fresh row and carries the subscription onto it, exactly as the automation runner does.
+        setRunStatus(attemptOneRunId, "AUT_STAT_FAILED")
+        String attemptTwoRunId = seedRun("AUT_STAT_RUNNING")
+        assertEquals(1, TenantNotificationSupport.reassignRunSubscriptions(ec, attemptOneRunId, attemptTwoRunId))
+        assertEquals(0L, countSubscriptions(attemptOneRunId))
+        assertEquals(1L, countSubscriptions(attemptTwoRunId))
+
+        def unsubscribe = callFacade("facade.ReconciliationFacadeServices.unsubscribe#RunNotification",
+                [reconciliationRunResultId: attemptOneRunId])
+
+        assertFalse(unsubscribe.ok as boolean,
+                "the subscription is still live on the successor row — reporting success here is the lie")
+        assertTrue((unsubscribe.errors ?: []).join(" ").contains("retried"))
+        // Pinned deliberately: the subscription IS still live and WILL still fire. Nothing stored links
+        // attempt 1's run-result id to attempt 2's — reassignRunSubscriptions leaves no trail and the
+        // execution row has already been repointed — so this service cannot follow the chain; it can only
+        // stop claiming to have done something it did not do. Closing the gap needs new state; when that
+        // lands, this is the assertion that must change.
+        assertEquals(1L, countSubscriptions(attemptTwoRunId))
+
+        ec.message.clearErrors()
+    }
+
+    @Test
     void notifyRunCompletedPurgesSubscriptionAndClearsStatusFlag() {
         // Final-review fix, finding 1: exercised through the real Moqui boot this class already pays
         // for — subscribe while RUNNING, flip to a terminal status the way a real run completion
@@ -191,6 +249,26 @@ class RunNotificationSubscriptionSmokeTests {
                 .setAll([reconciliationRunResultId: runId, companyUserGroupId: TENANT_ID, statusEnumId: statusEnumId])
                 .create()
         return runId
+    }
+
+    /** Saves a chat space and makes it the caller's notification default, so subscribe# can succeed. */
+    private void seedDefaultChatSpace(String spaceName) {
+        def save = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace",
+                [spaceName: spaceName, googleChatWebhookUrl: WEBHOOK, isActive: true])
+        assertTrue(save.ok as boolean)
+        def saveDefault = callFacade("facade.SettingsFacadeServices.save#UserNotificationDefault",
+                [chatSpaceId: save.chatSpace.chatSpaceId])
+        assertTrue(saveDefault.ok as boolean)
+    }
+
+    /** Moves a seeded run to another status, the way a real terminal close would. */
+    private void setRunStatus(String runId, String statusEnumId) {
+        ec.entity.find("darpan.reconciliation.ReconciliationRunResult")
+                .condition("reconciliationRunResultId", runId)
+                .disableAuthz()
+                .one()
+                .set("statusEnumId", statusEnumId)
+                .update()
     }
 
     private def findSubscription(String runId) {

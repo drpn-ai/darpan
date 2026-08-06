@@ -220,6 +220,9 @@
             <parameter name="noDataCount" type="Integer"/>
             <parameter name="failedCount" type="Integer"/>
             <parameter name="skippedDuplicateCount" type="Integer"/>
+            <parameter name="cancelledCount" type="Integer">
+                <description>Windows an operator stopped via cancel#ReconciliationRun; they end AUT_STAT_CANCELLED, not failed.</description>
+            </parameter>
             <parameter name="executionResults" type="List"/>
         </out-parameters>
         <actions>
@@ -230,6 +233,7 @@
             <set field="noDataCount" from="automationResult.noDataCount"/>
             <set field="failedCount" from="automationResult.failedCount"/>
             <set field="skippedDuplicateCount" from="automationResult.skippedDuplicateCount"/>
+            <set field="cancelledCount" from="automationResult.cancelledCount"/>
             <set field="executionResults" from="automationResult.executionResults"/>
         </actions>
     </service>

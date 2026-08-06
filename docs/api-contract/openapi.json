@@ -11212,7 +11212,7 @@
                 "required": [
                     "reconciliationRunResultId"
                 ],
-                "description": "Remove the caller's notify-me subscription for one run."
+                "description": "Remove the caller's notify-me subscription for one run. Caller-scoped: only the caller's own\n            row for that run is ever deleted. Reports an ERROR when there was nothing to remove instead of\n            reporting success \u2014 a retried automation carries subscriptions forward onto the new attempt's\n            run-result row, so a miss on an older id can mean the subscription is alive somewhere else and\n            still due to fire."
             },
             "UnsubscribeRunNotificationResult": {
                 "type": "object",

@@ -2936,7 +2936,13 @@
     </service>
 
     <service verb="unsubscribe" noun="RunNotification" allow-remote="true" authenticate="true">
-        <description>Remove the caller's notify-me subscription for one run.</description>
+        <description>
+            Remove the caller's notify-me subscription for one run. Caller-scoped: only the caller's own
+            row for that run is ever deleted. Reports an ERROR when there was nothing to remove instead of
+            reporting success — a retried automation carries subscriptions forward onto the new attempt's
+            run-result row, so a miss on an older id can mean the subscription is alive somewhere else and
+            still due to fire.
+        </description>
         <in-parameters><parameter name="reconciliationRunResultId" required="true"/></in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -2949,9 +2955,21 @@
             <set field="subscriptionRow" from="runIdValue ? ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('reconciliationRunResultId', runIdValue).condition('userId', ec.user.userId).disableAuthz().useCache(false).one() : null"/>
             <if condition="subscriptionRow != null">
                 <set field="ignoreDelete" from="subscriptionRow.delete()"/>
+                <!-- Only the hit branch may state where the caller stands. On a miss this service does
+                     not know: TenantNotificationSupport.reassignRunSubscriptions carries a subscription
+                     onto a retry's row by create-then-delete and leaves no old-id -> new-id trail, so a
+                     missing row means EITHER already-unsubscribed/already-notified OR moved-and-still-
+                     live, and nothing stored can tell those apart. `subscribed` is deliberately left
+                     unset there rather than asserting false. -->
+                <set field="subscribed" from="false"/>
                 <message>Notification cancelled.</message>
+            <else>
+                <!-- The bug this replaces: the miss branch silently did nothing, set subscribed=false and
+                     returned ok=true with no message, so "stop notifying me" reported success while a
+                     carried-forward subscription went on to fire at the retry's terminal outcome. -->
+                <message error="true">No notification subscription for run '${runIdValue}' belongs to you, so nothing was cancelled. If this run was retried, the subscription moved to the retry — stop it from the latest attempt.</message>
+            </else>
             </if>
-            <set field="subscribed" from="false"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

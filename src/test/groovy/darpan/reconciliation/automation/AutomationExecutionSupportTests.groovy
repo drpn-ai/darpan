@@ -1,5 +1,6 @@
 package darpan.reconciliation.automation
 
+import darpan.facade.reconciliation.RunObservability
 import darpan.reconciliation.notification.TenantNotificationSupport
 import darpan.reconciliation.source.SourceFilterSupport
 import org.junit.jupiter.api.Test
@@ -949,6 +950,164 @@ class AutomationExecutionSupportTests {
             // The payload that would go missing under an adopt-the-old-row regression.
             assertEquals(2, deliveries.size(), "the re-drive's completion alert must not be swallowed as ALREADY_NOTIFIED")
             assertTrue((deliveries[1].payload.text as String).startsWith("Darpan run completed: API Automation"))
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+    }
+
+    // ==================================================================================================
+    // Task 6 Part A — the live progress view offers "Cancel run" for automation runs, and until now
+    // nothing on the automation side read the flag that button sets: the run finished normally and
+    // reported SUCCESS to an operator who believed they had stopped it.
+    // ==================================================================================================
+
+    @Test
+    void aCancelRequestedMidRunStopsTheApiRunAndEndsBothRowsCancelled() {
+        // The core one: the run must actually STOP (the second extract and the reconcile never happen)
+        // and BOTH rows must end terminal CANCELLED. A test that only checked the end status would pass
+        // against a run that ignored the cancel, ran to completion and was merely relabelled — so the
+        // service-call trace is the load-bearing assertion here, not the statuses.
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        List<String> extractedSides = []
+        List<String> reconcileCalls = []
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                extractedSides << (call.params.fileSide as String)
+                // The operator presses Cancel on the live view while the first extract is running.
+                if (extractedSides.size() == 1) requestCancelMidRun(ec)
+                return [
+                        dataAvailable: true,
+                        fileLocation : "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName     : "${call.params.fileSide}.json".toString(),
+                        recordCount  : 5,
+                ]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                reconcileCalls << "reconcile"
+                return [reconciliationType: "ORDER", differenceCount: 4, diffFileName: "result.json"]
+            }
+            return [:]
+        }
+
+        Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+        assertEquals(["FILE_1"], extractedSides,
+                "the cancel checkpoint after extract 1 must stop the run — the second extract must never run")
+        assertTrue(reconcileCalls.isEmpty(), "a cancelled run must not go on to reconcile")
+        assertEquals(1, result.cancelledCount)
+        assertEquals(0, result.failedCount, "a cancel is not a failure")
+        assertEquals(0, result.executedCount)
+        List<FakeValue> runResults = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+        assertEquals(1, runResults.size(), "cancelling must reuse the minted row, not add a second one")
+        FakeValue runResult = runResults[0]
+        assertEquals(AutomationExecutionSupport.STATUS_CANCELLED, runResult.statusEnumId,
+                "the row the operator is watching must end CANCELLED — never left RUNNING for the reaper")
+        assertNotNull(runResult.completedDate)
+        assertEquals("Run cancelled by an operator.", runResult.errorMessage)
+        FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+        assertEquals(AutomationExecutionSupport.STATUS_CANCELLED, execution.statusEnumId,
+                "the execution row must be CANCELLED too — not FAILED, and not requeued PENDING")
+        assertNotNull(execution.completedDate)
+        assertEquals(runResult.reconciliationRunResultId, execution.reconciliationRunResultId)
+    }
+
+    @Test
+    void aCancelSurfacingAsAnExtractorFailureIsStillReportedCancelledNotFailed() {
+        // Requirement 3, the precedence runSavedRunDiff.groovy:1017 encodes. An extractor can catch the
+        // cancel thrown by its own progress checkpoint and re-raise its own error, so the runner sees an
+        // ordinary failure with no RunCancelledException in hand. Reporting THAT as FAILED tells the
+        // operator their own cancellation was a run failure — and here it also ALERTS them about it.
+        // The chosen message is a permanent-failure marker, so without the outranking check this is a
+        // terminal FAILED that notifies; with it, nothing is sent at all.
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        String webhookUrl = "https://chat.googleapis.com/v1/spaces/TENANT_A_SPACE/messages?key=test-key&token=test-token"
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_OPS",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Ops",
+                googleChatWebhookUrl: webhookUrl,
+                isActive            : "Y",
+        ])
+        ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"]
+                .find { it.automationId == "AUTO_API" }.put("chatSpaceId", "CS_OPS")
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                requestCancelMidRun(ec)
+                throw new IllegalStateException("Compare scope SCOPE_ORDER was not found")
+            }
+            return [:]
+        }
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        try {
+            Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+            assertEquals(1, result.cancelledCount)
+            assertEquals(0, result.failedCount)
+            FakeValue runResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"][0]
+            assertEquals(AutomationExecutionSupport.STATUS_CANCELLED, runResult.statusEnumId)
+            FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+            assertEquals(AutomationExecutionSupport.STATUS_CANCELLED, execution.statusEnumId)
+            assertTrue(deliveries.isEmpty(),
+                    "a cancelled run must not send the operator a failure alert about their own cancellation")
+            assertNull(runResult.notifiedDate, "and must not spend the notify claim on one either")
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+    }
+
+    @Test
+    void aCancelledApiRunPurgesTheNotifyMeSubscriptionItLeavesBehind() {
+        // Cancellation is a terminal outcome that deliberately notifies nobody, so nothing else will ever
+        // clean up a subscription taken while the run was RUNNING — purgeRunSubscriptions only fires off a
+        // won notification claim. And unlike a transient failure there is no successor attempt to carry it
+        // to: a cancel never requeues. An orphan here can never fire AND pins its chat space against
+        // deletion forever. The automation has no chatSpaceId of its own, so the subscription is the only
+        // route any alert could take — an empty delivery list means the silence is real.
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_ME",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Mine",
+                googleChatWebhookUrl: "https://chat.googleapis.com/v1/spaces/ME_SPACE/messages?key=test-key&token=test-token",
+                isActive            : "Y",
+        ])
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                // Notify me, then Cancel run — both only reachable because the row is live and RUNNING.
+                subscribeMidRun(ec, "USER_A", "CS_ME")
+                requestCancelMidRun(ec)
+                return [
+                        dataAvailable: true,
+                        fileLocation : "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName     : "${call.params.fileSide}.json".toString(),
+                        recordCount  : 5,
+                ]
+            }
+            return [:]
+        }
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        try {
+            AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+            FakeValue runResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"][0]
+            assertEquals(AutomationExecutionSupport.STATUS_CANCELLED, runResult.statusEnumId)
+            assertTrue(deliveries.isEmpty(), "a cancelled run stays silent — the operator already knows")
+            assertNull(runResult.notifiedDate)
+            assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty(),
+                    "the subscription must not outlive the chain — a cancel never requeues, so this is the end of it")
         } finally {
             TenantNotificationSupport.resetDeliveryHook()
         }
@@ -2760,6 +2919,23 @@ class AutomationExecutionSupportTests {
                 userId                   : userId,
                 chatSpaceId              : chatSpaceId,
         ])
+    }
+
+    /**
+     * Task 6: what pressing "Cancel run" on the live progress view does — cancel#ReconciliationRun calls
+     * RunObservability.requestCancel, which stamps cancelRequestedDate on the row and returns true while
+     * the run is still active. Driven through the real production entry point rather than by setting the
+     * field directly, so the fixture cannot drift from what the button actually writes. Called from inside
+     * an extract responder so the click lands mid-run.
+     */
+    private static String requestCancelMidRun(FakeEc ec) {
+        FakeValue liveRunResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+                .find { it.statusEnumId == AutomationExecutionSupport.STATUS_RUNNING }
+        if (liveRunResult == null) return null
+        String runResultId = liveRunResult.reconciliationRunResultId
+        assertTrue(RunObservability.requestCancel(ec, runResultId, "USER_A"),
+                "the fixture must actually record a cancel request against the live run")
+        return runResultId
     }
 
     /**

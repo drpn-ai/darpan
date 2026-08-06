@@ -1,5 +1,6 @@
 package darpan.reconciliation.automation
 
+import darpan.facade.reconciliation.RunObservability
 import darpan.reconciliation.notification.TenantNotificationSupport
 import org.junit.jupiter.api.Test
 
@@ -731,6 +732,200 @@ class SftpAutomationSupportTests {
         assertEquals(NOW, lastLiveSnapshot.runResultStartedDate, "a heartbeat must not rewrite startedDate")
     }
 
+    // ==================================================================================================
+    // Task 6 Part A — the SFTP half. Task 2d made an SFTP run followable on the live progress view, which
+    // offers "Cancel run"; nothing on this path read the flag that button sets, so a poll kept polling for
+    // up to its full timeout and the run reported its own outcome to an operator who had stopped it.
+    // ==================================================================================================
+
+    @Test
+    void aCancelRequestedMidPollStopsTheSftpRunAndEndsBothRowsCancelled() {
+        // The poll is this path's long phase: with no files present it retries up to pollTimeoutMinutes /
+        // pollIntervalMinutes times (7 by default — see the heartbeat test above). The attempt count is
+        // the load-bearing assertion: a run that ignored the cancel and was merely relabelled at the end
+        // would still show CANCELLED, but it would have polled seven times.
+        FakeEc ec = fakeEc()
+        seedSftpAutomation(ec)
+        ec.service.nextResult = [dataAvailable: false, statusMessage: "No SFTP files found"] as Map<String, Object>
+        int[] pollCount = [0]
+        ec.service.onPollCall = {
+            pollCount[0]++
+            if (pollCount[0] == 1) requestCancelMidRun(ec)
+        }
+        SftpAutomationSupport.setRetrySleeper { long ignored -> }
+
+        Map result
+        try {
+            result = SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
+        } finally {
+            SftpAutomationSupport.resetRetrySleeper()
+        }
+
+        assertEquals(1, pollCount[0],
+                "the cancel checkpoint must break the poll loop at the first attempt, not let it run to timeout")
+        assertEquals(AutomationExecutionSupport.STATUS_CANCELLED, result.statusEnumId,
+                "the service must report the cancellation as a normal outcome, not raise it as a crash")
+        List<FakeValue> runResults = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+        assertEquals(1, runResults.size(), "cancelling must reuse the row minted at RUNNING")
+        FakeValue runResult = runResults[0]
+        assertEquals(AutomationExecutionSupport.STATUS_CANCELLED, runResult.statusEnumId,
+                "the watched row must end CANCELLED — never left RUNNING for the reaper to flip to FAILED")
+        assertNotNull(runResult.completedDate)
+        assertEquals("Run cancelled by an operator.", runResult.errorMessage)
+        assertEquals(runResult.reconciliationRunResultId, result.reconciliationRunResultId)
+        FakeValue execution = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"][0]
+        assertEquals(AutomationExecutionSupport.STATUS_CANCELLED, execution.statusEnumId,
+                "the execution row must be CANCELLED too, not FAILED")
+        assertNotNull(execution.completedDate)
+    }
+
+    @Test
+    void aCancelSurfacingAsAThrownPollFailureIsStillReportedCancelledNotFailed() {
+        // Requirement 3 for the throw route. The poll/reconcile service can catch the cancel raised by its
+        // own progress checkpoint and re-raise its own exception, so the runner never sees a
+        // RunCancelledException. Without the outranking check this catch records FAILED, ALERTS the
+        // operator that their own cancellation was a run failure, and re-throws so the caller reports a
+        // crash. With it: CANCELLED, silent, and a normal return.
+        FakeEc ec = fakeEc()
+        seedSftpAutomation(ec)
+        seedNotifyChatSpace(ec)
+        ec.service.nextResult = [dataAvailable: false] as Map<String, Object>
+        ec.service.onPollCall = {
+            requestCancelMidRun(ec)
+            throw new IllegalStateException("SFTP transport aborted")
+        }
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        try {
+            Map result = SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
+
+            assertEquals(AutomationExecutionSupport.STATUS_CANCELLED, result.statusEnumId)
+            FakeValue runResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"][0]
+            assertEquals(AutomationExecutionSupport.STATUS_CANCELLED, runResult.statusEnumId)
+            FakeValue execution = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"][0]
+            assertEquals(AutomationExecutionSupport.STATUS_CANCELLED, execution.statusEnumId)
+            assertTrue(deliveries.isEmpty(),
+                    "a cancelled run must not send a failure alert about the operator's own cancellation")
+            assertNull(runResult.notifiedDate)
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+    }
+
+    @Test
+    void aCancelLandingAsThePollGivesUpWithAnErrorIsStillReportedCancelledNotFailed() {
+        // Requirement 3 for the route that never throws, which is the one runSavedRunDiff.groovy:1017
+        // itself guards: a message-level error from the poll/reconcile chain is only a FLAG here, so the
+        // catch above can never see it. The cancel therefore has to be outranked in the terminal decision
+        // itself, or a stop that arrived while the poll was recording an error is written FAILED and
+        // alerted as a run failure.
+        //
+        // Landing the click in that window needs the message facade's own read as the seam: the loop asks
+        // "should I stop?" only AFTER the attempt's cancel checkpoint has already run and passed. The
+        // sequence assertion below is what keeps this test honest — without it, a cancel stamped one step
+        // earlier would be caught by the checkpoint and the test would pass while proving the throw path.
+        FakeEc ec = fakeEc()
+        seedSftpAutomation(ec)
+        seedNotifyChatSpace(ec)
+        ec.service.nextResult = [dataAvailable: false, statusMessage: "SFTP connection lost"] as Map<String, Object>
+        List<String> sequence = []
+        ec.entity.updateHook = { FakeValue value ->
+            if (value.entityName == "darpan.reconciliation.ReconciliationRunResult" &&
+                    value.statusEnumId == SftpAutomationSupport.AUTOMATION_STATUS_RUNNING) {
+                sequence << "heartbeat"
+            }
+        }
+        ec.service.onPollCall = {
+            sequence << "poll"
+            ec.message.addError("SFTP connection lost")
+        }
+        ec.message.onHasError = {
+            if (sequence.contains("heartbeat") && !sequence.contains("cancel")) {
+                sequence << "cancel"
+                requestCancelMidRun(ec)
+            }
+        }
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        try {
+            Map result = SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
+
+            assertEquals(["poll", "heartbeat", "cancel"], sequence.take(3),
+                    "the cancel must land AFTER the attempt's checkpoint, or this proves the throw path instead")
+            assertEquals(AutomationExecutionSupport.STATUS_CANCELLED, result.statusEnumId)
+            FakeValue runResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"][0]
+            assertEquals(AutomationExecutionSupport.STATUS_CANCELLED, runResult.statusEnumId,
+                    "a poll that gave up with an error under a pending cancel is a cancellation, not a failure")
+            FakeValue execution = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"][0]
+            assertEquals(AutomationExecutionSupport.STATUS_CANCELLED, execution.statusEnumId)
+            assertTrue(deliveries.isEmpty())
+            assertNull(runResult.notifiedDate)
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+    }
+
+    @Test
+    void aCancelledSftpRunPurgesTheNotifyMeSubscriptionItLeavesBehind() {
+        // Cancellation notifies nobody, so nothing else will ever clean up a subscription taken while the
+        // run was RUNNING — purgeRunSubscriptions only fires off a won notification claim, and this runner
+        // never requeues, so there is no successor attempt to carry it to either. An orphan can never fire
+        // AND pins its chat space against deletion forever. The subscriber's space is the ONLY destination
+        // seeded here, so an empty delivery list means the silence is real rather than incidental.
+        FakeEc ec = fakeEc()
+        seedSftpAutomation(ec)
+        seedSubscriberChatSpace(ec)
+        ec.service.nextResult = [dataAvailable: false, statusMessage: "No SFTP files found"] as Map<String, Object>
+        ec.service.onPollCall = {
+            subscribeMidRun(ec, "USER_A", "CS_ME")
+            requestCancelMidRun(ec)
+        }
+        SftpAutomationSupport.setRetrySleeper { long ignored -> }
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        try {
+            SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
+
+            FakeValue runResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"][0]
+            assertEquals(AutomationExecutionSupport.STATUS_CANCELLED, runResult.statusEnumId)
+            assertTrue(deliveries.isEmpty(), "a cancelled run stays silent — the operator already knows")
+            assertNull(runResult.notifiedDate)
+            assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty(),
+                    "the subscription must not outlive the chain a cancel ends")
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+            SftpAutomationSupport.resetRetrySleeper()
+        }
+    }
+
+    /**
+     * Task 6: what pressing "Cancel run" on the live progress view does — cancel#ReconciliationRun calls
+     * RunObservability.requestCancel, which stamps cancelRequestedDate on the row and returns true while
+     * the run is still active. Driven through the real production entry point rather than by setting the
+     * field directly, so the fixture cannot drift from what the button actually writes.
+     */
+    private static String requestCancelMidRun(FakeEc ec) {
+        FakeValue liveRunResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+                .find { it.statusEnumId == SftpAutomationSupport.AUTOMATION_STATUS_RUNNING }
+        if (liveRunResult == null) return null
+        String runResultId = liveRunResult.reconciliationRunResultId
+        assertTrue(RunObservability.requestCancel(ec, runResultId, "USER_A"),
+                "the fixture must actually record a cancel request against the live run")
+        return runResultId
+    }
+
     /**
      * What a poller would see MID-RUN: called from inside the poll service call, i.e. after the execution
      * went RUNNING and long before any terminal write, so assertions can be about the in-flight state
@@ -1100,8 +1295,19 @@ class SftpAutomationSupportTests {
 
     private static class FakeMessageFacade {
         boolean error
+        /**
+         * Task 6: fired on every hasError() read. pollSftpUntilAvailable's loop condition asks this
+         * question only AFTER the attempt's cancel checkpoint has already run and passed, so it is the
+         * one seam a test can use to land an operator's click inside the narrow window the non-throwing
+         * outrank guard exists for — a cancel stamped after the final checkpoint, on a run already
+         * heading for a FAILED terminal it never threw for.
+         */
+        Closure onHasError = null
 
-        boolean hasError() { return error }
+        boolean hasError() {
+            onHasError?.call()
+            return error
+        }
 
         void addError(String ignored) {
             error = true

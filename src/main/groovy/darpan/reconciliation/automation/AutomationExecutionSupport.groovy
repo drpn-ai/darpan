@@ -7,6 +7,7 @@ import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
+import darpan.facade.reconciliation.RunObservability
 import darpan.reconciliation.core.ReconciliationServices
 import darpan.reconciliation.notification.TenantNotificationSupport
 import groovy.json.JsonSlurper
@@ -85,6 +86,11 @@ class AutomationExecutionSupport {
     static final String STATUS_NO_DATA = "AUT_STAT_NO_DATA"
     static final String STATUS_SKIPPED_DUPLICATE = "AUT_STAT_SKIP_DUP"
     static final String STATUS_DEAD_LETTER = "AUT_STAT_DEAD_LETTER"
+    // Terminal state for a run an operator stopped. Same enum value as
+    // RunObservability.STATUS_CANCELLED (seeded as AutomationExecStatus in data/AutomationSeedData.xml,
+    // so it satisfies both rows' statusEnumId FK); declared here for the same reason every other status
+    // above is — this file's own transitions read from its own constants.
+    static final String STATUS_CANCELLED = "AUT_STAT_CANCELLED"
 
     // Transient-failure retry policy (DAR-300). A transient failure requeues the execution to PENDING
     // with a backoff nextRetryDate; the 5-min scanner re-drives due rows, incrementing retryCount, and
@@ -262,11 +268,19 @@ class AutomationExecutionSupport {
                 // see heartbeatAutomationRun's javadoc for why lastUpdatedStamp, not lastHeartbeatDate, is
                 // what actually protects this run from StuckRunReaper.
                 heartbeatAutomationRun(ec, automation, execution, mintedRunResultId)
+                // Task 6: the same phase boundaries are the run's cancel checkpoints. Minting the row at
+                // RUNNING put this run on the live progress view, which offers "Cancel run" — until now
+                // nothing on the automation side ever read the flag that button sets, so the run finished
+                // normally and reported SUCCESS to an operator who believed they had stopped it.
+                // Cancellation stays cooperative (RunObservability.requestCancel only stamps the request):
+                // this throws RunCancelledException out of the run loop, caught below.
+                RunObservability.checkpointCancel(ec, mintedRunResultId)
                 Map<String, Object> file2Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file2Source, window, executionParams), file2Source)
                 // Task 2c: after source-2 extraction too — a NO_DATA window returns just below without
                 // ever reaching the reconcile heartbeat, so this is the last one it gets before its own
                 // terminal close (which also bumps lastUpdatedStamp).
                 heartbeatAutomationRun(ec, automation, execution, mintedRunResultId)
+                RunObservability.checkpointCancel(ec, mintedRunResultId)
 
                 if (!hasData(file1Result) || !hasData(file2Result)) {
                     Timestamp completedTimestamp = nowTimestamp(ec)
@@ -311,6 +325,10 @@ class AutomationExecutionSupport {
                 // going into reconcile, so an "around" heartbeat here instead of a near-duplicate one right
                 // before it gives the persist/notify work below its own protected window too.
                 heartbeatAutomationRun(ec, automation, execution, mintedRunResultId)
+                // Task 6: the last checkpoint before any output is persisted or anyone is notified, so a
+                // cancel that lands during the reconcile still ends the run CANCELLED rather than
+                // publishing a result the operator asked not to have.
+                RunObservability.checkpointCancel(ec, mintedRunResultId)
                 autoPersistedSources = (reconcileResult.persistedSources ?: []) as List
                 requireReconcileOutput(ec, reconcileResult)
                 ensureAutomationResultArtifact(ec, automation, file1Source, file2Source, reconcileResult, window, executionParams)
@@ -370,7 +388,24 @@ class AutomationExecutionSupport {
                         childWindowStartDate : window.childWindowStartDate,
                         childWindowEndDate   : window.childWindowEndDate,
                 ]
+            } catch (RunObservability.RunCancelledException cancelled) {
+                // The operator asked for this at one of the checkpoints above. End the attempt CANCELLED
+                // and carry on with the remaining windows — letting the throw reach the failure path
+                // below would classify the cancel as a transient failure, requeue the run they just
+                // stopped for retry, and record FAILED on the row they are watching.
+                executionResults << cancelledExecutionResult(ec, automation, execution, mintedRunResultId,
+                        automationExecutionId, window)
             } catch (Throwable t) {
+                // A cancel OUTRANKS an abort that merely looks like a failure (mirrors
+                // runSavedRunDiff.groovy:1017): an extractor can catch the cancel throw from its own
+                // progress checkpoint and surface it as an errors list or a wrapped service exception, and
+                // reporting THAT as FAILED would tell the operator their own cancellation was a run
+                // failure — and, worse here than on the interactive path, requeue the stopped run.
+                if (RunObservability.isCancelRequested(ec, mintedRunResultId)) {
+                    executionResults << cancelledExecutionResult(ec, automation, execution, mintedRunResultId,
+                            automationExecutionId, window)
+                    return
+                }
                 Timestamp completedTimestamp = nowTimestamp(ec)
                 Map<String, Object> failureFields = buildFailureFields(ec, execution, t, completedTimestamp, window)
                 updateAutomationExecution(ec, execution, failureFields)
@@ -427,8 +462,75 @@ class AutomationExecutionSupport {
                 noDataCount           : statusCounts[STATUS_NO_DATA] ?: 0,
                 failedCount           : statusCounts[STATUS_FAILED] ?: 0,
                 skippedDuplicateCount : statusCounts[STATUS_SKIPPED_DUPLICATE] ?: 0,
+                // Task 6: without its own counter a cancelled window is absent from every count in this
+                // envelope — the scanner log and run#AutomationNow's response would report a run that
+                // simply did not happen, which is the shape of the bug this whole plan started from.
+                cancelledCount        : statusCounts[STATUS_CANCELLED] ?: 0,
                 executionResults      : executionResults,
         ]
+    }
+
+    /**
+     * Terminal CANCELLED close for one execution attempt, plus the result-list entry describing it.
+     *
+     * <p>Deliberately NOT written through the failure path: {@code buildFailureFields} classifies an
+     * unrecognised throw as transient, so a cancel would requeue the very run the operator just stopped
+     * and stamp FAILED on the row they are watching. Requirement: a cancelled run ends terminal
+     * CANCELLED on BOTH rows and is never reported as a failure.</p>
+     */
+    protected static Map<String, Object> cancelledExecutionResult(def ec, def automation, def execution,
+            String runResultId, String automationExecutionId, Map<String, Object> window) {
+        return cancelAutomationExecution(ec, automation, execution, runResultId, [
+                mode            : "API_DATE_RANGE",
+                childWindowStart: window?.childWindowStartDate,
+                childWindowEnd  : window?.childWindowEndDate,
+        ]) + [
+                automationExecutionId: automationExecutionId,
+                childWindowStartDate : window?.childWindowStartDate,
+                childWindowEndDate   : window?.childWindowEndDate,
+        ]
+    }
+
+    /**
+     * Ends one automation attempt CANCELLED: the execution row, the run-result row minted at RUNNING, and
+     * that row's notify-me subscriptions. Shared by the API-range runner and {@code SftpAutomationSupport}.
+     *
+     * <p>Ordering: the run-result close is deliberately NOT inside the execution write's try, because if
+     * that write is what failed the minted row would be stranded RUNNING — the one outcome every terminal
+     * close in this file exists to prevent (the reaper turns it into a spurious FAILED alert two hours
+     * later). Same shape as the SFTP failure close.</p>
+     *
+     * <p><b>Notification decision:</b> a cancelled run does NOT notify, and purges its subscriptions
+     * instead. Two reasons. The only alert shape reachable from here is
+     * {@code notifyAutomationFailure}, which renders "Status: FAILED" — precisely what a cancel must not
+     * report — and adding a CANCELLED alert shape would be a new notification contract, not this fix.
+     * And the person who pressed Cancel already knows. The subscriptions cannot simply be left, though:
+     * a cancel is terminal and never requeues, so unlike a transient failure there is no successor
+     * attempt to carry them to — this is genuinely the end of the chain, and an orphan can never fire
+     * AND pins its chat space against deletion forever. Same reasoning, and the same helper, as the
+     * NO_DATA close.</p>
+     *
+     * @return the fields written to the execution row (the caller folds these into its result entry)
+     */
+    protected static Map<String, Object> cancelAutomationExecution(def ec, def automation, def execution,
+            String runResultId, Map<String, Object> metadata) {
+        Timestamp cancelledAt = nowTimestamp(ec)
+        Map<String, Object> cancelFields = [
+                statusEnumId    : STATUS_CANCELLED,
+                completedDate   : cancelledAt,
+                errorMessage    : RunObservability.CANCEL_REASON,
+                safeMetadataJson: safeMetadataJson(((metadata ?: [:]) + [cancelled: true]) as Map<String, Object>),
+                lastUpdatedDate : cancelledAt,
+        ]
+        try {
+            updateAutomationExecution(ec, execution, cancelFields)
+        } catch (Throwable executionWriteError) {
+            logger.warn("Could not record automation execution CANCELLED (best-effort): ${executionWriteError.message}")
+        }
+        completeAutomationRunResult(ec, automation, runResultId, STATUS_CANCELLED, cancelledAt,
+                [errorMessage: RunObservability.CANCEL_REASON])
+        TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, runResultId)
+        return cancelFields
     }
 
     static Map<String, Object> scanDueAutomations(def ec, Map params) {

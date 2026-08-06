@@ -193,6 +193,50 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
+    void stateWindowModeYieldsExactlyOneSegmentForTheScheduledDay() {
+        def automation = [
+                automationId            : "AUT_TO_DAILY",
+                relativeWindowTypeEnumId: "AUT_WIN_STATE",
+                windowTimeZone          : "UTC",
+        ]
+        Timestamp scheduled = timestamp("2026-08-05T06:00:00Z")
+
+        List<Map<String, Object>> windows = AutomationExecutionSupport.resolveWindows(
+                automation, [scheduledFireTime: scheduled])
+
+        assertEquals(1, windows.size())
+        assertEquals(timestamp("2026-08-05T00:00:00Z"), windows[0].childWindowStartDate)
+        assertEquals(timestamp("2026-08-06T00:00:00Z"), windows[0].childWindowEndDate)
+        assertEquals(1, windows[0].sequenceNum)
+    }
+
+    @Test
+    void stateWindowModeDoesNotSplitAcrossMonths() {
+        def automation = [
+                automationId            : "AUT_TO_DAILY",
+                relativeWindowTypeEnumId: "AUT_WIN_STATE",
+                relativeWindowCount     : 400,
+                windowTimeZone          : "UTC",
+        ]
+
+        List<Map<String, Object>> windows = AutomationExecutionSupport.resolveWindows(
+                automation, [scheduledFireTime: timestamp("2026-08-05T06:00:00Z")])
+
+        // relativeWindowCount is meaningless in state mode and must not widen or split the window:
+        // splitting a status-defined population by calendar month yields N identical diffs.
+        assertEquals(1, windows.size())
+    }
+
+    @Test
+    void stateWindowModeIsDetectable() {
+        assertTrue(AutomationExecutionSupport.isStateWindowMode(
+                [relativeWindowTypeEnumId: "AUT_WIN_STATE"]))
+        assertFalse(AutomationExecutionSupport.isStateWindowMode(
+                [relativeWindowTypeEnumId: "AUT_WIN_LAST_DAYS"]))
+        assertFalse(AutomationExecutionSupport.isStateWindowMode([:]))
+    }
+
+    @Test
     void apiExecutionCreatesIdempotentRowsAndCallsConfiguredSourceServices() {
         FakeEc ec = fakeEc()
         seedApiAutomation(ec)

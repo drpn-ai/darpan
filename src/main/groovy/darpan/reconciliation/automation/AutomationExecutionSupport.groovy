@@ -118,6 +118,7 @@ class AutomationExecutionSupport {
     static final String WINDOW_LAST_WEEKS = "AUT_WIN_LAST_WEEKS"
     static final String WINDOW_LAST_MONTHS = "AUT_WIN_LAST_MONTHS"
     static final String WINDOW_CUSTOM = "AUT_WIN_CUSTOM"
+    static final String WINDOW_STATE = "AUT_WIN_STATE"
 
     static final String FILE_SIDE_1 = "FILE_1"
     static final String FILE_SIDE_2 = "FILE_2"
@@ -708,6 +709,16 @@ class AutomationExecutionSupport {
         return minutes * 60_000L
     }
 
+    /**
+     * State-based automations define their population by record status rather than by a date window.
+     * The window they still carry is bookkeeping only — it keeps execution rows, the findOrCreateExecution
+     * dedup key, run metadata and the UI window display working unchanged — and is never sent to the
+     * extractor (see buildExtractServiceParams).
+     */
+    static boolean isStateWindowMode(def automation) {
+        return WINDOW_STATE == normalize(readField(automation, "relativeWindowTypeEnumId"))
+    }
+
     static List<Map<String, Object>> resolveWindows(def automation, Map params = [:]) {
         Map<String, Object> input = params ?: [:]
         Timestamp scheduledFireTime = toTimestamp(input.scheduledFireTime ?: input.scheduledDate ?: input.nowTimestamp) ?:
@@ -716,6 +727,23 @@ class AutomationExecutionSupport {
         ZonedDateTime scheduledLocal = scheduledFireTime.toInstant().atZone(zone)
         String windowType = normalize(readField(automation, "relativeWindowTypeEnumId")) ?: WINDOW_LAST_DAYS
         int windowCount = normalizeInt(readField(automation, "relativeWindowCount")) ?: 1
+
+        if (WINDOW_STATE == windowType) {
+            // Exactly one segment, always. The bounds are the scheduled day in the automation's zone:
+            // a real, valid, non-empty window that satisfies every downstream consumer, and that the
+            // extractor never sees because state-mode dispatch omits the date parameters entirely.
+            ZonedDateTime stateStart = scheduledLocal.toLocalDate().atStartOfDay(zone)
+            ZonedDateTime stateEnd = stateStart.plusDays(1)
+            Timestamp stateStartTimestamp = Timestamp.from(stateStart.toInstant())
+            Timestamp stateEndTimestamp = Timestamp.from(stateEnd.toInstant())
+            return [[
+                    sequenceNum         : 1,
+                    windowStartDate     : stateStartTimestamp,
+                    windowEndDate       : stateEndTimestamp,
+                    childWindowStartDate: stateStartTimestamp,
+                    childWindowEndDate  : stateEndTimestamp,
+            ]] as List<Map<String, Object>>
+        }
 
         ZonedDateTime windowStart
         ZonedDateTime windowEnd

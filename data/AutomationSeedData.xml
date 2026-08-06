@@ -111,4 +111,9 @@
             enumCode="CUSTOM_RANGE"
             description="Custom date range"
             sequenceNum="7"/>
+    <moqui.basic.Enumeration enumId="AUT_WIN_STATE"
+            enumTypeId="AutomationRelWindow"
+            enumCode="STATE_BASED"
+            description="State based (no date window)"
+            sequenceNum="8"/>
 </entity-facade-xml>

@@ -435,18 +435,19 @@ class SftpAutomationSupportTests {
     }
 
     @Test
-    void aFailedSftpRunEndsItsMintedRowTerminalAndReusesIt() {
-        // The failure-path counterpart, and the only test that proves the failure exit closes the row it
+    void aFailedSftpRunEndsItsMintedRowTerminalAndAlertsFailedOnce() {
+        // The failure-path counterpart, and the only test that proves the throw exit closes the row it
         // minted rather than abandoning it RUNNING (where the stuck-run reaper would flip it FAILED two
-        // hours later AND alert on it). It also pins the deliberate non-change: an SFTP failure does not
-        // notify — it never did — so a configured chat space must receive nothing.
+        // hours later AND alert on it). Fix round 1: it now also pins the notification-parity decision —
+        // a terminal SFTP failure alerts FAILED exactly like the API path does, exactly once, with the
+        // FAILURE payload (not a success one), and claims the notifiedDate CAS on the same single row.
         FakeEc ec = fakeEc()
         seedSftpAutomation(ec)
-        seedNotifyChatSpace(ec)
+        String webhookUrl = seedNotifyChatSpace(ec)
         ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"][0]["sourceTypeEnumId"] = "AUT_SRC_API"
         List<Map<String, Object>> deliveries = []
-        TenantNotificationSupport.setDeliveryHook { String webhookUrl, Map<String, Object> payload ->
-            deliveries << [webhookUrl: webhookUrl, payload: payload]
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
             return [ok: true, statusCode: 200]
         }
 
@@ -468,8 +469,134 @@ class SftpAutomationSupportTests {
         FakeValue execution = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"][0]
         assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_FAILED, execution.statusEnumId)
         assertEquals(runResult.reconciliationRunResultId, execution.reconciliationRunResultId)
-        assertTrue(deliveries.isEmpty(), "an SFTP failure notified nobody before Task 2d and still must not")
-        assertNull(runResult.notifiedDate, "nothing may claim the notify CAS on a path that does not notify")
+        assertEquals(1, deliveries.size(), "a terminal SFTP failure must alert exactly once, like the API path")
+        assertEquals(webhookUrl, deliveries[0].webhookUrl)
+        String text = deliveries[0].payload.text as String
+        assertTrue(text.contains("Darpan run completed WITH ISSUES"), "the delivered payload must be the FAILURE payload")
+        assertTrue(text.contains("AUT_SRC_SFTP"), "the alert must carry the reason the run died")
+        assertNotNull(runResult.notifiedDate, "the alert must claim the CAS on the one row this run owns")
+    }
+
+    @Test
+    void aFailedExecutionRowCreateStillClosesTheRunResultItAlreadyMinted() {
+        // The only proof of "no path may leave a minted row stranded RUNNING" for the one exit that
+        // happens BEFORE the main try block. Delete the guard around createAutomationExecution and every
+        // other test here still passes, while every DB failure at execution insert leaves a RUNNING row
+        // that StuckRunReaper flips to FAILED — and alerts on — 120 minutes later.
+        FakeEc ec = fakeEc()
+        seedSftpAutomation(ec)
+        seedNotifyChatSpace(ec)
+        ec.entity.createHook = { FakeValue value ->
+            if (value.entityName == "darpan.reconciliation.ReconciliationAutomationExecution") {
+                throw new IllegalStateException("execution insert failed")
+            }
+        }
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String webhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: webhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        try {
+            IllegalStateException thrown = assertThrows(IllegalStateException) {
+                SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
+            }
+            assertEquals("execution insert failed", thrown.message,
+                    "the original failure must reach the caller, not one raised by the cleanup")
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+
+        assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"].isEmpty())
+        List<FakeValue> runResults = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+        assertEquals(1, runResults.size(), "the row was already minted before the execution row was created")
+        assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_FAILED, runResults[0].statusEnumId,
+                "with no execution row, nothing downstream will ever close this row — so this exit must")
+        assertTrue((runResults[0].errorMessage as String).contains("execution insert failed"))
+        assertTrue(deliveries.isEmpty(),
+                "a pre-run infrastructure failure stays silent, like the API path's findOrCreateExecution throw")
+        assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty())
+    }
+
+    @Test
+    void aRunWithOutputButNoArtifactPathStillAlertsItsSubscriberInsteadOfDeletingThemSilently() {
+        // The terminal exit nothing else covers: dataAvailable is true but the poll returned no
+        // diffLocation/diffFileName, so resultDataManagerPath is blank. Before fix round 1 this branch
+        // closed the row and PURGED — the subscriber who clicked "Notify me" mid-run was deleted without
+        // ever being told the run ended. The automation has NO chatSpaceId of its own here, so the
+        // subscription is the only route an alert can take: one delivery proves the subscriber path
+        // specifically rather than incidentally.
+        FakeEc ec = fakeEc()
+        seedSftpAutomation(ec)
+        String subscriberWebhookUrl = seedSubscriberChatSpace(ec)
+        Map<String, Object> noArtifactPoll = successfulPollResult()
+        noArtifactPoll.remove("diffLocation")
+        noArtifactPoll.remove("diffFileName")
+        ec.service.nextResult = noArtifactPoll
+        ec.service.onPollCall = { subscribeMidRun(ec, "USER_A", "CS_ME") }
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String webhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: webhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        Map result
+        try {
+            result = SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+
+        assertNull(result.resultDataManagerPath, "this is the blank-artifact-path branch")
+        List<FakeValue> runResults = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+        assertEquals(1, runResults.size())
+        assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_COMPLETED, runResults[0].statusEnumId,
+                "the row must still end terminal even though nothing was written to it")
+        assertEquals(1, deliveries.size(), "the subscriber must be told how the run ended")
+        assertEquals(subscriberWebhookUrl, deliveries[0].webhookUrl)
+        assertNotNull(runResults[0].notifiedDate)
+        assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty(),
+                "and the subscription must not outlive the run it was watching")
+    }
+
+    @Test
+    void aPollServiceErrorAlertsTheSubscriberItWouldOtherwiseHaveDeletedSilently() {
+        // The other no-output terminal exit: the poll service raised a message error, so the run is
+        // FAILED with nothing persisted. Distinct code path from the throw (this is the else-if inside
+        // the try body, not the catch). Again the automation has no chatSpaceId, so the single delivery
+        // is proof the subscriber themselves was reached.
+        FakeEc ec = fakeEc()
+        seedSftpAutomation(ec)
+        String subscriberWebhookUrl = seedSubscriberChatSpace(ec)
+        ec.service.nextResult = successfulPollResult()
+        ec.service.onPollCall = {
+            subscribeMidRun(ec, "USER_A", "CS_ME")
+            ec.message.addError("SFTP poll service failed")
+        }
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String webhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: webhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        Map result
+        try {
+            result = SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+
+        assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_FAILED, result.statusEnumId)
+        assertNull(result.resultDataManagerPath, "a service-error run persists no output")
+        List<FakeValue> runResults = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+        assertEquals(1, runResults.size())
+        assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_FAILED, runResults[0].statusEnumId)
+        assertEquals(1, deliveries.size(), "a no-output SFTP failure must alert, like the API path")
+        assertEquals(subscriberWebhookUrl, deliveries[0].webhookUrl)
+        assertTrue((deliveries[0].payload.text as String).contains("Darpan run completed WITH ISSUES"))
+        assertNotNull(runResults[0].notifiedDate)
+        assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty(),
+                "the alert's won claim is what purges the subscription — never a purge ahead of it")
     }
 
     @Test
@@ -664,6 +791,23 @@ class SftpAutomationSupportTests {
         ] as Map<String, Object>
     }
 
+    /**
+     * A chat space for a notify-me SUBSCRIBER, deliberately without giving the automation a chatSpaceId
+     * of its own — so the subscription is the only route an alert can take and a delivery proves the
+     * subscriber path specifically rather than incidentally.
+     */
+    private static String seedSubscriberChatSpace(FakeEc ec) {
+        String webhookUrl = "https://chat.googleapis.com/v1/spaces/SUBSCRIBER_SPACE/messages?key=test-key&token=test-token"
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_ME",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Mine",
+                googleChatWebhookUrl: webhookUrl,
+                isActive            : "Y",
+        ])
+        return webhookUrl
+    }
+
     /** Gives the automation a destination so "did this run notify?" is an observable fact. */
     private static String seedNotifyChatSpace(FakeEc ec) {
         String webhookUrl = "https://chat.googleapis.com/v1/spaces/TENANT_A_SPACE/messages?key=test-key&token=test-token"
@@ -751,7 +895,16 @@ class SftpAutomationSupportTests {
                     value instanceof Number ? ((Number) value).intValue().toString() :
                             (((value)?.toString()?.trim()) ?: "0")
         }
-        List<String> lines = ["Darpan run completed: ${runName}".toString()]
+        // Task 2d fix round 1: mirror the real build#RunCompletedPayload template's FAILURE rendering
+        // (see ReconciliationNotificationServices.xml, and the identical harness in
+        // AutomationExecutionSupportTests) so the new SFTP failure-alert tests can assert that what got
+        // delivered is genuinely the failure payload — carrying the reason — and not a success one.
+        boolean runFailed = ((params.statusEnumId)?.toString()?.trim()) == SftpAutomationSupport.AUTOMATION_STATUS_FAILED
+        String headerPrefix = runFailed ? "Darpan run completed WITH ISSUES: " : "Darpan run completed: "
+        List<String> lines = ["${headerPrefix}${runName}".toString()]
+        if (runFailed) lines << "⚠ Status: FAILED — the ruleset did not fully evaluate; results may be incomplete.".toString()
+        String terminationReasonValue = ((params.terminationReason)?.toString()?.trim())
+        if (terminationReasonValue) lines << "⚠ ${terminationReasonValue}".toString()
         if (tenantLabel) lines << "Tenant: ${tenantLabel}".toString()
         if (resultId) lines << "Result ID: ${resultId}".toString()
         if (resultUrl) lines << "Run result: <${resultUrl}|Open run result>".toString()
@@ -777,6 +930,9 @@ class SftpAutomationSupportTests {
         // Task 2d: observation point for the heartbeat/phase-boundary tests — fired on every .update(),
         // mirroring AutomationExecutionSupportTests' harness so the two paths are tested the same way.
         Closure updateHook = null
+        // Task 2d fix round 1: injection point for a row insert that fails, so the guarded
+        // execution-row create can be exercised without a real database.
+        Closure createHook = null
 
         FakeFind find(String entityName) {
             return new FakeFind(entity: this, entityName: entityName)
@@ -865,6 +1021,7 @@ class SftpAutomationSupportTests {
         }
 
         FakeValue create() {
+            entity?.createHook?.call(this)
             created = true
             entity.rows[entityName] << this
             return this

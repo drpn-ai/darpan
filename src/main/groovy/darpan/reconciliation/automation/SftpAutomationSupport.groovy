@@ -135,9 +135,16 @@ class SftpAutomationSupport {
         } catch (Throwable createError) {
             // Without an execution row no terminal write below will ever run, so the row just minted
             // would sit RUNNING forever — and the stuck-run reaper would turn it into a spurious
-            // "your run failed" alert two hours later.
-            closeUnnotifiedRunResult(ec, automation, mintedRunResultId, AUTOMATION_STATUS_FAILED,
-                    nowTimestamp(ec), [errorMessage: truncate(sanitizeErrorMessage(createError), 255)])
+            // "your run failed" alert two hours later. Wrapped: the close is best-effort internally, but
+            // building its arguments is not, and a failure there must not replace the createError the
+            // caller actually needs to see. Deliberately does NOT notify — this is the pre-run
+            // infrastructure failure, and the API path's equivalent (a findOrCreateExecution throw) is
+            // likewise raised before anything is notifiable.
+            try {
+                closeUnnotifiedRunResult(ec, automation, mintedRunResultId, AUTOMATION_STATUS_FAILED,
+                        nowTimestamp(ec), [errorMessage: truncate(sanitizeErrorMessage(createError), 255)])
+            } catch (Throwable ignored) {
+            }
             throw createError
         }
         String automationExecutionId = normalize(readField(execution, "automationExecutionId"))
@@ -168,10 +175,7 @@ class SftpAutomationSupport {
 
             String resultDataManagerPath = outputProduced ?
                     normalizeDataManagerPath(ec, pollResult.diffLocation ?: pollResult.diffFileName) : null
-            // Task 2d: "did this run persist output" is no longer the same fact as "does a run-result row
-            // exist" — the row now exists from RUNNING onwards. The notify guard below keys off THIS, so
-            // notification incidence stays exactly what it was before the early mint.
-            boolean runOutputPersisted = false
+            String failureReason = normalize(pollResult.statusMessage) ?: "SFTP automation run failed"
             Timestamp completedTimestamp = nowTimestamp(ec)
             String reconciliationRunResultId = mintedRunResultId
             if (outputProduced) {
@@ -179,16 +183,18 @@ class SftpAutomationSupport {
                 // the mint itself failed, which is the pre-Task-2d behaviour.
                 reconciliationRunResultId = persistAutomationRunResult(ec, automation, mintedRunResultId,
                         pollResult, resultDataManagerPath, statusEnumId) ?: mintedRunResultId
-                runOutputPersisted = normalize(resultDataManagerPath) != null
             } else {
                 // NO_DATA and service-error runs never had a run-result row before Task 2d. They do now,
-                // and neither may be left RUNNING. Neither notifies, then or now, so both are closed here.
-                closeUnnotifiedRunResult(ec, automation, mintedRunResultId, statusEnumId, completedTimestamp,
+                // and neither may be left RUNNING. Closed here; who (if anyone) notifies them is decided
+                // below — the purge must never run ahead of a notification that still has to resolve its
+                // subscriber destinations.
+                AutomationExecutionSupport.completeAutomationRunResult(ec, automation, mintedRunResultId,
+                        statusEnumId, completedTimestamp,
                         statusEnumId == AUTOMATION_STATUS_FAILED ?
                                 // ReconciliationRunResult.errorMessage is text-medium = VARCHAR(255); a
                                 // longer value makes the whole update throw, leaving the row RUNNING —
                                 // the one outcome this close exists to prevent.
-                                [errorMessage: truncate(normalize(pollResult.statusMessage) ?: "SFTP automation run failed", 255)] :
+                                [errorMessage: truncate(failureReason, 255)] :
                                 [:])
             }
 
@@ -227,7 +233,7 @@ class SftpAutomationSupport {
                     lastUpdatedDate           : completedTimestamp,
             ]
             if (statusEnumId == AUTOMATION_STATUS_FAILED) {
-                updateFields.errorMessage = normalize(pollResult.statusMessage) ?: "SFTP automation run failed"
+                updateFields.errorMessage = failureReason
             }
             updateAutomationExecution(ec, execution, updateFields)
             // Task 7: notify on every terminal state that produced a run result (including a failed
@@ -237,11 +243,12 @@ class SftpAutomationSupport {
             // payload-build service call, which unlike the delivery loop has no internal try/catch) would
             // be caught by the outer catch(Throwable), overwriting the already-correct terminal status to
             // AUTOMATION_STATUS_FAILED and re-throwing — silently corrupting a successful/no-op run.
-            // Task 2d: guarded on runOutputPersisted, NOT on the row existing. The row now always exists,
-            // so the original `reconciliationRunResultId != null` test would have started alerting on runs
-            // that produced nothing (a poll that errored, or one whose diff had no artifact path) — a
-            // change in notification incidence, which is an explicit non-goal of this task.
-            if (runOutputPersisted && reconciliationRunResultId && statusEnumId != AUTOMATION_STATUS_NO_DATA) {
+            // Task 2d fix round 1: guarded on outputProduced, NOT on an artifact path having landed. The
+            // three branches below are exhaustive over the terminal outcomes and mutually exclusive, and
+            // together they give this path the SAME notification incidence as the API-range runner:
+            // a run that produced output alerts (with or without an artifact path, exactly like the API
+            // success path), a terminal failure alerts FAILED, and NO_DATA stays silent.
+            if (outputProduced && reconciliationRunResultId) {
                 try {
                     TenantNotificationSupport.notifyRunCompleted(ec, [
                             reconciliationRunResultId: reconciliationRunResultId,
@@ -264,11 +271,22 @@ class SftpAutomationSupport {
                 } catch (Throwable notifyError) {
                     logger.warn("SFTP automation notification failed (best-effort): ${notifyError.message}")
                 }
-            } else if (outputProduced) {
-                // The remaining terminal path: a run that produced output but no artifact path, so the row
-                // above ended terminal without notifying. Nothing else will ever clean up a "notify me"
-                // subscription taken while it was RUNNING — purgeRunSubscriptions only runs off a won
-                // notification claim. (The !outputProduced closes purge inside closeUnnotifiedRunResult.)
+            } else if (statusEnumId == AUTOMATION_STATUS_FAILED) {
+                // Task 2d fix round 1 (plan-owner decision): a terminal SFTP failure that produced no
+                // output now alerts, exactly as the API-range path has since UAT 2026-07-31
+                // (AutomationExecutionSupport.groovy:398-406). Before this task the silence was forced —
+                // no run-result row meant notifyRunCompleted had no anchor and returned NO_RESULT_ID.
+                // Now the row exists, and leaving it silent would mean this task made "Notify me"
+                // reachable for SFTP runs and then deleted the subscriber without telling them anything.
+                // notifyAutomationFailure is the API path's own helper, so the payload shape
+                // (noOutputProduced / terminationReason) is identical, and it purges via its won claim.
+                AutomationExecutionSupport.notifyAutomationFailure(ec, automation,
+                        reconciliationRunResultId, false, failureReason)
+            } else {
+                // NO_DATA only, and it stays silent — that is the API path's behaviour too, so parity
+                // means matching it rather than alerting on everything. Nothing will ever claim this row,
+                // and purgeRunSubscriptions only runs off a won claim, so purge explicitly: an orphan
+                // subscription can never fire AND pins its chat space against deletion forever.
                 TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, reconciliationRunResultId)
             }
 
@@ -298,14 +316,21 @@ class SftpAutomationSupport {
                 }
                 // Task 2d: deliberately NOT inside the execution-row write's own catch above. If that
                 // write is what failed, the row minted at RUNNING would be stranded RUNNING — precisely
-                // the outcome this close exists to prevent. An SFTP failure is terminal (this runner
-                // never requeues), and it does not notify — that incidence is unchanged — so the
-                // subscriptions it may have collected while RUNNING are purged with it.
-                closeUnnotifiedRunResult(ec, automation, mintedRunResultId, AUTOMATION_STATUS_FAILED,
-                        completedTimestamp, [
+                // the outcome this close exists to prevent. An SFTP failure is terminal: this runner
+                // never requeues (its catch always writes FAILED), so there is no successor attempt to
+                // carry anything to and this is genuinely the end of the chain.
+                AutomationExecutionSupport.completeAutomationRunResult(ec, automation, mintedRunResultId,
+                        AUTOMATION_STATUS_FAILED, completedTimestamp, [
                                 errorMessage: truncate(sanitizeErrorMessage(t), 255),
                                 errorDetail : truncate(sanitizeErrorDetail(t), 12000),
                         ])
+                // Task 2d fix round 1 (plan-owner decision): and it alerts, like the API path's terminal
+                // failure. The `?:` fallback mirrors AutomationExecutionSupport.groovy:402-403 — when the
+                // mint itself failed there is no anchor, so one is created purely so the failure is
+                // notifiable at all. notifyAutomationFailure is best-effort internally and cannot mask t.
+                AutomationExecutionSupport.notifyAutomationFailure(ec, automation,
+                        mintedRunResultId ?: AutomationExecutionSupport.persistFailureRunResult(ec, automation, t, completedTimestamp),
+                        false, sanitizeErrorMessage(t))
             } catch (Throwable ignored) {
             }
             throw t
@@ -313,21 +338,26 @@ class SftpAutomationSupport {
     }
 
     /**
-     * Terminal close for a run-result row on an SFTP path that does NOT notify (Task 2d): end the row,
-     * then purge its notify-me subscriptions.
+     * Terminal close for a run-result row on the one SFTP path that ends without notifying anybody
+     * (Task 2d): end the row, then purge its notify-me subscriptions.
      *
-     * <p>{@code subscribe#RunNotification} accepts any run whose row is PENDING/RUNNING. Before Task 2d
-     * an SFTP run was never observable in that state, so it could not be subscribed to at all; now it is
-     * observable for its whole life. {@code purgeRunSubscriptions} normally runs off a won notification
-     * claim inside {@code notifyRunCompleted}, so a terminal path that never notifies leaves an orphan
-     * that can never fire AND counts forever as chat-space usage, which makes settings refuse to delete
-     * that space.</p>
+     * <p>Its single caller is the failed execution-row create. Every other terminal outcome either
+     * notifies — and {@code notifyRunCompleted} purges off its own won claim — or is NO_DATA, which
+     * purges inline at the notify branch so the purge can never run ahead of an alert that still has
+     * to resolve its subscriber destinations (the ordering mistake Task 2b's fix round 1 made).</p>
+     *
+     * <p>Why any purge is needed: {@code subscribe#RunNotification} accepts any run whose row is
+     * PENDING/RUNNING. Before Task 2d an SFTP run was never observable in that state, so it could not
+     * be subscribed to at all; now it is observable for its whole life. An orphan subscription can
+     * never fire AND counts forever as chat-space usage, which makes settings refuse to delete that
+     * space.</p>
      *
      * <p>Purging is correct here and not the mistake Task 2b's fix round 2 corrected on the API path:
      * there, a transiently-failed attempt was NOT the end of the chain and its subscriptions had to be
      * carried onto the retry's row. This runner has no such chain — it mints a fresh execution row on
-     * every invocation and never requeues, so every terminal it reaches is genuinely the end and there
-     * is no successor row to carry anything to.</p>
+     * every invocation and never requeues — so every terminal it reaches is genuinely the end and
+     * there is no successor row to carry anything to. That is also why
+     * {@code TenantNotificationSupport.reassignRunSubscriptions} has no call site on this path.</p>
      *
      * <p>Both steps are best-effort inside {@code AutomationExecutionSupport}/
      * {@code TenantNotificationSupport}, so neither can mask the outcome being recorded.</p>

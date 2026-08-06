@@ -1058,6 +1058,7 @@ class AutomationExecutionSupport {
                 loadAutomationSourceFilters(ec,
                         normalize(readField(automation, "automationId")),
                         normalize(readField(source, "fileSide"))))
+        applyStatusParameter(serviceParams, connectorForService, source)
         applyWindowFieldParameter(serviceParams, connectorForService)
 
         def call = ec.service.sync().name(serviceName).parameters(serviceParams)
@@ -1100,6 +1101,22 @@ class AutomationExecutionSupport {
                                                                      List<Map<String, Object>> excludeFilters) {
         String filterParameterName = normalize(connector?.get("filterParameterName"))
         if (filterParameterName && excludeFilters) serviceParams.put(filterParameterName, excludeFilters)
+        return serviceParams
+    }
+
+    /** Registry-driven, same shape as applyExcludeFilterParameter: only a connector that declares a
+     *  status parameter ever receives one. */
+    protected static Map<String, Object> applyStatusParameter(Map<String, Object> serviceParams,
+                                                              Map<String, Object> connector,
+                                                              def source) {
+        String statusParameterName = normalize(connector?.get("statusParameterName"))
+        if (!statusParameterName) return serviceParams
+
+        List<String> statusIds = (normalize(readField(source, "extractStatusIds")) ?: "")
+                .tokenize(",")
+                .collect { String value -> normalize(value) }
+                .findAll { String value -> value } as List<String>
+        if (statusIds) serviceParams.put(statusParameterName, statusIds)
         return serviceParams
     }
 

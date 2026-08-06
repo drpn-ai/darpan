@@ -89,6 +89,7 @@
             filterParameterName="sourceFilters"
             windowFieldName="orderDate"
             supportsStateExtract="Y"
+            statusParameterName="orderStatusIds"
             healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
             enabled="Y"/>
 </entity-facade-xml>

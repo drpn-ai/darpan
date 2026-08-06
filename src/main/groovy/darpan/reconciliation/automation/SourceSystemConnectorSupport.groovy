@@ -181,6 +181,7 @@ class SourceSystemConnectorSupport {
                 keepFieldsBase             : readString(record, "keepFieldsBase"),
                 windowFieldName            : readString(record, "windowFieldName"),
                 supportsStateExtract       : "Y".equalsIgnoreCase(readString(record, "supportsStateExtract")),
+                statusParameterName        : readString(record, "statusParameterName"),
                 filterParameterName        : readString(record, "filterParameterName"),
                 lookupServiceName          : readString(record, "lookupServiceName"),
                 pairLookupServiceName          : readString(record, "pairLookupServiceName"),

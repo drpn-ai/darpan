@@ -2333,6 +2333,34 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
+    void statusParameterIsPassedWhenBothConnectorAndSourceDeclareIt() {
+        Map<String, Object> serviceParams = [:]
+        AutomationExecutionSupport.applyStatusParameter(serviceParams,
+                [statusParameterName: "orderStatusIds"],
+                [extractStatusIds: "ORDER_CREATED, ORDER_APPROVED"])
+
+        assertEquals(["ORDER_CREATED", "ORDER_APPROVED"], serviceParams.orderStatusIds)
+    }
+
+    @Test
+    void statusParameterIsAbsentWhenTheConnectorDoesNotDeclareOne() {
+        Map<String, Object> serviceParams = [:]
+        AutomationExecutionSupport.applyStatusParameter(serviceParams, [:],
+                [extractStatusIds: "ORDER_CREATED"])
+
+        assertEquals([:], serviceParams)
+    }
+
+    @Test
+    void statusParameterIsAbsentWhenTheSourceConfiguresNoStatuses() {
+        Map<String, Object> serviceParams = [:]
+        AutomationExecutionSupport.applyStatusParameter(serviceParams,
+                [statusParameterName: "orderStatusIds"], [extractStatusIds: "  ,  "])
+
+        assertEquals([:], serviceParams)
+    }
+
+    @Test
     void connectorWindowFieldNameReachesTheExtractService() {
         Map<String, Object> serviceParams = [:]
         AutomationExecutionSupport.applyWindowFieldParameter(

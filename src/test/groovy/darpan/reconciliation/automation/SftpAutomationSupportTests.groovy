@@ -7,6 +7,8 @@ import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNotEquals
+import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
@@ -287,12 +289,19 @@ class SftpAutomationSupportTests {
         assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_NO_DATA, result.statusEnumId)
         assertEquals(7, result.pollAttemptCount)
         assertEquals(7, ec.service.calls.size())
-        assertNull(result.reconciliationRunResultId)
+        // Task 2d: this used to assert "no run-result row at all", which it can no longer prove — the row
+        // is minted at RUNNING so a NO_DATA window has one. The stronger, still-true statement is that the
+        // one row it has ended NO_DATA rather than being left stranded RUNNING, and that the execution row
+        // names it, which is what makes the window followable while it is still polling.
+        assertEquals("RUN_RESULT_1", result.reconciliationRunResultId)
+        List<FakeValue> runResults = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+        assertEquals(1, runResults.size(), "a NO_DATA window owns exactly one run-result row")
+        assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_NO_DATA, runResults[0].statusEnumId)
 
         FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
         assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_NO_DATA, execution.statusEnumId)
         assertEquals(Timestamp.valueOf("2026-05-01 09:00:00"), execution.scheduledDate)
-        assertNull(execution.reconciliationRunResultId)
+        assertEquals("RUN_RESULT_1", execution.reconciliationRunResultId)
         assertTrue(execution.safeMetadataJson.contains("No file found"))
         assertTrue(execution.safeMetadataJson.contains("\"pollAttemptCount\":7"))
     }
@@ -340,6 +349,334 @@ class SftpAutomationSupportTests {
         FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
         assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_FAILED, execution.statusEnumId)
         assertTrue(execution.errorMessage.contains("AUT_SRC_SFTP"))
+    }
+
+    // ==================================================================================================
+    // Task 2d — the run-result row is minted at RUNNING on the SFTP path too, so "Run now" on an SFTP
+    // automation has a live run to redirect to. Mirrors AutomationExecutionSupportTests' Task 2b set.
+    // ==================================================================================================
+
+    @Test
+    void activeSftpExecutionCarriesARunResultIdWhileThePollIsStillGoing() {
+        // The only test that asserts the IN-FLIGHT triple (execution RUNNING, execution names a run-result
+        // row, that row is RUNNING). It reads the live rows from inside the poll service call, which is
+        // exactly where the "Run now" UI poll looks. Every other test here could pass with the id
+        // appearing only at the end — which is precisely the production bug. It also pins
+        // companyUserGroupId on the row, without which the tenant-gated get#ReconciliationRunStatus read
+        // would deny the operator who started the run.
+        FakeEc ec = fakeEc()
+        seedSftpAutomation(ec)
+        ec.service.nextResult = successfulPollResult()
+        Map<String, Object> liveSnapshot = [:]
+        ec.service.onPollCall = { liveSnapshot.putAll(snapshotLiveRun(ec)) }
+
+        SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
+
+        assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_RUNNING, liveSnapshot.executionStatus)
+        assertNotNull(liveSnapshot.executionRunResultId,
+                "an in-flight SFTP execution must already name its run-result row")
+        assertEquals(liveSnapshot.runResultId, liveSnapshot.executionRunResultId,
+                "the id on the execution row must be the row that actually exists")
+        assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_RUNNING, liveSnapshot.runResultStatus)
+        assertEquals("TENANT_A", liveSnapshot.runResultTenant,
+                "the live row must be readable by the tenant that started the run")
+        assertEquals(NOW, liveSnapshot.runResultStartedDate)
+        assertNull(liveSnapshot.runResultCompletedDate, "a live run has not completed")
+    }
+
+    @Test
+    void aSuccessfulSftpRunOwnsExactlyOneRunResultRowFromStartToFinish() {
+        // The only test that catches the specific regression early minting invites: mint at RUNNING AND
+        // create a second row at terminal. A count-only assertion would have passed against the old code
+        // too (it also produced exactly one row), so this asserts count == 1 AND that the single row
+        // carries both halves — startedDate, written only by the mint, and resultDataManagerPath, written
+        // only by the terminal update.
+        FakeEc ec = fakeEc()
+        seedSftpAutomation(ec)
+        ec.service.nextResult = successfulPollResult()
+
+        SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
+
+        List<FakeValue> runResults = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+        assertEquals(1, runResults.size(), "one SFTP execution owns exactly one run-result row")
+        assertEquals(1, ec.entity.createdValues("darpan.reconciliation.ReconciliationRunResult").size())
+        FakeValue runResult = runResults[0]
+        assertEquals(NOW, runResult.startedDate, "startedDate is written only by the mint at RUNNING")
+        assertEquals("reconciliation-runs/AUTO_SFTP/20260501/result.json", runResult.resultDataManagerPath,
+                "resultDataManagerPath is written only by the terminal update")
+        assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_COMPLETED, runResult.statusEnumId)
+        assertEquals(NOW, runResult.completedDate)
+        assertTrue(runResult.@updated, "the minted row must be UPDATED at terminal, not replaced")
+    }
+
+    @Test
+    void theSftpRunResultIdSeenAtRunningIsTheSameIdSeenAtCompleted() {
+        // Catches a mint whose id is later REPLACED rather than reused. The previous test counts rows;
+        // this one follows identity — the id a redirected browser is holding must still resolve, at the
+        // end, to the execution's id, the service out-parameter, and a row that is COMPLETED.
+        FakeEc ec = fakeEc()
+        seedSftpAutomation(ec)
+        ec.service.nextResult = successfulPollResult()
+        List<String> liveIds = []
+        ec.service.onPollCall = { liveIds << (snapshotLiveRun(ec).executionRunResultId as String) }
+
+        Map result = SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
+
+        String runningId = liveIds[0]
+        assertNotNull(runningId)
+        FakeValue execution = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"][0]
+        assertEquals(runningId, execution.reconciliationRunResultId,
+                "the id present at RUNNING must be the id present at terminal")
+        assertEquals(runningId, result.reconciliationRunResultId)
+        FakeValue runResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+                .find { it.reconciliationRunResultId == runningId }
+        assertNotNull(runResult, "the id handed out at RUNNING must still resolve to a row")
+        assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_COMPLETED, runResult.statusEnumId)
+    }
+
+    @Test
+    void aFailedSftpRunEndsItsMintedRowTerminalAndReusesIt() {
+        // The failure-path counterpart, and the only test that proves the failure exit closes the row it
+        // minted rather than abandoning it RUNNING (where the stuck-run reaper would flip it FAILED two
+        // hours later AND alert on it). It also pins the deliberate non-change: an SFTP failure does not
+        // notify — it never did — so a configured chat space must receive nothing.
+        FakeEc ec = fakeEc()
+        seedSftpAutomation(ec)
+        seedNotifyChatSpace(ec)
+        ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"][0]["sourceTypeEnumId"] = "AUT_SRC_API"
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String webhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: webhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        try {
+            assertThrows(IllegalArgumentException) {
+                SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
+            }
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+
+        List<FakeValue> runResults = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+        assertEquals(1, runResults.size(), "a failed run reuses its minted row instead of adding a second")
+        FakeValue runResult = runResults[0]
+        assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_FAILED, runResult.statusEnumId,
+                "the minted row must not be left stranded RUNNING by a failure")
+        assertEquals(NOW, runResult.completedDate)
+        assertTrue((runResult.errorMessage as String).contains("AUT_SRC_SFTP"))
+        FakeValue execution = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"][0]
+        assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_FAILED, execution.statusEnumId)
+        assertEquals(runResult.reconciliationRunResultId, execution.reconciliationRunResultId)
+        assertTrue(deliveries.isEmpty(), "an SFTP failure notified nobody before Task 2d and still must not")
+        assertNull(runResult.notifiedDate, "nothing may claim the notify CAS on a path that does not notify")
+    }
+
+    @Test
+    void aReDrivenSftpRunMintsAFreshRowSoItsCompletionStillNotifies() {
+        // Guards the invariant the whole mint-per-attempt design rests on: a re-drive must never adopt an
+        // already-notified row. Adopting one would let notifiedDate's claim-then-deliver CAS swallow the
+        // re-drive's completion alert (ALREADY_NOTIFIED) — a silent regression no other test here would
+        // catch, because every other test stops after one run.
+        FakeEc ec = fakeEc()
+        seedSftpAutomation(ec)
+        String webhookUrl = seedNotifyChatSpace(ec)
+        ec.service.nextResult = successfulPollResult()
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        Map firstResult
+        Map secondResult
+        try {
+            firstResult = SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
+            secondResult = SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+
+        assertNotEquals(firstResult.reconciliationRunResultId, secondResult.reconciliationRunResultId,
+                "the re-drive must mint its OWN row — adopting the first would inherit its spent notifiedDate")
+        List<FakeValue> runResults = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+        assertEquals(2, runResults.size())
+        assertTrue(runResults.every { it.notifiedDate != null },
+                "each attempt's row carries its own, unspent notify claim")
+        assertEquals(2, deliveries.size(), "the re-drive's completion alert must not be swallowed")
+        assertEquals(webhookUrl, deliveries[1].webhookUrl)
+        List<FakeValue> executions = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"]
+        assertEquals(2, executions.size())
+        assertEquals(secondResult.reconciliationRunResultId, executions[1].reconciliationRunResultId)
+    }
+
+    @Test
+    void aNoDataSftpRunPurgesTheNotifyMeSubscriptionItCanNowCollect() {
+        // What else keys on the run-result row: subscribe#RunNotification accepts any run whose row is
+        // PENDING/RUNNING, so minting at RUNNING silently makes "Notify me" reachable for SFTP runs. The
+        // NO_DATA close never notifies, and purgeRunSubscriptions only runs off a won notification claim,
+        // so without an explicit purge the subscription would survive forever — never firing, and
+        // permanently counting as chat-space usage so settings refuses to delete that space. This is the
+        // only test that exercises the subscription lifecycle on the SFTP path.
+        FakeEc ec = fakeEc()
+        seedSftpAutomation(ec)
+        ec.service.nextResult = [
+                dataAvailable     : false,
+                statusMessage     : "No file found at /incoming/shopify matching criteria.",
+                validationErrors  : [],
+                processingWarnings: [],
+        ]
+        ec.service.onPollCall = { subscribeMidRun(ec, "USER_A", "CS_ME") }
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String webhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: webhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+        SftpAutomationSupport.setRetrySleeper { long ignored -> }
+
+        try {
+            SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
+        } finally {
+            SftpAutomationSupport.resetRetrySleeper()
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+
+        FakeValue runResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"][0]
+        assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_NO_DATA, runResult.statusEnumId)
+        assertNull(runResult.notifiedDate, "purging must not be achieved by sending a notification")
+        assertTrue(deliveries.isEmpty(), "NO_DATA stayed silent before Task 2d and still must")
+        assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty(),
+                "a terminal run that never notifies must still purge its own subscriptions")
+    }
+
+    @Test
+    void sftpHeartbeatsFireAfterEveryPollAttemptWithoutChangingStatusOrNotifiedDate() {
+        // Task 2c parity. The SFTP poll loop is the longest unprotected stretch anywhere in the runner —
+        // pollTimeoutMinutes of attempt/sleep cycles (60 by default, operator-configurable) during which
+        // the newly-minted row is exposed to StuckRunReaper's 120-minute lastUpdatedStamp sweep. This is
+        // the only test that pins the COUNT and ORDER of heartbeats against the poll attempts, so
+        // dropping the heartbeat call site fails here even though the run itself still ends NO_DATA; and
+        // the mid-run snapshot is the only check that a heartbeat writes lastHeartbeatDate WITHOUT
+        // touching statusEnumId or notifiedDate.
+        Timestamp heartbeatAt = Timestamp.valueOf("2026-05-01 10:05:00")
+        FakeEc ec = fakeEc()
+        seedSftpAutomation(ec)
+        ec.service.nextResult = [
+                dataAvailable     : false,
+                statusMessage     : "No file found at /incoming/shopify matching criteria.",
+                validationErrors  : [],
+                processingWarnings: [],
+        ]
+        List<String> sequence = []
+        Map<String, Object> lastLiveSnapshot = [:]
+        ec.entity.updateHook = { FakeValue value ->
+            // A run-result write that still reads RUNNING at .update() time is a heartbeat: every terminal
+            // close sets a terminal statusEnumId in the SAME .set() sequence this hook inspects, so it
+            // cannot mistake a terminal write for a heartbeat.
+            if (value.entityName == "darpan.reconciliation.ReconciliationRunResult" &&
+                    value.statusEnumId == SftpAutomationSupport.AUTOMATION_STATUS_RUNNING) {
+                sequence << "heartbeat"
+            }
+        }
+        ec.service.onPollCall = {
+            sequence << "poll"
+            ec.user.nowTimestamp = heartbeatAt
+            lastLiveSnapshot.clear()
+            lastLiveSnapshot.putAll(snapshotLiveRun(ec))
+        }
+        SftpAutomationSupport.setRetrySleeper { long ignored -> }
+
+        try {
+            SftpAutomationSupport.runSftpFileAutomation(ec, [automationId: "AUTO_SFTP"])
+        } finally {
+            SftpAutomationSupport.resetRetrySleeper()
+        }
+
+        assertEquals(["poll", "heartbeat"] * 7, sequence,
+                "exactly one heartbeat must follow each poll attempt")
+        // Everything below reads the snapshot taken by the LAST poll call — after six heartbeats and
+        // before any terminal write. Asserting on the end state instead would prove nothing: the terminal
+        // close writes lastHeartbeatDate too, so it lands on the same value with or without heartbeats.
+        assertEquals(heartbeatAt, lastLiveSnapshot.runResultHeartbeatDate,
+                "the heartbeat must move lastHeartbeatDate forward while the run is still going")
+        assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_RUNNING, lastLiveSnapshot.runResultStatus)
+        assertNull(lastLiveSnapshot.runResultNotifiedDate)
+        assertEquals(NOW, lastLiveSnapshot.runResultStartedDate, "a heartbeat must not rewrite startedDate")
+    }
+
+    /**
+     * What a poller would see MID-RUN: called from inside the poll service call, i.e. after the execution
+     * went RUNNING and long before any terminal write, so assertions can be about the in-flight state
+     * rather than the end state (which the old design got right too).
+     */
+    private static Map<String, Object> snapshotLiveRun(FakeEc ec) {
+        FakeValue execution = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"]
+                .find { it.statusEnumId == SftpAutomationSupport.AUTOMATION_STATUS_RUNNING }
+        FakeValue runResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+                .find { it.statusEnumId == SftpAutomationSupport.AUTOMATION_STATUS_RUNNING }
+        return [
+                executionStatus       : execution?.statusEnumId,
+                executionRunResultId  : execution?.reconciliationRunResultId,
+                runResultId           : runResult?.reconciliationRunResultId,
+                runResultStatus       : runResult?.statusEnumId,
+                runResultStartedDate  : runResult?.startedDate,
+                runResultHeartbeatDate: runResult?.lastHeartbeatDate,
+                runResultCompletedDate: runResult?.completedDate,
+                runResultNotifiedDate : runResult?.notifiedDate,
+                runResultTenant       : runResult?.companyUserGroupId,
+        ] as Map<String, Object>
+    }
+
+    /** What "Notify me" does while the live view is open: a subscription against the RUNNING row. */
+    private static void subscribeMidRun(FakeEc ec, String userId, String chatSpaceId) {
+        FakeValue liveRunResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+                .find { it.statusEnumId == SftpAutomationSupport.AUTOMATION_STATUS_RUNNING }
+        if (liveRunResult == null) return
+        String runResultId = liveRunResult.reconciliationRunResultId
+        boolean already = ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"]
+                .any { it.reconciliationRunResultId == runResultId && it.userId == userId }
+        if (already) return
+        ec.entity.add("darpan.reconciliation.ReconciliationRunNotifySubscription", [
+                reconciliationRunResultId: runResultId,
+                userId                   : userId,
+                chatSpaceId              : chatSpaceId,
+        ])
+    }
+
+    private static Map<String, Object> successfulPollResult() {
+        return [
+                dataAvailable      : true,
+                statusMessage      : "Complete",
+                file1Source        : "sftp://source-a:22/incoming/shopify",
+                file2Source        : "sftp://source-b:22/incoming/netsuite",
+                file1SelectedName  : "shopify.csv",
+                file2SelectedName  : "netsuite.csv",
+                file1StagedLocation: "/tmp/shopify.csv",
+                file2StagedLocation: "/tmp/netsuite.csv",
+                reconciliationType : "ORDER",
+                diffLocation       : "reconciliation-runs/AUTO_SFTP/20260501/result.json",
+                diffFileName       : "result.json",
+                differenceCount    : 3,
+                onlyInFile1Count   : 1,
+                onlyInFile2Count   : 2,
+                validationErrors   : [],
+                processingWarnings : [],
+        ] as Map<String, Object>
+    }
+
+    /** Gives the automation a destination so "did this run notify?" is an observable fact. */
+    private static String seedNotifyChatSpace(FakeEc ec) {
+        String webhookUrl = "https://chat.googleapis.com/v1/spaces/TENANT_A_SPACE/messages?key=test-key&token=test-token"
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_OPS",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Ops",
+                googleChatWebhookUrl: webhookUrl,
+                isActive            : "Y",
+        ])
+        ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"]
+                .find { it.automationId == "AUTO_SFTP" }.put("chatSpaceId", "CS_OPS")
+        return webhookUrl
     }
 
     private static FakeEc fakeEc() {
@@ -437,6 +774,9 @@ class SftpAutomationSupportTests {
         Map<String, List<FakeValue>> rows = [:].withDefault { [] }
         int automationExecutionSeq = 1
         int runResultSeq = 1
+        // Task 2d: observation point for the heartbeat/phase-boundary tests — fired on every .update(),
+        // mirroring AutomationExecutionSupportTests' harness so the two paths are tested the same way.
+        Closure updateHook = null
 
         FakeFind find(String entityName) {
             return new FakeFind(entity: this, entityName: entityName)
@@ -502,6 +842,7 @@ class SftpAutomationSupportTests {
         FakeEntityFacade entity
         boolean created
         boolean updated
+        boolean deleted
 
         FakeValue(Map fields = [:], String entityName = null, FakeEntityFacade entity = null) {
             super(fields)
@@ -530,7 +871,17 @@ class SftpAutomationSupportTests {
         }
 
         FakeValue update() {
+            entity?.updateHook?.call(this)
             updated = true
+            return this
+        }
+
+        // TenantNotificationSupport.purgeRunSubscriptions calls .delete() on rows it already loaded;
+        // mirror real Moqui EntityValue.delete() semantics (self-removes from the backing store) so the
+        // Task 2d subscription-cleanup tests can assert on it.
+        FakeValue delete() {
+            entity?.rows?.get(entityName)?.remove(this)
+            deleted = true
             return this
         }
     }
@@ -539,6 +890,10 @@ class SftpAutomationSupportTests {
         Map<String, Object> nextResult = [:]
         List<FakeServiceCall> calls = []
         FakeEc ec
+        // Task 2d: fired on every poll#SftpAndReconcile call, i.e. from INSIDE the run, so a test can
+        // observe the live rows mid-flight (which is where the "Run now" UI poll looks) instead of only
+        // the end state, and can drive "click Notify me while it is running".
+        Closure onPollCall = null
         // Fix round 1 (review finding 2): forces the build#RunCompletedPayload call itself to throw —
         // that call has no internal try/catch (unlike the delivery loop), so this is the genuine
         // unguarded-escape mechanism sftpNotifyFailureDoesNotOverwriteTerminalStatus needs to regression
@@ -572,6 +927,9 @@ class SftpAutomationSupportTests {
             if (serviceName == "reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload") {
                 if (service.explodeOnBuildPayload) throw new RuntimeException("payload build failed")
                 return buildNotificationPayload(service.ec, params)
+            }
+            if (serviceName == "reconciliation.ReconciliationAutomationServices.poll#SftpAndReconcile") {
+                service.onPollCall?.call()
             }
             return service.nextResult
         }

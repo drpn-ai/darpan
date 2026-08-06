@@ -346,6 +346,19 @@ class AutomationExecutionSupport {
                 // would otherwise record SUCCEEDED despite the ruleset not fully evaluating. Mark it
                 // FAILED so the execution status and completion alert reflect the broken sync check.
                 boolean ruleExecutionFailed = reconcileResult.ruleExecutionFailed == true
+                // Task 6 fix round 1: the API path reaches a FAILED terminal WITHOUT throwing too — a rule
+                // build/eval failure is only the flag above — so neither checkpoint nor catch can see a
+                // cancel that lands in the window between the last checkpoint (:331) and here, which spans
+                // the artifact write and the run-result persist and can run for seconds on a large diff.
+                // Left unguarded, the operator is told FAILED and ALERTED about their own cancellation.
+                // Exactly the guard SftpAutomationSupport already carries on its own non-throwing error
+                // branch, gated the same way: only the failure branch is outranked, so a run that genuinely
+                // completed keeps its own outcome instead of being retitled by a late cancel.
+                if (ruleExecutionFailed && RunObservability.isCancelRequested(ec, mintedRunResultId)) {
+                    executionResults << cancelledExecutionResult(ec, automation, execution, mintedRunResultId,
+                            automationExecutionId, window)
+                    return
+                }
                 Map<String, Object> successFields = executionUpdateFields(file1Result, file2Result, reconcileResult) + [
                         statusEnumId              : ruleExecutionFailed ? STATUS_FAILED : STATUS_SUCCEEDED,
                         completedDate             : completedTimestamp,

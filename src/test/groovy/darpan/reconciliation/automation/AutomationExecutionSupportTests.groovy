@@ -1114,6 +1114,97 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
+    void aCancelLandingWhileTheArtifactIsWrittenBeatsARuleExecutionFailure() {
+        // Fix round 1. The API path reaches a FAILED terminal without ever throwing: a rule build/eval
+        // failure is only a flag on the reconcile result. That decision sits AFTER the last cancel
+        // checkpoint, on the far side of the artifact write and the run-result persist — seconds of work
+        // on a large diff — so a cancel landing there is seen by no checkpoint and no catch. Unguarded,
+        // the operator is written FAILED and ALERTED that their own cancellation was a run failure.
+        //
+        // The sequence assertion is what keeps this honest: it pins the click to AFTER the post-reconcile
+        // heartbeat (and so after the checkpoint that immediately follows it). A cancel stamped one step
+        // earlier would be caught by that checkpoint, and this test would be proving the throw path.
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        String webhookUrl = "https://chat.googleapis.com/v1/spaces/TENANT_A_SPACE/messages?key=test-key&token=test-token"
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_OPS",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Ops",
+                googleChatWebhookUrl: webhookUrl,
+                isActive            : "Y",
+        ])
+        ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"]
+                .find { it.automationId == "AUTO_API" }.put("chatSpaceId", "CS_OPS")
+        List<String> sequence = []
+        ec.entity.updateHook = { FakeValue value ->
+            if (value.entityName == "darpan.reconciliation.ReconciliationRunResult" &&
+                    value.statusEnumId == AutomationExecutionSupport.STATUS_RUNNING) {
+                sequence << "heartbeat"
+            }
+        }
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                return [
+                        dataAvailable: true,
+                        fileLocation : "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName     : "${call.params.fileSide}.json".toString(),
+                        recordCount  : 5,
+                ]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                sequence << "reconcile"
+                return [
+                        reconciliationType : "ORDER",
+                        diffLocation       : "reconciliation-runs/AUTO_API/20260501/result.json",
+                        diffFileName       : "result.json",
+                        differenceCount    : 4,
+                        // The rule set did not fully evaluate: this is the non-throwing FAILED terminal.
+                        ruleExecutionFailed: true,
+                ]
+            }
+            return [:]
+        }
+        ec.message.onHasError = {
+            // The first message read after the reconcile is requireReconcileOutput's, one line past the
+            // checkpoint and still ahead of the persist — the operator's click lands there.
+            if (sequence.contains("reconcile") && !sequence.contains("cancel")) {
+                sequence << "cancel"
+                requestCancelMidRun(ec)
+            }
+        }
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        try {
+            Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+            int cancelIndex = sequence.indexOf("cancel")
+            assertEquals("heartbeat", sequence[cancelIndex - 1],
+                    "the cancel must land after the post-reconcile heartbeat — i.e. past the checkpoint that follows it")
+            assertEquals("reconcile", sequence[cancelIndex - 2],
+                    "...and after the reconcile, or this proves a checkpoint rather than the outrank guard")
+            assertEquals(1, result.cancelledCount)
+            assertEquals(0, result.failedCount)
+            List<FakeValue> runResults = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+            assertEquals(1, runResults.size())
+            FakeValue runResult = runResults[0]
+            assertEquals(AutomationExecutionSupport.STATUS_CANCELLED, runResult.statusEnumId,
+                    "a rule-execution failure under a pending cancel is a cancellation, not a failure")
+            FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+            assertEquals(AutomationExecutionSupport.STATUS_CANCELLED, execution.statusEnumId)
+            assertTrue(deliveries.isEmpty(),
+                    "the operator must not be alerted that their own cancellation was a run failure")
+            assertNull(runResult.notifiedDate)
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+    }
+
+    @Test
     void apiExecutionInfersShopifyExtractorForLegacySourceRows() {
         FakeEc ec = fakeEc()
         seedApiAutomation(ec)
@@ -3003,10 +3094,20 @@ class AutomationExecutionSupportTests {
 
     private static class FakeMessageFacade {
         List<String> errors = []
+        /**
+         * Task 6 fix round 1: fired on every hasError() read. requireReconcileOutput consumes message
+         * errors immediately AFTER the post-reconcile cancel checkpoint and while the run-result row is
+         * still RUNNING, so it is the one point a test can reach inside the window the non-throwing
+         * ruleExecutionFailed outrank guard exists for.
+         */
+        Closure onHasError = null
 
         void addError(String error) { errors << error }
 
-        boolean hasError() { return !errors.isEmpty() }
+        boolean hasError() {
+            onHasError?.call()
+            return !errors.isEmpty()
+        }
 
         String getErrorsString() { return errors.join("\n") }
 

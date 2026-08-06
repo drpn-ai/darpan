@@ -101,6 +101,9 @@ class AutomationFacadeSupport {
         if (!ec.message.hasError()) {
             validateSources(ec, inputModeEnumId, sourceEntries, savedRunResolution.savedRun as Map)
         }
+        if (!ec.message.hasError()) {
+            validateStateModeSources(ec, input, sourceEntries).each { String error -> ec.message.addError(error) }
+        }
 
         String chatSpaceId = normalize(input.chatSpaceId) ?: null
         if (!ec.message.hasError() && chatSpaceId) {
@@ -697,6 +700,29 @@ class AutomationFacadeSupport {
             if (source.sourceTypeEnumId == SOURCE_TYPE_API) validateApiSource(ec, source)
             if (source.sourceTypeEnumId == SOURCE_TYPE_DB) validateDatabaseSource(ec, source)
         }
+    }
+
+    /**
+     * A state-based automation defines its population by status on BOTH sides. If one side still
+     * receives a date window while the other does not, the two extracts describe different populations
+     * and every non-overlapping record reads as a genuine discrepancy. Caught on save, because at run
+     * time the result looks like a real finding rather than a configuration error.
+     */
+    static List<String> validateStateModeSources(def ec, def automation, Collection sources) {
+        if (!AutomationExecutionSupport.isStateWindowMode(automation)) return []
+
+        List<String> errors = []
+        (sources ?: []).each { Object source ->
+            String systemEnumId = normalize(readField(source, "systemEnumId"))
+            String fileSide = normalize(readField(source, "fileSide"))
+            Map<String, Object> connector = SourceSystemConnectorSupport.resolveBySystemEnumId(ec, systemEnumId)
+            if (!connector?.supportsStateExtract) {
+                errors.add(("Source ${fileSide} (${systemEnumId}) cannot run without a date window. " +
+                        "Choose a date-based schedule window, or a source system that supports " +
+                        "status-defined extraction.").toString())
+            }
+        }
+        return errors
     }
 
     protected static void validateChatSpace(def ec, String chatSpaceId) {

@@ -608,6 +608,78 @@ class AutomationFacadeSmokeTests {
         assertTrue(ec.message.errors.any { String message -> message.contains("file1PrimaryIdExpression is required") })
     }
 
+    // ─── state-mode source-capability validation (RQ-15) ──────────────────────────
+    // A state-based automation defines its population by status on BOTH sides; a side that still
+    // needs a date window (i.e. its connector does not declare supportsStateExtract) makes the diff
+    // compare two different populations. These exercise validateStateModeSources directly against the
+    // real SourceSystemConnector registry rows seeded in setup() (OMS_TRANSFER_ORDERS is the only
+    // enabled connector with supportsStateExtract="Y" — see data/SourceSystemConnectorSeedData.xml).
+
+    @Test
+    void stateModeAutomationRejectsASideThatCannotDoStateExtraction() {
+        List<String> errors = AutomationFacadeSupport.validateStateModeSources(ec,
+                [automationId: "AUT_TO", relativeWindowTypeEnumId: "AUT_WIN_STATE"],
+                [[fileSide: "FILE_1", systemEnumId: "OMS_TRANSFER_ORDERS"],
+                 [fileSide: "FILE_2", systemEnumId: "SHOPIFY"]])
+
+        assertEquals(1, errors.size())
+        assertTrue(errors[0].contains("FILE_2"))
+        assertTrue(errors[0].contains("SHOPIFY"))
+    }
+
+    @Test
+    void stateModeAutomationAcceptsTwoStateCapableSides() {
+        List<String> errors = AutomationFacadeSupport.validateStateModeSources(ec,
+                [automationId: "AUT_TO", relativeWindowTypeEnumId: "AUT_WIN_STATE"],
+                [[fileSide: "FILE_1", systemEnumId: "OMS_TRANSFER_ORDERS"],
+                 [fileSide: "FILE_2", systemEnumId: "OMS_TRANSFER_ORDERS"]])
+
+        assertEquals([], errors)
+    }
+
+    @Test
+    void windowModeAutomationIsNeverCheckedForStateCapability() {
+        List<String> errors = AutomationFacadeSupport.validateStateModeSources(ec,
+                [automationId: "AUT_SO", relativeWindowTypeEnumId: "AUT_WIN_LAST_DAYS"],
+                [[fileSide: "FILE_1", systemEnumId: "OMS"],
+                 [fileSide: "FILE_2", systemEnumId: "SHOPIFY"]])
+
+        assertEquals([], errors)
+    }
+
+    @Test
+    void stateModeAutomationTreatsAnUnresolvableConnectorAsIncapableRatherThanThrowing() {
+        // A systemEnumId with no SourceSystemConnector row (typo, retired system, or a disabled row)
+        // must fail the same actionable way as a real-but-window-only connector, never throw.
+        List<String> errors = AutomationFacadeSupport.validateStateModeSources(ec,
+                [automationId: "AUT_TO", relativeWindowTypeEnumId: "AUT_WIN_STATE"],
+                [[fileSide: "FILE_1", systemEnumId: "OMS_TRANSFER_ORDERS"],
+                 [fileSide: "FILE_2", systemEnumId: "NOT_A_REAL_SYSTEM"]])
+
+        assertEquals(1, errors.size())
+        assertTrue(errors[0].contains("FILE_2"))
+        assertTrue(errors[0].contains("NOT_A_REAL_SYSTEM"))
+    }
+
+    @Test
+    void saveAutomationRejectsStateModeAutomationWhenSourcesCannotDoStateExtraction() {
+        // Wiring proof: prepareAutomationSave (via save#Automation) must actually call
+        // validateStateModeSources and surface its errors through ec.message like every other
+        // save-time validation, not just have the pure function pass its own unit tests.
+        // saveSftpAutomation's default sources are OMS (FILE_1) / SHOPIFY (FILE_2) — neither
+        // connector declares supportsStateExtract, so AUT_WIN_STATE must reject both sides.
+        Map<String, Object> saveResult = saveSftpAutomation("State Mode Mismatch SFTP", [
+                relativeWindowTypeEnumId: "AUT_WIN_STATE",
+        ])
+
+        assertFalse((Boolean) saveResult.ok)
+        String joinedErrors = (saveResult.errors ?: []).join(" | ")
+        assertTrue(joinedErrors.contains("FILE_1") && joinedErrors.contains("OMS"),
+                "Unexpected errors: ${joinedErrors}")
+        assertTrue(joinedErrors.contains("FILE_2") && joinedErrors.contains("SHOPIFY"),
+                "Unexpected errors: ${joinedErrors}")
+    }
+
     private Map<String, Object> saveSftpAutomation(String automationName, Map<String, Object> extraParams = [:]) {
         Map<String, Object> params = [
                 automationName : automationName,

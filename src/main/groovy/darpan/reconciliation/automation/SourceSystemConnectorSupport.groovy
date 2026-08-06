@@ -72,6 +72,18 @@ class SourceSystemConnectorSupport {
     }
 
     /**
+     * Resolve the enabled connector for a system id. systemEnumId is the PK, so this is a direct
+     * one() lookup (not the resolve()/alias scan) — used where a caller already has the exact,
+     * persisted systemEnumId (e.g. an automation source row) and has no need for alias matching.
+     */
+    static Map<String, Object> resolveBySystemEnumId(def ec, String systemEnumId) {
+        String wanted = normalize(systemEnumId)
+        if (!wanted) return null
+        def record = ec.entity.find(ENTITY_NAME).condition("systemEnumId", wanted).useCache(true).one()
+        return (record == null || !isEnabled(record)) ? null : toConnectorMap(record)
+    }
+
+    /**
      * Resolve the enabled connector whose expectedSourceConfigType matches. The interactive
      * saved-run path keys sources on sourceConfigType (not systemEnumId), so this is its
      * registry entry point — one connector per config type by construction.

@@ -63,4 +63,31 @@
             systemAliases="NETSUITE,DAR_SYS_NETSUITE"
             preserveWindowInstants="N"
             enabled="Y"/>
+
+    <!-- Transfer orders are served by the SAME /rest/s1/oms/orders endpoint and the SAME credentials as
+         sales orders; only the order type differs, and it is a server-side query filter. The row still
+         needs its own extractServiceName and expectedSourceConfigType because both connector resolvers
+         (resolveByExtractServiceName, resolveByExpectedSourceConfigType) take the first enabled match on
+         those attributes — two rows sharing either one would resolve ambiguously and silently.
+         No pairLookupServiceName: exchange pair verification is a sales-order concern. -->
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_TRANSFER_ORDERS"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsTransferOrders"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_REST_TRANSFER"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Orders API (Transfer Orders)"
+            sendUrlTemplate="{baseUrl}/rest/s1/oms/orders"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsTransferOrders"
+            systemAliases="OMS_TRANSFER_ORDERS,HOTWAX_TRANSFER_ORDERS,DAR_SYS_OMS_TO"
+            preserveWindowInstants="N"
+            keepFieldsParameterName="keepRecordFields"
+            keepFieldsBase="orderId,orderName,orderDate,statusId,originFacilityId,grandTotal,currencyUom"
+            filterParameterName="sourceFilters"
+            windowFieldName="orderDate"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            enabled="Y"/>
 </entity-facade-xml>

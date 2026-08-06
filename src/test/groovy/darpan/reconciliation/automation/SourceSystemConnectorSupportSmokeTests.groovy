@@ -252,4 +252,22 @@ class SourceSystemConnectorSupportSmokeTests {
         // Primary-ID selection stays deliberately narrow — widening the pills must not widen it.
         assertEquals(3, AutomationFacadeSupport.HOTWAX_OMS_ORDER_PRIMARY_ID_OPTIONS.size())
     }
+
+    @Test
+    void transferOrderConnectorResolvesDistinctlyFromSalesOrders() {
+        Map<String, Object> salesOrders = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(
+                ec, "HOTWAX_OMS_REST")
+        Map<String, Object> transferOrders = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(
+                ec, "HOTWAX_OMS_REST_TRANSFER")
+
+        assertEquals("OMS", salesOrders.systemEnumId)
+        assertEquals("OMS_TRANSFER_ORDERS", transferOrders.systemEnumId)
+        assertEquals("reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders",
+                salesOrders.extractServiceName)
+        assertEquals("reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsTransferOrders",
+                transferOrders.extractServiceName)
+        // Both reuse the same credential storage; only the routing label differs.
+        assertEquals(salesOrders.configEntityName, transferOrders.configEntityName)
+        assertEquals(salesOrders.configParameterName, transferOrders.configParameterName)
+    }
 }

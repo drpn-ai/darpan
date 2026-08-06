@@ -998,6 +998,7 @@ class AutomationExecutionSupport {
                 loadAutomationSourceFilters(ec,
                         normalize(readField(automation, "automationId")),
                         normalize(readField(source, "fileSide"))))
+        applyWindowFieldParameter(serviceParams, connectorForService)
 
         def call = ec.service.sync().name(serviceName).parameters(serviceParams)
         if (call?.metaClass?.respondsTo(call, "disableAuthz")) call = call.disableAuthz()
@@ -1015,6 +1016,16 @@ class AutomationExecutionSupport {
                                                                      List<Map<String, Object>> excludeFilters) {
         String filterParameterName = normalize(connector?.get("filterParameterName"))
         if (filterParameterName && excludeFilters) serviceParams.put(filterParameterName, excludeFilters)
+        return serviceParams
+    }
+
+    /** Config over code: the connector names the record date field its extract window filters on.
+     *  Blank leaves the parameter unset so the extractor keeps its own default (orderDate), which is
+     *  what every pre-existing connector row does. */
+    protected static Map<String, Object> applyWindowFieldParameter(Map<String, Object> serviceParams,
+                                                                   Map<String, Object> connector) {
+        String windowFieldName = normalize(connector?.get("windowFieldName"))
+        if (windowFieldName) serviceParams.windowFieldName = windowFieldName
         return serviceParams
     }
 

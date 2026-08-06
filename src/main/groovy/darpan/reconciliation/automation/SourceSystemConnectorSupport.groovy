@@ -179,6 +179,7 @@ class SourceSystemConnectorSupport {
                 preserveWindowInstants     : normalizeBool(readField(record, "preserveWindowInstants"), false),
                 keepFieldsParameterName    : readString(record, "keepFieldsParameterName"),
                 keepFieldsBase             : readString(record, "keepFieldsBase"),
+                windowFieldName            : readString(record, "windowFieldName"),
                 filterParameterName        : readString(record, "filterParameterName"),
                 lookupServiceName          : readString(record, "lookupServiceName"),
                 pairLookupServiceName          : readString(record, "pairLookupServiceName"),

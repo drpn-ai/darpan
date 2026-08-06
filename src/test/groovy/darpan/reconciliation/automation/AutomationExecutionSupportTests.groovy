@@ -1950,6 +1950,25 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
+    void connectorWindowFieldNameReachesTheExtractService() {
+        Map<String, Object> serviceParams = [:]
+        AutomationExecutionSupport.applyWindowFieldParameter(
+                serviceParams, [windowFieldName: "lastUpdatedTxStamp"])
+
+        assertEquals("lastUpdatedTxStamp", serviceParams.windowFieldName)
+    }
+
+    @Test
+    void blankConnectorWindowFieldNameLeavesTheParameterUnset() {
+        Map<String, Object> serviceParams = [:]
+        AutomationExecutionSupport.applyWindowFieldParameter(serviceParams, [windowFieldName: "  "])
+        AutomationExecutionSupport.applyWindowFieldParameter(serviceParams, [:])
+
+        // Unset, not empty: the extractor's own default must win, and an empty string would override it.
+        assertFalse(serviceParams.containsKey("windowFieldName"))
+    }
+
+    @Test
     void automationSourceFiltersAreReturnedInSequenceOrder() {
         // Fix round 1: SourceFilterSupport.firstMatchingRule returns the FIRST matching rule in list
         // order, and that rule owns the excluded count (ReconciliationEntities.xml:381-382 on

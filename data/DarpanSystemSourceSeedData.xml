@@ -38,4 +38,11 @@
             enumCode="DATABASE"
             description="Database"
             sequenceNum="5"/>
+
+    <moqui.basic.Enumeration
+            enumId="OMS_TRANSFER_ORDERS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_TRANSFER_ORDERS"
+            description="HotWax Transfer Orders"
+            sequenceNum="6"/>
 </entity-facade-xml>

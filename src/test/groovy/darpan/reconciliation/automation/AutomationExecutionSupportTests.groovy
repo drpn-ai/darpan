@@ -307,6 +307,270 @@ class AutomationExecutionSupportTests {
         assertEquals("reconciliation-runs/AUTO_API/20260501/result.json", runResult.resultDataManagerPath)
     }
 
+    // ==================================================================================================
+    // Task 2b — the run-result row is minted when the execution goes RUNNING, not when it ends, so an
+    // in-flight automation is something the UI can follow. Every test below reads the LIVE rows from
+    // inside the first extract call, i.e. mid-run, because that is the only moment the property under
+    // test is observable; asserting on the end state alone cannot tell the two designs apart.
+    // ==================================================================================================
+
+    @Test
+    void activeExecutionCarriesARunResultIdWhileTheRunIsStillGoing() {
+        // The exact pair the "Run now" poll waits for: an ACTIVE execution row that already names its
+        // run-result row, and that row itself ACTIVE. Before Task 2b the id was written only in the same
+        // update that set a terminal status, so this pair was unreachable and the redirect never fired.
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        Map<String, Object> midRun = [:]
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                if (midRun.isEmpty()) midRun.putAll(snapshotLiveRun(ec))
+                return [
+                        dataAvailable: true,
+                        fileLocation : "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName     : "${call.params.fileSide}.json".toString(),
+                        recordCount  : 5,
+                ]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                return [
+                        reconciliationType: "ORDER",
+                        diffLocation      : "reconciliation-runs/AUTO_API/20260501/result.json",
+                        diffFileName      : "result.json",
+                        differenceCount   : 4,
+                ]
+            }
+            return [:]
+        }
+
+        AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+        assertEquals(AutomationExecutionSupport.STATUS_RUNNING, midRun.executionStatus)
+        assertNotNull(midRun.executionRunResultId, "an ACTIVE execution row must already name its run-result row")
+        assertEquals(midRun.runResultId, midRun.executionRunResultId)
+        assertEquals(AutomationExecutionSupport.STATUS_RUNNING, midRun.runResultStatus)
+        assertEquals(NOW, midRun.runResultStartedDate)
+        // The row is stamped with the automation's asserted tenant from the first write, so the
+        // tenant-gated status read the UI does against it resolves for the operator who started the run.
+        assertEquals("TENANT_A", midRun.runResultTenant)
+    }
+
+    @Test
+    void aSuccessfulRunOwnsExactlyOneRunResultRowFromStartToFinish() {
+        // Guards the regression early minting invites: mint at RUNNING, then create a SECOND row at
+        // terminal. One row must carry both halves — the startedDate only the mint writes, and the
+        // artifact only the terminal write produces — and the execution row must point at that row.
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                return [
+                        dataAvailable: true,
+                        fileLocation : "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName     : "${call.params.fileSide}.json".toString(),
+                        recordCount  : 5,
+                ]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                return [
+                        reconciliationType: "ORDER",
+                        diffLocation      : "reconciliation-runs/AUTO_API/20260501/result.json",
+                        diffFileName      : "result.json",
+                        differenceCount   : 4,
+                        onlyInFile1Count  : 1,
+                        onlyInFile2Count  : 3,
+                ]
+            }
+            return [:]
+        }
+
+        Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+        assertEquals(1, result.executedCount)
+        List<FakeValue> runResults = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+        assertEquals(1, runResults.size(), "one execution must own exactly one run-result row")
+        FakeValue runResult = runResults[0]
+        assertEquals(NOW, runResult.startedDate, "startedDate is written only by the mint at RUNNING")
+        assertEquals("reconciliation-runs/AUTO_API/20260501/result.json", runResult.resultDataManagerPath,
+                "the artifact is written only by the terminal update — so both halves landed on ONE row")
+        assertEquals(AutomationExecutionSupport.STATUS_SUCCEEDED, runResult.statusEnumId)
+        assertNotNull(runResult.completedDate)
+        assertEquals(4, runResult.differenceCount)
+        FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+        assertEquals(runResult.reconciliationRunResultId, execution.reconciliationRunResultId)
+    }
+
+    @Test
+    void theRunResultIdSeenAtRunningIsTheSameIdSeenAtSucceeded() {
+        // "An id is present at the end" was already true before Task 2b — a test asserting only that
+        // passes against the broken code. What has to hold is that the id the UI captured mid-run is
+        // still the run's id when it finishes: a terminal write that minted its own row would strand
+        // the viewer on a run that stays RUNNING forever.
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        Map<String, Object> midRun = [:]
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                if (midRun.isEmpty()) midRun.putAll(snapshotLiveRun(ec))
+                return [
+                        dataAvailable: true,
+                        fileLocation : "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName     : "${call.params.fileSide}.json".toString(),
+                        recordCount  : 5,
+                ]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                return [
+                        reconciliationType: "ORDER",
+                        diffLocation      : "reconciliation-runs/AUTO_API/20260501/result.json",
+                        diffFileName      : "result.json",
+                        differenceCount   : 4,
+                ]
+            }
+            return [:]
+        }
+
+        AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+        FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+        assertEquals(AutomationExecutionSupport.STATUS_SUCCEEDED, execution.statusEnumId)
+        assertNotNull(midRun.executionRunResultId)
+        assertEquals(midRun.executionRunResultId, execution.reconciliationRunResultId,
+                "the id the UI polled at RUNNING must still be the run's id at SUCCEEDED")
+        FakeValue runResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+                .find { it.reconciliationRunResultId == midRun.executionRunResultId }
+        assertNotNull(runResult, "the id captured mid-run must still resolve to a row")
+        assertEquals(AutomationExecutionSupport.STATUS_SUCCEEDED, runResult.statusEnumId)
+    }
+
+    @Test
+    void aFailedRunEndsItsMintedRowTerminalAndReusesIt() {
+        // A permanent failure after the mint. The row the viewer is already watching must be the row
+        // that goes FAILED — not a second row minted by the failure path, which would leave the watched
+        // row RUNNING forever (and the stuck-run reaper alerting on it two hours later).
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        String webhookUrl = "https://chat.googleapis.com/v1/spaces/TENANT_A_SPACE/messages?key=test-key&token=test-token"
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_OPS",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Ops",
+                googleChatWebhookUrl: webhookUrl,
+                isActive            : "Y",
+        ])
+        ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"]
+                .find { it.automationId == "AUTO_API" }.put("chatSpaceId", "CS_OPS")
+        Map<String, Object> midRun = [:]
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                if (midRun.isEmpty()) midRun.putAll(snapshotLiveRun(ec))
+                return [
+                        dataAvailable: true,
+                        fileLocation : "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName     : "${call.params.fileSide}.json".toString(),
+                        recordCount  : 5,
+                ]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                // "was not found" is a permanent-failure marker, so the execution goes terminal FAILED
+                // instead of being requeued for retry — the path that notifies.
+                throw new IllegalStateException("Compare scope SCOPE_ORDER was not found")
+            }
+            return [:]
+        }
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        try {
+            Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+            assertEquals(1, result.failedCount)
+            assertNotNull(midRun.executionRunResultId)
+            List<FakeValue> runResults = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+            assertEquals(1, runResults.size(), "the failure path must reuse the minted row, not add a second one")
+            FakeValue runResult = runResults[0]
+            assertEquals(midRun.executionRunResultId, runResult.reconciliationRunResultId)
+            assertEquals(AutomationExecutionSupport.STATUS_FAILED, runResult.statusEnumId)
+            assertNotNull(runResult.completedDate)
+            assertTrue((runResult.errorMessage as String).contains("was not found"))
+            FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+            assertEquals(AutomationExecutionSupport.STATUS_FAILED, execution.statusEnumId)
+            assertEquals(runResult.reconciliationRunResultId, execution.reconciliationRunResultId)
+            // Exactly one alert, claimed on that one row: two rows would mean two claimable anchors.
+            assertEquals(1, deliveries.size())
+            assertNotNull(runResult.notifiedDate)
+            assertTrue((deliveries[0].payload.text as String).contains("Status: FAILED"))
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+    }
+
+    @Test
+    void aRunThatProducesNoOutputFileStillLeavesNoRunningRowBehind() {
+        // Compare returns counts but no artifact, so resultDataManagerPath is blank. That used to mean
+        // "no run-result row at all"; now the row already exists, so a blank path must resolve to the
+        // pre-minted id and still end that row terminal — a null return would strand it RUNNING.
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        String webhookUrl = "https://chat.googleapis.com/v1/spaces/TENANT_A_SPACE/messages?key=test-key&token=test-token"
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_OPS",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Ops",
+                googleChatWebhookUrl: webhookUrl,
+                isActive            : "Y",
+        ])
+        ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"]
+                .find { it.automationId == "AUTO_API" }.put("chatSpaceId", "CS_OPS")
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                return [
+                        dataAvailable: true,
+                        fileLocation : "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName     : "${call.params.fileSide}.json".toString(),
+                        recordCount  : 5,
+                ]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                // Counts only: requireReconcileOutput is satisfied by differenceCount, and with no
+                // diffDf ensureAutomationResultArtifact writes nothing, so no path is ever resolved.
+                return [reconciliationType: "ORDER", differenceCount: 4, onlyInFile1Count: 1, onlyInFile2Count: 3]
+            }
+            return [:]
+        }
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        try {
+            Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+            assertEquals(1, result.executedCount)
+            List<FakeValue> runResults = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+            assertEquals(1, runResults.size())
+            FakeValue runResult = runResults[0]
+            assertNull(runResult.resultDataManagerPath, "there genuinely was no artifact to record")
+            assertEquals(AutomationExecutionSupport.STATUS_SUCCEEDED, runResult.statusEnumId,
+                    "a fileless run must still end terminal — never left RUNNING for the reaper")
+            assertNotNull(runResult.completedDate)
+            FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+            assertEquals(AutomationExecutionSupport.STATUS_SUCCEEDED, execution.statusEnumId)
+            assertEquals(runResult.reconciliationRunResultId, execution.reconciliationRunResultId)
+            // Deliberate consequence, pinned so it stays deliberate: this run now has an anchor row, so
+            // it notifies once. Before Task 2b it had none and was silent — the silence was an accident
+            // of the missing row, not a decision that a completed run should go unreported.
+            assertEquals(1, deliveries.size())
+            assertNotNull(runResult.notifiedDate)
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+    }
+
     @Test
     void apiExecutionInfersShopifyExtractorForLegacySourceRows() {
         FakeEc ec = fakeEc()
@@ -603,8 +867,10 @@ class AutomationExecutionSupportTests {
 
     @Test
     void noDataRunDoesNotNotify() {
-        // Task 7: NO_DATA never mints a run-result row, so the failure/success notify wiring must stay
-        // silent even when the automation has a configured chatSpaceId.
+        // Task 7 / Task 2b: NO_DATA must stay silent even when the automation has a configured
+        // chatSpaceId. Since 2b the run-result row is minted at RUNNING, so "no row" is no longer the
+        // thing that keeps it quiet — the assertions below check what actually matters now: the one
+        // minted row ends terminal NO_DATA, is never claimed for notification, and nothing is delivered.
         FakeEc ec = fakeEc()
         seedApiAutomation(ec)
         ec.entity.add("moqui.security.UserGroup", [
@@ -648,7 +914,10 @@ class AutomationExecutionSupportTests {
 
             assertEquals(1, result.noDataCount)
             assertTrue(deliveries.isEmpty())
-            assertEquals(0, ec.entity.createdValues("darpan.reconciliation.ReconciliationRunResult").size())
+            List<FakeValue> runResults = ec.entity.createdValues("darpan.reconciliation.ReconciliationRunResult")
+            assertEquals(1, runResults.size())
+            assertEquals(AutomationExecutionSupport.STATUS_NO_DATA, runResults[0].statusEnumId)
+            assertNull(runResults[0].notifiedDate)
         } finally {
             TenantNotificationSupport.resetDeliveryHook()
         }
@@ -1485,7 +1754,13 @@ class AutomationExecutionSupportTests {
         assertEquals(AutomationExecutionSupport.STATUS_PENDING, execution.statusEnumId)
         assertNotNull(execution.nextRetryDate)
         assertNull(execution.completedDate)
-        assertEquals(0, ec.entity.createdValues("darpan.reconciliation.ReconciliationRunResult").size())
+        // Task 2b: the attempt minted a run-result row at RUNNING, so a requeue can no longer be proven
+        // by "no row exists". What must hold is that the attempt's row is CLOSED (never left ACTIVE for
+        // the stuck-run reaper to alert on) and was never stamped SUCCESS or notified.
+        List<FakeValue> runResults = ec.entity.createdValues("darpan.reconciliation.ReconciliationRunResult")
+        assertEquals(1, runResults.size())
+        assertEquals(AutomationExecutionSupport.STATUS_FAILED, runResults[0].statusEnumId)
+        assertNull(runResults[0].notifiedDate)
     }
 
     @Test
@@ -1816,6 +2091,24 @@ class AutomationExecutionSupportTests {
 
     private static Timestamp timestamp(String instantText) {
         return Timestamp.from(Instant.parse(instantText))
+    }
+
+    /**
+     * Task 2b: what a poller would see MID-RUN. Called from inside an extract responder, i.e. after the
+     * execution went RUNNING and long before any terminal write, so the assertions can be about the
+     * in-flight state rather than the end state (which both the old and new designs get right).
+     */
+    private static Map<String, Object> snapshotLiveRun(FakeEc ec) {
+        FakeValue execution = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"][0]
+        FakeValue runResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"][0]
+        return [
+                executionStatus     : execution?.statusEnumId,
+                executionRunResultId: execution?.reconciliationRunResultId,
+                runResultId         : runResult?.reconciliationRunResultId,
+                runResultStatus     : runResult?.statusEnumId,
+                runResultStartedDate: runResult?.startedDate,
+                runResultTenant     : runResult?.companyUserGroupId,
+        ] as Map<String, Object>
     }
 
     private static Map<String, Object> buildNotificationPayload(FakeEc ec, Map<String, Object> params) {

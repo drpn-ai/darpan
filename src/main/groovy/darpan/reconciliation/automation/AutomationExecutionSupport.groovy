@@ -223,15 +223,27 @@ class AutomationExecutionSupport {
             // so the finally below unpersists them on every exit path of this automation execution.
             List autoPersistedSources = []
             // Task 7 (gchat notifications): visible in the catch below so a failure AFTER the run-result
-            // row is minted (e.g. the execution-row status write itself fails) still notifies FAILED —
-            // a failure before any row is minted has nothing to notify about (guarded by this staying null).
+            // row is minted (e.g. the execution-row status write itself fails) still notifies FAILED.
+            // Task 2b: the row is now minted at RUNNING rather than at terminal, so this is populated for
+            // essentially the whole execution; it stays null only when the best-effort mint itself failed,
+            // in which case the terminal paths fall back to creating the row exactly as they used to.
             String mintedRunResultId = null
+            // Task 2b: kept SEPARATE from mintedRunResultId. Before 2b "a run-result row exists" and
+            // "this run produced output" were the same fact, and notifyAutomationFailure's payload shape
+            // keys off the latter. Early minting breaks that equivalence, so track output explicitly.
+            boolean runOutputPersisted = false
             try {
                 Timestamp startedTimestamp = nowTimestamp(ec)
+                // Task 2b: mint the run-result row as the execution goes RUNNING and carry its id in the
+                // SAME execution-row update. Two updates would leave a window where an ACTIVE execution
+                // has no run-result id — precisely the window the "Run now" UI poll watches, so a row it
+                // could never match is a redirect that never fires.
+                mintedRunResultId = beginAutomationRunResult(ec, automation, startedTimestamp)
                 updateAutomationExecution(ec, execution, [
-                        statusEnumId   : STATUS_RUNNING,
-                        startedDate    : startedTimestamp,
-                        lastUpdatedDate: startedTimestamp,
+                        statusEnumId             : STATUS_RUNNING,
+                        startedDate              : startedTimestamp,
+                        lastUpdatedDate          : startedTimestamp,
+                        reconciliationRunResultId: mintedRunResultId,
                 ])
 
                 Map<String, Object> file1Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file1Source, window, executionParams), file1Source)
@@ -253,6 +265,11 @@ class AutomationExecutionSupport {
                             lastUpdatedDate : completedTimestamp,
                     ]
                     updateAutomationExecution(ec, execution, noDataFields)
+                    // Task 2b terminal guarantee: a window with no data still minted a row at RUNNING, so
+                    // it has to be closed here or it sits ACTIVE forever (and the stuck-run reaper would
+                    // eventually flip it to FAILED and alert on a run that simply had nothing to compare).
+                    // NO_DATA still does not notify — that contract is unchanged.
+                    completeAutomationRunResult(ec, automation, mintedRunResultId, STATUS_NO_DATA, completedTimestamp, [:])
                     executionResults << noDataFields + [
                             automationExecutionId: automationExecutionId,
                             childWindowStartDate : window.childWindowStartDate,
@@ -269,9 +286,12 @@ class AutomationExecutionSupport {
                 ensureAutomationResultArtifact(ec, automation, file1Source, file2Source, reconcileResult, window, executionParams)
                 String resultDataManagerPath = normalizeDataManagerPath(ec,
                         reconcileResult.resultDataManagerPath ?: reconcileResult.diffLocation ?: reconcileResult.diffFileName)
-                String reconciliationRunResultId = persistAutomationRunResult(ec, automation, file1Result, file2Result,
-                        reconcileResult, resultDataManagerPath)
-                mintedRunResultId = reconciliationRunResultId
+                String reconciliationRunResultId = persistAutomationRunResult(ec, automation, mintedRunResultId,
+                        file1Result, file2Result, reconcileResult, resultDataManagerPath)
+                mintedRunResultId = reconciliationRunResultId ?: mintedRunResultId
+                // Output is what was persisted, not what exists: a blank resultDataManagerPath now still
+                // resolves to the pre-minted row (it must end terminal), but nothing was written.
+                runOutputPersisted = normalize(resultDataManagerPath) != null
 
                 Timestamp completedTimestamp = nowTimestamp(ec)
                 // Audit 2026-06-11 #4: a rule build/eval failure does not throw, so an automation run
@@ -324,15 +344,32 @@ class AutomationExecutionSupport {
                 Timestamp completedTimestamp = nowTimestamp(ec)
                 Map<String, Object> failureFields = buildFailureFields(ec, execution, t, completedTimestamp, window)
                 updateAutomationExecution(ec, execution, failureFields)
+                // Task 2b terminal guarantee: close the row minted at RUNNING on EVERY failure exit,
+                // including a transient one that requeues the execution to PENDING. Left RUNNING it would
+                // be an active run nobody is running, which the reaper turns into a spurious FAILED alert
+                // two hours later. The re-drive mints its own row, so each attempt owns exactly one.
+                if (mintedRunResultId) {
+                    completeAutomationRunResult(ec, automation, mintedRunResultId, STATUS_FAILED, completedTimestamp, [
+                            // ReconciliationRunResult.errorMessage is text-medium = VARCHAR(255); anything
+                            // longer makes the whole update throw, which would leave the row RUNNING — the
+                            // one outcome this close is here to prevent. RunObservability.failRun caps the
+                            // same column at 255 for the same reason. errorDetail is text-very-long (CLOB).
+                            errorMessage: truncate(sanitizeErrorMessage(t), 255),
+                            errorDetail : truncate(sanitizeErrorDetail(t), 12000),
+                    ])
+                }
                 // UAT 2026-07-31: this notify used to be guarded by `if (mintedRunResultId)`, i.e. only a
                 // run that had ALREADY produced output could report its own failure. Every run that died
                 // earlier — the entire scheduled-automation outage — failed in total silence. A terminal
                 // failure now mints its own FAILED run-result row so it is both notified and visible in
                 // run history. A failure queued for retry is NOT terminal and stays quiet.
+                // (Task 2b: the row is normally minted at RUNNING, so persistFailureRunResult is reached
+                // only when that mint failed — it stays the create-a-row-to-notify-on fallback, and can
+                // no longer produce a second row for a run that already has one.)
                 if (failureFields.statusEnumId == STATUS_FAILED) {
                     notifyAutomationFailure(ec, automation,
                             mintedRunResultId ?: persistFailureRunResult(ec, automation, t, completedTimestamp),
-                            mintedRunResultId != null, sanitizeErrorMessage(t))
+                            runOutputPersisted, sanitizeErrorMessage(t))
                 }
                 executionResults << failureFields + [
                         automationExecutionId: automationExecutionId,
@@ -1336,33 +1373,152 @@ class AutomationExecutionSupport {
         ].findAll { it.value != null } as Map<String, Object>
     }
 
-    protected static String persistAutomationRunResult(def ec, def automation, Map<String, Object> file1Result,
-            Map<String, Object> file2Result, Map<String, Object> reconcileResult, String resultDataManagerPath) {
-        if (!normalize(resultDataManagerPath)) return null
+    /**
+     * Mints the run's {@code ReconciliationRunResult} row in {@code AUT_STAT_RUNNING} at the moment the
+     * execution goes RUNNING, and returns its id so the caller can stamp it onto the execution row in
+     * the same update (Task 2b).
+     *
+     * <p>Why here and not at terminal: an ACTIVE execution row that carries no run-result id is an
+     * in-flight run with nothing to follow. The "Run now" UI polls for exactly that pair before it can
+     * open the live progress view, and the identity fields below are all known at start — nothing has to
+     * wait for the reconcile to finish.</p>
+     *
+     * <p>Best-effort by design, exactly like {@code RunObservability.beginRun} on the interactive path:
+     * observability must never be what fails a run. A failed mint returns null,
+     * {@code updateAutomationExecution} drops the null id, and the terminal paths fall back to creating
+     * the row themselves — the pre-Task-2b behaviour.</p>
+     */
+    protected static String beginAutomationRunResult(def ec, def automation, Timestamp startedAt) {
+        try {
+            String assertedTenantId = assertSystemWriteTenant(ec, automation)
+            return runInTransaction(ec, "Error starting reconciliation automation run result", {
+                def runResultValue = ec.entity.makeValue(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
+                runResultValue.set("savedRunId", normalize(readField(automation, "savedRunId")))
+                runResultValue.set("savedRunType", normalize(readField(automation, "savedRunType")) ?: "ruleset")
+                runResultValue.set("reconciliationRunId", normalize(readField(automation, "reconciliationRunId")))
+                runResultValue.set("reconciliationMappingId", normalize(readField(automation, "reconciliationMappingId")))
+                runResultValue.set("ruleSetId", normalize(readField(automation, "ruleSetId")))
+                runResultValue.set("compareScopeId", normalize(readField(automation, "compareScopeId")))
+                runResultValue.set("companyUserGroupId", assertedTenantId)
+                runResultValue.set("createdByUserId", normalize(readField(automation, "createdByUserId")) ?: currentUserId(ec))
+                // The entity default is AUT_STAT_SUCCESS, so RUNNING must be explicit here — and every
+                // terminal path must be explicit too, because the default no longer covers them.
+                runResultValue.set("statusEnumId", STATUS_RUNNING)
+                runResultValue.set("startedDate", startedAt)
+                runResultValue.set("lastHeartbeatDate", startedAt)
+                runResultValue.set("createdDate", startedAt)
+                runResultValue.set("lastUpdatedDate", startedAt)
+                // currentStage is deliberately left unset: automations emit no per-stage steps, and a
+                // stage label frozen at RESOLVE for the whole run would misreport progress.
+                runResultValue.setSequencedIdPrimary()
+                runResultValue.create()
+                return normalize(readField(runResultValue, "reconciliationRunResultId"))
+            }) as String
+        } catch (Throwable mintError) {
+            logger.warn("Could not mint automation run result at RUNNING (best-effort): ${mintError.message}")
+            return null
+        }
+    }
+
+    /**
+     * Closes the pre-minted run-result row with a terminal status (Task 2b). No-op when no row was
+     * minted. Best-effort: the run's own outcome has already been recorded on the execution row and must
+     * never be replaced by a failure to record it here.
+     */
+    protected static void completeAutomationRunResult(def ec, def automation, String runResultId,
+            String terminalStatusEnumId, Timestamp completedAt, Map<String, Object> extraFields) {
+        if (!normalize(runResultId)) return
+        try {
+            runInTransaction(ec, "Error completing reconciliation automation run result", {
+                def runResultValue = findAutomationRunResult(ec, runResultId,
+                        normalize(readField(automation, "companyUserGroupId")))
+                if (runResultValue == null) return null
+                (extraFields ?: [:]).each { key, value -> if (value != null) runResultValue.set(key as String, value) }
+                runResultValue.set("statusEnumId", terminalStatusEnumId)
+                runResultValue.set("completedDate", completedAt)
+                runResultValue.set("lastHeartbeatDate", completedAt)
+                runResultValue.set("lastUpdatedDate", completedAt)
+                runResultValue.update()
+                return null
+            })
+        } catch (Throwable completeError) {
+            logger.warn("Could not close automation run result ${runResultId} as ${terminalStatusEnumId} (best-effort): ${completeError.message}")
+        }
+    }
+
+    /**
+     * Loads a run-result row by the id this runner minted, re-pinned to the automation's own tenant so a
+     * system-context read can never reach another tenant's row. A blank tenant cannot happen on the run
+     * path ({@code findOrCreateExecution} already asserted it) and is left unconditioned rather than
+     * silently matching nothing.
+     */
+    protected static def findAutomationRunResult(def ec, String runResultId, String expectedTenantId) {
+        def finder = TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.RECONCILIATION_RUN_RESULT,
+                        "automation run-result read keyed by the id this runner minted — companyUserGroupId re-pinned to the automation's asserted tenant")
+                .condition("reconciliationRunResultId", runResultId)
+        if (normalize(expectedTenantId)) finder = finder.condition("companyUserGroupId", normalize(expectedTenantId))
+        return finder.useCache(false).one()
+    }
+
+    /**
+     * Writes the run's result artifact onto its {@code ReconciliationRunResult} row and ends it terminal.
+     *
+     * <p>Task 2b: {@code existingRunResultId} is the row minted at RUNNING, so this UPDATES that row
+     * rather than creating a second one — one execution attempt owns exactly one run-result row. It
+     * still creates the row when no id was minted (degenerate best-effort path), which is the original
+     * pre-2b behaviour and mirrors {@code runSavedRunDiff.groovy}'s persistRunResult closure.</p>
+     *
+     * <p>A blank {@code resultDataManagerPath} no longer means "no row": it means the row exists but
+     * nothing was written to it, so it resolves to the pre-minted id and is still ended terminal. Only a
+     * blank path with no pre-minted row returns null, exactly as before.</p>
+     */
+    protected static String persistAutomationRunResult(def ec, def automation, String existingRunResultId,
+            Map<String, Object> file1Result, Map<String, Object> file2Result, Map<String, Object> reconcileResult,
+            String resultDataManagerPath) {
+        if (!normalize(resultDataManagerPath) && !normalize(existingRunResultId)) return null
 
         String assertedTenantId = assertSystemWriteTenant(ec, automation)
         return runInTransaction(ec, "Error saving reconciliation automation run result", {
-            def runResultValue = ec.entity.makeValue(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
-            runResultValue.set("savedRunId", normalize(readField(automation, "savedRunId")))
-            runResultValue.set("savedRunType", normalize(readField(automation, "savedRunType")) ?: "ruleset")
-            runResultValue.set("reconciliationRunId", normalize(readField(automation, "reconciliationRunId")))
-            runResultValue.set("reconciliationMappingId", normalize(readField(automation, "reconciliationMappingId")))
-            runResultValue.set("ruleSetId", normalize(readField(automation, "ruleSetId")))
-            runResultValue.set("compareScopeId", normalize(readField(automation, "compareScopeId")))
-            runResultValue.set("companyUserGroupId", assertedTenantId)
-            runResultValue.set("createdByUserId", normalize(readField(automation, "createdByUserId")) ?: currentUserId(ec))
-            runResultValue.set("file1Name", normalize(file1Result.fileName))
-            runResultValue.set("file1DataManagerPath", normalize(file1Result.dataManagerPath))
-            runResultValue.set("file2Name", normalize(file2Result.fileName))
-            runResultValue.set("file2DataManagerPath", normalize(file2Result.dataManagerPath))
-            runResultValue.set("resultDataManagerPath", normalize(resultDataManagerPath))
-            runResultValue.set("reconciliationType", normalize(reconcileResult.reconciliationType ?: reconcileResult.objectType))
-            runResultValue.set("differenceCount", normalizeInt(reconcileResult.differenceCount))
-            runResultValue.set("onlyInFile1Count", normalizeInt(reconcileResult.onlyInFile1Count ?: reconcileResult.missingInFile2Count))
-            runResultValue.set("onlyInFile2Count", normalizeInt(reconcileResult.onlyInFile2Count ?: reconcileResult.missingInFile1Count))
-            runResultValue.set("createdDate", nowTimestamp(ec))
-            runResultValue.setSequencedIdPrimary()
-            runResultValue.create()
+            def runResultValue = normalize(existingRunResultId) ?
+                    findAutomationRunResult(ec, existingRunResultId, assertedTenantId) : null
+            boolean creating = runResultValue == null
+            if (creating) runResultValue = ec.entity.makeValue(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
+
+            Timestamp completedTimestamp = nowTimestamp(ec)
+            [
+                    savedRunId             : normalize(readField(automation, "savedRunId")),
+                    savedRunType           : normalize(readField(automation, "savedRunType")) ?: "ruleset",
+                    reconciliationRunId    : normalize(readField(automation, "reconciliationRunId")),
+                    reconciliationMappingId: normalize(readField(automation, "reconciliationMappingId")),
+                    ruleSetId              : normalize(readField(automation, "ruleSetId")),
+                    compareScopeId         : normalize(readField(automation, "compareScopeId")),
+                    companyUserGroupId     : assertedTenantId,
+                    createdByUserId        : normalize(readField(automation, "createdByUserId")) ?: currentUserId(ec),
+                    file1Name              : normalize(file1Result.fileName),
+                    file1DataManagerPath   : normalize(file1Result.dataManagerPath),
+                    file2Name              : normalize(file2Result.fileName),
+                    file2DataManagerPath   : normalize(file2Result.dataManagerPath),
+                    resultDataManagerPath  : normalize(resultDataManagerPath),
+                    reconciliationType     : normalize(reconcileResult.reconciliationType ?: reconcileResult.objectType),
+                    differenceCount        : normalizeInt(reconcileResult.differenceCount),
+                    onlyInFile1Count       : normalizeInt(reconcileResult.onlyInFile1Count ?: reconcileResult.missingInFile2Count),
+                    onlyInFile2Count       : normalizeInt(reconcileResult.onlyInFile2Count ?: reconcileResult.missingInFile1Count),
+            ].each { key, value -> if (value != null) runResultValue.set(key as String, value) }
+            // Explicit terminal status: the row was minted RUNNING, and on the create path the entity
+            // default (AUT_STAT_SUCCESS) already produced this value — so this is the same end state,
+            // just no longer left to a default. A ruleExecutionFailed run keeps recording SUCCESS here,
+            // as it always has; only the execution row and the alert report FAILED for that case.
+            runResultValue.set("statusEnumId", STATUS_SUCCEEDED)
+            runResultValue.set("completedDate", completedTimestamp)
+            runResultValue.set("lastHeartbeatDate", completedTimestamp)
+            runResultValue.set("lastUpdatedDate", completedTimestamp)
+            if (creating) {
+                runResultValue.set("createdDate", completedTimestamp)
+                runResultValue.setSequencedIdPrimary()
+                runResultValue.create()
+            } else {
+                runResultValue.update()
+            }
             return normalize(readField(runResultValue, "reconciliationRunResultId"))
         }) as String
     }
@@ -1377,6 +1533,11 @@ class AutomationExecutionSupport {
      *
      * <p>{@code AUT_STAT_FAILED} is terminal and not in {@code ACTIVE_STATUSES}, so this cannot block
      * a re-trigger. Best-effort: a failure to record must never replace the failure being recorded.</p>
+     *
+     * <p>Task 2b narrowed when this runs. The API-range path now mints its row at RUNNING, so the only
+     * caller that reaches this is a run whose mint itself failed — it can no longer add a second row to
+     * a run that already has one. The dead-letter path still calls it for an execution that never
+     * carried a run-result id.</p>
      */
     protected static String persistFailureRunResult(def ec, def automation, Throwable t, Timestamp failedAt) {
         try {

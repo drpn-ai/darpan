@@ -232,6 +232,9 @@ class AutomationExecutionSupport {
             // "this run produced output" were the same fact, and notifyAutomationFailure's payload shape
             // keys off the latter. Early minting breaks that equivalence, so track output explicitly.
             boolean runOutputPersisted = false
+            // The row this attempt replaces, if any: a retry re-drives the SAME execution row, and
+            // nothing ever clears its run-result id, so on attempt N+1 this still names attempt N's row.
+            String supersededRunResultId = normalize(readField(execution, "reconciliationRunResultId"))
             try {
                 Timestamp startedTimestamp = nowTimestamp(ec)
                 // Task 2b: mint the run-result row as the execution goes RUNNING and carry its id in the
@@ -245,6 +248,13 @@ class AutomationExecutionSupport {
                         lastUpdatedDate          : startedTimestamp,
                         reconciliationRunResultId: mintedRunResultId,
                 ])
+                // Carry "notify me" forward onto this attempt's row. A subscription is anchored to one
+                // run-result row, so without this a subscriber from the previous attempt could never be
+                // told how the run actually ended — the retry notifies against a row they are not on —
+                // and their row would sit there forever, pinning its chat space against deletion.
+                // (A previous attempt that already notified had its subscriptions purged by that claim,
+                // so this is a no-op there.)
+                TenantNotificationSupport.reassignRunSubscriptions(ec, supersededRunResultId, mintedRunResultId)
 
                 Map<String, Object> file1Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file1Source, window, executionParams), file1Source)
                 Map<String, Object> file2Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file2Source, window, executionParams), file2Source)
@@ -373,17 +383,17 @@ class AutomationExecutionSupport {
                 // no longer produce a second row for a run that already has one.)
                 if (failureFields.statusEnumId == STATUS_FAILED) {
                     // notifyRunCompleted purges this run's subscriptions itself once its claim is won,
-                    // so the purge must NOT be hoisted above this call — it would delete the subscriber
+                    // so nothing may delete them ahead of this call — that would drop the subscriber
                     // destinations the alert is about to resolve.
                     notifyAutomationFailure(ec, automation,
                             mintedRunResultId ?: persistFailureRunResult(ec, automation, t, completedTimestamp),
                             runOutputPersisted, sanitizeErrorMessage(t))
-                } else {
-                    // Requeued for retry: this row is terminal, will never notify, and the re-drive
-                    // mints a fresh row — so any subscription pointing here is already dead. Left
-                    // behind it can never fire and permanently blocks deleting its chat space.
-                    TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, mintedRunResultId)
                 }
+                // A requeued attempt deliberately does NOT purge its subscriptions here. The chain is
+                // not over: either the re-drive carries them onto its own row (see the mint above), or
+                // retries run out and reprocessDueRetries sends the DEAD_LETTER alert against this very
+                // row id — which is the one thing an ad hoc subscriber most needs, and purging here
+                // would silently delete the only destination that alert could reach them through.
                 executionResults << failureFields + [
                         automationExecutionId: automationExecutionId,
                         childWindowStartDate : window.childWindowStartDate,

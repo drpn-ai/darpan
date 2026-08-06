@@ -624,11 +624,13 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
-    void aRequeuedAttemptPurgesTheSubscriptionsPointingAtItsAbandonedRow() {
-        // Review finding 1, second unnotified terminal path: a transient failure closes the attempt's
-        // row FAILED and requeues the execution, and the re-drive mints a NEW row — so a subscription
-        // taken against the abandoned row can never fire for the retry either. Same orphan, same
-        // permanent chat-space pin.
+    void aRequeuedAttemptKeepsItsSubscriptionBecauseTheChainIsNotOver() {
+        // Fix round 2. This started life asserting the opposite — that a transient close purges its
+        // subscriptions — which silently broke the dead-letter alert: reprocessDueRetries sends the
+        // give-up alert against THIS row's id, so deleting its subscriptions here drops every ad hoc
+        // subscriber from it. A requeue is not a terminal outcome of the chain, so the subscription
+        // must survive: either the re-drive carries it onto the next attempt's row, or the dead-letter
+        // alert reaches the subscriber through this row. Both are asserted in the two tests below.
         FakeEc ec = fakeEc()
         seedApiAutomation(ec)
         ec.entity.add("darpan.reconciliation.TenantChatSpace", [
@@ -664,8 +666,158 @@ class AutomationExecutionSupportTests {
             FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
             assertEquals(AutomationExecutionSupport.STATUS_PENDING, execution.statusEnumId)
             assertTrue(deliveries.isEmpty(), "a requeued attempt must stay quiet")
+            List<FakeValue> subscriptions = ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"]
+            assertEquals(1, subscriptions.size(), "the chain has not ended, so the subscription must survive")
+            assertEquals(execution.reconciliationRunResultId, subscriptions[0].reconciliationRunResultId,
+                    "it must still sit on the row the dead-letter alert would notify against")
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+    }
+
+    @Test
+    void aDeadLetterAlertStillReachesSomeoneWhoSubscribedDuringTheFinalAttempt() {
+        // Fix round 2, the regression the previous round introduced. When retries run out,
+        // reprocessDueRetries sends the give-up alert against execution.reconciliationRunResultId —
+        // which is the LAST attempt's row, the very row a transient close was purging. Giving up is
+        // the outcome a subscriber most needs told about, and losing it is silent.
+        // The automation has NO chatSpaceId of its own here, so the subscription is the ONLY way this
+        // alert can be delivered at all: one delivery proves the subscriber path specifically.
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        String meWebhookUrl = "https://chat.googleapis.com/v1/spaces/ME_SPACE/messages?key=test-key&token=test-token"
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_ME",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Mine",
+                googleChatWebhookUrl: meWebhookUrl,
+                isActive            : "Y",
+        ])
+        int attemptCount = 0
+        ec.service.responder = { FakeServiceCall call ->
+            // The scanner re-drives through this service in production; wiring it makes attempt 2 a
+            // real run rather than a stub, so the row it mints is a real row.
+            if (call.serviceName == "reconciliation.ReconciliationAutomationServices.execute#Automation") {
+                return AutomationExecutionSupport.executeAutomation(ec, call.params)
+            }
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                if (call.params.fileSide == "FILE_1") attemptCount++
+                // Subscribed during the FINAL attempt only — the exact scenario that was being lost.
+                if (attemptCount == 2) subscribeMidRun(ec, "USER_A", "CS_ME")
+                return [
+                        dataAvailable: true,
+                        fileLocation : "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName     : "${call.params.fileSide}.json".toString(),
+                        recordCount  : 5,
+                ]
+            }
+            // Empty reconcile result every time: the transient path, so every attempt requeues.
+            return [:]
+        }
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        try {
+            // Attempt 1 — real run, transient failure, requeued.
+            AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+            FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+            assertEquals(AutomationExecutionSupport.STATUS_PENDING, execution.statusEnumId)
+            // Shorten the budget so the chain ends after one more attempt; the mechanic is identical
+            // to the production default of 3.
+            execution.put("maxRetryCount", 1)
+
+            // Scanner pass 1: under the cap, so it claims and re-drives — attempt 2 runs for real and
+            // mints its own row, and the operator clicks "Notify me" on it.
+            AutomationExecutionSupport.reprocessDueRetries(ec, timestamp("2026-05-01T11:00:00Z"), 100, [:])
+            assertEquals(1, execution.retryCount)
+            assertEquals(AutomationExecutionSupport.STATUS_PENDING, execution.statusEnumId)
+            assertEquals(2, attemptCount, "the re-drive must be a real second attempt")
+            List<FakeValue> subscriptions = ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"]
+            assertEquals(1, subscriptions.size())
+            assertEquals(execution.reconciliationRunResultId, subscriptions[0].reconciliationRunResultId)
+            assertTrue(deliveries.isEmpty(), "nothing is terminal yet")
+
+            // Scanner pass 2: retries exhausted → DEAD_LETTER, and the give-up alert goes out.
+            AutomationExecutionSupport.reprocessDueRetries(ec, timestamp("2026-05-01T12:00:00Z"), 100, [:])
+
+            assertEquals(AutomationExecutionSupport.STATUS_DEAD_LETTER, execution.statusEnumId)
+            assertEquals(1, deliveries.size(), "the subscriber must be told the automation gave up")
+            assertEquals(meWebhookUrl, deliveries[0].webhookUrl)
+            assertTrue((deliveries[0].payload.text as String).contains("Automation gave up after 1 retries"))
             assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty(),
-                    "the abandoned attempt's subscriptions must be purged, not left pointing at a dead row")
+                    "the chain is over, so the subscription must not outlive it")
+        } finally {
+            TenantNotificationSupport.resetDeliveryHook()
+        }
+    }
+
+    @Test
+    void aSubscriptionTakenOnAnEarlierAttemptIsNotifiedWhenTheRetryFinallySucceeds() {
+        // Fix round 2, the other half of the lifecycle. "Notify me" has to mean "tell me how this run
+        // ends", not "tell me how this one attempt ends" — but a subscription is anchored to ONE
+        // run-result row and each attempt mints its own. The subscription must therefore ride forward
+        // onto the new attempt's row, be delivered exactly once when that attempt ends, and be gone.
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        String meWebhookUrl = "https://chat.googleapis.com/v1/spaces/ME_SPACE/messages?key=test-key&token=test-token"
+        ec.entity.add("darpan.reconciliation.TenantChatSpace", [
+                chatSpaceId         : "CS_ME",
+                companyUserGroupId  : "TENANT_A",
+                spaceName           : "Mine",
+                googleChatWebhookUrl: meWebhookUrl,
+                isActive            : "Y",
+        ])
+        boolean firstAttempt = true
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                // Subscribed during attempt 1 only — the attempt that never notifies.
+                if (firstAttempt) subscribeMidRun(ec, "USER_A", "CS_ME")
+                return [
+                        dataAvailable: true,
+                        fileLocation : "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName     : "${call.params.fileSide}.json".toString(),
+                        recordCount  : 5,
+                ]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                if (firstAttempt) return [:]   // transient failure → requeued
+                return [
+                        reconciliationType: "ORDER",
+                        diffLocation      : "reconciliation-runs/AUTO_API/20260501/result.json",
+                        diffFileName      : "result.json",
+                        differenceCount   : 4,
+                ]
+            }
+            return [:]
+        }
+        List<Map<String, Object>> deliveries = []
+        TenantNotificationSupport.setDeliveryHook { String deliveredWebhookUrl, Map<String, Object> payload ->
+            deliveries << [webhookUrl: deliveredWebhookUrl, payload: payload]
+            return [ok: true, statusCode: 200]
+        }
+
+        try {
+            AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+            FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+            assertEquals(AutomationExecutionSupport.STATUS_PENDING, execution.statusEnumId)
+            String abandonedRunResultId = execution.reconciliationRunResultId
+
+            // The requeued row is PENDING, so the scanner's re-drive reuses it — attempt 2 succeeds.
+            firstAttempt = false
+            AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+            assertEquals(AutomationExecutionSupport.STATUS_SUCCEEDED, execution.statusEnumId)
+            assertNotEquals(abandonedRunResultId, execution.reconciliationRunResultId, "attempt 2 mints its own row")
+            assertEquals(2, ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"].size())
+            // Exactly once, to the subscriber, for the attempt they never saw.
+            assertEquals(1, deliveries.size())
+            assertEquals(meWebhookUrl, deliveries[0].webhookUrl)
+            assertTrue((deliveries[0].payload.text as String).startsWith("Darpan run completed: API Automation"))
+            assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty(),
+                    "the chain is over, so the subscription must not outlive it")
         } finally {
             TenantNotificationSupport.resetDeliveryHook()
         }
@@ -2305,7 +2457,10 @@ class AutomationExecutionSupportTests {
      * points at is the real minted one, not a guessed id.
      */
     private static void subscribeMidRun(FakeEc ec, String userId, String chatSpaceId) {
-        FakeValue liveRunResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"][0]
+        // The RUNNING row, not rows[0]: a retried automation has one row per attempt, and the live view
+        // the operator is looking at is always the current attempt's.
+        FakeValue liveRunResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"]
+                .find { it.statusEnumId == AutomationExecutionSupport.STATUS_RUNNING }
         if (liveRunResult == null) return
         String runResultId = liveRunResult.reconciliationRunResultId
         boolean already = ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"]

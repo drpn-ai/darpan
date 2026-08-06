@@ -196,9 +196,72 @@ class TenantNotificationSupport {
     }
 
     /**
+     * Best-effort move of every notify-me subscription from the run-result row of the attempt that
+     * just ended to the row of the attempt now replacing it.
+     *
+     * <p>A subscription is anchored to ONE run-result row, but a retried automation gives each attempt
+     * its own row — so without this, a subscription taken during attempt N could never fire for
+     * attempt N+1, and would be left behind pointing at a row nobody will ever notify again. Moving it
+     * forward is what makes "notify me" mean "tell me how this run ends" rather than "tell me how this
+     * one attempt ends", and it is what lets a single purge-on-notify close the whole chain out.</p>
+     *
+     * <p>Deliberately NOT a purge: the abandoned row is still the anchor the dead-letter alert uses
+     * (it is whatever {@code execution.reconciliationRunResultId} points at), so deleting these rows at
+     * the transient close silently drops ad hoc subscribers from the give-up alert.</p>
+     *
+     * <p>{@code reconciliationRunResultId} is part of the primary key, so this is create-then-delete
+     * rather than an update. Create first: if the create fails the old row survives and the chain can
+     * still notify through it, whereas deleting first would lose the subscription outright. A
+     * subscriber who already subscribed to the new attempt as well keeps that row and the stale one is
+     * simply dropped.</p>
+     *
+     * @return how many subscriptions were carried forward
+     */
+    static int reassignRunSubscriptions(def ec, Object fromRunResultId, Object toRunResultId) {
+        String fromId = ((fromRunResultId)?.toString()?.trim())
+        String toId = ((toRunResultId)?.toString()?.trim())
+        if (!fromId || !toId || fromId == toId) return 0
+        int movedCount = 0
+        try {
+            List subscriptionRows = TenantScopedFinder.findGlobalUnscoped(ec,
+                            DarpanEntityConstants.RUN_NOTIFY_SUBSCRIPTION,
+                            "retry carry-forward keyed by the abandoned attempt's run-result id — rows are re-anchored to the new attempt of the same execution")
+                    ?.condition("reconciliationRunResultId", fromId)
+                    ?.useCache(false)?.list() ?: []
+            for (def subscriptionRow : subscriptionRows) {
+                try {
+                    String userId = ((subscriptionRow.userId)?.toString()?.trim())
+                    def alreadySubscribed = TenantScopedFinder.findGlobalUnscoped(ec,
+                                    DarpanEntityConstants.RUN_NOTIFY_SUBSCRIPTION,
+                                    "carry-forward duplicate check — same subscriber may already have subscribed to the new attempt")
+                            ?.condition("reconciliationRunResultId", toId)
+                            ?.condition("userId", userId)
+                            ?.useCache(false)?.one()
+                    if (alreadySubscribed == null) {
+                        def carriedRow = ec.entity.makeValue(DarpanEntityConstants.RUN_NOTIFY_SUBSCRIPTION)
+                        carriedRow.set("reconciliationRunResultId", toId)
+                        carriedRow.set("userId", userId)
+                        carriedRow.set("chatSpaceId", subscriptionRow.chatSpaceId)
+                        carriedRow.set("subscribedDate", subscriptionRow.subscribedDate)
+                        carriedRow.create()
+                        movedCount++
+                    }
+                    subscriptionRow.delete()
+                } catch (Throwable t) {
+                    logger.warn("Failed to carry a run notification subscription from {} to {}: {}",
+                            fromId, toId, t.message)
+                }
+            }
+        } catch (Throwable t) {
+            logger.warn("Failed to carry run notification subscriptions from {} to {}: {}", fromId, toId, t.message)
+        }
+        return movedCount
+    }
+
+    /**
      * Best-effort purge of every notify-me subscription for a run that reached a terminal state
-     * WITHOUT ever notifying — the automation NO_DATA close, and a transient failure whose retry is
-     * re-driven under a brand-new run-result row.
+     * WITHOUT ever notifying and with no further attempt to carry it to — today, the automation
+     * NO_DATA close.
      *
      * <p>Only for paths that do not notify. A run that notifies purges inside
      * {@link #notifyRunCompleted} after its claim is won; calling this first would delete the very

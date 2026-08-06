@@ -174,4 +174,51 @@ class ReconciliationSavedRunSupportTests {
         assertNull(ReconciliationSavedRunSupport.topLevelRecordField(null))
         assertNull(ReconciliationSavedRunSupport.topLevelRecordField("   "))
     }
+
+    // ─── ruleKeepFieldsForSide: rule-referenced fields for extract projection ────
+
+    @Test
+    void ruleKeepFieldsCollectTopLevelFieldsForTheRequestedSide() {
+        List<Map<String, Object>> ruleRows = [
+                [ruleId: "R1", file1FieldPath: '$.statusId', file2FieldPath: '$.status'],
+                [ruleId: "R2", file1FieldPath: '$.grandTotal', file2FieldPath: '$.totalAmount'],
+        ]
+
+        assertEquals(["statusId", "grandTotal"],
+                ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_1"))
+        assertEquals(["status", "totalAmount"],
+                ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_2"))
+    }
+
+    @Test
+    void ruleKeepFieldsReturnNullWhenAPathCannotBeReducedToATopLevelField() {
+        List<Map<String, Object>> ruleRows = [
+                [ruleId: "R1", file1FieldPath: '$.statusId', file2FieldPath: '$.status'],
+                // NOTE: the brief's illustrative example ('$.shipGroups[*].facilityId') is NOT
+                // actually unresolvable under the current topLevelRecordField: that helper strips up
+                // to the FIRST "[*]" unconditionally (treating it as the outer records-array
+                // boundary) and returns whatever segment follows, so it resolves to "facilityId" —
+                // verified empirically, see task-7-report.md. A wildcard with nothing after it is a
+                // path topLevelRecordField genuinely cannot reduce (empty remainder fails the
+                // identifier check), so it exercises the same "unresolvable path" branch this test
+                // targets.
+                [ruleId: "R2", file1FieldPath: '$.shipGroups[*]', file2FieldPath: '$.facility'],
+        ]
+
+        // Projection must never drop a field a rule reads: a rule evaluating against an absent field
+        // reports false differences, which is worse than a large extract.
+        assertNull(ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_1"))
+        assertEquals(["status", "facility"],
+                ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_2"))
+    }
+
+    @Test
+    void ruleKeepFieldsIgnoreRowsWithNoPathForThatSide() {
+        List<Map<String, Object>> ruleRows = [
+                [ruleId: "R1", file1FieldPath: '$.statusId'],
+        ]
+
+        assertEquals(["statusId"], ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_1"))
+        assertEquals([], ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_2"))
+    }
 }

@@ -563,11 +563,34 @@ class ReconciliationSavedRunSupport {
     }
 
     /**
+     * Top-level record fields the rule set reads on one side, for the extract projection.
+     *
+     * Returns null when ANY rule's path on that side cannot be reduced to a top-level record field
+     * (a nested or wildcard path such as $.shipGroups[*].facilityId). Null means "do not project this
+     * side" — a rule silently evaluating against a field the projection dropped would report false
+     * differences, which is a far worse outcome than transferring full records. The conservative
+     * answer is per-side: a nested path on file 2 must not disable projection on file 1.
+     */
+    static List<String> ruleKeepFieldsForSide(List<Map<String, Object>> ruleRows, String fileSide) {
+        String pathKey = "FILE_2".equalsIgnoreCase(normalize(fileSide)) ? "file2FieldPath" : "file1FieldPath"
+        Set<String> fields = new LinkedHashSet<String>()
+        for (Map<String, Object> row : (ruleRows ?: [])) {
+            String rawPath = normalize(row?.get(pathKey))
+            if (!rawPath) continue
+            String fieldName = topLevelRecordField(rawPath)
+            if (!fieldName) return null
+            fields.add(fieldName)
+        }
+        return new ArrayList<String>(fields)
+    }
+
+    /**
      * Fields the extract file must keep for one compare source: the connector's base
-     * identity/display fields plus every join-key field configured for the side. Returns null
-     * (no projection — full records) when the rule set defines ANY rules: rule expressions are
-     * not yet parsed into record fields, so trimming could break them. Presence-only rule sets
-     * (the production shape) get the full size win.
+     * identity/display fields, every join-key field configured for the side, and every top-level
+     * field the rule set's rules read on that side. Returns null (no projection — full records)
+     * when any rule's path on this side cannot be reduced to a top-level record field — see
+     * {@link #ruleKeepFieldsForSide}. Presence-only rule sets and rule sets whose expressions all
+     * resolve to top-level fields (the common shape) still get the size win.
      */
     static List<String> resolveExtractKeepFields(def ec, Object source, Object baseFieldsCsv) {
         String compareScopeId = normalize(source?.compareScopeId)
@@ -580,7 +603,15 @@ class ReconciliationSavedRunSupport {
                 ec, "darpan.rule.RuleSetCompareScope", "compareScopeId", compareScopeId)
         if (scope == null) return null
         String ruleSetId = normalize(scope.ruleSetId)
-        if (ruleSetId && collectRuleRows(ec, ruleSetId)) return null
+        List<String> ruleKeepFields = []
+        if (ruleSetId) {
+            List<Map<String, Object>> ruleRows = collectRuleRows(ec, ruleSetId)
+            if (ruleRows) {
+                ruleKeepFields = ruleKeepFieldsForSide(ruleRows, fileSide)
+                // Null means at least one rule reads a path projection cannot preserve.
+                if (ruleKeepFields == null) return null
+            }
+        }
 
         Set<String> keepFields = new LinkedHashSet<String>()
         normalize(baseFieldsCsv)?.tokenize(",")?.each { Object field ->
@@ -599,6 +630,7 @@ class ReconciliationSavedRunSupport {
             String fieldName = topLevelRecordField(normalize(source?.primaryIdExpression))
             if (fieldName) keepFields.add(fieldName)
         }
+        keepFields.addAll(ruleKeepFields)
         return keepFields ? new ArrayList<String>(keepFields) : null
     }
 

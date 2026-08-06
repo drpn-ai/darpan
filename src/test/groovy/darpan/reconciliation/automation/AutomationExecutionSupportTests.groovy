@@ -2366,6 +2366,177 @@ class AutomationExecutionSupportTests {
                 [orderId: "O-2", salesChannelEnumId: "WEB_SALES_CHANNEL"], parsed))
     }
 
+    // ==================================================================================================
+    // Task 2c — Task 2b's early mint exposes an automation's run-result row to StuckRunReaper (it sweeps
+    // any PENDING/RUNNING row whose lastUpdatedStamp goes stale). These heartbeat the row at automation
+    // phase boundaries so a normal-length run is not falsely reaped. Boundary heartbeats give exactly the
+    // same guarantee the interactive path's beginStep/endStep heartbeats give — no stronger: a run whose
+    // SINGLE phase (one very large extract, or one very large reconcile) exceeds the reaper threshold on
+    // its own is still reaped. That is not fixed here; it is out of scope (see the task report).
+    // ==================================================================================================
+
+    @Test
+    void heartbeatDuringARunRefreshesTheRunResultRowWithoutChangingStatusOrNotifiedDate() {
+        // Required test 1. A heartbeat must move lastHeartbeatDate/lastUpdatedDate forward — the write
+        // that gives StuckRunReaper's lastUpdatedStamp something real to bump — while leaving statusEnumId
+        // at RUNNING and notifiedDate untouched. A heartbeat is not a status change and must never look
+        // like one to the notifiedDate claim-then-deliver CAS.
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        Timestamp heartbeatAt = timestamp("2026-05-01T10:05:00Z")
+        Map<String, Object> midRun = [:]
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                if (call.params.fileSide == "FILE_1") {
+                    // Move the clock forward before the heartbeat that fires right after this call
+                    // returns, so its write is observably distinct from the mint's startedDate — both
+                    // otherwise read the same fixed NOW, and the assertions below could not tell
+                    // "never heartbeated" apart from "heartbeated but the clock didn't move".
+                    ec.user.nowTimestamp = heartbeatAt
+                }
+                return [
+                        dataAvailable: true,
+                        fileLocation : "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName     : "${call.params.fileSide}.json".toString(),
+                        recordCount  : 5,
+                ]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                // Both extraction heartbeats have already fired by now; the reconcile-call heartbeat and
+                // every terminal write are still ahead, so this is the live in-flight state a poll would
+                // see mid-run.
+                if (midRun.isEmpty()) {
+                    FakeValue liveRunResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"][0]
+                    midRun.statusEnumId = liveRunResult.statusEnumId
+                    midRun.lastHeartbeatDate = liveRunResult.lastHeartbeatDate
+                    midRun.lastUpdatedDate = liveRunResult.lastUpdatedDate
+                    midRun.notifiedDate = liveRunResult.notifiedDate
+                    midRun.updated = liveRunResult.@updated
+                }
+                return [
+                        reconciliationType: "ORDER",
+                        diffLocation      : "reconciliation-runs/AUTO_API/20260501/result.json",
+                        diffFileName      : "result.json",
+                        differenceCount   : 4,
+                        onlyInFile1Count  : 1,
+                        onlyInFile2Count  : 3,
+                ]
+            }
+            return [:]
+        }
+
+        AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+        assertEquals(AutomationExecutionSupport.STATUS_RUNNING, midRun.statusEnumId,
+                "a heartbeat must never change statusEnumId")
+        assertEquals(heartbeatAt, midRun.lastHeartbeatDate, "the heartbeat must move lastHeartbeatDate forward")
+        assertEquals(heartbeatAt, midRun.lastUpdatedDate, "the heartbeat must move lastUpdatedDate forward")
+        assertNull(midRun.notifiedDate, "a heartbeat must never touch notification state")
+        assertTrue(midRun.updated as boolean,
+                "the row must already have received a real .update() from the heartbeat, not just the mint's .create()")
+    }
+
+    @Test
+    void aHeartbeatFailureDoesNotFailTheRun() {
+        // Required test 2. Best-effort means best-effort: inject a throwing write at exactly the
+        // heartbeat point (never the mint, which .create()s, and never the terminal close, which flips
+        // statusEnumId to a terminal value in the SAME .update() call this hook is keyed on) and prove the
+        // run still completes SUCCEEDED with its run-result row correctly closed.
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                return [
+                        dataAvailable: true,
+                        fileLocation : "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName     : "${call.params.fileSide}.json".toString(),
+                        recordCount  : 5,
+                ]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                return [
+                        reconciliationType: "ORDER",
+                        diffLocation      : "reconciliation-runs/AUTO_API/20260501/result.json",
+                        diffFileName      : "result.json",
+                        differenceCount   : 4,
+                        onlyInFile1Count  : 1,
+                        onlyInFile2Count  : 3,
+                ]
+            }
+            return [:]
+        }
+        int heartbeatWriteAttempts = 0
+        ec.entity.updateHook = { FakeValue value ->
+            if (value.entityName == "darpan.reconciliation.ReconciliationRunResult" &&
+                    value.statusEnumId == AutomationExecutionSupport.STATUS_RUNNING) {
+                heartbeatWriteAttempts++
+                throw new IllegalStateException("heartbeat write failed")
+            }
+        }
+
+        Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+        assertTrue(heartbeatWriteAttempts > 0, "the injected failure must actually have been exercised")
+        assertEquals(1, result.executedCount, "a best-effort heartbeat failure must never fail the run")
+        FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+        assertEquals(AutomationExecutionSupport.STATUS_SUCCEEDED, execution.statusEnumId)
+        FakeValue runResult = ec.entity.rows["darpan.reconciliation.ReconciliationRunResult"][0]
+        assertEquals(AutomationExecutionSupport.STATUS_SUCCEEDED, runResult.statusEnumId,
+                "the terminal close must still land despite every heartbeat write throwing")
+        assertNotNull(runResult.notifiedDate, "the completion notify must still fire despite the heartbeat failures")
+    }
+
+    @Test
+    void heartbeatsFireAtEachPhaseBoundaryForATwoSourceRun() {
+        // Required test 3. Guards the specific promise: one heartbeat after source-1 extraction, one
+        // after source-2 extraction, one after the reconcile call — three boundaries for a two-source run,
+        // in that order. A future refactor that drops one of the three heartbeatAutomationRun(...) call
+        // sites must fail this test even though the run itself would still complete SUCCEEDED.
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        List<String> events = []
+        ec.entity.updateHook = { FakeValue value ->
+            // A heartbeat is the ONLY .update() this file makes against a run-result row while it is
+            // still RUNNING — every terminal close flips statusEnumId to a terminal value in the SAME
+            // .update() call, so this cannot double-count a terminal write as a heartbeat.
+            if (value.entityName == "darpan.reconciliation.ReconciliationRunResult" &&
+                    value.statusEnumId == AutomationExecutionSupport.STATUS_RUNNING) {
+                events << "heartbeat"
+            }
+        }
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                events << "extract:${call.params.fileSide}".toString()
+                return [
+                        dataAvailable: true,
+                        fileLocation : "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName     : "${call.params.fileSide}.json".toString(),
+                        recordCount  : 5,
+                ]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                events << "reconcile"
+                return [
+                        reconciliationType: "ORDER",
+                        diffLocation      : "reconciliation-runs/AUTO_API/20260501/result.json",
+                        diffFileName      : "result.json",
+                        differenceCount   : 4,
+                        onlyInFile1Count  : 1,
+                        onlyInFile2Count  : 3,
+                ]
+            }
+            return [:]
+        }
+
+        Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+        assertEquals(1, result.executedCount)
+        assertEquals(
+                ["extract:FILE_1", "heartbeat", "extract:FILE_2", "heartbeat", "reconcile", "heartbeat"],
+                events,
+                "expected exactly one heartbeat after each source extraction and one after the reconcile call")
+    }
+
     private static FakeEc fakeEc() {
         FakeEc ec = new FakeEc(
                 entity: new FakeEntityFacade(),

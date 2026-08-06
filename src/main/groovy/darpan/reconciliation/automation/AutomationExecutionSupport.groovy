@@ -257,7 +257,15 @@ class AutomationExecutionSupport {
                 TenantNotificationSupport.reassignRunSubscriptions(ec, supersededRunResultId, mintedRunResultId)
 
                 Map<String, Object> file1Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file1Source, window, executionParams), file1Source)
+                // Task 2c: refresh the clock after source-1 extraction, a real (possibly slow) I/O call —
+                // see heartbeatAutomationRun's javadoc for why lastUpdatedStamp, not lastHeartbeatDate, is
+                // what actually protects this run from StuckRunReaper.
+                heartbeatAutomationRun(ec, automation, execution, mintedRunResultId)
                 Map<String, Object> file2Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file2Source, window, executionParams), file2Source)
+                // Task 2c: after source-2 extraction too — a NO_DATA window returns just below without
+                // ever reaching the reconcile heartbeat, so this is the last one it gets before its own
+                // terminal close (which also bumps lastUpdatedStamp).
+                heartbeatAutomationRun(ec, automation, execution, mintedRunResultId)
 
                 if (!hasData(file1Result) || !hasData(file2Result)) {
                     Timestamp completedTimestamp = nowTimestamp(ec)
@@ -296,6 +304,12 @@ class AutomationExecutionSupport {
                 Map<String, Object> reconcileResult = normalizeReconcileResult(
                         reconcileRunner.call(ec, automation, file1Source, file2Source, file1Result, file2Result, window, executionParams)
                 )
+                // Task 2c: around the reconcile call — reconcile (a Spark job) is typically the single
+                // longest phase, so this is the boundary that matters most. Placed AFTER rather than
+                // immediately before: the two extraction heartbeats above already leave the clock fresh
+                // going into reconcile, so an "around" heartbeat here instead of a near-duplicate one right
+                // before it gives the persist/notify work below its own protected window too.
+                heartbeatAutomationRun(ec, automation, execution, mintedRunResultId)
                 autoPersistedSources = (reconcileResult.persistedSources ?: []) as List
                 requireReconcileOutput(ec, reconcileResult)
                 ensureAutomationResultArtifact(ec, automation, file1Source, file2Source, reconcileResult, window, executionParams)
@@ -1492,6 +1506,65 @@ class AutomationExecutionSupport {
                 .condition("reconciliationRunResultId", runResultId)
         if (normalize(expectedTenantId)) finder = finder.condition("companyUserGroupId", normalize(expectedTenantId))
         return finder.useCache(false).one()
+    }
+
+    /**
+     * Task 2c: best-effort heartbeat at automation phase boundaries.
+     *
+     * <p>Task 2b mints the {@code ReconciliationRunResult} row at RUNNING, which newly exposes it to
+     * {@code StuckRunReaper} — the reaper flips any {@code ReconciliationRunResult} or
+     * {@code ReconciliationAutomationExecution} row sitting in PENDING/RUNNING to FAILED (and, for the
+     * run-result row, notifies) once its {@code lastUpdatedStamp} — Moqui's auto-maintained column, NOT
+     * {@code lastHeartbeatDate} — goes stale (default 120 min, {@code StuckRunReaper.groovy:36}). Any
+     * {@code .update()} bumps {@code lastUpdatedStamp} regardless of which fields change; this refreshes
+     * {@code lastHeartbeatDate} (and, on the execution row, {@code lastUpdatedDate}) purely so that
+     * {@code .update()} has something real to write.</p>
+     *
+     * <p>Mirrors the interactive path's beginStep/endStep heartbeats, moved to automation phase
+     * boundaries since automations write no {@code ReconciliationRunStep} rows (non-goal, unchanged).
+     * Called after each source extraction and after the reconcile call in
+     * {@code executeAutomationForTenant} — the three points where a real, potentially slow I/O call
+     * (a Shopify/OMS extract, or the Spark reconcile) has just finished.</p>
+     *
+     * <p><b>Residual limitation, stated plainly:</b> this is a BOUNDARY heartbeat, not a progress
+     * heartbeat. It resets the clock only between phases, so a run is still falsely reaped if a SINGLE
+     * phase — one very large Shopify/OMS extract, or one very large reconcile — exceeds the threshold
+     * on its own. That is exactly the guarantee the interactive path's beginStep/endStep heartbeats
+     * give today; this task extends the same guarantee to automations, it does not improve on it.</p>
+     *
+     * <p>Never touches {@code statusEnumId} or {@code notifiedDate}, and never fails the run: the
+     * run-result write and the execution write are independently caught and logged at warn, exactly
+     * like every other best-effort helper in this file.</p>
+     */
+    protected static void heartbeatAutomationRun(def ec, def automation, def execution, String runResultId) {
+        Timestamp now
+        try {
+            now = nowTimestamp(ec)
+        } catch (Throwable t) {
+            logger.warn("Automation heartbeat could not resolve current time (best-effort): ${t.message}")
+            return
+        }
+        if (normalize(runResultId)) {
+            try {
+                runInTransaction(ec, "Error heartbeating reconciliation automation run result", {
+                    def runResultValue = findAutomationRunResult(ec, runResultId,
+                            normalize(readField(automation, "companyUserGroupId")))
+                    if (runResultValue != null) {
+                        runResultValue.set("lastHeartbeatDate", now)
+                        runResultValue.set("lastUpdatedDate", now)
+                        runResultValue.update()
+                    }
+                    return null
+                })
+            } catch (Throwable t) {
+                logger.warn("Automation heartbeat failed to refresh run result ${runResultId} (best-effort): ${t.message}")
+            }
+        }
+        try {
+            updateAutomationExecution(ec, execution, [lastUpdatedDate: now])
+        } catch (Throwable t) {
+            logger.warn("Automation heartbeat failed to refresh execution row (best-effort): ${t.message}")
+        }
     }
 
     /**

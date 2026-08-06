@@ -2637,7 +2637,12 @@
         <actions>
             <set field="inputModes" from="darpan.facade.reconciliation.AutomationFacadeSupport.listEnumOptions(ec, 'AutomationInputMode').findAll { it.enumId in darpan.facade.reconciliation.AutomationFacadeSupport.SUPPORTED_INPUT_MODES }"/>
             <set field="sourceTypes" from="darpan.facade.reconciliation.AutomationFacadeSupport.listEnumOptions(ec, 'AutomationSourceType')"/>
-            <set field="relativeWindows" from="darpan.facade.reconciliation.AutomationFacadeSupport.listEnumOptions(ec, 'AutomationRelWindow')"/>
+            <!-- Interim guard rail: state mode (AUT_WIN_STATE) additionally requires a per-source
+                 status list, and that list's write path does not exist yet, so offering the mode
+                 today lets an operator save an automation that fails on every run. Filter it out of
+                 the selectable options until the status-list configuration surface ships; the enum
+                 row, WINDOW_STATE constant, and state-mode dispatch logic all stay intact. -->
+            <set field="relativeWindows" from="darpan.facade.reconciliation.AutomationFacadeSupport.listEnumOptions(ec, 'AutomationRelWindow').findAll { it.enumId != darpan.reconciliation.automation.AutomationExecutionSupport.WINDOW_STATE }"/>
             <set field="fileTypes" from="darpan.facade.reconciliation.AutomationFacadeSupport.listEnumOptions(ec, 'DarpanFileType')"/>
             <set field="systems" from="darpan.facade.reconciliation.AutomationFacadeSupport.listEnumOptions(ec, 'DarpanSystemSource')"/>
             <set field="savedRuns" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.collectSavedRunRows(ec)"/>

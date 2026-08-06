@@ -417,6 +417,12 @@ class AutomationFacadeSmokeTests {
         List<String> inputModeIds = ((List<Map<String, Object>>) optionsResult.inputModes).collect { it.enumId as String }
         assertEquals(["AUT_IN_API_RANGE", "AUT_IN_SFTP_FILES"] as Set, inputModeIds as Set)
         assertFalse(inputModeIds.contains("AUT_IN_SFTP_POLL"))
+        // Interim guard rail: state mode (AUT_WIN_STATE) has no write path yet for the per-source
+        // status list it requires, so it must not be offered while every other window stays selectable.
+        List<String> relativeWindowIds = ((List<Map<String, Object>>) optionsResult.relativeWindows).collect { it.enumId as String }
+        assertFalse(relativeWindowIds.contains(AutomationExecutionSupport.WINDOW_STATE))
+        assertEquals(["AUT_WIN_PREV_DAY", "AUT_WIN_PREV_WEEK", "AUT_WIN_PREV_MONTH", "AUT_WIN_LAST_DAYS",
+                       "AUT_WIN_LAST_WEEKS", "AUT_WIN_LAST_MONTHS", "AUT_WIN_CUSTOM"] as Set, relativeWindowIds as Set)
         List<Map<String, Object>> sftpServers = (List<Map<String, Object>>) optionsResult.sftpServers
         assertTrue(sftpServers.any { it.sftpServerId == "SHOPIFY_TEST_SFTP" })
         assertTrue(sftpServers.any { it.sftpServerId == "SHARED_TEST_SFTP" })

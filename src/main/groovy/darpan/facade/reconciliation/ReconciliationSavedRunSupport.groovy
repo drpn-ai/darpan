@@ -654,8 +654,10 @@ class ReconciliationSavedRunSupport {
      * identity/display fields, every join-key field configured for the side, and every top-level
      * field the rule set's rules read on that side. Returns null (no projection — full records)
      * when any rule's path on this side cannot be reduced to a top-level record field — see
-     * {@link #ruleKeepFieldsForSide}. Presence-only rule sets and rule sets whose expressions all
-     * resolve to top-level fields (the common shape) still get the size win.
+     * {@link #ruleKeepFieldsForSide}. A rule that carries no structured field path on either side
+     * (a raw-DRL rule, or a presence-only rule) falls into that same case and disables projection
+     * for both sides. Rule sets whose rules all resolve to top-level fields on this side (the
+     * common shape) still get the size win.
      */
     static List<String> resolveExtractKeepFields(def ec, Object source, Object baseFieldsCsv) {
         String compareScopeId = normalize(source?.compareScopeId)

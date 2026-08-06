@@ -75,8 +75,8 @@ class AutomationFacadeSupport {
      * and this list is a curated convenience, not a hard limit — salesChannelEnumId is here precisely
      * because it is the shipping use case and is NOT in keepFieldsBase.
      *
-     * Safe for comparison rules too: resolveExtractKeepFields disables projection entirely as soon as
-     * a rule set defines any rule, so a rule drawn on a non-keepFieldsBase field still sees its value.
+     * Safe for comparison rules too: resolveExtractKeepFields unions each rule's field paths into the
+     * projection keep-set, so a rule drawn on a non-keepFieldsBase field still sees its value.
      */
     static final List<Map<String, Object>> HOTWAX_OMS_ORDER_FIELD_OPTIONS = [
             [fieldPath: "\$.records[*].orderId", label: "Order ID", type: "string"],

@@ -356,10 +356,20 @@ def extractApiSource = { Object source, String fileSide, Map artifactContext, Ma
     ] as Map<String, Object>
     if (connector.preserveWindowInstants) extractParams.preserveWindowInstants = true
 
+    // Config over code, mirrors AutomationExecutionSupport.applyWindowFieldParameter: the connector
+    // names the record date field its extract window filters on. Blank leaves the parameter unset so
+    // the extractor keeps its own default (orderDate). Without this, an interactive run and a
+    // scheduled automation of the same saved run would query different date fields the moment
+    // windowFieldName is set to anything other than that default (e.g. lastUpdatedTxStamp).
+    String windowFieldName = normalize(connector.windowFieldName)
+    if (windowFieldName) extractParams.windowFieldName = windowFieldName
+
     // Registry-driven record projection: when the connector declares a keep-fields parameter, pass
     // the fields reconciliation actually needs so the extractor trims records before writing
-    // (99k-order OMS windows drop from ~1.4 GB to tens of MB). Skipped automatically for rule sets
-    // with field-comparison rules — see resolveExtractKeepFields.
+    // (99k-order OMS windows drop from ~1.4 GB to tens of MB). Projection is disabled (full records
+    // sent) when any rule's field path on this side can't be reduced to a top-level record field,
+    // including raw-DRL/presence-only rules with no structured path on either side — see
+    // resolveExtractKeepFields.
     String keepFieldsParameterName = normalize(connector.keepFieldsParameterName)
     if (keepFieldsParameterName) {
         List<String> keepFields = ReconciliationSavedRunSupport.resolveExtractKeepFields(ec, source, connector.keepFieldsBase)

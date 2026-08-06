@@ -565,23 +565,88 @@ class ReconciliationSavedRunSupport {
     /**
      * Top-level record fields the rule set reads on one side, for the extract projection.
      *
-     * Returns null when ANY rule's path on that side cannot be reduced to a top-level record field
-     * (a nested or wildcard path such as $.shipGroups[*].facilityId). Null means "do not project this
-     * side" — a rule silently evaluating against a field the projection dropped would report false
-     * differences, which is a far worse outcome than transferring full records. The conservative
-     * answer is per-side: a nested path on file 2 must not disable projection on file 1.
+     * A rule's path is accepted ONLY when it is provably relative to a single record: either it
+     * carries no "[*]" wildcard at all, or it begins with the SAME "&lt;recordArray&gt;[*]" prefix the
+     * side's own {@code primaryIdExpression} uses (e.g. "records[*]" from "$.records[*].orderId") —
+     * mirroring {@link reconciliation.rule.FieldComparisonRuleLogicGenerator#fieldPathRelativeToPrimary}.
+     * Anything else returns null for the WHOLE side. {@code topLevelRecordField} alone is NOT this
+     * gate: it strips up to the FIRST "[*]" unconditionally and returns whatever follows, so it cannot
+     * tell a genuinely nested per-record wildcard (e.g. {@code $.shipGroups[*].facilityId}, or the
+     * file-2 {@code $[*].orderItems[*].sku} convention) apart from a safe "$.records[*].field" path —
+     * both shapes make it return a plausible-but-wrong field name instead of null. This method gates
+     * on the primary-ID prefix FIRST and only delegates to {@code topLevelRecordField} to name the
+     * field once a path has already been proven safe.
+     *
+     * Null means "do not project this side" — a rule silently evaluating against a field the
+     * projection dropped would report false differences, which is a far worse outcome than
+     * transferring full records. The conservative answer is per-side: a nested path on file 2 must
+     * not disable projection on file 1. A row that carries a path for neither side — an
+     * unparsed/opaque expression, e.g. a bare-condition {@code ruleLogic} with no structured
+     * file1FieldPath/file2FieldPath — can't be verified safe either, so it disables projection too.
+     * A row that carries a path for only the OTHER side makes no claim about this one and is skipped.
+     * An unrecognized {@code fileSide} returns null rather than silently defaulting to file 1.
      */
-    static List<String> ruleKeepFieldsForSide(List<Map<String, Object>> ruleRows, String fileSide) {
-        String pathKey = "FILE_2".equalsIgnoreCase(normalize(fileSide)) ? "file2FieldPath" : "file1FieldPath"
+    static List<String> ruleKeepFieldsForSide(List<Map<String, Object>> ruleRows, String fileSide, Object primaryIdExpression) {
+        String side = normalize(fileSide)
+        boolean isFile1 = "FILE_1".equalsIgnoreCase(side)
+        boolean isFile2 = "FILE_2".equalsIgnoreCase(side)
+        if (!isFile1 && !isFile2) return null
+
+        String pathKey = isFile2 ? "file2FieldPath" : "file1FieldPath"
+        String otherPathKey = isFile2 ? "file1FieldPath" : "file2FieldPath"
+        String recordArrayPrefix = ruleFieldPathRecordArrayPrefix(primaryIdExpression)
+
         Set<String> fields = new LinkedHashSet<String>()
         for (Map<String, Object> row : (ruleRows ?: [])) {
             String rawPath = normalize(row?.get(pathKey))
-            if (!rawPath) continue
+            if (!rawPath) {
+                if (normalize(row?.get(otherPathKey))) continue
+                return null
+            }
+            if (!isRuleFieldPathSafeForProjection(rawPath, recordArrayPrefix)) return null
             String fieldName = topLevelRecordField(rawPath)
             if (!fieldName) return null
             fields.add(fieldName)
         }
         return new ArrayList<String>(fields)
+    }
+
+    /**
+     * The "&lt;recordArray&gt;[*]" prefix a side's primaryIdExpression establishes (e.g. "records[*]"
+     * from "$.records[*].orderId"), normalized the same way {@code topLevelRecordField} normalizes
+     * internally so the comparison in {@link #isRuleFieldPathSafeForProjection} is apples to apples.
+     * Null when the expression is blank or carries no wildcard — every wildcarded rule path is then
+     * rejected for that side, since there is nothing to check it against.
+     */
+    private static String ruleFieldPathRecordArrayPrefix(Object primaryIdExpression) {
+        String normalized = normalizedSparkPathForRuleGate(normalize(primaryIdExpression))
+        if (!normalized) return null
+        int starIndex = normalized.indexOf("[*]")
+        return starIndex >= 0 ? normalized.substring(0, starIndex + 3) : null
+    }
+
+    /** True when a rule field path is provably relative to a single record — see {@link #ruleKeepFieldsForSide}. */
+    private static boolean isRuleFieldPathSafeForProjection(String rawPath, String recordArrayPrefix) {
+        String normalized = normalizedSparkPathForRuleGate(rawPath)
+        if (normalized == null) return false
+        if (!normalized.contains("[*]")) return true
+        if (!recordArrayPrefix) return false
+        return normalized.startsWith(recordArrayPrefix + ".")
+    }
+
+    /**
+     * Mirrors the normalization {@code topLevelRecordField} applies internally (strip a trailing
+     * |NORMALIZER, expand to full JSONPath form, then strip the "$."/"$[*]." root).
+     */
+    private static String normalizedSparkPathForRuleGate(String rawExpression) {
+        if (!rawExpression) return null
+        try {
+            String idExpr = (String) CompareIdExpressionSupport.splitIdExpression(rawExpression).idExpr
+            if (!idExpr) return null
+            return CompareIdExpressionSupport.normalizeSparkPath(CompareIdExpressionSupport.normalizeJsonIdExpr(idExpr))
+        } catch (Exception ignored) {
+            return null
+        }
     }
 
     /**
@@ -607,7 +672,7 @@ class ReconciliationSavedRunSupport {
         if (ruleSetId) {
             List<Map<String, Object>> ruleRows = collectRuleRows(ec, ruleSetId)
             if (ruleRows) {
-                ruleKeepFields = ruleKeepFieldsForSide(ruleRows, fileSide)
+                ruleKeepFields = ruleKeepFieldsForSide(ruleRows, fileSide, source?.primaryIdExpression)
                 // Null means at least one rule reads a path projection cannot preserve.
                 if (ruleKeepFields == null) return null
             }

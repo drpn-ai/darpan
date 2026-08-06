@@ -176,6 +176,14 @@ class ReconciliationSavedRunSupportTests {
     }
 
     // ─── ruleKeepFieldsForSide: rule-referenced fields for extract projection ────
+    // Review fix (task-7-report.md Fix Report): the gate is the side's own primaryIdExpression
+    // record-array prefix (e.g. "records[*]" from "$.records[*].orderId"), not merely "did
+    // topLevelRecordField return something" — that helper strips up to the FIRST "[*]"
+    // unconditionally and cannot tell a genuinely nested per-record wildcard from the outer
+    // records-array wildcard. '$.records[*].orderId' is the standard OMS-side primary used below
+    // wherever the test needs a real prefix to check a wildcarded path against.
+
+    private static final String TEST_PRIMARY_ID_EXPRESSION = '$.records[*].orderId'
 
     @Test
     void ruleKeepFieldsCollectTopLevelFieldsForTheRequestedSide() {
@@ -185,31 +193,42 @@ class ReconciliationSavedRunSupportTests {
         ]
 
         assertEquals(["statusId", "grandTotal"],
-                ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_1"))
+                ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_1", TEST_PRIMARY_ID_EXPRESSION))
         assertEquals(["status", "totalAmount"],
-                ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_2"))
+                ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_2", TEST_PRIMARY_ID_EXPRESSION))
     }
 
     @Test
     void ruleKeepFieldsReturnNullWhenAPathCannotBeReducedToATopLevelField() {
         List<Map<String, Object>> ruleRows = [
                 [ruleId: "R1", file1FieldPath: '$.statusId', file2FieldPath: '$.status'],
-                // NOTE: the brief's illustrative example ('$.shipGroups[*].facilityId') is NOT
-                // actually unresolvable under the current topLevelRecordField: that helper strips up
-                // to the FIRST "[*]" unconditionally (treating it as the outer records-array
-                // boundary) and returns whatever segment follows, so it resolves to "facilityId" —
-                // verified empirically, see task-7-report.md. A wildcard with nothing after it is a
-                // path topLevelRecordField genuinely cannot reduce (empty remainder fails the
-                // identifier check), so it exercises the same "unresolvable path" branch this test
-                // targets.
-                [ruleId: "R2", file1FieldPath: '$.shipGroups[*]', file2FieldPath: '$.facility'],
+                // $.shipGroups[*].facilityId is a genuinely nested per-record wildcard, not the outer
+                // records[*] boundary TEST_PRIMARY_ID_EXPRESSION establishes — the prefix gate rejects
+                // it even though topLevelRecordField('$.shipGroups[*].facilityId') alone would return
+                // "facilityId" (a plausible-looking but wrong top-level field name).
+                [ruleId: "R2", file1FieldPath: '$.shipGroups[*].facilityId', file2FieldPath: '$.facility'],
         ]
 
         // Projection must never drop a field a rule reads: a rule evaluating against an absent field
         // reports false differences, which is worse than a large extract.
-        assertNull(ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_1"))
+        assertNull(ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_1", TEST_PRIMARY_ID_EXPRESSION))
         assertEquals(["status", "facility"],
-                ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_2"))
+                ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_2", TEST_PRIMARY_ID_EXPRESSION))
+    }
+
+    @Test
+    void ruleKeepFieldsPinsRealNestedWildcardShapesToNull() {
+        // Regression lock: both shapes are real, not hypothetical. $[*].orderItems[*].sku is the
+        // file-2 convention used throughout src/test/resources/reconciliation/rule/rulelogic-goldens.json —
+        // normalizeSparkPath consumes the leading "$[*]" record root first, so the FIRST *remaining*
+        // wildcard is always the nested one, and topLevelRecordField alone would return "sku".
+        List<Map<String, Object>> ruleRows = [
+                [ruleId: "R1", file1FieldPath: '$.shipGroups[*].facilityId'],
+                [ruleId: "R2", file2FieldPath: '$[*].orderItems[*].sku'],
+        ]
+
+        assertNull(ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_1", TEST_PRIMARY_ID_EXPRESSION))
+        assertNull(ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_2", TEST_PRIMARY_ID_EXPRESSION))
     }
 
     @Test
@@ -218,7 +237,33 @@ class ReconciliationSavedRunSupportTests {
                 [ruleId: "R1", file1FieldPath: '$.statusId'],
         ]
 
-        assertEquals(["statusId"], ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_1"))
-        assertEquals([], ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_2"))
+        assertEquals(["statusId"], ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_1", TEST_PRIMARY_ID_EXPRESSION))
+        assertEquals([], ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_2", TEST_PRIMARY_ID_EXPRESSION))
+    }
+
+    @Test
+    void ruleKeepFieldsReturnNullWhenARuleCarriesNoPathForEitherSide() {
+        // parseRuleExpression returns [:] for a blank/unparseable expression (e.g. a bare-condition
+        // ruleLogic with no structured file1FieldPath/file2FieldPath), so collectRuleRows can hand
+        // back a row with neither path. Its safety can't be verified, so it disables projection —
+        // unlike a row naming only the OTHER side (ruleKeepFieldsIgnoreRowsWithNoPathForThatSide
+        // above), which makes no claim about this side and is skipped.
+        List<Map<String, Object>> ruleRows = [
+                [ruleId: "R1", file1FieldPath: '$.statusId', file2FieldPath: '$.status'],
+                [ruleId: "R2"],
+        ]
+
+        assertNull(ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_1", TEST_PRIMARY_ID_EXPRESSION))
+        assertNull(ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_2", TEST_PRIMARY_ID_EXPRESSION))
+    }
+
+    @Test
+    void ruleKeepFieldsReturnNullForAnUnrecognizedFileSide() {
+        List<Map<String, Object>> ruleRows = [
+                [ruleId: "R1", file1FieldPath: '$.statusId', file2FieldPath: '$.status'],
+        ]
+
+        assertNull(ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_3", TEST_PRIMARY_ID_EXPRESSION))
+        assertNull(ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, null, TEST_PRIMARY_ID_EXPRESSION))
     }
 }

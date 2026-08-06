@@ -1856,6 +1856,83 @@ end'''
                 .disableAuthz().useCache(false).list().size())
     }
 
+    // ── Task 7: resolveExtractKeepFields — union rule-referenced fields instead of disabling
+    // projection wholesale. Uses the real create#RuleSetRun path (not hand-built entity rows) so the
+    // rule expressions go through the same normalizeRuleEntries/regenerateFieldComparisonRuleLogic
+    // pipeline a real save would, then reads the persisted RuleSetCompareSource rows via
+    // resolveRuleSetRun (the pattern findFilterRows above already established) and calls
+    // resolveExtractKeepFields directly.
+
+    @Test
+    void resolveExtractKeepFieldsUnionsBaseKeyAndRuleFieldsWhenEveryRulePathResolves() {
+        String expression = '{"type":"FIELD_COMPARISON","file1FieldPath":"$.records[*].statusId","file2FieldPath":"status","operator":"="}'
+        String savedRunId = createRuleSetRun([
+                file1PrimaryIdExpression: '$.records[*].orderId',
+                file2PrimaryIdExpression: 'order_id',
+                rules                   : [
+                        [sequenceNum: 10, ruleLogic: 'rule "R1" when $m : Map() then end',
+                         ruleType   : "FIELD_COMPARISON", expression: expression, enabled: "Y", severity: "WARN"],
+                ],
+        ])
+
+        Map<String, Object> resolved = ReconciliationSavedRunSupport.resolveRuleSetRun(ec, savedRunId)
+        Map<String, Object> sourceBySide = (Map<String, Object>) resolved.sourceBySide
+        def file1Source = sourceBySide[ReconciliationSavedRunSupport.FILE_SIDE_1]
+        def file2Source = sourceBySide[ReconciliationSavedRunSupport.FILE_SIDE_2]
+        assertNotNull(file1Source)
+        assertNotNull(file2Source)
+
+        // Base (connector) field + the primaryIdExpression fallback field (no key-field rows exist)
+        // + the rule field, unioned — not the old "any rule -> full record" bail-out.
+        assertEquals(["externalId", "orderId", "statusId"],
+                ReconciliationSavedRunSupport.resolveExtractKeepFields(ec, file1Source, "externalId"))
+        assertEquals(["externalId", "order_id", "status"],
+                ReconciliationSavedRunSupport.resolveExtractKeepFields(ec, file2Source, "externalId"))
+    }
+
+    @Test
+    void resolveExtractKeepFieldsDisablesProjectionOnlyForTheSideWithAnUnresolvableRulePath() {
+        // $.shipGroups[*].facilityId is a genuinely nested per-record wildcard relative to
+        // file1PrimaryIdExpression's records[*] boundary below — see task-7-report.md Fix Report.
+        String expression = '{"type":"FIELD_COMPARISON","file1FieldPath":"$.shipGroups[*].facilityId","file2FieldPath":"facility","operator":"="}'
+        String savedRunId = createRuleSetRun([
+                file1PrimaryIdExpression: '$.records[*].orderId',
+                file2PrimaryIdExpression: 'order_id',
+                rules                   : [
+                        [sequenceNum: 10, ruleLogic: 'rule "R1" when $m : Map() then end',
+                         ruleType   : "FIELD_COMPARISON", expression: expression, enabled: "Y", severity: "WARN"],
+                ],
+        ])
+
+        Map<String, Object> resolved = ReconciliationSavedRunSupport.resolveRuleSetRun(ec, savedRunId)
+        Map<String, Object> sourceBySide = (Map<String, Object>) resolved.sourceBySide
+        def file1Source = sourceBySide[ReconciliationSavedRunSupport.FILE_SIDE_1]
+        def file2Source = sourceBySide[ReconciliationSavedRunSupport.FILE_SIDE_2]
+
+        assertNull(ReconciliationSavedRunSupport.resolveExtractKeepFields(ec, file1Source, "externalId"))
+        assertEquals(["externalId", "order_id", "facility"],
+                ReconciliationSavedRunSupport.resolveExtractKeepFields(ec, file2Source, "externalId"))
+    }
+
+    @Test
+    void resolveExtractKeepFieldsForARuleFreeScopeReturnsBaseAndKeyFieldsUnchanged() {
+        String savedRunId = createRuleSetRun([
+                file1PrimaryIdExpression: '$.records[*].orderId',
+                file2PrimaryIdExpression: 'order_id',
+                rules                   : [],
+        ])
+
+        Map<String, Object> resolved = ReconciliationSavedRunSupport.resolveRuleSetRun(ec, savedRunId)
+        Map<String, Object> sourceBySide = (Map<String, Object>) resolved.sourceBySide
+        def file1Source = sourceBySide[ReconciliationSavedRunSupport.FILE_SIDE_1]
+        def file2Source = sourceBySide[ReconciliationSavedRunSupport.FILE_SIDE_2]
+
+        assertEquals(["externalId", "orderId"],
+                ReconciliationSavedRunSupport.resolveExtractKeepFields(ec, file1Source, "externalId"))
+        assertEquals(["externalId", "order_id"],
+                ReconciliationSavedRunSupport.resolveExtractKeepFields(ec, file2Source, "externalId"))
+    }
+
     private void seedCrossTenantMappingUsingReadableSchemas() {
         upsertEntity("moqui.security.UserGroup", [userGroupId: GORJANA], [
                 userGroupId    : GORJANA,

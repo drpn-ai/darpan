@@ -2779,6 +2779,14 @@
             <parameter name="lastHeartbeatDate" type="Timestamp"/>
             <parameter name="completedDate" type="Timestamp"/>
             <parameter name="errorMessage"/>
+            <parameter name="errorDetail">
+                <description>
+                    Full failure text. errorMessage is capped at 255 chars to fit a text-medium column,
+                    which truncates real Spark/service errors mid-sentence — routinely cutting off the
+                    part that names the fix (e.g. the "Did you mean [...]" column suggestion). This is
+                    the untruncated text-very-long copy the run row already stored.
+                </description>
+            </parameter>
             <parameter name="steps" type="List">
                 <parameter name="stageCode"/>
                 <parameter name="stageSequence" type="Integer"/>
@@ -2831,6 +2839,7 @@
                 <set field="lastHeartbeatDate" from="runRow.lastHeartbeatDate"/>
                 <set field="completedDate" from="runRow.completedDate"/>
                 <set field="errorMessage" from="runRow.errorMessage"/>
+                <set field="errorDetail" from="runRow.errorDetail"/>
                 <set field="stepRows" from="ec.entity.find('darpan.reconciliation.ReconciliationRunStep').condition('reconciliationRunResultId', runIdValue).orderBy('stageSequence').disableAuthz().useCache(false).list() ?: []"/>
                 <set field="steps" from="stepRows.collect { row -> [stageCode: row.stageCode, stageSequence: row.stageSequence, statusEnumId: row.statusEnumId, startedDate: row.startedDate, completedDate: row.completedDate, recordCount: row.recordCount, errorMessage: row.errorMessage, metricsJson: row.metricsJson] }"/>
                 <set field="subscriptionRow" from="ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('reconciliationRunResultId', runIdValue).condition('userId', ec.user.userId).disableAuthz().useCache(false).one()"/>

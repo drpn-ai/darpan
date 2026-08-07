@@ -7129,6 +7129,10 @@
                     "errorMessage": {
                         "type": "string"
                     },
+                    "errorDetail": {
+                        "type": "string",
+                        "description": "Full failure text. errorMessage is capped at 255 chars to fit a text-medium column,\n                    which truncates real Spark/service errors mid-sentence \u2014 routinely cutting off the\n                    part that names the fix (e.g. the \"Did you mean [...]\" column suggestion). This is\n                    the untruncated text-very-long copy the run row already stored."
+                    },
                     "steps": {
                         "type": "array",
                         "items": {

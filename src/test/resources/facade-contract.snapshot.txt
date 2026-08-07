@@ -748,6 +748,7 @@ SERVICE get ReconciliationRunStatus
     cancelRequestedDate : Timestamp
     completedDate : Timestamp
     currentStage : String
+    errorDetail : String
     errorMessage : String
     errors : List
     errors.error : String

@@ -249,6 +249,11 @@ class SourceSystemConnectorSupportSmokeTests {
         // a keep field (exclusions run before projection, so any raw field is testable).
         assertTrue(pillFields.contains("salesChannelEnumId"))
         assertFalse(keepFields.contains("salesChannelEnumId"))
+        // DAR-BE-017, same widening for the same reason. Verified against a real captured OMS extract
+        // (org.apache.ofbiz.order.order.OrderHeader): productStoreId is a top-level key on every order
+        // document, so a rule drawn on this pill matches the raw record before projection trims it.
+        assertTrue(pillFields.contains("productStoreId"))
+        assertFalse(keepFields.contains("productStoreId"))
         // Primary-ID selection stays deliberately narrow — widening the pills must not widen it.
         assertEquals(3, AutomationFacadeSupport.HOTWAX_OMS_ORDER_PRIMARY_ID_OPTIONS.size())
     }

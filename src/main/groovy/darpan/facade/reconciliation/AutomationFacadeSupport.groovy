@@ -70,10 +70,16 @@ class AutomationFacadeSupport {
      * selection wants key-like fields only.
      *
      * Contents = the OMS connector's {@code keepFieldsBase} (pinned against drift by
-     * SourceSystemConnectorSupportSmokeTests) PLUS {@code salesChannelEnumId}. Exclusion filters run
-     * BEFORE projection (OmsRestSourceSupport.prepareOrdersPage), so ANY raw-record field is testable
-     * and this list is a curated convenience, not a hard limit — salesChannelEnumId is here precisely
-     * because it is the shipping use case and is NOT in keepFieldsBase.
+     * SourceSystemConnectorSupportSmokeTests) PLUS {@code salesChannelEnumId} and
+     * {@code productStoreId}. Exclusion filters run BEFORE projection
+     * (OmsRestSourceSupport.prepareOrdersPage), so ANY raw-record field is testable and this list is a
+     * curated convenience, not a hard limit — those two are here precisely because they are the
+     * shipping exclusion use cases and are NOT in keepFieldsBase.
+     *
+     * Every entry must name a real top-level key on the OMS order document
+     * (org.apache.ofbiz.order.order.OrderHeader), because SourceFilterSupport matches rules against
+     * top-level record keys only. A pill naming a field the record does not carry would persist a rule
+     * that silently excludes nothing — see the guard tests in darpan-hotwax OmsRestSourceSupportTests.
      *
      * Safe for comparison rules too: resolveExtractKeepFields unions each rule's field paths into the
      * projection keep-set, so a rule drawn on a non-keepFieldsBase field still sees its value.
@@ -86,6 +92,7 @@ class AutomationFacadeSupport {
             [fieldPath: "\$.records[*].orderDate", label: "Order date", type: "string"],
             [fieldPath: "\$.records[*].statusId", label: "Status", type: "string"],
             [fieldPath: "\$.records[*].salesChannelEnumId", label: "Sales channel", type: "string"],
+            [fieldPath: "\$.records[*].productStoreId", label: "Product store", type: "string"],
     ].asImmutable()
 
     static Map<String, Object> prepareAutomationSave(def ec, Map params = [:]) {

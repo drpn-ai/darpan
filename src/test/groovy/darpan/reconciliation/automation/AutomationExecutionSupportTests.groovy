@@ -2863,13 +2863,22 @@ class AutomationExecutionSupportTests {
         FakeEc ec = fakeEc()
         seedApiAutomation(ec)
         List<String> events = []
+        String lastStage = null
         ec.entity.updateHook = { FakeValue value ->
-            // A heartbeat is the ONLY .update() this file makes against a run-result row while it is
-            // still RUNNING — every terminal close flips statusEnumId to a terminal value in the SAME
-            // .update() call, so this cannot double-count a terminal write as a heartbeat.
+            // Two different writers now touch a RUNNING run-result row: heartbeatAutomationRun (clock
+            // only) and RunObservability.beginStep (which also stamps currentStage as it opens a stage).
+            // Discriminate on currentStage changing — a heartbeat inherits whatever stage is already on
+            // the row, so only a genuine stage transition reports a new value. Every terminal close
+            // flips statusEnumId in the SAME .update(), so neither branch can double-count a terminal.
             if (value.entityName == "darpan.reconciliation.ReconciliationRunResult" &&
                     value.statusEnumId == AutomationExecutionSupport.STATUS_RUNNING) {
-                events << "heartbeat"
+                String stage = value.currentStage
+                if (stage != null && stage != lastStage) {
+                    lastStage = stage
+                    events << "stage:${stage}".toString()
+                } else {
+                    events << "heartbeat"
+                }
             }
         }
         ec.service.responder = { FakeServiceCall call ->
@@ -2899,10 +2908,31 @@ class AutomationExecutionSupportTests {
         Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
 
         assertEquals(1, result.executedCount)
+        // The three heartbeats are unchanged and still land after each extract and after the reconcile.
+        // Interleaved with them are the stage transitions an operator watches on the live progress view:
+        // automations previously wrote no ReconciliationRunStep rows at all, so that view rendered every
+        // canonical stage as a Pending row that could never advance for the whole run.
         assertEquals(
-                ["extract:FILE_1", "heartbeat", "extract:FILE_2", "heartbeat", "reconcile", "heartbeat"],
+                ["stage:RESOLVE",
+                 "stage:EXTRACT_FILE1", "extract:FILE_1", "heartbeat",
+                 "stage:EXTRACT_FILE2", "extract:FILE_2", "heartbeat",
+                 "stage:COMPARE", "reconcile", "heartbeat",
+                 "stage:WRITE_OUTPUT"],
                 events,
-                "expected exactly one heartbeat after each source extraction and one after the reconcile call")
+                "expected each phase boundary to open its stage and still fire its heartbeat")
+
+        // The stage rows themselves must exist and be closed — the live view reads these, not the
+        // currentStage stamp, so a run that only moved currentStage would still show nothing.
+        List steps = ec.entity.createdValues("darpan.reconciliation.ReconciliationRunStep")
+        assertEquals(
+                ["RESOLVE", "EXTRACT_FILE1", "EXTRACT_FILE2", "COMPARE", "WRITE_OUTPUT"],
+                steps.collect { it.stageCode },
+                "expected one persisted run-step row per completed phase")
+        assertTrue(
+                steps.every { it.statusEnumId == RunObservability.STATUS_SUCCESS },
+                "expected every step of a successful run to be closed SUCCESS, not left RUNNING")
+        assertEquals(5, steps.find { it.stageCode == "EXTRACT_FILE1" }.recordCount,
+                "expected the extract step to carry its record count")
     }
 
     private static FakeEc fakeEc() {

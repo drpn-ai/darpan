@@ -242,6 +242,14 @@ class AutomationExecutionSupport {
             // The row this attempt replaces, if any: a retry re-drives the SAME execution row, and
             // nothing ever clears its run-result id, so on attempt N+1 this still names attempt N's row.
             String supersededRunResultId = normalize(readField(execution, "reconciliationRunResultId"))
+            // The ReconciliationRunStep row currently open, or null between stages. Minting the run row
+            // at RUNNING put automations on the live progress view, but automations wrote no step rows at
+            // all, so that view synthesized a Pending row per canonical stage and NONE of them could ever
+            // advance — a 7-step progress list frozen for the whole run. These are the same phase
+            // boundaries the heartbeat and cancel checkpoints already use. Visible to the catch blocks
+            // below so an abort closes whatever stage was open instead of orphaning it RUNNING.
+            def openStep = null
+            Map<String, Object> stepCtx = [companyUserGroupId: readField(automation, "companyUserGroupId")]
             try {
                 Timestamp startedTimestamp = nowTimestamp(ec)
                 // Task 2b: mint the run-result row as the execution goes RUNNING and carry its id in the
@@ -263,7 +271,17 @@ class AutomationExecutionSupport {
                 // so this is a no-op there.)
                 TenantNotificationSupport.reassignRunSubscriptions(ec, supersededRunResultId, mintedRunResultId)
 
+                // RESOLVE covers everything between minting the row and the first extract: window
+                // resolution, source lookup and the subscription carry-forward above. Opened and closed
+                // together because there is no cancel checkpoint inside it to interleave with.
+                openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_RESOLVE)
+                RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [:])
+                openStep = null
+
+                openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE1)
                 Map<String, Object> file1Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file1Source, window, executionParams), file1Source)
+                RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [recordCount: file1Result.recordCount])
+                openStep = null
                 // Task 2c: refresh the clock after source-1 extraction, a real (possibly slow) I/O call —
                 // see heartbeatAutomationRun's javadoc for why lastUpdatedStamp, not lastHeartbeatDate, is
                 // what actually protects this run from StuckRunReaper.
@@ -275,7 +293,10 @@ class AutomationExecutionSupport {
                 // Cancellation stays cooperative (RunObservability.requestCancel only stamps the request):
                 // this throws RunCancelledException out of the run loop, caught below.
                 RunObservability.checkpointCancel(ec, mintedRunResultId)
+                openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE2)
                 Map<String, Object> file2Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file2Source, window, executionParams), file2Source)
+                RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [recordCount: file2Result.recordCount])
+                openStep = null
                 // Task 2c: after source-2 extraction too — a NO_DATA window returns just below without
                 // ever reaching the reconcile heartbeat, so this is the last one it gets before its own
                 // terminal close (which also bumps lastUpdatedStamp).
@@ -316,9 +337,12 @@ class AutomationExecutionSupport {
                     return
                 }
 
+                openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_COMPARE)
                 Map<String, Object> reconcileResult = normalizeReconcileResult(
                         reconcileRunner.call(ec, automation, file1Source, file2Source, file1Result, file2Result, window, executionParams)
                 )
+                RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [:])
+                openStep = null
                 // Task 2c: around the reconcile call — reconcile (a Spark job) is typically the single
                 // longest phase, so this is the boundary that matters most. Placed AFTER rather than
                 // immediately before: the two extraction heartbeats above already leave the clock fresh
@@ -334,8 +358,11 @@ class AutomationExecutionSupport {
                 ensureAutomationResultArtifact(ec, automation, file1Source, file2Source, reconcileResult, window, executionParams)
                 String resultDataManagerPath = normalizeDataManagerPath(ec,
                         reconcileResult.resultDataManagerPath ?: reconcileResult.diffLocation ?: reconcileResult.diffFileName)
+                openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_WRITE_OUTPUT)
                 String reconciliationRunResultId = persistAutomationRunResult(ec, automation, mintedRunResultId,
                         file1Result, file2Result, reconcileResult, resultDataManagerPath)
+                RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [:])
+                openStep = null
                 mintedRunResultId = reconciliationRunResultId ?: mintedRunResultId
                 // Output is what was persisted, not what exists: a blank resultDataManagerPath now still
                 // resolves to the pre-minted row (it must end terminal), but nothing was written.
@@ -402,6 +429,11 @@ class AutomationExecutionSupport {
                         childWindowEndDate   : window.childWindowEndDate,
                 ]
             } catch (RunObservability.RunCancelledException cancelled) {
+                // Close whatever stage was open so the timeline ends CANCELLED with it, rather than
+                // leaving one row stuck RUNNING under a terminal run. Best-effort, like every other
+                // observability write — never let bookkeeping change how the attempt is classified.
+                RunObservability.endStep(ec, openStep, RunObservability.STATUS_CANCELLED, [:])
+                openStep = null
                 // The operator asked for this at one of the checkpoints above. End the attempt CANCELLED
                 // and carry on with the remaining windows — letting the throw reach the failure path
                 // below would classify the cancel as a transient failure, requeue the run they just
@@ -415,10 +447,16 @@ class AutomationExecutionSupport {
                 // reporting THAT as FAILED would tell the operator their own cancellation was a run
                 // failure — and, worse here than on the interactive path, requeue the stopped run.
                 if (RunObservability.isCancelRequested(ec, mintedRunResultId)) {
+                    RunObservability.endStep(ec, openStep, RunObservability.STATUS_CANCELLED, [:])
+                    openStep = null
                     executionResults << cancelledExecutionResult(ec, automation, execution, mintedRunResultId,
                             automationExecutionId, window)
                     return
                 }
+                // The stage that was running when this blew up is the one an operator needs to see
+                // marked FAILED — it names WHERE the run died, which the run-level error alone does not.
+                RunObservability.endStep(ec, openStep, RunObservability.STATUS_FAILED, [errorMessage: sanitizeErrorMessage(t)])
+                openStep = null
                 Timestamp completedTimestamp = nowTimestamp(ec)
                 Map<String, Object> failureFields = buildFailureFields(ec, execution, t, completedTimestamp, window)
                 updateAutomationExecution(ec, execution, failureFields)

@@ -40,7 +40,41 @@ class AuthFacadeSupport {
     /** The single answer to every login refusal that is not recoverable by changing the password. */
     private static final String INVALID_CREDENTIALS_MESSAGE = "Invalid username or password"
 
+    /** Refusals MoquiShiroRealm raises only AFTER running the credentials matcher, so the password was
+     *  already hashed on these paths and must not be hashed a second time. Everything else — including any
+     *  message this list does not recognise — is treated as having skipped the hash, so drift in the
+     *  framework's wording costs a redundant hash rather than reopening the timing channel. */
+    private static final List<String> POST_PASSWORD_REFUSAL_MARKERS = [
+            PASSWORD_CHANGE_REQUIRED_MARKER,
+            PASSWORD_EXPIRED_MARKER,
+            "is not in allowed list",
+    ]
+
+    /** Decoy credential for the check below: a fixed salt and a well-formed SHA-256 hex digest that is not
+     *  the hash of anything anyone knows. Neither is a secret and neither is ever stored or compared against
+     *  a real account — their only job is to give Shiro's matcher the same shape of work it does for a real
+     *  one, so the submitted password gets hashed either way. */
+    private static final String DECOY_PASSWORD_SALT = "darpan-login-timing-decoy"
+    private static final String DECOY_STORED_CREDENTIAL =
+            "9f2eb2b4b8e0d7a1c3f5068d4e7a9b1c2d3e4f5061728394a5b6c7d8e9f00112"
+
+    /** Wall-clock floor for a refused login, in milliseconds.
+     *
+     *  Matching the work is not enough on its own. A wrong password for an account that EXISTS also runs
+     *  increment#UserAccountFailedLogins — a database write, in its own transaction — and there is no
+     *  honest equivalent to run for a username that does not exist, because there is no row to write to.
+     *  That write is the account-lockout mechanism, so it cannot be dropped either. With the hash equalised,
+     *  it was measured as the whole of the remaining ~0.7ms gap.
+     *
+     *  Hence a floor: hold every refusal to the same minimum so the residual has nothing to show. Deliberately
+     *  small. The usual advice reaches for 100-250ms, but a refused login holds a request thread and its open
+     *  transaction for the whole floor, so a large one hands the enumeration this is meant to frustrate a
+     *  multiplier on the connection pool. 25ms clears the ~2.3ms this component takes locally with room to
+     *  spare, and sits at or under a production database's own round-trip, where it costs almost nothing. */
+    private static final long LOGIN_REFUSAL_FLOOR_MILLIS = 25L
+
     static Map<String, Object> loginSession(def ec, Object username, Object password) {
+        long attemptStartedNanos = System.nanoTime()
         String usernameValue = normalize(username)
         String passwordValue = password?.toString()
 
@@ -55,7 +89,7 @@ class AuthFacadeSupport {
             loggedIn = ec.user.loginUser(usernameValue, passwordValue)
             if (!loggedIn) {
                 passwordChangeReason = resolvePasswordChangeReason(ec)
-                if (passwordChangeReason == null) collapseLoginFailure(ec, usernameValue)
+                if (passwordChangeReason == null) collapseLoginFailure(ec, usernameValue, passwordValue, attemptStartedNanos)
             }
         }
 
@@ -132,13 +166,76 @@ class AuthFacadeSupport {
      *
      *  NOT closed by this: an unknown username short-circuits before password hashing, so the reply comes
      *  back measurably sooner. That timing oracle needs a constant-time login path, not a message change. */
-    private static void collapseLoginFailure(def ec, String usernameValue) {
+    private static void collapseLoginFailure(def ec, String usernameValue, String passwordValue,
+                                             long attemptStartedNanos) {
         List<String> refusals = FacadeSupport.getErrors(ec)
         if (refusals) logger.info("Login refused for username [{}]: {}", usernameValue, refusals.join(" | "))
+        burnSkippedPasswordHash(ec, refusals, usernameValue, passwordValue)
+        holdRefusalToFloor(attemptStartedNanos)
         // clearAll(), not clearErrors(): clearErrors MOVES errors into the messages list, which would hand
         // the caller the same text under a different key.
         ec.message.clearAll()
         ec.message.addError(INVALID_CREDENTIALS_MESSAGE)
+    }
+
+    /** Spend the password hash the framework skipped, so a refusal cannot be identified by how fast it came
+     *  back. Closes the other half of the enumeration oracle that collapseLoginFailure's wording fix leaves
+     *  open: identical text is no use if one answer is reliably quicker.
+     *
+     *  MoquiShiroRealm decides "no such account", "disabled" and "terminated" in loginPrePassword, before it
+     *  ever reaches the credentials matcher, so those replies skip the hash entirely and return sooner. This
+     *  runs the same hash the matcher would have, against a decoy salt, and throws the result away.
+     *
+     *  Equalising the WORK rather than padding the CLOCK is deliberate. A fixed delay would be simpler and
+     *  would mask more, but it holds a request thread and its open transaction for the whole floor on every
+     *  failed login — during the enumeration this is meant to frustrate, that multiplies an attacker's grip
+     *  on the connection pool by the ratio of the floor to a few milliseconds. A decoy hash is CPU-bound and
+     *  holds nothing.
+     *
+     *  What this does NOT equalise: loginPrePassword falls through up to three entity lookups for a username
+     *  it cannot find (exact, case-insensitive, then email) versus one for a hit, so lookup cost still varies
+     *  by a smaller amount in the opposite direction. On this component's SHA-256 hashing the two roughly
+     *  cancel; a slower database or a costlier hash would change that balance, so the residual is worth
+     *  re-measuring against a production-like database rather than assumed to stay closed. The tests below
+     *  pin the deterministic half of this — that both paths spend exactly one hash. */
+    private static void burnSkippedPasswordHash(def ec, List<String> refusals, String usernameValue,
+                                                String passwordValue) {
+        boolean hashAlreadySpent = refusals.any { String refusal ->
+            POST_PASSWORD_REFUSAL_MARKERS.any { marker -> refusal?.contains(marker) }
+        }
+        if (hashAlreadySpent) return
+        try {
+            // Drive the SAME matcher the real path uses rather than hashing directly: a bare SimpleHash
+            // leaves out the matcher construction, salt byte-source conversion and digest comparison around
+            // it, and measurement showed that shortfall still left the refusals ~0.8ms apart.
+            def token = new UsernamePasswordToken(usernameValue ?: "", passwordValue ?: "")
+            def info = new SimpleAuthenticationInfo(usernameValue ?: "", DECOY_STORED_CREDENTIAL,
+                    new SimpleByteSource(DECOY_PASSWORD_SALT), "moquiRealm")
+            ec.ecfi.getCredentialsMatcher(ec.ecfi.passwordHashType, false).doCredentialsMatch(token, info)
+        } catch (Exception e) {
+            // Never fail a login response over the decoy; worst case the timing difference returns.
+            logger.warn("Decoy credential check failed, refused-login timing may be distinguishable: ${e.message}")
+        }
+    }
+
+    /** Hold a refusal open until the floor, so whatever the decoy could not equalise has nothing to show.
+     *
+     *  Overshooting the floor is not an error but it does mean the masking has stopped working, so say so —
+     *  a silent regression here looks exactly like a working defence. */
+    private static void holdRefusalToFloor(long attemptStartedNanos) {
+        long elapsedMillis = (System.nanoTime() - attemptStartedNanos).intdiv(1_000_000L)
+        long remainingMillis = LOGIN_REFUSAL_FLOOR_MILLIS - elapsedMillis
+        if (remainingMillis <= 0) {
+            logger.warn("Refused login took {}ms, past the {}ms floor — refusals are no longer held to a " +
+                    "constant time and may again be distinguishable by how fast they return",
+                    elapsedMillis, LOGIN_REFUSAL_FLOOR_MILLIS)
+            return
+        }
+        try {
+            Thread.sleep(remainingMillis)
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt()
+        }
     }
 
     /** Null unless the failed login was rejected for a reason the user can clear themselves by setting a

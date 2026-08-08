@@ -521,6 +521,115 @@ class AuthFacadeSupportTests {
         assertEquals(unknown.passwordChangeRequired, existing.passwordChangeRequired)
     }
 
+    /** Identical wording is no use if one answer is reliably quicker. MoquiShiroRealm decides "no such
+     *  account" before it ever reaches the credentials matcher, so that reply skips the password hash and
+     *  returns sooner — measurably so. Every refused login must therefore spend exactly one hash. */
+    @Test
+    void loginSessionSpendsTheHashTheFrameworkSkipped() {
+        EcfiStub ecfi = new EcfiStub(credentialsMatch: false)
+        MessageFacadeStub message = new MessageFacadeStub()
+        UserStub user = new UserStub(loginUserResult: false,
+                loginFailureError: ACCOUNT_REVEALING_REFUSALS.unknownAccount)
+        def ec = executionContext(message: message, user: user, ecfi: ecfi)
+
+        AuthFacadeSupport.loginSession(ec, "no.such.person", "guess")
+
+        assertEquals(1, ecfi.credentialChecks.size(),
+                "a refusal decided before the password check must still spend a credential check")
+    }
+
+    /** ...and exactly one. Doubling up on a path that already hashed would just invert the tell. */
+    @Test
+    void loginSessionDoesNotSpendASecondHashWhenTheFrameworkAlreadyDidOne() {
+        // The IP allow-list gate is raised in loginPostPassword, i.e. after the credentials matcher ran.
+        EcfiStub ecfi = new EcfiStub(credentialsMatch: false)
+        MessageFacadeStub message = new MessageFacadeStub()
+        UserStub user = new UserStub(loginUserResult: false,
+                loginFailureError: ACCOUNT_REVEALING_REFUSALS.ipNotAllowed)
+        def ec = executionContext(message: message, user: user, ecfi: ecfi)
+
+        AuthFacadeSupport.loginSession(ec, "avnindra.sharma", "correct-password")
+
+        assertEquals(0, ecfi.credentialChecks.size(),
+                "the framework already hashed on this path; a decoy would make it the slow one instead")
+    }
+
+    /** A refusal whose wording this code does not recognise must fall to the safe side — spend the hash.
+     *  Framework wording drifting should cost a redundant hash, never reopen the timing channel. */
+    @Test
+    void loginSessionSpendsAHashForARefusalItDoesNotRecognise() {
+        EcfiStub ecfi = new EcfiStub(credentialsMatch: false)
+        MessageFacadeStub message = new MessageFacadeStub()
+        UserStub user = new UserStub(loginUserResult: false,
+                loginFailureError: "Authenticate failed for some reason invented after this code was written")
+        def ec = executionContext(message: message, user: user, ecfi: ecfi)
+
+        AuthFacadeSupport.loginSession(ec, "avnindra.sharma", "guess")
+
+        assertEquals(1, ecfi.credentialChecks.size())
+    }
+
+    /** The password-change reasons are reached only after the password matched, so the hash is already spent
+     *  and the reply is not part of the anonymous enumeration surface. */
+    @Test
+    void loginSessionDoesNotSpendADecoyHashOnThePasswordChangePath() {
+        EcfiStub ecfi = new EcfiStub(credentialsMatch: false)
+        MessageFacadeStub message = new MessageFacadeStub()
+        UserStub user = new UserStub(loginUserResult: false, loginFailureError: FRAMEWORK_PWDCHG_ERROR)
+        def ec = executionContext(message: message, user: user, ecfi: ecfi)
+
+        Map<String, Object> result = AuthFacadeSupport.loginSession(ec, "avnindra.sharma", "temp-pass")
+
+        assertTrue(result.passwordChangeRequired as boolean)
+        assertEquals(0, ecfi.credentialChecks.size())
+    }
+
+    /** Equalising the work only got the two refusals to within ~0.7ms of each other: a wrong password for an
+     *  account that EXISTS also writes increment#UserAccountFailedLogins, and there is no honest equivalent
+     *  to run for a username with no row to write to. So every refusal is additionally held to a floor. */
+    @Test
+    void loginSessionHoldsEveryRefusalToTheSameFloor() {
+        List<Long> elapsed = [ACCOUNT_REVEALING_REFUSALS.unknownAccount,
+                              ACCOUNT_REVEALING_REFUSALS.wrongPassword,
+                              ACCOUNT_REVEALING_REFUSALS.disabled].collect { String frameworkText ->
+            MessageFacadeStub message = new MessageFacadeStub()
+            UserStub user = new UserStub(loginUserResult: false, loginFailureError: frameworkText)
+            def ec = executionContext(message: message, user: user)
+
+            long startedNanos = System.nanoTime()
+            AuthFacadeSupport.loginSession(ec, "avnindra.sharma", "guess")
+            return (System.nanoTime() - startedNanos).intdiv(1_000_000L)
+        }
+
+        elapsed.each { Long millis ->
+            assertTrue(millis >= 25L, "a refused login returned in ${millis}ms, under the 25ms floor")
+        }
+    }
+
+    /** The floor is for refusals only. Padding a successful login would tax every real sign-in to hide
+     *  something the response announces anyway. */
+    @Test
+    void loginSessionDoesNotHoldBackASuccessfulSignIn() {
+        Closure<Long> signIn = {
+            MessageFacadeStub message = new MessageFacadeStub()
+            UserStub user = new UserStub(userId: "EX_USER", username: "test.user",
+                    loginUserResult: true, loginKey: "issued-token")
+            def ec = executionContext(message: message, user: user, factory: new FactoryStub(expireHours: 2.0f))
+
+            long startedNanos = System.nanoTime()
+            Map<String, Object> result = AuthFacadeSupport.loginSession(ec, "test.user", "secret")
+            assertTrue(result.authenticated as boolean)
+            return (System.nanoTime() - startedNanos).intdiv(1_000_000L)
+        }
+
+        // Warm the path first: a cold first call spends more than the floor on class loading alone, which
+        // would look exactly like padding that is not there.
+        3.times { signIn.call() }
+        long elapsedMillis = signIn.call()
+
+        assertTrue(elapsedMillis < 25L, "a successful sign-in waited ${elapsedMillis}ms behind the refusal floor")
+    }
+
     /** Collapsing the refusals must not also blind support: the reason still has to reach the server log. */
     @Test
     void loginSessionKeepsTheRealReasonOutOfTheReplyButNotOutOfTheLog() {
@@ -819,18 +928,32 @@ class AuthFacadeSupportTests {
         boolean credentialsMatch
         Object requestedHashType
         boolean requestedBase64
+        String passwordHashType = "SHA-256"
+        /** One entry per credential check actually spent on this request. UserStub fakes the framework's own
+         *  check, so in these tests this counts decoys only — exactly what the timing parity depends on. */
+        List<String> credentialChecks = []
 
         Object getCredentialsMatcher(Object hashType, boolean base64) {
             requestedHashType = hashType
             requestedBase64 = base64
-            return new CredentialsMatcherStub(credentialsMatch: credentialsMatch)
+            return new CredentialsMatcherStub(credentialsMatch: credentialsMatch, ecfi: this)
+        }
+
+        String getPasswordHashType() {
+            return passwordHashType
+        }
+
+        String getSimpleHash(String source, String salt) {
+            return "hash:${source}:${salt}"
         }
     }
 
     static class CredentialsMatcherStub {
         boolean credentialsMatch
+        EcfiStub ecfi
 
         boolean doCredentialsMatch(Object token, Object info) {
+            ecfi?.credentialChecks?.add(info?.toString())
             return credentialsMatch
         }
     }

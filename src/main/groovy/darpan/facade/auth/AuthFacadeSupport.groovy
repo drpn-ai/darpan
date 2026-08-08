@@ -37,6 +37,9 @@ class AuthFacadeSupport {
     private static final String PASSWORD_EXPIRED_MESSAGE =
             "Your password has expired and must be changed before you can sign in."
 
+    /** The single answer to every login refusal that is not recoverable by changing the password. */
+    private static final String INVALID_CREDENTIALS_MESSAGE = "Invalid username or password"
+
     static Map<String, Object> loginSession(def ec, Object username, Object password) {
         String usernameValue = normalize(username)
         String passwordValue = password?.toString()
@@ -52,7 +55,7 @@ class AuthFacadeSupport {
             loggedIn = ec.user.loginUser(usernameValue, passwordValue)
             if (!loggedIn) {
                 passwordChangeReason = resolvePasswordChangeReason(ec)
-                if (passwordChangeReason == null) ec.message.addError("Invalid username or password")
+                if (passwordChangeReason == null) collapseLoginFailure(ec, usernameValue)
             }
         }
 
@@ -107,6 +110,35 @@ class AuthFacadeSupport {
         }
 
         return result
+    }
+
+    /** Reduce every non-recoverable login refusal to one indistinguishable answer.
+     *
+     *  MoquiShiroRealm names the account in all six of its refusals, and five of them are decided BEFORE the
+     *  password is checked, so an anonymous caller could confirm an account exists without holding its
+     *  password at all — and learn more besides:
+     *
+     *    "No account found for username X"                                    → X does not exist
+     *    "Password incorrect for username X"                                  → X exists
+     *    "...account is disabled and will not be re-enabled until T [DISTMP]" → X exists, is being attacked
+     *    "...account is disabled...not schedule[d]...[DISPRM]"                → X exists, is deactivated
+     *    "User account X was terminated at T [TERM]"                          → X existed, and when it left
+     *    "...client IP C is not in allowed list for user or group"            → X exists and is IP-fenced
+     *
+     *  The framework already declines to reveal whether the password was right for a disabled account
+     *  (loginPrePassword checks `disabled` first, deliberately); this closes the remaining half of the same
+     *  question. The reason still goes to the server log, because support diagnosing "I cannot get in" needs
+     *  to know which gate closed — it is the caller who must not be told.
+     *
+     *  NOT closed by this: an unknown username short-circuits before password hashing, so the reply comes
+     *  back measurably sooner. That timing oracle needs a constant-time login path, not a message change. */
+    private static void collapseLoginFailure(def ec, String usernameValue) {
+        List<String> refusals = FacadeSupport.getErrors(ec)
+        if (refusals) logger.info("Login refused for username [{}]: {}", usernameValue, refusals.join(" | "))
+        // clearAll(), not clearErrors(): clearErrors MOVES errors into the messages list, which would hand
+        // the caller the same text under a different key.
+        ec.message.clearAll()
+        ec.message.addError(INVALID_CREDENTIALS_MESSAGE)
     }
 
     /** Null unless the failed login was rejected for a reason the user can clear themselves by setting a

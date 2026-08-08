@@ -461,6 +461,82 @@ class AuthFacadeSupportTests {
         assertEquals(["Invalid username or password"], result.errors)
     }
 
+    // Every refusal MoquiShiroRealm can raise before the password is checked. Each one names the account, so
+    // each one answers "does this username exist?" for a caller holding no password at all.
+    private static final Map<String, String> ACCOUNT_REVEALING_REFUSALS = [
+            unknownAccount   : "No account found for username avnindra.sharma",
+            wrongPassword    : "Password incorrect for username avnindra.sharma",
+            lockedOut        : "Authenticate failed for user avnindra.sharma because account is disabled and will not be re-enabled until 2026-08-08 12:05:00.0 [DISTMP].",
+            disabled         : "Authenticate failed for user avnindra.sharma because account is disabled and is not schedule to be automatically re-enabled [DISPRM].",
+            terminated       : "User account avnindra.sharma was terminated at 2026-01-31 00:00:00.0 [TERM].",
+            ipNotAllowed     : "Authenticate failed for user avnindra.sharma because client IP 203.0.113.7 is not in allowed list for user or group.",
+    ]
+
+    /** The whole point: an attacker must not be able to tell these six apart, nor tell any of them from the
+     *  others, so probing usernames yields nothing. */
+    @Test
+    void loginSessionGivesEveryRefusalTheSameAnswer() {
+        List<String> distinctReplies = []
+        ACCOUNT_REVEALING_REFUSALS.each { String gate, String frameworkText ->
+            MessageFacadeStub message = new MessageFacadeStub()
+            UserStub user = new UserStub(loginUserResult: false, loginFailureError: frameworkText)
+            def ec = executionContext(message: message, user: user)
+
+            Map<String, Object> result = AuthFacadeSupport.loginSession(ec, "avnindra.sharma", "guess")
+
+            String rendered = "${result.errors}${result.messages}"
+            assertFalse(rendered.contains("avnindra.sharma"), "${gate} leaked the account name: ${rendered}")
+            assertFalse(rendered.contains("DISTMP") || rendered.contains("DISPRM") || rendered.contains("TERM"),
+                    "${gate} leaked the internal code: ${rendered}")
+            assertFalse(rendered.contains("203.0.113.7"), "${gate} leaked the IP fence: ${rendered}")
+            assertFalse(result.passwordChangeRequired as boolean, "${gate} is not recoverable by changing the password")
+            distinctReplies.add(rendered)
+        }
+
+        assertEquals(1, distinctReplies.toSet().size(),
+                "every refusal must be indistinguishable, got: ${distinctReplies.toSet()}")
+        assertEquals("[Invalid username or password][]", distinctReplies.first())
+    }
+
+    /** An account that exists and one that does not must be answered identically — the narrowest statement
+     *  of the leak, kept separate so a regression names itself. */
+    @Test
+    void loginSessionDoesNotRevealWhetherTheAccountExists() {
+        MessageFacadeStub unknownMessage = new MessageFacadeStub()
+        Map<String, Object> unknown = AuthFacadeSupport.loginSession(
+                executionContext(message: unknownMessage, user: new UserStub(
+                        loginUserResult: false, loginFailureError: ACCOUNT_REVEALING_REFUSALS.unknownAccount)),
+                "avnindra.sharma", "guess")
+
+        MessageFacadeStub existingMessage = new MessageFacadeStub()
+        Map<String, Object> existing = AuthFacadeSupport.loginSession(
+                executionContext(message: existingMessage, user: new UserStub(
+                        loginUserResult: false, loginFailureError: ACCOUNT_REVEALING_REFUSALS.wrongPassword)),
+                "avnindra.sharma", "guess")
+
+        assertEquals(unknown.errors, existing.errors)
+        assertEquals(unknown.messages, existing.messages)
+        assertEquals(unknown.ok, existing.ok)
+        assertEquals(unknown.authenticated, existing.authenticated)
+        assertEquals(unknown.passwordChangeRequired, existing.passwordChangeRequired)
+    }
+
+    /** Collapsing the refusals must not also blind support: the reason still has to reach the server log. */
+    @Test
+    void loginSessionKeepsTheRealReasonOutOfTheReplyButNotOutOfTheLog() {
+        MessageFacadeStub message = new MessageFacadeStub()
+        UserStub user = new UserStub(loginUserResult: false,
+                loginFailureError: ACCOUNT_REVEALING_REFUSALS.disabled)
+        def ec = executionContext(message: message, user: user)
+
+        Map<String, Object> result = AuthFacadeSupport.loginSession(ec, "avnindra.sharma", "guess")
+
+        // The MessageFacade — the only channel that reaches the caller — retains nothing but the generic text.
+        assertEquals(["Invalid username or password"], message.errors)
+        assertEquals([], message.messages)
+        assertEquals(["Invalid username or password"], result.errors)
+    }
+
     @Test
     void changeExpiredPasswordUpdatesPasswordAndRevokesEveryOtherSession() {
         MessageFacadeStub message = new MessageFacadeStub()

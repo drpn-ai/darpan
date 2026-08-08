@@ -27,6 +27,18 @@
             <parameter name="authenticated" type="Boolean">
                 <description>True when the session is authenticated after the login attempt.</description>
             </parameter>
+            <parameter name="passwordChangeRequired" type="Boolean">
+                <description>True when the submitted credentials were correct but the account cannot sign in until its
+                    password is changed. darpan-ui offers change#ExpiredPassword instead of a plain login failure.
+                    NOTE this case returns ok=true with authenticated=false and the explanation in `messages`: the
+                    credentials were accepted and the call completed, it is the session that is withheld pending a
+                    required next step. Read `authenticated`, never `ok`, to decide whether a session exists.</description>
+            </parameter>
+            <parameter name="passwordChangeReason" type="String">
+                <description>Why the password must change: `PWDCHG` when the account is flagged to change at next
+                    login, `PWDTIM` when the current password has aged past the configured rotation window.
+                    Absent unless passwordChangeRequired is true.</description>
+            </parameter>
             <parameter name="authToken" type="String">
                 <description>Explicit login-key token that darpan-ui sends on later requests through the `login_key` header.</description>
             </parameter>
@@ -78,6 +90,8 @@
             <set field="messages" from="authResult.messages"/>
             <set field="errors" from="authResult.errors"/>
             <set field="authenticated" from="authResult.authenticated"/>
+            <set field="passwordChangeRequired" from="authResult.passwordChangeRequired"/>
+            <set field="passwordChangeReason" from="authResult.passwordChangeReason"/>
             <set field="authToken" from="authResult.authToken"/>
             <set field="authTokenType" from="authResult.authTokenType"/>
             <set field="authTokenHeaderName" from="authResult.authTokenHeaderName"/>
@@ -454,6 +468,57 @@
             <set field="ok" from="passwordUpdated == true &amp;&amp; !ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <!-- The self-service escape hatch for an account that login refuses until its password changes. Every
+         account the admin app creates or resets is flagged requirePasswordChange="Y", and login#Session
+         rejects those before a session exists, so change#OwnPassword above — which needs a session — is
+         unreachable for exactly the users who most need it. Anonymous by necessity; see the support method
+         for the oracle, lockout, and brute-force guards that necessity forces. -->
+    <service verb="change" noun="ExpiredPassword" allow-remote="true" authenticate="anonymous-all">
+        <description>Change the password of an account that cannot sign in until it is changed, without a session.
+            Requires the account's current password, so it grants nothing to a caller who does not already hold
+            valid credentials. Issues no token: darpan-ui calls login#Session afterwards with the new password.</description>
+        <in-parameters>
+            <parameter name="username" required="true">
+                <description>Account whose password is being changed. Matched exactly first, then case-insensitively,
+                    the same way login resolves an account.</description>
+            </parameter>
+            <parameter name="currentPassword" required="true">
+                <description>The account's existing password, including the temporary one an admin issued.</description>
+            </parameter>
+            <parameter name="newPassword" required="true">
+                <description>The replacement password, subject to the standard Moqui password policy.</description>
+            </parameter>
+            <parameter name="newPasswordVerify" required="true">
+                <description>Confirmation value for the new password.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean">
+                <description>True when the password update completed without facade errors.</description>
+            </parameter>
+            <parameter name="messages" type="List">
+                <description>Informational messages emitted during password update handling.</description>
+                <parameter name="message"/>
+            </parameter>
+            <parameter name="errors" type="List">
+                <description>Errors returned while validating or changing the password. Identity and credential
+                    failures are collapsed into one indistinguishable message; password-policy failures are
+                    reported in full so the user can correct them.</description>
+                <parameter name="error"/>
+            </parameter>
+            <parameter name="passwordUpdated" type="Boolean">
+                <description>True when the password was changed and the account can now sign in.</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="changeResult" from="darpan.facade.auth.AuthFacadeSupport.changeExpiredPassword(ec, username, currentPassword, newPassword, newPasswordVerify)"/>
+            <set field="ok" from="changeResult.ok"/>
+            <set field="messages" from="changeResult.messages"/>
+            <set field="errors" from="changeResult.errors"/>
+            <set field="passwordUpdated" from="changeResult.passwordUpdated"/>
         </actions>
     </service>
 

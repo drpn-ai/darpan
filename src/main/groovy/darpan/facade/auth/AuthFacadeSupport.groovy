@@ -6,6 +6,7 @@ import darpan.facade.common.TenantScopedFinder
 import org.apache.shiro.authc.SimpleAuthenticationInfo
 import org.apache.shiro.authc.UsernamePasswordToken
 import org.apache.shiro.lang.util.SimpleByteSource
+import org.moqui.entity.EntityCondition
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -13,6 +14,28 @@ import static darpan.common.ValueSupport.normalize
 
 class AuthFacadeSupport {
     private static final Logger logger = LoggerFactory.getLogger(AuthFacadeSupport.class)
+
+    /** Reason codes darpan-ui switches on to decide whether a rejected login can be recovered by a
+     *  password change. Values match the bracketed markers the framework embeds in its own messages. */
+    static final String PASSWORD_CHANGE_REQUIRED_REASON = "PWDCHG"
+    static final String PASSWORD_EXPIRED_REASON = "PWDTIM"
+
+    /** MoquiShiroRealm.loginPostPassword raises PasswordChangeRequiredException with a "[PWDCHG]" marker
+     *  when UserAccount.requirePasswordChange is Y, and ExpiredCredentialsException with "[PWDTIM]" when
+     *  passwordSetDate is older than user-facade.password.@change-weeks. UserFacadeImpl.internalLoginToken
+     *  catches both and adds the message text to the MessageFacade, which is the only place the distinction
+     *  survives — loginUser() returns a bare false for every rejection reason alike. Matching the marker is
+     *  therefore the supported signal; the session attributes the framework also sets are unusable here
+     *  because darpan-ui authenticates statelessly with a login-key header and has no server session.
+     *
+     *  Both exceptions are thrown only AFTER the submitted password matched, so reporting either reason to
+     *  an unauthenticated caller reveals nothing: it answers a caller who already holds valid credentials. */
+    private static final String PASSWORD_CHANGE_REQUIRED_MARKER = "[PWDCHG]"
+    private static final String PASSWORD_EXPIRED_MARKER = "[PWDTIM]"
+    private static final String PASSWORD_CHANGE_REQUIRED_MESSAGE =
+            "Your password must be changed before you can sign in."
+    private static final String PASSWORD_EXPIRED_MESSAGE =
+            "Your password has expired and must be changed before you can sign in."
 
     static Map<String, Object> loginSession(def ec, Object username, Object password) {
         String usernameValue = normalize(username)
@@ -24,9 +47,13 @@ class AuthFacadeSupport {
         boolean loggedIn = false
         String issuedAuthToken = null
         Integer authTokenExpiresInSecondsValue = null
+        String passwordChangeReason = null
         if (!ec.message.hasError()) {
             loggedIn = ec.user.loginUser(usernameValue, passwordValue)
-            if (!loggedIn) ec.message.addError("Invalid username or password")
+            if (!loggedIn) {
+                passwordChangeReason = resolvePasswordChangeReason(ec)
+                if (passwordChangeReason == null) ec.message.addError("Invalid username or password")
+            }
         }
 
         String userId = normalize(ec?.user?.userId)
@@ -48,7 +75,8 @@ class AuthFacadeSupport {
         }
 
         Map<String, Object> result = [
-                authenticated: authenticated,
+                authenticated         : authenticated,
+                passwordChangeRequired: passwordChangeReason != null,
         ]
         if (authenticated) {
             result.sessionInfo = TenantAccessSupport.buildSessionInfo(ec)
@@ -59,7 +87,166 @@ class AuthFacadeSupport {
         }
 
         result.putAll(FacadeSupport.envelope(ec))
+
+        if (passwordChangeReason != null) {
+            // Drop the framework text entirely: it names the account and quotes the internal code, and this
+            // response goes to an unauthenticated caller. clearAll() rather than clearErrors(), because
+            // clearErrors() MOVES errors into the messages list instead of discarding them.
+            ec.message.clearAll()
+            result.passwordChangeReason = passwordChangeReason
+            // Reported as a COMPLETED call carrying a required next step, not as a failure — `authenticated`
+            // stays false, which is the signal every caller actually reads. Two layers drop the payload of
+            // anything shaped like a failure, and the reason code has to survive both: Moqui's JSON-RPC
+            // dispatcher replaces the result with an error object when the MessageFacade ends with errors,
+            // and darpan-ui's client throws on any envelope with ok:false or a non-empty errors list. The
+            // user-facing text therefore travels in `messages`.
+            result.ok = true
+            result.errors = []
+            result.messages = [passwordChangeReason == PASSWORD_EXPIRED_REASON
+                    ? PASSWORD_EXPIRED_MESSAGE : PASSWORD_CHANGE_REQUIRED_MESSAGE]
+        }
+
         return result
+    }
+
+    /** Null unless the failed login was rejected for a reason the user can clear themselves by setting a
+     *  new password. See PASSWORD_CHANGE_REQUIRED_MARKER for why the message text is the signal. */
+    private static String resolvePasswordChangeReason(def ec) {
+        List<String> errors = FacadeSupport.getErrors(ec)
+        if (errors.any { it?.contains(PASSWORD_CHANGE_REQUIRED_MARKER) }) return PASSWORD_CHANGE_REQUIRED_REASON
+        if (errors.any { it?.contains(PASSWORD_EXPIRED_MARKER) }) return PASSWORD_EXPIRED_REASON
+        return null
+    }
+
+    /** Change the password of an account that cannot sign in until it does so (PWDCHG or PWDTIM), without
+     *  requiring a session — the whole point being that no session can exist until the password changes.
+     *
+     *  Three things this has to get right that the framework service underneath does not, because it was
+     *  written for an authenticated caller:
+     *
+     *  1. update#Password reports "Could not find user with name X" and "Password incorrect for user X"
+     *     through `<return public="true" type="danger"/>`, which calls addPublic — a plain message, not an
+     *     error. Left alone those ride out on an ok:true envelope and make this a username-existence oracle.
+     *  2. update#Password does not consult moqui.security.UserAccount.disabled, so an account the framework
+     *     just locked after too many failed logins could reset its way straight past the lockout.
+     *  3. update#Password does not count failed attempts, so an unguarded anonymous wrapper around it is an
+     *     offline-speed password-guessing channel that never trips the max-failures lockout login enforces.
+     *
+     *  Password-policy complaints (too short, no digit, reused) are the one class of failure passed through
+     *  verbatim: they are only reachable after the current password verified, so they tell an attacker
+     *  nothing, and withholding them would leave the user guessing why their new password was refused. */
+    static Map<String, Object> changeExpiredPassword(def ec, Object username, Object currentPassword,
+                                                     Object newPassword, Object newPasswordVerify) {
+        String usernameValue = normalize(username)
+        String currentPasswordValue = currentPassword?.toString()
+        String newPasswordValue = newPassword?.toString()
+        String newPasswordVerifyValue = newPasswordVerify?.toString()
+
+        if (!usernameValue) ec.message.addError("username is required")
+        if (!currentPasswordValue) ec.message.addError("current password is required")
+        if (!newPasswordValue) ec.message.addError("new password is required")
+        if (!newPasswordVerifyValue) ec.message.addError("new password verification is required")
+
+        boolean passwordUpdated = false
+        if (!ec.message.hasError()) {
+            def userAccount = findUserAccountForPasswordChange(ec, usernameValue)
+            if (userAccount == null || "Y" == normalize(userAccount.disabled)) {
+                rejectAnonymousPasswordChange(ec)
+            } else {
+                passwordUpdated = runFrameworkPasswordChange(ec, userAccount, currentPasswordValue,
+                        newPasswordValue, newPasswordVerifyValue)
+            }
+        }
+
+        Map<String, Object> result = [passwordUpdated: passwordUpdated]
+        result.putAll(FacadeSupport.envelope(ec))
+        return result
+    }
+
+    /** Exact username first, then case-insensitive, mirroring MoquiShiroRealm.loginPrePassword. Login accepts
+     *  either casing, so resolving the account any more strictly here would strand a user who signed in
+     *  successfully and then could not complete the change they were just told to make. */
+    private static def findUserAccountForPasswordChange(def ec, String usernameValue) {
+        def finder = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
+                "self-scoped auth: resolve account for anonymous forced password change")
+        def account = finder.condition("username", usernameValue).one()
+        if (account != null) return account
+
+        def caseInsensitiveFinder = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
+                "self-scoped auth: case-insensitive account lookup for anonymous forced password change")
+        def conditionFactory = ec.entity?.conditionFactory
+        if (conditionFactory == null) return null
+        return caseInsensitiveFinder.condition(conditionFactory
+                .makeCondition("username", EntityCondition.ComparisonOperator.EQUALS, usernameValue)
+                .ignoreCase()).one()
+    }
+
+    private static boolean runFrameworkPasswordChange(def ec, def userAccount, String currentPasswordValue,
+                                                      String newPasswordValue, String newPasswordVerifyValue) {
+        Map updateOut = ec.service.sync().name("org.moqui.impl.UserServices.update#Password").parameters([
+                userId           : userAccount.userId,
+                oldPassword      : currentPasswordValue,
+                newPassword      : newPasswordValue,
+                newPasswordVerify: newPasswordVerifyValue,
+        ]).call()
+
+        if (updateOut?.updateSuccessful == true && !ec.message.hasError()) {
+            // The framework success message names the account; darpan-ui renders its own confirmation copy.
+            ec.message.clearAll()
+            // Match change#OwnPassword: a password change invalidates every other device immediately.
+            deleteAllLoginKeysForUser(ec, normalize(userAccount.userId))
+            return true
+        }
+
+        if (updateOut?.passwordIssues == true) {
+            promotePasswordPolicyMessagesToErrors(ec)
+            return false
+        }
+
+        if (!ec.message.hasError()) {
+            // No error and no policy complaint means update#Password bailed through one of its addPublic
+            // returns: the account was not found or the current password did not match. Only this branch is
+            // a credential guess, so only this branch feeds the framework's max-failures lockout. Its own
+            // transaction, because the enclosing one is about to roll back.
+            incrementFailedLogins(ec, normalize(userAccount.userId))
+        }
+        rejectAnonymousPasswordChange(ec)
+        return false
+    }
+
+    /** update#PasswordInternal splits a policy rejection in two: the reasons ("Password shorter than 8
+     *  characters", "Password was used in last 5 passwords") go to the messages list, while the error it
+     *  actually fails with is the contentless "Found issues with password so not updating". A service that
+     *  ends with errors is returned over JSON-RPC as an error object built from the error strings alone, so
+     *  the messages are dropped and the user is told only that something was wrong. Swapping the reasons
+     *  into the error position keeps the failure a failure while making it one the user can act on. */
+    private static void promotePasswordPolicyMessagesToErrors(def ec) {
+        List<String> reasons = FacadeSupport.getMessages(ec).findAll { it }
+        ec.message.clearAll()
+        if (reasons) {
+            reasons.each { ec.message.addError(it) }
+        } else {
+            ec.message.addError("That new password was refused. Choose a different one.")
+        }
+    }
+
+    /** One indistinguishable answer for "no such account", "wrong current password", "locked out", and any
+     *  other non-policy refusal, so the response cannot be mined for which of those is true. */
+    private static void rejectAnonymousPasswordChange(def ec) {
+        // clearAll(), not clearErrors(): clearErrors MOVES errors into the messages list rather than
+        // discarding them, which would put the framework text back in the response under another key.
+        ec.message.clearAll()
+        ec.message.addError("Unable to change the password. Check the username and current password.")
+    }
+
+    private static void incrementFailedLogins(def ec, String userId) {
+        if (!userId) return
+        try {
+            ec.service.sync().name("org.moqui.impl.UserServices.increment#UserAccountFailedLogins")
+                    .parameters([userId: userId]).requireNewTransaction(true).call()
+        } catch (Exception e) {
+            logger.warn("incrementFailedLogins failed for userId=${userId}: ${e.message}")
+        }
     }
 
     static Map<String, Object> verifyOwnPassword(def ec, Object currentPassword) {

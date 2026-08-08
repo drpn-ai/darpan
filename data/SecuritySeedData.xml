@@ -35,6 +35,8 @@
             artifactName="facade.AuthFacadeServices.get#SessionInfo" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_AUTH_API"
             artifactName="facade.AuthFacadeServices.logout#Session" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_AUTH_API"
+            artifactName="facade.AuthFacadeServices.change#ExpiredPassword" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"/>
     <moqui.security.ArtifactAuthz artifactAuthzId="DARPAN_AUTH_API_ALL_USERS" userGroupId="ALL_USERS"
             artifactGroupId="DARPAN_AUTH_API" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
 

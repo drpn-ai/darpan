@@ -75,6 +75,9 @@
                                         "$ref": "#/components/schemas/UpdateUserAccountRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/ChangeExpiredPasswordRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ChangeOwnPasswordRequest"
                                     },
                                     {
@@ -314,6 +317,7 @@
                                         "admin.UserAdminServices.get#UserList": "#/components/schemas/GetUserListRequest",
                                         "admin.UserAdminServices.reset#Password": "#/components/schemas/ResetPasswordRequest",
                                         "admin.UserAdminServices.update#UserAccount": "#/components/schemas/UpdateUserAccountRequest",
+                                        "facade.AuthFacadeServices.change#ExpiredPassword": "#/components/schemas/ChangeExpiredPasswordRequest",
                                         "facade.AuthFacadeServices.change#OwnPassword": "#/components/schemas/ChangeOwnPasswordRequest",
                                         "facade.AuthFacadeServices.get#SessionInfo": "#/components/schemas/GetSessionInfoRequest",
                                         "facade.AuthFacadeServices.login#Session": "#/components/schemas/LoginSessionRequest",
@@ -453,6 +457,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/UpdateUserAccountResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ChangeExpiredPasswordResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ChangeOwnPasswordResponse"
@@ -2381,6 +2388,121 @@
                     "result"
                 ]
             },
+            "ChangeExpiredPasswordParams": {
+                "type": "object",
+                "properties": {
+                    "username": {
+                        "type": "string",
+                        "description": "Account whose password is being changed. Matched exactly first, then case-insensitively,\n                    the same way login resolves an account."
+                    },
+                    "currentPassword": {
+                        "type": "string",
+                        "description": "The account's existing password, including the temporary one an admin issued."
+                    },
+                    "newPassword": {
+                        "type": "string",
+                        "description": "The replacement password, subject to the standard Moqui password policy."
+                    },
+                    "newPasswordVerify": {
+                        "type": "string",
+                        "description": "Confirmation value for the new password."
+                    }
+                },
+                "required": [
+                    "username",
+                    "currentPassword",
+                    "newPassword",
+                    "newPasswordVerify"
+                ],
+                "description": "Change the password of an account that cannot sign in until it is changed, without a session.\n            Requires the account's current password, so it grants nothing to a caller who does not already hold\n            valid credentials. Issues no token: darpan-ui calls login#Session afterwards with the new password."
+            },
+            "ChangeExpiredPasswordResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the password update completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages emitted during password update handling."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Errors returned while validating or changing the password. Identity and credential\n                    failures are collapsed into one indistinguishable message; password-policy failures are\n                    reported in full so the user can correct them."
+                    },
+                    "passwordUpdated": {
+                        "type": "boolean",
+                        "description": "True when the password was changed and the account can now sign in."
+                    }
+                }
+            },
+            "ChangeExpiredPasswordRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuthFacadeServices.change#ExpiredPassword",
+                "x-darpan-method": "facade.AuthFacadeServices.change#ExpiredPassword",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuthFacadeServices.change#ExpiredPassword"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ChangeExpiredPasswordParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ChangeExpiredPasswordResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuthFacadeServices.change#ExpiredPassword. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ChangeExpiredPasswordResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "ChangeOwnPasswordParams": {
                 "type": "object",
                 "properties": {
@@ -2857,6 +2979,14 @@
                     "authenticated": {
                         "type": "boolean",
                         "description": "True when the session is authenticated after the login attempt."
+                    },
+                    "passwordChangeRequired": {
+                        "type": "boolean",
+                        "description": "True when the submitted credentials were correct but the account cannot sign in until its\n                    password is changed. darpan-ui offers change#ExpiredPassword instead of a plain login failure.\n                    NOTE this case returns ok=true with authenticated=false and the explanation in `messages`: the\n                    credentials were accepted and the call completed, it is the session that is withheld pending a\n                    required next step. Read `authenticated`, never `ok`, to decide whether a session exists."
+                    },
+                    "passwordChangeReason": {
+                        "type": "string",
+                        "description": "Why the password must change: `PWDCHG` when the account is flagged to change at next\n                    login, `PWDTIM` when the current password has aged past the configured rotation window.\n                    Absent unless passwordChangeRequired is true."
                     },
                     "authToken": {
                         "type": "string",
@@ -14258,6 +14388,7 @@
         "admin.UserAdminServices.get#UserList": "GetUserList",
         "admin.UserAdminServices.reset#Password": "ResetPassword",
         "admin.UserAdminServices.update#UserAccount": "UpdateUserAccount",
+        "facade.AuthFacadeServices.change#ExpiredPassword": "ChangeExpiredPassword",
         "facade.AuthFacadeServices.change#OwnPassword": "ChangeOwnPassword",
         "facade.AuthFacadeServices.get#SessionInfo": "GetSessionInfo",
         "facade.AuthFacadeServices.login#Session": "LoginSession",

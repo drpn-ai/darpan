@@ -33,6 +33,13 @@ loading it exposes nothing to operators.
     <!-- Added records from data/DarpanSystemSourceSeedData.xml.
          Precedes the SourceSystemConnector row below: that row's systemEnumId references this enum. -->
     <moqui.basic.Enumeration enumId="OMS_TRANSFER_ORDERS" enumTypeId="DarpanSystemSource" enumCode="HOTWAX_TRANSFER_ORDERS" description="HotWax Transfer Orders" sequenceNum="6"/>
+    <!-- Added records from data/SecuritySeedData.xml.
+         Parent ArtifactGroup DARPAN_AUTH_API already exists in every deployed environment (it has carried
+         login#Session since before 1.3.0), so this row has no forward FK reference and needs no reordering.
+         Registers the anonymous forced-password-change entry point alongside the other pre-session auth
+         services. Until it loads, a fresh install and an upgraded install disagree on the contents of the
+         anonymous auth fence. -->
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_AUTH_API" artifactName="facade.AuthFacadeServices.change#ExpiredPassword" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"/>
     <!-- Added records from data/SourceSystemConnectorSeedData.xml -->
     <darpan.reconciliation.SourceSystemConnector systemEnumId="OMS_TRANSFER_ORDERS" extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsTransferOrders" dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="HOTWAX_OMS_REST_TRANSFER" configParameterName="omsRestSourceConfigId" configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig" remoteId="HOTWAX_ORDERS_API" endpointLabel="Orders API (Transfer Orders)" sendUrlTemplate="{baseUrl}/rest/s1/oms/orders" remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsTransferOrders" systemAliases="OMS_TRANSFER_ORDERS,HOTWAX_TRANSFER_ORDERS,DAR_SYS_OMS_TO" preserveWindowInstants="N" keepFieldsParameterName="keepRecordFields" keepFieldsBase="orderId,orderName,orderDate,statusId,originFacilityId,grandTotal,currencyUom" filterParameterName="sourceFilters" windowFieldName="orderDate" supportsStateExtract="Y" statusParameterName="orderStatusIds" healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection" enabled="Y"/>
 </entity-facade-xml>

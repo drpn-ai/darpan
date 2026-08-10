@@ -159,4 +159,32 @@ class LoginDeadlockRegressionTests {
         assertLoginIssuedAWorkingKey(result)
         assertLoginKeyPersisted(userId)
     }
+
+    /** Makes permanent the control Task 3 ran and discarded: an unarmed account passed the identical
+     *  assertions in 515 ms on the unfixed framework. It proves a future green is the fix working rather
+     *  than the harness quietly failing to arm anything. */
+    @Test
+    void loginStillSucceedsForAnUnarmedAccount() {
+        String username = "deadlock.clean.${RUN_TOKEN}"
+        String userId = createArmedUser(username, [:])
+        Map result = loginInOneTransaction(username)
+        assertLoginIssuedAWorkingKey(result)
+        assertLoginKeyPersisted(userId)
+    }
+
+    /** Regression guard for spec §5.2 — the assertion that justifies shipping without a cleanup migration
+     *  for already-broken production accounts: a successful login must clear the same armed flags that
+     *  would otherwise re-trigger the deadlock on the account's next login. */
+    @Test
+    void signingInClearsTheArmedFlags() {
+        String username = "deadlock.selfheal.${RUN_TOKEN}"
+        String userId = createArmedUser(username, [successiveFailedLogins: 2, hasLoggedOut: "Y"])
+        Map result = loginInOneTransaction(username)
+        assertLoginIssuedAWorkingKey(result)
+        Map account = ec.entity.find("moqui.security.UserAccount").condition("userId", userId)
+                .disableAuthz().one()?.getMap()
+        assert (account.successiveFailedLogins as Integer) == 0:
+                "successiveFailedLogins not cleared: ${account.successiveFailedLogins}"
+        assert account.hasLoggedOut == "N": "hasLoggedOut not cleared: ${account.hasLoggedOut}"
+    }
 }

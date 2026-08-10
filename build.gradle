@@ -144,6 +144,11 @@ test {
 // the default `test` task. Run with `./gradlew :runtime:component:darpan:mysqlTest`.
 tasks.register('mysqlTest', Test) {
     useJUnitPlatform { includeTags 'mysql' }
+    // Tag filtering happens inside each forked worker, after Gradle has already decided how many
+    // to fork — an uncapped maxParallelForks churns a heavy Moqui/Spark JVM per compiled test class
+    // just to find the few @Tag("mysql") ones. Cap at 1, matching `test` above; this task is the
+    // only guard for MySQL-only defects (InnoDB locking) that H2 cannot reproduce.
+    maxParallelForks = 1
     // Moqui keeps process-global state (System properties, ECFI); one test class per JVM.
     forkEvery = 1
     testClassesDirs = sourceSets.test.output.classesDirs

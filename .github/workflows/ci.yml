@@ -2,15 +2,21 @@ name: Darpan Backend CI
 
 # Restores automated backend CI (MACH maturity audit P0 #2). `drpn-ai/darpan` is a Moqui
 # *component* repo, so the framework has to be assembled around the checked-out code before the
-# JUnit suite (39 files / ~318 @Test) can run. Assembly mirrors the verified darpan-cli bootstrap
-# recipe (REPO_MANIFEST in darpan-cli/bin/darpan): clone moqui-framework@master -> getRuntime ->
+# JUnit suite (88 result files / 799 @Test on H2) can run. Assembly mirrors the verified darpan-cli
+# bootstrap recipe (REPO_MANIFEST in darpan-cli/bin/darpan): clone moqui-framework -> getRuntime ->
 # place moqui-sftp + ALL 4 Darpan components (darpan under test + darpan-hotwax + netsuite-darpan +
 # shopify-darpan) -> load (H2) -> test. The 3 integration components are mandatory, not optional:
 # darpan's own main code and tests resolve their entities by name (darpan.hotwax.*, ShopifyAuthConfig,
 # Ns* configs), so omitting them makes those entity reads throw EntityNotFoundException at runtime.
-# Tests run against the embedded H2 datasource, so no external DB service is required, and the Spark
-# 3.5 / JDK 21 `--add-opens` set is already injected by the component's own test task jvmArgs
-# (build.gradle: sparkJava21Opens), so it does not need to be re-declared here.
+# The Spark 3.5 / JDK 21 `--add-opens` set is already injected by the component's own test task
+# jvmArgs (build.gradle: sparkJava21Opens), so it does not need to be re-declared here.
+#
+# Two datasources, on purpose. The bulk of the suite runs on the embedded H2 datasource. A small
+# MySQL-backed suite (`mysqlTest`, @Tag("mysql")) runs against the service container below, because
+# H2 does not implement InnoDB's FK parent-row locking and the login self-deadlock it guards is
+# therefore INVISIBLE on H2. Without that step the regression test guards nothing and a future green
+# build can silently revert the fix. The two share one job: the H2 tests are unaffected by a MySQL
+# service being present, and assembling the framework twice would double the slowest part of CI.
 
 on:
   pull_request:
@@ -42,9 +48,38 @@ jobs:
           ./gitleaks detect --source . --no-banner --redact --verbose
 
   backend-tests:
-    name: Component test suite (JDK 21, H2)
+    name: Component test suite (JDK 21, H2 + MySQL)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
+
+    services:
+      # mysql:8.4 deliberately, not 9.x — this mirrors the production server version. The suite is
+      # also run locally against 9.3 and the InnoDB locking semantics it depends on are the same on
+      # both, but CI should fail where production would fail.
+      #
+      # MYSQL_DATABASE creates the schema; Moqui creates its own tables on demand and the suite
+      # needs no seed data (the locally proven fixture database likewise holds tables but zero seed
+      # rows), so there is nothing further to provision.
+      #
+      # The credentials below are the service container's own throwaway root account. They exist
+      # only for the life of the job, are reachable only from this runner, and grant nothing
+      # anywhere else.
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: darpan_ci_root
+          MYSQL_DATABASE: darpan_test
+        ports:
+          - 3306:3306
+        # Without a health check the first step can open a connection to a half-booted server and
+        # fail in a way that looks like a test failure. start-period covers first-boot initdb.
+        options: >-
+          --health-cmd="mysqladmin ping --host=127.0.0.1 --user=root --password=darpan_ci_root"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+          --health-start-period=30s
+
     steps:
       - name: Check out darpan component (code under test)
         uses: actions/checkout@v5
@@ -68,8 +103,21 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
-      - name: Clone Moqui framework (master)
-        run: git clone --depth 1 --branch master https://github.com/moqui/moqui-framework.git darpan-backend
+      # DO NOT "restore" this to moqui/moqui-framework@master. drpn-ai/moqui-framework is our fork,
+      # and the tag below is the prod-pinned upstream ref (d12a86e1) plus one commit: the login
+      # self-deadlock fix in MoquiShiroRealm (c618faf1). Upstream master does NOT contain that fix,
+      # so building against it would run the mysqlTest regression suite against code that still has
+      # the defect — CI would go red, or worse, someone would delete the test.
+      #
+      # It is a TAG, not a branch or a raw SHA: the branch will be rebased or deleted once the fix
+      # goes upstream, and this must not break then. darpan-docker-config's Dockerfile pins the same
+      # tag via MOQUI_FRAMEWORK_REF, so CI and the production image build the same framework.
+      # Retire the fork by repointing both at an upstream ref once the fix is merged there.
+      - name: Clone Moqui framework (drpn-ai fork, pinned tag)
+        run: |
+          git clone --depth 1 --branch v4.0.0-drpn.1 \
+            https://github.com/drpn-ai/moqui-framework.git darpan-backend
+          git -C darpan-backend log --oneline -1
 
       - name: Download Moqui runtime (must precede component placement)
         working-directory: darpan-backend
@@ -100,6 +148,43 @@ jobs:
       - name: Run darpan component test suite
         working-directory: darpan-backend
         run: ./gradlew --no-daemon --console=plain :runtime:component:darpan:test
+
+      # Bitronix issues `XA RECOVER` when it initialises the datasource, and MySQL refuses that
+      # statement without XA_RECOVER_ADMIN ON *.* — it comes back as XAER_RMERR and takes the whole
+      # run down before a single test executes. We connect as the container's root account, which
+      # already holds the privilege, so no GRANT step is needed; if this is ever repointed at a
+      # dedicated user, that user needs `GRANT XA_RECOVER_ADMIN ON *.* ` explicitly. Asserting it
+      # here turns a confusing mid-suite stack trace into a one-line failure.
+      - name: Verify MySQL service is reachable and holds XA_RECOVER_ADMIN
+        run: |
+          set -euo pipefail
+          # Uses the mysql:8.4 client from the image the service container already pulled, so this
+          # does not depend on which MySQL client the runner image happens to ship.
+          grants=$(docker run --rm --network host mysql:8.4 \
+            mysql --host=127.0.0.1 --port=3306 --user=root --password=darpan_ci_root \
+                  --batch --skip-column-names --execute="SHOW GRANTS FOR CURRENT_USER();")
+          echo "$grants"
+          echo "$grants" | grep -q 'XA_RECOVER_ADMIN\|ALL PRIVILEGES ON \*\.\*' || {
+            echo "::error::MySQL test account lacks XA_RECOVER_ADMIN ON *.* — Bitronix XA RECOVER will fail with XAER_RMERR"
+            exit 1
+          }
+
+      # The reason this workflow has a database at all. `test` EXCLUDES @Tag("mysql")
+      # (build.gradle), so without this step the login-deadlock regression test runs nowhere and the
+      # fix can be reverted by a green build. Must stay after `test`: both are Test tasks and each
+      # clears its own build/test-results directory, but they are separate tasks and do not conflict.
+      #
+      # --no-daemon matters here beyond speed: Gradle seeds a Test task's environment from the build
+      # JVM, and a reused daemon would carry the environment it started with, not these values.
+      - name: Run MySQL-backed regression suite (login deadlock)
+        working-directory: darpan-backend
+        env:
+          DARPAN_TEST_DB_HOST: 127.0.0.1
+          DARPAN_TEST_DB_PORT: '3306'
+          DARPAN_TEST_DB_NAME: darpan_test
+          DARPAN_TEST_DB_USER: root
+          DARPAN_TEST_DB_PASSWORD: darpan_ci_root
+        run: ./gradlew --no-daemon --console=plain :runtime:component:darpan:mysqlTest
 
       # Coverage ratchet (MACH P1): reuses the execution data from :test — no test rerun.
       # Floors sit ~2 points below the measured baseline (build.gradle jacoco block).
@@ -138,5 +223,11 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: darpan-test-reports
-          path: darpan-backend/runtime/component/darpan/build/reports/tests/test/
+          # Both suites, and the raw XML as well as the HTML: a Test task reports BUILD SUCCESSFUL
+          # even when it matched zero tests, so the per-suite XML is the only proof of what ran.
+          path: |
+            darpan-backend/runtime/component/darpan/build/reports/tests/test/
+            darpan-backend/runtime/component/darpan/build/reports/tests/mysqlTest/
+            darpan-backend/runtime/component/darpan/build/test-results/test/
+            darpan-backend/runtime/component/darpan/build/test-results/mysqlTest/
           if-no-files-found: ignore

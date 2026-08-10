@@ -143,11 +143,37 @@ test {
 // locking in H2). Requires a locally reachable darpan_test MySQL database; not part of `check` or
 // the default `test` task. Run with `./gradlew :runtime:component:darpan:mysqlTest`.
 tasks.register('mysqlTest', Test) {
+    // Three gates, deliberately. They are not redundant — they act at three different moments, and
+    // only the first one makes this task fast:
+    //
+    //   include (class-file pattern) — the EFFICIENCY gate, applied to the class-file SCAN, before
+    //       Gradle forks anything. This is the only one that reduces work. With forkEvery = 1 below,
+    //       Gradle starts one JVM per scanned class FILE, and a Groovy source set compiles to far
+    //       more class files than it has test classes (closures, traits, anonymous classes): the
+    //       unfiltered scan here yields 1028 of them, so a bare run spent ~500s starting and
+    //       stopping 1028 JVMs to run 4 tests that take 0.9s. Measured: 503s -> 4s.
+    //
+    //   filter (test-name pattern) — the FAIL-LOUD gate, applied inside the worker after discovery.
+    //       It cannot prevent a fork, so it buys no time; it is here for failOnNoMatchingTests,
+    //       which turns "the pattern went stale and matched nothing" into a build failure instead of
+    //       a BUILD SUCCESSFUL over an empty result directory.
+    //
+    //   includeTags 'mysql' — the CORRECTNESS gate. Only @Tag("mysql") tests may ever run here,
+    //       whatever the patterns above happen to match.
+    //
+    // The patterns name the class rather than a convention because the tag — the real marker — is
+    // invisible to Gradle before forking, and no MySQL-specific naming convention exists to key off.
+    // ADDING A NEW @Tag("mysql") CLASS MEANS ADDING IT TO BOTH PATTERNS, or it silently never runs;
+    // failOnNoMatchingTests is what keeps "silently" from being true of the existing one.
     useJUnitPlatform { includeTags 'mysql' }
-    // Tag filtering happens inside each forked worker, after Gradle has already decided how many
-    // to fork — an uncapped maxParallelForks churns a heavy Moqui/Spark JVM per compiled test class
-    // just to find the few @Tag("mysql") ones. Cap at 1, matching `test` above; this task is the
-    // only guard for MySQL-only defects (InnoDB locking) that H2 cannot reproduce.
+    include '**/LoginDeadlockRegressionTests.class'
+    filter {
+        includeTestsMatching '*LoginDeadlockRegressionTests'
+        failOnNoMatchingTests = true
+    }
+    // Cap at 1, matching `test` above; this task is the only guard for MySQL-only defects (InnoDB
+    // locking) that H2 cannot reproduce, and an uncapped fork pool crashed outright ("Could not
+    // stop all services") before it could report anything.
     maxParallelForks = 1
     // Moqui keeps process-global state (System properties, ECFI); one test class per JVM.
     forkEvery = 1

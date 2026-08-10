@@ -129,11 +129,26 @@ ext.sparkJava21Opens = [
 ]
 
 test {
-    useJUnitPlatform()
+    // MySQL-backed tests (@Tag("mysql")) need real InnoDB locking semantics and stay opt-in via
+    // the mysqlTest task below, so everyday `./gradlew test` keeps running H2-fast.
+    useJUnitPlatform { excludeTags 'mysql' }
     // Moqui keeps process-global state; isolate smoke test classes so fixture DBs do not leak.
     maxParallelForks = 1
     forkEvery = 1
     // JDK 21: open modules for Spark, and quiet the ByteBuddy/Mockito dynamic-agent warning.
+    jvmArgs(sparkJava21Opens + ['-XX:+EnableDynamicAgentLoading', '--enable-native-access=ALL-UNNAMED'])
+}
+
+// Opt-in MySQL-backed suite (InnoDB lock behavior that H2 cannot reproduce — no FK parent-row
+// locking in H2). Requires a locally reachable darpan_test MySQL database; not part of `check` or
+// the default `test` task. Run with `./gradlew :runtime:component:darpan:mysqlTest`.
+tasks.register('mysqlTest', Test) {
+    useJUnitPlatform { includeTags 'mysql' }
+    // Moqui keeps process-global state (System properties, ECFI); one test class per JVM.
+    forkEvery = 1
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    // Same JDK 21 module opens as `test` — Spark/Netty classes can load during ECFI init.
     jvmArgs(sparkJava21Opens + ['-XX:+EnableDynamicAgentLoading', '--enable-native-access=ALL-UNNAMED'])
 }
 

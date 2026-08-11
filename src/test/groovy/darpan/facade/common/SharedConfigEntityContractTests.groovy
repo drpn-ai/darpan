@@ -28,23 +28,30 @@ class SharedConfigEntityContractTests {
         return backendRoot.resolve("runtime/component/darpan/data/SecuritySeedData.xml").toFile().text
     }
 
+    private static String configTenantAccessEntityBlock() {
+        String xml = authEntitiesXml()
+        int start = xml.indexOf('entity-name="ConfigTenantAccess"')
+        int end = xml.indexOf('</entity>', start)
+        return xml.substring(start, end)
+    }
+
     @Test
     void configTenantAccessDeclaresTheFourPartCompositePrimaryKey() {
-        String xml = authEntitiesXml()
-        assertTrue(xml.contains('entity-name="ConfigTenantAccess"'),
+        String block = configTenantAccessEntityBlock()
+        assertTrue(block.contains('entity-name="ConfigTenantAccess"'),
                 "ConfigTenantAccess must be declared in AuthEntities.xml")
         ['configTypeEnumId', 'configId', 'tenantUserGroupId', 'fromDate'].each { String field ->
-            assertTrue((xml =~ /(?s)<field name="${field}"[^>]*is-pk="true"/).find(),
+            assertTrue((block =~ /(?s)<field name="${field}"[^>]*is-pk="true"/).find(),
                     "${field} must be part of the ConfigTenantAccess primary key")
         }
     }
 
     @Test
     void configTenantAccessCarriesSoftRevokeAndGrantAudit() {
-        String xml = authEntitiesXml()
-        assertTrue((xml =~ /(?s)<field name="thruDate" type="date-time"[^>]*\/?>/).find(),
+        String block = configTenantAccessEntityBlock()
+        assertTrue((block =~ /(?s)<field name="thruDate" type="date-time"[^>]*\/?>/).find(),
                 "thruDate is the soft-revoke column; revoke must never delete a grant row")
-        assertTrue((xml =~ /(?s)<field name="grantedByUserId" type="id"[^>]*\/?>/).find(),
+        assertTrue((block =~ /(?s)<field name="grantedByUserId" type="id"[^>]*\/?>/).find(),
                 "grantedByUserId records who widened credential access")
     }
 
@@ -58,10 +65,7 @@ class SharedConfigEntityContractTests {
 
     @Test
     void configTenantAccessHasNoCompanyUserGroupIdField() {
-        String xml = authEntitiesXml()
-        int start = xml.indexOf('entity-name="ConfigTenantAccess"')
-        int end = xml.indexOf('</entity>', start)
-        String block = xml.substring(start, end)
+        String block = configTenantAccessEntityBlock()
         assertFalse(block.contains('companyUserGroupId'),
                 "ConfigTenantAccess is a peer-group join with no owning tenant of its own; a " +
                 "companyUserGroupId would invite TenantScopedFinder.findTenantScoped and break sharing")

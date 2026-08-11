@@ -42,9 +42,9 @@ class SharedConfigEntityContractTests {
     @Test
     void configTenantAccessCarriesSoftRevokeAndGrantAudit() {
         String xml = authEntitiesXml()
-        assertTrue(xml.contains('<field name="thruDate" type="date-time"/>'),
+        assertTrue((xml =~ /(?s)<field name="thruDate" type="date-time"[^>]*\/?>/).find(),
                 "thruDate is the soft-revoke column; revoke must never delete a grant row")
-        assertTrue(xml.contains('<field name="grantedByUserId" type="id"/>'),
+        assertTrue((xml =~ /(?s)<field name="grantedByUserId" type="id"[^>]*\/?>/).find(),
                 "grantedByUserId records who widened credential access")
     }
 

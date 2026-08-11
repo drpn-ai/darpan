@@ -2,6 +2,7 @@ package darpan.facade.reconciliation
 
 import darpan.common.DarpanEntityConstants
 import darpan.facade.common.FacadeSupport
+import darpan.facade.common.SharedConfigAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import darpan.facade.settings.SettingsFacadeSupport
@@ -20,6 +21,7 @@ import java.time.Instant
 
 import static darpan.common.ValueSupport.fileNameFromPath
 import static darpan.common.ValueSupport.normalize
+import static darpan.common.ValueSupport.normalizeBool
 import static darpan.common.ValueSupport.normalizeLower
 import static darpan.common.ValueSupport.readField
 import static darpan.common.ValueSupport.readString
@@ -1054,13 +1056,12 @@ class AutomationFacadeSupport {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
         try {
-            // P0 #4 step 4b: tenant condition pre-applied by finder; additional conditions chained.
-            List rows = TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG)
-                    .condition("isActive", "Y")
-                    .condition("canReadOrders", "Y")
-                    .orderBy("description,omsRestSourceConfigId")
-                    .useCache(false)
-                    .list() ?: []
+            // DAR-BE-005: owned rows plus rows shared to this tenant via ConfigTenantAccess.
+            // listAccessibleConfigRows applies no status filter, so isActive/canReadOrders are
+            // preserved here — the source picker must not offer inactive or non-order-reading configs.
+            List rows = SharedConfigAccessSupport
+                    .listAccessibleConfigRows(ec, SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS)
+                    .findAll { normalize(readString(it, "isActive")) != "N" && normalizeBool(readField(it, "canReadOrders")) }
             return rows.collect { item ->
                 String configId = readString(item, "omsRestSourceConfigId")
                 String label = readString(item, "description") ?: configId
@@ -1084,13 +1085,12 @@ class AutomationFacadeSupport {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
         try {
-            // P0 #4 step 4b: tenant condition pre-applied by finder; additional conditions chained.
-            List rows = TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.SHOPIFY_AUTH_CONFIG)
-                    .condition("isActive", "Y")
-                    .condition("canReadOrders", "Y")
-                    .orderBy("description,shopifyAuthConfigId")
-                    .useCache(false)
-                    .list() ?: []
+            // DAR-BE-005: owned rows plus rows shared to this tenant via ConfigTenantAccess.
+            // listAccessibleConfigRows applies no status filter, so isActive/canReadOrders are
+            // preserved here — the source picker must not offer inactive or non-order-reading configs.
+            List rows = SharedConfigAccessSupport
+                    .listAccessibleConfigRows(ec, SharedConfigAccessSupport.CONFIG_TYPE_SHOPIFY_AUTH)
+                    .findAll { normalize(readString(it, "isActive")) != "N" && normalizeBool(readField(it, "canReadOrders")) }
             return rows.collect { item ->
                 String configId = readString(item, "shopifyAuthConfigId")
                 String label = readString(item, "description") ?: configId
@@ -1183,13 +1183,12 @@ class AutomationFacadeSupport {
         boolean omsSupportsExcludeFilters = supportsExcludeFiltersForSystem(ec, OMS_SYSTEM_ENUM_ID)
 
         try {
-            // P0 #4 step 4b: tenant condition pre-applied by finder; additional conditions chained.
-            List rows = TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG)
-                    .condition("isActive", "Y")
-                    .condition("canReadOrders", "Y")
-                    .orderBy("description,omsRestSourceConfigId")
-                    .useCache(false)
-                    .list() ?: []
+            // DAR-BE-005: owned rows plus rows shared to this tenant via ConfigTenantAccess.
+            // listAccessibleConfigRows applies no status filter, so isActive/canReadOrders are
+            // preserved here — the source picker must not offer inactive or non-order-reading configs.
+            List rows = SharedConfigAccessSupport
+                    .listAccessibleConfigRows(ec, SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS)
+                    .findAll { normalize(readString(it, "isActive")) != "N" && normalizeBool(readField(it, "canReadOrders")) }
             return rows.collect { item ->
                 String configId = readString(item, "omsRestSourceConfigId")
                 String label = readString(item, "description") ?: configId

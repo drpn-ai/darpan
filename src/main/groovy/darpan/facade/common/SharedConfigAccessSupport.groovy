@@ -155,6 +155,50 @@ class SharedConfigAccessSupport {
     }
 
     /**
+     * Every config row of this type the ACTIVE tenant may use: the rows it owns, plus the rows
+     * shared with it. Ordered by description then PK, deduped by PK.
+     *
+     * <p>Owned rows come through {@link TenantScopedFinder#findTenantScoped} — untouched, still
+     * default-deny. Shared rows are fetched by explicit PK, one at a time: a peer group is a handful
+     * of tenants, and a point lookup keeps the cross-tenant read narrow and auditable rather than
+     * handing a caller an unbounded unscoped finder.</p>
+     *
+     * <p>With zero grant rows this returns exactly what the tenant-only finder returns, which is what
+     * makes the settings lists backward compatible.</p>
+     */
+    static List listAccessibleConfigRows(def ec, String configTypeEnumId) {
+        Map<String, String> type = configType(configTypeEnumId)
+        if (type == null) return []
+        String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+        if (!activeTenantUserGroupId) return []
+
+        List ownedRows = TenantScopedFinder.findTenantScoped(ec, type.entityName)
+                .orderBy("description,${type.pkField}")
+                .useCache(false)
+                .list() ?: []
+
+        Set<String> ownedIds = ownedRows.collect { normalize(readField(it, type.pkField)) }.findAll { it } as Set
+        Set<String> sharedIds = listSharedConfigIdsForTenant(ec, configTypeEnumId, activeTenantUserGroupId)
+
+        List sharedRows = (sharedIds - ownedIds).collect { String configId ->
+            TenantScopedFinder.findGlobalUnscoped(ec, type.entityName,
+                            "shared config resolved by explicit PK for a tenant holding an active " +
+                            "ConfigTenantAccess grant (DAR-BE-005)")
+                    .condition(type.pkField, configId)
+                    .useCache(false)
+                    .one()
+        }.findAll { it != null }
+
+        return (ownedRows + sharedRows).sort { left, right ->
+            String leftKey = normalize(readField(left, "description")) ?: normalize(readField(left, type.pkField)) ?: ""
+            String rightKey = normalize(readField(right, "description")) ?: normalize(readField(right, type.pkField)) ?: ""
+            int byDescription = leftKey <=> rightKey
+            return byDescription != 0 ? byDescription :
+                    ((normalize(readField(left, type.pkField)) ?: "") <=> (normalize(readField(right, type.pkField)) ?: ""))
+        }
+    }
+
+    /**
      * Reads grant rows and drops revoked ones IN GROOVY rather than via {@code conditionDate}.
      *
      * <p>Matches {@code AdminMembershipSupport.findActiveMembershipRows}, the existing house pattern

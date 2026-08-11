@@ -12615,6 +12615,9 @@
                                 },
                                 "hasPrivateKeyPem": {
                                     "type": "boolean"
+                                },
+                                "isShared": {
+                                    "type": "boolean"
                                 }
                             }
                         }
@@ -12777,6 +12780,9 @@
                                 },
                                 "isActive": {
                                     "type": "string"
+                                },
+                                "isShared": {
+                                    "type": "boolean"
                                 }
                             }
                         }

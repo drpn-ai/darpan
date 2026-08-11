@@ -1677,6 +1677,7 @@ SERVICE list NsAuthConfigs
     authConfigs.hasPassword : Boolean
     authConfigs.hasPrivateKeyPem : Boolean
     authConfigs.isActive : String
+    authConfigs.isShared : Boolean
     authConfigs.nsAuthConfigId : String
     authConfigs.scope : String
     authConfigs.tokenUrl : String
@@ -1724,6 +1725,7 @@ SERVICE list NsRestletConfigs
     restletConfigs.headersJson : String
     restletConfigs.httpMethod : String
     restletConfigs.isActive : String
+    restletConfigs.isShared : Boolean
     restletConfigs.nsAuthConfigId : String
     restletConfigs.nsRestletConfigId : String
     restletConfigs.readTimeoutSeconds : Integer

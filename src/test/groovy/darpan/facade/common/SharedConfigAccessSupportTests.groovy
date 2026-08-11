@@ -175,6 +175,72 @@ class SharedConfigAccessSupportTests {
 
     // --- builders -------------------------------------------------------
 
+    // --- accessible-row listing (settings-list seam) ---------------------
+
+    @Test
+    void listAccessibleConfigRowsReturnsOwnedRowsWhenNothingIsShared() {
+        def ec = ecWithConfigRows(
+                activeTenant: "STEVE_MADDEN",
+                grants: [],
+                configRows: [
+                        [omsRestSourceConfigId: "OMS_SM", companyUserGroupId: "STEVE_MADDEN", description: "SM"],
+                        [omsRestSourceConfigId: "OMS_BJ", companyUserGroupId: "BETSEY_JOHNSON", description: "BJ"],
+                ])
+
+        List rows = SharedConfigAccessSupport.listAccessibleConfigRows(ec, "SCFG_HOTWAX_OMS")
+        assertEquals(["OMS_SM"], rows.collect { it.omsRestSourceConfigId },
+                "with zero grants the result must be byte-identical to today's tenant-only list")
+    }
+
+    @Test
+    void listAccessibleConfigRowsUnionsSharedRowsAndDedupesBySortedPk() {
+        def ec = ecWithConfigRows(
+                activeTenant: "BETSEY_JOHNSON",
+                grants: [grant("SCFG_HOTWAX_OMS", "OMS_SM", "BETSEY_JOHNSON")],
+                configRows: [
+                        [omsRestSourceConfigId: "OMS_SM", companyUserGroupId: "STEVE_MADDEN", description: "AAA shared"],
+                        [omsRestSourceConfigId: "OMS_BJ", companyUserGroupId: "BETSEY_JOHNSON", description: "ZZZ own"],
+                ])
+
+        List rows = SharedConfigAccessSupport.listAccessibleConfigRows(ec, "SCFG_HOTWAX_OMS")
+        assertEquals(["OMS_SM", "OMS_BJ"], rows.collect { it.omsRestSourceConfigId },
+                "shared config appears beside the tenant's own, ordered by description")
+        assertEquals(2, rows.size(), "no duplicate rows")
+    }
+
+    @Test
+    void listAccessibleConfigRowsIsEmptyWithNoActiveTenant() {
+        def ec = ecWithConfigRows(
+                activeTenant: null,
+                grants: [grant("SCFG_HOTWAX_OMS", "OMS_SM", "BETSEY_JOHNSON")],
+                configRows: [[omsRestSourceConfigId: "OMS_SM", companyUserGroupId: "STEVE_MADDEN"]])
+
+        assertTrue(SharedConfigAccessSupport.listAccessibleConfigRows(ec, "SCFG_HOTWAX_OMS").isEmpty(),
+                "default-deny: no active tenant must never fall open to every config row")
+    }
+
+    private static Expando ecWithConfigRows(Map spec) {
+        return executionContext(
+                user: new UserStub(userId: "aditi", nowTimestamp: NOW,
+                        preferences: ["darpan.auth.activeTenantUserGroupId": spec.activeTenant],
+                        context: [activeTenantUserGroupId: spec.activeTenant]),
+                entity: new EntityFacadeStub(finders: [
+                        "darpan.auth.ConfigTenantAccess": new FinderStub(listResult: (spec.grants ?: []) as List),
+                        "darpan.hotwax.HotWaxOmsRestSourceConfig":
+                                new FinderStub(listResult: (spec.configRows ?: []) as List),
+                        // REQUIRED, same reason as ecWithGrants above: listAccessibleConfigRows calls
+                        // currentActiveTenantUserGroupId, which resolves through listAvailableTenants →
+                        // this view, NOT from the preference. Omit it and the active tenant is null, so
+                        // the method returns [] — `listAccessibleConfigRowsIsEmptyWithNoActiveTenant`
+                        // would pass for the wrong reason while the other two tests fail.
+                        "moqui.security.UserGroupAndMember": new FinderStub(listResult:
+                                spec.activeTenant ? [[userId         : "aditi",
+                                                      userGroupId    : spec.activeTenant,
+                                                      groupTypeEnumId: "UgtDarpanCompany"]] : []),
+                ])
+        )
+    }
+
     private static Map grant(String type, String configId, String tenant, Timestamp thruDate = null) {
         return [configTypeEnumId: type, configId: configId, tenantUserGroupId: tenant,
                 fromDate: PAST, thruDate: thruDate, grantedByUserId: "aditi"]
@@ -234,6 +300,14 @@ class SharedConfigAccessSupportTests {
         FinderStub find(String entityName) {
             FinderStub f = finders[entityName]
             if (f == null) { f = new FinderStub(); finders[entityName] = f }
+            // Real Moqui's ec.entity.find(entityName) always hands back a brand-new EntityFind with
+            // an empty condition set — it never remembers conditions from an earlier, unrelated query
+            // against the same entity. Reset here so a second find() on the same entity within one
+            // production method (e.g. TenantScopedFinder.findGlobalUnscoped's point lookup, called
+            // after findTenantScoped already queried and condition()'d this same cached stub) starts
+            // clean instead of silently inheriting a stale condition (like the prior tenant-scoping
+            // companyUserGroupId) that would never match the target row.
+            f.conditions = [:]
             return f
         }
     }
@@ -250,8 +324,17 @@ class SharedConfigAccessSupportTests {
         FinderStub orderBy(String s) { this }
 
         Object one() {
-            if (oneResult instanceof Map && !conditions.every { k, v -> oneResult[k] == v }) return null
-            return oneResult
+            // Explicit oneResult (a single canned row) wins, matching the original point-lookup
+            // shape used by SharedConfigGrantSupportTests. When no oneResult is configured, fall back
+            // to filtering listResult exactly like list() does and take the first match — this is what
+            // lets a single FinderStub double as BOTH a list()-based query (owned rows) and a
+            // condition-per-PK one() point lookup (shared rows), which listAccessibleConfigRows needs.
+            if (oneResult != null) {
+                if (oneResult instanceof Map && !conditions.every { k, v -> oneResult[k] == v }) return null
+                return oneResult
+            }
+            List matches = list()
+            return matches.isEmpty() ? null : matches[0]
         }
 
         List list() {

@@ -258,6 +258,26 @@
             description="Admin/platform-owned SFTP server"
             enumTypeId="DarpanSftpScope"/>
 
+    <!-- DAR-BE-005 — the catalog of config types that can be shared across tenants. Adding a value
+         here plus a CONFIG_TYPE_REGISTRY row in SharedConfigAccessSupport is the whole extension
+         path for a new shareable config type. moqui.service.message.SystemMessageRemote is
+         deliberately absent: it is a framework-owned endpoint descriptor already visible to every
+         tenant, not a per-tenant credential. -->
+    <moqui.basic.EnumerationType enumTypeId="DarpanSharedConfigType"
+            description="Darpan API source config types that support cross-tenant sharing"/>
+    <moqui.basic.Enumeration enumId="SCFG_HOTWAX_OMS"
+            description="HotWax OMS REST source config (darpan.hotwax.HotWaxOmsRestSourceConfig)"
+            enumTypeId="DarpanSharedConfigType"/>
+    <moqui.basic.Enumeration enumId="SCFG_SHOPIFY_AUTH"
+            description="Shopify auth config (darpan.shopify.ShopifyAuthConfig)"
+            enumTypeId="DarpanSharedConfigType"/>
+    <moqui.basic.Enumeration enumId="SCFG_NS_AUTH"
+            description="NetSuite auth config (darpan.reconciliation.NsAuthConfig)"
+            enumTypeId="DarpanSharedConfigType"/>
+    <moqui.basic.Enumeration enumId="SCFG_NS_RESTLET"
+            description="NetSuite Restlet config (darpan.reconciliation.NsRestletConfig)"
+            enumTypeId="DarpanSharedConfigType"/>
+
     <!-- Admin API fence: the admin.* service namespace is the platform-operator surface
          (tenant lifecycle, user management, membership). Granted ONLY to DARPAN_SUPER_ADMIN and
          framework ADMIN — the same two groups that satisfy isSuperAdmin(). Deliberately NOT

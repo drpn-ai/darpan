@@ -18,6 +18,7 @@ class DarpanEntityConstants {
     // Auth / tenant
     static final String TENANT_SETTING = "darpan.auth.TenantSetting"
     static final String TENANT_USER_PERMISSION_GROUP_MEMBER = "darpan.auth.TenantUserPermissionGroupMember"
+    static final String CONFIG_TENANT_ACCESS = "darpan.auth.ConfigTenantAccess"
 
     // Rule
     static final String RULE_SET = "darpan.rule.RuleSet"

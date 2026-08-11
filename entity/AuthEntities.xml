@@ -22,6 +22,46 @@
         </relationship>
     </entity>
 
+    <!-- DAR-BE-005 — peer-group membership for a SHARED API source config. The set of active rows
+         for one (configTypeEnumId, configId) IS the group: every member tenant is an equal peer and
+         may edit the config's fields. There is no owner column and no copy — the underlying config
+         row stays the single source of truth, so an edit under any member propagates for free.
+
+         configId is a POLYMORPHIC reference (no DB FK across the four config types, which live in
+         three different components). SharedConfigGrantSupport MUST verify the referenced row exists
+         on write; nothing at the schema level can.
+
+         Extending to a new shareable config type = one new DarpanSharedConfigType Enumeration value
+         plus one row in SharedConfigAccessSupport.CONFIG_TYPE_REGISTRY. No schema change. -->
+    <entity entity-name="ConfigTenantAccess" package="darpan.auth" use="configuration" cache="true">
+        <description>Grants one tenant peer membership in a shared API source config's group.</description>
+        <field name="configTypeEnumId" type="id" is-pk="true"/>
+        <field name="configId" type="id" is-pk="true"/>
+        <field name="tenantUserGroupId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="grantedByUserId" type="id"/>
+
+        <relationship type="one" title="Tenant" related="moqui.security.UserGroup" short-alias="tenant">
+            <key-map field-name="tenantUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+        <relationship type="one" title="ConfigType" related="moqui.basic.Enumeration" short-alias="configType">
+            <key-map field-name="configTypeEnumId" related-field-name="enumId"/>
+        </relationship>
+        <relationship type="one-nofk" title="GrantedBy" related="moqui.security.UserAccount" short-alias="grantedByUser">
+            <description>No FK in order to allow externally authenticated users.</description>
+            <key-map field-name="grantedByUserId" related-field-name="userId"/>
+        </relationship>
+
+        <!-- tenantUserGroupId is non-leftmost in the composite PK, so "which configs are shared with
+             my tenant" (SharedConfigAccessSupport.listSharedConfigIdsForTenant, called on every
+             settings list render) would full-scan this table. Same defect fixed for SFTPACCESS_TENANT
+             under Audit H9.5. -->
+        <index name="CFGACCESS_TENANT">
+            <index-field name="tenantUserGroupId"/>
+        </index>
+    </entity>
+
     <entity entity-name="TenantSetting" package="darpan.auth" use="configuration">
         <description>Tenant-level settings shared by users operating in a Darpan tenant.</description>
         <field name="companyUserGroupId" type="id" is-pk="true" not-null="true"/>

@@ -161,6 +161,12 @@ class TenantAccessSupport {
      * <p>Default-deny: a blank tenant, an anonymous caller, or a tenant with no
      * {@code DARPAN_TENANT_ADMIN} row all return false. A super admin returns true for every tenant,
      * consistent with {@code resolveActiveTenantPermissionScope} already granting them the role.</p>
+     *
+     * <p><strong>Caller obligation:</strong> This method performs NO existence check on {@code tenantUserGroupId}.
+     * A {@code true} result means "this user administers that tenant <em>if it exists</em>". Super-admins return
+     * {@code true} for any non-blank string, real or not. Callers taking unvalidated {@code tenantUserGroupId}
+     * input MUST validate tenant existence independently before trusting a {@code true} result — see
+     * {@code AdminMembershipSupport.validateTenantExists} for the standard existence check.</p>
      */
     static boolean isTenantAdmin(def ec, String tenantUserGroupId) {
         String normalizedTenantUserGroupId = normalize(tenantUserGroupId)
@@ -171,7 +177,8 @@ class TenantAccessSupport {
         return DARPAN_TENANT_ADMIN_GROUP_ID in listTenantPermissionGroupIds(ec, normalizedTenantUserGroupId)
     }
 
-    /** Gate form of {@link #isTenantAdmin}: adds an error and returns false when denied. */
+    /** Gate form of {@link #isTenantAdmin}: adds an error and returns false when denied.
+     * Callers taking unvalidated input must validate tenant existence independently (see {@link #isTenantAdmin}). */
     static boolean requireTenantAdmin(def ec, String tenantUserGroupId,
             String message = TENANT_ADMIN_REQUIRED_MESSAGE) {
         if (isTenantAdmin(ec, tenantUserGroupId)) return true

@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-005 — cross-tenant sharing of API source configs.
+
+     NAMESPACE: facade.* is correct here. admin.* is fenced to super-admin only (DARPAN_ADMIN_API)
+     and the actors for config sharing are PER-TENANT admins, by decision.
+
+     FENCE WARNING: facade\..* is granted to every Darpan role including DARPAN_TENANT_USER
+     (SecuritySeedData.xml:97-121). The artifact fence stops nobody here. The entire gate is the
+     two-sided requireTenantAdmin check inside SharedConfigGrantSupport. Do not add a service to
+     this file that writes ConfigTenantAccess without routing through that class. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="grant" noun="ConfigTenantAccess" allow-remote="true" authenticate="true">
+        <description>Add a tenant to a shared API source config's peer group. Requires the caller to
+            be a tenant admin of the target tenant AND of a tenant that already uses the config.
+            Sharing widens access to the config's encrypted credentials — it is not a copy.</description>
+        <in-parameters>
+            <parameter name="configTypeEnumId" required="true"><description>SCFG_HOTWAX_OMS, SCFG_SHOPIFY_AUTH,
+                SCFG_NS_AUTH, or SCFG_NS_RESTLET.</description></parameter>
+            <parameter name="configId" required="true"><description>Id of the existing config row.</description></parameter>
+            <parameter name="targetTenantUserGroupId" required="true"><description>Tenant to add to the group.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="granted" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="granted" from="darpan.facade.common.SharedConfigGrantSupport.grantAccess(ec, configTypeEnumId, configId, targetTenantUserGroupId)"/>
+            <if condition="granted">
+                <message>Shared configuration ${configId} with ${targetTenantUserGroupId}.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="revoke" noun="ConfigTenantAccess" allow-remote="true" authenticate="true">
+        <description>Remove a tenant from a shared config's peer group by thruDating its grant.
+            Gated identically to grant. Never deletes a row — who could reach a credential is history.</description>
+        <in-parameters>
+            <parameter name="configTypeEnumId" required="true"/>
+            <parameter name="configId" required="true"/>
+            <parameter name="targetTenantUserGroupId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="revoked" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="revoked" from="darpan.facade.common.SharedConfigGrantSupport.revokeAccess(ec, configTypeEnumId, configId, targetTenantUserGroupId)"/>
+            <if condition="revoked">
+                <message>Stopped sharing configuration ${configId} with ${targetTenantUserGroupId}.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="list" noun="ConfigTenantAccess" authz-action="view" allow-remote="true" authenticate="true">
+        <description>Sharing state for one config: owning tenant, peer tenants, the affected-tenant
+            count for the edit warning, and whether the caller may manage the group.</description>
+        <in-parameters>
+            <parameter name="configTypeEnumId" required="true"/>
+            <parameter name="configId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="sharing" type="Map">
+                <parameter name="configTypeEnumId"/>
+                <parameter name="configId"/>
+                <parameter name="ownerTenantUserGroupId"/>
+                <parameter name="ownerTenantLabel"/>
+                <parameter name="memberTenantUserGroupIds" type="List"><parameter name="tenantUserGroupId"/></parameter>
+                <parameter name="memberTenantLabels" type="List">
+                    <parameter name="member" type="Map">
+                        <parameter name="tenantUserGroupId"/>
+                        <parameter name="label"/>
+                    </parameter>
+                </parameter>
+                <parameter name="memberCount" type="Integer"/>
+                <parameter name="canManage" type="Boolean"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="sharing" from="darpan.facade.common.SharedConfigGrantSupport.describeSharing(ec, configTypeEnumId, configId)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+</services>

@@ -6,6 +6,7 @@ import darpan.reconciliation.core.CompareIdExpressionSupport
 import darpan.reconciliation.source.SourceFilterSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.PaginationSupport
+import darpan.facade.common.SharedConfigAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import groovy.json.JsonSlurper
@@ -964,46 +965,79 @@ class ReconciliationSavedRunSupport {
     }
 
     protected static void validateShopifyAuthConfig(def ec, String sourceLabel, String sourceConfigId) {
-        def config = TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.SHOPIFY_AUTH_CONFIG)
+        // DAR-BE-005 seam B: a config reachable in the settings list must also be referenceable.
+        // findGlobalUnscoped loads by explicit PK; canActiveTenantUseConfig gates it immediately —
+        // owner OR peer-group member. With zero grants this is exactly the old tenant-only behavior.
+        def config = TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.SHOPIFY_AUTH_CONFIG,
+                        "source config resolved by explicit PK; SharedConfigAccessSupport gates " +
+                        "owner-or-shared access on the next line (DAR-BE-005)")
                 .condition("shopifyAuthConfigId", sourceConfigId)
                 .useCache(false)
                 .one()
-        TenantAccessSupport.requireTenantRecordAccess(ec, config,
-                "${sourceLabel} Shopify auth config '${sourceConfigId}' was not found.",
-                "${sourceLabel} Shopify auth config '${sourceConfigId}' is not available in your active tenant.")
-        if (config && normalize(config.isActive) == "N") {
+        if (config == null) {
+            ec.message.addError("${sourceLabel} Shopify auth config '${sourceConfigId}' was not found.")
+            return
+        }
+        if (!SharedConfigAccessSupport.canActiveTenantUseConfig(ec,
+                SharedConfigAccessSupport.CONFIG_TYPE_SHOPIFY_AUTH, config)) {
+            ec.message.addError("${sourceLabel} Shopify auth config '${sourceConfigId}' is not available in your active tenant.")
+            return
+        }
+        if (normalize(config.isActive) == "N") {
             ec.message.addError("${sourceLabel} Shopify auth config '${sourceConfigId}' is inactive.")
         }
-        if (config && !normalizeBool(config.canReadOrders)) {
+        if (!normalizeBool(config.canReadOrders)) {
             ec.message.addError("${sourceLabel} Shopify auth config '${sourceConfigId}' cannot read orders.")
         }
     }
 
     protected static void validateHotWaxOmsConfig(def ec, String sourceLabel, String sourceConfigId) {
-        def config = TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG)
+        // DAR-BE-005 seam B: a config reachable in the settings list must also be referenceable.
+        // findGlobalUnscoped loads by explicit PK; canActiveTenantUseConfig gates it immediately —
+        // owner OR peer-group member. With zero grants this is exactly the old tenant-only behavior.
+        def config = TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG,
+                        "source config resolved by explicit PK; SharedConfigAccessSupport gates " +
+                        "owner-or-shared access on the next line (DAR-BE-005)")
                 .condition("omsRestSourceConfigId", sourceConfigId)
                 .useCache(false)
                 .one()
-        TenantAccessSupport.requireTenantRecordAccess(ec, config,
-                "${sourceLabel} HotWax source config '${sourceConfigId}' was not found.",
-                "${sourceLabel} HotWax source config '${sourceConfigId}' is not available in your active tenant.")
-        if (config && normalize(config.isActive) == "N") {
+        if (config == null) {
+            ec.message.addError("${sourceLabel} HotWax source config '${sourceConfigId}' was not found.")
+            return
+        }
+        if (!SharedConfigAccessSupport.canActiveTenantUseConfig(ec,
+                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, config)) {
+            ec.message.addError("${sourceLabel} HotWax source config '${sourceConfigId}' is not available in your active tenant.")
+            return
+        }
+        if (normalize(config.isActive) == "N") {
             ec.message.addError("${sourceLabel} HotWax source config '${sourceConfigId}' is inactive.")
         }
-        if (config && !normalizeBool(config.canReadOrders)) {
+        if (!normalizeBool(config.canReadOrders)) {
             ec.message.addError("${sourceLabel} HotWax source config '${sourceConfigId}' cannot read orders.")
         }
     }
 
     protected static void validateNetSuiteAuthConfig(def ec, String sourceLabel, String sourceConfigId, def nsRestletConfig) {
-        def config = TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.NS_AUTH_CONFIG)
+        // DAR-BE-005 seam B: a config reachable in the settings list must also be referenceable.
+        // findGlobalUnscoped loads by explicit PK; canActiveTenantUseConfig gates it immediately —
+        // owner OR peer-group member. With zero grants this is exactly the old tenant-only behavior.
+        def config = TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.NS_AUTH_CONFIG,
+                        "source config resolved by explicit PK; SharedConfigAccessSupport gates " +
+                        "owner-or-shared access on the next line (DAR-BE-005)")
                 .condition("nsAuthConfigId", sourceConfigId)
                 .useCache(false)
                 .one()
-        TenantAccessSupport.requireTenantRecordAccess(ec, config,
-                "${sourceLabel} NetSuite auth config '${sourceConfigId}' was not found.",
-                "${sourceLabel} NetSuite auth config '${sourceConfigId}' is not available in your active tenant.")
-        if (config && normalize(config.isActive) == "N") {
+        if (config == null) {
+            ec.message.addError("${sourceLabel} NetSuite auth config '${sourceConfigId}' was not found.")
+            return
+        }
+        if (!SharedConfigAccessSupport.canActiveTenantUseConfig(ec,
+                SharedConfigAccessSupport.CONFIG_TYPE_NS_AUTH, config)) {
+            ec.message.addError("${sourceLabel} NetSuite auth config '${sourceConfigId}' is not available in your active tenant.")
+            return
+        }
+        if (normalize(config.isActive) == "N") {
             ec.message.addError("${sourceLabel} NetSuite auth config '${sourceConfigId}' is inactive.")
         }
         String endpointAuthConfigId = normalize(nsRestletConfig?.nsAuthConfigId)

@@ -4,6 +4,7 @@ import darpan.common.DarpanEntityConstants
 import darpan.common.TransactionDetachSupport
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
+import darpan.facade.common.SharedConfigAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
@@ -1442,6 +1443,31 @@ class AutomationExecutionSupport {
                     .useCache(false)
                     .limit(2)
                     .list() ?: []
+
+            // DAR-BE-005: a config shared TO this tenant is equally usable by its automations.
+            // Resolved by explicit PK so the cross-tenant read stays a point lookup.
+            String configTypeEnumId = SharedConfigAccessSupport.CONFIG_TYPE_REGISTRY.find { k, v ->
+                v.entityName == configEntityName
+            }?.key
+            if (configTypeEnumId) {
+                Set<String> ownedIds = rows.collect { normalize(readField(it, configIdField)) }.findAll { it } as Set
+                (SharedConfigAccessSupport.listSharedConfigIdsForTenant(ec, configTypeEnumId, companyUserGroupId) - ownedIds)
+                        .each { String sharedId ->
+                            def sharedRow = TenantScopedFinder.findGlobalUnscoped(ec, configEntityName,
+                                            "shared config resolved by explicit PK for a tenant holding an " +
+                                            "active ConfigTenantAccess grant (DAR-BE-005)")
+                                    .condition(configIdField, sharedId)
+                                    .condition("isActive", "Y")
+                                    .condition("canReadOrders", "Y")
+                                    .useCache(false)
+                                    .one()
+                            if (sharedRow != null) rows = rows + [sharedRow]
+                        }
+            }
+
+            // Unchanged contract: auto-detect only when the choice is UNAMBIGUOUS. Sharing can push a
+            // tenant from one candidate to two, in which case auto-detect correctly declines and the
+            // automation must name its config explicitly.
             return rows.size() == 1 ? normalize(readField(rows.first(), configIdField)) : null
         } catch (Exception e) {
             logger.warn("Failed to detect single active source config for ${configEntityName}", e)

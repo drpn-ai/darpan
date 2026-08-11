@@ -4526,7 +4526,15 @@
                     "omsRestSourceConfigs": {
                         "type": "array",
                         "items": {
-                            
+                            "type": "object",
+                            "properties": {
+                                "omsRestSourceConfigId": {
+                                    "type": "string"
+                                },
+                                "isShared": {
+                                    "type": "boolean"
+                                }
+                            }
                         }
                     },
                     "pagination": {
@@ -4680,7 +4688,12 @@
                         }
                     },
                     "savedOmsRestSourceConfig": {
-                        "type": "object"
+                        "type": "object",
+                        "properties": {
+                            "isShared": {
+                                "type": "boolean"
+                            }
+                        }
                     }
                 }
             },
@@ -14377,6 +14390,9 @@
                             },
                             "hasAccessToken": {
                                 "type": "boolean"
+                            },
+                            "isShared": {
+                                "type": "boolean"
                             }
                         }
                     }
@@ -14528,6 +14544,9 @@
                                     "type": "boolean"
                                 },
                                 "hasAccessToken": {
+                                    "type": "boolean"
+                                },
+                                "isShared": {
                                     "type": "boolean"
                                 }
                             }
@@ -14682,6 +14701,9 @@
                                 "type": "boolean"
                             },
                             "hasAccessToken": {
+                                "type": "boolean"
+                            },
+                            "isShared": {
                                 "type": "boolean"
                             }
                         }

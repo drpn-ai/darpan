@@ -99,10 +99,17 @@ class SharedConfigPropagationTests {
 
         ReconciliationSavedRunSupport.validateHotWaxOmsConfig(asOutsider, "File 1", "OMS_SM")
 
-        assertEquals(["File 1 HotWax source config 'OMS_SM' is not available in your active tenant."],
+        // NOT "is not available in your active tenant." — that assertion (and this comment) were
+        // wrong before the 2026-08-11 review fix. Pre-DAR-BE-005, findTenantScoped pre-filtered by
+        // tenant at the QUERY level, so a foreign-owned row was simply invisible and "was not found"
+        // was the ONLY message an outsider could ever see; requireTenantRecordAccess's forbidden
+        // branch was unreachable at this call site. An outsider must keep getting that exact text —
+        // both for byte-identical pre-DAR-BE-005 behavior AND to deny a cross-tenant existence
+        // oracle (sourceConfigId is caller-supplied via saved runs and rule sets).
+        assertEquals(["File 1 HotWax source config 'OMS_SM' was not found."],
                 asOutsider.message.errors,
-                "the error text must stay byte-identical to what requireTenantRecordAccess used to " +
-                "produce — the UI and existing specs match on it")
+                "an outsider tenant gets the SAME 'was not found' text a nonexistent id would " +
+                "produce — never the more specific 'is not available' message")
     }
 
     @Test
@@ -115,6 +122,75 @@ class SharedConfigPropagationTests {
 
         assertEquals(["File 1 HotWax source config 'OMS_DOES_NOT_EXIST' was not found."],
                 asOwner.message.errors)
+    }
+
+    // --- Seam B: cross-tenant existence oracle stays closed (2026-08-11 review fix) -------------
+    //
+    // The property that must never silently regress: for a caller with NO standing (not owner, not
+    // a peer), a real config id it cannot use and an id that does not exist at all must produce
+    // BYTE-IDENTICAL ec.message.errors. If they ever diverge, the response itself becomes an oracle
+    // — a caller with no admin standing could enumerate every real config id in the installation by
+    // which text comes back. Each test below queries the SAME id against two stubs: one where a
+    // foreign-owned row with that id exists, one where no row with that id exists at all.
+
+    @Test
+    void validateShopifyAuthConfigGivesAnOutsiderTheIdenticalMessageForARealAndANonexistentConfigId() {
+        Map foreignRow = [shopifyAuthConfigId: "SHOP_SM", companyUserGroupId: "STEVE_MADDEN",
+                          isActive: "Y", canReadOrders: "Y"]
+        Map unrelatedRow = [shopifyAuthConfigId: "SHOP_UNRELATED", companyUserGroupId: "STEVE_MADDEN",
+                            isActive: "Y", canReadOrders: "Y"]
+        def asOutsiderRealId = ecForConfigType("THIRD_LOVE", "darpan.shopify.ShopifyAuthConfig",
+                "SCFG_SHOPIFY_AUTH", "shopifyAuthConfigId", foreignRow)
+        def asOutsiderUnknownId = ecForConfigType("THIRD_LOVE", "darpan.shopify.ShopifyAuthConfig",
+                "SCFG_SHOPIFY_AUTH", "shopifyAuthConfigId", unrelatedRow)
+
+        ReconciliationSavedRunSupport.validateShopifyAuthConfig(asOutsiderRealId, "File 1", "SHOP_SM")
+        ReconciliationSavedRunSupport.validateShopifyAuthConfig(asOutsiderUnknownId, "File 1", "SHOP_SM")
+
+        assertEquals(asOutsiderUnknownId.message.errors, asOutsiderRealId.message.errors,
+                "oracle-closed: a real config the outsider has no standing over must be " +
+                "indistinguishable from an id that does not exist at all")
+        assertEquals(["File 1 Shopify auth config 'SHOP_SM' was not found."], asOutsiderRealId.message.errors)
+    }
+
+    @Test
+    void validateHotWaxOmsConfigGivesAnOutsiderTheIdenticalMessageForARealAndANonexistentConfigId() {
+        Map foreignRow = [omsRestSourceConfigId: "OMS_SM", companyUserGroupId: "STEVE_MADDEN",
+                          isActive: "Y", canReadOrders: "Y"]
+        Map unrelatedRow = [omsRestSourceConfigId: "OMS_UNRELATED", companyUserGroupId: "STEVE_MADDEN",
+                            isActive: "Y", canReadOrders: "Y"]
+        def asOutsiderRealId = ecForConfigType("THIRD_LOVE", "darpan.hotwax.HotWaxOmsRestSourceConfig",
+                "SCFG_HOTWAX_OMS", "omsRestSourceConfigId", foreignRow)
+        def asOutsiderUnknownId = ecForConfigType("THIRD_LOVE", "darpan.hotwax.HotWaxOmsRestSourceConfig",
+                "SCFG_HOTWAX_OMS", "omsRestSourceConfigId", unrelatedRow)
+
+        ReconciliationSavedRunSupport.validateHotWaxOmsConfig(asOutsiderRealId, "File 1", "OMS_SM")
+        ReconciliationSavedRunSupport.validateHotWaxOmsConfig(asOutsiderUnknownId, "File 1", "OMS_SM")
+
+        assertEquals(asOutsiderUnknownId.message.errors, asOutsiderRealId.message.errors,
+                "oracle-closed: a real config the outsider has no standing over must be " +
+                "indistinguishable from an id that does not exist at all")
+        assertEquals(["File 1 HotWax source config 'OMS_SM' was not found."], asOutsiderRealId.message.errors)
+    }
+
+    @Test
+    void validateNetSuiteAuthConfigGivesAnOutsiderTheIdenticalMessageForARealAndANonexistentConfigId() {
+        Map foreignRow = [nsAuthConfigId: "NS_SM", companyUserGroupId: "STEVE_MADDEN",
+                          isActive: "Y", canReadOrders: "Y"]
+        Map unrelatedRow = [nsAuthConfigId: "NS_UNRELATED", companyUserGroupId: "STEVE_MADDEN",
+                            isActive: "Y", canReadOrders: "Y"]
+        def asOutsiderRealId = ecForConfigType("THIRD_LOVE", "darpan.reconciliation.NsAuthConfig",
+                "SCFG_NS_AUTH", "nsAuthConfigId", foreignRow)
+        def asOutsiderUnknownId = ecForConfigType("THIRD_LOVE", "darpan.reconciliation.NsAuthConfig",
+                "SCFG_NS_AUTH", "nsAuthConfigId", unrelatedRow)
+
+        ReconciliationSavedRunSupport.validateNetSuiteAuthConfig(asOutsiderRealId, "File 1", "NS_SM", null)
+        ReconciliationSavedRunSupport.validateNetSuiteAuthConfig(asOutsiderUnknownId, "File 1", "NS_SM", null)
+
+        assertEquals(asOutsiderUnknownId.message.errors, asOutsiderRealId.message.errors,
+                "oracle-closed: a real config the outsider has no standing over must be " +
+                "indistinguishable from an id that does not exist at all")
+        assertEquals(["File 1 NetSuite auth config 'NS_SM' was not found."], asOutsiderRealId.message.errors)
     }
 
     // --- Seam B: automation auto-detect (AutomationExecutionSupport.findSingleActiveConfigId) ---
@@ -187,6 +263,37 @@ class SharedConfigPropagationTests {
      *  than editing the shared stub keeps this task's file footprint to the three files it owns. */
     private static class LimitAwareFinderStub extends SharedConfigAccessSupportTests.FinderStub {
         LimitAwareFinderStub limit(int max) { this }
+    }
+
+    /** Generalizes {@link #ecFor} across config type for the oracle-closed tests above: entity
+     *  name, {@code configTypeEnumId}, and the PK field all vary by config type; everything else —
+     *  the always-to-BETSEY_JOHNSON grant row, the active-tenant view row — is identical. The grant
+     *  is irrelevant to these tests (both stubs are queried as THIRD_LOVE, an outsider with no
+     *  grant either way) but is included for shape-parity with {@link #ecFor}. */
+    private static Expando ecForConfigType(String activeTenant, String entityName, String configTypeEnumId,
+            String pkField, Map configRow) {
+        return new Expando(
+                user: new SharedConfigAccessSupportTests.UserStub(userId: "aditi", nowTimestamp: NOW,
+                        preferences: ["darpan.auth.activeTenantUserGroupId": activeTenant],
+                        context: [activeTenantUserGroupId: activeTenant]),
+                entity: new SharedConfigAccessSupportTests.EntityFacadeStub(finders: [
+                        "darpan.auth.ConfigTenantAccess": new SharedConfigAccessSupportTests.FinderStub(
+                                listResult: [[configTypeEnumId: configTypeEnumId, configId: configRow[pkField],
+                                              tenantUserGroupId: "BETSEY_JOHNSON",
+                                              fromDate: Timestamp.valueOf("2026-01-01 00:00:00"),
+                                              thruDate: null, grantedByUserId: "aditi"]]),
+                        (entityName): new SharedConfigAccessSupportTests.FinderStub(
+                                listResult: [configRow], oneResult: configRow),
+                        "moqui.security.UserGroupAndMember":
+                                new SharedConfigAccessSupportTests.FinderStub(listResult:
+                                        activeTenant ? [[userId         : "aditi",
+                                                         userGroupId    : activeTenant,
+                                                         groupTypeEnumId: "UgtDarpanCompany"]] : []),
+                ]),
+                message: new SharedConfigAccessSupportTests.MessageFacadeStub(),
+                l10n: new Expando(timeZone: "UTC"),
+                resource: new Expando(properties: [:])
+        )
     }
 
     /** STEVE_MADDEN owns the row; BETSEY_JOHNSON holds an active grant; THIRD_LOVE holds none. */

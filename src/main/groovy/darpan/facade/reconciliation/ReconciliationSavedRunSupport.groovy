@@ -974,13 +974,19 @@ class ReconciliationSavedRunSupport {
                 .condition("shopifyAuthConfigId", sourceConfigId)
                 .useCache(false)
                 .one()
-        if (config == null) {
-            ec.message.addError("${sourceLabel} Shopify auth config '${sourceConfigId}' was not found.")
-            return
-        }
-        if (!SharedConfigAccessSupport.canActiveTenantUseConfig(ec,
+        // Deliberately ONE message for both "no such row" and "row exists but this tenant has no
+        // standing over it" (not owner, not a peer). This is not a downgrade — it's required.
+        // findTenantScoped (pre-DAR-BE-005) pre-filtered by tenant at the QUERY level, so a
+        // foreign-owned row was simply invisible and this exact text was the only message a
+        // zero-grant caller could ever see; splitting it into a more specific "is not available"
+        // message would both break that byte-identical behavior AND reopen a cross-tenant
+        // existence oracle (sourceConfigId is caller-supplied via saved runs and rule sets, so a
+        // caller with no standing must not be able to learn whether an id exists ANYWHERE by which
+        // message comes back — see SharedConfigGrantSupport.resolveAndAuthorize, d272fd7, for the
+        // same ruling applied to the grant/revoke path).
+        if (config == null || !SharedConfigAccessSupport.canActiveTenantUseConfig(ec,
                 SharedConfigAccessSupport.CONFIG_TYPE_SHOPIFY_AUTH, config)) {
-            ec.message.addError("${sourceLabel} Shopify auth config '${sourceConfigId}' is not available in your active tenant.")
+            ec.message.addError("${sourceLabel} Shopify auth config '${sourceConfigId}' was not found.")
             return
         }
         if (normalize(config.isActive) == "N") {
@@ -1001,13 +1007,19 @@ class ReconciliationSavedRunSupport {
                 .condition("omsRestSourceConfigId", sourceConfigId)
                 .useCache(false)
                 .one()
-        if (config == null) {
-            ec.message.addError("${sourceLabel} HotWax source config '${sourceConfigId}' was not found.")
-            return
-        }
-        if (!SharedConfigAccessSupport.canActiveTenantUseConfig(ec,
+        // Deliberately ONE message for both "no such row" and "row exists but this tenant has no
+        // standing over it" (not owner, not a peer). This is not a downgrade — it's required.
+        // findTenantScoped (pre-DAR-BE-005) pre-filtered by tenant at the QUERY level, so a
+        // foreign-owned row was simply invisible and this exact text was the only message a
+        // zero-grant caller could ever see; splitting it into a more specific "is not available"
+        // message would both break that byte-identical behavior AND reopen a cross-tenant
+        // existence oracle (sourceConfigId is caller-supplied via saved runs and rule sets, so a
+        // caller with no standing must not be able to learn whether an id exists ANYWHERE by which
+        // message comes back — see SharedConfigGrantSupport.resolveAndAuthorize, d272fd7, for the
+        // same ruling applied to the grant/revoke path).
+        if (config == null || !SharedConfigAccessSupport.canActiveTenantUseConfig(ec,
                 SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, config)) {
-            ec.message.addError("${sourceLabel} HotWax source config '${sourceConfigId}' is not available in your active tenant.")
+            ec.message.addError("${sourceLabel} HotWax source config '${sourceConfigId}' was not found.")
             return
         }
         if (normalize(config.isActive) == "N") {
@@ -1028,13 +1040,19 @@ class ReconciliationSavedRunSupport {
                 .condition("nsAuthConfigId", sourceConfigId)
                 .useCache(false)
                 .one()
-        if (config == null) {
-            ec.message.addError("${sourceLabel} NetSuite auth config '${sourceConfigId}' was not found.")
-            return
-        }
-        if (!SharedConfigAccessSupport.canActiveTenantUseConfig(ec,
+        // Deliberately ONE message for both "no such row" and "row exists but this tenant has no
+        // standing over it" (not owner, not a peer). This is not a downgrade — it's required.
+        // findTenantScoped (pre-DAR-BE-005) pre-filtered by tenant at the QUERY level, so a
+        // foreign-owned row was simply invisible and this exact text was the only message a
+        // zero-grant caller could ever see; splitting it into a more specific "is not available"
+        // message would both break that byte-identical behavior AND reopen a cross-tenant
+        // existence oracle (sourceConfigId is caller-supplied via saved runs and rule sets, so a
+        // caller with no standing must not be able to learn whether an id exists ANYWHERE by which
+        // message comes back — see SharedConfigGrantSupport.resolveAndAuthorize, d272fd7, for the
+        // same ruling applied to the grant/revoke path).
+        if (config == null || !SharedConfigAccessSupport.canActiveTenantUseConfig(ec,
                 SharedConfigAccessSupport.CONFIG_TYPE_NS_AUTH, config)) {
-            ec.message.addError("${sourceLabel} NetSuite auth config '${sourceConfigId}' is not available in your active tenant.")
+            ec.message.addError("${sourceLabel} NetSuite auth config '${sourceConfigId}' was not found.")
             return
         }
         if (normalize(config.isActive) == "N") {

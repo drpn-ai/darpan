@@ -7,6 +7,14 @@ import org.junit.jupiter.api.Test
 
 import java.sql.Timestamp
 import java.time.Instant
+import java.util.concurrent.Callable
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.concurrent.ThreadFactory
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
@@ -777,6 +785,9 @@ class AutomationExecutionSupportTests {
             // Scanner pass 1: under the cap, so it claims and re-drives — attempt 2 runs for real and
             // mints its own row, and the operator clicks "Notify me" on it.
             AutomationExecutionSupport.reprocessDueRetries(ec, timestamp("2026-05-01T11:00:00Z"), 100, [:])
+            // DAR-BE-002: the re-drive is submitted, not joined — wait for attempt 2 to actually finish
+            // before asserting on what it left behind.
+            ec.service.awaitAsyncCompletion()
             assertEquals(1, execution.retryCount)
             assertEquals(AutomationExecutionSupport.STATUS_PENDING, execution.statusEnumId)
             assertEquals(2, attemptCount, "the re-drive must be a real second attempt")
@@ -787,6 +798,7 @@ class AutomationExecutionSupportTests {
 
             // Scanner pass 2: retries exhausted → DEAD_LETTER, and the give-up alert goes out.
             AutomationExecutionSupport.reprocessDueRetries(ec, timestamp("2026-05-01T12:00:00Z"), 100, [:])
+            ec.service.awaitAsyncCompletion()
 
             assertEquals(AutomationExecutionSupport.STATUS_DEAD_LETTER, execution.statusEnumId)
             assertEquals(1, deliveries.size(), "the subscriber must be told the automation gave up")
@@ -2276,6 +2288,149 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
+    void scanSubmitsAndAdvancesTheScheduleWithoutWaitingForTheExecution() {
+        // DAR-BE-002: the every-5-minute ServiceJob used to dispatch async futures and then JOIN them
+        // (future.get(1800s)), so a ~301s reconciliation held the whole sweep open and ticks overlapped.
+        // The scan must submit, advance the schedule, and return while the execution is still running.
+        FakeEc ec = fakeEc()
+        addDueAutomation(ec, "AUTO_SLOW", timestamp("2026-05-01T09:00:00Z"))
+
+        CountDownLatch executionStarted = new CountDownLatch(1)
+        CountDownLatch releaseExecution = new CountDownLatch(1)
+        AtomicBoolean executionFinished = new AtomicBoolean(false)
+        ec.service.responder = { FakeServiceCall call ->
+            executionStarted.countDown()
+            releaseExecution.await(30, TimeUnit.SECONDS)
+            executionFinished.set(true)
+            return [executedCount: 1]
+        }
+        // Watchdog so a regression to joining FAILS on the assertion below instead of hanging the suite.
+        startLatchWatchdog(releaseExecution, 3000L)
+
+        Map result = AutomationExecutionSupport.scanDueAutomations(ec, [nowTimestamp: NOW, limit: 100])
+
+        assertFalse(executionFinished.get(),
+                "scan#DueAutomations must return without waiting for the execution it submitted")
+        FakeValue dueAutomation = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find {
+            it.automationId == "AUTO_SLOW"
+        }
+        assertEquals(timestamp("2026-05-01T09:00:00Z"), dueAutomation.lastScheduledFireTime,
+                "the schedule must advance at submission, not after the execution finishes")
+        assertEquals(timestamp("2026-05-01T11:00:00Z"), dueAutomation.nextScheduledFireTime,
+                "a still-running execution must not leave its automation due for the next tick")
+        assertEquals(1, result.dueCount)
+        assertTrue(executionStarted.await(10, TimeUnit.SECONDS),
+                "the execution must actually be submitted, not dropped")
+        releaseExecution.countDown()
+    }
+
+    @Test
+    void scanDefersSubmissionWhenTheInFlightExecutionCapIsAlreadyFull() {
+        // DAR-BE-002 keeps the 2026-06-11 #8 flood protection: fire-and-forget moves scheduling off the
+        // scan, so the bound has to move onto in-flight state. Moqui's shared worker pool is bounded at
+        // 32+ threads — far above the 4 concurrent Spark reconciliations this cap exists to allow — so
+        // the scan counts RUNNING executions and defers rather than stampeding the driver.
+        FakeEc ec = fakeEc()
+        addDueAutomation(ec, "AUTO_DEFERRED", timestamp("2026-05-01T09:00:00Z"))
+        (1..AutomationExecutionSupport.MAX_CONCURRENT_EXECUTIONS).each { int index ->
+            ec.entity.add("darpan.reconciliation.ReconciliationAutomationExecution", [
+                    automationExecutionId: "EXEC_INFLIGHT_${index}".toString(),
+                    automationId         : "AUTO_OTHER_${index}".toString(),
+                    companyUserGroupId   : "TENANT_A",
+                    statusEnumId         : AutomationExecutionSupport.STATUS_RUNNING,
+                    scheduledDate        : NOW,
+            ])
+        }
+        ec.service.responder = { FakeServiceCall call -> [executedCount: 1] }
+
+        Map result = AutomationExecutionSupport.scanDueAutomations(ec, [nowTimestamp: NOW, limit: 100])
+
+        assertTrue(ec.service.calls.isEmpty(),
+                "no execution may be submitted while the in-flight cap is full. Submitted: ${ec.service.calls*.serviceName}")
+        assertEquals(1, result.deferredCount)
+        FakeValue deferred = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find {
+            it.automationId == "AUTO_DEFERRED"
+        }
+        assertNull(deferred.lastScheduledFireTime,
+                "a deferred automation must stay due — advancing its schedule would silently drop the window")
+        assertEquals(timestamp("2026-05-01T09:00:00Z"), deferred.nextScheduledFireTime)
+    }
+
+    @Test
+    void aDeferredAutomationIsSubmittedOnTheNextTickOnceCapacityFrees() {
+        // The deferral above must be a delay, not a loss: once the in-flight executions clear, the very
+        // next 5-minute tick picks the same window up.
+        FakeEc ec = fakeEc()
+        addDueAutomation(ec, "AUTO_DEFERRED", timestamp("2026-05-01T09:00:00Z"))
+        List<FakeValue> inFlight = (1..AutomationExecutionSupport.MAX_CONCURRENT_EXECUTIONS).collect { int index ->
+            ec.entity.add("darpan.reconciliation.ReconciliationAutomationExecution", [
+                    automationExecutionId: "EXEC_INFLIGHT_${index}".toString(),
+                    automationId         : "AUTO_OTHER_${index}".toString(),
+                    companyUserGroupId   : "TENANT_A",
+                    statusEnumId         : AutomationExecutionSupport.STATUS_RUNNING,
+                    scheduledDate        : NOW,
+            ])
+            return ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"].last()
+        }
+        ec.service.responder = { FakeServiceCall call -> [executedCount: 1] }
+
+        AutomationExecutionSupport.scanDueAutomations(ec, [nowTimestamp: NOW, limit: 100])
+        inFlight.each { FakeValue row -> row.statusEnumId = AutomationExecutionSupport.STATUS_SUCCEEDED }
+        Map secondTick = AutomationExecutionSupport.scanDueAutomations(ec, [
+                nowTimestamp: timestamp("2026-05-01T10:05:00Z"),
+                limit       : 100,
+        ])
+
+        assertEquals(0, secondTick.deferredCount)
+        assertEquals(1, ec.service.calls.size())
+        assertEquals("AUTO_DEFERRED", ec.service.calls[0].params.automationId)
+        assertEquals(timestamp("2026-05-01T09:00:00Z"), ec.service.calls[0].params.scheduledFireTime,
+                "the deferred window itself must run, not a fresher one that skips it")
+    }
+
+    @Test
+    void retryRedriveIsSubmittedWithoutWaitingForTheExecution() {
+        // DAR-BE-002: reprocessDueRetries ran on the same 5-minute scan and blocked on a SYNC
+        // execute#Automation for every due retry, so leaving it synchronous would keep the sweep long
+        // even after the scheduled path stopped joining.
+        FakeEc ec = fakeEc()
+        ec.entity.add("darpan.reconciliation.ReconciliationAutomationExecution", [
+                automationExecutionId: "EXEC_RETRY_SLOW",
+                automationId         : "AUTO_RETRY",
+                companyUserGroupId   : "TENANT_A",
+                statusEnumId         : AutomationExecutionSupport.STATUS_PENDING,
+                retryCount           : 0,
+                maxRetryCount        : 3,
+                scheduledDate        : NOW,
+                nextRetryDate        : timestamp("2026-04-30T00:00:00Z"),
+        ])
+
+        CountDownLatch executionStarted = new CountDownLatch(1)
+        CountDownLatch releaseExecution = new CountDownLatch(1)
+        AtomicBoolean executionFinished = new AtomicBoolean(false)
+        ec.service.responder = { FakeServiceCall call ->
+            executionStarted.countDown()
+            releaseExecution.await(30, TimeUnit.SECONDS)
+            executionFinished.set(true)
+            return [executedCount: 1]
+        }
+        startLatchWatchdog(releaseExecution, 3000L)
+
+        List results = AutomationExecutionSupport.reprocessDueRetries(ec, NOW, 100, [:])
+
+        assertFalse(executionFinished.get(),
+                "the retry sweep must submit the re-drive and return, not join it")
+        assertEquals(1, results.size())
+        FakeValue row = ec.entity.rows["darpan.reconciliation.ReconciliationAutomationExecution"].find {
+            it.automationExecutionId == "EXEC_RETRY_SLOW"
+        }
+        assertEquals(1, row.retryCount, "the row must still be claimed before the submission")
+        assertTrue(executionStarted.await(10, TimeUnit.SECONDS),
+                "the re-drive must actually be submitted, not dropped")
+        releaseExecution.countDown()
+    }
+
+    @Test
     void transientFailureRequeuesExecutionToPendingWithBackoff() {
         // DAR-300: a transient extractor failure requeues the execution to PENDING with a nextRetryDate
         // (not terminal FAILED), so the scanner can re-drive it.
@@ -2956,6 +3111,37 @@ class AutomationExecutionSupportTests {
         return ec
     }
 
+    /** An active automation on an hourly schedule whose next fire time has already passed. */
+    private static void addDueAutomation(FakeEc ec, String automationId, Timestamp nextScheduledFireTime) {
+        ec.entity.add("darpan.reconciliation.ReconciliationAutomation", [
+                automationId         : automationId,
+                automationName       : automationId,
+                companyUserGroupId   : "TENANT_A",
+                inputModeEnumId      : AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE,
+                scheduleExpr         : "0 0 * * * ?",
+                windowTimeZone       : "UTC",
+                isActive             : "Y",
+                nextScheduledFireTime: nextScheduledFireTime,
+        ])
+    }
+
+    /**
+     * Releases a latch after a delay so a test that pins a submitted execution can never hang the suite:
+     * production code that (re)gains a blocking join fails the assertion instead of stalling forever.
+     */
+    private static void startLatchWatchdog(CountDownLatch latch, long delayMillis) {
+        Thread watchdog = new Thread({ ->
+            try {
+                Thread.sleep(delayMillis)
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt()
+            }
+            latch.countDown()
+        }, "latch-watchdog")
+        watchdog.daemon = true
+        watchdog.start()
+    }
+
     private static void seedApiAutomation(FakeEc ec) {
         // Registry rows the dispatch path now reads (mirrors data/SourceSystemConnectorSeedData.xml).
         ec.entity.add(SourceSystemConnectorSupport.ENTITY_NAME, [
@@ -3214,6 +3400,12 @@ class AutomationExecutionSupportTests {
             return list().find()
         }
 
+        // Mirrors Moqui EntityFind.count() — DAR-BE-002's in-flight governor counts RUNNING executions
+        // rather than loading them, since the count is all it needs.
+        long count() {
+            return list().size() as long
+        }
+
         List<FakeValue> list() {
             entity.listCounts[entityName] = (entity.listCounts[entityName] ?: 0) + 1
             List<FakeValue> matchedRows = entity.rows[entityName].findAll { value ->
@@ -3295,11 +3487,82 @@ class AutomationExecutionSupportTests {
 
     private static class FakeServiceFacade {
         Closure responder = { FakeServiceCall ignored -> [:] }
-        List<FakeServiceCall> calls = []
+        List<FakeServiceCall> calls = Collections.synchronizedList([] as List<FakeServiceCall>)
         FakeEc ec
+        /**
+         * DAR-BE-002: a REAL background pool, not an inline stub. "scan#DueAutomations does not wait for
+         * the execution it submitted" is only provable if the submitted body can still be running when
+         * the scan returns — an inline fake would make every arrangement of the production code pass.
+         * Daemon threads so a fixture that leaves work parked on a latch cannot hold the Gradle test JVM.
+         */
+        final ExecutorService asyncPool = Executors.newCachedThreadPool({ Runnable runnable ->
+            Thread thread = new Thread(runnable, "fake-async-service")
+            thread.daemon = true
+            return thread
+        } as ThreadFactory)
+        private final List<Future<?>> asyncSubmissions = Collections.synchronizedList([] as List<Future<?>>)
 
         FakeServiceCall sync() {
             return new FakeServiceCall(service: this)
+        }
+
+        FakeAsyncServiceCall async() {
+            return new FakeAsyncServiceCall(service: this)
+        }
+
+        Future<Map<String, Object>> dispatchAsync(FakeServiceCall submitted) {
+            Future<Map<String, Object>> future = (Future<Map<String, Object>>) asyncPool.submit(
+                    { -> (responder.call(submitted) ?: [:]) as Map<String, Object> } as Callable)
+            asyncSubmissions << future
+            return future
+        }
+
+        /**
+         * Joins every submitted async body. A test asserting on the EFFECTS of a fire-and-forget
+         * submission must say so explicitly — racing the worker would make it flaky, and asserting
+         * without joining would quietly stop testing the re-drive at all.
+         */
+        void awaitAsyncCompletion(long timeoutSeconds = 10L) {
+            List<Future<?>> pending
+            synchronized (asyncSubmissions) { pending = new ArrayList<Future<?>>(asyncSubmissions) }
+            pending.each { Future<?> future -> future.get(timeoutSeconds, TimeUnit.SECONDS) }
+        }
+    }
+
+    /**
+     * Mirrors Moqui's ServiceCallAsync: {@code call()} is fire-and-forget (void), {@code callFuture()}
+     * hands back a Future. Both record the submission on the CALLING thread and run only the service
+     * body off-thread, so a test can assert what was submitted without racing the worker.
+     */
+    private static class FakeAsyncServiceCall {
+        FakeServiceFacade service
+        String serviceName
+        Map<String, Object> params = [:]
+
+        FakeAsyncServiceCall name(String serviceName) {
+            this.serviceName = serviceName
+            return this
+        }
+
+        FakeAsyncServiceCall parameters(Map<String, Object> params) {
+            this.params = params
+            return this
+        }
+
+        FakeAsyncServiceCall disableAuthz() { return this }
+
+        private FakeServiceCall recordSubmission() {
+            FakeServiceCall submitted = new FakeServiceCall(service: service, serviceName: serviceName, params: params)
+            service.calls << submitted
+            return submitted
+        }
+
+        void call() {
+            service.dispatchAsync(recordSubmission())
+        }
+
+        Future<Map<String, Object>> callFuture() {
+            return service.dispatchAsync(recordSubmission())
         }
     }
 

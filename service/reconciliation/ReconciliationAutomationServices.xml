@@ -239,7 +239,15 @@
     </service>
 
     <service verb="scan" noun="DueAutomations" transaction="ignore" allow-remote="false" authenticate="anonymous-all">
-        <description>Find active automations with nextScheduledFireTime at or before now, call execute#Automation, and advance nextScheduledFireTime from the automation schedule expression.</description>
+        <description>Find active automations with nextScheduledFireTime at or before now, SUBMIT execute#Automation for each
+            (fire-and-forget onto the async worker pool), and advance nextScheduledFireTime from the automation schedule
+            expression at submission time. DAR-BE-002: this scan does not wait for any execution to finish, so it returns
+            promptly and the every-5-minute ServiceJob stops overlapping itself. scanResults therefore carries a submission
+            ACK per automation, not a run outcome — each execution reports itself on its own ReconciliationAutomationExecution
+            and ReconciliationRunResult rows (both minted at RUNNING) and on the live run-progress view. Submissions are
+            bounded by darpan.reconciliation.automation.maxConcurrentExecutions minus the executions already RUNNING;
+            automations past that budget are reported in deferredCount with their schedule untouched, so the next tick
+            re-drives the same window.</description>
         <in-parameters>
             <parameter name="nowTimestamp" type="Timestamp"/>
             <parameter name="limit" type="Integer" default-value="100"/>
@@ -250,13 +258,21 @@
         <out-parameters>
             <parameter name="scanTimestamp" type="Timestamp"/>
             <parameter name="dueCount" type="Integer"/>
-            <parameter name="scanResults" type="List"/>
+            <parameter name="scanResults" type="List">
+                <description>One entry per SUBMITTED automation: automationId, scheduledFireTime, the advanced
+                    nextScheduledFireTime, and a submission ack. Not a per-execution outcome.</description>
+            </parameter>
+            <parameter name="deferredCount" type="Integer">
+                <description>Due automations left for the next tick because the in-flight execution cap was already
+                    reached. Non-zero here means the scheduler is saturated, not that nothing was due.</description>
+            </parameter>
         </out-parameters>
         <actions>
             <set field="automationResult" from="darpan.reconciliation.automation.AutomationExecutionSupport.scanDueAutomations(ec, context)"/>
             <set field="scanTimestamp" from="automationResult.scanTimestamp"/>
             <set field="dueCount" from="automationResult.dueCount"/>
             <set field="scanResults" from="automationResult.scanResults"/>
+            <set field="deferredCount" from="automationResult.deferredCount"/>
         </actions>
     </service>
 

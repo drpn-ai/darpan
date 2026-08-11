@@ -25,10 +25,6 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.Future
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 
 import static darpan.common.ValueSupport.fileNameFromPath
 import static darpan.common.ValueSupport.normalize
@@ -50,15 +46,17 @@ import static darpan.reconciliation.automation.AutomationRuntimeSupport.updateAu
 
 class AutomationExecutionSupport {
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(AutomationExecutionSupport)
-    // Audit 2026-06-11 #8: bound the number of automation executions dispatched concurrently per scan
-    // and cap how long the scan waits on any single execution. Override via the system properties
-    // below for tenants with heavier scheduler/Spark capacity.
+    // Audit 2026-06-11 #8, reworked by DAR-BE-002: the ceiling on how many automation executions may be
+    // in flight at once, bounding shared service-pool and Spark-driver load. It used to be a per-scan
+    // dispatch width because the scan JOINED every execution it dispatched, so "concurrent within one
+    // scan" and "concurrent at all" were the same number. The scan is fire-and-forget now, so the bound
+    // is measured against executions already RUNNING; a tick that would exceed it defers the remaining
+    // due automations to the next tick rather than stampeding Moqui's worker pool (bounded at 32+
+    // threads, far above the Spark concurrency this cap exists to allow). Override via the system
+    // property for tenants with heavier scheduler/Spark capacity.
     static final int MAX_CONCURRENT_EXECUTIONS =
             (System.getProperty("darpan.reconciliation.automation.maxConcurrentExecutions") ?: "4").isInteger() ?
                     (System.getProperty("darpan.reconciliation.automation.maxConcurrentExecutions") ?: "4").toInteger() : 4
-    static final long EXECUTION_TIMEOUT_SECONDS =
-            (System.getProperty("darpan.reconciliation.automation.executionTimeoutSeconds") ?: "1800").isLong() ?
-                    (System.getProperty("darpan.reconciliation.automation.executionTimeoutSeconds") ?: "1800").toLong() : 1800L
     // Security (HIGH gap 2, reworked 2026-06-30): hard DoS sanity ceiling on the resolved window span,
     // SEPARATE from the per-automation `maxWindowDays` operational default (entity default=28). This
     // ceiling exists only to stop the 1970->9999 (~2.9M-day) explosion; it must never reject a real
@@ -602,64 +600,113 @@ class AutomationExecutionSupport {
                 }
                 .take(limit)
 
-        // Audit 2026-06-11 #8: previously ALL due automations (up to `limit`, default 100) were
-        // dispatched as async futures in one pass and then resolved with an untimed future.get(),
-        // flooding the shared service worker pool and Spark driver and letting one wedged execution
-        // block the entire scan. Process them in bounded concurrency chunks instead, and resolve each
-        // future with a timeout so a hung execution cannot stall the rest.
-        int maxConcurrent = MAX_CONCURRENT_EXECUTIONS > 0 ? MAX_CONCURRENT_EXECUTIONS : 1
+        // DAR-BE-002: submit, advance the schedule, return. This scan is a ServiceJob on a 5-minute
+        // cron; it used to dispatch each execution as a future and then JOIN it with a 1800s timed get,
+        // so total wall clock was ceil(N / maxConcurrent) x slowest-in-chunk (~301s observed) and the
+        // scheduler overlapped itself. Every execution is now independently observable on its own live
+        // progress view (executeAutomation mints its ReconciliationAutomationExecution + run-result rows
+        // at RUNNING), so the scan no longer has to wait around to report outcomes.
+        //
+        // The 2026-06-11 #8 flood protection survives as an IN-FLIGHT cap rather than a dispatch width:
+        // budget = cap - executions already RUNNING. Due automations past the budget are deferred with
+        // their schedule untouched, so the very next tick re-drives the same window instead of losing it.
+        int inFlightCount = countInFlightExecutions(ec)
+        int submissionBudget = remainingSubmissionBudget(inFlightCount)
         List<Map<String, Object>> scanResults = []
-        dueAutomationEntries.collate(maxConcurrent).each { List<Map<String, Object>> chunk ->
-            List<Map<String, Object>> pendingExecutions = chunk.collect { Map<String, Object> dueEntry ->
-                def automation = dueEntry.automation
-                String automationId = normalize(readField(automation, "automationId"))
-                Timestamp scheduledFireTime = toTimestamp(dueEntry.scheduledFireTime)
-                Map<String, Object> executeParams = [
-                        automationId      : automationId,
-                        scheduledFireTime : scheduledFireTime,
-                        nowTimestamp      : now,
-                ]
-                ["outputLocation", "sparkMaster", "sparkAppName"].each { key ->
-                    if (input[key] != null) executeParams[key] = input[key]
-                }
+        List<Map<String, Object>> deferredResults = []
+        dueAutomationEntries.each { Map<String, Object> dueEntry ->
+            def automation = dueEntry.automation
+            String automationId = normalize(readField(automation, "automationId"))
+            Timestamp scheduledFireTime = toTimestamp(dueEntry.scheduledFireTime)
 
-                return [
-                        automation       : automation,
-                        automationId     : automationId,
-                        scheduledFireTime: scheduledFireTime,
-                        executeFuture    : callExecuteAutomationServiceFuture(ec, executeParams),
-                ] as Map<String, Object>
-            } as List<Map<String, Object>>
-
-            pendingExecutions.each { Map<String, Object> pendingExecution ->
-                def automation = pendingExecution.automation
-                String automationId = pendingExecution.automationId as String
-                Timestamp scheduledFireTime = toTimestamp(pendingExecution.scheduledFireTime)
-                Map<String, Object> executeResult = resolveExecuteAutomationFuture((Future<Map<String, Object>>) pendingExecution.executeFuture)
-                Timestamp nextFireTime = resolveNextScheduledFireTime(automation, scheduledFireTime, now)
-                updateAutomation(ec, automation, [
-                        lastScheduledFireTime: scheduledFireTime,
-                        nextScheduledFireTime: nextFireTime,
-                        lastUpdatedDate      : now,
-                ])
-                scanResults << [
-                        automationId             : automationId,
-                        scheduledFireTime        : scheduledFireTime,
-                        nextScheduledFireTime    : nextFireTime,
-                        executeResult            : executeResult,
-                ]
+            if (scanResults.size() >= submissionBudget) {
+                // Deliberately visible, never a silent truncation: an operator reading the ServiceJobRun
+                // must be able to tell "nothing was due" apart from "the cap was saturated".
+                deferredResults << [automationId: automationId, scheduledFireTime: scheduledFireTime, deferred: true]
+                return
             }
+
+            Map<String, Object> executeParams = [
+                    automationId     : automationId,
+                    scheduledFireTime: scheduledFireTime,
+                    nowTimestamp     : now,
+            ]
+            ["outputLocation", "sparkMaster", "sparkAppName"].each { key ->
+                if (input[key] != null) executeParams[key] = input[key]
+            }
+
+            Map<String, Object> submitResult = submitExecuteAutomationService(ec, executeParams)
+            if (submitResult.submitted != true) {
+                // The submission itself was refused (saturated queue, dispatch error). Leave the schedule
+                // alone so the next tick retries: nothing was enqueued, so there is nothing to double-fire.
+                deferredResults << [automationId: automationId, scheduledFireTime: scheduledFireTime,
+                                    deferred: true, submitResult: submitResult]
+                return
+            }
+
+            // Advance the moment the execution is enqueued, NOT when it finishes. Advancing after the
+            // run would leave a long execution still "due" on the next 5-minute tick and submit it a
+            // second time while the first is mid-flight.
+            Timestamp nextFireTime = resolveNextScheduledFireTime(automation, scheduledFireTime, now)
+            updateAutomation(ec, automation, [
+                    lastScheduledFireTime: scheduledFireTime,
+                    nextScheduledFireTime: nextFireTime,
+                    lastUpdatedDate      : now,
+            ])
+            scanResults << [
+                    automationId         : automationId,
+                    scheduledFireTime    : scheduledFireTime,
+                    nextScheduledFireTime: nextFireTime,
+                    executeResult        : submitResult,
+            ]
         }
 
-        List<Map<String, Object>> retryResults = reprocessDueRetries(ec, now, limit, input)
+        List<Map<String, Object>> retryResults = reprocessDueRetries(ec, now, limit, input,
+                submissionBudget - scanResults.size())
+
+        // Only the cap deferrals are a saturation signal; a refused submission already logged its own
+        // error above, and saying "in flight" about it would misattribute the cause.
+        int capDeferredCount = deferredResults.count { Map<String, Object> entry -> !entry.containsKey("submitResult") } as int
+        if (capDeferredCount > 0) {
+            logger.warn("Automation scan deferred {} due automation(s) to the next tick: {} execution(s) already in flight (cap {})",
+                    capDeferredCount, inFlightCount, MAX_CONCURRENT_EXECUTIONS)
+        }
 
         return [
-                scanTimestamp: now,
-                dueCount     : dueAutomationEntries.size(),
-                scanResults  : scanResults,
-                retryDueCount: retryResults.size(),
-                retryResults : retryResults,
+                scanTimestamp  : now,
+                dueCount       : dueAutomationEntries.size(),
+                scanResults    : scanResults,
+                deferredCount  : deferredResults.size(),
+                deferredResults: deferredResults,
+                retryDueCount  : retryResults.size(),
+                retryResults   : retryResults,
         ]
+    }
+
+    /**
+     * How many more executions this tick may enqueue: {@link #MAX_CONCURRENT_EXECUTIONS} minus the
+     * executions already RUNNING. Stale RUNNING rows (crashed JVM, killed container) cannot wedge the
+     * scheduler forever — sweep#StuckReconciliationRuns reaps them to FAILED on its own 10-minute cron.
+     */
+    protected static int remainingSubmissionBudget(int inFlightCount) {
+        int cap = MAX_CONCURRENT_EXECUTIONS > 0 ? MAX_CONCURRENT_EXECUTIONS : 1
+        return Math.max(0, cap - inFlightCount)
+    }
+
+    protected static int countInFlightExecutions(def ec) {
+        try {
+            return TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION,
+                            "system-cron cross-tenant sweep: count in-flight executions to bound submissions")
+                    .condition("statusEnumId", STATUS_RUNNING)
+                    .useCache(false)
+                    .count() as int
+        } catch (Throwable countError) {
+            // Fail CLOSED on the flood guard, not open: if the in-flight count is unreadable, assume the
+            // pool is busy rather than firing an unbounded batch at the Spark driver. The next tick is
+            // five minutes away.
+            logger.error("Could not count in-flight automation executions; deferring this scan's submissions", countError)
+            return Integer.MAX_VALUE
+        }
     }
 
     /**
@@ -668,8 +715,17 @@ class AutomationExecutionSupport {
      * on statusEnumId then filters nextRetryDate in memory (only requeued rows carry one). retryCount
      * advances at pickup; a row that has reached maxRetryCount is dead-lettered instead of re-driven,
      * which bounds the loop even if the automation's window config changed under it.
+     *
+     * <p>DAR-BE-002: re-drives are SUBMITTED, not joined — this runs inside the same 5-minute scan, so a
+     * synchronous re-drive here would keep the sweep long even after the scheduled path stopped waiting.
+     * It shares the scan's in-flight submission budget: a re-drive past the budget is left unclaimed
+     * (retryCount untouched, nextRetryDate still due) so the next tick picks it up unchanged.
+     * Dead-lettering costs no worker and is never budget-gated.</p>
      */
-    protected static List<Map<String, Object>> reprocessDueRetries(def ec, Timestamp now, int limit, Map<String, Object> input) {
+    protected static List<Map<String, Object>> reprocessDueRetries(def ec, Timestamp now, int limit, Map<String, Object> input,
+            Integer submissionBudget = null) {
+        int remainingBudget = submissionBudget != null ? Math.max(0, submissionBudget) :
+                remainingSubmissionBudget(countInFlightExecutions(ec))
         List pendingRows = TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION,
                         "system-cron retry pickup: PENDING automation executions past nextRetryDate")
                 .condition("statusEnumId", STATUS_PENDING)
@@ -716,6 +772,13 @@ class AutomationExecutionSupport {
                 return
             }
 
+            if (remainingBudget <= 0) {
+                // Do NOT claim what cannot be submitted: leaving retryCount and nextRetryDate untouched
+                // means the next tick re-drives this exact row without having burnt a retry on it.
+                results << [automationExecutionId: execId, automationId: automationId, deferred: true]
+                return
+            }
+
             // Claim the row: advance retryCount and lease nextRetryDate forward so a concurrent/next scan
             // cannot immediately re-pick it while this re-drive is in flight. (updateAutomationExecution
             // ignores null values, so we push the date out rather than clearing it; a reused row moves to
@@ -739,12 +802,8 @@ class AutomationExecutionSupport {
                     nowTimestamp     : now,
             ]
             ["outputLocation", "sparkMaster", "sparkAppName"].each { String key -> if (input[key] != null) executeParams[key] = input[key] }
-            Map<String, Object> executeResult
-            try {
-                executeResult = callExecuteAutomationService(ec, executeParams)
-            } catch (Throwable t) {
-                executeResult = [errors: [sanitizeErrorMessage(t)]]
-            }
+            Map<String, Object> executeResult = submitExecuteAutomationService(ec, executeParams)
+            if (executeResult.submitted == true) remainingBudget--
             results << [automationExecutionId: execId, automationId: automationId, retryCount: currentRetry + 1, executeResult: executeResult]
         }
         return results
@@ -1452,29 +1511,42 @@ class AutomationExecutionSupport {
         return (call.call() ?: [:]) as Map<String, Object>
     }
 
-    protected static Future<Map<String, Object>> callExecuteAutomationServiceFuture(def ec, Map<String, Object> executeParams) {
+    /**
+     * DAR-BE-002: hand execute#Automation to Moqui's async worker pool and return AT ONCE — no future,
+     * no join. The returned map is a submission ACK, not an outcome: the execution's real result lives on
+     * its own ReconciliationAutomationExecution + ReconciliationRunResult rows, both minted at RUNNING,
+     * which is what the live progress view follows.
+     *
+     * <p>executeParams must keep carrying automationId + scheduledFireTime: the detached execution has no
+     * ambient tenant (the scheduler runs as anonymous {@code _NA_}) and resolves its tenant anchor from
+     * the automation's companyUserGroupId, exactly as the joined path did.</p>
+     *
+     * <p>Contexts with no async facade (unit harnesses, degraded runtimes) fall back to running inline
+     * rather than dropping the window — the same fallback the future-based dispatcher had.</p>
+     */
+    protected static Map<String, Object> submitExecuteAutomationService(def ec, Map<String, Object> executeParams) {
+        String automationId = normalize(executeParams?.automationId)
         if (!ec?.service?.metaClass?.respondsTo(ec.service, "async")) {
-            return CompletableFuture.completedFuture(callExecuteAutomationService(ec, executeParams))
+            try {
+                return (callExecuteAutomationService(ec, executeParams) ?: [:]) + [submitted: true, submittedAsync: false]
+            } catch (Throwable inlineError) {
+                logger.error("Inline automation execution failed for {}: {}", automationId, sanitizeErrorMessage(inlineError))
+                return [submitted: false, submittedAsync: false, error: sanitizeErrorMessage(inlineError)]
+            }
         }
 
-        def call = ec.service.async()
-                .name("reconciliation.ReconciliationAutomationServices.execute#Automation")
-                .parameters(executeParams)
-        if (call?.metaClass?.respondsTo(call, "disableAuthz")) call = call.disableAuthz()
-        return (Future<Map<String, Object>>) call.callFuture()
-    }
-
-    protected static Map<String, Object> resolveExecuteAutomationFuture(Future<Map<String, Object>> future) {
-        if (future == null) return [:]
-        long timeoutSeconds = EXECUTION_TIMEOUT_SECONDS > 0 ? EXECUTION_TIMEOUT_SECONDS : 1800L
         try {
-            return (future.get(timeoutSeconds, TimeUnit.SECONDS) ?: [:]) as Map<String, Object>
-        } catch (TimeoutException te) {
-            // Audit 2026-06-11 #8: do not block the scan indefinitely on a wedged execution. Cancel it,
-            // free the worker, and report a failure rather than stalling every remaining automation.
-            future.cancel(true)
-            logger.error("Automation execution timed out after {}s; cancelled to free the worker pool", timeoutSeconds)
-            return [error: "Automation execution timed out after ${timeoutSeconds}s".toString()] as Map<String, Object>
+            def call = ec.service.async()
+                    .name("reconciliation.ReconciliationAutomationServices.execute#Automation")
+                    .parameters(executeParams)
+            if (call?.metaClass?.respondsTo(call, "disableAuthz")) call = call.disableAuthz()
+            call.call()
+            return [submitted: true, submittedAsync: true]
+        } catch (Throwable submitError) {
+            // A refused submission (saturated queue, dispatch error) must be loud and must NOT be
+            // reported as a run: the caller leaves the schedule unadvanced so the next tick retries.
+            logger.error("Could not submit automation execution for {}: {}", automationId, sanitizeErrorMessage(submitError))
+            return [submitted: false, submittedAsync: true, error: sanitizeErrorMessage(submitError)]
         }
     }
 

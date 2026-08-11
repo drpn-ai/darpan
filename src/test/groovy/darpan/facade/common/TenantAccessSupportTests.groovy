@@ -852,6 +852,91 @@ class TenantAccessSupportTests {
                 "on every request via the before-request hook, for every user")
     }
 
+    // ------------------------------------------------------------------
+    // DAR-BE-005 — per-tenant admin check for an ARBITRARY tenant
+    // ------------------------------------------------------------------
+
+    @Test
+    void isTenantAdminIsTrueWhenUserHoldsTenantAdminInThatSpecificTenant() {
+        def ec = executionContext(
+                user: new UserStub(userId: "aditi"),
+                entity: new EntityFacadeStub(finders: [
+                        "darpan.auth.TenantUserPermissionGroupMember": new FinderStub(listResult: [
+                                [userId: "aditi", tenantUserGroupId: "STEVE_MADDEN",
+                                 permissionUserGroupId: "DARPAN_TENANT_ADMIN", thruDate: null],
+                        ]),
+                        "moqui.security.UserGroupMember": new FinderStub(listResult: []),
+                ])
+        )
+
+        assertTrue(TenantAccessSupport.isTenantAdmin(ec, "STEVE_MADDEN"),
+                "A DARPAN_TENANT_ADMIN row for the named tenant must satisfy isTenantAdmin")
+    }
+
+    @Test
+    void isTenantAdminIsFalseForATenantTheUserOnlyEditsOrDoesNotAdminister() {
+        def ec = executionContext(
+                user: new UserStub(userId: "aditi"),
+                entity: new EntityFacadeStub(finders: [
+                        "darpan.auth.TenantUserPermissionGroupMember": new FinderStub(listResult: [
+                                [userId: "aditi", tenantUserGroupId: "BETSEY_JOHNSON",
+                                 permissionUserGroupId: "DARPAN_COMPANY_EDITOR", thruDate: null],
+                        ]),
+                        "moqui.security.UserGroupMember": new FinderStub(listResult: []),
+                ])
+        )
+
+        assertFalse(TenantAccessSupport.isTenantAdmin(ec, "BETSEY_JOHNSON"),
+                "DARPAN_COMPANY_EDITOR is not tenant admin — it must not authorize a credential grant")
+        assertFalse(TenantAccessSupport.isTenantAdmin(ec, "THIRD_LOVE"),
+                "A tenant with no permission row at all must be denied (default-deny)")
+    }
+
+    @Test
+    void isTenantAdminIsFalseForBlankTenantAndAnonymousUser() {
+        def ec = executionContext(user: new UserStub(userId: "aditi"))
+        assertFalse(TenantAccessSupport.isTenantAdmin(ec, null), "null tenant must be denied")
+        assertFalse(TenantAccessSupport.isTenantAdmin(ec, "  "), "blank tenant must be denied")
+
+        def anonymous = executionContext(user: new UserStub(userId: null))
+        assertFalse(TenantAccessSupport.isTenantAdmin(anonymous, "STEVE_MADDEN"),
+                "An unauthenticated caller must never be tenant admin")
+    }
+
+    @Test
+    void isTenantAdminIsTrueForSuperAdminOnAnyTenant() {
+        def ec = executionContext(
+                user: new UserStub(userId: "root"),
+                entity: new EntityFacadeStub(finders: [
+                        "darpan.auth.TenantUserPermissionGroupMember": new FinderStub(listResult: []),
+                        "moqui.security.UserGroupMember": new FinderStub(oneResult: [
+                                userId: "root", userGroupId: "DARPAN_SUPER_ADMIN", thruDate: null
+                        ]),
+                ])
+        )
+
+        assertTrue(TenantAccessSupport.isTenantAdmin(ec, "ANY_TENANT"),
+                "Super admin already holds DARPAN_TENANT_ADMIN on the active tenant via " +
+                "resolveActiveTenantPermissionScope; isTenantAdmin must stay consistent with that")
+    }
+
+    @Test
+    void requireTenantAdminAddsAnErrorAndReturnsFalseWhenDenied() {
+        def message = new MessageFacadeStub()
+        def ec = executionContext(
+                user: new UserStub(userId: "aditi"),
+                message: message,
+                entity: new EntityFacadeStub(finders: [
+                        "darpan.auth.TenantUserPermissionGroupMember": new FinderStub(listResult: []),
+                        "moqui.security.UserGroupMember": new FinderStub(listResult: []),
+                ])
+        )
+
+        assertFalse(TenantAccessSupport.requireTenantAdmin(ec, "THIRD_LOVE", "nope"), "denied must be false")
+        assertTrue(message.hasError(), "requireTenantAdmin must add an ec.message error when it denies")
+        assertTrue(message.errors.first().contains("nope"), "the caller's message must reach the user")
+    }
+
     private static Expando executionContext(Map overrides = [:]) {
         return new Expando(
                 user: overrides.user ?: new UserStub(),

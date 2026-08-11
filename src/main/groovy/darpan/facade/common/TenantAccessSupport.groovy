@@ -57,6 +57,7 @@ class TenantAccessSupport {
     static final String ACTIVE_TENANT_READ_ONLY_MESSAGE = "Your active tenant is read-only for this action."
     static final String NO_ACTIVE_TENANT_FILTER_VALUE = "__NO_ACTIVE_TENANT__"
     static final String OWNED_RECORD_UNAVAILABLE_MESSAGE = "Requested record is not available in your customer scope."
+    static final String TENANT_ADMIN_REQUIRED_MESSAGE = "This action requires tenant-admin access for the named tenant."
 
     protected static final List<String> ACCESS_SCOPE_CONTEXT_KEYS = [
             "activeTenantUserGroupId",
@@ -146,6 +147,34 @@ class TenantAccessSupport {
 
     static boolean requireDarpanAdmin(def ec, String message = "This operation requires Darpan admin access.") {
         if (isDarpanAdmin(ec)) return true
+        ec?.message?.addError(message)
+        return false
+    }
+
+    /**
+     * True when the current user administers the NAMED tenant — not merely the active one.
+     *
+     * <p>DAR-BE-005. {@link #resolveActiveTenantPermissionScope} answers this question only for the
+     * active tenant and collapses the role into {@code canEdit}; cross-tenant config sharing needs a
+     * per-tenant answer for an arbitrary tenant, on BOTH ends of a grant. This is that predicate.</p>
+     *
+     * <p>Default-deny: a blank tenant, an anonymous caller, or a tenant with no
+     * {@code DARPAN_TENANT_ADMIN} row all return false. A super admin returns true for every tenant,
+     * consistent with {@code resolveActiveTenantPermissionScope} already granting them the role.</p>
+     */
+    static boolean isTenantAdmin(def ec, String tenantUserGroupId) {
+        String normalizedTenantUserGroupId = normalize(tenantUserGroupId)
+        if (!normalizedTenantUserGroupId) return false
+        if (!currentUserId(ec)) return false
+        if (isSuperAdmin(ec)) return true
+
+        return DARPAN_TENANT_ADMIN_GROUP_ID in listTenantPermissionGroupIds(ec, normalizedTenantUserGroupId)
+    }
+
+    /** Gate form of {@link #isTenantAdmin}: adds an error and returns false when denied. */
+    static boolean requireTenantAdmin(def ec, String tenantUserGroupId,
+            String message = TENANT_ADMIN_REQUIRED_MESSAGE) {
+        if (isTenantAdmin(ec, tenantUserGroupId)) return true
         ec?.message?.addError(message)
         return false
     }

@@ -4531,6 +4531,57 @@
                                 "omsRestSourceConfigId": {
                                     "type": "string"
                                 },
+                                "description": {
+                                    "type": "string"
+                                },
+                                "companyUserGroupId": {
+                                    "type": "string"
+                                },
+                                "baseUrl": {
+                                    "type": "string"
+                                },
+                                "ordersPath": {
+                                    "type": "string"
+                                },
+                                "timeZone": {
+                                    "type": "string"
+                                },
+                                "authType": {
+                                    "type": "string"
+                                },
+                                "hasUsername": {
+                                    "type": "boolean"
+                                },
+                                "hasPassword": {
+                                    "type": "boolean"
+                                },
+                                "hasApiToken": {
+                                    "type": "boolean"
+                                },
+                                "customHeaderNames": {
+                                    "type": "array",
+                                    "items": {
+                                        
+                                    }
+                                },
+                                "connectTimeoutSeconds": {
+                                    "type": "integer"
+                                },
+                                "readTimeoutSeconds": {
+                                    "type": "integer"
+                                },
+                                "isActive": {
+                                    "type": "string"
+                                },
+                                "canReadOrders": {
+                                    "type": "boolean"
+                                },
+                                "createdDate": {
+                                    "type": "string"
+                                },
+                                "lastUpdatedDate": {
+                                    "type": "string"
+                                },
                                 "isShared": {
                                     "type": "boolean"
                                 }
@@ -4690,6 +4741,60 @@
                     "savedOmsRestSourceConfig": {
                         "type": "object",
                         "properties": {
+                            "omsRestSourceConfigId": {
+                                "type": "string"
+                            },
+                            "description": {
+                                "type": "string"
+                            },
+                            "companyUserGroupId": {
+                                "type": "string"
+                            },
+                            "baseUrl": {
+                                "type": "string"
+                            },
+                            "ordersPath": {
+                                "type": "string"
+                            },
+                            "timeZone": {
+                                "type": "string"
+                            },
+                            "authType": {
+                                "type": "string"
+                            },
+                            "hasUsername": {
+                                "type": "boolean"
+                            },
+                            "hasPassword": {
+                                "type": "boolean"
+                            },
+                            "hasApiToken": {
+                                "type": "boolean"
+                            },
+                            "customHeaderNames": {
+                                "type": "array",
+                                "items": {
+                                    
+                                }
+                            },
+                            "connectTimeoutSeconds": {
+                                "type": "integer"
+                            },
+                            "readTimeoutSeconds": {
+                                "type": "integer"
+                            },
+                            "isActive": {
+                                "type": "string"
+                            },
+                            "canReadOrders": {
+                                "type": "boolean"
+                            },
+                            "createdDate": {
+                                "type": "string"
+                            },
+                            "lastUpdatedDate": {
+                                "type": "string"
+                            },
                             "isShared": {
                                 "type": "boolean"
                             }

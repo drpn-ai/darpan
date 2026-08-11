@@ -69,13 +69,13 @@ class SharedConfigGrantSupport {
                 targetTenantUserGroupId, "stop sharing")
         if (resolved == null) return false
 
-        List activeRows = (TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.CONFIG_TENANT_ACCESS,
-                        "shared-config revoke: locate the caller's own grant rows by explicit PK parts (DAR-BE-005)")
-                .condition("configTypeEnumId", resolved.configTypeEnumId)
-                .condition("configId", resolved.configId)
-                .condition("tenantUserGroupId", resolved.targetTenantUserGroupId)
-                .useCache(false)
-                .list() ?: []).findAll { it.thruDate == null }
+        // Reuse the SAME active-grant definition the reader uses (SharedConfigAccessSupport, which
+        // gates live credential access): a null thruDate OR a FUTURE thruDate both count as active.
+        // A local `thruDate == null` filter here previously disagreed with the reader and left a
+        // future-dated row un-revokable — reachable by grant/read, invisible to revoke
+        // (DAR-BE-005 review finding, 2026-08-11).
+        List activeRows = SharedConfigAccessSupport.listActiveGrantRows(ec, resolved.configTypeEnumId,
+                resolved.configId, resolved.targetTenantUserGroupId)
 
         if (!activeRows) {
             ec.message.addError("${resolved.typeLabel} '${resolved.configId}' is not shared with " +
@@ -107,27 +107,31 @@ class SharedConfigGrantSupport {
      * use the config, so any member tenant can render the panel.
      */
     static Map<String, Object> describeSharing(def ec, String configTypeEnumId, String configId) {
-        Map<String, String> type = SharedConfigAccessSupport.configType(configTypeEnumId)
+        String normalizedType = normalize(configTypeEnumId)
+        Map<String, String> type = SharedConfigAccessSupport.configType(normalizedType)
         if (type == null) {
             ec.message.addError("Unknown shared config type '${configTypeEnumId ?: '(missing)'}'.")
             return null
         }
-        def config = loadConfigRow(ec, type, configId)
+        // Normalize configId BEFORE the lookup — resolveAndAuthorize already did this; describeSharing
+        // previously did not, so a whitespace-padded id was grantable but not describable
+        // (DAR-BE-005 review finding, 2026-08-11).
+        String normalizedConfigId = normalize(configId)
+        def config = loadConfigRow(ec, type, normalizedConfigId)
         if (config == null) {
-            ec.message.addError("${type.label} '${configId ?: '(missing)'}' was not found.")
+            ec.message.addError("${type.label} '${normalizedConfigId ?: '(missing)'}' was not found.")
             return null
         }
-        if (!SharedConfigAccessSupport.canActiveTenantUseConfig(ec, configTypeEnumId, config)) {
+        if (!SharedConfigAccessSupport.canActiveTenantUseConfig(ec, normalizedType, config)) {
             ec.message.addError(TenantAccessSupport.TENANT_RECORD_UNAVAILABLE_MESSAGE)
             return null
         }
 
         String ownerTenantUserGroupId = normalize(config.companyUserGroupId)
-        List<String> members = SharedConfigAccessSupport.listMemberTenantIds(ec,
-                normalize(configTypeEnumId), normalize(configId))
+        List<String> members = SharedConfigAccessSupport.listMemberTenantIds(ec, normalizedType, normalizedConfigId)
         return [
-                configTypeEnumId        : normalize(configTypeEnumId),
-                configId                : normalize(configId),
+                configTypeEnumId        : normalizedType,
+                configId                : normalizedConfigId,
                 ownerTenantUserGroupId  : ownerTenantUserGroupId,
                 ownerTenantLabel        : TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, ownerTenantUserGroupId),
                 memberTenantUserGroupIds: members,
@@ -142,9 +146,30 @@ class SharedConfigGrantSupport {
     }
 
     /**
-     * Shared prologue: validate the type, prove the config row exists (there is no DB FK to do it),
-     * then apply the two-sided admin rule. Returns null after adding an ec.message error on any
-     * failure — callers must treat null as "stop".
+     * Shared prologue: apply the two-sided admin rule FIRST, then confirm the named resources
+     * actually exist, immediately before the write. Returns null after adding an ec.message error
+     * on any failure — callers must treat null as "stop".
+     *
+     * <p><strong>Ordering — Aditi's 2026-08-11 decision, overturning an earlier version of this
+     * method that checked existence before the admin checks.</strong> {@code facade\..*} is granted
+     * to every Darpan role, so ANY authenticated user — including one who administers nothing at
+     * all — can call {@code grant#}/{@code revoke#ConfigTenantAccess} with guessed ids. If existence
+     * were checked first, such a caller could distinguish "config not found" from "you must be a
+     * tenant admin" and use the response itself as a cross-tenant existence oracle, enumerating
+     * every config row and every real tenant id in the installation. The admin checks (target, then
+     * anchor) now run FIRST: a caller who fails either learns nothing else, because the config row
+     * is not even loaded until step 3, and a null config row simply yields an empty anchor set at
+     * step 4 — the SAME generic "you must be a tenant admin of a tenant that already uses this
+     * config" denial a real config the caller has no standing over would also produce.</p>
+     *
+     * <p>The safety property that must NEVER regress: existence is verified before the WRITE, not
+     * before the admin check. {@link #isDarpanTenant} still runs strictly before any
+     * {@code create#}/{@code update#} call below (step 5), so a super-admin — who trivially passes
+     * BOTH admin checks for any non-blank tenant string, per
+     * {@link TenantAccessSupport#isTenantAdmin} — is still stopped here if the named target tenant
+     * is a typo or does not exist. See
+     * {@code aSuperAdminIsStillStoppedByTenantExistenceEvenAfterPassingBothAdminChecks} for the
+     * explicit regression test.</p>
      */
     private static Map<String, Object> resolveAndAuthorize(def ec, String configTypeEnumId, String configId,
             String targetTenantUserGroupId, String verbPhrase) {
@@ -152,6 +177,8 @@ class SharedConfigGrantSupport {
         String normalizedConfigId = normalize(configId)
         String normalizedTarget = normalize(targetTenantUserGroupId)
 
+        // Step 1 — type validation and basic input shape. The type catalog is public and a blank
+        // parameter names no specific record, so neither check leaks anything about the datastore.
         Map<String, String> type = SharedConfigAccessSupport.configType(normalizedType)
         if (type == null) {
             ec.message.addError("Unknown shared config type '${configTypeEnumId ?: '(missing)'}'.")
@@ -160,37 +187,42 @@ class SharedConfigGrantSupport {
         if (!normalizedConfigId) { ec.message.addError("A config id is required."); return null }
         if (!normalizedTarget) { ec.message.addError("A target tenant is required."); return null }
 
-        // configId is polymorphic across three components — no DB FK can do this check.
-        def config = loadConfigRow(ec, type, normalizedConfigId)
-        if (config == null) {
-            ec.message.addError("${type.label} '${normalizedConfigId}' was not found.")
-            return null
-        }
-        // ORDERING IS LOAD-BEARING — this existence check MUST stay ahead of requireTenantAdmin
-        // below. isTenantAdmin performs no existence check of its own and returns true for a
-        // super-admin on ANY non-blank string, including a typo'd or deleted tenant id. This is the
-        // only thing standing between "admin fat-fingers a tenant name" and a grant row pointing at
-        // a tenant nobody vetted. Raised in Task 2 review, 2026-08-11.
-        if (!isDarpanTenant(ec, normalizedTarget)) {
-            ec.message.addError("Tenant ${normalizedTarget} was not found.")
-            return null
-        }
-
-        String ownerTenantUserGroupId = normalize(config.companyUserGroupId)
-        List<String> members = SharedConfigAccessSupport.listMemberTenantIds(ec, normalizedType, normalizedConfigId)
-
-        // Side 1 — the target. You may not add or remove a tenant you do not administer.
+        // Step 2 — target admin check. A caller who fails this learns nothing else: the config row
+        // has not been loaded yet, so there is no existence signal to leak.
         if (!TenantAccessSupport.requireTenantAdmin(ec, normalizedTarget,
                 "You must be a tenant admin of ${normalizedTarget} to ${verbPhrase} this configuration.")) {
             return null
         }
 
-        // Side 2 — the anchor. You may not reach into a group you have no standing in.
+        // Step 3 — load the config row (may be null) and the peer group. listMemberTenantIds reads
+        // ConfigTenantAccess directly by (type, configId) — it has no FK to the config row, so it is
+        // read unconditionally rather than gated on `config` being non-null.
+        def config = loadConfigRow(ec, type, normalizedConfigId)
+        String ownerTenantUserGroupId = config == null ? null : normalize(config.companyUserGroupId)
+        List<String> members = SharedConfigAccessSupport.listMemberTenantIds(ec, normalizedType, normalizedConfigId)
+
+        // Step 4 — anchor admin check. A null config row (or one with no peers) yields an empty
+        // anchor set, which denies here with the same message a real-but-unreachable config would
+        // produce — non-disclosing either way.
         List<String> anchorTenantUserGroupIds = (([ownerTenantUserGroupId] + members)
                 .findAll { it } as List<String>).unique()
         if (!anchorTenantUserGroupIds.any { String t -> TenantAccessSupport.isTenantAdmin(ec, t) }) {
             ec.message.addError("You must be a tenant admin of a tenant that already uses " +
                     "${type.label} '${normalizedConfigId}' to ${verbPhrase} it.")
+            return null
+        }
+
+        // Step 5 — only now, after BOTH admin checks passed, confirm the named resources actually
+        // exist. configId is polymorphic across three components — no DB FK can do that check.
+        // isDarpanTenant runs strictly before any create#/update# call below; this is what stops a
+        // super-admin (who trivially passes steps 2 and 4 for any non-blank string) from writing a
+        // grant row that points at a typo'd or deleted tenant.
+        if (config == null) {
+            ec.message.addError("${type.label} '${normalizedConfigId}' was not found.")
+            return null
+        }
+        if (!isDarpanTenant(ec, normalizedTarget)) {
+            ec.message.addError("Tenant ${normalizedTarget} was not found.")
             return null
         }
 

@@ -109,6 +109,31 @@ class SharedConfigAccessSupport {
     }
 
     /**
+     * Active grant rows (per {@link #isActiveGrant}) for exactly this
+     * (configTypeEnumId, configId, tenantUserGroupId) triple.
+     *
+     * <p>This is the ONE place that decides "is this specific grant currently active" — every
+     * reader in this class funnels through {@link #isActiveGrant} already; this exposes the same
+     * decision to writers (namely {@code SharedConfigGrantSupport.revokeAccess}) so reader and
+     * writer cannot disagree about what "active" means. Before this existed, revoke filtered on
+     * {@code thruDate == null} while this class's readers (which gate live credential access)
+     * treated a FUTURE thruDate as active too — a row with a future thruDate was reachable by
+     * {@code listMemberTenantIds} but invisible to revoke's own filter, making it un-revokable
+     * (DAR-BE-005 review finding, 2026-08-11).</p>
+     */
+    static List listActiveGrantRows(def ec, String configTypeEnumId, String configId, String tenantUserGroupId) {
+        String normalizedConfigId = normalize(configId)
+        String normalizedTenant = normalize(tenantUserGroupId)
+        if (configType(configTypeEnumId) == null || !normalizedConfigId || !normalizedTenant) return []
+
+        return activeGrants(ec) { def finder ->
+            finder.condition("configTypeEnumId", normalize(configTypeEnumId))
+                    .condition("configId", normalizedConfigId)
+                    .condition("tenantUserGroupId", normalizedTenant)
+        }
+    }
+
+    /**
      * The owner-or-shared decision for the ACTIVE tenant, given an already-loaded config record.
      *
      * <p>Strictly wider than {@link TenantAccessSupport#canAccessTenantRecord}: it returns true for

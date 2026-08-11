@@ -33,6 +33,10 @@ class SharedConfigGrantSupportTests {
         assertEquals(1, world.created.size(), "exactly one ConfigTenantAccess row must be created")
         assertEquals("COMPANY_2", world.created.first().parameters.tenantUserGroupId)
         assertEquals("SCFG_HOTWAX_OMS", world.created.first().parameters.configTypeEnumId)
+
+        assertEquals(1, world.audited.size(), "grantAccess must write exactly one audit-log row")
+        assertEquals("aditi", world.audited.first().parameters.adminUserId,
+                "the audit row must carry the acting user, not the target tenant")
     }
 
     @Test
@@ -82,6 +86,43 @@ class SharedConfigGrantSupportTests {
     }
 
     @Test
+    void grantErrorIsIdenticalForARealAndANonexistentConfigWhenTheCallerAdministersNeitherEnd() {
+        // The caller (admin of COMPANY_3 only) administers neither the target (COMPANY_2) nor the
+        // owner of a real config (COMPANY_1). The target-admin check (step 2) must deny before the
+        // config table is ever touched, so the message is byte-identical whether "OMS_HW_1" is real
+        // or made up — otherwise the response itself would be a cross-tenant existence oracle for
+        // configs and tenants (DAR-BE-005 review finding, 2026-08-11).
+        def realWorld = world(
+                adminOf: ["COMPANY_3"],
+                config: [omsRestSourceConfigId: "OMS_HW_1", companyUserGroupId: "COMPANY_1"])
+        def ghostWorld = world(adminOf: ["COMPANY_3"], config: null)
+
+        assertFalse(SharedConfigGrantSupport.grantAccess(realWorld.ec, "SCFG_HOTWAX_OMS", "OMS_HW_1", "COMPANY_2"))
+        assertFalse(SharedConfigGrantSupport.grantAccess(ghostWorld.ec, "SCFG_HOTWAX_OMS", "GHOST", "COMPANY_2"))
+
+        assertEquals(realWorld.message.errors, ghostWorld.message.errors,
+                "a caller who administers neither end must get an identical denial whether the " +
+                "config id names a real row or a nonexistent one")
+    }
+
+    @Test
+    void aSuperAdminIsStillStoppedByTenantExistenceEvenAfterPassingBothAdminChecks() {
+        // A super admin trivially passes requireTenantAdmin/isTenantAdmin for ANY non-blank tenant
+        // string (see TenantAccessSupport.isTenantAdmin) — including a typo. isDarpanTenant (step 5)
+        // is the only thing left standing between that and a grant row pointing at a tenant nobody
+        // vetted. This must hold even though the admin checks now run BEFORE the existence checks.
+        def world = world(
+                superAdmin: true,
+                config: [omsRestSourceConfigId: "OMS_HW_1", companyUserGroupId: "COMPANY_1"])
+
+        assertFalse(SharedConfigGrantSupport.grantAccess(world.ec, "SCFG_HOTWAX_OMS", "OMS_HW_1", "COMPANY_TYPO"),
+                "a super admin passes both admin checks for any string, but a typo'd/nonexistent " +
+                "tenant must still be rejected before the write")
+        assertTrue(world.message.errors.any { it.contains("COMPANY_TYPO") })
+        assertTrue(world.created.isEmpty(), "the write must never happen for an unvetted target")
+    }
+
+    @Test
     void grantIsDeniedForAnUnknownConfigType() {
         def world = world(adminOf: ["COMPANY_1", "COMPANY_2"],
                 config: [omsRestSourceConfigId: "OMS_HW_1", companyUserGroupId: "COMPANY_1"])
@@ -117,6 +158,48 @@ class SharedConfigGrantSupportTests {
         assertTrue(world.deleted.isEmpty(), "revoke must never delete — who could reach a credential is history")
         assertEquals(1, world.updated.size())
         assertEquals(NOW, world.updated.first().parameters.thruDate)
+
+        assertEquals(1, world.audited.size(), "revokeAccess must write exactly one audit-log row")
+        assertEquals("aditi", world.audited.first().parameters.adminUserId)
+    }
+
+    @Test
+    void revokeSucceedsForAGrantWithAFutureThruDate() {
+        // The reader that gates live credential access (SharedConfigAccessSupport.isActiveGrant)
+        // treats a FUTURE thruDate as still active — same as null. Before the fix, revoke filtered
+        // rows on `thruDate == null` only, so a future-dated row was reachable by grant/read but
+        // invisible to revoke's own filter: T could read the credential today, yet neither grant nor
+        // revoke could touch that row (DAR-BE-005 review finding, 2026-08-11).
+        // NOTE: this local is deliberately NOT named `world` — declaring a local `world` would
+        // shadow the `world(...)` factory method for the REST of this method body (Groovy resolves
+        // the identifier to the local once declared), breaking the second `world(...)` call below.
+        Timestamp future = Timestamp.valueOf("2027-01-01 00:00:00")
+        def beforeWorld = world(
+                adminOf: ["COMPANY_1", "COMPANY_2"],
+                config: [omsRestSourceConfigId: "OMS_HW_1", companyUserGroupId: "COMPANY_1"],
+                grants: [grant("SCFG_HOTWAX_OMS", "OMS_HW_1", "COMPANY_2", future)])
+
+        // Sanity: before revoke, COMPANY_2's future-thruDate row IS active per the reader — this is
+        // exactly why an unrevokable future-dated row is dangerous.
+        assertTrue(SharedConfigAccessSupport.listMemberTenantIds(beforeWorld.ec, "SCFG_HOTWAX_OMS", "OMS_HW_1")
+                .contains("COMPANY_2"))
+
+        assertTrue(SharedConfigGrantSupport.revokeAccess(beforeWorld.ec, "SCFG_HOTWAX_OMS", "OMS_HW_1", "COMPANY_2"),
+                "revoke and the reader must agree on what 'active' means — a future thruDate is " +
+                "active, so it must be revokable, not silently unreachable by both grant and revoke")
+        assertEquals(1, beforeWorld.updated.size())
+        assertEquals(NOW, beforeWorld.updated.first().parameters.thruDate,
+                "revoke must set thruDate to now, superseding the stale future value")
+
+        // Prove the write revoke just issued would actually remove membership: rebuild the world as
+        // it would look immediately after that write lands (thruDate = NOW) and confirm the SAME
+        // reader no longer counts COMPANY_2 as a member.
+        def afterWorld = world(
+                adminOf: ["COMPANY_1", "COMPANY_2"],
+                config: [omsRestSourceConfigId: "OMS_HW_1", companyUserGroupId: "COMPANY_1"],
+                grants: [grant("SCFG_HOTWAX_OMS", "OMS_HW_1", "COMPANY_2", NOW)])
+        assertFalse(SharedConfigAccessSupport.listMemberTenantIds(afterWorld.ec, "SCFG_HOTWAX_OMS", "OMS_HW_1")
+                .contains("COMPANY_2"), "once thruDate is set to now, the same reader must exclude the tenant")
     }
 
     @Test
@@ -148,24 +231,40 @@ class SharedConfigGrantSupportTests {
                 "memberCount is owner + peers — it is what the UI's 'changes affect N tenants' warning shows")
     }
 
+    @Test
+    void describeSharingNormalizesAWhitespacePaddedConfigId() {
+        // A whitespace-padded id was grantable (resolveAndAuthorize already normalized) but not
+        // describable before this fix (DAR-BE-005 review finding, 2026-08-11).
+        def world = world(
+                adminOf: ["COMPANY_1"],
+                config: [omsRestSourceConfigId: "OMS_HW_1", companyUserGroupId: "COMPANY_1"])
+
+        Map result = SharedConfigGrantSupport.describeSharing(world.ec, "SCFG_HOTWAX_OMS", "  OMS_HW_1  ")
+
+        assertEquals("OMS_HW_1", result.configId)
+        assertEquals("COMPANY_1", result.ownerTenantUserGroupId)
+    }
+
     // --- harness ---------------------------------------------------------
 
-    private static Map grant(String type, String configId, String tenant) {
+    private static Map grant(String type, String configId, String tenant, Timestamp thruDate = null) {
         return [configTypeEnumId: type, configId: configId, tenantUserGroupId: tenant,
-                fromDate: Timestamp.valueOf("2026-01-01 00:00:00"), thruDate: null, grantedByUserId: "aditi"]
+                fromDate: Timestamp.valueOf("2026-01-01 00:00:00"), thruDate: thruDate, grantedByUserId: "aditi"]
     }
 
     /**
      * Builds an ec plus recorders. `adminOf` becomes DARPAN_TENANT_ADMIN rows in
-     * TenantUserPermissionGroupMember; the user is deliberately NOT a super admin, since
-     * super-admin would short-circuit every check under test.
+     * TenantUserPermissionGroupMember; the user is deliberately NOT a super admin unless
+     * `spec.superAdmin` is set, since super-admin would short-circuit every check under test —
+     * except the one regression test that specifically needs it
+     * ({@code aSuperAdminIsStillStoppedByTenantExistenceEvenAfterPassingBothAdminChecks}).
      */
     private static Map world(Map spec) {
         List<Map> permissionRows = ((spec.adminOf ?: []) as List).collect { String tenant ->
             [userId: "aditi", tenantUserGroupId: tenant,
              permissionUserGroupId: "DARPAN_TENANT_ADMIN", thruDate: null]
         }
-        List created = [], updated = [], deleted = []
+        List created = [], updated = [], deleted = [], audited = []
 
         // Every tenant this world knows about must resolve as a real UgtDarpanCompany group, or
         // isDarpanTenant rejects the grant before the two-sided rule is ever evaluated and the
@@ -184,9 +283,12 @@ class SharedConfigGrantSupportTests {
                 "darpan.auth.TenantUserPermissionGroupMember":
                         new SharedConfigAccessSupportTests.FinderStub(listResult: permissionRows),
                 // isSuperAdmin reads this via .one(); leaving oneResult null keeps the acting user a
-                // plain tenant admin. A super-admin would short-circuit every check under test.
+                // plain tenant admin. A super-admin would short-circuit every check under test —
+                // spec.superAdmin opts a single test into that short-circuit deliberately, to prove
+                // isDarpanTenant (not the admin checks) is what still stops it.
                 "moqui.security.UserGroupMember":
-                        new SharedConfigAccessSupportTests.FinderStub(listResult: []),
+                        new SharedConfigAccessSupportTests.FinderStub(listResult: [],
+                                oneResult: spec.superAdmin ? [userId: "aditi", userGroupId: "ADMIN"] : null),
                 "moqui.security.UserGroupAndMember":
                         new SharedConfigAccessSupportTests.FinderStub(listResult:
                                 activeTenant ? [[userId         : "aditi",
@@ -210,11 +312,11 @@ class SharedConfigGrantSupportTests {
                         context: [activeTenantUserGroupId: activeTenant]),
                 entity: entity,
                 message: message,
-                service: new ServiceFacadeStub(created: created, updated: updated, deleted: deleted),
+                service: new ServiceFacadeStub(created: created, updated: updated, deleted: deleted, audited: audited),
                 l10n: new Expando(timeZone: "UTC"),
                 resource: new Expando(properties: [:])
         )
-        return [ec: ec, message: message, created: created, updated: updated, deleted: deleted]
+        return [ec: ec, message: message, created: created, updated: updated, deleted: deleted, audited: audited]
     }
 
     /**
@@ -244,9 +346,9 @@ class SharedConfigGrantSupportTests {
         }
     }
 
-    /** Records service calls by verb so the tests can assert create-vs-update-vs-delete. */
+    /** Records service calls by verb so the tests can assert create-vs-update-vs-delete-vs-audit. */
     static class ServiceFacadeStub {
-        List created, updated, deleted
+        List created, updated, deleted, audited
 
         def sync() { return new CallStub(owner: this) }
 
@@ -260,10 +362,15 @@ class SharedConfigGrantSupportTests {
             CallStub disableAuthz() { this }
             Map call() {
                 // grantAccess/revokeAccess each also call AdminAuditSupport.record, which issues its
-                // own "create#darpan.admin.AdminAuditLog" call. That call must not be counted in
-                // `created` — these tests assert on ConfigTenantAccess row counts, and no test here
-                // asserts on the audit-log write itself, so it is excluded rather than tracked.
-                if (serviceName == "create#darpan.admin.AdminAuditLog") return [:]
+                // own "create#darpan.admin.AdminAuditLog" call. That must NOT be counted in `created`
+                // — `created` asserts on ConfigTenantAccess row counts specifically — but it must be
+                // observable somewhere, or the audit write is a feature with no test guarding it
+                // (deleting both AdminAuditSupport.record calls would otherwise leave every test
+                // green). Routed into `audited` instead (DAR-BE-005 review finding, 2026-08-11).
+                if (serviceName == "create#darpan.admin.AdminAuditLog") {
+                    owner.audited << [name: serviceName, parameters: parameters]
+                    return [:]
+                }
                 if (serviceName?.startsWith("create#")) owner.created << [name: serviceName, parameters: parameters]
                 else if (serviceName?.startsWith("update#")) owner.updated << [name: serviceName, parameters: parameters]
                 else if (serviceName?.startsWith("delete#")) owner.deleted << [name: serviceName, parameters: parameters]

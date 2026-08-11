@@ -102,6 +102,15 @@
                                         "$ref": "#/components/schemas/VerifyOwnPasswordRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GrantConfigTenantAccessRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ListConfigTenantAccessRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RevokeConfigTenantAccessRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/DeleteHotWaxOmsRestSourceConfigRequest"
                                     },
                                     {
@@ -326,6 +335,9 @@
                                         "facade.AuthFacadeServices.save#ActiveTenant": "#/components/schemas/SaveActiveTenantRequest",
                                         "facade.AuthFacadeServices.save#UserSettings": "#/components/schemas/SaveUserSettingsRequest",
                                         "facade.AuthFacadeServices.verify#OwnPassword": "#/components/schemas/VerifyOwnPasswordRequest",
+                                        "facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess": "#/components/schemas/GrantConfigTenantAccessRequest",
+                                        "facade.ConfigSharingFacadeServices.list#ConfigTenantAccess": "#/components/schemas/ListConfigTenantAccessRequest",
+                                        "facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess": "#/components/schemas/RevokeConfigTenantAccessRequest",
                                         "facade.HotWaxOmsFacadeServices.delete#HotWaxOmsRestSourceConfig": "#/components/schemas/DeleteHotWaxOmsRestSourceConfigRequest",
                                         "facade.HotWaxOmsFacadeServices.list#HotWaxOmsRestSourceConfigs": "#/components/schemas/ListHotWaxOmsRestSourceConfigsRequest",
                                         "facade.HotWaxOmsFacadeServices.save#HotWaxOmsRestSourceConfig": "#/components/schemas/SaveHotWaxOmsRestSourceConfigRequest",
@@ -484,6 +496,15 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/VerifyOwnPasswordResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GrantConfigTenantAccessResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ListConfigTenantAccessResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RevokeConfigTenantAccessResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/DeleteHotWaxOmsRestSourceConfigResponse"
@@ -4011,6 +4032,359 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/VerifyOwnPasswordResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GrantConfigTenantAccessParams": {
+                "type": "object",
+                "properties": {
+                    "configTypeEnumId": {
+                        "type": "string",
+                        "description": "SCFG_HOTWAX_OMS, SCFG_SHOPIFY_AUTH,\n                SCFG_NS_AUTH, or SCFG_NS_RESTLET."
+                    },
+                    "configId": {
+                        "type": "string",
+                        "description": "Id of the existing config row."
+                    },
+                    "targetTenantUserGroupId": {
+                        "type": "string",
+                        "description": "Tenant to add to the group."
+                    }
+                },
+                "required": [
+                    "configTypeEnumId",
+                    "configId",
+                    "targetTenantUserGroupId"
+                ],
+                "description": "Add a tenant to a shared API source config's peer group. Requires the caller to\n            be a tenant admin of the target tenant AND of a tenant that already uses the config.\n            Sharing widens access to the config's encrypted credentials \u2014 it is not a copy."
+            },
+            "GrantConfigTenantAccessResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "granted": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "GrantConfigTenantAccessRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess",
+                "x-darpan-method": "facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GrantConfigTenantAccessParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GrantConfigTenantAccessResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GrantConfigTenantAccessResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ListConfigTenantAccessParams": {
+                "type": "object",
+                "properties": {
+                    "configTypeEnumId": {
+                        "type": "string"
+                    },
+                    "configId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "configTypeEnumId",
+                    "configId"
+                ],
+                "description": "Sharing state for one config: owning tenant, peer tenants, the affected-tenant\n            count for the edit warning, and whether the caller may manage the group."
+            },
+            "ListConfigTenantAccessResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "sharing": {
+                        "type": "object",
+                        "properties": {
+                            "configTypeEnumId": {
+                                "type": "string"
+                            },
+                            "configId": {
+                                "type": "string"
+                            },
+                            "ownerTenantUserGroupId": {
+                                "type": "string"
+                            },
+                            "ownerTenantLabel": {
+                                "type": "string"
+                            },
+                            "memberTenantUserGroupIds": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            },
+                            "memberTenantLabels": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "member": {
+                                            "type": "object",
+                                            "properties": {
+                                                "tenantUserGroupId": {
+                                                    "type": "string"
+                                                },
+                                                "label": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            "memberCount": {
+                                "type": "integer"
+                            },
+                            "canManage": {
+                                "type": "boolean"
+                            }
+                        }
+                    }
+                }
+            },
+            "ListConfigTenantAccessRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ConfigSharingFacadeServices.list#ConfigTenantAccess",
+                "x-darpan-method": "facade.ConfigSharingFacadeServices.list#ConfigTenantAccess",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ConfigSharingFacadeServices.list#ConfigTenantAccess"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ListConfigTenantAccessParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ListConfigTenantAccessResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ConfigSharingFacadeServices.list#ConfigTenantAccess. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ListConfigTenantAccessResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RevokeConfigTenantAccessParams": {
+                "type": "object",
+                "properties": {
+                    "configTypeEnumId": {
+                        "type": "string"
+                    },
+                    "configId": {
+                        "type": "string"
+                    },
+                    "targetTenantUserGroupId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "configTypeEnumId",
+                    "configId",
+                    "targetTenantUserGroupId"
+                ],
+                "description": "Remove a tenant from a shared config's peer group by thruDating its grant.\n            Gated identically to grant. Never deletes a row \u2014 who could reach a credential is history."
+            },
+            "RevokeConfigTenantAccessResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "revoked": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "RevokeConfigTenantAccessRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess",
+                "x-darpan-method": "facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RevokeConfigTenantAccessParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RevokeConfigTenantAccessResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RevokeConfigTenantAccessResult"
                     }
                 },
                 "required": [
@@ -14397,6 +14771,9 @@
         "facade.AuthFacadeServices.save#ActiveTenant": "SaveActiveTenant",
         "facade.AuthFacadeServices.save#UserSettings": "SaveUserSettings",
         "facade.AuthFacadeServices.verify#OwnPassword": "VerifyOwnPassword",
+        "facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess": "GrantConfigTenantAccess",
+        "facade.ConfigSharingFacadeServices.list#ConfigTenantAccess": "ListConfigTenantAccess",
+        "facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess": "RevokeConfigTenantAccess",
         "facade.HotWaxOmsFacadeServices.delete#HotWaxOmsRestSourceConfig": "DeleteHotWaxOmsRestSourceConfig",
         "facade.HotWaxOmsFacadeServices.list#HotWaxOmsRestSourceConfigs": "ListHotWaxOmsRestSourceConfigs",
         "facade.HotWaxOmsFacadeServices.save#HotWaxOmsRestSourceConfig": "SaveHotWaxOmsRestSourceConfig",

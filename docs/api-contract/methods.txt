@@ -24,6 +24,9 @@ facade.AuthFacadeServices.logout#Session
 facade.AuthFacadeServices.save#ActiveTenant
 facade.AuthFacadeServices.save#UserSettings
 facade.AuthFacadeServices.verify#OwnPassword
+facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess
+facade.ConfigSharingFacadeServices.list#ConfigTenantAccess
+facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess
 facade.HotWaxOmsFacadeServices.delete#HotWaxOmsRestSourceConfig
 facade.HotWaxOmsFacadeServices.list#HotWaxOmsRestSourceConfigs
 facade.HotWaxOmsFacadeServices.save#HotWaxOmsRestSourceConfig

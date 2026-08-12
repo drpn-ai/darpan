@@ -311,6 +311,21 @@ class SourceSystemConnectorSupportSmokeTests {
                 "the service name must also satisfy the defense-in-depth naming guard")
     }
 
+    @Test
+    void omsReturnsConnectorIsRegisteredAndCarriesExclusionSupport() {
+        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(
+                ec, ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS)
+
+        assertNotNull(connector, "OMS_RETURNS connector row must exist and be enabled")
+        assertEquals(ReconciliationSavedRunSupport.HOTWAX_OMS_RETURNS_EXTRACT_SERVICE,
+                connector.extractServiceName)
+        assertEquals(ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST_RETURNS,
+                connector.expectedSourceConfigType)
+        // Without filterParameterName the channel exclusion cannot dispatch at all, and the rules
+        // board hides the control — a configured rule would validate, persist and never run (§5).
+        assertEquals("sourceFilters", connector.filterParameterName)
+    }
+
     /**
      * Ratchet, not a spot check. resolveByExtractServiceName and resolveByExpectedSourceConfigType
      * both take the FIRST enabled match, so two enabled rows sharing either attribute resolve

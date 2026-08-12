@@ -17,9 +17,9 @@ references it. That alignment is coincidence, not a guarantee. Re-check parent-b
 after every regeneration.
 
 SCOPE DRIFT: the header range above describes the 1.4.0 cut, but records added after that cut
-accumulate here until the next release regenerates the file (the ArtifactGroupMember row and the
-OMS_RECON_ORDERS pair below both post-date it). Re-derive the range at the next cut rather than
-trusting this header.
+accumulate here until the next release regenerates the file (the ArtifactGroupMember row, the
+OMS_RECON_ORDERS pair, and the OMS_RETURNS pair below all post-date it). Re-derive the range at the
+next cut rather than trusting this header.
 
 OPERATOR IMPACT: additive records only — nothing existing is modified, so loading this file changes
 no current reconciliation behaviour.
@@ -33,6 +33,12 @@ no current reconciliation behaviour.
   explicit per-rule-set change to sourceConfigType HOTWAX_OMS_REST_RECON. Until these load, that
   connector cannot be selected and its extract service is not dispatchable (the security allow-list
   is derived from enabled connector rows).
+- One Enumeration and one SourceSystemConnector row register the OMS reconciliationReturns endpoint
+  (DAR-BE-018) as a NEW source system, OMS_RETURNS. This is additive capability, not a migration —
+  Darpan did not reconcile returns before this row, so no existing rule set changes behaviour. Until
+  these load, OMS_RETURNS does not appear as a selectable source and its extract service is not
+  dispatchable (the security allow-list is derived from enabled connector rows). filterParameterName
+  is present so the returnChannelEnumId exclusion (§5) can dispatch once a tenant configures it.
 
 The AUT_WIN_STATE row backs a window mode that is deliberately NOT offered in the UI in this
 release — list#AutomationSourceOptions filters it out, because the per-source status list it needs
@@ -48,6 +54,9 @@ loading it exposes nothing to operators.
     <!-- DAR-BE-018. Same parent-before-child constraint as the row above: the OMS_RECON_ORDERS
          SourceSystemConnector further down references this enum by systemEnumId. -->
     <moqui.basic.Enumeration enumId="OMS_RECON_ORDERS" enumTypeId="DarpanSystemSource" enumCode="HOTWAX_RECON_ORDERS" description="HotWax Orders (Reconciliation API)" sequenceNum="7"/>
+    <!-- DAR-BE-018. Same parent-before-child constraint: the OMS_RETURNS SourceSystemConnector
+         further down references this enum by systemEnumId. -->
+    <moqui.basic.Enumeration enumId="OMS_RETURNS" enumTypeId="DarpanSystemSource" enumCode="HOTWAX_RETURNS" description="HotWax Returns (Reconciliation API)" sequenceNum="8"/>
     <!-- Added records from data/SecuritySeedData.xml.
          Parent ArtifactGroup DARPAN_AUTH_API already exists in every deployed environment (it has carried
          login#Session since before 1.3.0), so this row has no forward FK reference and needs no reordering.
@@ -58,4 +67,5 @@ loading it exposes nothing to operators.
     <!-- Added records from data/SourceSystemConnectorSeedData.xml -->
     <darpan.reconciliation.SourceSystemConnector systemEnumId="OMS_TRANSFER_ORDERS" extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsTransferOrders" dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="HOTWAX_OMS_REST_TRANSFER" configParameterName="omsRestSourceConfigId" configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig" remoteId="HOTWAX_ORDERS_API" endpointLabel="Orders API (Transfer Orders)" sendUrlTemplate="{baseUrl}/rest/s1/oms/orders" remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsTransferOrders" systemAliases="OMS_TRANSFER_ORDERS,HOTWAX_TRANSFER_ORDERS,DAR_SYS_OMS_TO" preserveWindowInstants="N" keepFieldsParameterName="keepRecordFields" keepFieldsBase="orderId,orderName,orderDate,statusId,originFacilityId,grandTotal,currencyUom" filterParameterName="sourceFilters" windowFieldName="orderDate" supportsStateExtract="Y" statusParameterName="orderStatusIds" healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection" enabled="Y"/>
     <darpan.reconciliation.SourceSystemConnector systemEnumId="OMS_RECON_ORDERS" extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders" dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="HOTWAX_OMS_REST_RECON" configParameterName="omsRestSourceConfigId" configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig" remoteId="HOTWAX_ORDERS_API" endpointLabel="Reconciliation Orders API" sendUrlTemplate="{baseUrl}/rest/s1/oms/reconciliationOrders" remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders" systemAliases="OMS_RECON_ORDERS,HOTWAX_RECON_ORDERS,DAR_SYS_OMS_RECON" preserveWindowInstants="N" keepFieldsParameterName="keepRecordFields" keepFieldsBase="orderId,orderName,externalId,grandTotal,orderDate,statusId" filterParameterName="sourceFilters" healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection" enabled="Y"/>
+    <darpan.reconciliation.SourceSystemConnector systemEnumId="OMS_RETURNS" extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReturns" dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="HOTWAX_OMS_REST_RETURNS" configParameterName="omsRestSourceConfigId" configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig" remoteId="HOTWAX_ORDERS_API" endpointLabel="Reconciliation Returns API" sendUrlTemplate="{baseUrl}/rest/s1/oms/reconciliationReturns" remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReturns" systemAliases="OMS_RETURNS,HOTWAX_RETURNS,DAR_SYS_OMS_RETURNS" preserveWindowInstants="N" keepFieldsParameterName="keepRecordFields" keepFieldsBase="returnId,externalId,orderExternalId,statusId,entryDate,returnTotal,currencyUomId,returnChannelEnumId" filterParameterName="sourceFilters" healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection" enabled="Y"/>
 </entity-facade-xml>

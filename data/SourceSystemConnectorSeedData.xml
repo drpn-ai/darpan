@@ -134,4 +134,42 @@
             filterParameterName="sourceFilters"
             healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
             enabled="Y"/>
+
+    <!-- OMS returns via /rest/s1/oms/reconciliationReturns (DAR-BE-018). NEW CAPABILITY: Darpan did
+         not reconcile returns before this row, so nothing is being migrated and no existing rule set
+         changes behaviour.
+
+         Its own systemEnumId AND its own expectedSourceConfigType are both required — the resolvers
+         take the first enabled match on either attribute, so a row cloning one would silently shadow
+         a shipped row (SourceSystemConnectorSupportSmokeTests ratchets this). remoteId is shared with
+         the OMS family because the credentials and baseUrl are the same tenant config row.
+
+         sendUrlTemplate documents the endpoint for the registry and the remote label; it does NOT
+         route the extractor, which pins DEFAULT_RETURNS_PATH.
+
+         filterParameterName is REQUIRED here, not optional: the returnChannelEnumId exclusion is part
+         of the phase-1 design (§5), and exclusion dispatch keys on this attribute. Without it the
+         rules board hides the exclusion control and a configured rule would never run.
+
+         keepFieldsBase mirrors the endpoint's header field set. items[] is nested rather than a
+         top-level field and is always retained by the extractor regardless of projection. -->
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_RETURNS"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReturns"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_REST_RETURNS"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Reconciliation Returns API"
+            sendUrlTemplate="{baseUrl}/rest/s1/oms/reconciliationReturns"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReturns"
+            systemAliases="OMS_RETURNS,HOTWAX_RETURNS,DAR_SYS_OMS_RETURNS"
+            preserveWindowInstants="N"
+            keepFieldsParameterName="keepRecordFields"
+            keepFieldsBase="returnId,externalId,orderExternalId,statusId,entryDate,returnTotal,currencyUomId,returnChannelEnumId"
+            filterParameterName="sourceFilters"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            enabled="Y"/>
 </entity-facade-xml>

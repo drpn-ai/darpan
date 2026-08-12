@@ -69,6 +69,12 @@ class ReconciliationSavedRunSupport {
     static final String SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST_RECON = "HOTWAX_OMS_REST_RECON"
     static final String HOTWAX_RECON_ORDERS_ENDPOINT_LABEL = "Reconciliation Orders API"
     static final String HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders"
+    // DAR-BE-018 returns. Own system id AND own config type — the registry resolvers take the first
+    // enabled match on each, so sharing either would silently shadow a shipped row.
+    static final String SYSTEM_HOTWAX_OMS_RETURNS = "OMS_RETURNS"
+    static final String SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST_RETURNS = "HOTWAX_OMS_REST_RETURNS"
+    static final String HOTWAX_RETURNS_ENDPOINT_LABEL = "Reconciliation Returns API"
+    static final String HOTWAX_OMS_RETURNS_EXTRACT_SERVICE = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReturns"
     static final String SHOPIFY_ORDERS_REMOTE_ID = "SHOPIFY_REMOTE"
     static final String SHOPIFY_ORDERS_ENDPOINT_LABEL = "Admin GraphQL Orders"
     static final String SHOPIFY_GRAPHQL_EXECUTE_SERVICE = "facade.ShopifyFacadeServices.execute#ShopifyGraphql"

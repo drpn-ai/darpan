@@ -35,6 +35,27 @@ class SharedConfigEntityContractTests {
         return xml.substring(start, end)
     }
 
+    private static String settingsFacadeServicesXml() {
+        Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
+        return backendRoot.resolve("runtime/component/darpan/service/facade/SettingsFacadeServices.xml").toFile().text
+    }
+
+    /**
+     * Extracts a single {@code <service verb="..." noun="...">...</service>} block by its opening
+     * tag. SettingsFacadeServices.xml is a large, multi-service file — list#NsRestletConfigs' own
+     * auth-metadata join (a documented, out-of-scope Task 5 cosmetic minor / Finding B territory)
+     * contains a bare {@code ec.entity.find('darpan.reconciliation.NsAuthConfig')} that a whole-file
+     * match would collide with. Scoping to the specific service block is what makes the assertions
+     * below match ONLY the two save# services Task 8 Finding A fixed.
+     */
+    private static String serviceBlock(String xml, String verb, String noun) {
+        String startMarker = "<service verb=\"${verb}\" noun=\"${noun}\""
+        int start = xml.indexOf(startMarker)
+        assertTrue(start >= 0, "Could not find <service verb=\"${verb}\" noun=\"${noun}\"> in SettingsFacadeServices.xml")
+        int end = xml.indexOf('</service>', start)
+        return xml.substring(start, end)
+    }
+
     @Test
     void configTenantAccessDeclaresTheFourPartCompositePrimaryKey() {
         String block = configTenantAccessEntityBlock()
@@ -124,5 +145,61 @@ class SharedConfigEntityContractTests {
                 "read is silently filtered by DARPAN_ACTIVE_COMPANY_SCOPE and the shared row disappears")
         assertTrue(source.contains("TenantScopedFinder.findGlobalUnscoped"),
                 "the cross-tenant grant read is the one justified opt-out and must be explicit")
+    }
+
+    /**
+     * DAR-BE-005 Task 8 review finding. Finding A's fix has two halves at each of the three sites in
+     * {@code save#NsAuthConfig} / {@code save#NsRestletConfig}: the owner-or-shared access gate
+     * ({@code SharedConfigAccessSupport.canActiveTenantUseConfig}) AND the read that feeds it
+     * ({@code TenantScopedFinder.findGlobalUnscoped} instead of a bare {@code ec.entity.find}). The
+     * gate half is exercised end to end by {@code SettingsFacadeSharedConfigSaveTests}. The read half
+     * is NOT, and cannot be, exercised by any service-level test in this repo: Moqui's
+     * {@code authzDisabled} flag is a single non-scoped boolean on the execution context
+     * ({@code ArtifactExecutionFacadeImpl.groovy}), set for the ENTIRE nested service execution
+     * before the called service's actions run ({@code ServiceCallSyncImpl.java}). Every test that
+     * exercises these two services invokes them via
+     * {@code ec.service.sync()...disableAuthz().call()} — both
+     * {@code SettingsFacadeSharedConfigSaveTests} and
+     * {@code SettingsFacadeTenantFilteringSmokeTests} use exactly that shape. Inside those tests
+     * {@code DARPAN_ACTIVE_COMPANY_SCOPE} never applies to ANY nested {@code ec.entity.find}, bare or
+     * wrapped, so reverting the read at {@code :607}/{@code :800}/{@code :815} back to a bare
+     * {@code ec.entity.find} — while keeping the new gate — would fail no service-level test in the
+     * repo. A static source assertion is therefore the ONLY available way to pin this invariant, the
+     * same technique {@link #everySharedConfigReadInDarpanGoesThroughTenantScopedFinder} already uses
+     * for {@code SharedConfigAccessSupport.groovy}.
+     *
+     * <p>Scoped to the three service-block sites (via {@link #serviceBlock}), not the whole file: see
+     * that method's Javadoc for the unrelated bare find this must not collide with.</p>
+     */
+    @Test
+    void saveNsAuthAndNsRestletConfigResolveTheirRecordsThroughFindGlobalUnscopedNotABareEntityFind() {
+        String xml = settingsFacadeServicesXml()
+        String saveNsAuthConfig = serviceBlock(xml, "save", "NsAuthConfig")
+        String saveNsRestletConfig = serviceBlock(xml, "save", "NsRestletConfig")
+
+        [["save#NsAuthConfig", saveNsAuthConfig], ["save#NsRestletConfig", saveNsRestletConfig]].each { List pair ->
+            String label = (String) pair[0]
+            String block = (String) pair[1]
+            assertFalse(block.contains("ec.entity.find('darpan.reconciliation.NsAuthConfig'") ||
+                    block.contains('ec.entity.find("darpan.reconciliation.NsAuthConfig"'),
+                    "${label} must not resolve NsAuthConfig via a bare ec.entity.find — " +
+                    "DARPAN_ACTIVE_COMPANY_SCOPE silently filters it to the active tenant on any " +
+                    "authz-enabled read, hiding a shared-but-foreign-owned row from the " +
+                    "owner-or-shared access check before it can even run")
+            assertFalse(block.contains("ec.entity.find('darpan.reconciliation.NsRestletConfig'") ||
+                    block.contains('ec.entity.find("darpan.reconciliation.NsRestletConfig"'),
+                    "${label} must not resolve NsRestletConfig via a bare ec.entity.find — same reason")
+        }
+
+        assertTrue(saveNsAuthConfig.contains("TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsAuthConfig'"),
+                "save#NsAuthConfig's own existence check (site :604) must resolve the record through " +
+                "TenantScopedFinder.findGlobalUnscoped so a shared-but-foreign-owned row is visible " +
+                "to SharedConfigAccessSupport.canActiveTenantUseConfig")
+        assertTrue(saveNsRestletConfig.contains("TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsRestletConfig'"),
+                "save#NsRestletConfig's own existence check (site :785) must resolve the record " +
+                "through TenantScopedFinder.findGlobalUnscoped")
+        assertTrue(saveNsRestletConfig.contains("TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsAuthConfig'"),
+                "save#NsRestletConfig's referenced-auth-config check (site :797) must resolve the " +
+                "referenced NsAuthConfig through TenantScopedFinder.findGlobalUnscoped too")
     }
 }

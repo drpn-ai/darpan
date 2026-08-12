@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Release-scoped upgrade data for Darpan 1.5.0 (DAR-BE-005 — shared config across tenants).
+Records must also live in generic source data files under runtime/component/darpan/data/.
+Load with: ./gradlew loadDarpanUpgradeData
+
+ORDERING: hand-verified parent-before-child. EnumerationType precedes its Enumerations, and both
+precede every ConfigTenantAccess row that references configTypeEnumId. release_preflight.py sorts
+alphabetically and WILL break this if the file is regenerated — re-order by hand afterwards.
+
+OPERATOR IMPACT, STEP A (enum definitions): five additive records, no behaviour change. Until they
+load, no config can be shared, because a grant must name a configTypeEnumId that exists.
+
+OPERATOR IMPACT, STEP B (backfill): ONE ConfigTenantAccess row that adds the Betsey Johnson tenant
+to the peer group of Steve Madden's existing HotWax OMS config. After it loads, both tenants read
+and edit the SAME config row and its stored credential. This is a deliberate widening of credential
+access, requested for the shared HotWax account. It is NOT reversible by re-running a loader —
+undo it with facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess.
+
+Every other config in every environment stays private and unchanged. Sharing is opt-in.
+
+PREREQUISITE: 1.4.0 upgrade-data must be loaded first.
+-->
+<entity-facade-xml type="darpan-seed">
+
+    <!-- Step A — config-type catalog. -->
+    <moqui.basic.EnumerationType enumTypeId="DarpanSharedConfigType"
+            description="Darpan API source config types that support cross-tenant sharing"/>
+    <moqui.basic.Enumeration enumId="SCFG_HOTWAX_OMS"
+            description="HotWax OMS REST source config (darpan.hotwax.HotWaxOmsRestSourceConfig)"
+            enumTypeId="DarpanSharedConfigType"/>
+    <moqui.basic.Enumeration enumId="SCFG_SHOPIFY_AUTH"
+            description="Shopify auth config (darpan.shopify.ShopifyAuthConfig)"
+            enumTypeId="DarpanSharedConfigType"/>
+    <moqui.basic.Enumeration enumId="SCFG_NS_AUTH"
+            description="NetSuite auth config (darpan.reconciliation.NsAuthConfig)"
+            enumTypeId="DarpanSharedConfigType"/>
+    <moqui.basic.Enumeration enumId="SCFG_NS_RESTLET"
+            description="NetSuite Restlet config (darpan.reconciliation.NsRestletConfig)"
+            enumTypeId="DarpanSharedConfigType"/>
+
+    <!-- Step B — one-time backfill for the shared HotWax account.
+         The config is OWNED by Steve Madden and stays that way; this row adds Betsey Johnson as an
+         equal peer. No row is needed for the owning tenant — ownership is access.
+
+         UNVERIFIED-IDS: the three logical ids below (STEVE_MADDEN, BETSEY_JOHNSON,
+         HOTWAX_OMS_SHARED) follow Darpan's tenant naming convention but have NOT been confirmed
+         against the live instance. Tenants are provisioned per environment and never seeded, so the
+         repo cannot confirm them. A row naming the wrong tenant silently widens access to that
+         tenant's operators. Whoever verifies all three against the live instance deletes this
+         UNVERIFIED-IDS marker and the test that pins it, in the same commit — that deletion is the
+         conscious review gate. Do not load this file while the marker is present. -->
+    <darpan.auth.ConfigTenantAccess
+            configTypeEnumId="SCFG_HOTWAX_OMS"
+            configId="HOTWAX_OMS_SHARED"
+            tenantUserGroupId="BETSEY_JOHNSON"
+            fromDate="2026-08-11 00:00:00"
+            grantedByUserId="_NA_"/>
+
+</entity-facade-xml>

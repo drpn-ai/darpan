@@ -202,4 +202,30 @@ class SharedConfigEntityContractTests {
                 "save#NsRestletConfig's referenced-auth-config check (site :797) must resolve the " +
                 "referenced NsAuthConfig through TenantScopedFinder.findGlobalUnscoped too")
     }
+
+    /**
+     * Deploy-safety tripwire (kept by explicit ruling, Aditi 2026-08-11).
+     *
+     * <p>The backfill widens credential access to a named tenant, using logical ids that have not
+     * been confirmed against the live instance. This test pins the UNVERIFIED-IDS marker so the file
+     * cannot quietly become "verified" without someone deciding it is. Deleting the marker and
+     * deleting this test are the same commit, and that commit is the review gate.</p>
+     *
+     * <p>It asserts a marker is PRESENT on purpose. A reviewer may read that as an inverted test —
+     * it is not: the assertion is "this file still declares itself unverified", which is a real
+     * property with a real failure mode (loading unconfirmed tenant ids into production).</p>
+     */
+    @Test
+    void backfillStillDeclaresItsTenantIdsUnverified() {
+        Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
+        Path upgradeData = backendRoot.resolve("runtime/component/darpan/data/releases/1.5.0/upgrade-data.xml")
+        String xml = upgradeData.toFile().text
+
+        assertTrue(xml.contains("UNVERIFIED-IDS"),
+                "The UNVERIFIED-IDS marker is gone, so someone confirmed STEVE_MADDEN / BETSEY_JOHNSON / " +
+                "HOTWAX_OMS_SHARED against the live instance. Good — record the verified ids in the " +
+                "release notes and delete this test in the same commit. If you did NOT verify them, " +
+                "restore the marker: loading unconfirmed tenant ids widens credential access to whoever " +
+                "those ids actually name.")
+    }
 }

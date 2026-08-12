@@ -44,7 +44,6 @@ class ReturnPresenceVerificationSupport {
         int pendingCount = 0
         List<Map<String, Object>> missingInShopify = []
         Set<String> ordersMatchedForward = new HashSet<>()
-        Map<String, Set<String>> omsExternalIdsByOrder = [:]
 
         omsReturns.each { Object raw ->
             if (!(raw instanceof Map)) return
@@ -52,10 +51,6 @@ class ReturnPresenceVerificationSupport {
             String externalId = normalize(omsReturn.get("externalId"))
             String orderExternalId = normalize(omsReturn.get("orderExternalId"))
             if (!externalId || !orderExternalId) return
-
-            omsExternalIdsByOrder
-                    .computeIfAbsent(orderExternalId, { new HashSet<String>() })
-                    .add(externalId)
 
             Map<String, Set<String>> order = byOrder.get(orderExternalId)
             boolean refundMatch = order != null && order.get("refundIds").contains(externalId)
@@ -80,20 +75,28 @@ class ReturnPresenceVerificationSupport {
         }
 
         List<Map<String, Object>> missingInOms = []
+        int suppressedOrderCount = 0
         shopifyOrders.each { Object raw ->
             if (!(raw instanceof Map)) return
             Map order = (Map) raw
             String orderId = normalize(order.get("orderId"))
             if (!orderId) return
             // Per design §4: the event is demonstrably captured under the other id, so do not
-            // re-report it against this order.
-            if (ordersMatchedForward.contains(orderId)) return
+            // re-report it against this order. Counted so the audit note can disclose that a
+            // per-order (not per-return) suppression occurred — see design §4 known phase-1
+            // imprecision: an order with more than one return could mask a second missing refund.
+            if (ordersMatchedForward.contains(orderId)) {
+                suppressedOrderCount++
+                return
+            }
 
-            Set<String> omsIds = omsExternalIdsByOrder.get(orderId) ?: (Set<String>) new HashSet<String>()
             boolean young = parseMillis(order.get("createdAt")) > graceFloor
 
+            // Invariant: any refundId here equal to an OMS externalId on this order would already
+            // have set refundMatch = true in the forward pass above (same normalized string, same
+            // order lookup), which adds this order to ordersMatchedForward and skips it at the
+            // guard above — so no membership check against OMS ids is needed or reachable here.
             idSet(order.get("refundIds")).each { String refundId ->
-                if (omsIds.contains(refundId)) return
                 if (young) {
                     pendingCount++
                     return
@@ -112,7 +115,7 @@ class ReturnPresenceVerificationSupport {
                 missingInShopify: missingInShopify,
                 missingInOms    : missingInOms,
                 auditNote       : buildAuditNote(matchedCount, missingInShopify.size(),
-                        missingInOms.size(), pendingCount, graceHours),
+                        missingInOms.size(), pendingCount, graceHours, suppressedOrderCount),
         ]
     }
 
@@ -146,10 +149,23 @@ class ReturnPresenceVerificationSupport {
         }
     }
 
-    /** One sentence the operator always gets — even an all-matched run shows its work. */
+    /**
+     * One sentence the operator always gets — even an all-matched run shows its work. When at
+     * least one order's reverse check was suppressed by an earlier forward match, a second
+     * sentence discloses it: suppression is per order, not per return event (design §4 known
+     * phase-1 imprecision), so a second missing refund on that order would not be independently
+     * caught. Only appended when it can actually apply — never a blanket disclaimer.
+     */
     private static String buildAuditNote(int matchedCount, int missingInShopifyCount,
-                                         int missingInOmsCount, int pendingCount, int graceHours) {
-        return "Return presence check: ${matchedCount} matched, ${missingInShopifyCount} missing in Shopify, " +
+                                         int missingInOmsCount, int pendingCount, int graceHours,
+                                         int suppressedOrderCount) {
+        String note = "Return presence check: ${matchedCount} matched, ${missingInShopifyCount} missing in Shopify, " +
                 "${missingInOmsCount} missing in OMS, ${pendingCount} pending (younger than ${graceHours}h)."
+        if (suppressedOrderCount > 0) {
+            note += " ${suppressedOrderCount} order(s) had their reverse (missing-in-OMS) check suppressed by " +
+                    "an earlier forward match; on an order with more than one return, a second missing refund " +
+                    "would not be caught independently (known phase-1 limitation)."
+        }
+        return note
     }
 }

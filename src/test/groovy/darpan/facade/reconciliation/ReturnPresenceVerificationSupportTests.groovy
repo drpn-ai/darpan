@@ -3,6 +3,7 @@ package darpan.facade.reconciliation
 import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -113,6 +114,25 @@ class ReturnPresenceVerificationSupportTests {
         String note = result.auditNote as String
         assertTrue(note.contains("1 matched"), "operator always gets a sentence: ${note}")
         assertTrue(note.contains("3h"), "the grace must be stated: ${note}")
+    }
+
+    @Test
+    void auditNoteStatesTheSuppressionCaveatOnlyWhenASuppressionOccurred() {
+        // Return-id fallback match (same fixture as the reverse-suppression test): the order
+        // matches forward, so its reverse check is suppressed and the caveat must be disclosed.
+        Map suppressed = verify(
+                [omsReturn("9001", "7025799037059", OLD)],
+                [shopifyOrder("7025799037059", ["5001"], ["9001"])])
+        assertTrue(((String) suppressed.auditNote).contains("suppressed"),
+                "a suppressed order must be disclosed: ${suppressed.auditNote}")
+
+        // Neither id set matches: no forward match, so no order is suppressed and the caveat
+        // would be noise.
+        Map notSuppressed = verify(
+                [omsReturn("7777", "7025799037059", OLD)],
+                [shopifyOrder("7025799037059", ["5001"], ["9001"])])
+        assertFalse(((String) notSuppressed.auditNote).contains("suppressed"),
+                "no suppression occurred, the caveat must not appear: ${notSuppressed.auditNote}")
     }
 
     private static Map verify(List omsReturns, List shopifyOrders) {

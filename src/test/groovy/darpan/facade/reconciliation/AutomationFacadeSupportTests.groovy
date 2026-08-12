@@ -166,6 +166,37 @@ class AutomationFacadeSupportTests {
                 "the shared remoteId must not make this source display as the legacy Orders API")
     }
 
+    // ─── OMS_RETURNS field pills (DAR-BE-018 Task 6, design §5) ───────────────────
+    // fieldOptionsForSystem hard-branches on known system ids and returns null for anything else;
+    // a null falls back to primaryIdOptions and the returnChannelEnumId exclusion pill silently
+    // never appears — no error, no failing test, no log line.
+
+    @Test
+    void returnsSystemOffersTheChannelPill() {
+        List<Map<String, Object>> options = AutomationFacadeSupport.fieldOptionsForSystem("OMS_RETURNS")
+
+        assertNotNull(options, "OMS_RETURNS must have a curated pill list — null falls back to primaryIdOptions "
+                + "and the channel pill silently disappears (design §5)")
+        List<String> paths = options.collect { it.fieldPath as String }
+        assertTrue(paths.contains("\$.records[*].returnChannelEnumId"),
+                "the channel pill is the whole point of the returns exclusion: ${paths}")
+        assertTrue(paths.contains("\$.records[*].externalId"))
+        assertTrue(paths.contains("\$.records[*].orderExternalId"))
+    }
+
+    @Test
+    void returnsPillsNameOnlyTopLevelRecordKeys() {
+        // SourceFilterSupport matches against top-level keys via CompareIdExpressionSupport
+        // .topLevelRecordField, so a nested path would persist a rule that excludes nothing.
+        List<Map<String, Object>> options = AutomationFacadeSupport.fieldOptionsForSystem("OMS_RETURNS")
+        options.each { Map<String, Object> option ->
+            String path = option.fieldPath as String
+            String tail = path.substring(path.lastIndexOf('.') + 1)
+            assertFalse(tail.contains("["), "nested pill path is unusable: ${path}")
+            assertTrue(path.startsWith("\$.records[*]."), "unexpected pill path shape: ${path}")
+        }
+    }
+
     static class MessageStub {
         List<String> errors = []
         void addError(Object error) { errors.add(error?.toString()) }

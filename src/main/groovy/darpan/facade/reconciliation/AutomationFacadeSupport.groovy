@@ -49,6 +49,7 @@ class AutomationFacadeSupport {
     static final String SHOPIFY_ORDERS_ENDPOINT_LABEL = ReconciliationSavedRunSupport.SHOPIFY_ORDERS_ENDPOINT_LABEL
     static final String HOTWAX_OMS_ORDERS_EXTRACT_SERVICE = ReconciliationSavedRunSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE
     static final String OMS_RECON_SYSTEM_ENUM_ID = ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RECON
+    static final String OMS_RETURNS_SYSTEM_ENUM_ID = ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS
     static final String HOTWAX_RECON_ORDERS_ENDPOINT_LABEL = ReconciliationSavedRunSupport.HOTWAX_RECON_ORDERS_ENDPOINT_LABEL
     static final String HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE = ReconciliationSavedRunSupport.HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE
     static final String SHOPIFY_ORDERS_EXTRACT_SERVICE = ReconciliationSavedRunSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE
@@ -116,6 +117,32 @@ class AutomationFacadeSupport {
                 !((String) option.fieldPath).endsWith("salesChannelEnumId") &&
                         !((String) option.fieldPath).endsWith("productStoreId")
             }.asImmutable()
+
+    /**
+     * Pills for the OMS returns connector (DAR-BE-018, design §5).
+     *
+     * Every entry must be a real TOP-LEVEL key on the OMS return header, because SourceFilterSupport
+     * reduces a stored expression via CompareIdExpressionSupport.topLevelRecordField and matches
+     * against top-level record keys only — a nested or non-existent path persists a rule that
+     * validates, excludes nothing, and reports no error.
+     *
+     * returnChannelEnumId IS offered here, unlike its orders analog salesChannelEnumId on the recon
+     * connector: the returns endpoint's server-side projection includes the channel field, so a rule
+     * drawn on it actually sees a value. If the OMS ever narrows that projection, or implements the
+     * RQ-24 server-side channel filter, remove this pill — see the design's §5 tension note.
+     *
+     * items[] is deliberately absent: it is a nested array, not a top-level scalar key.
+     */
+    static final List<Map<String, Object>> HOTWAX_OMS_RETURN_FIELD_OPTIONS = [
+            [fieldPath: "\$.records[*].returnId", label: "Return ID", type: "string"],
+            [fieldPath: "\$.records[*].externalId", label: "Shopify reference", type: "string"],
+            [fieldPath: "\$.records[*].orderExternalId", label: "Order external ID", type: "string"],
+            [fieldPath: "\$.records[*].statusId", label: "Status", type: "string"],
+            [fieldPath: "\$.records[*].entryDate", label: "Entry date", type: "string"],
+            [fieldPath: "\$.records[*].returnTotal", label: "Return total", type: "string"],
+            [fieldPath: "\$.records[*].currencyUomId", label: "Currency", type: "string"],
+            [fieldPath: "\$.records[*].returnChannelEnumId", label: "Return channel", type: "string"],
+    ].asImmutable()
 
     static Map<String, Object> prepareAutomationSave(def ec, Map params = [:]) {
         Map input = params ?: [:]
@@ -1373,10 +1400,11 @@ class AutomationFacadeSupport {
      * The wider pill list the rules board uses, or null when this system has no curated superset —
      * the board then falls back to {@code primaryIdOptions}, which is exactly today's behavior.
      *
-     * Only OMS has one. Shopify deliberately does NOT: its connector declares no {@code keepFieldsBase}
-     * and its record shape comes from a per-tenant GraphQL request template, so any wider list would be
-     * guessed rather than derived — and it declares no {@code filterParameterName} either, so it can
-     * carry no exclusions for the wider list to serve.
+     * OMS (both order connectors) and OMS_RETURNS have one. Shopify deliberately does NOT: its
+     * connector declares no {@code keepFieldsBase} and its record shape comes from a per-tenant
+     * GraphQL request template, so any wider list would be guessed rather than derived — and it
+     * declares no {@code filterParameterName} either, so it can carry no exclusions for the wider
+     * list to serve.
      */
     protected static List<Map<String, Object>> fieldOptionsForSystem(String systemEnumId) {
         String normalized = normalize(systemEnumId)
@@ -1384,6 +1412,7 @@ class AutomationFacadeSupport {
         // Narrower on purpose — the recon endpoint projects server-side, so the two extra pills
         // would name fields that never arrive. See HOTWAX_OMS_RECON_ORDER_FIELD_OPTIONS.
         if (normalized == OMS_RECON_SYSTEM_ENUM_ID) return HOTWAX_OMS_RECON_ORDER_FIELD_OPTIONS
+        if (normalized == OMS_RETURNS_SYSTEM_ENUM_ID) return HOTWAX_OMS_RETURN_FIELD_OPTIONS
         return null
     }
 

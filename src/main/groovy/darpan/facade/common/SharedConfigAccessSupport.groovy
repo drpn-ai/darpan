@@ -134,24 +134,44 @@ class SharedConfigAccessSupport {
     }
 
     /**
-     * The owner-or-shared decision for the ACTIVE tenant, given an already-loaded config record.
+     * The owner-or-shared decision for an EXPLICIT tenant, given an already-loaded config record.
+     *
+     * <p>DAR-BE-005 B1 — added for the automation path, whose tenant comes from the already-gated
+     * automation record (a trusted, server-derived value) rather than from a session's active
+     * tenant, so it cannot call {@link #canActiveTenantUseConfig}, which resolves the active tenant
+     * internally. {@link #canActiveTenantUseConfig} now delegates here with the active tenant, so
+     * there is exactly one implementation of the owner-or-shared decision — this codebase has
+     * already been bitten once by a reader/writer pair that drifted apart (the {@code thruDate} bug
+     * documented on {@link #listActiveGrantRows}), and a decision duplicated across two callers is
+     * the same hazard shape.</p>
      *
      * <p>Strictly wider than {@link TenantAccessSupport#canAccessTenantRecord}: it returns true for
      * everything that method returns true for, plus peer-group members. With zero grant rows the two
      * are identical — which is what makes sharing backward compatible.</p>
      */
-    static boolean canActiveTenantUseConfig(def ec, String configTypeEnumId, def configRecord) {
+    static boolean canTenantUseConfig(def ec, String configTypeEnumId, def configRecord, String tenantUserGroupId) {
         if (configRecord == null) return false
-        String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
-        if (!activeTenantUserGroupId) return false
+        String normalizedTenant = normalize(tenantUserGroupId)
+        if (!normalizedTenant) return false
 
         String ownerTenantUserGroupId = normalize(readField(configRecord, "companyUserGroupId"))
-        if (ownerTenantUserGroupId && ownerTenantUserGroupId == activeTenantUserGroupId) return true
+        if (ownerTenantUserGroupId && ownerTenantUserGroupId == normalizedTenant) return true
 
         Map<String, String> type = configType(configTypeEnumId)
         if (type == null) return false
         String configId = normalize(readField(configRecord, type.pkField))
-        return isSharedWithTenant(ec, configTypeEnumId, configId, activeTenantUserGroupId)
+        return isSharedWithTenant(ec, configTypeEnumId, configId, normalizedTenant)
+    }
+
+    /**
+     * The owner-or-shared decision for the ACTIVE tenant, given an already-loaded config record.
+     * Thin wrapper over {@link #canTenantUseConfig} — see that method's Javadoc for why the two are
+     * kept as a single implementation.
+     */
+    static boolean canActiveTenantUseConfig(def ec, String configTypeEnumId, def configRecord) {
+        if (configRecord == null) return false
+        String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+        return canTenantUseConfig(ec, configTypeEnumId, configRecord, activeTenantUserGroupId)
     }
 
     /**

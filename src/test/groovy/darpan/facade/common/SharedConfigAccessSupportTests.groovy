@@ -173,6 +173,70 @@ class SharedConfigAccessSupportTests {
                 "no active tenant means no access — default-deny, same as TenantScopedFinder")
     }
 
+    // --- owner-or-shared decision for an EXPLICIT tenant (DAR-BE-005 B1) ---
+
+    /**
+     * B1 — the automation path's own entry point: an explicit tenant (server-derived from an
+     * already-gated automation record) rather than the session's active tenant. This is what
+     * {@code canActiveTenantUseConfig} now delegates to; both are exercised here so a future edit
+     * that reintroduces two divergent implementations fails loudly.
+     */
+    @Test
+    void canTenantUseConfigAllowsTheOwningTenantWithNoGrantRow() {
+        def ec = ecWithGrants([])
+        def config = [omsRestSourceConfigId: "OMS_HW_1", companyUserGroupId: "STEVE_MADDEN"]
+
+        assertTrue(SharedConfigAccessSupport.canTenantUseConfig(ec, "SCFG_HOTWAX_OMS", config, "STEVE_MADDEN"),
+                "sharing is additive — an unshared config must behave exactly as it does today")
+    }
+
+    @Test
+    void canTenantUseConfigAllowsAnExplicitMemberTenantOfTheSharedGroup() {
+        def ec = ecWithGrants([grant("SCFG_HOTWAX_OMS", "OMS_HW_1", "BETSEY_JOHNSON")])
+        def config = [omsRestSourceConfigId: "OMS_HW_1", companyUserGroupId: "STEVE_MADDEN"]
+
+        assertTrue(SharedConfigAccessSupport.canTenantUseConfig(ec, "SCFG_HOTWAX_OMS", config, "BETSEY_JOHNSON"),
+                "the automation path's own entry point: an explicit peer tenant, not the session's " +
+                "active tenant, must be able to use a config shared with it at run time")
+    }
+
+    @Test
+    void canTenantUseConfigDeniesAnExplicitNonMemberForeignTenant() {
+        def ec = ecWithGrants([grant("SCFG_HOTWAX_OMS", "OMS_HW_1", "BETSEY_JOHNSON")])
+        def config = [omsRestSourceConfigId: "OMS_HW_1", companyUserGroupId: "STEVE_MADDEN"]
+
+        assertFalse(SharedConfigAccessSupport.canTenantUseConfig(ec, "SCFG_HOTWAX_OMS", config, "THIRD_LOVE"),
+                "tenant isolation must not loosen for an explicit tenant outside the group either")
+    }
+
+    @Test
+    void canTenantUseConfigDeniesNullConfigAndBlankTenant() {
+        def ec = ecWithGrants([grant("SCFG_HOTWAX_OMS", "OMS_HW_1", "BETSEY_JOHNSON")])
+        def config = [omsRestSourceConfigId: "OMS_HW_1", companyUserGroupId: "STEVE_MADDEN"]
+
+        assertFalse(SharedConfigAccessSupport.canTenantUseConfig(ec, "SCFG_HOTWAX_OMS", null, "STEVE_MADDEN"))
+        assertFalse(SharedConfigAccessSupport.canTenantUseConfig(ec, "SCFG_HOTWAX_OMS", config, null),
+                "no explicit tenant means no access — default-deny, same shape as no active tenant")
+        assertFalse(SharedConfigAccessSupport.canTenantUseConfig(ec, "SCFG_HOTWAX_OMS", config, "   "))
+    }
+
+    /**
+     * Pins the delegation itself: {@code canActiveTenantUseConfig} must be a thin wrapper that
+     * forwards to {@code canTenantUseConfig} with the resolved active tenant, not a second
+     * hand-written copy of the owner-or-shared decision — the exact reader/writer drift shape this
+     * codebase was already bitten by once (the {@code thruDate} bug documented on
+     * {@code listActiveGrantRows}).
+     */
+    @Test
+    void canActiveTenantUseConfigAgreesWithCanTenantUseConfigForTheSameExplicitTenant() {
+        def ec = ecWithGrants([grant("SCFG_HOTWAX_OMS", "OMS_HW_1", "BETSEY_JOHNSON")], "BETSEY_JOHNSON")
+        def config = [omsRestSourceConfigId: "OMS_HW_1", companyUserGroupId: "STEVE_MADDEN"]
+
+        assertEquals(
+                SharedConfigAccessSupport.canTenantUseConfig(ec, "SCFG_HOTWAX_OMS", config, "BETSEY_JOHNSON"),
+                SharedConfigAccessSupport.canActiveTenantUseConfig(ec, "SCFG_HOTWAX_OMS", config))
+    }
+
     // --- builders -------------------------------------------------------
 
     // --- accessible-row listing (settings-list seam) ---------------------

@@ -81,4 +81,48 @@ class SharedConfigEntityContractTests {
                     "${enumId} must be seeded so a grant can name this config type")
         }
     }
+
+    /**
+     * DAR-BE-005 seam C. The four shareable config entities are members of the framework
+     * EntityFilterSet DARPAN_ACTIVE_COMPANY_SCOPE, which hard-filters them to the active tenant on
+     * any authz-enabled read. Every sharing-aware read MUST therefore go through TenantScopedFinder
+     * (which disables authz on every method). A future read that forgets would silently drop the
+     * shared row, and the symptom — "the shared config vanished" — points nowhere near the cause.
+     */
+    @Test
+    void shareableConfigEntitiesAreStillCoveredByTheActiveCompanyEntityFilter() {
+        String xml = securitySeedXml()
+        ['darpan.reconciliation.NsAuthConfig',
+         'darpan.reconciliation.NsRestletConfig',
+         'darpan.hotwax.HotWaxOmsRestSourceConfig',
+         'darpan.shopify.ShopifyAuthConfig'].each { String entityName ->
+            assertTrue(xml.contains("entityName=\"${entityName}\""),
+                    "${entityName} must stay in DARPAN_ACTIVE_COMPANY_SCOPE — sharing widens access " +
+                    "through the resolver, NOT by removing the framework tenant filter")
+        }
+    }
+
+    @Test
+    void configTenantAccessIsNotInTheActiveCompanyEntityFilterSet() {
+        String xml = securitySeedXml()
+        int setStart = xml.indexOf('entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"')
+        assertTrue(setStart > 0, "DARPAN_ACTIVE_COMPANY_SCOPE must exist")
+        assertFalse(xml.contains('entityName="darpan.auth.ConfigTenantAccess"'),
+                "ConfigTenantAccess has no companyUserGroupId; a [companyUserGroupId: ...] filter on it " +
+                "cannot work. Its only reader is SharedConfigAccessSupport via findGlobalUnscoped.")
+    }
+
+    @Test
+    void everySharedConfigReadInDarpanGoesThroughTenantScopedFinder() {
+        Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
+        Path accessSupport = backendRoot.resolve(
+                "runtime/component/darpan/src/main/groovy/darpan/facade/common/SharedConfigAccessSupport.groovy")
+        String source = accessSupport.toFile().text
+
+        assertFalse(source.contains("ec.entity.find("),
+                "SharedConfigAccessSupport must never call ec.entity.find directly — an authz-enabled " +
+                "read is silently filtered by DARPAN_ACTIVE_COMPANY_SCOPE and the shared row disappears")
+        assertTrue(source.contains("TenantScopedFinder.findGlobalUnscoped"),
+                "the cross-tenant grant read is the one justified opt-out and must be explicit")
+    }
 }

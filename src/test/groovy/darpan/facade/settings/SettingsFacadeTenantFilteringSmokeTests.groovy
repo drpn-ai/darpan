@@ -119,7 +119,11 @@ class SettingsFacadeTenantFilteringSmokeTests {
                 username      : "leaked-auth-user",
         ])
         assertFalse((Boolean) authResult.ok)
-        assertTrue((authResult.errors ?: []).join(" ").contains("not available in your active tenant"))
+        // DAR-BE-005 Task 8, Finding A: save#NsAuthConfig now gates on
+        // SharedConfigAccessSupport.canActiveTenantUseConfig (owner-or-shared) and collapses the
+        // denial to the same "was not found" text a nonexistent id would produce — GORJANA_AUTH is
+        // not shared with KREWE here, so this stays a denial, just with the non-distinguishing text.
+        assertTrue((authResult.errors ?: []).join(" ").contains("was not found"))
         assertEquals("Gorjana Auth", findOne("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "GORJANA_AUTH"]).description)
 
         ec.message.clearErrors()
@@ -132,7 +136,8 @@ class SettingsFacadeTenantFilteringSmokeTests {
                 headersJson      : "{}",
         ])
         assertFalse((Boolean) endpointResult.ok)
-        assertTrue((endpointResult.errors ?: []).join(" ").contains("not available in your active tenant"))
+        // Same Finding A collapse as above, for save#NsRestletConfig's own existence/access gate.
+        assertTrue((endpointResult.errors ?: []).join(" ").contains("was not found"))
         assertEquals("https://gorjana.suitetalk.api.netsuite.com/restlet", findOne("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "GORJANA_ENDPOINT"]).endpointUrl)
     }
 

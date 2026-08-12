@@ -599,9 +599,21 @@
                 <message error="true">Username is required for BASIC auth.</message>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="existingAuth" from="ec.entity.find('darpan.reconciliation.NsAuthConfig').condition('nsAuthConfigId', nsAuthConfigIdValue).useCache(false).one()"/>
-                <if condition="existingAuth">
-                    <set field="ignoreAuthAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, existingAuth, &quot;NS Auth config '${nsAuthConfigIdValue}' was not found.&quot;, &quot;NS Auth config '${nsAuthConfigIdValue}' is not available in your active tenant.&quot;)"/>
+                <!-- DAR-BE-005 seam C: a bare ec.entity.find here is silently filtered by
+                     DARPAN_ACTIVE_COMPANY_SCOPE (SecuritySeedData.xml DARPAN_SCOPE_NS_AUTH), so a
+                     shared-but-foreign-owned row would be invisible before any access check runs.
+                     findGlobalUnscoped bypasses that filter; canActiveTenantUseConfig below is the
+                     real owner-or-shared gate. -->
+                <set field="existingAuth" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsAuthConfig', 'save#NsAuthConfig existence check; SharedConfigAccessSupport.canActiveTenantUseConfig gates owner-or-shared access on the next line (DAR-BE-005)').condition('nsAuthConfigId', nsAuthConfigIdValue).useCache(false).one()"/>
+                <if condition="existingAuth &amp;&amp; !darpan.facade.common.SharedConfigAccessSupport.canActiveTenantUseConfig(ec, darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_AUTH, existingAuth)">
+                    <!-- Deliberately ONE message for "no such row" and "row exists but this tenant has
+                         no standing over it" (not owner, not a peer) — matches Task 6's
+                         validateNetSuiteAuthConfig and Task 7's component gates. findTenantScoped
+                         (pre-DAR-BE-005) pre-filtered by tenant at the query level, so this exact text
+                         was the only message a zero-grant caller could ever see; splitting it into a
+                         more specific "not available" message would both break that byte-identical
+                         behavior AND reopen a cross-tenant existence oracle. Do not "improve" this. -->
+                    <message error="true">NS Auth config '${nsAuthConfigIdValue}' was not found.</message>
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
@@ -780,21 +792,37 @@
                 <message error="true">${headersJsonError}</message>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="existingEndpoint" from="ec.entity.find('darpan.reconciliation.NsRestletConfig').condition('nsRestletConfigId', nsRestletConfigIdValue).useCache(false).one()"/>
-                <if condition="existingEndpoint">
-                    <set field="ignoreEndpointAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, existingEndpoint, &quot;NS endpoint config '${nsRestletConfigIdValue}' was not found.&quot;, &quot;NS endpoint config '${nsRestletConfigIdValue}' is not available in your active tenant.&quot;)"/>
+                <!-- DAR-BE-005 seam C: a bare ec.entity.find here is silently filtered by
+                     DARPAN_ACTIVE_COMPANY_SCOPE (SecuritySeedData.xml DARPAN_SCOPE_NS_RESTLET), so a
+                     shared-but-foreign-owned row would be invisible before any access check runs.
+                     findGlobalUnscoped bypasses that filter; canActiveTenantUseConfig below is the
+                     real owner-or-shared gate. -->
+                <set field="existingEndpoint" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsRestletConfig', 'save#NsRestletConfig existence check; SharedConfigAccessSupport.canActiveTenantUseConfig gates owner-or-shared access on the next line (DAR-BE-005)').condition('nsRestletConfigId', nsRestletConfigIdValue).useCache(false).one()"/>
+                <if condition="existingEndpoint &amp;&amp; !darpan.facade.common.SharedConfigAccessSupport.canActiveTenantUseConfig(ec, darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_RESTLET, existingEndpoint)">
+                    <!-- Deliberately ONE message for "no such row" and "row exists but this tenant has
+                         no standing over it" (not owner, not a peer) — matches Task 6's reference
+                         validators and Task 7's component gates. Splitting this into a more specific
+                         "not available" message would both break the byte-identical pre-DAR-BE-005
+                         behavior for a foreign tenant AND reopen a cross-tenant existence oracle.
+                         Do not "improve" this. -->
+                    <message error="true">NS endpoint config '${nsRestletConfigIdValue}' was not found.</message>
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="authCfg" from="ec.entity.find('darpan.reconciliation.NsAuthConfig').condition('nsAuthConfigId', nsAuthConfigIdValue).useCache(false).one()"/>
-                <if condition="!authCfg">
+                <!-- DAR-BE-005 seam C: same DARPAN_ACTIVE_COMPANY_SCOPE bypass as above, this time for
+                     the referenced NsAuthConfig (DARPAN_SCOPE_NS_AUTH) — a member tenant saving a
+                     restlet against a shared auth config must be able to see that auth config exists. -->
+                <set field="authCfg" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsAuthConfig', 'save#NsRestletConfig auth-config reference check; SharedConfigAccessSupport.canActiveTenantUseConfig gates owner-or-shared access on the next line (DAR-BE-005)').condition('nsAuthConfigId', nsAuthConfigIdValue).useCache(false).one()"/>
+                <set field="authCfgAccessible" from="authCfg != null &amp;&amp; darpan.facade.common.SharedConfigAccessSupport.canActiveTenantUseConfig(ec, darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_AUTH, authCfg)"/>
+                <if condition="!authCfgAccessible">
+                    <!-- Deliberately ONE message for "no such row" and "row exists but this tenant has
+                         no standing over it" — same ruling as above; kept as its own gate (rather than
+                         reusing the site-604 shape) because this is a REFERENCE check inside
+                         save#NsRestletConfig, not the primary record being saved. -->
                     <message error="true">NsAuthConfig ${nsAuthConfigIdValue} not found.</message>
                 </if>
-                <if condition="authCfg &amp;&amp; (authCfg.isActive ?: 'Y').toString().equalsIgnoreCase('N')">
+                <if condition="authCfgAccessible &amp;&amp; (authCfg.isActive ?: 'Y').toString().equalsIgnoreCase('N')">
                     <message error="true">NsAuthConfig ${nsAuthConfigIdValue} is inactive.</message>
-                </if>
-                <if condition="authCfg">
-                    <set field="ignoreAuthCfgAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, authCfg, &quot;NsAuthConfig ${nsAuthConfigIdValue} not found.&quot;, &quot;NsAuthConfig ${nsAuthConfigIdValue} is not available in your active tenant.&quot;)"/>
                 </if>
             </if>
             <if condition="!ec.message.hasError()">

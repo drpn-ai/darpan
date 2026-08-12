@@ -202,6 +202,14 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.reconciliation.SftpServer"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <!-- DAR-BE-005 — these four config entities can be SHARED across tenants via
+         darpan.auth.ConfigTenantAccess, but they stay in this filter set on purpose. Sharing is
+         granted by the resolver (SharedConfigAccessSupport), never by removing the framework's
+         tenant filter: an authz-enabled read must still see only the active tenant's own rows.
+         Every sharing-aware read goes through TenantScopedFinder, which disables authz on each of
+         its methods and therefore bypasses this filter by design. A NEW read path that calls
+         ec.entity.find directly on one of these entities will silently drop shared rows — the
+         symptom is "the shared config vanished" and it points nowhere near this file. -->
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_NS_AUTH"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.reconciliation.NsAuthConfig"

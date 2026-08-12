@@ -251,6 +251,19 @@ class SharedConfigGrantSupport {
                 .one()
     }
 
+    /**
+     * True while any tenant still holds an active grant on this config.
+     *
+     * <p>Delete-path guard for all three components. A shared config must NOT be deletable, even by
+     * its owner: {@code ConfigTenantAccess.configId} is polymorphic with no DB FK, so a delete
+     * cascades nothing and would leave every peer tenant's automation failing at run time with a
+     * "not found" that points nowhere. Blocking at delete time is the loud failure; the owner
+     * revokes each peer first.</p>
+     */
+    static boolean hasActiveGrants(def ec, String configTypeEnumId, String configId) {
+        return !SharedConfigAccessSupport.listMemberTenantIds(ec, configTypeEnumId, configId).isEmpty()
+    }
+
     /** Rejects non-tenant UserGroups so a grant can never name ADMIN or a permission group. */
     private static boolean isDarpanTenant(def ec, String tenantUserGroupId) {
         def group = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserGroup",

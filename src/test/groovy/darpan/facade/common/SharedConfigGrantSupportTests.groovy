@@ -245,6 +245,39 @@ class SharedConfigGrantSupportTests {
         assertEquals("COMPANY_1", result.ownerTenantUserGroupId)
     }
 
+    // --- delete guard ------------------------------------------------------
+
+    @Test
+    void hasActiveGrantsIsTrueWhileAnyPeerRemainsAndFalseAfterTheLastRevoke() {
+        def shared = world(
+                adminOf: ["COMPANY_1"],
+                config: [omsRestSourceConfigId: "OMS_HW_1", companyUserGroupId: "COMPANY_1"],
+                grants: [grant("SCFG_HOTWAX_OMS", "OMS_HW_1", "COMPANY_2")])
+        assertTrue(SharedConfigGrantSupport.hasActiveGrants(shared.ec, "SCFG_HOTWAX_OMS", "OMS_HW_1"),
+                "a config with a live peer must not be deletable — configId has no FK to cascade")
+
+        def unshared = world(
+                adminOf: ["COMPANY_1"],
+                config: [omsRestSourceConfigId: "OMS_HW_1", companyUserGroupId: "COMPANY_1"],
+                grants: [])
+        assertFalse(SharedConfigGrantSupport.hasActiveGrants(unshared.ec, "SCFG_HOTWAX_OMS", "OMS_HW_1"),
+                "once every grant is revoked the owner may delete normally")
+    }
+
+    @Test
+    void hasActiveGrantsIgnoresRevokedRows() {
+        def world = world(
+                adminOf: ["COMPANY_1"],
+                config: [omsRestSourceConfigId: "OMS_HW_1", companyUserGroupId: "COMPANY_1"],
+                grants: [[configTypeEnumId: "SCFG_HOTWAX_OMS", configId: "OMS_HW_1",
+                          tenantUserGroupId: "COMPANY_2",
+                          fromDate: Timestamp.valueOf("2026-01-01 00:00:00"),
+                          thruDate: Timestamp.valueOf("2026-02-01 00:00:00")]])
+
+        assertFalse(SharedConfigGrantSupport.hasActiveGrants(world.ec, "SCFG_HOTWAX_OMS", "OMS_HW_1"),
+                "a revoked grant is history, not a live dependency")
+    }
+
     // --- harness ---------------------------------------------------------
 
     private static Map grant(String type, String configId, String tenant, Timestamp thruDate = null) {

@@ -135,6 +135,68 @@ class ReturnPresenceVerificationSupportTests {
                 "no suppression occurred, the caveat must not appear: ${notSuppressed.auditNote}")
     }
 
+    @Test
+    void readsBothExtractFilesAndAppendsMissingRowsToTheDiffFile() {
+        File omsFile = File.createTempFile("oms-returns-", ".json")
+        File shopifyFile = File.createTempFile("shopify-return-refs-", ".json")
+        File diffFile = File.createTempFile("diff-", ".json")
+        try {
+            omsFile.text = groovy.json.JsonOutput.toJson([records: [
+                    omsReturn("7777", "7025799037059", OLD),
+            ], metadata: [:]])
+            shopifyFile.text = groovy.json.JsonOutput.toJson([records: [
+                    shopifyOrder("7025799037059", ["5001"], []),
+            ], metadata: [:]])
+            // Mirrors ReconciliationServices.writeDiffDatasetOutput's line-oriented format (see
+            // ExchangePairVerificationSupportTests.diffFile()/MissingDiffVerificationSupportTests
+            // .writeDiffDocument): appendDiffRows scans line-by-line and only recognizes
+            // "differences":[ when it opens its OWN line. A single-line envelope such as
+            // '{"differences":[],...}' never matches that check, so the append would silently no-op
+            // (caught by appendDiffRows's own try/catch as a warning, not a thrown failure) and this
+            // test's assertions on appendedCount/diffFile.text would fail against the real class.
+            diffFile.text = '{\n' +
+                    '"summary":{"totalDifferences":0,"onlyInFile1Count":0,"onlyInFile2Count":0,"missingObjectDifferenceCount":0},\n' +
+                    '"processingWarnings":[],\n' +
+                    '"differences":[]\n' +
+                    '}\n'
+
+            Map result = ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
+                    omsFile    : omsFile,
+                    shopifyFile: shopifyFile,
+                    diffFile   : diffFile,
+                    nowMillis  : NOW,
+            ])
+
+            assertTrue(result.performed as boolean)
+            // One OMS return matching nothing, and one Shopify refund with no OMS counterpart.
+            assertEquals(2, result.appendedCount)
+            assertTrue(diffFile.text.contains("RETURN_MISSING_IN_SHOPIFY"))
+            assertTrue(diffFile.text.contains("RETURN_MISSING_IN_OMS"))
+        } finally {
+            omsFile.delete(); shopifyFile.delete(); diffFile.delete()
+        }
+    }
+
+    @Test
+    void degradesToAWarningWhenAnExtractFileIsMissing() {
+        // The compare already succeeded; a verification failure must not fail the whole run.
+        File diffFile = File.createTempFile("diff-", ".json")
+        try {
+            diffFile.text = '{"differences":[],"processingWarnings":[]}'
+            Map result = ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
+                    omsFile    : new File("/nonexistent/oms.json"),
+                    shopifyFile: new File("/nonexistent/shopify.json"),
+                    diffFile   : diffFile,
+                    nowMillis  : NOW,
+            ])
+
+            assertEquals(false, result.performed)
+            assertTrue(((List) result.warnings).size() > 0, "a skipped check must say so")
+        } finally {
+            diffFile.delete()
+        }
+    }
+
     private static Map verify(List omsReturns, List shopifyOrders) {
         return ReturnPresenceVerificationSupport.verifyReturnPresence([
                 omsReturns   : omsReturns,

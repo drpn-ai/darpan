@@ -8,6 +8,7 @@ import darpan.facade.reconciliation.MissingDiffVerificationSupport
 import darpan.facade.reconciliation.ReconciliationApiWindowSupport
 import darpan.facade.reconciliation.ReconciliationOutputSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
+import darpan.facade.reconciliation.ReturnPresenceVerificationSupport
 import darpan.facade.reconciliation.RunObservability
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.core.ReconciliationServices
@@ -632,6 +633,77 @@ def runVerificationPass = { Map serviceResult, Object file1Source, Object file2S
              errorMessage: verification.lookupFailed && verification.warnings ? verification.warnings.first().toString() : null])
 }
 
+// Return presence verify stage (DAR-BE-018): mirrors runExchangeVerificationPass's shape — resolve
+// each side's connector, gate on the pair of returns connectors' resolved systemEnumIds (never on
+// hardcoded source names, so an orders reconciliation never enters this path and no existing saved
+// run changes behaviour), open a STAGE_VERIFY step, call the file-facing wrapper, complete the step.
+// Unlike the exchange pass (a live Shopify sweep + OMS point lookup), this check reads the two
+// sides' already-written extract files — both are REQUIRED inputs here, not an optional sidecar —
+// and the wrapper itself (ReturnPresenceVerificationSupport.verifyReturnPresenceForRun) degrades a
+// missing/unreadable file to a warning rather than throwing, so no pre-check on file existence is
+// needed before invoking it.
+def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source, Object file2Source,
+                                          Map file1Result, Map file2Result, String file1Label, String file2Label ->
+    if (serviceResult.ruleExecutionFailed == true) return
+    List sides = [[source: file1Source, extractResult: file1Result, fileSide: "FILE_1", label: file1Label],
+                  [source: file2Source, extractResult: file2Result, fileSide: "FILE_2", label: file2Label]]
+    Map omsReturnsSide = sides.find { Map side ->
+        normalize(resolveConnectorFor(side.source)?.systemEnumId) == ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS
+    }
+    Map shopifyReturnsSide = sides.find { Map side ->
+        normalize(resolveConnectorFor(side.source)?.systemEnumId) == "SHOPIFY_RETURN_REFS"
+    }
+    if (omsReturnsSide == null || shopifyReturnsSide == null) return
+
+    File diffFile = resolveOutputFile(serviceResult)
+    if (diffFile == null || !diffFile.isFile()) return
+
+    def returnsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_VERIFY) : null
+    Map returnsVerification
+    boolean checkFailed = false
+    try {
+        returnsVerification = ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
+                omsFile    : resolveLocationFile(normalize(omsReturnsSide.extractResult?.fileLocation)),
+                shopifyFile: resolveLocationFile(normalize(shopifyReturnsSide.extractResult?.fileLocation)),
+                diffFile   : diffFile,
+                nowMillis  : System.currentTimeMillis(),
+        ])
+    } catch (Throwable t) {
+        checkFailed = true
+        returnsVerification = [performed: false, appendedCount: 0, auditNote: null,
+                warnings: ["Return presence check failed: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map
+    }
+    if (ec.message.hasError()) {
+        returnsVerification.warnings = ((returnsVerification.warnings ?: []) as List) + ((ec.message.getErrors() ?: []) as List)
+        ec.message.clearErrors()
+    }
+    // Bump ONLY the two counters appendDiffRows itself bumps on disk (totalDifferences,
+    // missingObjectDifferenceCount) inside verifyReturnPresenceForRun, so the in-memory summary
+    // that feeds the persisted run-result row and the returned tiles never drifts from what the
+    // diff file's own JSON now says. Deliberately NOT touching missingInFile1Count/
+    // missingInFile2Count: the wrapper does not bump the file's onlyInFile1Count/onlyInFile2Count
+    // either (return-presence misses run in both directions — missingInShopify and missingInOms —
+    // and attributing the combined appended count to a single side would misreport it).
+    long appended = ((returnsVerification.appendedCount ?: 0) as long)
+    if (appended > 0L) {
+        serviceResult.differenceCount = ((serviceResult.differenceCount ?: 0) as long) + appended
+        if (serviceResult.missingObjectDifferenceCount != null) {
+            serviceResult.missingObjectDifferenceCount = (serviceResult.missingObjectDifferenceCount as long) + appended
+        }
+    }
+    List returnsNotes = []
+    if (returnsVerification.auditNote) returnsNotes.add(returnsVerification.auditNote)
+    returnsNotes.addAll((returnsVerification.warnings ?: []) as List)
+    if (returnsNotes) serviceResult.processingWarnings = ((serviceResult.processingWarnings ?: []) as List) + returnsNotes
+    RunObservability.endStep(ec, returnsStep,
+            checkFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
+            [recordCount : appended,
+             errorMessage: checkFailed && returnsVerification.warnings ? returnsVerification.warnings.first().toString() : null,
+             metricsJson : JsonOutput.toJson([performed: returnsVerification.performed == true,
+                     matchedCount: returnsVerification.matchedCount ?: 0, pendingCount: returnsVerification.pendingCount ?: 0,
+                     appendedCount: appended])])
+}
+
 try {
     def mapping = null
     if (!ec.message.hasError()) {
@@ -832,6 +904,8 @@ try {
                                     // just produced, and adjusts serviceResult counts BEFORE they are persisted.
                                     runVerificationPass(serviceResult, file1Source, file2Source, file1Label, file2Label)
                                     runExchangeVerificationPass(serviceResult, file1Source, file2Source,
+                                            (Map) file1Result, (Map) file2Result, file1Label, file2Label)
+                                    runReturnPresenceVerificationPass(serviceResult, file1Source, file2Source,
                                             (Map) file1Result, (Map) file2Result, file1Label, file2Label)
                                     String resultDataManagerPath = serviceResult.diffLocation ?
                                             (DataManagerSupport.relativeDataManagerPath(ec, new File(serviceResult.diffLocation as String)) ?: serviceResult.diffFileName) :

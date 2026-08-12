@@ -28,6 +28,13 @@ class ReturnPresenceVerificationSupport {
     static final String TYPE_MISSING_IN_SHOPIFY = "RETURN_MISSING_IN_SHOPIFY"
     static final String TYPE_MISSING_IN_OMS = "RETURN_MISSING_IN_OMS"
     static final int DEFAULT_GRACE_HOURS = 3
+    // Mirrors ExchangePairVerificationSupport.AUDIT_NOTE_PREFIX: the opening phrase of the
+    // always-emitted audit sentence. Not currently consumed by TenantNotificationSupport's
+    // partitionAuditNotes (that classifier only recognizes the exchange and missing-diff prefixes
+    // today) — kept as the producer-owned constant this class's own audit note already renders,
+    // ready for that classifier to be extended. See buildAuditNote below; the literal there is not
+    // yet rewritten to use this constant.
+    static final String AUDIT_NOTE_PREFIX = "Return presence check: "
 
     static Map<String, Object> verifyReturnPresence(Map<String, Object> args) {
         List omsReturns = (args?.omsReturns instanceof List) ? (List) args.omsReturns : []
@@ -117,6 +124,75 @@ class ReturnPresenceVerificationSupport {
                 auditNote       : buildAuditNote(matchedCount, missingInShopify.size(),
                         missingInOms.size(), pendingCount, graceHours, suppressedOrderCount),
         ]
+    }
+
+    /**
+     * File-facing wrapper over verifyReturnPresence. Kept separate from the rule itself so the rule
+     * stays a pure function over two lists and can be tested without touching disk.
+     *
+     * Advisory by design: the compare has already succeeded by the time this runs, so a missing or
+     * unreadable extract degrades to a warning rather than failing the run — the same posture as the
+     * exchange manifest sidecar.
+     */
+    static Map<String, Object> verifyReturnPresenceForRun(Map<String, Object> args) {
+        List<String> warnings = []
+        File omsFile = (File) args?.omsFile
+        File shopifyFile = (File) args?.shopifyFile
+        File diffFile = (File) args?.diffFile
+
+        List omsReturns = readRecords(omsFile, "OMS returns", warnings)
+        List shopifyOrders = readRecords(shopifyFile, "Shopify return references", warnings)
+        if (omsReturns == null || shopifyOrders == null || diffFile == null || !diffFile.isFile()) {
+            return [performed: false, appendedCount: 0, warnings: warnings, auditNote: null]
+        }
+
+        Map<String, Object> result = verifyReturnPresence([
+                omsReturns   : omsReturns,
+                shopifyOrders: shopifyOrders,
+                graceHours   : args?.graceHours,
+                nowMillis    : args?.nowMillis,
+        ])
+
+        List<Map<String, Object>> rows = []
+        rows.addAll((List) result.missingInShopify)
+        rows.addAll((List) result.missingInOms)
+
+        // appendDiffRows is `protected static VOID` (ExchangePairVerificationSupport.groovy:246) with
+        // signature (File diffFile, List<Map> rows, String auditNote, Map<String,Integer> summaryBumps).
+        // It does NOT return a count and its 4th argument is the summary-bump map, not a warnings list.
+        // Wrap it exactly as the exchange stage does (:154-160): skip when there are no rows, and treat
+        // a write failure as a warning — the compare already succeeded, so this must not fail the run.
+        int appended = 0
+        if (rows) {
+            try {
+                ExchangePairVerificationSupport.appendDiffRows(diffFile, rows, result.auditNote as String,
+                        [totalDifferences: rows.size(), missingObjectDifferenceCount: rows.size()])
+                appended = rows.size()
+            } catch (Exception e) {
+                warnings.add("Return presence check could not write diff rows: ${e.message}".toString())
+            }
+        }
+
+        Map<String, Object> out = new LinkedHashMap<>(result)
+        out.put("performed", true)
+        out.put("appendedCount", appended)
+        out.put("warnings", warnings)
+        return out
+    }
+
+    private static List readRecords(File file, String label, List<String> warnings) {
+        if (file == null || !file.isFile()) {
+            warnings.add("${label} extract was not available; the return presence check did not run.".toString())
+            return null
+        }
+        try {
+            Object parsed = new groovy.json.JsonSlurper().parse(file, "UTF-8")
+            Object records = (parsed instanceof Map) ? ((Map) parsed).get("records") : parsed
+            return (records instanceof List) ? (List) records : []
+        } catch (Exception e) {
+            warnings.add("${label} extract could not be read (${e.message}); the return presence check did not run.".toString())
+            return null
+        }
     }
 
     private static Map<String, Map<String, Set<String>>> indexShopifyOrders(List shopifyOrders) {

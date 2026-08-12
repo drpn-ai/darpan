@@ -235,8 +235,13 @@
                 <if condition="file2SystemMessageRemoteIdValue &amp;&amp; file2SystemMessageRemote == null">
                     <set field="file2SystemMessageRemote" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.ensureVirtualApiOrdersRemote(ec, file2SystemEnumIdValue, file2SystemMessageRemoteIdValue, file2SourceConfigTypeValue)"/>
                 </if>
-                <set field="file1NsRestletConfig" from="file1NsRestletConfigIdValue ? ec.entity.find('darpan.reconciliation.NsRestletConfig').condition('nsRestletConfigId', file1NsRestletConfigIdValue).useCache(false).one() : null"/>
-                <set field="file2NsRestletConfig" from="file2NsRestletConfigIdValue ? ec.entity.find('darpan.reconciliation.NsRestletConfig').condition('nsRestletConfigId', file2NsRestletConfigIdValue).useCache(false).one() : null"/>
+                <!-- DAR-BE-005 B4: was a bare ec.entity.find, authz-enabled and silently filtered by
+                     DARPAN_ACTIVE_COMPANY_SCOPE, so a shared-but-foreign-owned restlet was invisible
+                     before the access check below ever ran. findGlobalUnscoped bypasses that filter;
+                     SharedConfigAccessSupport.canActiveTenantUseConfig is the real owner-or-shared
+                     gate, applied immediately below. -->
+                <set field="file1NsRestletConfig" from="file1NsRestletConfigIdValue ? darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsRestletConfig', 'create#RuleSetRun/save#RuleSetRun NsRestletConfig existence check; SharedConfigAccessSupport.canActiveTenantUseConfig gates owner-or-shared access immediately after (DAR-BE-005)').condition('nsRestletConfigId', file1NsRestletConfigIdValue).useCache(false).one() : null"/>
+                <set field="file2NsRestletConfig" from="file2NsRestletConfigIdValue ? darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsRestletConfig', 'create#RuleSetRun/save#RuleSetRun NsRestletConfig existence check; SharedConfigAccessSupport.canActiveTenantUseConfig gates owner-or-shared access immediately after (DAR-BE-005)').condition('nsRestletConfigId', file2NsRestletConfigIdValue).useCache(false).one() : null"/>
                 <if condition="file1System == null">
                     <message error="true">file1SystemEnumId '${file1SystemEnumIdValue}' is not valid</message>
                 </if>
@@ -262,13 +267,26 @@
                     <message error="true">file2SystemMessageRemoteId '${file2SystemMessageRemoteIdValue}' was not found</message>
                 </if>
                 <if condition="file1NsRestletConfigIdValue">
-                    <set field="ignoreFile1NsRestletAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file1NsRestletConfig, &quot;file1NsRestletConfigId '${file1NsRestletConfigIdValue}' was not found&quot;, 'file1 API endpoint is not available in your active tenant.')"/>
+                    <!-- DAR-BE-005 B4: was owner-only requireTenantRecordAccess with a distinguishing
+                         "not available in your active tenant" message, so a peer holding an active
+                         ConfigTenantAccess grant on this restlet (visible and editable in Settings)
+                         could not reference it here. canActiveTenantUseConfig is the owner-or-shared
+                         gate; the denial collapses to the SAME "was not found" text a nonexistent id
+                         produces — matches Task 6/7's reference-validator and settings-save collapse,
+                         so a caller with no standing cannot tell "missing" from "foreign, unshared"
+                         apart. Do not split this back into two messages. -->
+                    <if condition="file1NsRestletConfig == null || !darpan.facade.common.SharedConfigAccessSupport.canActiveTenantUseConfig(ec, darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_RESTLET, file1NsRestletConfig)">
+                        <message error="true">file1NsRestletConfigId '${file1NsRestletConfigIdValue}' was not found</message>
+                    </if>
                     <if condition="file1NsRestletConfig != null &amp;&amp; ((file1NsRestletConfig.isActive)?.toString()?.trim()) == 'N'">
                         <message error="true">file1NsRestletConfigId '${file1NsRestletConfigIdValue}' is inactive</message>
                     </if>
                 </if>
                 <if condition="file2NsRestletConfigIdValue">
-                    <set field="ignoreFile2NsRestletAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file2NsRestletConfig, &quot;file2NsRestletConfigId '${file2NsRestletConfigIdValue}' was not found&quot;, 'file2 API endpoint is not available in your active tenant.')"/>
+                    <!-- DAR-BE-005 B4 — see file1NsRestletConfigId above for the full rationale. -->
+                    <if condition="file2NsRestletConfig == null || !darpan.facade.common.SharedConfigAccessSupport.canActiveTenantUseConfig(ec, darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_RESTLET, file2NsRestletConfig)">
+                        <message error="true">file2NsRestletConfigId '${file2NsRestletConfigIdValue}' was not found</message>
+                    </if>
                     <if condition="file2NsRestletConfig != null &amp;&amp; ((file2NsRestletConfig.isActive)?.toString()?.trim()) == 'N'">
                         <message error="true">file2NsRestletConfigId '${file2NsRestletConfigIdValue}' is inactive</message>
                     </if>
@@ -919,8 +937,13 @@
                 <if condition="file2SystemMessageRemoteIdValue &amp;&amp; file2SystemMessageRemote == null">
                     <set field="file2SystemMessageRemote" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.ensureVirtualApiOrdersRemote(ec, file2SystemEnumIdValue, file2SystemMessageRemoteIdValue, file2SourceConfigTypeValue)"/>
                 </if>
-                <set field="file1NsRestletConfig" from="file1NsRestletConfigIdValue ? ec.entity.find('darpan.reconciliation.NsRestletConfig').condition('nsRestletConfigId', file1NsRestletConfigIdValue).useCache(false).one() : null"/>
-                <set field="file2NsRestletConfig" from="file2NsRestletConfigIdValue ? ec.entity.find('darpan.reconciliation.NsRestletConfig').condition('nsRestletConfigId', file2NsRestletConfigIdValue).useCache(false).one() : null"/>
+                <!-- DAR-BE-005 B4: was a bare ec.entity.find, authz-enabled and silently filtered by
+                     DARPAN_ACTIVE_COMPANY_SCOPE, so a shared-but-foreign-owned restlet was invisible
+                     before the access check below ever ran. findGlobalUnscoped bypasses that filter;
+                     SharedConfigAccessSupport.canActiveTenantUseConfig is the real owner-or-shared
+                     gate, applied immediately below. -->
+                <set field="file1NsRestletConfig" from="file1NsRestletConfigIdValue ? darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsRestletConfig', 'create#RuleSetRun/save#RuleSetRun NsRestletConfig existence check; SharedConfigAccessSupport.canActiveTenantUseConfig gates owner-or-shared access immediately after (DAR-BE-005)').condition('nsRestletConfigId', file1NsRestletConfigIdValue).useCache(false).one() : null"/>
+                <set field="file2NsRestletConfig" from="file2NsRestletConfigIdValue ? darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsRestletConfig', 'create#RuleSetRun/save#RuleSetRun NsRestletConfig existence check; SharedConfigAccessSupport.canActiveTenantUseConfig gates owner-or-shared access immediately after (DAR-BE-005)').condition('nsRestletConfigId', file2NsRestletConfigIdValue).useCache(false).one() : null"/>
                 <if condition="file1System == null">
                     <message error="true">file1SystemEnumId '${file1SystemEnumIdValue}' is not valid</message>
                 </if>
@@ -946,13 +969,26 @@
                     <message error="true">file2SystemMessageRemoteId '${file2SystemMessageRemoteIdValue}' was not found</message>
                 </if>
                 <if condition="file1NsRestletConfigIdValue">
-                    <set field="ignoreFile1NsRestletAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file1NsRestletConfig, &quot;file1NsRestletConfigId '${file1NsRestletConfigIdValue}' was not found&quot;, 'file1 API endpoint is not available in your active tenant.')"/>
+                    <!-- DAR-BE-005 B4: was owner-only requireTenantRecordAccess with a distinguishing
+                         "not available in your active tenant" message, so a peer holding an active
+                         ConfigTenantAccess grant on this restlet (visible and editable in Settings)
+                         could not reference it here. canActiveTenantUseConfig is the owner-or-shared
+                         gate; the denial collapses to the SAME "was not found" text a nonexistent id
+                         produces — matches Task 6/7's reference-validator and settings-save collapse,
+                         so a caller with no standing cannot tell "missing" from "foreign, unshared"
+                         apart. Do not split this back into two messages. -->
+                    <if condition="file1NsRestletConfig == null || !darpan.facade.common.SharedConfigAccessSupport.canActiveTenantUseConfig(ec, darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_RESTLET, file1NsRestletConfig)">
+                        <message error="true">file1NsRestletConfigId '${file1NsRestletConfigIdValue}' was not found</message>
+                    </if>
                     <if condition="file1NsRestletConfig != null &amp;&amp; ((file1NsRestletConfig.isActive)?.toString()?.trim()) == 'N'">
                         <message error="true">file1NsRestletConfigId '${file1NsRestletConfigIdValue}' is inactive</message>
                     </if>
                 </if>
                 <if condition="file2NsRestletConfigIdValue">
-                    <set field="ignoreFile2NsRestletAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file2NsRestletConfig, &quot;file2NsRestletConfigId '${file2NsRestletConfigIdValue}' was not found&quot;, 'file2 API endpoint is not available in your active tenant.')"/>
+                    <!-- DAR-BE-005 B4 — see file1NsRestletConfigId above for the full rationale. -->
+                    <if condition="file2NsRestletConfig == null || !darpan.facade.common.SharedConfigAccessSupport.canActiveTenantUseConfig(ec, darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_RESTLET, file2NsRestletConfig)">
+                        <message error="true">file2NsRestletConfigId '${file2NsRestletConfigIdValue}' was not found</message>
+                    </if>
                     <if condition="file2NsRestletConfig != null &amp;&amp; ((file2NsRestletConfig.isActive)?.toString()?.trim()) == 'N'">
                         <message error="true">file2NsRestletConfigId '${file2NsRestletConfigIdValue}' is inactive</message>
                     </if>

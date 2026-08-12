@@ -1169,12 +1169,14 @@ class AutomationFacadeSupport {
     protected static List<Map<String, Object>> listNsAuthConfigOptions(def ec) {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
-        // P0 #4 step 4b: tenant condition pre-applied by finder; additional conditions chained.
-        List rows = TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.NS_AUTH_CONFIG)
-                .condition("isActive", "Y")
-                .orderBy("description,nsAuthConfigId")
-                .useCache(false)
-                .list() ?: []
+        // DAR-BE-005 B5: owned rows plus rows shared to this tenant via ConfigTenantAccess — was
+        // owner-only findTenantScoped, so a shared NetSuite auth config appeared in Settings
+        // (editable) but never in this automation source picker. listAccessibleConfigRows applies
+        // no status filter, so isActive is preserved here via findAll — same precedent as the
+        // OMS/Shopify builders above (Task 5).
+        List rows = SharedConfigAccessSupport
+                .listAccessibleConfigRows(ec, SharedConfigAccessSupport.CONFIG_TYPE_NS_AUTH)
+                .findAll { normalize(readString(it, "isActive")) != "N" }
         return rows.collect { item ->
             String configId = readString(item, "nsAuthConfigId")
             String label = readString(item, "description") ?: configId
@@ -1193,11 +1195,14 @@ class AutomationFacadeSupport {
     static List<Map<String, Object>> listNsRestletOptions(def ec) {
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
-        // P0 #4 step 4b: tenant condition pre-applied by finder; additional conditions chained.
-        List rows = TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.NS_RESTLET_CONFIG)
-                .orderBy("description,nsRestletConfigId")
-                .useCache(false)
-                .list() ?: []
+        // DAR-BE-005 B5: owned rows plus rows shared to this tenant via ConfigTenantAccess — was
+        // owner-only findTenantScoped, so a shared NetSuite Restlet config appeared in Settings
+        // (editable) but never in this automation source picker. listAccessibleConfigRows applies
+        // no status filter; this builder never filtered by isActive either (isActive is surfaced
+        // as a response field, not filtered out), so there is nothing to preserve beyond the
+        // widened row set — unlike listNsAuthConfigOptions above.
+        List rows = SharedConfigAccessSupport
+                .listAccessibleConfigRows(ec, SharedConfigAccessSupport.CONFIG_TYPE_NS_RESTLET)
         return rows.collect { item ->
             String label = readString(item, "description") ?: readString(item, "nsRestletConfigId")
             String systemEnumId = inferSystemEnumId(readString(item, "nsRestletConfigId"), label)

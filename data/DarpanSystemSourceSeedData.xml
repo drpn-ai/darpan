@@ -45,4 +45,11 @@
             enumCode="HOTWAX_TRANSFER_ORDERS"
             description="HotWax Transfer Orders"
             sequenceNum="6"/>
+
+    <moqui.basic.Enumeration
+            enumId="OMS_RECON_ORDERS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_RECON_ORDERS"
+            description="HotWax Orders (Reconciliation API)"
+            sequenceNum="7"/>
 </entity-facade-xml>

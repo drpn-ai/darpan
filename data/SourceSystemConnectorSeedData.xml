@@ -92,4 +92,46 @@
             statusParameterName="orderStatusIds"
             healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
             enabled="Y"/>
+
+    <!-- OMS sales orders again, but served by /rest/s1/oms/reconciliationOrders, which filters to
+         comparison-eligible sales orders server-side, projects to the six-field set, honours pageSize
+         and reports hasMore/ordersCount (DAR-BE-018). ADDITIVE and opt-in: the OMS row above is
+         untouched, and a rule set moves across by pointing its source at HOTWAX_OMS_REST_RECON —
+         against the SAME HotWaxOmsRestSourceConfig row, since the credentials and baseUrl are shared.
+
+         Its own systemEnumId AND its own expectedSourceConfigType are both required: the two
+         resolvers take the first enabled match on those attributes, so a row cloning either one
+         would shadow the shipped OMS row silently (SourceSystemConnectorSupportSmokeTests ratchets
+         this). remoteId is deliberately shared with OMS — same API family, same credentials — and
+         costs nothing here because the virtual-remote builder only ever fires for canonical OMS.
+
+         sendUrlTemplate documents the endpoint for the registry and the remote label; it does NOT
+         route the extractor, which pins DEFAULT_RECON_ORDERS_PATH rather than reading the tenant
+         config's (legacy) ordersPath column.
+
+         GATING: the endpoint returns a FIXED field set. Before enabling this connector for a rule
+         set, verify its join key and every field-comparison field fall inside keepFieldsBase below;
+         anything wider must stay on the OMS row. filterParameterName is retained because configured
+         exclusions still run client-side — the endpoint has no knowledge of tenant exclusion rules.
+         No pairLookupServiceName: exchange counterparts arrive inline on the record, so the manifest
+         is built without point lookups. -->
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_RECON_ORDERS"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_REST_RECON"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Reconciliation Orders API"
+            sendUrlTemplate="{baseUrl}/rest/s1/oms/reconciliationOrders"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders"
+            systemAliases="OMS_RECON_ORDERS,HOTWAX_RECON_ORDERS,DAR_SYS_OMS_RECON"
+            preserveWindowInstants="N"
+            keepFieldsParameterName="keepRecordFields"
+            keepFieldsBase="orderId,orderName,externalId,grandTotal,orderDate,statusId"
+            filterParameterName="sourceFilters"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            enabled="Y"/>
 </entity-facade-xml>

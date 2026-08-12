@@ -275,4 +275,69 @@ class SourceSystemConnectorSupportSmokeTests {
         assertEquals(salesOrders.configEntityName, transferOrders.configEntityName)
         assertEquals(salesOrders.configParameterName, transferOrders.configParameterName)
     }
+
+    @Test
+    void reconciliationOrdersConnectorResolvesDistinctlyFromLegacyOmsOrders() {
+        Map<String, Object> legacy = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(
+                ec, "HOTWAX_OMS_REST")
+        Map<String, Object> recon = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(
+                ec, "HOTWAX_OMS_REST_RECON")
+
+        assertNotNull(recon, "reconciliationOrders connector row should resolve")
+        assertEquals("OMS", legacy.systemEnumId)
+        assertEquals("OMS_RECON_ORDERS", recon.systemEnumId)
+        assertEquals("reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders",
+                recon.extractServiceName)
+        // Same credentials, same window parameters, same projection — only the endpoint differs, so
+        // an operator can move a rule set across without touching its source config or its rules.
+        assertEquals(legacy.configEntityName, recon.configEntityName)
+        assertEquals(legacy.configParameterName, recon.configParameterName)
+        assertEquals(legacy.dateFromParameterName, recon.dateFromParameterName)
+        assertEquals(legacy.dateToParameterName, recon.dateToParameterName)
+        assertEquals(legacy.keepFieldsBase, recon.keepFieldsBase)
+        // Configured exclusions still run client-side here: the endpoint knows nothing of tenant
+        // exclusion rules, so dropping filterParameterName would silently disable them.
+        assertEquals(legacy.filterParameterName, recon.filterParameterName)
+    }
+
+    @Test
+    void reconciliationOrdersExtractServiceIsDispatchable() {
+        Set<String> allowed = SourceSystemConnectorSupport.allowedServiceNames(ec)
+        String reconService = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders"
+
+        assertTrue(allowed.contains(reconService),
+                "the connector row must auto-permit its extract service: ${allowed}")
+        assertTrue(SourceSystemConnectorSupport.isAllowedExtractorServiceShape(reconService),
+                "the service name must also satisfy the defense-in-depth naming guard")
+    }
+
+    /**
+     * Ratchet, not a spot check. resolveByExtractServiceName and resolveByExpectedSourceConfigType
+     * both take the FIRST enabled match, so two enabled rows sharing either attribute resolve
+     * ambiguously and silently — and the row that loses could be a shipped one. Adding a connector
+     * that clones an existing config type must fail here rather than in production.
+     */
+    @Test
+    void noTwoEnabledConnectorsShareAnExtractServiceOrConfigType() {
+        List rows = ec.entity.find(SourceSystemConnectorSupport.ENTITY_NAME).useCache(false).list()
+                .findAll { row -> "Y".equalsIgnoreCase(row.enabled?.toString()) }
+
+        Map<String, List<String>> byConfigType = [:]
+        Map<String, List<String>> byExtractService = [:]
+        rows.each { row ->
+            String configType = row.expectedSourceConfigType?.toString()?.trim()
+            String extractService = row.extractServiceName?.toString()?.trim()
+            String systemEnumId = row.systemEnumId?.toString()
+            if (configType) byConfigType.computeIfAbsent(configType, { [] }).add(systemEnumId)
+            if (extractService) byExtractService.computeIfAbsent(extractService, { [] }).add(systemEnumId)
+        }
+
+        Map duplicateConfigTypes = byConfigType.findAll { ignored, owners -> owners.size() > 1 }
+        Map duplicateExtractServices = byExtractService.findAll { ignored, owners -> owners.size() > 1 }
+
+        assertTrue(duplicateConfigTypes.isEmpty(),
+                "expectedSourceConfigType claimed by more than one enabled connector: ${duplicateConfigTypes}")
+        assertTrue(duplicateExtractServices.isEmpty(),
+                "extractServiceName claimed by more than one enabled connector: ${duplicateExtractServices}")
+    }
 }

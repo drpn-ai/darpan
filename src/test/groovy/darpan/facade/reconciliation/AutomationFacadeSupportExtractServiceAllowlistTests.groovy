@@ -36,6 +36,26 @@ class AutomationFacadeSupportExtractServiceAllowlistTests {
         assertFalse(callValidate(AutomationFacadeSupport.SHOPIFY_GRAPHQL_EXECUTE_SERVICE).hasError())
     }
 
+    /**
+     * DAR-BE-018. The required-parameter branch keys on the extract service NAME, so a second OMS
+     * connector with its own service name would skip the check entirely and persist a source with no
+     * omsRestSourceConfigId — which then fails at run time, inside a scheduled automation, rather
+     * than at save time in front of the operator.
+     */
+    @Test
+    void reconOrdersSourceStillRequiresItsOmsConfigId() {
+        MessageStub message = callValidate(AutomationFacadeSupport.HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE)
+        assertTrue(message.hasError())
+        assertTrue(message.errors.any { it.contains("omsRestSourceConfigId") },
+                "Unexpected errors: ${message.errors}")
+    }
+
+    @Test
+    void allowsReconOrdersSourceCarryingItsConfigId() {
+        assertFalse(callValidate(AutomationFacadeSupport.HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE,
+                [omsRestSourceConfigId: "OMS_CFG"]).hasError())
+    }
+
     @Test
     void rejectsArbitraryServiceName() {
         MessageStub message = callValidate("darpan.reconciliation.SomeInternalService")
@@ -62,6 +82,10 @@ class AutomationFacadeSupportExtractServiceAllowlistTests {
                 [systemEnumId         : "SHOPIFY",
                  extractServiceName   : AutomationFacadeSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE,
                  remoteSendServiceName: AutomationFacadeSupport.SHOPIFY_GRAPHQL_EXECUTE_SERVICE,
+                 enabled              : "Y"],
+                [systemEnumId         : AutomationFacadeSupport.OMS_RECON_SYSTEM_ENUM_ID,
+                 extractServiceName   : AutomationFacadeSupport.HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE,
+                 remoteSendServiceName: AutomationFacadeSupport.HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE,
                  enabled              : "Y"],
         ]
         Expando finder = new Expando()

@@ -48,6 +48,9 @@ class AutomationFacadeSupport {
     static final String SHOPIFY_ORDERS_REMOTE_ID = ReconciliationSavedRunSupport.SHOPIFY_ORDERS_REMOTE_ID
     static final String SHOPIFY_ORDERS_ENDPOINT_LABEL = ReconciliationSavedRunSupport.SHOPIFY_ORDERS_ENDPOINT_LABEL
     static final String HOTWAX_OMS_ORDERS_EXTRACT_SERVICE = ReconciliationSavedRunSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE
+    static final String OMS_RECON_SYSTEM_ENUM_ID = ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RECON
+    static final String HOTWAX_RECON_ORDERS_ENDPOINT_LABEL = ReconciliationSavedRunSupport.HOTWAX_RECON_ORDERS_ENDPOINT_LABEL
+    static final String HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE = ReconciliationSavedRunSupport.HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE
     static final String SHOPIFY_ORDERS_EXTRACT_SERVICE = ReconciliationSavedRunSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE
     static final String SHOPIFY_GRAPHQL_EXECUTE_SERVICE = ReconciliationSavedRunSupport.SHOPIFY_GRAPHQL_EXECUTE_SERVICE
     static final String HOTWAX_OMS_WINDOW_START_PARAMETER = "windowStart"
@@ -96,6 +99,23 @@ class AutomationFacadeSupport {
             [fieldPath: "\$.records[*].salesChannelEnumId", label: "Sales channel", type: "string"],
             [fieldPath: "\$.records[*].productStoreId", label: "Product store", type: "string"],
     ].asImmutable()
+
+    /**
+     * The subset of the OMS pills that the /rest/s1/oms/reconciliationOrders connector may offer.
+     *
+     * The wider two pills exist because on the LEGACY endpoint exclusions run against the full order
+     * document before projection, so any raw field is testable. The recon endpoint projects
+     * SERVER-side to a fixed set, so salesChannelEnumId and productStoreId never arrive — a rule
+     * drawn on either would validate, persist, and then exclude nothing. Offering only what the
+     * endpoint actually returns keeps that failure impossible rather than silent.
+     *
+     * Derived from the list above rather than re-typed, so the two cannot drift apart.
+     */
+    static final List<Map<String, Object>> HOTWAX_OMS_RECON_ORDER_FIELD_OPTIONS =
+            HOTWAX_OMS_ORDER_FIELD_OPTIONS.findAll { Map<String, Object> option ->
+                !((String) option.fieldPath).endsWith("salesChannelEnumId") &&
+                        !((String) option.fieldPath).endsWith("productStoreId")
+            }.asImmutable()
 
     static Map<String, Object> prepareAutomationSave(def ec, Map params = [:]) {
         Map input = params ?: [:]
@@ -830,7 +850,10 @@ class AutomationFacadeSupport {
             ec.message.addError("${source.fileSide} API source requires safeMetadataJson.extractServiceName.")
             return
         }
-        if (serviceName == HOTWAX_OMS_ORDERS_EXTRACT_SERVICE) {
+        // Both OMS orders connectors read their credentials from the same parameter, so both must be
+        // held to the same save-side requirement — keying on one service name alone would let a
+        // recon-orders source save with no config id and fail later inside a scheduled run.
+        if (serviceName == HOTWAX_OMS_ORDERS_EXTRACT_SERVICE || serviceName == HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE) {
             Map parameters = metadata.parameters instanceof Map ? (Map) metadata.parameters : [:]
             if (!normalize(parameters.omsRestSourceConfigId)) {
                 ec.message.addError("${source.fileSide} OMS API source requires safeMetadataJson.parameters.omsRestSourceConfigId.")
@@ -1289,6 +1312,11 @@ class AutomationFacadeSupport {
     }
 
     protected static String endpointLabelForSystem(String systemEnumId, String remoteId, String fallbackLabel) {
+        // Checked before the OMS branch: both connectors share HOTWAX_ORDERS_REMOTE_ID (same API
+        // family, same credentials), so the system id is the only thing that separates them here.
+        if (normalize(systemEnumId) == OMS_RECON_SYSTEM_ENUM_ID) {
+            return HOTWAX_RECON_ORDERS_ENDPOINT_LABEL
+        }
         if (normalize(systemEnumId) == OMS_SYSTEM_ENUM_ID &&
                 normalize(remoteId) == HOTWAX_ORDERS_REMOTE_ID) {
             return HOTWAX_ORDERS_ENDPOINT_LABEL
@@ -1329,6 +1357,9 @@ class AutomationFacadeSupport {
 
     protected static List<Map<String, Object>> primaryIdOptionsForSystem(String systemEnumId) {
         switch (normalize(systemEnumId)) {
+            // Both OMS orders connectors read the same order documents and project the same six
+            // fields, so they offer the same choices; only the endpoint serving them differs.
+            case OMS_RECON_SYSTEM_ENUM_ID:
             case OMS_SYSTEM_ENUM_ID:
                 return HOTWAX_OMS_ORDER_PRIMARY_ID_OPTIONS
             case SHOPIFY_SYSTEM_ENUM_ID:
@@ -1348,7 +1379,12 @@ class AutomationFacadeSupport {
      * carry no exclusions for the wider list to serve.
      */
     protected static List<Map<String, Object>> fieldOptionsForSystem(String systemEnumId) {
-        return normalize(systemEnumId) == OMS_SYSTEM_ENUM_ID ? HOTWAX_OMS_ORDER_FIELD_OPTIONS : null
+        String normalized = normalize(systemEnumId)
+        if (normalized == OMS_SYSTEM_ENUM_ID) return HOTWAX_OMS_ORDER_FIELD_OPTIONS
+        // Narrower on purpose — the recon endpoint projects server-side, so the two extra pills
+        // would name fields that never arrive. See HOTWAX_OMS_RECON_ORDER_FIELD_OPTIONS.
+        if (normalized == OMS_RECON_SYSTEM_ENUM_ID) return HOTWAX_OMS_RECON_ORDER_FIELD_OPTIONS
+        return null
     }
 
     /**

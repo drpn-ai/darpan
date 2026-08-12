@@ -7,6 +7,7 @@ import java.time.Instant
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -116,6 +117,53 @@ class AutomationFacadeSupportTests {
         Map<String, Object> dbSource = databaseSourceFixture().first()
         List<Map<String, Object>> result = AutomationFacadeSupport.applyApiSourceMetadataDefaults(null, [dbSource])
         assertEquals([dbSource], result)
+    }
+
+    /**
+     * DAR-BE-018. The reconciliationOrders connector is a second OMS orders source with its own
+     * systemEnumId, and these three helpers key on systemEnumId EQUALITY rather than on the connector
+     * registry. Without the new id they return null/empty, and the rules board silently offers no
+     * field pills and no primary-id choices for a source the operator can otherwise configure —
+     * a connector that validates and then cannot be given a join key.
+     *
+     * systemAliases does NOT cover this: aliases are read only by SourceSystemConnectorSupport.resolve
+     * to find a row FROM an id, and have no effect on these comparisons.
+     */
+    @Test
+    void reconciliationOrdersSystemOffersRulesBoardPillsAtAll() {
+        assertNotNull(AutomationFacadeSupport.fieldOptionsForSystem("OMS_RECON_ORDERS"),
+                "without pills the rules board cannot configure a source this connector can otherwise save")
+        assertEquals(AutomationFacadeSupport.primaryIdOptionsForSystem("OMS"),
+                AutomationFacadeSupport.primaryIdOptionsForSystem("OMS_RECON_ORDERS"),
+                "the join key must be selectable from the same choices — all three are projected fields")
+    }
+
+    /**
+     * The recon endpoint projects server-side to a fixed six-field set, so the two pills that exist
+     * only because the LEGACY endpoint ships whole order documents (salesChannelEnumId,
+     * productStoreId) must not be offered here. A rule drawn on a field the endpoint never returns
+     * would validate, persist, and then exclude nothing — silently.
+     */
+    @Test
+    void reconciliationOrdersPillsAreLimitedToProjectedFields() {
+        List<String> reconFields = AutomationFacadeSupport.fieldOptionsForSystem("OMS_RECON_ORDERS")
+                .collect { Map option -> (option.fieldPath as String).substring("\$.records[*].".length()) }
+        List<String> legacyFields = AutomationFacadeSupport.fieldOptionsForSystem("OMS")
+                .collect { Map option -> (option.fieldPath as String).substring("\$.records[*].".length()) }
+
+        assertEquals(["orderId", "orderName", "externalId", "grandTotal", "orderDate", "statusId"], reconFields)
+        assertFalse(reconFields.contains("salesChannelEnumId"))
+        assertFalse(reconFields.contains("productStoreId"))
+        // Still a strict subset of the legacy list, so the two cannot drift into disagreeing labels.
+        assertTrue(legacyFields.containsAll(reconFields))
+    }
+
+    @Test
+    void reconciliationOrdersSystemLabelsItsOwnEndpoint() {
+        String label = AutomationFacadeSupport.endpointLabelForSystem(
+                "OMS_RECON_ORDERS", "HOTWAX_ORDERS_API", null)
+        assertEquals("Reconciliation Orders API", label,
+                "the shared remoteId must not make this source display as the legacy Orders API")
     }
 
     static class MessageStub {

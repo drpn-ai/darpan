@@ -61,6 +61,14 @@ class ReconciliationSavedRunSupport {
     static final String HOTWAX_ORDERS_REMOTE_ID = "HOTWAX_ORDERS_API"
     static final String HOTWAX_ORDERS_ENDPOINT_LABEL = "Orders API"
     static final String HOTWAX_OMS_ORDERS_EXTRACT_SERVICE = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"
+    // DAR-BE-018: the same OMS sales orders served by /rest/s1/oms/reconciliationOrders. A second
+    // connector row rather than a repoint, so the shipped OMS path stays available as a fallback
+    // while parity is proven. Its system id and config type must both differ from the OMS row's —
+    // the registry resolvers take the first enabled match on each (see SourceSystemConnectorSeedData).
+    static final String SYSTEM_HOTWAX_OMS_RECON = "OMS_RECON_ORDERS"
+    static final String SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST_RECON = "HOTWAX_OMS_REST_RECON"
+    static final String HOTWAX_RECON_ORDERS_ENDPOINT_LABEL = "Reconciliation Orders API"
+    static final String HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders"
     static final String SHOPIFY_ORDERS_REMOTE_ID = "SHOPIFY_REMOTE"
     static final String SHOPIFY_ORDERS_ENDPOINT_LABEL = "Admin GraphQL Orders"
     static final String SHOPIFY_GRAPHQL_EXECUTE_SERVICE = "facade.ShopifyFacadeServices.execute#ShopifyGraphql"

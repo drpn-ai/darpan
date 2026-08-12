@@ -232,6 +232,37 @@ class SharedConfigGrantSupportTests {
     }
 
     @Test
+    void describeSharingErrorIsIdenticalForARealForeignConfigAndANonexistentConfig() {
+        // list#ConfigTenantAccess sits behind facade\..*, granted to every Darpan role including
+        // DARPAN_TENANT_USER (class Javadoc) — unlike grant/revoke, describeSharing has no two-sided
+        // admin check to run first; canActiveTenantUseConfig (a membership check anyone can fail) IS
+        // the whole gate. A caller whose active tenant is neither owner nor peer must therefore get
+        // the SAME denial whether the config id names a real row owned by someone else or does not
+        // exist at all — otherwise the response is a cross-tenant existence oracle, enumerable by
+        // sweeping ids. This pins the collapse for B6, mirroring the grantErrorIsIdentical... test
+        // above that pins the analogous fix from Task 4 (DAR-BE-005 review finding, 2026-08-11/12).
+        def foreignWorld = world(
+                adminOf: [],
+                activeTenant: "COMPANY_2",
+                config: [omsRestSourceConfigId: "OMS_HW_1", companyUserGroupId: "COMPANY_1"])
+        def ghostWorld = world(
+                adminOf: [],
+                activeTenant: "COMPANY_2",
+                config: null)
+
+        // Same configId in both calls deliberately: the collapsed message echoes the id back
+        // ("'<id>' was not found"), so a byte-identical comparison only pins the leak-closing
+        // property when the id itself is held constant between the real-row and no-such-row cases.
+        assertEquals(null, SharedConfigGrantSupport.describeSharing(foreignWorld.ec, "SCFG_HOTWAX_OMS", "OMS_HW_1"),
+                "a caller with no standing must be denied, not shown the sharing panel")
+        assertEquals(null, SharedConfigGrantSupport.describeSharing(ghostWorld.ec, "SCFG_HOTWAX_OMS", "OMS_HW_1"))
+
+        assertEquals(foreignWorld.message.errors, ghostWorld.message.errors,
+                "a caller with no standing over the config must get an identical denial whether the " +
+                "config id names a real row owned by another tenant or does not exist at all")
+    }
+
+    @Test
     void describeSharingNormalizesAWhitespacePaddedConfigId() {
         // A whitespace-padded id was grantable (resolveAndAuthorize already normalized) but not
         // describable before this fix (DAR-BE-005 review finding, 2026-08-11).

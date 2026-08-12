@@ -118,12 +118,20 @@ class SharedConfigGrantSupport {
         // (DAR-BE-005 review finding, 2026-08-11).
         String normalizedConfigId = normalize(configId)
         def config = loadConfigRow(ec, type, normalizedConfigId)
-        if (config == null) {
+        // Deliberately the SAME "not found" message for "no such row" and "real row, but the active
+        // tenant is neither owner nor peer" — do NOT split these back out. list#ConfigTenantAccess
+        // sits behind the facade\..* fence, which every Darpan role satisfies including
+        // DARPAN_TENANT_USER (see class Javadoc), and this method's only gate is
+        // canActiveTenantUseConfig, a membership check anyone can fail. A caller with no standing at
+        // all must not be able to tell "missing" apart from "exists but isn't yours" — that
+        // distinction is exactly a cross-tenant existence oracle, enumerable by sweeping config ids.
+        // This mirrors Aditi's Task 4 ruling on resolveAndAuthorize (DAR-BE-005 review finding,
+        // 2026-08-11), which collapsed the identical leak on grant#/revoke#ConfigTenantAccess by
+        // running the admin check before existence is ever revealed. describeSharing has no
+        // "authorize first" ordering available to it (it IS the authorization check), so the fix here
+        // is to collapse the two outcomes into one message instead (B6, 2026-08-12).
+        if (config == null || !SharedConfigAccessSupport.canActiveTenantUseConfig(ec, normalizedType, config)) {
             ec.message.addError("${type.label} '${normalizedConfigId ?: '(missing)'}' was not found.")
-            return null
-        }
-        if (!SharedConfigAccessSupport.canActiveTenantUseConfig(ec, normalizedType, config)) {
-            ec.message.addError(TenantAccessSupport.TENANT_RECORD_UNAVAILABLE_MESSAGE)
             return null
         }
 

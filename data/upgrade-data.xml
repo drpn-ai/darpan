@@ -56,17 +56,22 @@ loading it exposes nothing to operators.
     <!-- Added records from data/AutomationSeedData.xml -->
     <moqui.basic.Enumeration enumId="AUT_WIN_STATE" enumTypeId="AutomationRelWindow" enumCode="STATE_BASED" description="State based (no date window)" sequenceNum="8"/>
     <!-- Added records from data/DarpanSystemSourceSeedData.xml.
-         Precedes the SourceSystemConnector row below: that row's systemEnumId references this enum. -->
-    <moqui.basic.Enumeration enumId="OMS_TRANSFER_ORDERS" enumTypeId="DarpanSystemSource" enumCode="HOTWAX_TRANSFER_ORDERS" description="HotWax Transfer Orders" sequenceNum="6"/>
+         Precedes the SourceSystemConnector row below: that row's systemEnumId references this enum.
+         parentEnumId="OMS" groups this endpoint under OMS for the two-step source picker (system,
+         then endpoint) — see list#AutomationSourceOptions / darpan-ui's darpanSystems.ts. -->
+    <moqui.basic.Enumeration enumId="OMS_TRANSFER_ORDERS" enumTypeId="DarpanSystemSource" enumCode="HOTWAX_TRANSFER_ORDERS" description="HotWax Transfer Orders" sequenceNum="6" parentEnumId="OMS"/>
     <!-- DAR-BE-018. Same parent-before-child constraint as the row above: the OMS_RECON_ORDERS
-         SourceSystemConnector further down references this enum by systemEnumId. -->
-    <moqui.basic.Enumeration enumId="OMS_RECON_ORDERS" enumTypeId="DarpanSystemSource" enumCode="HOTWAX_RECON_ORDERS" description="HotWax Orders (Reconciliation API)" sequenceNum="7"/>
+         SourceSystemConnector further down references this enum by systemEnumId. Same
+         parentEnumId="OMS" picker grouping as above. -->
+    <moqui.basic.Enumeration enumId="OMS_RECON_ORDERS" enumTypeId="DarpanSystemSource" enumCode="HOTWAX_RECON_ORDERS" description="HotWax Orders (Reconciliation API)" sequenceNum="7" parentEnumId="OMS"/>
     <!-- DAR-BE-018. Same parent-before-child constraint: the OMS_RETURNS SourceSystemConnector
-         further down references this enum by systemEnumId. -->
-    <moqui.basic.Enumeration enumId="OMS_RETURNS" enumTypeId="DarpanSystemSource" enumCode="HOTWAX_RETURNS" description="HotWax Returns (Reconciliation API)" sequenceNum="8"/>
+         further down references this enum by systemEnumId. Same parentEnumId="OMS" picker
+         grouping as above. -->
+    <moqui.basic.Enumeration enumId="OMS_RETURNS" enumTypeId="DarpanSystemSource" enumCode="HOTWAX_RETURNS" description="HotWax Returns (Reconciliation API)" sequenceNum="8" parentEnumId="OMS"/>
     <!-- DAR-BE-018 task 9. Same parent-before-child constraint: the SHOPIFY_RETURN_REFS
-         SourceSystemConnector further down references this enum by systemEnumId. -->
-    <moqui.basic.Enumeration enumId="SHOPIFY_RETURN_REFS" enumTypeId="DarpanSystemSource" enumCode="SHOPIFY_RETURN_REFS" description="Shopify Order Return References" sequenceNum="9"/>
+         SourceSystemConnector further down references this enum by systemEnumId.
+         parentEnumId="SHOPIFY" groups it under SHOPIFY for the two-step source picker. -->
+    <moqui.basic.Enumeration enumId="SHOPIFY_RETURN_REFS" enumTypeId="DarpanSystemSource" enumCode="SHOPIFY_RETURN_REFS" description="Shopify Order Return References" sequenceNum="9" parentEnumId="SHOPIFY"/>
     <!-- Added records from data/SecuritySeedData.xml.
          Parent ArtifactGroup DARPAN_AUTH_API already exists in every deployed environment (it has carried
          login#Session since before 1.3.0), so this row has no forward FK reference and needs no reordering.

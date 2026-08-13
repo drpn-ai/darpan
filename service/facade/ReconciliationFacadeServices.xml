@@ -2663,6 +2663,11 @@
                 <parameter name="description"/>
                 <parameter name="sequenceNum" type="Integer"/>
                 <parameter name="label"/>
+                <!-- Present only for endpoint-level rows (e.g. OMS_RETURNS) grouped under a
+                     top-level system for the two-step source picker (system, then endpoint).
+                     Absent (not just blank) for top-level systems (OMS, SHOPIFY, NETSUITE, SAPI,
+                     DATABASE) — listEnumOptions strips null fields before returning. -->
+                <parameter name="parentEnumId"/>
             </parameter>
             <parameter name="savedRuns" type="List"/>
             <parameter name="sftpServers" type="List"/>

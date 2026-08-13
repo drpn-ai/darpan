@@ -398,6 +398,41 @@ class AutomationFacadeSmokeTests {
         }
     }
 
+    /**
+     * Product-model fix: the source picker must ask for the system (HotWax, Shopify, ...) before
+     * the endpoint (Transfer Orders, Returns, ...), not present endpoints as top-level systems.
+     * list#AutomationSourceOptions stays enum-driven (DarpanSystemSource), so the UI groups
+     * endpoints under their system via moqui.basic.Enumeration.parentEnumId — this locks in that
+     * every endpoint row carries its parent and every top-level system row carries none.
+     */
+    @Test
+    void systemSourceOptionsExposeParentEnumIdForEndpointGrouping() {
+        Map<String, Object> optionsResult = callFacade("facade.ReconciliationFacadeServices.list#AutomationSourceOptions", [:])
+        assertTrue((Boolean) optionsResult.ok, optionsResult.errors?.toString())
+        List<Map<String, Object>> systems = (List<Map<String, Object>>) optionsResult.systems
+        Map<String, Map<String, Object>> systemsById = systems.collectEntries { [(it.enumId as String): it] }
+
+        // Top-level systems: no parentEnumId key at all (not even a null one) — the picker's
+        // step 1 options and the pre-fix contract shape for these rows are unchanged.
+        ["OMS", "SHOPIFY", "NETSUITE", "SAPI", "DATABASE"].each { String systemEnumId ->
+            assertTrue(systemsById.containsKey(systemEnumId), "expected ${systemEnumId} in systems")
+            assertFalse(systemsById[systemEnumId].containsKey("parentEnumId"),
+                    "${systemEnumId} is a top-level system and must not carry parentEnumId")
+        }
+
+        // Endpoint-level rows: parentEnumId points at their owning system.
+        [
+                OMS_TRANSFER_ORDERS: "OMS",
+                OMS_RECON_ORDERS   : "OMS",
+                OMS_RETURNS        : "OMS",
+                SHOPIFY_RETURN_REFS: "SHOPIFY",
+        ].each { String endpointEnumId, String expectedParent ->
+            assertTrue(systemsById.containsKey(endpointEnumId), "expected ${endpointEnumId} in systems")
+            assertEquals(expectedParent, systemsById[endpointEnumId].parentEnumId,
+                    "${endpointEnumId} must be grouped under ${expectedParent}")
+        }
+    }
+
     @Test
     void automationFacadeEnforcesTenantAndViewOnlyBoundaries() {
         Map<String, Object> saveResult = saveSftpAutomation("Tenant Guard SFTP")

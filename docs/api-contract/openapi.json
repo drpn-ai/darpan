@@ -8265,6 +8265,9 @@
                                 },
                                 "label": {
                                     "type": "string"
+                                },
+                                "parentEnumId": {
+                                    "type": "string"
                                 }
                             }
                         }

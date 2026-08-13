@@ -1041,11 +1041,16 @@ class AutomationFacadeSupport {
                 .list() ?: []
         List<Map<String, Object>> mappedOptions = options.collect { item ->
             [
-                    enumId     : readString(item, "enumId"),
-                    enumCode   : readString(item, "enumCode"),
-                    description: readString(item, "description"),
-                    sequenceNum: readField(item, "sequenceNum"),
-                    label      : FacadeSupport.enumLabel(item),
+                    enumId      : readString(item, "enumId"),
+                    enumCode    : readString(item, "enumCode"),
+                    description : readString(item, "description"),
+                    sequenceNum : readField(item, "sequenceNum"),
+                    label       : FacadeSupport.enumLabel(item),
+                    // Only DarpanSystemSource rows populate this (endpoint rows like OMS_RETURNS
+                    // point at their parent system, e.g. OMS) — every other enum type's rows have
+                    // no parentEnumId value, so findAll below strips the key out entirely rather
+                    // than emitting parentEnumId:null, leaving their contract shape unchanged.
+                    parentEnumId: readString(item, "parentEnumId"),
             ].findAll { it.value != null }
         } as List<Map<String, Object>>
         return SettingsFacadeSupport.deduplicateEnumOptions(enumTypeId, mappedOptions)

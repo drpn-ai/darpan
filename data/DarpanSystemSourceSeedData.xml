@@ -39,34 +39,43 @@
             description="Database"
             sequenceNum="5"/>
 
+    <!-- parentEnumId groups this row under OMS for the source picker: step 1 asks for the system
+         (OMS/HotWax), step 2 asks for the endpoint (this row is one of OMS's choices, alongside
+         OMS itself as the default "Orders" endpoint). See list#AutomationSourceOptions and
+         darpan-ui's darpanSystems.ts for the consumers. -->
     <moqui.basic.Enumeration
             enumId="OMS_TRANSFER_ORDERS"
             enumTypeId="DarpanSystemSource"
             enumCode="HOTWAX_TRANSFER_ORDERS"
             description="HotWax Transfer Orders"
-            sequenceNum="6"/>
+            sequenceNum="6"
+            parentEnumId="OMS"/>
 
     <moqui.basic.Enumeration
             enumId="OMS_RECON_ORDERS"
             enumTypeId="DarpanSystemSource"
             enumCode="HOTWAX_RECON_ORDERS"
             description="HotWax Orders (Reconciliation API)"
-            sequenceNum="7"/>
+            sequenceNum="7"
+            parentEnumId="OMS"/>
 
     <moqui.basic.Enumeration
             enumId="OMS_RETURNS"
             enumTypeId="DarpanSystemSource"
             enumCode="HOTWAX_RETURNS"
             description="HotWax Returns (Reconciliation API)"
-            sequenceNum="8"/>
+            sequenceNum="8"
+            parentEnumId="OMS"/>
 
     <!-- DAR-BE-018. Per-order Shopify refund/return id sets, cursor-paginated (task 9). Its own
          SourceSystemConnector row references this enum by systemEnumId, so this row must load
-         first (see upgrade-data.xml's ordering note). -->
+         first (see upgrade-data.xml's ordering note). parentEnumId groups it under SHOPIFY for
+         the two-step source picker (see comment above). -->
     <moqui.basic.Enumeration
             enumId="SHOPIFY_RETURN_REFS"
             enumTypeId="DarpanSystemSource"
             enumCode="SHOPIFY_RETURN_REFS"
             description="Shopify Order Return References"
-            sequenceNum="9"/>
+            sequenceNum="9"
+            parentEnumId="SHOPIFY"/>
 </entity-facade-xml>

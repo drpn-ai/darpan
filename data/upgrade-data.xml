@@ -18,8 +18,8 @@ after every regeneration.
 
 SCOPE DRIFT: the header range above describes the 1.4.0 cut, but records added after that cut
 accumulate here until the next release regenerates the file (the ArtifactGroupMember row, the
-OMS_RECON_ORDERS pair, and the OMS_RETURNS pair below all post-date it). Re-derive the range at the
-next cut rather than trusting this header.
+OMS_RECON_ORDERS pair, the OMS_RETURNS pair, and the SHOPIFY_RETURN_REFS pair below all post-date
+it). Re-derive the range at the next cut rather than trusting this header.
 
 OPERATOR IMPACT: additive records only — nothing existing is modified, so loading this file changes
 no current reconciliation behaviour.
@@ -39,6 +39,13 @@ no current reconciliation behaviour.
   these load, OMS_RETURNS does not appear as a selectable source and its extract service is not
   dispatchable (the security allow-list is derived from enabled connector rows). filterParameterName
   is present so the returnChannelEnumId exclusion (§5) can dispatch once a tenant configures it.
+- One Enumeration and one SourceSystemConnector row register the Shopify per-order refund/return id
+  extractor (DAR-BE-018 task 9) as a NEW source system, SHOPIFY_RETURN_REFS, exposing
+  extract#ShopifyOrderReturnRefs. Additive capability sharing the SHOPIFY_REMOTE remote and the
+  canonical ShopifyAuthConfig entity with the existing SHOPIFY row; no existing rule set changes
+  behaviour. Until these load, SHOPIFY_RETURN_REFS does not appear as a selectable source and its
+  extract service is not dispatchable (the security allow-list is derived from enabled connector
+  rows). No filterParameterName: this connector carries no tenant exclusion rules.
 
 The AUT_WIN_STATE row backs a window mode that is deliberately NOT offered in the UI in this
 release — list#AutomationSourceOptions filters it out, because the per-source status list it needs
@@ -57,6 +64,9 @@ loading it exposes nothing to operators.
     <!-- DAR-BE-018. Same parent-before-child constraint: the OMS_RETURNS SourceSystemConnector
          further down references this enum by systemEnumId. -->
     <moqui.basic.Enumeration enumId="OMS_RETURNS" enumTypeId="DarpanSystemSource" enumCode="HOTWAX_RETURNS" description="HotWax Returns (Reconciliation API)" sequenceNum="8"/>
+    <!-- DAR-BE-018 task 9. Same parent-before-child constraint: the SHOPIFY_RETURN_REFS
+         SourceSystemConnector further down references this enum by systemEnumId. -->
+    <moqui.basic.Enumeration enumId="SHOPIFY_RETURN_REFS" enumTypeId="DarpanSystemSource" enumCode="SHOPIFY_RETURN_REFS" description="Shopify Order Return References" sequenceNum="9"/>
     <!-- Added records from data/SecuritySeedData.xml.
          Parent ArtifactGroup DARPAN_AUTH_API already exists in every deployed environment (it has carried
          login#Session since before 1.3.0), so this row has no forward FK reference and needs no reordering.
@@ -68,4 +78,7 @@ loading it exposes nothing to operators.
     <darpan.reconciliation.SourceSystemConnector systemEnumId="OMS_TRANSFER_ORDERS" extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsTransferOrders" dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="HOTWAX_OMS_REST_TRANSFER" configParameterName="omsRestSourceConfigId" configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig" remoteId="HOTWAX_ORDERS_API" endpointLabel="Orders API (Transfer Orders)" sendUrlTemplate="{baseUrl}/rest/s1/oms/orders" remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsTransferOrders" systemAliases="OMS_TRANSFER_ORDERS,HOTWAX_TRANSFER_ORDERS,DAR_SYS_OMS_TO" preserveWindowInstants="N" keepFieldsParameterName="keepRecordFields" keepFieldsBase="orderId,orderName,orderDate,statusId,originFacilityId,grandTotal,currencyUom" filterParameterName="sourceFilters" windowFieldName="orderDate" supportsStateExtract="Y" statusParameterName="orderStatusIds" healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection" enabled="Y"/>
     <darpan.reconciliation.SourceSystemConnector systemEnumId="OMS_RECON_ORDERS" extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders" dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="HOTWAX_OMS_REST_RECON" configParameterName="omsRestSourceConfigId" configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig" remoteId="HOTWAX_ORDERS_API" endpointLabel="Reconciliation Orders API" sendUrlTemplate="{baseUrl}/rest/s1/oms/reconciliationOrders" remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders" systemAliases="OMS_RECON_ORDERS,HOTWAX_RECON_ORDERS,DAR_SYS_OMS_RECON" preserveWindowInstants="N" keepFieldsParameterName="keepRecordFields" keepFieldsBase="orderId,orderName,externalId,grandTotal,orderDate,statusId" filterParameterName="sourceFilters" healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection" enabled="Y"/>
     <darpan.reconciliation.SourceSystemConnector systemEnumId="OMS_RETURNS" extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReturns" dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="HOTWAX_OMS_REST_RETURNS" configParameterName="omsRestSourceConfigId" configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig" remoteId="HOTWAX_ORDERS_API" endpointLabel="Reconciliation Returns API" sendUrlTemplate="{baseUrl}/rest/s1/oms/reconciliationReturns" remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReturns" systemAliases="OMS_RETURNS,HOTWAX_RETURNS,DAR_SYS_OMS_RETURNS" preserveWindowInstants="N" keepFieldsParameterName="keepRecordFields" keepFieldsBase="returnId,externalId,orderExternalId,statusId,entryDate,returnTotal,currencyUomId,returnChannelEnumId" filterParameterName="sourceFilters" healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection" enabled="Y"/>
+    <!-- DAR-BE-018 task 9: Shopify per-order refund/return id sets, cursor-paginated (see
+         SourceSystemConnectorSeedData.xml for the full row rationale). -->
+    <darpan.reconciliation.SourceSystemConnector systemEnumId="SHOPIFY_RETURN_REFS" extractServiceName="reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrderReturnRefs" dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="SHOPIFY_RETURN_REFS_API" configParameterName="shopifyAuthConfigId" configEntityName="darpan.shopify.ShopifyAuthConfig" remoteId="SHOPIFY_REMOTE" endpointLabel="Shopify Return References" systemAliases="SHOPIFY_RETURN_REFS,SHOPIFY_RETURNS,DAR_SYS_SHOPIFY_RETURN_REFS" preserveWindowInstants="N" enabled="Y"/>
 </entity-facade-xml>

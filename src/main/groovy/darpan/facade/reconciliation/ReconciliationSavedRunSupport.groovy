@@ -75,6 +75,10 @@ class ReconciliationSavedRunSupport {
     static final String SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST_RETURNS = "HOTWAX_OMS_REST_RETURNS"
     static final String HOTWAX_RETURNS_ENDPOINT_LABEL = "Reconciliation Returns API"
     static final String HOTWAX_OMS_RETURNS_EXTRACT_SERVICE = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReturns"
+    // DAR-BE-018 task 9: Shopify side of the returns-presence gate in runSavedRunDiff.groovy. Own
+    // system id — the registry resolvers take the first enabled match on systemEnumId, so sharing
+    // one would silently shadow a shipped row.
+    static final String SYSTEM_SHOPIFY_RETURN_REFS = "SHOPIFY_RETURN_REFS"
     static final String SHOPIFY_ORDERS_REMOTE_ID = "SHOPIFY_REMOTE"
     static final String SHOPIFY_ORDERS_ENDPOINT_LABEL = "Admin GraphQL Orders"
     static final String SHOPIFY_GRAPHQL_EXECUTE_SERVICE = "facade.ShopifyFacadeServices.execute#ShopifyGraphql"

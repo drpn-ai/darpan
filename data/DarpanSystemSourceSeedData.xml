@@ -59,4 +59,14 @@
             enumCode="HOTWAX_RETURNS"
             description="HotWax Returns (Reconciliation API)"
             sequenceNum="8"/>
+
+    <!-- DAR-BE-018. Per-order Shopify refund/return id sets, cursor-paginated (task 9). Its own
+         SourceSystemConnector row references this enum by systemEnumId, so this row must load
+         first (see upgrade-data.xml's ordering note). -->
+    <moqui.basic.Enumeration
+            enumId="SHOPIFY_RETURN_REFS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="SHOPIFY_RETURN_REFS"
+            description="Shopify Order Return References"
+            sequenceNum="9"/>
 </entity-facade-xml>

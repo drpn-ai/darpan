@@ -651,7 +651,7 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
         normalize(resolveConnectorFor(side.source)?.systemEnumId) == ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS
     }
     Map shopifyReturnsSide = sides.find { Map side ->
-        normalize(resolveConnectorFor(side.source)?.systemEnumId) == "SHOPIFY_RETURN_REFS"
+        normalize(resolveConnectorFor(side.source)?.systemEnumId) == ReconciliationSavedRunSupport.SYSTEM_SHOPIFY_RETURN_REFS
     }
     if (omsReturnsSide == null || shopifyReturnsSide == null) return
 

@@ -24,10 +24,26 @@ import static darpan.common.ValueSupport.normalizeInt
  * refundsCreatedAt map), not the order's — a refund created minutes ago on a months-old order must
  * still read as young (fix I1; see verifyReturnPresence below).
  *
- * ID normalization: the OMS-side externalId is GID-tail-normalized the same way
- * CompareDatasetSupport.applyIdNormalizer's SHOPIFY_GID_TAIL does for Spark columns, since the OMS
- * returns endpoint's externalId format (bare vs GID) has never been observed live (OQ-8). The
- * normalization is idempotent for bare numerics, so this is free insurance either way (fix I5).
+ * ID normalization: BOTH the OMS-side externalId AND orderExternalId are GID-tail-normalized the
+ * same way CompareDatasetSupport.applyIdNormalizer's SHOPIFY_GID_TAIL does for Spark columns, since
+ * the OMS returns endpoint's id format (bare vs GID) has never been observed live (OQ-8) — that
+ * uncertainty applies identically to both fields, which come off the same endpoint and the same
+ * connector projection. The normalization is idempotent for bare numerics, so this is free
+ * insurance either way (fix I5, widened to orderExternalId as Important #2 of the fix-wave-C
+ * re-review: leaving orderExternalId un-normalized would silently fail every byOrder lookup if OMS
+ * ever emits GIDs, nullifying I5's own premise).
+ *
+ * Reporting window vs. lookup floor (Important #3, fix-wave-C): the upstream Shopify extractor now
+ * fetches/emits events from [windowStart - lookback, windowEnd) rather than [windowStart, windowEnd)
+ * — see ShopifyReturnRefsSupport's class doc — because OMS lags Shopify by ~38min (RQ-23), so a
+ * Shopify refund for an OMS return sitting just inside windowStart can itself have been created just
+ * BEFORE windowStart. The forward pass above is deliberately unaffected: it may match against ANY
+ * emitted event, pre-window included, which is the entire point of the widened net. The reverse pass
+ * must NOT report a pre-window Shopify refund as missing-in-OMS, though — that would just relocate
+ * the false-missing this fix closes from the OMS side to the Shopify side — so it is additionally
+ * gated on the caller-supplied windowStartMillis (verifyReturnPresence's windowStartMillis arg,
+ * threaded from runSavedRunDiff.groovy's own windowStartDate, which already knows the run's window).
+ * A caller that does not supply windowStartMillis degrades to pre-fix behaviour (no gate).
  *
  * Known phase-1 imprecision: on an order carrying several returns, the forward-match suppression is
  * per-order rather than per-event. Exact reverse attribution needs the design's §8 typed-field hedge
@@ -62,6 +78,13 @@ class ReturnPresenceVerificationSupport {
                 ? ((Number) args.nowMillis).longValue()
                 : System.currentTimeMillis()
         long graceFloor = nowMillis - graceHours * 3600_000L
+        // Important #3 (fix-wave-C): the run's REPORTING window start, distinct from the wider
+        // lookup floor the Shopify extractor now fetches from. Optional and nullable — a caller
+        // that does not supply it (older call site, or a test) gets pre-fix behaviour. See the
+        // class doc's "Reporting window vs. lookup floor" section.
+        Long windowStartMillis = (args?.windowStartMillis instanceof Number)
+                ? ((Number) args.windowStartMillis).longValue()
+                : null
         // C2 fix: appended diff rows must carry the fields the rest of the pipeline actually reads
         // (RULESET_DIFF_SCHEMA / RULESET_CSV_COLUMNS / OutputDescriptorSupport / DiffDetailClassifier
         // all key off primaryId + presentIn/missingIn + message) — a row missing them exported as
@@ -84,10 +107,14 @@ class ReturnPresenceVerificationSupport {
         omsReturns.each { Object raw ->
             if (!(raw instanceof Map)) { malformedOmsReturnCount++; return }
             Map omsReturn = (Map) raw
-            // I5 fix: GID-normalize the OMS side before comparing against Shopify's (already bare)
-            // id sets. Idempotent for bare numerics, so this cannot regress the observed case.
+            // I5 fix, widened by Important #2 (fix-wave-C): GID-normalize BOTH OMS-side ids before
+            // comparing against Shopify's (already bare) id sets/order keys. orderExternalId was
+            // left un-normalized by the original I5 fix, which nullified it end to end: if OMS ever
+            // emits GIDs, byOrder.get(orderExternalId) below would return null for every return and
+            // every OMS return would report missing-in-Shopify regardless of externalId. Idempotent
+            // for bare numerics, so this cannot regress the observed case.
             String externalId = stripShopifyGidTail(normalize(omsReturn.get("externalId")))
-            String orderExternalId = normalize(omsReturn.get("orderExternalId"))
+            String orderExternalId = stripShopifyGidTail(normalize(omsReturn.get("orderExternalId")))
             if (!externalId || !orderExternalId) { malformedOmsReturnCount++; return }
 
             Map<String, Set<String>> order = byOrder.get(orderExternalId)
@@ -134,10 +161,12 @@ class ReturnPresenceVerificationSupport {
 
             // I1 fix: the reverse grace must measure the REFUND's own creation time, not the
             // order's — a refund created 5 minutes ago on a 3-month-old order is still young. The
-            // upstream Shopify extractor emits refundsCreatedAt (bare refund id -> that event's own
-            // createdAt, ISO-8601). Fall back to the order's createdAt only when the per-event date
-            // is absent (an older extract shape without refundsCreatedAt at all).
-            Map<String, String> refundsCreatedAt = normalizedStringMap(order.get("refundsCreatedAt"))
+            // upstream Shopify extractor emits per-refund createdAt (Important #1, fix-wave-C: now a
+            // `refunds: [{id, createdAt}, ...]` list — a data-keyed map inflated the Spark-inferred
+            // ingest schema's field count to the file's total distinct id count; see
+            // resolveRefundsCreatedAt). Fall back to the order's createdAt only when no per-event
+            // date is available at all (an older extract shape with neither shape present).
+            Map<String, String> refundsCreatedAt = resolveRefundsCreatedAt(order)
             long orderCreatedMillis = parseMillis(order.get("createdAt"))
 
             // Invariant: any refundId here equal to an OMS externalId on this order would already
@@ -147,6 +176,13 @@ class ReturnPresenceVerificationSupport {
             idSet(order.get("refundIds")).each { String refundId ->
                 String rawRefundCreatedAt = refundsCreatedAt.get(refundId)
                 long refundCreatedMillis = rawRefundCreatedAt ? parseMillis(rawRefundCreatedAt) : orderCreatedMillis
+                // Important #3 (fix-wave-C): this refund can be present ONLY because the Shopify
+                // extractor's fetch/emit floor now reaches back before windowStart (RQ-23 lookback,
+                // see class doc). It was available to the forward pass above for exactly that
+                // reason; the reverse pass must not turn around and report it missing-in-OMS, which
+                // would just relocate the false-missing onto the other side. Gate on the caller-
+                // supplied reporting windowStartMillis; absent that, degrade to pre-fix behaviour.
+                if (windowStartMillis != null && refundCreatedMillis < windowStartMillis) return
                 if (refundCreatedMillis > graceFloor) {
                     pendingCount++
                     return
@@ -195,12 +231,16 @@ class ReturnPresenceVerificationSupport {
         }
 
         Map<String, Object> result = verifyReturnPresence([
-                omsReturns     : omsReturns,
-                shopifyOrders  : shopifyOrders,
-                graceHours     : args?.graceHours,
-                nowMillis      : args?.nowMillis,
-                omsSideLabel   : args?.omsSideLabel,
-                shopifySideLabel: args?.shopifySideLabel,
+                omsReturns       : omsReturns,
+                shopifyOrders    : shopifyOrders,
+                graceHours       : args?.graceHours,
+                nowMillis        : args?.nowMillis,
+                omsSideLabel     : args?.omsSideLabel,
+                shopifySideLabel : args?.shopifySideLabel,
+                // Important #3 (fix-wave-C): threaded straight through from the caller (runSavedRunDiff
+                // .groovy's windowStartDate), which already resolves the run's reporting window.
+                // verifyReturnPresence itself degrades to pre-fix behaviour when this is absent.
+                windowStartMillis: args?.windowStartMillis,
         ])
 
         // M2: surface malformed-record counts as ordinary (actionable) warnings — deliberately NOT
@@ -316,6 +356,29 @@ class ReturnPresenceVerificationSupport {
         Matcher digitsMatcher = TRAILING_DIGITS_PATTERN.matcher(value)
         if (digitsMatcher.find()) return digitsMatcher.group(1)
         return value
+    }
+
+    /**
+     * Important #1 (fix-wave-C): the upstream Shopify extractor now emits `refunds: [{id,
+     * createdAt}, ...]` — a stable-shape list — instead of a `refundsCreatedAt: {id: createdAt}`
+     * map. The map shape's field count tracked the number of distinct refund ids in the file, which
+     * a plain (schema-inferring) Spark JSON read turns into a StructType whose width is the union of
+     * every id across the whole window (see ShopifyReturnRefsSupport's class doc). Read the list
+     * shape when present; fall back to the old map shape so the two repos' fixes can land
+     * independently of each other.
+     */
+    private static Map<String, String> resolveRefundsCreatedAt(Map order) {
+        Object refundsList = order.get("refunds")
+        if (refundsList instanceof List) {
+            Map<String, String> out = [:]
+            ((List) refundsList).each { Object raw ->
+                if (!(raw instanceof Map)) return
+                String id = normalize(((Map) raw).get("id"))
+                if (id) out.put(id, normalize(((Map) raw).get("createdAt")))
+            }
+            return out
+        }
+        return normalizedStringMap(order.get("refundsCreatedAt"))
     }
 
     /** I1 fix: normalized (trimmed, blank-key-dropped) String->String view of a raw JSON map. */

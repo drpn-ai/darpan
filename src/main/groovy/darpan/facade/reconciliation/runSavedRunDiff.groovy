@@ -672,6 +672,13 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
                 // labels at all, on top of missing primaryId. Thread it through.
                 omsSideLabel    : omsReturnsSide.label,
                 shopifySideLabel: shopifyReturnsSide.label,
+                // Important #3 (fix-wave-C): the run's reporting window start, so the wrapper can
+                // gate the reverse (missing-in-OMS) pass against refunds the Shopify extractor only
+                // emitted because of its own lookback widening (RQ-23). windowStartDate is already
+                // resolved above (same variable runExchangeVerificationPass reads at :543) and may
+                // be null for a saved run with no window (e.g. two static files) — the wrapper
+                // degrades to pre-fix behaviour in that case rather than throwing.
+                windowStartMillis: windowStartDate?.time,
         ])
     } catch (Throwable t) {
         checkFailed = true

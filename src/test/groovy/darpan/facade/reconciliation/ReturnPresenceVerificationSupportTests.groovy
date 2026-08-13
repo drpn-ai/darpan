@@ -302,6 +302,103 @@ class ReturnPresenceVerificationSupportTests {
     }
 
     @Test
+    void readsTheNewRefundsListShapeForTheReverseGrace() {
+        // Important #1 (fix-wave-C): the upstream extractor now emits refunds as a
+        // `refunds: [{id, createdAt}, ...]` list instead of a refundsCreatedAt map (a Spark
+        // schema-inference fix on the emitting side). The new shape must drive the same reverse
+        // grace check I1 already proved against the old map shape.
+        Map order = [orderId: "7025799037059", refundIds: ["5001"], returnIds: [],
+                     createdAt: new Date(OLD).toInstant().toString(),
+                     refunds  : [[id: "5001", createdAt: new Date(RECENT).toInstant().toString()]]]
+
+        Map result = verify([], [order])
+
+        assertEquals(0, ((List) result.missingInOms).size(), "a young refund (list shape) on an old order must not be reported missing")
+        assertEquals(1, result.pendingCount)
+    }
+
+    @Test
+    void fallsBackToTheOldRefundsCreatedAtMapShapeWhenRefundsListIsAbsent() {
+        // Cross-repo landing independence: when only the older map shape is present (the Shopify-
+        // side fix not yet deployed), the fallback must behave exactly as before.
+        Map order = [orderId: "7025799037059", refundIds: ["5001"], returnIds: [],
+                     createdAt: new Date(OLD).toInstant().toString(),
+                     refundsCreatedAt: ["5001": new Date(RECENT).toInstant().toString()]]
+
+        Map result = verify([], [order])
+
+        assertEquals(0, ((List) result.missingInOms).size())
+        assertEquals(1, result.pendingCount)
+    }
+
+    @Test
+    void aPreWindowShopifyRefundStillSatisfiesTheForwardMatch() {
+        // Important #3: OMS lags Shopify by ~38min (RQ-23). The Shopify extractor now widens its
+        // fetch/emit floor by a lookback, so a refund created just BEFORE windowStart can still be
+        // present here -- and the forward pass must match against it, which is the entire point of
+        // the widened net.
+        long windowStart = 1_800_000_000_000L
+        long omsEntry = windowStart + 5 * 60_000L        // just inside the reporting window
+        long refundCreated = windowStart - 30 * 60_000L  // just before it, inside the lookback
+
+        Map order = [orderId: "7025799037059", refundIds: ["5001"], returnIds: [],
+                     createdAt: new Date(refundCreated).toInstant().toString(),
+                     refunds  : [[id: "5001", createdAt: new Date(refundCreated).toInstant().toString()]]]
+        Map omsReturnRecord = [externalId: "5001", orderExternalId: "7025799037059",
+                                entryDate: omsEntry, returnId: "R-5001"]
+
+        Map result = ReturnPresenceVerificationSupport.verifyReturnPresence([
+                omsReturns       : [omsReturnRecord],
+                shopifyOrders    : [order],
+                nowMillis        : windowStart + 3600_000L,
+                windowStartMillis: windowStart,
+        ])
+
+        assertEquals(1, result.matchedCount, "a pre-window Shopify refund (within the lookback) must still satisfy the forward match")
+        assertEquals(0, ((List) result.missingInShopify).size())
+    }
+
+    @Test
+    void aPreWindowShopifyRefundIsNotSeparatelyReportedMissingInOms() {
+        // The other half of Important #3, isolated from the forward-match suppression already
+        // covered by suppressesReverseMissingWhenTheOrderAlreadyMatchedForward: there is NO OMS
+        // return at all here, so ordersMatchedForward stays empty and cannot be masking this. The
+        // refund's own createdAt predates windowStart -- available only because of the Shopify
+        // extractor's lookback widening -- and must not be reported missing-in-OMS: doing so would
+        // just relocate the false-missing this fix closes from the OMS side to the Shopify side.
+        long windowStart = 1_800_000_000_000L
+        long refundCreated = windowStart - 30 * 60_000L  // pre-window, and well outside the grace too
+
+        Map order = [orderId: "7025799037059", refundIds: ["5001"], returnIds: [],
+                     createdAt: new Date(refundCreated).toInstant().toString(),
+                     refunds  : [[id: "5001", createdAt: new Date(refundCreated).toInstant().toString()]]]
+
+        Map result = ReturnPresenceVerificationSupport.verifyReturnPresence([
+                omsReturns       : [],
+                shopifyOrders    : [order],
+                nowMillis        : windowStart + 4 * 3600_000L,
+                windowStartMillis: windowStart,
+        ])
+
+        assertEquals(0, ((List) result.missingInOms).size())
+        assertEquals(0, result.pendingCount, "gated out before the grace check, not merely marked pending")
+    }
+
+    @Test
+    void degradesToPreFixBehaviourWhenNoWindowStartIsSupplied() {
+        // Callers that do not thread windowStartMillis (older call sites, or this test file's own
+        // verify() helper) must keep seeing pre-fix behaviour: no gating beyond the existing grace
+        // check, even for a refund that predates what would have been the reporting window.
+        Map order = [orderId: "7025799037059", refundIds: ["5001"], returnIds: [],
+                     createdAt: new Date(OLD).toInstant().toString(),
+                     refunds  : [[id: "5001", createdAt: new Date(OLD).toInstant().toString()]]]
+
+        Map result = verify([], [order])
+
+        assertEquals(1, ((List) result.missingInOms).size())
+    }
+
+    @Test
     void matchesAGidFormOmsExternalIdAgainstABareShopifyRefundId() {
         // I5: the OMS side of the match must be GID-normalized too. The Shopify side already strips
         // GIDs down to the bare id; the OMS returns header format (bare vs GID) has never been
@@ -312,6 +409,22 @@ class ReturnPresenceVerificationSupportTests {
                 [shopifyOrder("7025799037059", ["5001"], [])])
 
         assertEquals(1, result.matchedCount, "a GID-form OMS externalId must still match the bare Shopify refund id")
+        assertEquals(0, ((List) result.missingInShopify).size())
+    }
+
+    @Test
+    void matchesAGidFormOrderExternalIdAndExternalIdAgainstABareShopifyOrderAndRefundPair() {
+        // Important #2 (fix-wave-C re-review): orderExternalId comes off the same OMS returns
+        // endpoint and the same connector projection as externalId, so the SAME bare-vs-GID
+        // uncertainty (OQ-8) applies to it. The original I5 fix normalized only externalId; a
+        // GID-form orderExternalId would make every byOrder.get(orderExternalId) lookup return null,
+        // silently defeating I5 for every OMS return regardless of externalId's own form.
+        Map result = verify(
+                [[externalId: "gid://shopify/Refund/5001", orderExternalId: "gid://shopify/Order/7025799037059",
+                  entryDate: OLD, returnId: "R-5001"]],
+                [shopifyOrder("7025799037059", ["5001"], [])])
+
+        assertEquals(1, result.matchedCount, "a GID-form orderExternalId must still match the bare Shopify order id")
         assertEquals(0, ((List) result.missingInShopify).size())
     }
 

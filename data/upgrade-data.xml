@@ -55,10 +55,29 @@ loading it exposes nothing to operators.
 <entity-facade-xml type="darpan-seed">
     <!-- Added records from data/AutomationSeedData.xml -->
     <moqui.basic.Enumeration enumId="AUT_WIN_STATE" enumTypeId="AutomationRelWindow" enumCode="STATE_BASED" description="State based (no date window)" sequenceNum="8"/>
+    <!-- CORRECTIONS to two rows that already exist in every deployed environment. Both are
+         create-or-update by PK, so these restate the row with the corrected description and change
+         nothing else.
+
+         SHOPIFY's stored description is the shouty "SHOPIFY", which is what a deployed environment
+         renders wherever a system is named — the run-result page's "Extracting SHOPIFY",
+         "Missing from SHOPIFY", and the compared-files labels. OMS never showed the same problem
+         only because SettingsFacadeSupport.normalizeSystemSourceOption HARDCODES description
+         "HotWax" for OMS/HOTWAX options, overriding whatever the database holds; Shopify has no
+         such override and falls through to the raw row. Restating OMS here too keeps the seed file
+         and the database in agreement rather than relying on that override.
+
+         NOTE these fix FUTURE runs only. ReconciliationOutputSupport reads file labels from
+         metadata.get("file1Label"), i.e. the label is stamped into each run's output document when
+         the run executes. Historical runs keep the name they were stamped with, by decision
+         (2026-08-13) — backfilling would mean rewriting stored output documents. -->
+    <moqui.basic.Enumeration enumId="OMS" enumTypeId="DarpanSystemSource" enumCode="HOTWAX" description="HotWax" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="SHOPIFY" enumTypeId="DarpanSystemSource" enumCode="SHOPIFY" description="Shopify" sequenceNum="2"/>
     <!-- Added records from data/DarpanSystemSourceSeedData.xml.
          Precedes the SourceSystemConnector row below: that row's systemEnumId references this enum.
          parentEnumId="OMS" groups this endpoint under OMS for the two-step source picker (system,
-         then endpoint) — see list#AutomationSourceOptions / darpan-ui's darpanSystems.ts. -->
+         then endpoint) — see list#AutomationSourceOptions / darpan-ui's darpanSystems.ts.
+         Both parents above load first, satisfying the parentEnumId self-reference. -->
     <moqui.basic.Enumeration enumId="OMS_TRANSFER_ORDERS" enumTypeId="DarpanSystemSource" enumCode="HOTWAX_TRANSFER_ORDERS" description="HotWax Transfer Orders" sequenceNum="6" parentEnumId="OMS"/>
     <!-- DAR-BE-018. Same parent-before-child constraint as the row above: the OMS_RECON_ORDERS
          SourceSystemConnector further down references this enum by systemEnumId. Same

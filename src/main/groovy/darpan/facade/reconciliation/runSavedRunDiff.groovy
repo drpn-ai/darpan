@@ -663,10 +663,15 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
     boolean checkFailed = false
     try {
         returnsVerification = ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
-                omsFile    : resolveLocationFile(normalize(omsReturnsSide.extractResult?.fileLocation)),
-                shopifyFile: resolveLocationFile(normalize(shopifyReturnsSide.extractResult?.fileLocation)),
-                diffFile   : diffFile,
-                nowMillis  : System.currentTimeMillis(),
+                omsFile         : resolveLocationFile(normalize(omsReturnsSide.extractResult?.fileLocation)),
+                shopifyFile     : resolveLocationFile(normalize(shopifyReturnsSide.extractResult?.fileLocation)),
+                diffFile        : diffFile,
+                nowMillis       : System.currentTimeMillis(),
+                // C2: sides[].label is already plumbed here (file1Label/file2Label -> sides above)
+                // but nothing previously read it — appended rows had no presentIn/missingIn side
+                // labels at all, on top of missing primaryId. Thread it through.
+                omsSideLabel    : omsReturnsSide.label,
+                shopifySideLabel: shopifyReturnsSide.label,
         ])
     } catch (Throwable t) {
         checkFailed = true

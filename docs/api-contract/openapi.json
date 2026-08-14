@@ -304,6 +304,12 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveShopifyAuthConfigRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ListSourceConfigEndpointsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/StoreSourceConfigEndpointAccessRequest"
                                     }
                                 ],
                                 "discriminator": {
@@ -402,7 +408,9 @@
                                         "facade.ShopifyFacadeServices.delete#ShopifyAuthConfig": "#/components/schemas/DeleteShopifyAuthConfigRequest",
                                         "facade.ShopifyFacadeServices.get#ShopifyAuthConfig": "#/components/schemas/GetShopifyAuthConfigRequest",
                                         "facade.ShopifyFacadeServices.list#ShopifyAuthConfigs": "#/components/schemas/ListShopifyAuthConfigsRequest",
-                                        "facade.ShopifyFacadeServices.save#ShopifyAuthConfig": "#/components/schemas/SaveShopifyAuthConfigRequest"
+                                        "facade.ShopifyFacadeServices.save#ShopifyAuthConfig": "#/components/schemas/SaveShopifyAuthConfigRequest",
+                                        "facade.SourceEndpointFacadeServices.list#SourceConfigEndpoints": "#/components/schemas/ListSourceConfigEndpointsRequest",
+                                        "facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess": "#/components/schemas/StoreSourceConfigEndpointAccessRequest"
                                     }
                                 }
                             }
@@ -700,6 +708,12 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveShopifyAuthConfigResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ListSourceConfigEndpointsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/StoreSourceConfigEndpointAccessResponse"
                                         }
                                     ]
                                 }
@@ -14877,6 +14891,226 @@
                     "jsonrpc",
                     "result"
                 ]
+            },
+            "ListSourceConfigEndpointsParams": {
+                "type": "object",
+                "properties": {
+                    "configTypeEnumId": {
+                        "type": "string",
+                        "description": "SCFG_HOTWAX_OMS, SCFG_SHOPIFY_AUTH,\n                SCFG_NS_AUTH, or SCFG_NS_RESTLET."
+                    },
+                    "configId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "configTypeEnumId",
+                    "configId"
+                ],
+                "description": "Endpoints registered for this config type, each with its current enablement.\n            The catalog comes from SourceSystemConnector; access rows only supply isEnabled."
+            },
+            "ListSourceConfigEndpointsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "endpoints": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "systemEnumId": {
+                                    "type": "string"
+                                },
+                                "endpointLabel": {
+                                    "type": "string"
+                                },
+                                "isEnabled": {
+                                    "type": "boolean"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "ListSourceConfigEndpointsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SourceEndpointFacadeServices.list#SourceConfigEndpoints",
+                "x-darpan-method": "facade.SourceEndpointFacadeServices.list#SourceConfigEndpoints",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SourceEndpointFacadeServices.list#SourceConfigEndpoints"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ListSourceConfigEndpointsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ListSourceConfigEndpointsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SourceEndpointFacadeServices.list#SourceConfigEndpoints. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ListSourceConfigEndpointsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "StoreSourceConfigEndpointAccessParams": {
+                "type": "object",
+                "properties": {
+                    "configTypeEnumId": {
+                        "type": "string"
+                    },
+                    "configId": {
+                        "type": "string"
+                    },
+                    "enabledSystemEnumIds": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "required": [
+                    "configTypeEnumId",
+                    "configId",
+                    "enabledSystemEnumIds"
+                ],
+                "description": "Replace this config's endpoint enablement. Endpoints omitted from\n            enabledSystemEnumIds are explicitly disabled; endpoints included have any prior 'N' row\n            flipped back to 'Y'. Absent rows mean enabled, so a fully-enabled config stores nothing\n            new."
+            },
+            "StoreSourceConfigEndpointAccessResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "stored": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "StoreSourceConfigEndpointAccessRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess",
+                "x-darpan-method": "facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/StoreSourceConfigEndpointAccessParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "StoreSourceConfigEndpointAccessResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/StoreSourceConfigEndpointAccessResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
             }
         }
     },
@@ -14974,6 +15208,8 @@
         "facade.ShopifyFacadeServices.delete#ShopifyAuthConfig": "DeleteShopifyAuthConfig",
         "facade.ShopifyFacadeServices.get#ShopifyAuthConfig": "GetShopifyAuthConfig",
         "facade.ShopifyFacadeServices.list#ShopifyAuthConfigs": "ListShopifyAuthConfigs",
-        "facade.ShopifyFacadeServices.save#ShopifyAuthConfig": "SaveShopifyAuthConfig"
+        "facade.ShopifyFacadeServices.save#ShopifyAuthConfig": "SaveShopifyAuthConfig",
+        "facade.SourceEndpointFacadeServices.list#SourceConfigEndpoints": "ListSourceConfigEndpoints",
+        "facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess": "StoreSourceConfigEndpointAccess"
     }
 }

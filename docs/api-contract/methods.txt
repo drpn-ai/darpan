@@ -92,3 +92,5 @@ facade.ShopifyFacadeServices.delete#ShopifyAuthConfig
 facade.ShopifyFacadeServices.get#ShopifyAuthConfig
 facade.ShopifyFacadeServices.list#ShopifyAuthConfigs
 facade.ShopifyFacadeServices.save#ShopifyAuthConfig
+facade.SourceEndpointFacadeServices.list#SourceConfigEndpoints
+facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess

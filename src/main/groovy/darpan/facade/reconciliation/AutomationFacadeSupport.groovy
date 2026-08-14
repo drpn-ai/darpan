@@ -924,7 +924,7 @@ class AutomationFacadeSupport {
                         normalize(enriched.optionKey) ?:
                         AutomationExecutionSupport.findSingleActiveConfigId(ec,
                                 TenantAccessSupport.currentActiveTenantUserGroupId(ec),
-                                normalize(connector.configEntityName), configParam)
+                                normalize(connector.configEntityName), configParam, normalize(connector.systemEnumId))
                 if (configId) parameters[configParam] = configId
 
                 String serviceName = normalize(metadata.extractServiceName ?: metadata.serviceName)

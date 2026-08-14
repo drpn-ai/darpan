@@ -206,7 +206,7 @@ class SharedConfigPropagationTests {
         def ec = ecForAutomation("BETSEY_JOHNSON", [sharedRow], [grant])
 
         String resolved = AutomationExecutionSupport.findSingleActiveConfigId(
-                ec, "BETSEY_JOHNSON", "darpan.hotwax.HotWaxOmsRestSourceConfig", "omsRestSourceConfigId")
+                ec, "BETSEY_JOHNSON", "darpan.hotwax.HotWaxOmsRestSourceConfig", "omsRestSourceConfigId", "OMS")
 
         assertEquals("OMS_SM", resolved,
                 "a member tenant's automation must auto-resolve the ONE config it can reach, owned or shared")
@@ -225,7 +225,7 @@ class SharedConfigPropagationTests {
         def ec = ecForAutomation("BETSEY_JOHNSON", [ownedRow, sharedRow], [grant])
 
         String resolved = AutomationExecutionSupport.findSingleActiveConfigId(
-                ec, "BETSEY_JOHNSON", "darpan.hotwax.HotWaxOmsRestSourceConfig", "omsRestSourceConfigId")
+                ec, "BETSEY_JOHNSON", "darpan.hotwax.HotWaxOmsRestSourceConfig", "omsRestSourceConfigId", "OMS")
 
         assertNull(resolved,
                 "unchanged contract: sharing can take a tenant from one candidate to two, and " +
@@ -235,7 +235,11 @@ class SharedConfigPropagationTests {
 
     /** Builds an EC for the automation auto-detect path. All config rows share one FinderStub, since
      *  findSingleActiveConfigId queries the same entity twice: once by companyUserGroupId (owned),
-     *  once by explicit PK (shared point lookup). */
+     *  once by explicit PK (shared point lookup). Also seeds a single "OMS" SourceSystemConnector row
+     *  so SourceEndpointAccessSupport.isEndpointEnabled has a non-empty catalog to read — with an empty
+     *  catalog every endpoint reads as disabled and findSingleActiveConfigId would always return null
+     *  regardless of the scenario under test. No SourceConfigEndpointAccess rows are seeded, which
+     *  exercises the absent-means-enabled default these tests rely on. */
     private static Expando ecForAutomation(String activeTenant, List<Map> configRows, List<Map> grants) {
         return new Expando(
                 user: new SharedConfigAccessSupportTests.UserStub(userId: "aditi", nowTimestamp: NOW,
@@ -244,8 +248,12 @@ class SharedConfigPropagationTests {
                 entity: new SharedConfigAccessSupportTests.EntityFacadeStub(finders: [
                         "darpan.auth.ConfigTenantAccess": new SharedConfigAccessSupportTests.FinderStub(
                                 listResult: grants),
-                        "darpan.hotwax.HotWaxOmsRestSourceConfig": new LimitAwareFinderStub(
+                        "darpan.hotwax.HotWaxOmsRestSourceConfig": new SharedConfigAccessSupportTests.FinderStub(
                                 listResult: configRows),
+                        "darpan.reconciliation.SourceSystemConnector": new SharedConfigAccessSupportTests.FinderStub(
+                                listResult: [[systemEnumId      : "OMS",
+                                              configEntityName  : "darpan.hotwax.HotWaxOmsRestSourceConfig",
+                                              enabled           : "Y"]]),
                         "moqui.security.UserGroupAndMember":
                                 new SharedConfigAccessSupportTests.FinderStub(listResult:
                                         activeTenant ? [[userId         : "aditi",
@@ -256,13 +264,6 @@ class SharedConfigPropagationTests {
                 l10n: new Expando(timeZone: "UTC"),
                 resource: new Expando(properties: [:])
         )
-    }
-
-    /** {@code findSingleActiveConfigId} chains {@code .limit(2)}, which the shared harness FinderStub
-     *  does not implement (no production caller needed it before this task). Extending locally rather
-     *  than editing the shared stub keeps this task's file footprint to the three files it owns. */
-    private static class LimitAwareFinderStub extends SharedConfigAccessSupportTests.FinderStub {
-        LimitAwareFinderStub limit(int max) { this }
     }
 
     /** Generalizes {@link #ecFor} across config type for the oracle-closed tests above: entity

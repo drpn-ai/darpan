@@ -1357,12 +1357,14 @@ class AutomationExecutionSupport {
             if (!configParameterName) return
             if (normalize(parameters[configParameterName]) || defaults.containsKey(configParameterName)) return
             // A connector whose config id lives on the source row (DATABASE -> databaseSourceQueryId) carries
-            // its own id per source, so no shared tenant default is needed and the canReadOrders-filtered
+            // its own id per source, so no shared tenant default is needed and the endpoint-enablement-filtered
             // findSingleActiveConfigId (which cannot match DatabaseSourceQuery) must not run. Null for the
             // API/SFTP connectors, whose id is not a row column, so their default resolution is unchanged.
             if (readSourceRowConfigId(source, configParameterName)) return
+            // connector.systemEnumId (not the source's raw/possibly-aliased systemEnumId) is the canonical
+            // id that SourceSystemConnector and SourceConfigEndpointAccess both key on.
             String configId = findSingleActiveConfigId(ec, companyUserGroupId,
-                    normalize(connector.configEntityName), configParameterName)
+                    normalize(connector.configEntityName), configParameterName, normalize(connector.systemEnumId))
             if (configId) defaults[configParameterName] = configId
         }
         return defaults
@@ -1392,15 +1394,15 @@ class AutomationExecutionSupport {
             //
             // AUT_SRC_DB regression fix: a connector whose configParameterName names a REAL column on the
             // automation source row (DATABASE -> databaseSourceQueryId) resolves that id DIRECTLY from the
-            // admin-chosen row value. This bypasses findSingleActiveConfigId, whose canReadOrders="Y" filter
-            // does not apply to DatabaseSourceQuery and whose "single active" pick would ignore the admin's
-            // choice on a multi-query tenant. The id still flows into the extract service, which re-checks
-            // tenant scope. Otherwise (no config id anywhere) leave the metadata service unset.
+            // admin-chosen row value. This bypasses findSingleActiveConfigId, whose endpoint-enablement
+            // filter does not apply to DatabaseSourceQuery and whose "single active" pick would ignore the
+            // admin's choice on a multi-query tenant. The id still flows into the extract service, which
+            // re-checks tenant scope. Otherwise (no config id anywhere) leave the metadata service unset.
             String configId = readSourceRowConfigId(source, configParameterName) ?:
                     normalize(parameters[configParameterName]) ?:
                     normalize(configDefaults?[configParameterName]) ?:
                     findSingleActiveConfigId(ec, companyUserGroupId,
-                            normalize(connector.configEntityName), configParameterName)
+                            normalize(connector.configEntityName), configParameterName, normalize(connector.systemEnumId))
             if (!configId) return metadata
             parameters[configParameterName] = configId
         }
@@ -1432,16 +1434,19 @@ class AutomationExecutionSupport {
         return normalize(readField(source, configParameterName))
     }
 
-    protected static String findSingleActiveConfigId(def ec, String companyUserGroupId, String configEntityName, String configIdField) {
+    protected static String findSingleActiveConfigId(def ec, String companyUserGroupId, String configEntityName,
+            String configIdField, String systemEnumId) {
         if (!companyUserGroupId || !configEntityName || !configIdField) return null
         try {
+            // No .limit(2) here (unlike the pre-endpoint-enablement version of this query): the
+            // endpoint-enablement post-filter below runs AFTER this fetch, so capping the fetch first
+            // could truncate away the very owned row that would go on to survive that filter. Every
+            // active owned candidate has to be visible to the filter before the list is narrowed.
             List rows = TenantScopedFinder.findGlobalUnscoped(ec, configEntityName,
                             "config lookup keyed by explicit companyUserGroupId from automation record")
                     .condition("companyUserGroupId", companyUserGroupId)
                     .condition("isActive", "Y")
-                    .condition("canReadOrders", "Y")
                     .useCache(false)
-                    .limit(2)
                     .list() ?: []
 
             // DAR-BE-005: a config shared TO this tenant is equally usable by its automations.
@@ -1458,11 +1463,25 @@ class AutomationExecutionSupport {
                                             "active ConfigTenantAccess grant (DAR-BE-005)")
                                     .condition(configIdField, sharedId)
                                     .condition("isActive", "Y")
-                                    .condition("canReadOrders", "Y")
                                     .useCache(false)
                                     .one()
                             if (sharedRow != null) rows = rows + [sharedRow]
                         }
+            }
+
+            // Endpoint enablement replaced canReadOrders. IMPORTANT: it cannot be a finder condition
+            // above — absent means enabled (see SourceEndpointAccessSupport), so a WHERE clause would
+            // exclude exactly the configs that have made no explicit decision, i.e. almost all of
+            // them, silently inverting the default. Fetch every active candidate first (owned + shared,
+            // above) and post-filter in Groovy through isEndpointEnabled instead.
+            //
+            // Converting this back into a finder condition is the obvious-looking optimisation that
+            // breaks it — don't. Tell the next person too.
+            if (configTypeEnumId) {
+                rows = rows.findAll { row ->
+                    SourceEndpointAccessSupport.isEndpointEnabled(ec, configTypeEnumId,
+                            normalize(readField(row, configIdField)), systemEnumId)
+                }
             }
 
             // Unchanged contract: auto-detect only when the choice is UNAMBIGUOUS. Sharing can push a
@@ -1475,14 +1494,14 @@ class AutomationExecutionSupport {
         }
     }
 
-    protected static String findSingleActiveOmsRestSourceConfigId(def ec, String companyUserGroupId) {
+    protected static String findSingleActiveOmsRestSourceConfigId(def ec, String companyUserGroupId, String systemEnumId) {
         return findSingleActiveConfigId(ec, companyUserGroupId,
-                DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG, "omsRestSourceConfigId")
+                DarpanEntityConstants.HOT_WAX_OMS_REST_SOURCE_CONFIG, "omsRestSourceConfigId", systemEnumId)
     }
 
-    protected static String findSingleActiveShopifyAuthConfigId(def ec, String companyUserGroupId) {
+    protected static String findSingleActiveShopifyAuthConfigId(def ec, String companyUserGroupId, String systemEnumId) {
         return findSingleActiveConfigId(ec, companyUserGroupId,
-                DarpanEntityConstants.SHOPIFY_AUTH_CONFIG, "shopifyAuthConfigId")
+                DarpanEntityConstants.SHOPIFY_AUTH_CONFIG, "shopifyAuthConfigId", systemEnumId)
     }
 
     protected static String sourceLabel(def ec, String systemEnumId, String fallback) {

@@ -66,4 +66,33 @@
         </actions>
     </service>
 
+    <!-- One-time upgrade migration (P1-T4): translate the legacy canReadOrders flag into explicit
+         SourceConfigEndpointAccess rows. authenticate="false" + allow-remote="false" by design: an
+         operator runs this once per environment during the upgrade, not a tenant-facing action, and it
+         deliberately sweeps every tenant's configs (see SourceEndpointWriteSupport.migrateLegacyCanReadOrders
+         Javadoc) — it must never be reachable remotely. -->
+    <service verb="migrate" noun="SourceConfigEndpointAccess" authenticate="false" allow-remote="false">
+        <description>One-time: translate the legacy canReadOrders flag into explicit endpoint
+            decisions. canReadOrders='N' disables every endpoint of that config's type;
+            canReadOrders='Y' writes nothing, because an absent row already means enabled.
+            Idempotent by PK — safe to re-run. Not remote: an operator runs this once per
+            environment during the upgrade.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="disabledConfigCount" type="Integer"/>
+            <parameter name="rowsWritten" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="migrationResult" from="darpan.reconciliation.automation.SourceEndpointWriteSupport.migrateLegacyCanReadOrders(ec)"/>
+            <set field="disabledConfigCount" from="migrationResult.disabledConfigCount"/>
+            <set field="rowsWritten" from="migrationResult.rowsWritten"/>
+            <message>Disabled endpoints for ${disabledConfigCount} config(s); wrote ${rowsWritten} row(s).</message>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
 </services>

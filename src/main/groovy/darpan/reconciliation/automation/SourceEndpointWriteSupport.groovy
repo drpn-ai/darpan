@@ -84,4 +84,81 @@ class SourceEndpointWriteSupport {
 
         return true
     }
+
+    /**
+     * One-time upgrade migration: translates the legacy {@code canReadOrders} flag on the two config
+     * types that ever carried it into explicit {@link SourceEndpointAccessSupport} rows.
+     *
+     * <p>{@code canReadOrders='N'} disables every catalog endpoint for that config's type — one 'N'
+     * row per endpoint. {@code canReadOrders='Y'} writes NOTHING: absent already means enabled (see
+     * {@link SourceEndpointAccessSupport} class Javadoc), so writing 'Y' rows here would only create
+     * churn every endpoint shipped later would need a per-tenant backfill against — exactly what the
+     * opt-out default exists to avoid.</p>
+     *
+     * <p>A null {@code canReadOrders} is resolved to THAT config type's own entity default, resolved
+     * directly rather than via a comparison of entity names through the registry:
+     * {@code HotWaxOmsRestSourceConfig} defaults 'Y' (opt-out), {@code ShopifyAuthConfig} defaults 'N'
+     * (opt-in) — see each entity's own field definition. Getting this backwards for the null case
+     * would silently leave a legacy-closed Shopify config fully open after migration.</p>
+     *
+     * <p>NetSuite config types never carried {@code canReadOrders} and are therefore out of scope —
+     * their endpoints stay absent, i.e. enabled, which was already their real prior behavior.</p>
+     *
+     * <p>Platform-wide sweep across every tenant's configs, by design: this is a one-time operator
+     * upgrade step, not a tenant-facing read, matching the service's own {@code authenticate="false"}.
+     * Uses {@link TenantScopedFinder#findGlobalUnscoped} rather than a bare {@code disableAuthz()} so
+     * {@code DisableAuthzRatchetTest} gains no new bare-call site.</p>
+     *
+     * <p>Idempotent by PK: {@code createOrUpdate()} against the same
+     * (configTypeEnumId, configId, systemEnumId) triple overwrites in place, so re-running never
+     * duplicates rows.</p>
+     *
+     * @return {@code [disabledConfigCount: <configs written for>, rowsWritten: <access rows written>]}
+     */
+    static Map<String, Integer> migrateLegacyCanReadOrders(def ec) {
+        List<String> legacyConfigTypes = [SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS,
+                                           SharedConfigAccessSupport.CONFIG_TYPE_SHOPIFY_AUTH]
+
+        int disabledConfigCount = 0
+        int rowsWritten = 0
+
+        legacyConfigTypes.each { String configTypeEnumId ->
+            Map<String, String> typeRow = SharedConfigAccessSupport.configType(configTypeEnumId)
+            if (typeRow == null) return
+
+            // Resolved directly from the config type rather than by comparing entity names through
+            // the registry: Shopify's own field default is 'N', HotWax OMS's is 'Y'.
+            String entityDefaultCanReadOrders =
+                    configTypeEnumId == SharedConfigAccessSupport.CONFIG_TYPE_SHOPIFY_AUTH ? "N" : "Y"
+
+            List configs = TenantScopedFinder.findGlobalUnscoped(ec, typeRow.entityName,
+                    "one-time canReadOrders migration sweeps every tenant's configs by design (operator upgrade step)")
+                    .useCache(false)
+                    .list() ?: []
+
+            configs.each { config ->
+                String effective = readString(config, "canReadOrders") ?: entityDefaultCanReadOrders
+                if (!effective.equalsIgnoreCase("N")) return
+
+                String configId = readString(config, typeRow.pkField)
+                List<Map<String, Object>> catalog =
+                        SourceEndpointAccessSupport.listEndpointsForConfig(ec, configTypeEnumId, configId)
+                if (catalog.isEmpty()) return
+
+                disabledConfigCount++
+                catalog.each { Map<String, Object> endpoint ->
+                    ec.entity.makeValue(SourceEndpointAccessSupport.ENTITY_NAME)
+                            .setAll([configTypeEnumId  : configTypeEnumId,
+                                     configId          : configId,
+                                     systemEnumId      : endpoint.systemEnumId,
+                                     companyUserGroupId: readString(config, "companyUserGroupId"),
+                                     isEnabled         : "N"])
+                            .createOrUpdate()
+                    rowsWritten++
+                }
+            }
+        }
+
+        return [disabledConfigCount: disabledConfigCount, rowsWritten: rowsWritten]
+    }
 }

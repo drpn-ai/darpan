@@ -716,4 +716,43 @@
         <field name="lastUpdatedDate" type="date-time"/>
     </entity>
 
+    <!-- Per-endpoint enablement for one tenant-owned API source config row.
+         Mirrors darpan.auth.ConfigTenantAccess deliberately: configId is POLYMORPHIC, discriminated
+         by configTypeEnumId (SharedConfigAccessSupport.CONFIG_TYPE_REGISTRY), so no FK to the config
+         entity is declarable. Two consequences are handled elsewhere and must stay handled:
+           - each config's delete path must delete its rows here (orphans are otherwise silent)
+           - companyUserGroupId is denormalized from the parent so TenantScopedFinder works without
+             a bare disableAuthz (CI-banned)
+
+         ABSENT ROW MEANS ENABLED. This table stores explicit decisions only, so a connector row
+         added in a later release is usable immediately with no per-tenant backfill. A row here can
+         only ever turn an endpoint OFF — SourceEndpointAccessSupport reads the catalog from
+         SourceSystemConnector, so a registry row with enabled='N' can never be switched on by
+         tenant data. -->
+    <entity entity-name="SourceConfigEndpointAccess" package="darpan.reconciliation"
+            use="configuration" cache="true">
+        <description>Whether one API source config row may use one registered source endpoint.</description>
+        <field name="configTypeEnumId" type="id" is-pk="true"/>
+        <field name="configId" type="id" is-pk="true"/>
+        <field name="systemEnumId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true">
+            <description>Denormalized from the parent config row. Configs do not change owner, so this
+                cannot drift; it exists so tenant-scoped reads need no disableAuthz.</description>
+        </field>
+        <field name="isEnabled" type="text-indicator" default="'Y'">
+            <description>'N' disables this endpoint for this config. A row is only ever written to
+                record an explicit decision — see the ABSENT ROW note above.</description>
+        </field>
+
+        <relationship type="one" title="Company" related="moqui.security.UserGroup" short-alias="company">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+        <relationship type="one" title="ConfigType" related="moqui.basic.Enumeration" short-alias="configType">
+            <key-map field-name="configTypeEnumId" related-field-name="enumId"/>
+        </relationship>
+        <relationship type="one" title="System" related="moqui.basic.Enumeration" short-alias="system">
+            <key-map field-name="systemEnumId" related-field-name="enumId"/>
+        </relationship>
+    </entity>
+
 </entities>

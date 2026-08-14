@@ -111,4 +111,37 @@ class SourceEndpointAccessSupportTests {
         assertEquals(["SHOPIFY", "SHOPIFY_RETURN_REFS"],
                 endpoints.collect { it.systemEnumId }.sort())
     }
+
+    @Test
+    void registryDisabledConnectorNeverBecomesReachable() {
+        // A connector row switched OFF in the registry (enabled="N") must stay unreachable no matter
+        // what tenant access data says — tenant rows may only turn an endpoint OFF, never ON.
+        String disabledSystemEnumId = "OMS_DISABLED_TEST_ENDPOINT"
+
+        // FK prerequisite: SourceConfigEndpointAccess.systemEnumId -> Enumeration. SourceSystemConnector
+        // itself declares no such relationship, so the connector row below needs no enum row on its
+        // own — only the writeAccessRow call further down does.
+        ec.entity.makeValue("moqui.basic.Enumeration")
+                .setAll([enumId: disabledSystemEnumId, enumTypeId: "DarpanSystemSource"])
+                .create()
+
+        ec.entity.makeValue(SourceSystemConnectorSupport.ENTITY_NAME)
+                .setAll([systemEnumId    : disabledSystemEnumId,
+                         configEntityName: "darpan.hotwax.HotWaxOmsRestSourceConfig",
+                         endpointLabel   : "Disabled Test Endpoint",
+                         enabled         : "N"])
+                .create()
+
+        List<Map<String, Object>> endpoints = SourceEndpointAccessSupport.listEndpointsForConfig(ec,
+                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID)
+        assertFalse(endpoints.any { it.systemEnumId == disabledSystemEnumId },
+                "A registry-disabled connector must never appear in the catalog")
+
+        // The point that matters most: even an explicit isEnabled="Y" tenant decision cannot switch
+        // on an endpoint the registry itself has disabled.
+        writeAccessRow(disabledSystemEnumId, "Y")
+        assertFalse(SourceEndpointAccessSupport.isEndpointEnabled(ec,
+                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, disabledSystemEnumId),
+                "Tenant data must never switch on a registry-disabled endpoint")
+    }
 }

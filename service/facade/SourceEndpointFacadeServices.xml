@@ -7,8 +7,10 @@
 
      FENCE WARNING: facade\..* is granted to every Darpan role including DARPAN_TENANT_USER
      (SecuritySeedData.xml:97-121), so the artifact fence stops nobody. The gate is the parent-config
-     authorization inside storeSourceConfigEndpointAccess.groovy. Enablement is OWNER-controlled: a
-     tenant holding only ConfigTenantAccess may read the list but not change it. -->
+     authorization inside darpan.reconciliation.automation.SourceEndpointAccessSupport.listEndpointsForAuthorizedConfig
+     (read) and SourceEndpointWriteSupport.storeAccess (write). Enablement is OWNER-controlled: a
+     tenant holding only ConfigTenantAccess may read the list (owner OR shared peer) but not change it
+     (owner only). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
@@ -31,7 +33,7 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="endpoints" from="darpan.reconciliation.automation.SourceEndpointAccessSupport.listEndpointsForConfig(ec, configTypeEnumId, configId)"/>
+            <set field="endpoints" from="darpan.reconciliation.automation.SourceEndpointAccessSupport.listEndpointsForAuthorizedConfig(ec, configTypeEnumId, configId)"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
@@ -57,7 +59,7 @@
             <parameter name="stored" type="Boolean"/>
         </out-parameters>
         <actions>
-            <script location="component://darpan/src/main/groovy/darpan/facade/settings/storeSourceConfigEndpointAccess.groovy"/>
+            <set field="stored" from="darpan.reconciliation.automation.SourceEndpointWriteSupport.storeAccess(ec, configTypeEnumId, configId, enabledSystemEnumIds)"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

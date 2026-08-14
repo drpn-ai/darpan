@@ -1,6 +1,7 @@
 package darpan.reconciliation.automation
 
 import darpan.facade.common.SharedConfigAccessSupport
+import darpan.facade.common.TenantScopedFinder
 
 import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.readString
@@ -18,8 +19,14 @@ import static darpan.common.ValueSupport.readString
  * backfill. Every reader must default to enabled.</p>
  *
  * <p>Both entities are {@code use="configuration"} platform/tenant config, read as plain cached
- * finds. Callers reach this only after authorizing the parent config through its own tenant-scoped
- * path, so no {@code disableAuthz} is introduced here.</p>
+ * finds. {@link #listEndpointsForConfig} and {@link #isEndpointEnabled} carry no authorization of
+ * their own — callers reach them only after authorizing the parent config through its own
+ * tenant-scoped path, so no {@code disableAuthz} is introduced here.
+ * {@link #listEndpointsForAuthorizedConfig} is the one exception: it IS the authorization boundary
+ * for the {@code list#SourceConfigEndpoints} facade service, which has no other gate (see that
+ * service's FENCE WARNING comment). Still read-only — no entity writes. The write path lives in the
+ * separate {@link SourceEndpointWriteSupport}, matching the read/write split
+ * {@code SourceSystemConnectorSupport} already follows.</p>
  */
 class SourceEndpointAccessSupport {
     static final String ENTITY_NAME = "darpan.reconciliation.SourceConfigEndpointAccess"
@@ -62,6 +69,50 @@ class SourceEndpointAccessSupport {
                     isEnabled    : decisions.get(systemEnumId) != "N",
             ] as Map<String, Object>
         }.sort { it.systemEnumId } as List<Map<String, Object>>
+    }
+
+    /**
+     * Authorization-checked entry point for {@code list#SourceConfigEndpoints}: the catalog from
+     * {@link #listEndpointsForConfig}, but only after confirming the ACTIVE tenant may use the parent
+     * config — owner OR shared peer (via {@code SharedConfigAccessSupport.canActiveTenantUseConfig}).
+     * A tenant with neither relationship gets an {@code ec.message} error and an empty list, never the
+     * catalog. Read access is intentionally wider than write access: a shared peer may read the
+     * enablement list (the settings page must render for them) even though only the owner may change
+     * it — see {@link SourceEndpointWriteSupport#storeAccess}.
+     */
+    static List<Map<String, Object>> listEndpointsForAuthorizedConfig(def ec, String configTypeEnumId, String configId) {
+        Map<String, String> typeRow = SharedConfigAccessSupport.configType(configTypeEnumId)
+        if (typeRow == null) {
+            ec.message.addError("Unknown config type '${configTypeEnumId}'.".toString())
+            return []
+        }
+
+        // Fast path: the active tenant owns the row. findTenantScopedByIdQuiet is owner-only (it
+        // gates on companyUserGroupId == active tenant), so a null here does NOT mean "deny" — it
+        // only rules out ownership, and a shared peer is checked next.
+        def parent = TenantScopedFinder.findTenantScopedByIdQuiet(ec, typeRow.entityName, typeRow.pkField, configId)
+        if (parent == null) {
+            // Not owned by the active tenant (or it doesn't exist). It may still be shared TO this
+            // tenant via ConfigTenantAccess — the owner-only finder above can't see that, so resolve
+            // the row unscoped (same point-lookup shape SharedConfigAccessSupport.listAccessibleConfigRows
+            // already uses for shared rows) and let canActiveTenantUseConfig make the real, wider
+            // owner-or-shared decision.
+            parent = TenantScopedFinder.findGlobalUnscoped(ec, typeRow.entityName,
+                    "shared-config peer read for list#SourceConfigEndpoints — endpoint enablement must " +
+                    "stay readable by every peer in the config's ConfigTenantAccess group, not just its owner")
+                    .condition(typeRow.pkField, configId)
+                    .useCache(false)
+                    .one()
+        }
+
+        if (parent == null || !SharedConfigAccessSupport.canActiveTenantUseConfig(ec, configTypeEnumId, parent)) {
+            // Same not-found wording regardless of cause (missing vs. foreign vs. unshared) — this
+            // path must not let a caller distinguish "doesn't exist" from "exists but isn't yours".
+            ec.message.addError("${typeRow.label} ${configId} not found.".toString())
+            return []
+        }
+
+        return listEndpointsForConfig(ec, configTypeEnumId, configId)
     }
 
     /** True when this config may extract from this endpoint. Absent decision means enabled. */

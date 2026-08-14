@@ -25,6 +25,10 @@ class SourceEndpointAccessSupportTests {
 
     private static final String CONFIG_ID = "endpoint-access-test-oms"
     private static final String TENANT = "ENDPOINT_ACCESS_TENANT"
+    // Owner tenant for the store#SourceConfigEndpointAccess tests (Task 3). "KREWE" matches
+    // ReconciliationSmokeTestSupport's private TEST_COMPANY_USER_GROUP_ID — same duplicated-literal
+    // convention AutomationFacadeSmokeTests already uses, since that constant isn't exposed.
+    private static final String KREWE = "KREWE"
 
     @BeforeAll
     void setup() {
@@ -53,6 +57,19 @@ class SourceEndpointAccessSupportTests {
         // connector registry.
         ec.entity.makeValue("moqui.basic.Enumeration")
                 .setAll([enumId: "OMS_NOT_A_REAL_ENDPOINT", enumTypeId: "DarpanSystemSource"])
+                .create()
+
+        // Task 3: store#SourceConfigEndpointAccess authorizes writes by loading the parent config row
+        // through TenantScopedFinder.findTenantScopedByIdQuiet, which needs a REAL logged-in tenant
+        // owner (not just FK rows) — it resolves the active tenant from the user's own group
+        // membership. Reuses the house seedCompanyScope + HotWaxOmsRestSourceConfig convention already
+        // used by AutomationFacadeSmokeTests rather than hand-rolling tenant membership again.
+        ReconciliationSmokeTestSupport.seedCompanyScope(ec)
+        ec.entity.makeValue("darpan.hotwax.HotWaxOmsRestSourceConfig")
+                .setAll([omsRestSourceConfigId: CONFIG_ID,
+                         description          : "Endpoint-access smoke test OMS config",
+                         companyUserGroupId   : KREWE,
+                         baseUrl              : "https://oms.endpoint-access-test.invalid"])
                 .create()
     }
 
@@ -143,5 +160,38 @@ class SourceEndpointAccessSupportTests {
         assertFalse(SourceEndpointAccessSupport.isEndpointEnabled(ec,
                 SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, disabledSystemEnumId),
                 "Tenant data must never switch on a registry-disabled endpoint")
+    }
+
+    @Test
+    void storeServiceWritesOnlyExplicitDisables() {
+        // gorjana-style config: everything on except returns.
+        ec.service.sync().name("facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess")
+                .parameters([configTypeEnumId    : SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS,
+                             configId            : CONFIG_ID,
+                             enabledSystemEnumIds: ["OMS", "OMS_RECON_ORDERS", "OMS_TRANSFER_ORDERS"]])
+                .disableAuthz().call()
+
+        assertFalse(SourceEndpointAccessSupport.isEndpointEnabled(ec,
+                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, "OMS_RETURNS"))
+        assertTrue(SourceEndpointAccessSupport.isEndpointEnabled(ec,
+                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, "OMS"))
+    }
+
+    @Test
+    void storeServiceIsIdempotentAndReEnables() {
+        ec.service.sync().name("facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess")
+                .parameters([configTypeEnumId    : SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS,
+                             configId            : CONFIG_ID,
+                             enabledSystemEnumIds: ["OMS", "OMS_RECON_ORDERS", "OMS_TRANSFER_ORDERS"]])
+                .disableAuthz().call()
+        // Re-enable everything; the previously written 'N' row must flip back, not linger.
+        ec.service.sync().name("facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess")
+                .parameters([configTypeEnumId    : SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS,
+                             configId            : CONFIG_ID,
+                             enabledSystemEnumIds: ["OMS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_TRANSFER_ORDERS"]])
+                .disableAuthz().call()
+
+        assertTrue(SourceEndpointAccessSupport.isEndpointEnabled(ec,
+                SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID, "OMS_RETURNS"))
     }
 }

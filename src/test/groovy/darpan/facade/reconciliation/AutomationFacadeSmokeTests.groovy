@@ -37,6 +37,12 @@ class AutomationFacadeSmokeTests {
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "automation-facade-smoke")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AutomationSeedData.xml")
+        // DarpanSystemSource is the authoritative source of the system/endpoint rows that
+        // list#AutomationSourceOptions returns as `systems` (it reads the Enumeration table
+        // directly). Without this, only the rows other components happen to seed show up — OMS and
+        // SHOPIFY do, NETSUITE does not — and the parentEnumId endpoint grouping is absent entirely.
+        // Loads BEFORE the connector file: SourceSystemConnector.systemEnumId references these rows.
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/DarpanSystemSourceSeedData.xml")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorSeedData.xml")
         seedLegacyPollInputMode()
         ReconciliationSmokeTestSupport.seedSchemaBackedCsvMappingFixtures(ec)

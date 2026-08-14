@@ -939,6 +939,7 @@ SERVICE list AutomationSourceOptions
     systems.enumCode : String
     systems.enumId : String
     systems.label : String
+    systems.parentEnumId : String
     systems.sequenceNum : Integer
 
 SERVICE list Automations

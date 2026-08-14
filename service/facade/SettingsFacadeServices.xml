@@ -169,7 +169,7 @@
     </service>
 
     <service verb="list" noun="TenantChatSpaces" authz-action="view" allow-remote="true" authenticate="true">
-        <description>List active-tenant Google Chat spaces with webhook redaction.</description>
+        <description>List active-tenant Google Chat spaces, including the webhook URL in clear text.</description>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
@@ -177,7 +177,7 @@
             <parameter name="chatSpaces" type="List">
                 <parameter name="chatSpaceId"/><parameter name="spaceName"/>
                 <parameter name="googleChatConfigured" type="Boolean"/>
-                <parameter name="googleChatWebhookUrlMasked"/>
+                <parameter name="googleChatWebhookUrl"/>
                 <parameter name="isActive"/><parameter name="inUse" type="Boolean"/>
                 <parameter name="createdByUserId"/>
                 <parameter name="createdDate" type="Timestamp"/><parameter name="lastUpdatedDate" type="Timestamp"/>
@@ -188,7 +188,7 @@
             <set field="spaceRows" from="tenantId ? (ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('companyUserGroupId', tenantId).orderBy('spaceName').disableAuthz().useCache(false).list() ?: []) : []"/>
             <set field="automationSpaceIds" from="tenantId ? (ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).list().collect { ((it.chatSpaceId)?.toString()?.trim()) }.findAll { it } as Set) : ([] as Set)"/>
             <set field="subscriptionSpaceIds" from="spaceRows ? (ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('chatSpaceId', 'in', spaceRows.collect { it.chatSpaceId }).disableAuthz().useCache(false).list().collect { ((it.chatSpaceId)?.toString()?.trim()) }.findAll { it } as Set) : ([] as Set)"/>
-            <set field="chatSpaces" from="spaceRows.collect { row -> [chatSpaceId: row.chatSpaceId, spaceName: row.spaceName, googleChatConfigured: !!((row.googleChatWebhookUrl)?.toString()?.trim()), googleChatWebhookUrlMasked: darpan.reconciliation.notification.TenantNotificationSupport.maskGoogleChatWebhookUrl(row.googleChatWebhookUrl), isActive: ((row.isActive)?.toString()?.trim()) ?: 'Y', inUse: automationSpaceIds.contains(row.chatSpaceId) || subscriptionSpaceIds.contains(row.chatSpaceId), createdByUserId: row.createdByUserId, createdDate: row.createdDate, lastUpdatedDate: row.lastUpdatedDate] }"/>
+            <set field="chatSpaces" from="spaceRows.collect { row -> [chatSpaceId: row.chatSpaceId, spaceName: row.spaceName, googleChatConfigured: !!((row.googleChatWebhookUrl)?.toString()?.trim()), googleChatWebhookUrl: ((row.googleChatWebhookUrl)?.toString()?.trim()), isActive: ((row.isActive)?.toString()?.trim()) ?: 'Y', inUse: automationSpaceIds.contains(row.chatSpaceId) || subscriptionSpaceIds.contains(row.chatSpaceId), createdByUserId: row.createdByUserId, createdDate: row.createdDate, lastUpdatedDate: row.lastUpdatedDate] }"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
@@ -196,7 +196,7 @@
     </service>
 
     <service verb="save" noun="TenantChatSpace" allow-remote="true" authenticate="true">
-        <description>Create or update one named Google Chat space for the active tenant. Webhook URL is write-only.</description>
+        <description>Create or update one named Google Chat space for the active tenant.</description>
         <in-parameters>
             <parameter name="chatSpaceId"/>
             <parameter name="spaceName" required="true"/>
@@ -243,7 +243,7 @@
             </if>
             <set field="savedSpace" from="chatSpaceIdValue ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('chatSpaceId', chatSpaceIdValue).condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).one() : null"/>
             <set field="savedSpaceInUse" from="savedSpace ? (ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('chatSpaceId', savedSpace.chatSpaceId).disableAuthz().useCache(false).count() > 0 || ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('chatSpaceId', savedSpace.chatSpaceId).disableAuthz().useCache(false).count() > 0) : false"/>
-            <set field="chatSpace" from="savedSpace ? [chatSpaceId: savedSpace.chatSpaceId, spaceName: savedSpace.spaceName, googleChatConfigured: !!((savedSpace.googleChatWebhookUrl)?.toString()?.trim()), googleChatWebhookUrlMasked: darpan.reconciliation.notification.TenantNotificationSupport.maskGoogleChatWebhookUrl(savedSpace.googleChatWebhookUrl), isActive: ((savedSpace.isActive)?.toString()?.trim()) ?: 'Y', inUse: savedSpaceInUse, createdByUserId: savedSpace.createdByUserId, createdDate: savedSpace.createdDate, lastUpdatedDate: savedSpace.lastUpdatedDate] : null"/>
+            <set field="chatSpace" from="savedSpace ? [chatSpaceId: savedSpace.chatSpaceId, spaceName: savedSpace.spaceName, googleChatConfigured: !!((savedSpace.googleChatWebhookUrl)?.toString()?.trim()), googleChatWebhookUrl: ((savedSpace.googleChatWebhookUrl)?.toString()?.trim()), isActive: ((savedSpace.isActive)?.toString()?.trim()) ?: 'Y', inUse: savedSpaceInUse, createdByUserId: savedSpace.createdByUserId, createdDate: savedSpace.createdDate, lastUpdatedDate: savedSpace.lastUpdatedDate] : null"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

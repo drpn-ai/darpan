@@ -131,6 +131,38 @@
         </actions>
     </service>
 
+    <service verb="clear" noun="UndecryptableChatSpaceWebhooks" authenticate="false">
+        <description>One-time upgrade for the 2026-08-14 removal of encrypt="true" from
+            TenantChatSpace.googleChatWebhookUrl. Moqui only decrypts a field still declared encrypted, so
+            any row written before that change now reads back as ciphertext. Left alone it would be handed
+            straight to URI.create() on every send. This nulls every value that is not a valid Google Chat
+            space endpoint, so the space renders as not-configured and an admin re-pastes the URL once.
+            Idempotent, and a no-op on an installation that never stored a webhook. Internal only.</description>
+        <out-parameters>
+            <parameter name="clearedSpaceCount" type="Integer"/>
+            <parameter name="keptSpaceCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="clearedSpaceCount" from="0"/>
+            <set field="keptSpaceCount" from="0"/>
+            <set field="spaceRows" from="ec.entity.find('darpan.reconciliation.TenantChatSpace').disableAuthz().useCache(false).list() ?: []"/>
+            <iterate list="spaceRows" entry="spaceRow">
+                <set field="storedValue" from="((spaceRow.googleChatWebhookUrl)?.toString()?.trim())"/>
+                <if condition="storedValue">
+                    <set field="validationError" from="darpan.reconciliation.notification.TenantNotificationSupport.validateGoogleChatWebhookUrl(storedValue)"/>
+                    <if condition="validationError">
+                        <set field="ignoreSet" from="spaceRow.set('googleChatWebhookUrl', null)"/>
+                        <set field="ignoreUpdate" from="spaceRow.update()"/>
+                        <set field="clearedSpaceCount" from="clearedSpaceCount + 1"/>
+                    <else>
+                        <set field="keptSpaceCount" from="keptSpaceCount + 1"/>
+                    </else>
+                    </if>
+                </if>
+            </iterate>
+        </actions>
+    </service>
+
     <!-- Task 13 fix round 1, Critical 2: originally named facade.ReconciliationFacadeServices.migrate#
          AutomationExcludeFilters with allow-remote="true"/authenticate="true". data/SecuritySeedData.xml
          warns that facade.* is an auto-grant trap — the facade.* ArtifactGroupMember grants AUTHZA_ALL

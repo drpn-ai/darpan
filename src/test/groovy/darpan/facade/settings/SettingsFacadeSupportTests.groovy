@@ -36,19 +36,14 @@ class SettingsFacadeSupportTests {
         assertIterableEquals(["HotWax", "SHOPIFY", "NETSUITE"], deduplicated.collect { it.label })
     }
 
-    // TenantNotificationSetting + get#/save#TenantNotificationSettings retired 2026-07-29 (replaced by
-    // TenantChatSpace + save#TenantChatSpace, migrated by migrate#TenantNotificationSettings). These
-    // support statics are unchanged and now back save#TenantChatSpace instead — this case keeps the
-    // raw-URL-never-echoed invariant covered under its new name.
+    // Masking was removed 2026-08-14 by decision: the webhook URL is now stored and returned in
+    // clear text, so there is no raw-URL-never-echoed invariant left to cover. Validation is still
+    // load bearing — it is the only thing stopping a non-Google-Chat URL reaching the delivery call.
     @Test
-    void googleChatWebhookValidationAndMaskingKeepSecretsOutOfTenantChatSpaceResponses() {
+    void googleChatWebhookValidationRejectsAnythingButAGoogleChatSpaceEndpoint() {
         String webhookUrl = "https://chat.googleapis.com/v1/spaces/AAQAayYEtUA/messages?key=test-key&token=test-token"
 
         assertNull(TenantNotificationSupport.validateGoogleChatWebhookUrl(webhookUrl))
-        assertEquals(
-                "https://chat.googleapis.com/v1/spaces/AAQA...EtUA/messages?key=...&token=...",
-                TenantNotificationSupport.maskGoogleChatWebhookUrl(webhookUrl)
-        )
         assertEquals("Google Chat webhook URL must use https.",
                 TenantNotificationSupport.validateGoogleChatWebhookUrl("http://chat.googleapis.com/v1/spaces/test/messages?key=a&token=b"))
         assertEquals("Google Chat webhook URL must use chat.googleapis.com.",

@@ -553,7 +553,7 @@ Named Google Chat space registry entry for one tenant. Replaces the single-webho
 - `chatSpaceId` (PK)
 - `companyUserGroupId`
 - `spaceName` (unique per tenant, case-insensitive, service-validated)
-- `googleChatWebhookUrl` (encrypted)
+- `googleChatWebhookUrl` (clear text since 2026-08-14)
 - `isActive`
 - `createdByUserId`
 - `createdDate`

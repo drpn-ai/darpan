@@ -63,22 +63,6 @@ class TenantNotificationSupport {
         return null
     }
 
-    static String maskGoogleChatWebhookUrl(Object rawWebhookUrl) {
-        String webhookUrl = ((rawWebhookUrl)?.toString()?.trim())
-        if (!webhookUrl) return null
-
-        try {
-            URI uri = URI.create(webhookUrl)
-            String path = uri.path ?: ""
-            List<String> segments = path.split("/").findAll { it }
-            String spaceId = segments.size() >= 3 ? segments[2] : null
-            String maskedSpace = spaceId ? (spaceId.length() <= 8 ? "..." : spaceId.substring(0, 4) + "..." + spaceId.substring(spaceId.length() - 4)) : "space"
-            return "${uri.scheme}://${uri.host}/v1/spaces/${maskedSpace}/messages?key=...&token=..."
-        } catch (Exception ignored) {
-            return "configured"
-        }
-    }
-
     static Map<String, Object> notifyRunCompleted(def ec, Map<String, Object> runResult) {
         Map<String, Object> context = new LinkedHashMap<String, Object>((runResult ?: [:]) as Map<String, Object>)
         String tenantId = ((context.companyUserGroupId)?.toString()?.trim())

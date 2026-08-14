@@ -188,8 +188,11 @@
         <field name="spaceName" type="text-medium" not-null="true">
             <description>Display label, unique per tenant (case-insensitive, service-validated).</description>
         </field>
-        <field name="googleChatWebhookUrl" type="text-very-long" encrypt="true">
-            <description>Google Chat incoming webhook URL. Treat as a secret and never return raw in facade responses.</description>
+        <field name="googleChatWebhookUrl" type="text-very-long">
+            <description>Google Chat incoming webhook URL. Stored and returned in clear text by decision
+                2026-08-14: at-rest encryption here shared entity_ds_crypt_pass with the API credential
+                fields, so a key problem silently broke notification delivery for a value that is
+                re-pastable from Google Chat in seconds. Reads are no longer masked either.</description>
         </field>
         <field name="isActive" type="text-indicator" default="'Y'"/>
         <field name="createdByUserId" type="id"/>

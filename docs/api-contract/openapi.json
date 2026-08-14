@@ -13125,7 +13125,7 @@
                 "properties": {
                     
                 },
-                "description": "List active-tenant Google Chat spaces with webhook redaction."
+                "description": "List active-tenant Google Chat spaces, including the webhook URL in clear text."
             },
             "ListTenantChatSpacesResult": {
                 "type": "object",
@@ -13159,7 +13159,7 @@
                                 "googleChatConfigured": {
                                     "type": "boolean"
                                 },
-                                "googleChatWebhookUrlMasked": {
+                                "googleChatWebhookUrl": {
                                     "type": "string"
                                 },
                                 "isActive": {
@@ -13870,7 +13870,7 @@
                 "required": [
                     "spaceName"
                 ],
-                "description": "Create or update one named Google Chat space for the active tenant. Webhook URL is write-only."
+                "description": "Create or update one named Google Chat space for the active tenant."
             },
             "SaveTenantChatSpaceResult": {
                 "type": "object",

@@ -86,7 +86,8 @@ class SettingsFacadeTenantFilteringSmokeTests {
         List<Map<String, Object>> chatSpaces = (List<Map<String, Object>>) (chatSpaceResult.chatSpaces ?: [])
         assertEquals(["KREWE_SPACE"], chatSpaces.collect { Map<String, Object> row -> row.chatSpaceId })
         assertTrue(chatSpaces.first().googleChatConfigured as boolean)
-        assertTrue((chatSpaces.first().googleChatWebhookUrlMasked as String).contains("key=...&token=..."))
+        assertEquals("https://chat.googleapis.com/v1/spaces/KREWE_SPACE/messages?key=krewe-key&token=krewe-token",
+                chatSpaces.first().googleChatWebhookUrl as String)
         assertNoRawCredentialFields(chatSpaces)
 
         ec.message.clearErrors()
@@ -254,7 +255,8 @@ class SettingsFacadeTenantFilteringSmokeTests {
         Map<String, Object> chatSpace = (Map<String, Object>) saveResult.chatSpace
         assertEquals("Gorjana new space", chatSpace.spaceName)
         assertEquals(true, chatSpace.googleChatConfigured)
-        assertTrue((chatSpace.googleChatWebhookUrlMasked as String).contains("key=...&token=..."))
+        assertEquals("https://chat.googleapis.com/v1/spaces/GORJANA_NEW/messages?key=new-key&token=new-token",
+                chatSpace.googleChatWebhookUrl as String)
         assertNoRawCredentialFields(chatSpace)
 
         String chatSpaceId = chatSpace.chatSpaceId as String
@@ -558,7 +560,10 @@ class SettingsFacadeTenantFilteringSmokeTests {
     private static void assertNoRawCredentialFields(Object payload) {
         if (payload instanceof Map) {
             Map map = (Map) payload
-            ["password", "privateKey", "apiToken", "privateKeyPem", "llmApiKey", "googleChatWebhookUrl"].each { String fieldName ->
+            // googleChatWebhookUrl was removed from this list 2026-08-14: that field is deliberately
+            // returned in clear text now. The other five are still masked and this helper is the only
+            // thing asserting it, so do not thin the list further without the same explicit decision.
+            ["password", "privateKey", "apiToken", "privateKeyPem", "llmApiKey"].each { String fieldName ->
                 assertFalse(map.containsKey(fieldName), "Response must not expose ${fieldName}: ${map}")
             }
             map.values().each { Object value -> assertNoRawCredentialFields(value) }

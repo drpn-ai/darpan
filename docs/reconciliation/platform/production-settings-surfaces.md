@@ -120,7 +120,7 @@ Run these checks after production setup or after moving a tenant to a new enviro
 
 - As tenant A editor, save a named Google Chat space through `facade.SettingsFacadeServices.save#TenantChatSpace`.
 - Confirm the stored `darpan.reconciliation.TenantChatSpace.companyUserGroupId` is tenant A.
-- Call `list#TenantChatSpaces` and confirm each row includes `googleChatConfigured=true` and only `googleChatWebhookUrlMasked`, never the raw webhook URL.
+- Call `list#TenantChatSpaces` and confirm each row includes `googleChatConfigured=true` and the `googleChatWebhookUrl` in clear text. Masking and at-rest encryption were both removed 2026-08-14; treat read access to this service as read access to the webhook itself.
 - Save again with the same `chatSpaceId` and confirm the row is updated, not duplicated; saving a second space with the same name (case-insensitive) in the same tenant must fail.
 - Switch to tenant B and call `list#TenantChatSpaces`; tenant A's spaces must not appear.
 - As a Tenant User in tenant A, call `list#TenantChatSpaces`; the configured/redacted status may appear.

@@ -1775,7 +1775,7 @@ SERVICE list TenantChatSpaces
     chatSpaces.createdByUserId : String
     chatSpaces.createdDate : Timestamp
     chatSpaces.googleChatConfigured : Boolean
-    chatSpaces.googleChatWebhookUrlMasked : String
+    chatSpaces.googleChatWebhookUrl : String
     chatSpaces.inUse : Boolean
     chatSpaces.isActive : String
     chatSpaces.lastUpdatedDate : Timestamp

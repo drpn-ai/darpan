@@ -56,13 +56,19 @@ class LegacyCanReadOrdersRatchetTest {
             // isDisabled()) — Task 14, immediately after this one, replaces that single boolean with
             // a per-endpoint report. Stays allowlisted until Task 14 lands.
             "ShopifyConnectionProbe.groovy",
-            // AutomationFacadeSupport.groovy's listOmsRestSourceConfigOptions/listShopifyAuthConfigOptions/
-            // listOmsRestSourceRemoteOptions still filter the automation source-config picker by the
-            // raw canReadOrders field instead of SourceEndpointAccessSupport.isEndpointEnabled. This
-            // is real, pre-existing (not introduced by Task 13) technical debt: the plan document's
-            // own "Explicitly NOT in this plan" section names these "registry-driven option builders"
-            // as Plan 2 scope. Allowlisted here for the same reason as the connection probe above —
-            // tracked, not silently accepted as permanent.
+            // AutomationFacadeSupport.groovy's listOmsRestSourceConfigOptions, listShopifyAuthConfigOptions
+            // and listOmsRestSourceRemoteOptions still filter the automation source-config picker by
+            // the raw canReadOrders field instead of SourceEndpointAccessSupport.isEndpointEnabled.
+            // This is real, pre-existing (not introduced by Task 13) technical debt, already planned:
+            // docs/superpowers/plans/2026-08-14-endpoint-enablement-plan2-registry-driven-options.md,
+            // Task 6 Step 3 rewrites listOmsRestSourceConfigOptions's and listShopifyAuthConfigOptions's
+            // option shaping, and Step 4 rewrites listOmsRestSourceRemoteOptions (together with
+            // listShopifySourceRemoteOptions) into one registry-driven builder — between them, Task 6
+            // covers all three of this file's canReadOrders reads. NOT the Plan 1 "Explicitly NOT in
+            // this plan" section, which names only listOmsRestSourceRemoteOptions,
+            // listShopifySourceRemoteOptions and inferSystemEnumId, not the two Options builders.
+            // Allowlisted here for the same reason as the connection probe above — tracked, not
+            // silently accepted as permanent.
             "AutomationFacadeSupport.groovy",
     ]
 

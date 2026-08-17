@@ -755,4 +755,37 @@
         </relationship>
     </entity>
 
+    <!-- Rules-board pills for ONE endpoint, as data.
+         Keyed on systemEnumId (the ENDPOINT), not the parent system: SHOPIFY emits
+         $.records[*].id / .name while SHOPIFY_RETURN_REFS emits $.records[*].orderId / .orderName.
+         Two endpoints on the same credential and the same API produce different record keys, so
+         per-system pills cannot express this.
+
+         EVERY fieldPath MUST name a top-level SCALAR key on the emitted record. SourceFilterSupport
+         reduces a stored expression via CompareIdExpressionSupport.topLevelRecordField and matches
+         top-level keys only — a nested path OR a list-valued key persists a rule that validates,
+         matches nothing, and reports no error. Ratchet test enforces this. -->
+    <entity entity-name="SourceSystemConnectorField" package="darpan.reconciliation"
+            use="configuration" cache="true">
+        <description>One selectable record field offered by a source endpoint's rules board.</description>
+        <field name="systemEnumId" type="id" is-pk="true"/>
+        <field name="fieldPath" type="text-medium" is-pk="true"/>
+        <field name="label" type="text-medium"/>
+        <field name="fieldType" type="text-short" default="'string'"/>
+        <field name="isPrimaryIdCandidate" type="text-indicator" default="'N'">
+            <description>Whether this field may be chosen as a join key. Deliberately narrower than the
+                full pill list: primary-ID selection wants key-like fields only.</description>
+        </field>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="description" type="text-long">
+            <description>Why this pill is safe to offer — which projection returns it, or why a
+                sibling field is deliberately absent. Migrated from the doc comments this table
+                replaces; do not leave blank when adding a row.</description>
+        </field>
+
+        <relationship type="one" title="Connector" related="darpan.reconciliation.SourceSystemConnector" short-alias="connector">
+            <key-map field-name="systemEnumId" related-field-name="systemEnumId"/>
+        </relationship>
+    </entity>
+
 </entities>

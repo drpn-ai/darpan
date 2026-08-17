@@ -14286,6 +14286,24 @@
                                 }
                             }
                         }
+                    },
+                    "endpoints": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "systemEnumId": {
+                                    "type": "string"
+                                },
+                                "endpointLabel": {
+                                    "type": "string"
+                                },
+                                "isEnabled": {
+                                    "type": "boolean"
+                                }
+                            }
+                        },
+                        "description": "Per-endpoint enablement, when the connector's probe reports it (currently\n                    only Shopify's). Connectors that don't report it leave this empty."
                     }
                 }
             },

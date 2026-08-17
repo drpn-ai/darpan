@@ -881,6 +881,13 @@
                     <parameter name="durationMillis" type="Long"/>
                 </parameter>
             </parameter>
+            <parameter name="endpoints" type="List">
+                <description>Per-endpoint enablement, when the connector's probe reports it (currently
+                    only Shopify's). Connectors that don't report it leave this empty.</description>
+                <parameter name="systemEnumId"/>
+                <parameter name="endpointLabel"/>
+                <parameter name="isEnabled" type="Boolean"/>
+            </parameter>
         </out-parameters>
         <actions>
             <script>context.putAll(darpan.facade.settings.SourceConnectionDiagnosticsSupport.testSourceConnection(ec, systemEnumId, configId, stage, staged))</script>

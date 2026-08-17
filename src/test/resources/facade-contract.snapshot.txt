@@ -1986,6 +1986,10 @@ SERVICE test SourceConnection
     checks.check : Map
     connectionOk : Boolean
     durationMillis : Long
+    endpoints : List
+    endpoints.endpointLabel : String
+    endpoints.isEnabled : Boolean
+    endpoints.systemEnumId : String
     errors : List
     errors.error : String
     messages : List

@@ -101,6 +101,9 @@ class SourceConnectionDiagnosticsSupport {
         boolean staged = stage != null || normalizeBool(rawStaged, false)
 
         List<Map<String, Object>> checks
+        // Optional: most connectors are single-endpoint and never set this key, so it stays [] for
+        // them. Declared outside the try (like checks/nextStage) because `result` is try-scoped.
+        List<Map<String, Object>> endpoints = []
         String nextStage = null
         try {
             Map<String, Object> parameters = [(configParameterName): configId] as Map<String, Object>
@@ -110,6 +113,7 @@ class SourceConnectionDiagnosticsSupport {
                     .parameters(parameters)
                     .call() as Map<String, Object>
             checks = normalizeChecks(result?.get("checks"))
+            endpoints = normalizeEndpoints(result?.get("endpoints"))
             nextStage = staged ? normalize(result?.get("nextStage")) : null
         } catch (Throwable t) {
             // A probe that blows up is a defect, but the operator should see a diagnostic verdict
@@ -134,6 +138,7 @@ class SourceConnectionDiagnosticsSupport {
                 connectionOk  : connectionOk,
                 checks        : checks,
                 nextStage     : nextStage,
+                endpoints     : endpoints,
                 durationMillis: durationMillis,
         ] as Map<String, Object>
     }
@@ -171,12 +176,36 @@ class SourceConnectionDiagnosticsSupport {
         return out
     }
 
+    /**
+     * Coerce whatever a probe returned into the endpoint contract. Optional and connector-specific —
+     * most probes (single-endpoint sources like OMS) never set this key, so absent or malformed input
+     * becomes an empty list rather than a service-shape error. Mirrors normalizeChecks' drop-the-row-
+     * rather-than-fail-the-call posture: an entry missing systemEnumId is dropped, not defaulted.
+     */
+    protected static List<Map<String, Object>> normalizeEndpoints(Object raw) {
+        if (!(raw instanceof Collection)) return []
+        List<Map<String, Object>> out = []
+        ((Collection) raw).each { Object item ->
+            if (!(item instanceof Map)) return
+            Map row = (Map) item
+            String systemEnumId = normalize(row.get("systemEnumId"))
+            if (!systemEnumId) return
+            out.add([
+                    systemEnumId : systemEnumId,
+                    endpointLabel: normalize(row.get("endpointLabel")) ?: systemEnumId,
+                    isEnabled    : normalizeBool(row.get("isEnabled"), true),
+            ] as Map<String, Object>)
+        }
+        return out
+    }
+
     private static Map<String, Object> unavailable(long startedAt) {
         return [
                 available     : false,
                 connectionOk  : false,
                 checks        : [],
                 nextStage     : null,
+                endpoints     : [],
                 durationMillis: System.currentTimeMillis() - startedAt,
         ] as Map<String, Object>
     }

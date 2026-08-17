@@ -355,4 +355,62 @@ class SourceSystemConnectorSupportSmokeTests {
         assertTrue(duplicateExtractServices.isEmpty(),
                 "extractServiceName claimed by more than one enabled connector: ${duplicateExtractServices}")
     }
+
+    /**
+     * Ratchet, not a spot check. HOTWAX_OMS_RECON_ORDER_FIELD_OPTIONS is currently derived in code by
+     * filtering HOTWAX_OMS_ORDER_FIELD_OPTIONS, so the two provably cannot diverge. Once both become
+     * SourceSystemConnectorField seed rows (Task 5), that guarantee is gone — this test replaces it.
+     * The recon endpoint (OMS_RECON_ORDERS) projects server-side to a subset of the OMS document; an
+     * extra pill there names a field that never arrives, so a rule on it validates, persists, and
+     * excludes nothing.
+     */
+    @Test
+    void reconOrderPillsAreASubsetOfOmsPills() {
+        ReconciliationSmokeTestSupport.loadSeedData(ec,
+                "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+
+        Set<String> omsPaths = pillPaths("OMS")
+        Set<String> reconPaths = pillPaths("OMS_RECON_ORDERS")
+
+        assertTrue(omsPaths.containsAll(reconPaths),
+                "The recon endpoint projects server-side to a subset of the OMS document. Extra pills " +
+                "here name fields that never arrive: ${(reconPaths - omsPaths).sort()}")
+    }
+
+    /**
+     * Ratchet, not a spot check. SourceFilterSupport matches top-level record keys only, via
+     * CompareIdExpressionSupport.topLevelRecordField. A nested path or a list-valued key persists a
+     * rule that validates, matches nothing, and reports no error.
+     */
+    @Test
+    void everyPillNamesATopLevelScalarKey() {
+        ReconciliationSmokeTestSupport.loadSeedData(ec,
+                "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+
+        List rows = ec.entity.find("darpan.reconciliation.SourceSystemConnectorField")
+                .useCache(false).list() ?: []
+        assertFalse(rows.isEmpty(), "Seed data did not load")
+
+        // SourceFilterSupport matches top-level record keys only, via
+        // CompareIdExpressionSupport.topLevelRecordField. Anything else persists a rule that
+        // validates, matches nothing, and reports no error.
+        List<String> offenders = rows.collect { it.fieldPath as String }.findAll { String path ->
+            !(path ==~ /^\$\.records\[\*\]\.[A-Za-z][A-Za-z0-9]*$/)
+        }
+        assertTrue(offenders.isEmpty(), "Non top-level pill paths: ${offenders.sort()}")
+
+        // List-valued keys are top-level but equally unusable. These are the known ones on
+        // SHOPIFY_RETURN_REFS; a new list-valued field must be added here when its endpoint ships.
+        List<String> listValued = ["refundIds", "returnIds", "refunds", "returns"]
+        List<String> listOffenders = rows.findAll { it.systemEnumId == "SHOPIFY_RETURN_REFS" }
+                .collect { (it.fieldPath as String).substring("\$.records[*].".length()) }
+                .findAll { listValued.contains(it) }
+        assertTrue(listOffenders.isEmpty(), "List-valued pills are not offerable: ${listOffenders.sort()}")
+    }
+
+    private Set<String> pillPaths(String systemEnumId) {
+        return (ec.entity.find("darpan.reconciliation.SourceSystemConnectorField")
+                .condition("systemEnumId", systemEnumId).useCache(false).list() ?: [])
+                .collect { it.fieldPath as String } as Set<String>
+    }
 }

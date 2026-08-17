@@ -52,10 +52,6 @@ class LegacyCanReadOrdersRatchetTest {
             "ShopifyGraphqlFacadeSupport.groovy",
 
             // --- Known, tracked-elsewhere readers that Task 13 does not fix ---
-            // ShopifyConnectionProbe.groovy still reads config.canReadOrders directly (build() and
-            // isDisabled()) — Task 14, immediately after this one, replaces that single boolean with
-            // a per-endpoint report. Stays allowlisted until Task 14 lands.
-            "ShopifyConnectionProbe.groovy",
             // AutomationFacadeSupport.groovy's listOmsRestSourceConfigOptions, listShopifyAuthConfigOptions
             // and listOmsRestSourceRemoteOptions still filter the automation source-config picker by
             // the raw canReadOrders field instead of SourceEndpointAccessSupport.isEndpointEnabled.
@@ -67,8 +63,7 @@ class LegacyCanReadOrdersRatchetTest {
             // covers all three of this file's canReadOrders reads. NOT the Plan 1 "Explicitly NOT in
             // this plan" section, which names only listOmsRestSourceRemoteOptions,
             // listShopifySourceRemoteOptions and inferSystemEnumId, not the two Options builders.
-            // Allowlisted here for the same reason as the connection probe above — tracked, not
-            // silently accepted as permanent.
+            // Allowlisted here as tracked, planned debt — not silently accepted as permanent.
             "AutomationFacadeSupport.groovy",
     ]
 

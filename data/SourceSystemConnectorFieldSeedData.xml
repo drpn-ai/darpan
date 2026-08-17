@@ -113,10 +113,13 @@
             label="Order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
             description="bareId(legacyResourceId ?: id) — the bare GID tail, matching the numeric Shopify
                 reference the OMS side stores."/>
-    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].orderName"
-            label="Order name" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
-            description="normalize(node.name) — NULLABLE. See Task 3 Step 1: this row ships only if a captured
-                extract shows it reliably populated."/>
+    <!-- orderName (normalize(node.name), $.records[*].orderName) was DROPPED here (Task 3, Plan 2):
+         no captured SHOPIFY_RETURN_REFS extract exists anywhere in the repo to prove the field is
+         reliably populated, and the field is documented nullable at
+         ShopifyReturnRefsSupport.groovy:263. An unevidenced primary-ID candidate produces a run that
+         silently matches nothing and reports no error, which is worse than shipping with orderId as
+         the sole primary-ID candidate. Re-add only once a real captured extract proves it populated
+         on every sampled record. -->
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].createdAt"
             label="Order created" fieldType="string" sequenceNum="3"
             description="Order creation date. NOT the refund/return event date — those live inside the

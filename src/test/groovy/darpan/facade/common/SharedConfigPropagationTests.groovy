@@ -321,6 +321,18 @@ class SharedConfigPropagationTests {
                                         activeTenant ? [[userId         : "aditi",
                                                          userGroupId    : activeTenant,
                                                          groupTypeEnumId: "UgtDarpanCompany"]] : []),
+                        // Task 8: validateHotWaxOmsConfig now ends in
+                        // requireEndpointEnabledForSide -> SourceEndpointAccessSupport.isEndpointEnabled,
+                        // which builds its catalog from SourceSystemConnector rows. Without this row the
+                        // catalog is empty and EVERY endpoint reads disabled (absent-means-enabled only
+                        // applies to the ACCESS decision, never to catalog membership), which would fail
+                        // validateHotWaxOmsConfigAllowsAMemberTenantToReferenceTheSharedConfig even though
+                        // canReadOrders: "Y" above says the config itself is fine. Mirrors ecForAutomation.
+                        "darpan.reconciliation.SourceSystemConnector":
+                                new SharedConfigAccessSupportTests.FinderStub(listResult:
+                                        [[systemEnumId    : "OMS",
+                                          configEntityName: "darpan.hotwax.HotWaxOmsRestSourceConfig",
+                                          enabled         : "Y"]]),
                 ]),
                 message: new SharedConfigAccessSupportTests.MessageFacadeStub(),
                 l10n: new Expando(timeZone: "UTC"),

@@ -1,6 +1,7 @@
 package darpan.facade.reconciliation
 
 import darpan.common.DarpanEntityConstants
+import darpan.reconciliation.automation.SourceEndpointAccessSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.core.CompareIdExpressionSupport
 import darpan.reconciliation.source.SourceFilterSupport
@@ -20,7 +21,6 @@ import java.sql.Statement
 
 import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.boundedInt
-import static darpan.common.ValueSupport.normalizeBool
 import static darpan.common.ValueSupport.normalizeInt
 import static darpan.common.ValueSupport.normalizeLower
 import static darpan.common.ValueSupport.normalizeUpper
@@ -946,7 +946,10 @@ class ReconciliationSavedRunSupport {
             sourceConfigId = normalize(nsRestletConfig.nsAuthConfigId)
         }
 
-        String expectedType = expectedSourceConfigType(ec, systemEnumId)
+        // Resolved once and reused below for dispatch, instead of a second call to
+        // expectedSourceConfigType(ec, systemEnumId) — same registry row, same result.
+        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, systemEnumId)
+        String expectedType = connector?.expectedSourceConfigType
         if (expectedType && !sourceConfigId) {
             ec.message.addError("${sourceLabel} API source requires sourceConfigId for ${systemEnumId}.")
             return [sourceConfigId: null, sourceConfigType: null]
@@ -959,19 +962,26 @@ class ReconciliationSavedRunSupport {
         }
         sourceConfigType = sourceConfigType ?: expectedType
 
-        switch (systemEnumId) {
-            case SYSTEM_SHOPIFY:
-                validateShopifyAuthConfig(ec, sourceLabel, sourceConfigId)
-                break
-            case SYSTEM_HOTWAX_OMS:
-                validateHotWaxOmsConfig(ec, sourceLabel, sourceConfigId)
-                break
-            case SYSTEM_NETSUITE:
-                validateNetSuiteAuthConfig(ec, sourceLabel, sourceConfigId, nsRestletConfig)
-                break
-            default:
-                break
+        // Registry-driven dispatch: which validator applies (and therefore which endpoint gate
+        // fires) is decided by the connector row's OWN configEntityName, not a per-systemEnumId
+        // switch. This is what lets a new endpoint sharing an existing config entity — OMS_RETURNS,
+        // OMS_TRANSFER_ORDERS, OMS_RECON_ORDERS, SHOPIFY_RETURN_REFS, ... — reach the same gate its
+        // base system already had, with no new case needed here. Each validator receives the run's
+        // REAL systemEnumId (not a hardcoded constant) so requireEndpointEnabledForSide checks the
+        // endpoint the run actually names, never a fixed parent.
+        String configTypeEnumId = SourceEndpointAccessSupport.configTypeForEntityName(connector?.configEntityName as String)
+        if (configTypeEnumId == SharedConfigAccessSupport.CONFIG_TYPE_SHOPIFY_AUTH) {
+            validateShopifyAuthConfig(ec, sourceLabel, sourceConfigId, systemEnumId)
+        } else if (configTypeEnumId == SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS) {
+            validateHotWaxOmsConfig(ec, sourceLabel, sourceConfigId, systemEnumId)
+        } else if (systemEnumId == SYSTEM_NETSUITE) {
+            // NetSuite's connector row carries no configEntityName by design (no automation
+            // extractor — see SourceSystemConnectorSeedData.xml) so it can never resolve through the
+            // registry branches above; dispatch stays a direct, unchanged call.
+            validateNetSuiteAuthConfig(ec, sourceLabel, sourceConfigId, nsRestletConfig)
         }
+        // else: unregistered system (e.g. SAPI, or no connector row at all) — no validator, exactly
+        // the prior "default: break" behavior.
 
         return [sourceConfigId: sourceConfigId, sourceConfigType: sourceConfigType]
     }
@@ -982,7 +992,19 @@ class ReconciliationSavedRunSupport {
         return SourceSystemConnectorSupport.resolve(ec, rawSystemEnumId)?.expectedSourceConfigType
     }
 
-    protected static void validateShopifyAuthConfig(def ec, String sourceLabel, String sourceConfigId) {
+    /**
+     * Shared by both saved-run guards so the two cannot drift. Absent access row means enabled — do
+     * not "optimise" this into a finder condition.
+     */
+    static void requireEndpointEnabledForSide(def ec, String configTypeEnumId, String configId,
+                                              String systemEnumId) {
+        if (!SourceEndpointAccessSupport.isEndpointEnabled(ec, configTypeEnumId, configId, systemEnumId)) {
+            ec.message.addError("Source config ${configId} is not enabled for ${systemEnumId}.".toString())
+        }
+    }
+
+    protected static void validateShopifyAuthConfig(def ec, String sourceLabel, String sourceConfigId,
+                                                     String systemEnumId = SYSTEM_SHOPIFY) {
         // DAR-BE-005 seam B: a config reachable in the settings list must also be referenceable.
         // findGlobalUnscoped loads by explicit PK; canActiveTenantUseConfig gates it immediately —
         // owner OR peer-group member. With zero grants this is exactly the old tenant-only behavior.
@@ -1010,12 +1032,12 @@ class ReconciliationSavedRunSupport {
         if (normalize(config.isActive) == "N") {
             ec.message.addError("${sourceLabel} Shopify auth config '${sourceConfigId}' is inactive.")
         }
-        if (!normalizeBool(config.canReadOrders)) {
-            ec.message.addError("${sourceLabel} Shopify auth config '${sourceConfigId}' cannot read orders.")
-        }
+        requireEndpointEnabledForSide(ec, SharedConfigAccessSupport.CONFIG_TYPE_SHOPIFY_AUTH, sourceConfigId,
+                systemEnumId)
     }
 
-    protected static void validateHotWaxOmsConfig(def ec, String sourceLabel, String sourceConfigId) {
+    protected static void validateHotWaxOmsConfig(def ec, String sourceLabel, String sourceConfigId,
+                                                   String systemEnumId = SYSTEM_HOTWAX_OMS) {
         // DAR-BE-005 seam B: a config reachable in the settings list must also be referenceable.
         // findGlobalUnscoped loads by explicit PK; canActiveTenantUseConfig gates it immediately —
         // owner OR peer-group member. With zero grants this is exactly the old tenant-only behavior.
@@ -1043,9 +1065,8 @@ class ReconciliationSavedRunSupport {
         if (normalize(config.isActive) == "N") {
             ec.message.addError("${sourceLabel} HotWax source config '${sourceConfigId}' is inactive.")
         }
-        if (!normalizeBool(config.canReadOrders)) {
-            ec.message.addError("${sourceLabel} HotWax source config '${sourceConfigId}' cannot read orders.")
-        }
+        requireEndpointEnabledForSide(ec, SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, sourceConfigId,
+                systemEnumId)
     }
 
     protected static void validateNetSuiteAuthConfig(def ec, String sourceLabel, String sourceConfigId, def nsRestletConfig) {

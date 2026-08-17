@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Rules-board pills, migrated from the AutomationFacadeSupport constants they replace.
+
+     LOAD ORDER: every row references a SourceSystemConnector by systemEnumId, so
+     SourceSystemConnectorSeedData.xml must load first. When this file is folded into a release
+     upgrade-data.xml, re-check parent-before-child BY HAND after generating — the generator sorts
+     alphabetically and has broken Moqui FK load order before.
+
+     ADDING AN ENDPOINT: one Enumeration row, one SourceSystemConnector row, and N rows here. No
+     Groovy or Vue change. EndpointExpandabilityTests proves that claim. -->
+<entity-facade-xml type="darpan-seed">
+
+    <!-- OMS orders. A SUPERSET of the primary-ID subset: salesChannelEnumId and productStoreId are
+         NOT in the connector's keepFieldsBase and are here deliberately, because exclusion filters
+         run BEFORE projection (OmsRestSourceSupport.prepareOrdersPage) so any raw record field is
+         testable. Every entry names a real top-level key on the OMS order document
+         (org.apache.ofbiz.order.order.OrderHeader). -->
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].orderId"
+            label="Order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
+            description="OMS order identity. In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].orderName"
+            label="Order name" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
+            description="Operator-facing order name. In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].externalId"
+            label="External ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            description="Shopify reference stored on the OMS order. In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].grandTotal"
+            label="Grand total" fieldType="string" sequenceNum="4"
+            description="In keepFieldsBase. Comparison only — not key-like."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].orderDate"
+            label="Order date" fieldType="string" sequenceNum="5"
+            description="In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].statusId"
+            label="Status" fieldType="string" sequenceNum="6"
+            description="In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].salesChannelEnumId"
+            label="Sales channel" fieldType="string" sequenceNum="7"
+            description="NOT in keepFieldsBase. Offered because exclusion filters run before projection on the
+                legacy endpoint, so the raw field is testable. This is a shipping exclusion use case."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].productStoreId"
+            label="Product store" fieldType="string" sequenceNum="8"
+            description="NOT in keepFieldsBase. Same reason as salesChannelEnumId."/>
+
+    <!-- OMS reconciliationOrders. A strict SUBSET of OMS: the endpoint projects SERVER-side to a
+         fixed set, so salesChannelEnumId and productStoreId never arrive and a rule drawn on either
+         would validate, persist, and then exclude nothing. Ratchet test enforces the subset. -->
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RECON_ORDERS" fieldPath="$.records[*].orderId"
+            label="Order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
+            description="Server-side projected by /rest/s1/oms/reconciliationOrders."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RECON_ORDERS" fieldPath="$.records[*].orderName"
+            label="Order name" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
+            description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RECON_ORDERS" fieldPath="$.records[*].externalId"
+            label="External ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RECON_ORDERS" fieldPath="$.records[*].grandTotal"
+            label="Grand total" fieldType="string" sequenceNum="4" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RECON_ORDERS" fieldPath="$.records[*].orderDate"
+            label="Order date" fieldType="string" sequenceNum="5" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RECON_ORDERS" fieldPath="$.records[*].statusId"
+            label="Status" fieldType="string" sequenceNum="6" description="Server-side projected."/>
+
+    <!-- OMS returns (DAR-BE-018 §5). Mirrors the connector's keepFieldsBase. items[] is deliberately
+         ABSENT: it is a nested array, not a top-level scalar key.
+         returnChannelEnumId IS offered here, unlike its orders analog salesChannelEnumId on the recon
+         connector, because the returns endpoint's server-side projection includes the channel field.
+         If OMS ever narrows that projection or implements the RQ-24 server-side channel filter,
+         remove this row.
+         The three primary-ID candidates are a NEW decision (primaryIdOptionsForSystem had no case for
+         this endpoint): returnId is the OMS identity, externalId the Shopify reference,
+         orderExternalId the order spine. -->
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].returnId"
+            label="Return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
+            description="OMS return identity."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].externalId"
+            label="Shopify reference" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
+            description="Shopify reference on the return."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].orderExternalId"
+            label="Order external ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            description="Order spine — joins a return back to its order."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].statusId"
+            label="Status" fieldType="string" sequenceNum="4" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].entryDate"
+            label="Entry date" fieldType="string" sequenceNum="5" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].returnTotal"
+            label="Return total" fieldType="string" sequenceNum="6" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].currencyUomId"
+            label="Currency" fieldType="string" sequenceNum="7" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].returnChannelEnumId"
+            label="Return channel" fieldType="string" sequenceNum="8"
+            description="Included in the endpoint's server-side projection, so a rule drawn on it sees a value.
+                Remove if OMS narrows the projection or ships the RQ-24 server-side channel filter."/>
+
+    <!-- Shopify orders. Deliberately only two: the record shape comes from a per-tenant GraphQL
+         request template, so any wider list would be guessed rather than derived. Both are
+         primary-ID candidates, which reproduces the old fieldOptionsForSystem null -> fall back to
+         primaryIdOptions behaviour exactly. -->
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].id"
+            label="Order ID" fieldType="ID" isPrimaryIdCandidate="Y" sequenceNum="1"
+            description="Shopify order GID."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].name"
+            label="Order name" fieldType="String" isPrimaryIdCandidate="Y" sequenceNum="2"
+            description="Shopify order name."/>
+
+    <!-- Shopify return references (DAR-BE-018 task 9). NEW — this endpoint had no pills anywhere.
+         Derived from the EMITTED record shape pinned at ShopifyReturnRefsSupport.groovy:245-249 and
+         built at :261-269, NOT from ShopifySourceCatalog.defaultSelectedFieldPaths (that is the
+         GraphQL selection, which is not what rules run against).
+         refundIds / returnIds / refunds / returns are top-level but LIST-VALUED and are therefore
+         deliberately absent — a rule on any of them would validate, match nothing, and report no
+         error. Note the key names differ from SHOPIFY: orderId/orderName, not id/name. -->
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].orderId"
+            label="Order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
+            description="bareId(legacyResourceId ?: id) — the bare GID tail, matching the numeric Shopify
+                reference the OMS side stores."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].orderName"
+            label="Order name" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
+            description="normalize(node.name) — NULLABLE. See Task 3 Step 1: this row ships only if a captured
+                extract shows it reliably populated."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].createdAt"
+            label="Order created" fieldType="string" sequenceNum="3"
+            description="Order creation date. NOT the refund/return event date — those live inside the
+                list-valued refunds[]/returns[] and are not offerable as pills."/>
+
+</entity-facade-xml>

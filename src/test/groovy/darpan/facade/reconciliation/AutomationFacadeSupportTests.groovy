@@ -119,44 +119,11 @@ class AutomationFacadeSupportTests {
         assertEquals([dbSource], result)
     }
 
-    /**
-     * DAR-BE-018. The reconciliationOrders connector is a second OMS orders source with its own
-     * systemEnumId, and these three helpers key on systemEnumId EQUALITY rather than on the connector
-     * registry. Without the new id they return null/empty, and the rules board silently offers no
-     * field pills and no primary-id choices for a source the operator can otherwise configure —
-     * a connector that validates and then cannot be given a join key.
-     *
-     * systemAliases does NOT cover this: aliases are read only by SourceSystemConnectorSupport.resolve
-     * to find a row FROM an id, and have no effect on these comparisons.
-     */
-    @Test
-    void reconciliationOrdersSystemOffersRulesBoardPillsAtAll() {
-        assertNotNull(AutomationFacadeSupport.fieldOptionsForSystem("OMS_RECON_ORDERS"),
-                "without pills the rules board cannot configure a source this connector can otherwise save")
-        assertEquals(AutomationFacadeSupport.primaryIdOptionsForSystem("OMS"),
-                AutomationFacadeSupport.primaryIdOptionsForSystem("OMS_RECON_ORDERS"),
-                "the join key must be selectable from the same choices — all three are projected fields")
-    }
-
-    /**
-     * The recon endpoint projects server-side to a fixed six-field set, so the two pills that exist
-     * only because the LEGACY endpoint ships whole order documents (salesChannelEnumId,
-     * productStoreId) must not be offered here. A rule drawn on a field the endpoint never returns
-     * would validate, persist, and then exclude nothing — silently.
-     */
-    @Test
-    void reconciliationOrdersPillsAreLimitedToProjectedFields() {
-        List<String> reconFields = AutomationFacadeSupport.fieldOptionsForSystem("OMS_RECON_ORDERS")
-                .collect { Map option -> (option.fieldPath as String).substring("\$.records[*].".length()) }
-        List<String> legacyFields = AutomationFacadeSupport.fieldOptionsForSystem("OMS")
-                .collect { Map option -> (option.fieldPath as String).substring("\$.records[*].".length()) }
-
-        assertEquals(["orderId", "orderName", "externalId", "grandTotal", "orderDate", "statusId"], reconFields)
-        assertFalse(reconFields.contains("salesChannelEnumId"))
-        assertFalse(reconFields.contains("productStoreId"))
-        // Still a strict subset of the legacy list, so the two cannot drift into disagreeing labels.
-        assertTrue(legacyFields.containsAll(reconFields))
-    }
+    // reconciliationOrdersSystemOffersRulesBoardPillsAtAll and reconciliationOrdersPillsAreLimitedTo-
+    // ProjectedFields moved to SourceSystemConnectorSupportSmokeTests.groovy (Task 5, Plan 2):
+    // fieldOptionsForSystem/primaryIdOptionsForSystem gained an ec parameter and now read the
+    // SourceSystemConnectorField registry, which needs a real, seed-backed ExecutionContext that
+    // this file's ec-free fixtures do not provide.
 
     @Test
     void reconciliationOrdersSystemLabelsItsOwnEndpoint() {
@@ -166,36 +133,10 @@ class AutomationFacadeSupportTests {
                 "the shared remoteId must not make this source display as the legacy Orders API")
     }
 
-    // ─── OMS_RETURNS field pills (DAR-BE-018 Task 6, design §5) ───────────────────
-    // fieldOptionsForSystem hard-branches on known system ids and returns null for anything else;
-    // a null falls back to primaryIdOptions and the returnChannelEnumId exclusion pill silently
-    // never appears — no error, no failing test, no log line.
-
-    @Test
-    void returnsSystemOffersTheChannelPill() {
-        List<Map<String, Object>> options = AutomationFacadeSupport.fieldOptionsForSystem("OMS_RETURNS")
-
-        assertNotNull(options, "OMS_RETURNS must have a curated pill list — null falls back to primaryIdOptions "
-                + "and the channel pill silently disappears (design §5)")
-        List<String> paths = options.collect { it.fieldPath as String }
-        assertTrue(paths.contains("\$.records[*].returnChannelEnumId"),
-                "the channel pill is the whole point of the returns exclusion: ${paths}")
-        assertTrue(paths.contains("\$.records[*].externalId"))
-        assertTrue(paths.contains("\$.records[*].orderExternalId"))
-    }
-
-    @Test
-    void returnsPillsNameOnlyTopLevelRecordKeys() {
-        // SourceFilterSupport matches against top-level keys via CompareIdExpressionSupport
-        // .topLevelRecordField, so a nested path would persist a rule that excludes nothing.
-        List<Map<String, Object>> options = AutomationFacadeSupport.fieldOptionsForSystem("OMS_RETURNS")
-        options.each { Map<String, Object> option ->
-            String path = option.fieldPath as String
-            String tail = path.substring(path.lastIndexOf('.') + 1)
-            assertFalse(tail.contains("["), "nested pill path is unusable: ${path}")
-            assertTrue(path.startsWith("\$.records[*]."), "unexpected pill path shape: ${path}")
-        }
-    }
+    // returnsSystemOffersTheChannelPill and returnsPillsNameOnlyTopLevelRecordKeys (DAR-BE-018 Task 6,
+    // design §5) moved to SourceSystemConnectorSupportSmokeTests.groovy (Task 5, Plan 2) for the same
+    // reason as the reconciliationOrders pill tests above — fieldOptionsForSystem now reads the
+    // registry and needs a real ec.
 
     static class MessageStub {
         List<String> errors = []

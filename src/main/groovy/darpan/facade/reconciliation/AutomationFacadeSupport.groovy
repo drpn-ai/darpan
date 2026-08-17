@@ -60,89 +60,6 @@ class AutomationFacadeSupport {
     static final String SHOPIFY_WINDOW_END_PARAMETER = "windowEnd"
     static final List<String> FILE_SIDES = [FILE_SIDE_1, FILE_SIDE_2].asImmutable()
     static final List<String> SUPPORTED_INPUT_MODES = [INPUT_MODE_API_RANGE, INPUT_MODE_SFTP_FILES].asImmutable()
-    static final List<Map<String, Object>> HOTWAX_OMS_ORDER_PRIMARY_ID_OPTIONS = [
-            [fieldPath: "\$.records[*].orderId", label: "Order ID", type: "string"],
-            [fieldPath: "\$.records[*].orderName", label: "Order name", type: "string"],
-            [fieldPath: "\$.records[*].externalId", label: "External ID", type: "string"],
-    ].asImmutable()
-    static final List<Map<String, Object>> SHOPIFY_ORDER_PRIMARY_ID_OPTIONS = [
-            [fieldPath: "\$.records[*].id", label: "Order ID", type: "ID"],
-            [fieldPath: "\$.records[*].name", label: "Order name", type: "String"],
-    ].asImmutable()
-
-    /**
-     * The fields the rules board offers as pills for an OMS source — a SUPERSET of
-     * {@link #HOTWAX_OMS_ORDER_PRIMARY_ID_OPTIONS}, which stays deliberately narrow because primary-ID
-     * selection wants key-like fields only.
-     *
-     * Contents = the OMS connector's {@code keepFieldsBase} (pinned against drift by
-     * SourceSystemConnectorSupportSmokeTests) PLUS {@code salesChannelEnumId} and
-     * {@code productStoreId}. Exclusion filters run BEFORE projection
-     * (OmsRestSourceSupport.prepareOrdersPage), so ANY raw-record field is testable and this list is a
-     * curated convenience, not a hard limit — those two are here precisely because they are the
-     * shipping exclusion use cases and are NOT in keepFieldsBase.
-     *
-     * Every entry must name a real top-level key on the OMS order document
-     * (org.apache.ofbiz.order.order.OrderHeader), because SourceFilterSupport matches rules against
-     * top-level record keys only. A pill naming a field the record does not carry would persist a rule
-     * that silently excludes nothing — see the guard tests in darpan-hotwax OmsRestSourceSupportTests.
-     *
-     * Safe for comparison rules too: resolveExtractKeepFields unions each rule's field paths into the
-     * projection keep-set, so a rule drawn on a non-keepFieldsBase field still sees its value.
-     */
-    static final List<Map<String, Object>> HOTWAX_OMS_ORDER_FIELD_OPTIONS = [
-            [fieldPath: "\$.records[*].orderId", label: "Order ID", type: "string"],
-            [fieldPath: "\$.records[*].orderName", label: "Order name", type: "string"],
-            [fieldPath: "\$.records[*].externalId", label: "External ID", type: "string"],
-            [fieldPath: "\$.records[*].grandTotal", label: "Grand total", type: "string"],
-            [fieldPath: "\$.records[*].orderDate", label: "Order date", type: "string"],
-            [fieldPath: "\$.records[*].statusId", label: "Status", type: "string"],
-            [fieldPath: "\$.records[*].salesChannelEnumId", label: "Sales channel", type: "string"],
-            [fieldPath: "\$.records[*].productStoreId", label: "Product store", type: "string"],
-    ].asImmutable()
-
-    /**
-     * The subset of the OMS pills that the /rest/s1/oms/reconciliationOrders connector may offer.
-     *
-     * The wider two pills exist because on the LEGACY endpoint exclusions run against the full order
-     * document before projection, so any raw field is testable. The recon endpoint projects
-     * SERVER-side to a fixed set, so salesChannelEnumId and productStoreId never arrive — a rule
-     * drawn on either would validate, persist, and then exclude nothing. Offering only what the
-     * endpoint actually returns keeps that failure impossible rather than silent.
-     *
-     * Derived from the list above rather than re-typed, so the two cannot drift apart.
-     */
-    static final List<Map<String, Object>> HOTWAX_OMS_RECON_ORDER_FIELD_OPTIONS =
-            HOTWAX_OMS_ORDER_FIELD_OPTIONS.findAll { Map<String, Object> option ->
-                !((String) option.fieldPath).endsWith("salesChannelEnumId") &&
-                        !((String) option.fieldPath).endsWith("productStoreId")
-            }.asImmutable()
-
-    /**
-     * Pills for the OMS returns connector (DAR-BE-018, design §5).
-     *
-     * Every entry must be a real TOP-LEVEL key on the OMS return header, because SourceFilterSupport
-     * reduces a stored expression via CompareIdExpressionSupport.topLevelRecordField and matches
-     * against top-level record keys only — a nested or non-existent path persists a rule that
-     * validates, excludes nothing, and reports no error.
-     *
-     * returnChannelEnumId IS offered here, unlike its orders analog salesChannelEnumId on the recon
-     * connector: the returns endpoint's server-side projection includes the channel field, so a rule
-     * drawn on it actually sees a value. If the OMS ever narrows that projection, or implements the
-     * RQ-24 server-side channel filter, remove this pill — see the design's §5 tension note.
-     *
-     * items[] is deliberately absent: it is a nested array, not a top-level scalar key.
-     */
-    static final List<Map<String, Object>> HOTWAX_OMS_RETURN_FIELD_OPTIONS = [
-            [fieldPath: "\$.records[*].returnId", label: "Return ID", type: "string"],
-            [fieldPath: "\$.records[*].externalId", label: "Shopify reference", type: "string"],
-            [fieldPath: "\$.records[*].orderExternalId", label: "Order external ID", type: "string"],
-            [fieldPath: "\$.records[*].statusId", label: "Status", type: "string"],
-            [fieldPath: "\$.records[*].entryDate", label: "Entry date", type: "string"],
-            [fieldPath: "\$.records[*].returnTotal", label: "Return total", type: "string"],
-            [fieldPath: "\$.records[*].currencyUomId", label: "Currency", type: "string"],
-            [fieldPath: "\$.records[*].returnChannelEnumId", label: "Return channel", type: "string"],
-    ].asImmutable()
 
     static Map<String, Object> prepareAutomationSave(def ec, Map params = [:]) {
         Map input = params ?: [:]
@@ -1264,8 +1181,8 @@ class AutomationFacadeSupport {
                         systemLabel          : enumLabel(ec, OMS_SYSTEM_ENUM_ID),
                         dateFromParameterName : HOTWAX_OMS_WINDOW_START_PARAMETER,
                         dateToParameterName   : HOTWAX_OMS_WINDOW_END_PARAMETER,
-                        primaryIdOptions      : HOTWAX_OMS_ORDER_PRIMARY_ID_OPTIONS,
-                        fieldOptions          : fieldOptionsForSystem(OMS_SYSTEM_ENUM_ID),
+                        primaryIdOptions      : primaryIdOptionsForSystem(ec, OMS_SYSTEM_ENUM_ID),
+                        fieldOptions          : fieldOptionsForSystem(ec, OMS_SYSTEM_ENUM_ID),
                         supportsExcludeFilters: omsSupportsExcludeFilters,
                         safeMetadataJson     : JsonOutput.toJson([
                                 extractServiceName: HOTWAX_OMS_ORDERS_EXTRACT_SERVICE,
@@ -1306,8 +1223,8 @@ class AutomationFacadeSupport {
                     systemLabel          : enumLabel(ec, SHOPIFY_SYSTEM_ENUM_ID),
                     dateFromParameterName: SHOPIFY_WINDOW_START_PARAMETER,
                     dateToParameterName  : SHOPIFY_WINDOW_END_PARAMETER,
-                    primaryIdOptions     : primaryIdOptionsForSystem(SHOPIFY_SYSTEM_ENUM_ID),
-                    fieldOptions         : fieldOptionsForSystem(SHOPIFY_SYSTEM_ENUM_ID),
+                    primaryIdOptions     : primaryIdOptionsForSystem(ec, SHOPIFY_SYSTEM_ENUM_ID),
+                    fieldOptions         : fieldOptionsForSystem(ec, SHOPIFY_SYSTEM_ENUM_ID),
                     supportsExcludeFilters: shopifySupportsExcludeFilters,
                     safeMetadataJson     : JsonOutput.toJson([
                             extractServiceName: SHOPIFY_ORDERS_EXTRACT_SERVICE,
@@ -1340,8 +1257,8 @@ class AutomationFacadeSupport {
                     sendServiceName      : sendServiceName,
                     systemEnumId         : systemEnumId,
                     systemLabel          : enumLabel(ec, systemEnumId),
-                    primaryIdOptions     : primaryIdOptionsForSystem(systemEnumId),
-                    fieldOptions         : fieldOptionsForSystem(systemEnumId),
+                    primaryIdOptions     : primaryIdOptionsForSystem(ec, systemEnumId),
+                    fieldOptions         : fieldOptionsForSystem(ec, systemEnumId),
                     supportsExcludeFilters: supportsExcludeFiltersForSystem(ec, systemEnumId),
                     label                : endpointLabel,
             ].findAll { it.value != null } as Map<String, Object>]
@@ -1392,38 +1309,40 @@ class AutomationFacadeSupport {
         return false
     }
 
-    protected static List<Map<String, Object>> primaryIdOptionsForSystem(String systemEnumId) {
-        switch (normalize(systemEnumId)) {
-            // Both OMS orders connectors read the same order documents and project the same six
-            // fields, so they offer the same choices; only the endpoint serving them differs.
-            case OMS_RECON_SYSTEM_ENUM_ID:
-            case OMS_SYSTEM_ENUM_ID:
-                return HOTWAX_OMS_ORDER_PRIMARY_ID_OPTIONS
-            case SHOPIFY_SYSTEM_ENUM_ID:
-                return SHOPIFY_ORDER_PRIMARY_ID_OPTIONS
-            default:
-                return []
-        }
+    /**
+     * Join-key candidates for an endpoint: the deliberately narrow, key-like subset.
+     * Registry-driven — a connector shipped later needs only seed rows.
+     */
+    static List<Map<String, Object>> primaryIdOptionsForSystem(def ec, String systemEnumId) {
+        return pillsForSystem(ec, systemEnumId, true)
     }
 
     /**
-     * The wider pill list the rules board uses, or null when this system has no curated superset —
-     * the board then falls back to {@code primaryIdOptions}, which is exactly today's behavior.
-     *
-     * OMS (both order connectors) and OMS_RETURNS have one. Shopify deliberately does NOT: its
-     * connector declares no {@code keepFieldsBase} and its record shape comes from a per-tenant
-     * GraphQL request template, so any wider list would be guessed rather than derived — and it
-     * declares no {@code filterParameterName} either, so it can carry no exclusions for the wider
-     * list to serve.
+     * The wider pill list the rules board offers. Endpoints with no curated superset simply have
+     * fewer rows — Shopify has exactly its two primary-ID candidates, which is byte-identical to the
+     * old "return null, board falls back to primaryIdOptions" behaviour.
      */
-    protected static List<Map<String, Object>> fieldOptionsForSystem(String systemEnumId) {
-        String normalized = normalize(systemEnumId)
-        if (normalized == OMS_SYSTEM_ENUM_ID) return HOTWAX_OMS_ORDER_FIELD_OPTIONS
-        // Narrower on purpose — the recon endpoint projects server-side, so the two extra pills
-        // would name fields that never arrive. See HOTWAX_OMS_RECON_ORDER_FIELD_OPTIONS.
-        if (normalized == OMS_RECON_SYSTEM_ENUM_ID) return HOTWAX_OMS_RECON_ORDER_FIELD_OPTIONS
-        if (normalized == OMS_RETURNS_SYSTEM_ENUM_ID) return HOTWAX_OMS_RETURN_FIELD_OPTIONS
-        return null
+    static List<Map<String, Object>> fieldOptionsForSystem(def ec, String systemEnumId) {
+        return pillsForSystem(ec, systemEnumId, false)
+    }
+
+    private static List<Map<String, Object>> pillsForSystem(def ec, String systemEnumId, boolean primaryIdOnly) {
+        String target = normalize(systemEnumId)
+        if (!target) return []
+
+        def finder = ec.entity.find("darpan.reconciliation.SourceSystemConnectorField")
+                .condition("systemEnumId", target)
+                .orderBy("sequenceNum,fieldPath")
+                .useCache(true)
+        if (primaryIdOnly) finder = finder.condition("isPrimaryIdCandidate", "Y")
+
+        return (finder.list() ?: []).collect { row ->
+            [
+                    fieldPath: readString(row, "fieldPath"),
+                    label    : readString(row, "label"),
+                    type     : readString(row, "fieldType") ?: "string",
+            ] as Map<String, Object>
+        } as List<Map<String, Object>>
     }
 
     /**

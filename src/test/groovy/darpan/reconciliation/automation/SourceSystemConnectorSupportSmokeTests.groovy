@@ -233,13 +233,19 @@ class SourceSystemConnectorSupportSmokeTests {
 
     @Test
     void theBoardsOmsFieldPillsCoverEveryKeepFieldsBaseField() {
-        // FINAL-REVIEW CRITICAL 1b. HOTWAX_OMS_ORDER_FIELD_OPTIONS is a hand-written mirror of the OMS
-        // connector's keepFieldsBase plus salesChannelEnumId. Pin the mirror: adding a field to
-        // keepFieldsBase without adding a pill would silently make it unselectable on the rules board.
+        // FINAL-REVIEW CRITICAL 1b, updated for Task 5 (Plan 2): the OMS field pills used to be a
+        // hand-written AutomationFacadeSupport constant mirroring keepFieldsBase plus
+        // salesChannelEnumId; they are now SourceSystemConnectorField seed rows read through
+        // AutomationFacadeSupport.fieldOptionsForSystem. Pin the mirror: adding a field to
+        // keepFieldsBase without adding a pill row would silently make it unselectable on the rules
+        // board.
+        ReconciliationSmokeTestSupport.loadSeedData(ec,
+                "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+
         Map<String, Object> oms = SourceSystemConnectorSupport.resolve(ec, "OMS")
         assertNotNull(oms, "OMS connector row should resolve")
 
-        List<String> pillFields = AutomationFacadeSupport.HOTWAX_OMS_ORDER_FIELD_OPTIONS
+        List<String> pillFields = AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS")
                 .collect { Map<String, Object> option -> (option.fieldPath as String).substring("\$.records[*].".length()) }
         List<String> keepFields = ((String) oms.keepFieldsBase).split(",").collect { it.trim() }.findAll { it }
 
@@ -255,7 +261,7 @@ class SourceSystemConnectorSupportSmokeTests {
         assertTrue(pillFields.contains("productStoreId"))
         assertFalse(keepFields.contains("productStoreId"))
         // Primary-ID selection stays deliberately narrow — widening the pills must not widen it.
-        assertEquals(3, AutomationFacadeSupport.HOTWAX_OMS_ORDER_PRIMARY_ID_OPTIONS.size())
+        assertEquals(3, AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "OMS").size())
     }
 
     @Test
@@ -412,5 +418,123 @@ class SourceSystemConnectorSupportSmokeTests {
         return (ec.entity.find("darpan.reconciliation.SourceSystemConnectorField")
                 .condition("systemEnumId", systemEnumId).useCache(false).list() ?: [])
                 .collect { it.fieldPath as String } as Set<String>
+    }
+
+    /**
+     * Task 5 (Plan 2). primaryIdOptionsForSystem / fieldOptionsForSystem now read
+     * SourceSystemConnectorField instead of the five deleted AutomationFacadeSupport constants. The
+     * substance of the change: OMS_RETURNS and SHOPIFY_RETURN_REFS had NO case in the old
+     * hand-written switch (default -> [] / null) and must now return real options purely because a
+     * registry row exists for them — no Groovy branch was added for either.
+     */
+    @Test
+    void pillLookupsComeFromTheRegistry() {
+        ReconciliationSmokeTestSupport.loadSeedData(ec,
+                "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+
+        // The endpoints that had NO case in the old switch must now return real options.
+        assertFalse(AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "OMS_RETURNS").isEmpty(),
+                "OMS_RETURNS fell through to default: return [] before this change")
+        assertFalse(AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "SHOPIFY_RETURN_REFS").isEmpty())
+
+        assertEquals(["\$.records[*].orderId", "\$.records[*].orderName", "\$.records[*].externalId"],
+                AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "OMS").collect { it.fieldPath })
+        assertEquals("Return channel",
+                AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_RETURNS")
+                        .find { it.fieldPath == "\$.records[*].returnChannelEnumId" }.label)
+    }
+
+    /**
+     * Moved from AutomationFacadeSupportTests.groovy (Task 5, Plan 2): primaryIdOptionsForSystem /
+     * fieldOptionsForSystem gained an ec parameter and now read the SourceSystemConnectorField
+     * registry, so these assertions need a real, seed-backed ExecutionContext rather than the
+     * ec-free fixture that file otherwise sticks to.
+     *
+     * DAR-BE-018. The reconciliationOrders connector is a second OMS orders source with its own
+     * systemEnumId, and these lookups key on systemEnumId equality against the registry. Without a
+     * matching row they return empty, and the rules board silently offers no field pills and no
+     * primary-id choices for a source the operator can otherwise configure — a connector that
+     * validates and then cannot be given a join key.
+     *
+     * systemAliases does NOT cover this: aliases are read only by SourceSystemConnectorSupport.resolve
+     * to find a row FROM an id, and have no effect on these comparisons.
+     */
+    @Test
+    void reconciliationOrdersSystemOffersRulesBoardPillsAtAll() {
+        ReconciliationSmokeTestSupport.loadSeedData(ec,
+                "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+
+        assertFalse(AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_RECON_ORDERS").isEmpty(),
+                "without pills the rules board cannot configure a source this connector can otherwise save")
+        assertEquals(AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "OMS"),
+                AutomationFacadeSupport.primaryIdOptionsForSystem(ec, "OMS_RECON_ORDERS"),
+                "the join key must be selectable from the same choices — all three are projected fields")
+    }
+
+    /**
+     * Moved from AutomationFacadeSupportTests.groovy (Task 5, Plan 2) — see note above.
+     *
+     * The recon endpoint projects server-side to a fixed six-field set, so the two pills that exist
+     * only because the LEGACY endpoint ships whole order documents (salesChannelEnumId,
+     * productStoreId) must not be offered here. A rule drawn on a field the endpoint never returns
+     * would validate, persist, and then exclude nothing — silently.
+     */
+    @Test
+    void reconciliationOrdersPillsAreLimitedToProjectedFields() {
+        ReconciliationSmokeTestSupport.loadSeedData(ec,
+                "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+
+        List<String> reconFields = AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_RECON_ORDERS")
+                .collect { Map option -> (option.fieldPath as String).substring("\$.records[*].".length()) }
+        List<String> legacyFields = AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS")
+                .collect { Map option -> (option.fieldPath as String).substring("\$.records[*].".length()) }
+
+        assertEquals(["orderId", "orderName", "externalId", "grandTotal", "orderDate", "statusId"], reconFields)
+        assertFalse(reconFields.contains("salesChannelEnumId"))
+        assertFalse(reconFields.contains("productStoreId"))
+        // Still a strict subset of the legacy list, so the two cannot drift into disagreeing labels.
+        assertTrue(legacyFields.containsAll(reconFields))
+    }
+
+    /**
+     * Moved from AutomationFacadeSupportTests.groovy (Task 5, Plan 2) — see note above.
+     * fieldOptionsForSystem used to hard-branch on known system ids and return null for anything
+     * else; a null fell back to primaryIdOptions and the returnChannelEnumId exclusion pill silently
+     * never appeared — no error, no failing test, no log line. Now it reads the registry, so this
+     * pins actual presence rather than mere non-nullness.
+     */
+    @Test
+    void returnsSystemOffersTheChannelPill() {
+        ReconciliationSmokeTestSupport.loadSeedData(ec,
+                "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+
+        List<Map<String, Object>> options = AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_RETURNS")
+
+        assertFalse(options.isEmpty(), "OMS_RETURNS must have a curated pill list — an empty list means the "
+                + "channel pill silently disappears (design §5)")
+        List<String> paths = options.collect { it.fieldPath as String }
+        assertTrue(paths.contains("\$.records[*].returnChannelEnumId"),
+                "the channel pill is the whole point of the returns exclusion: ${paths}")
+        assertTrue(paths.contains("\$.records[*].externalId"))
+        assertTrue(paths.contains("\$.records[*].orderExternalId"))
+    }
+
+    /**
+     * Moved from AutomationFacadeSupportTests.groovy (Task 5, Plan 2) — see note above.
+     * SourceFilterSupport matches against top-level keys via CompareIdExpressionSupport
+     * .topLevelRecordField, so a nested path would persist a rule that excludes nothing.
+     */
+    @Test
+    void returnsPillsNameOnlyTopLevelRecordKeys() {
+        ReconciliationSmokeTestSupport.loadSeedData(ec,
+                "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+
+        List<Map<String, Object>> options = AutomationFacadeSupport.fieldOptionsForSystem(ec, "OMS_RETURNS")
+        options.each { Map<String, Object> option ->
+            String path = option.fieldPath as String
+            String tail = path.substring(path.lastIndexOf('.') + 1)
+            assertFalse(tail.contains("["), "nested pill path is unusable: ${path}")
+            assertTrue(path.startsWith("\$.records[*]."), "unexpected pill path shape: ${path}")
+        }
     }
 }

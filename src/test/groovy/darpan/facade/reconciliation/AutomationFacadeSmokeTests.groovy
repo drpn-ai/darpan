@@ -44,6 +44,11 @@ class AutomationFacadeSmokeTests {
         // Loads BEFORE the connector file: SourceSystemConnector.systemEnumId references these rows.
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/DarpanSystemSourceSeedData.xml")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorSeedData.xml")
+        // Task 5 (Plan 2): primaryIdOptionsForSystem/fieldOptionsForSystem now read this table instead
+        // of hand-written AutomationFacadeSupport constants — without it, every source option's
+        // primaryIdOptions/fieldOptions comes back empty. Loads AFTER the connector file, per the
+        // seed file's own load-order note (rows reference SourceSystemConnector by systemEnumId).
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
         seedLegacyPollInputMode()
         ReconciliationSmokeTestSupport.seedSchemaBackedCsvMappingFixtures(ec)
         ReconciliationSmokeTestSupport.seedSftpServerFixtures(ec)
@@ -515,10 +520,12 @@ class AutomationFacadeSmokeTests {
         assertTrue(shopifyPrimaryIdOptions.any { it.fieldPath == "\$.records[*].id" && it.label == "Order ID" })
         assertTrue(shopifyPrimaryIdOptions.any { it.fieldPath == "\$.records[*].name" && it.label == "Order name" })
         // Shopify declares no filterParameterName, so the UI must never offer it the exclusion mark;
-        // and it gets no wider field list (its record shape comes from a per-tenant GraphQL template),
-        // so the board falls back to primaryIdOptions exactly as before.
+        // and it gets no wider field list (its record shape comes from a per-tenant GraphQL template).
+        // Registry-driven (Task 5, Plan 2): Shopify's seed rows ARE its two primary-ID candidates, so
+        // fieldOptions is byte-identical to primaryIdOptions rather than the old null-falls-back-to-
+        // primaryIdOptions board behaviour.
         assertEquals(false, shopifySourceOption.supportsExcludeFilters)
-        assertNull(shopifySourceOption.fieldOptions)
+        assertEquals(shopifyPrimaryIdOptions, shopifySourceOption.fieldOptions)
         assertTrue(((List<Map<String, Object>>) optionsResult.savedRuns).any { it.savedRunId == "OrderIdSchemaMap" })
 
         ec.message.clearErrors()

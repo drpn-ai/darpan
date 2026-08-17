@@ -365,8 +365,11 @@ class AutomationFacadeSmokeTests {
                 it.sourceConfigId == "KREWE_OMS" && it.sourceConfigType == "HOTWAX_OMS_REST" && it.systemEnumId == "OMS"
             })
 
+            // Task 6 (Plan 2): one systemRemotes row per (config x enabled endpoint) now — KREWE_OMS
+            // carries OMS, OMS_RECON_ORDERS, OMS_RETURNS and OMS_TRANSFER_ORDERS rows, so optionKey
+            // alone is no longer unique; systemEnumId picks the canonical orders row specifically.
             Map<String, Object> omsSourceOption = ((List<Map<String, Object>>) optionsResult.systemRemotes).find {
-                it.optionKey == "KREWE_OMS"
+                it.optionKey == "KREWE_OMS" && it.systemEnumId == "OMS"
             }
             assertNotNull(omsSourceOption)
             assertEquals("HOTWAX_ORDERS_API", omsSourceOption.systemMessageRemoteId)
@@ -393,8 +396,11 @@ class AutomationFacadeSmokeTests {
                 it.sourceConfigId == "KREWE_SHOPIFY" && it.sourceConfigType == "SHOPIFY_AUTH" && it.systemEnumId == "SHOPIFY"
             })
 
+            // Task 6 (Plan 2): KREWE_SHOPIFY now also carries a SHOPIFY_RETURN_REFS row sharing the
+            // same optionKey (and the same remoteId — SHOPIFY_RETURN_REFS shares SHOPIFY_REMOTE), so
+            // systemEnumId disambiguates the canonical orders row.
             Map<String, Object> shopifySourceOption = ((List<Map<String, Object>>) optionsResult.systemRemotes).find {
-                it.optionKey == "KREWE_SHOPIFY"
+                it.optionKey == "KREWE_SHOPIFY" && it.systemEnumId == "SHOPIFY"
             }
             assertNotNull(shopifySourceOption)
             assertEquals("SHOPIFY_REMOTE", shopifySourceOption.systemMessageRemoteId)
@@ -476,8 +482,11 @@ class AutomationFacadeSmokeTests {
         List<Map<String, Object>> sourceConfigs = (List<Map<String, Object>>) optionsResult.sourceConfigs
         assertTrue(sourceConfigs.any { it.sourceConfigId == "KREWE_OMS" && it.sourceConfigType == "HOTWAX_OMS_REST" && it.systemEnumId == "OMS" })
         assertTrue(sourceConfigs.any { it.sourceConfigId == "KREWE_SHOPIFY" && it.sourceConfigType == "SHOPIFY_AUTH" && it.systemEnumId == "SHOPIFY" })
+        // Task 6 (Plan 2): one systemRemotes row per (config x enabled endpoint) now — optionKey
+        // alone is no longer unique for KREWE_OMS (also carries OMS_RECON_ORDERS/OMS_RETURNS/
+        // OMS_TRANSFER_ORDERS rows), so systemEnumId picks the canonical orders row specifically.
         Map<String, Object> omsSourceOption = ((List<Map<String, Object>>) optionsResult.systemRemotes).find {
-            it.optionKey == "KREWE_OMS"
+            it.optionKey == "KREWE_OMS" && it.systemEnumId == "OMS"
         }
         assertNotNull(omsSourceOption)
         assertEquals("HOTWAX_ORDERS_API", omsSourceOption.systemMessageRemoteId)
@@ -499,8 +508,11 @@ class AutomationFacadeSmokeTests {
         assertFalse(primaryIdOptions.any { it.fieldPath == "\$.records[*].salesChannelEnumId" },
                 "primary-ID selection must stay narrow")
         assertEquals(true, omsSourceOption.supportsExcludeFilters)
+        // Task 6 (Plan 2): SHOPIFY_RETURN_REFS shares the same remoteId (SHOPIFY_REMOTE), so
+        // systemMessageRemoteId alone is no longer unique — pin the canonical orders row by
+        // systemEnumId too.
         Map<String, Object> shopifySourceOption = ((List<Map<String, Object>>) optionsResult.systemRemotes).find {
-            it.systemMessageRemoteId == "SHOPIFY_REMOTE"
+            it.systemMessageRemoteId == "SHOPIFY_REMOTE" && it.systemEnumId == "SHOPIFY"
         }
         assertNotNull(shopifySourceOption)
         assertEquals("SHOPIFY", shopifySourceOption.systemEnumId)

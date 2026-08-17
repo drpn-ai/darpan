@@ -9,6 +9,7 @@ import darpan.facade.settings.SettingsFacadeSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.AutomationRuntimeSupport
 import darpan.reconciliation.automation.SftpAutomationSupport
+import darpan.reconciliation.automation.SourceEndpointAccessSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.source.SourceFilterSupport
 import groovy.json.JsonOutput
@@ -1021,71 +1022,49 @@ class AutomationFacadeSupport {
     }
 
     static List<Map<String, Object>> listSourceConfigOptions(def ec) {
-        return listOmsRestSourceConfigOptions(ec) + listShopifyAuthConfigOptions(ec) + listNsAuthConfigOptions(ec)
+        return listRegistrySourceConfigOptions(ec) + listNsAuthConfigOptions(ec)
     }
 
-    protected static List<Map<String, Object>> listOmsRestSourceConfigOptions(def ec) {
-        String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
-        if (!activeTenantUserGroupId) return []
-        try {
-            // DAR-BE-005: owned rows plus rows shared to this tenant via ConfigTenantAccess.
-            // listAccessibleConfigRows applies no status filter, so isActive/canReadOrders are
-            // preserved here — the source picker must not offer inactive or non-order-reading configs.
-            List rows = SharedConfigAccessSupport
-                    .listAccessibleConfigRows(ec, SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS)
-                    .findAll { normalize(readString(it, "isActive")) != "N" && normalizeBool(readField(it, "canReadOrders")) }
-            return rows.collect { item ->
-                String configId = readString(item, "omsRestSourceConfigId")
-                String label = readString(item, "description") ?: configId
-                [
-                        sourceConfigId      : configId,
-                        sourceConfigType    : SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST,
-                        omsRestSourceConfigId: configId,
-                        description         : readString(item, "description"),
-                        systemEnumId        : OMS_SYSTEM_ENUM_ID,
-                        systemLabel         : enumLabel(ec, OMS_SYSTEM_ENUM_ID),
-                        label               : label,
-                ].findAll { it.value != null } as Map<String, Object>
-            } as List<Map<String, Object>>
-        } catch (Exception e) {
-            logger.warn("Failed to load source config options", e)
-            return []
+    /**
+     * One option row per (accessible, active config row) x (enabled endpoint), across every
+     * {@code SharedConfigAccessSupport.CONFIG_TYPE_REGISTRY} type that has {@code SourceSystemConnector}
+     * rows keyed to its {@code configEntityName} — today HOTWAX_OMS and SHOPIFY_AUTH (NS_AUTH /
+     * NS_RESTLET have none; those keep their own non-endpoint-aware builders below, unchanged).
+     *
+     * <p>THE FIX: before this, every row for a config was stamped with the parent system's canonical
+     * id (OMS / SHOPIFY) regardless of which endpoint it represented. The wizard filters this list by
+     * the selected systemEnumId, so picking a non-canonical endpoint (e.g. OMS_RETURNS) matched zero
+     * rows and rendered "No API configs are available". Each row here instead carries THAT endpoint's
+     * own connector fields, so selecting OMS_RETURNS surfaces a row stamped OMS_RETURNS.</p>
+     */
+    protected static List<Map<String, Object>> listRegistrySourceConfigOptions(def ec) {
+        List<Map<String, Object>> options = []
+        SharedConfigAccessSupport.CONFIG_TYPE_REGISTRY.keySet().each { String configTypeEnumId ->
+            options.addAll(sourceConfigOptionsForType(ec, configTypeEnumId))
         }
+        return options
     }
 
-    protected static List<Map<String, Object>> listShopifyAuthConfigOptions(def ec) {
-        String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
-        if (!activeTenantUserGroupId) return []
-        try {
-            // DAR-BE-005: owned rows plus rows shared to this tenant via ConfigTenantAccess.
-            // listAccessibleConfigRows applies no status filter, so isActive/canReadOrders are
-            // preserved here — the source picker must not offer inactive or non-order-reading configs.
-            List rows = SharedConfigAccessSupport
-                    .listAccessibleConfigRows(ec, SharedConfigAccessSupport.CONFIG_TYPE_SHOPIFY_AUTH)
-                    .findAll { normalize(readString(it, "isActive")) != "N" && normalizeBool(readField(it, "canReadOrders")) }
-            return rows.collect { item ->
-                String configId = readString(item, "shopifyAuthConfigId")
-                String label = readString(item, "description") ?: configId
-                [
-                        sourceConfigId     : configId,
-                        sourceConfigType   : SOURCE_CONFIG_TYPE_SHOPIFY_AUTH,
-                        shopifyAuthConfigId: configId,
-                        description        : readString(item, "description"),
-                        systemEnumId       : SHOPIFY_SYSTEM_ENUM_ID,
-                        systemLabel        : enumLabel(ec, SHOPIFY_SYSTEM_ENUM_ID),
-                        dateFromParameterName: SHOPIFY_WINDOW_START_PARAMETER,
-                        dateToParameterName  : SHOPIFY_WINDOW_END_PARAMETER,
-                        safeMetadataJson   : JsonOutput.toJson([
-                                extractServiceName: SHOPIFY_ORDERS_EXTRACT_SERVICE,
-                                parameters        : [shopifyAuthConfigId: configId],
-                        ]),
-                        label              : label,
-                ].findAll { it.value != null } as Map<String, Object>
-            } as List<Map<String, Object>>
-        } catch (Exception e) {
-            logger.warn("Failed to load source config options", e)
-            return []
-        }
+    protected static List<Map<String, Object>> sourceConfigOptionsForType(def ec, String configTypeEnumId) {
+        return listEnabledConfigEndpoints(ec, configTypeEnumId).collect { Map<String, Object> pair ->
+            Map<String, Object> connector = pair.connector as Map<String, Object>
+            String configId = pair.configId as String
+            String pkField = pair.pkField as String
+            String label = pair.configLabel as String
+            String systemEnumId = connector.systemEnumId as String
+            ([
+                    sourceConfigId  : configId,
+                    sourceConfigType: connector.expectedSourceConfigType,
+                    (pkField)       : configId,
+                    description     : label,
+                    systemEnumId    : systemEnumId,
+                    systemLabel     : enumLabel(ec, systemEnumId),
+                    dateFromParameterName: connector.dateFromParameterName,
+                    dateToParameterName  : connector.dateToParameterName,
+                    safeMetadataJson: safeMetadataJsonForConnector(connector, pkField, configId),
+                    label           : label,
+            ] as Map<String, Object>).findAll { it.value != null } as Map<String, Object>
+        } as List<Map<String, Object>>
     }
 
     protected static List<Map<String, Object>> listNsAuthConfigOptions(def ec) {
@@ -1127,7 +1106,11 @@ class AutomationFacadeSupport {
                 .listAccessibleConfigRows(ec, SharedConfigAccessSupport.CONFIG_TYPE_NS_RESTLET)
         return rows.collect { item ->
             String label = readString(item, "description") ?: readString(item, "nsRestletConfigId")
-            String systemEnumId = inferSystemEnumId(readString(item, "nsRestletConfigId"), label)
+            // Every row this builder sees is a NetSuite Restlet config by construction (it reads only
+            // CONFIG_TYPE_NS_RESTLET rows) — no inference needed, and none of the old substring-match
+            // heuristic's misclassification risk if a description happened to contain another
+            // system's name.
+            String systemEnumId = NETSUITE_SYSTEM_ENUM_ID
             [
                     nsRestletConfigId: readString(item, "nsRestletConfigId"),
                     description      : readString(item, "description"),
@@ -1145,94 +1128,127 @@ class AutomationFacadeSupport {
     }
 
     static List<Map<String, Object>> listOmsRestSourceRemoteOptions(def ec) {
+        return remoteOptionsForType(ec, SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS)
+    }
+
+    static List<Map<String, Object>> listShopifySourceRemoteOptions(def ec) {
+        return remoteOptionsForType(ec, SharedConfigAccessSupport.CONFIG_TYPE_SHOPIFY_AUTH)
+    }
+
+    /**
+     * Registry-driven replacement for the old per-system remote-option builders. One row per
+     * (accessible, active config row) x (enabled endpoint) — see {@link #listRegistrySourceConfigOptions}
+     * for why cardinality changed. Every field comes off the connector row for THAT specific endpoint,
+     * never a shared canonical remote lookup — proven independent of the SystemMessageRemote seed by
+     * {@code AutomationFacadeSmokeTests.hotWaxEndpointOptionsDoNotDependOnSystemRemoteSeed} /
+     * {@code shopifyEndpointOptionsDoNotDependOnSystemRemoteSeed}.
+     */
+    protected static List<Map<String, Object>> remoteOptionsForType(def ec, String configTypeEnumId) {
+        return listEnabledConfigEndpoints(ec, configTypeEnumId).collect { Map<String, Object> pair ->
+            Map<String, Object> connector = pair.connector as Map<String, Object>
+            String configId = pair.configId as String
+            String pkField = pair.pkField as String
+            String configLabel = pair.configLabel as String
+            String systemEnumId = connector.systemEnumId as String
+            String endpointLabel = normalize(connector.endpointLabel as String) ?: systemEnumId
+            ([
+                    systemMessageRemoteId: connector.remoteId,
+                    optionKey            : configId,
+                    sourceConfigId       : configId,
+                    sourceConfigType     : connector.expectedSourceConfigType,
+                    (pkField)            : configId,
+                    sourceConfigLabel    : configLabel,
+                    description          : endpointLabel,
+                    systemEnumId         : systemEnumId,
+                    systemLabel          : enumLabel(ec, systemEnumId),
+                    dateFromParameterName: connector.dateFromParameterName,
+                    dateToParameterName  : connector.dateToParameterName,
+                    primaryIdOptions     : primaryIdOptionsForSystem(ec, systemEnumId),
+                    fieldOptions         : fieldOptionsForSystem(ec, systemEnumId),
+                    supportsExcludeFilters: supportsExcludeFiltersForSystem(ec, systemEnumId),
+                    safeMetadataJson     : safeMetadataJsonForConnector(connector, pkField, configId),
+                    label                : endpointLabel,
+            ] as Map<String, Object>).findAll { it.value != null } as Map<String, Object>
+        } as List<Map<String, Object>>
+    }
+
+    /**
+     * The core product both option shapes above are built from: every (accessible, active config row)
+     * paired with every ENABLED endpoint connector for that config type — "enabled" meaning both the
+     * registry gate ({@code SourceSystemConnector.enabled='Y'}) and the per-config decision
+     * ({@link SourceEndpointAccessSupport#isEndpointEnabled}, where an absent decision means enabled).
+     *
+     * <p>Returns {@code []} for a config type with no registered endpoints (NS_AUTH / NS_RESTLET
+     * today — {@code listNsAuthConfigOptions}/{@code listNsRestletOptions} are untouched, separate
+     * builders) or with no active tenant.</p>
+     */
+    protected static List<Map<String, Object>> listEnabledConfigEndpoints(def ec, String configTypeEnumId) {
+        Map<String, String> type = SharedConfigAccessSupport.configType(configTypeEnumId)
+        if (type == null) return []
         String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
         if (!activeTenantUserGroupId) return []
 
-        def omsRemote = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.service.message.SystemMessageRemote",
-                        "framework remote config — SystemMessageRemote is not tenant-owned")
-                .condition("systemMessageRemoteId", HOTWAX_ORDERS_REMOTE_ID)
-                .useCache(false)
-                .one()
-        String endpointLabel = endpointLabelForSystem(OMS_SYSTEM_ENUM_ID, HOTWAX_ORDERS_REMOTE_ID,
-                readString(omsRemote, "description") ?: HOTWAX_ORDERS_ENDPOINT_LABEL)
-
-        // Resolved once, outside the row loop: it is the same registry row for every source config.
-        boolean omsSupportsExcludeFilters = supportsExcludeFiltersForSystem(ec, OMS_SYSTEM_ENUM_ID)
+        List<Map<String, Object>> connectors = connectorRowsForConfigEntity(ec, type.entityName)
+        if (!connectors) return []
 
         try {
             // DAR-BE-005: owned rows plus rows shared to this tenant via ConfigTenantAccess.
-            // listAccessibleConfigRows applies no status filter, so isActive/canReadOrders are
-            // preserved here — the source picker must not offer inactive or non-order-reading configs.
-            List rows = SharedConfigAccessSupport
-                    .listAccessibleConfigRows(ec, SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS)
-                    .findAll { normalize(readString(it, "isActive")) != "N" && normalizeBool(readField(it, "canReadOrders")) }
-            return rows.collect { item ->
-                String configId = readString(item, "omsRestSourceConfigId")
-                String label = readString(item, "description") ?: configId
-                [
-                        systemMessageRemoteId: HOTWAX_ORDERS_REMOTE_ID,
-                        optionKey            : configId,
-                        sourceConfigId       : configId,
-                        sourceConfigType     : SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST,
-                        omsRestSourceConfigId: configId,
-                        sourceConfigLabel    : label,
-                        description          : endpointLabel,
-                        systemEnumId         : OMS_SYSTEM_ENUM_ID,
-                        systemLabel          : enumLabel(ec, OMS_SYSTEM_ENUM_ID),
-                        dateFromParameterName : HOTWAX_OMS_WINDOW_START_PARAMETER,
-                        dateToParameterName   : HOTWAX_OMS_WINDOW_END_PARAMETER,
-                        primaryIdOptions      : primaryIdOptionsForSystem(ec, OMS_SYSTEM_ENUM_ID),
-                        fieldOptions          : fieldOptionsForSystem(ec, OMS_SYSTEM_ENUM_ID),
-                        supportsExcludeFilters: omsSupportsExcludeFilters,
-                        safeMetadataJson     : JsonOutput.toJson([
-                                extractServiceName: HOTWAX_OMS_ORDERS_EXTRACT_SERVICE,
-                                parameters        : [omsRestSourceConfigId: configId],
-                        ]),
-                        label                : endpointLabel,
-                ].findAll { it.value != null } as Map<String, Object>
-            } as List<Map<String, Object>>
+            // listAccessibleConfigRows applies no status filter, so isActive is preserved here — the
+            // source picker must not offer an inactive config. canReadOrders is deliberately NOT
+            // checked anymore: per-endpoint enablement (isEndpointEnabled below) replaces it.
+            List rows = SharedConfigAccessSupport.listAccessibleConfigRows(ec, configTypeEnumId)
+                    .findAll { normalize(readString(it, "isActive")) != "N" }
+            List<Map<String, Object>> pairs = []
+            rows.each { item ->
+                String configId = readString(item, type.pkField)
+                String configLabel = readString(item, "description") ?: configId
+                connectors.each { Map<String, Object> connector ->
+                    String systemEnumId = connector.systemEnumId as String
+                    // Absent SourceConfigEndpointAccess row means enabled — never expressed as a
+                    // finder condition; isEndpointEnabled already applies that contract.
+                    if (SourceEndpointAccessSupport.isEndpointEnabled(ec, configTypeEnumId, configId, systemEnumId)) {
+                        pairs << ([configId: configId, pkField: type.pkField, configLabel: configLabel,
+                                   connector: connector] as Map<String, Object>)
+                    }
+                }
+            }
+            return pairs
         } catch (Exception e) {
-            logger.warn("Failed to load source config options", e)
+            logger.warn("Failed to load source config options for ${configTypeEnumId}", e)
             return []
         }
     }
 
-    static List<Map<String, Object>> listShopifySourceRemoteOptions(def ec) {
-        def shopifyRemote = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.service.message.SystemMessageRemote",
-                        "framework remote config — SystemMessageRemote is not tenant-owned")
-                .condition("systemMessageRemoteId", SHOPIFY_ORDERS_REMOTE_ID)
-                .useCache(false)
-                .one()
-        String endpointLabel = endpointLabelForSystem(SHOPIFY_SYSTEM_ENUM_ID, SHOPIFY_ORDERS_REMOTE_ID,
-                readString(shopifyRemote, "description") ?: SHOPIFY_ORDERS_ENDPOINT_LABEL)
+    /** Enabled SourceSystemConnector rows for one config entity, projected to just the fields these builders need. */
+    private static List<Map<String, Object>> connectorRowsForConfigEntity(def ec, String configEntityName) {
+        if (!configEntityName) return []
+        return (ec.entity.find(SourceSystemConnectorSupport.ENTITY_NAME)
+                .condition("configEntityName", configEntityName)
+                .orderBy("systemEnumId")
+                .useCache(true)
+                .list() ?: [])
+                .findAll { row -> (readString(row, "enabled") ?: "Y").equalsIgnoreCase("Y") }
+                .collect { row ->
+                    ([
+                            systemEnumId            : readString(row, "systemEnumId"),
+                            expectedSourceConfigType: readString(row, "expectedSourceConfigType"),
+                            extractServiceName      : readString(row, "extractServiceName"),
+                            endpointLabel           : readString(row, "endpointLabel"),
+                            dateFromParameterName   : readString(row, "dateFromParameterName"),
+                            dateToParameterName     : readString(row, "dateToParameterName"),
+                            remoteId                : readString(row, "remoteId"),
+                            configParameterName     : readString(row, "configParameterName"),
+                    ] as Map<String, Object>)
+                } as List<Map<String, Object>>
+    }
 
-        boolean shopifySupportsExcludeFilters = supportsExcludeFiltersForSystem(ec, SHOPIFY_SYSTEM_ENUM_ID)
-        return listShopifyAuthConfigOptions(ec).collect { Map<String, Object> sourceConfig ->
-            String sourceConfigId = readString(sourceConfig, "sourceConfigId")
-            [
-                    systemMessageRemoteId: SHOPIFY_ORDERS_REMOTE_ID,
-                    optionKey            : sourceConfigId,
-                    sourceConfigId       : sourceConfigId,
-                    sourceConfigType     : SOURCE_CONFIG_TYPE_SHOPIFY_AUTH,
-                    shopifyAuthConfigId  : sourceConfigId,
-                    sourceConfigLabel    : readString(sourceConfig, "label"),
-                    description          : endpointLabel,
-                    sendUrl              : maskUrl(readString(shopifyRemote, "sendUrl")),
-                    sendServiceName      : SHOPIFY_GRAPHQL_EXECUTE_SERVICE,
-                    systemEnumId         : SHOPIFY_SYSTEM_ENUM_ID,
-                    systemLabel          : enumLabel(ec, SHOPIFY_SYSTEM_ENUM_ID),
-                    dateFromParameterName: SHOPIFY_WINDOW_START_PARAMETER,
-                    dateToParameterName  : SHOPIFY_WINDOW_END_PARAMETER,
-                    primaryIdOptions     : primaryIdOptionsForSystem(ec, SHOPIFY_SYSTEM_ENUM_ID),
-                    fieldOptions         : fieldOptionsForSystem(ec, SHOPIFY_SYSTEM_ENUM_ID),
-                    supportsExcludeFilters: shopifySupportsExcludeFilters,
-                    safeMetadataJson     : JsonOutput.toJson([
-                            extractServiceName: SHOPIFY_ORDERS_EXTRACT_SERVICE,
-                            parameters        : [shopifyAuthConfigId: sourceConfigId],
-                    ]),
-                    label                : endpointLabel,
-            ].findAll { it.value != null } as Map<String, Object>
-        } as List<Map<String, Object>>
+    /** safeMetadataJson for a connector-driven option row: its OWN extractServiceName + config-id parameter. */
+    private static String safeMetadataJsonForConnector(Map<String, Object> connector, String pkField, String configId) {
+        String paramName = normalize(connector.configParameterName as String) ?: pkField
+        return JsonOutput.toJson([
+                extractServiceName: connector.extractServiceName,
+                parameters        : [(paramName): configId],
+        ])
     }
 
     static List<Map<String, Object>> listSystemRemoteOptions(def ec) {
@@ -1244,7 +1260,9 @@ class AutomationFacadeSupport {
         return rows.collectMany { item ->
             String remoteId = readString(item, "systemMessageRemoteId")
             String label = readString(item, "description") ?: remoteId
-            String systemEnumId = inferSystemEnumId(remoteId, label)
+            // Registry-driven, not the deleted inferSystemEnumId substring heuristic: resolve the
+            // system from the SourceSystemConnector row keyed by this remote's id.
+            String systemEnumId = systemEnumIdForRemoteId(ec, remoteId)
             if (!systemEnumId) return []
             String sendServiceName = readString(item, "sendServiceName")
             if (!isDirectApiSourceRemote(systemEnumId, sendServiceName)) return []
@@ -1310,6 +1328,31 @@ class AutomationFacadeSupport {
     }
 
     /**
+     * Registry-driven replacement for the deleted inferSystemEnumId substring heuristic:
+     * {@code listSystemRemoteOptions}'s only caller resolves a SystemMessageRemote row's system from
+     * the SourceSystemConnector row keyed by its remoteId, rather than guessing from the remote's id
+     * / description text.
+     *
+     * <p>remoteId is not a unique key on SourceSystemConnector — every OMS-family endpoint
+     * (OMS, OMS_RECON_ORDERS, OMS_RETURNS, OMS_TRANSFER_ORDERS) shares HOTWAX_ORDERS_API — so this
+     * takes the first enabled match, ordered by systemEnumId for determinism. That ambiguity is
+     * harmless here: {@code isDirectApiSourceRemote} only ever accepts SHOPIFY (whose remoteId is not
+     * shared with any other connector), so whichever OMS-family row this resolves to is filtered out
+     * immediately after regardless.</p>
+     */
+    protected static String systemEnumIdForRemoteId(def ec, String remoteId) {
+        String target = normalize(remoteId)
+        if (!target) return null
+        List rows = ec.entity.find(SourceSystemConnectorSupport.ENTITY_NAME)
+                .condition("remoteId", target)
+                .orderBy("systemEnumId")
+                .useCache(true)
+                .list() ?: []
+        def match = rows.find { row -> (readString(row, "enabled") ?: "Y").equalsIgnoreCase("Y") }
+        return match ? readString(match, "systemEnumId") : null
+    }
+
+    /**
      * Join-key candidates for an endpoint: the deliberately narrow, key-like subset.
      * Registry-driven — a connector shipped later needs only seed rows.
      */
@@ -1362,14 +1405,6 @@ class AutomationFacadeSupport {
             logger.warn("Could not resolve exclusion-filter support for system ${systemEnumId}", e)
             return false
         }
-    }
-
-    protected static String inferSystemEnumId(String id, String label) {
-        String text = "${id ?: ""} ${label ?: ""}".toUpperCase(Locale.ROOT)
-        if (text.contains("SHOPIFY")) return "SHOPIFY"
-        if (text.contains("NETSUITE") || text.contains("NET_SUITE")) return "NETSUITE"
-        if (text.contains("HOTWAX") || text.contains("OMS")) return "OMS"
-        return null
     }
 
     protected static String sftpServerLabel(def ec, String sftpServerId) {

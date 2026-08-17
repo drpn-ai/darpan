@@ -311,4 +311,40 @@ class SourceEndpointAccessSupportTests {
         assertEquals(before, after,
                 "A rejected write by a non-owner tenant must leave every access row exactly as it was")
     }
+
+    @Test
+    void deletingAConfigRemovesItsAccessRows() {
+        // Task 13: SourceConfigEndpointAccess.configId is polymorphic, so nothing cascades on
+        // delete. companyUserGroupId is KREWE (not the file's TENANT constant) because the real
+        // delete service authorizes by comparing the config row's companyUserGroupId against the
+        // CALLER's currently active tenant (TenantAccessSupport.canAccessTenantRecord) — KREWE is
+        // the tenant this fixture is logged in as at the end of setup() and after every other test
+        // restores it, so the doomed config must be owned by KREWE to be deletable here at all.
+        String doomedId = "endpoint-access-doomed"
+        ec.entity.makeValue("darpan.hotwax.HotWaxOmsRestSourceConfig")
+                .setAll([omsRestSourceConfigId: doomedId, description: "Doomed",
+                         companyUserGroupId   : KREWE, baseUrl: "https://doomed.example.com",
+                         isActive             : "Y", canReadOrders: "Y"]).createOrUpdate()
+        ec.entity.makeValue(SourceEndpointAccessSupport.ENTITY_NAME)
+                .setAll([configTypeEnumId  : SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS,
+                         configId          : doomedId, systemEnumId: "OMS_RETURNS",
+                         companyUserGroupId: KREWE, isEnabled: "N"]).createOrUpdate()
+
+        // Real service name (verified against HotWaxOmsFacadeServices.xml and the sibling
+        // HotWaxOmsRestSourceConfigFacadeSmokeTests.deleteFacade helper): verb="delete"
+        // noun="HotWaxOmsRestSourceConfig" -> delete#HotWaxOmsRestSourceConfig, not the brief's
+        // guessed delete#OmsRestSourceConfig.
+        Map<String, Object> result = ec.service.sync()
+                .name("facade.HotWaxOmsFacadeServices.delete#HotWaxOmsRestSourceConfig")
+                .parameters([omsRestSourceConfigId: doomedId])
+                .disableAuthz().call() as Map<String, Object>
+
+        // Not hollow: prove the delete itself actually succeeded, so a passing access-row count
+        // below can't be explained by the delete having been silently rejected instead.
+        assertTrue((result.ok as boolean),
+                "Delete must succeed for a KREWE-owned config with no active grants: ${result.errors}")
+        assertEquals(0L, ec.entity.find(SourceEndpointAccessSupport.ENTITY_NAME)
+                .condition("configId", doomedId).useCache(false).count(),
+                "A deleted config must not leave access rows for a future config with the same id")
+    }
 }

@@ -3,12 +3,14 @@ package darpan.reconciliation.automation
 import darpan.facade.reconciliation.AutomationFacadeSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import groovy.xml.XmlParser
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.moqui.context.ExecutionContext
 
+import java.nio.file.Files
 import java.nio.file.Path
 
 import static org.junit.jupiter.api.Assertions.assertEquals
@@ -536,5 +538,82 @@ class SourceSystemConnectorSupportSmokeTests {
             assertFalse(tail.contains("["), "nested pill path is unusable: ${path}")
             assertTrue(path.startsWith("\$.records[*]."), "unexpected pill path shape: ${path}")
         }
+    }
+
+    /**
+     * Task 10 (Plan 2). Moqui seed loads are createOrUpdate and never delete, so Task 3's removal of
+     * SHOPIFY_RETURN_REFS / orderName from the seed file had no effect on a database that had already
+     * loaded the earlier 27-row seed — browser verification confirmed the wizard still offered "Order
+     * name" against the live dev DB. This simulates exactly that: load the CURRENT seed (which no
+     * longer carries the row), then hand-insert the withdrawn row to reproduce a database that loaded
+     * the older version, and prove the migration removes it — and ONLY it.
+     */
+    @Test
+    void retiresAPillThatWasWithdrawnFromSeedData() {
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+        // Simulate a database that loaded the older seed, which still carried the withdrawn pill.
+        ec.entity.makeValue("darpan.reconciliation.SourceSystemConnectorField")
+                .setAll([systemEnumId: "SHOPIFY_RETURN_REFS", fieldPath: "\$.records[*].orderName",
+                         label: "Order name", fieldType: "string", isPrimaryIdCandidate: "Y",
+                         sequenceNum: 2, description: "withdrawn"]).createOrUpdate()
+
+        ec.service.sync().name("facade.SourceEndpointFacadeServices.migrate#RetiredConnectorFields")
+                .disableAuthz().call()
+
+        assertEquals(0L, ec.entity.find("darpan.reconciliation.SourceSystemConnectorField")
+                .condition("systemEnumId", "SHOPIFY_RETURN_REFS")
+                .condition("fieldPath", "\$.records[*].orderName")
+                .useCache(false).count())
+        // The pills that remain must be untouched — a retirement must not sweep its neighbours.
+        assertEquals(2L, ec.entity.find("darpan.reconciliation.SourceSystemConnectorField")
+                .condition("systemEnumId", "SHOPIFY_RETURN_REFS").useCache(false).count())
+    }
+
+    /**
+     * Idempotency half of Task 10: re-running the migration once the retired row is already gone (or
+     * was never loaded) must delete nothing and not error.
+     */
+    @Test
+    void reRunningTheMigrationDeletesNothingTheSecondTime() {
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+        ec.entity.find("darpan.reconciliation.SourceSystemConnectorField")
+                .condition("systemEnumId", "SHOPIFY_RETURN_REFS")
+                .condition("fieldPath", "\$.records[*].orderName")
+                .deleteAll()
+
+        Map result = ec.service.sync().name("facade.SourceEndpointFacadeServices.migrate#RetiredConnectorFields")
+                .disableAuthz().call()
+
+        assertEquals(0, result.rowsDeleted)
+        assertFalse((boolean) ec.message.hasError())
+    }
+
+    /**
+     * The ratchet Task 10 exists to add. Without it, an operator could retire a pill (add it to
+     * RETIRED_FIELDS) and re-seed it in the SAME release — the migration deletes a row the loader
+     * immediately recreates on the next seed load, and the resulting state depends on run order.
+     * Reads the seed file directly off disk rather than through the loaded ec, so it fails whether or
+     * not this test class happens to load that file first.
+     */
+    @Test
+    void noRetiredFieldReappearsInTheSeedFile() {
+        Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
+        Path seedPath = backendRoot.resolve("runtime/component/darpan/data/SourceSystemConnectorFieldSeedData.xml")
+        assertTrue(Files.exists(seedPath), "seed file not found at ${seedPath}")
+
+        List seedRows = new XmlParser(false, false).parse(seedPath.toFile()).children()
+                .findAll { it.name() == "darpan.reconciliation.SourceSystemConnectorField" }
+
+        List<String> offenders = SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS.findAll { Map<String, String> retired ->
+            seedRows.any { row ->
+                row.attributes().get("systemEnumId") == retired.systemEnumId &&
+                        row.attributes().get("fieldPath") == retired.fieldPath
+            }
+        }.collect { "${it.systemEnumId} / ${it.fieldPath}".toString() }
+
+        assertTrue(offenders.isEmpty(),
+                "RETIRED_FIELDS entries still present in SourceSystemConnectorFieldSeedData.xml — the seed " +
+                "loader would recreate a row this migration deletes, so the resulting state would depend on " +
+                "run order: ${offenders}")
     }
 }

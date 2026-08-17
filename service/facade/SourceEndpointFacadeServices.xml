@@ -95,4 +95,34 @@
         </actions>
     </service>
 
+    <!-- One-time upgrade migration (Plan 2 Task 10): delete SourceSystemConnectorField pill rows
+         explicitly withdrawn from seed data. Moqui seed loads are createOrUpdate and never delete, so
+         removing a row from SourceSystemConnectorFieldSeedData.xml has no effect on a database that
+         already loaded the earlier version of that file — the row survives and the rules board keeps
+         offering it (see SourceSystemConnectorFieldWriteSupport Javadoc for the SHOPIFY_RETURN_REFS /
+         orderName case this fixes). authenticate="false" + allow-remote="false" by design, exactly like
+         migrate#SourceConfigEndpointAccess above: an operator runs this once per environment during the
+         upgrade, not a tenant-facing action, and it must never be reachable remotely. -->
+    <service verb="migrate" noun="RetiredConnectorFields" authenticate="false" allow-remote="false">
+        <description>One-time: delete SourceSystemConnectorField rows explicitly retired in
+            SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS. Deletes by exact PK (systemEnumId +
+            fieldPath) only — never by systemEnumId alone, which would sweep every pill an endpoint has
+            rather than just the withdrawn one. Idempotent — safe to re-run; a second run deletes
+            nothing and reports zero. Not remote: an operator runs this once per environment during the
+            upgrade.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="rowsDeleted" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="rowsDeleted" from="darpan.reconciliation.automation.SourceSystemConnectorFieldWriteSupport.deleteRetiredFields(ec)"/>
+            <message>Deleted ${rowsDeleted} retired field row(s).</message>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
 </services>

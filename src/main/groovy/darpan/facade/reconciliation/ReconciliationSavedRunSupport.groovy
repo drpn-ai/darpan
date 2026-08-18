@@ -1118,6 +1118,19 @@ class ReconciliationSavedRunSupport {
                     .condition("systemMessageRemoteId", source.systemMessageRemoteId)
                     .useCache(false)
                     .one() : null
+            // The connector registry's OWN endpoint label for THIS run's system, preferred ahead of the
+            // shared SystemMessageRemote row's description. remoteId is deliberately shared across a
+            // system family (SHOPIFY_RETURN_REFS reuses SHOPIFY's SHOPIFY_REMOTE; OMS_RETURNS,
+            // OMS_RECON_ORDERS and OMS_TRANSFER_ORDERS all reuse OMS's HOTWAX_ORDERS_API — see
+            // SourceSystemConnectorSeedData.xml), so the ONE global SystemMessageRemote row that id
+            // resolves to cannot itself distinguish which sibling endpoint a run actually uses; its
+            // description is whatever the FIRST endpoint to touch ensureVirtualApiOrdersRemote set it
+            // to (in practice the canonical parent's label, e.g. "Admin GraphQL Orders"), and every
+            // other endpoint sharing that remoteId inherited that same wrong label. The registry has no
+            // such collision — SourceSystemConnector is keyed by the run's own systemEnumId — so resolve
+            // there first. Falls through to the old chain when no connector row is registered for this
+            // systemEnumId (kept for any bespoke SystemMessageRemote outside the registry).
+            def systemConnector = source.systemMessageRemoteId ? SourceSystemConnectorSupport.resolve(ec, systemEnumId) : null
             // NsRestletConfig is directly-owned (has companyUserGroupId); use quiet variant for display label.
             def nsRestletConfig = source.nsRestletConfigId ? TenantScopedFinder.findTenantScopedByIdQuiet(
                     ec, DarpanEntityConstants.NS_RESTLET_CONFIG, "nsRestletConfigId", source.nsRestletConfigId) : null
@@ -1135,7 +1148,8 @@ class ReconciliationSavedRunSupport {
                     sourceTypeEnumId  : normalize(source.sourceTypeEnumId),
                     sourceTypeLabel   : sourceTypeEnum ? FacadeSupport.enumLabel(sourceTypeEnum) : null,
                     systemMessageRemoteId   : normalize(source.systemMessageRemoteId),
-                    systemMessageRemoteLabel: normalize(systemMessageRemote?.description) ?:
+                    systemMessageRemoteLabel: normalize(systemConnector?.endpointLabel) ?:
+                            normalize(systemMessageRemote?.description) ?:
                             virtualSystemRemoteLabel(systemEnumId, source.systemMessageRemoteId, source.sourceConfigType) ?:
                             normalize(systemMessageRemote?.systemMessageRemoteId),
                     nsRestletConfigId       : normalize(source.nsRestletConfigId),

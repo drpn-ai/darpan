@@ -44,6 +44,10 @@ class SavedRunsFacadeSmokeTests {
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "saved-runs-facade-smoke")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AutomationSeedData.xml")
+        // Registers the SHOPIFY_RETURN_REFS / OMS_RETURNS (and other endpoint-specific) system enum
+        // rows that create#RuleSetRun validates file{n}SystemEnumId against — AutomationSeedData.xml
+        // only carries the canonical OMS/SHOPIFY/NETSUITE/SAPI rows.
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/DarpanSystemSourceSeedData.xml")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorSeedData.xml")
         ReconciliationSmokeTestSupport.seedSchemaBackedCsvMappingFixtures(ec)
     }
@@ -1163,6 +1167,71 @@ end'''
                 .one())
         assertEquals("SHOPIFY_REMOTE", file1Source.systemMessageRemoteId)
         assertEquals("KREWE_SHOPIFY", file1Source.sourceConfigId)
+    }
+
+    /**
+     * Live bug (2026-08 "Returns Prod" run): SHOPIFY_RETURN_REFS and OMS_RETURNS deliberately share
+     * their parent's remoteId (SHOPIFY_REMOTE / HOTWAX_ORDERS_API — see SourceSystemConnectorSeedData.xml
+     * comments) because they hit the same credentials/connection as the canonical Shopify/OMS orders
+     * extract. In every real deployment that shared SystemMessageRemote row already carries the
+     * PARENT's description — seeded by upgrade-data (see releases/pre-reset/2.0.0/upgrade-data.xml) or
+     * created once by ensureVirtualApiOrdersRemote the first time a canonical orders run touched it —
+     * so this test seeds those two rows exactly as production has them (parent labels) before creating
+     * a run on the RETURNS-family endpoints, reproducing the exact bytes the operator saw: "Admin
+     * GraphQL Orders" / "Orders API" instead of each side's own endpoint label.
+     */
+    @Test
+    void savedRunSystemOptionsLabelEndpointWithItsOwnConnectorLabelNotTheSharedParentRemote() {
+        upsertAutomationSourceTypeApi()
+        upsertEntity("moqui.service.message.SystemMessageRemote", [systemMessageRemoteId: "SHOPIFY_REMOTE"], [
+                systemMessageRemoteId: "SHOPIFY_REMOTE",
+                description          : "Admin GraphQL Orders",
+                sendUrl              : "https://{shop}.myshopify.com/admin/api/{apiVersion}/graphql.json",
+                sendServiceName      : "facade.ShopifyFacadeServices.execute#ShopifyGraphql",
+        ])
+        upsertEntity("moqui.service.message.SystemMessageRemote", [systemMessageRemoteId: "HOTWAX_ORDERS_API"], [
+                systemMessageRemoteId: "HOTWAX_ORDERS_API",
+                description          : "Orders API",
+                sendUrl              : "{baseUrl}/rest/s1/oms/orders",
+                sendServiceName      : "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders",
+        ])
+        seedShopifyAuthConfig(KREWE, "KREWE_SHOPIFY_RETURNS")
+        seedOmsRestSourceConfig(KREWE, "KREWE_OMS_RETURNS")
+
+        Map<String, Object> createResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters([
+                        runName                    : "Returns Prod",
+                        description                : "Shopify return refs against OMS returns",
+                        file1SystemEnumId          : "SHOPIFY_RETURN_REFS",
+                        file1SourceTypeEnumId      : "AUT_SRC_API",
+                        file1SystemMessageRemoteId : "SHOPIFY_REMOTE",
+                        file1SourceConfigId        : "KREWE_SHOPIFY_RETURNS",
+                        file1SourceConfigType      : "SHOPIFY_RETURN_REFS_API",
+                        file1PrimaryIdExpression   : "\$.eventId",
+                        file2SystemEnumId          : "OMS_RETURNS",
+                        file2SourceTypeEnumId      : "AUT_SRC_API",
+                        file2SystemMessageRemoteId : "HOTWAX_ORDERS_API",
+                        file2SourceConfigId        : "KREWE_OMS_RETURNS",
+                        file2SourceConfigType      : "HOTWAX_OMS_REST_RETURNS",
+                        file2PrimaryIdExpression   : "externalId",
+                        rules                      : [],
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        ruleSetRunFixturesToCleanUp.add([ruleSetId: createResult.savedRun.savedRunId as String,
+                                          compareScopeId: createResult.savedRun.compareScopeId as String])
+
+        List<Map<String, Object>> systemOptions = (List<Map<String, Object>>) (createResult.savedRun.systemOptions ?: [])
+        Map<String, Object> file1Option = systemOptions.find { it.fileSide == "FILE_1" }
+        Map<String, Object> file2Option = systemOptions.find { it.fileSide == "FILE_2" }
+
+        // Each side's OWN connector label (SourceSystemConnectorSeedData.xml), not the shared remote's
+        // inherited parent description ("Admin GraphQL Orders" / "Orders API").
+        assertEquals("Shopify Return References", file1Option.systemMessageRemoteLabel)
+        assertEquals("Reconciliation Returns API", file2Option.systemMessageRemoteLabel)
     }
 
     @Test

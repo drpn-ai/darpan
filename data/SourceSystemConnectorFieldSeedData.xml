@@ -73,8 +73,10 @@
             label="Return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
             description="OMS return identity."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].externalId"
-            label="Shopify reference" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
-            description="Shopify reference on the return."/>
+            label="Shopify refund or return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
+            description="RELABELLED (was 'Shopify reference'): the OMS side of the primary comparison — a
+                Shopify refund id or, for a small number of returns, a return id instead. Matches Shopify
+                SHOPIFY_RETURN_REFS's eventId whichever kind of id it holds."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].orderExternalId"
             label="Order external ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
             description="Order spine — joins a return back to its order."/>
@@ -113,10 +115,11 @@
          this revision) are retired in SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS — seed
          removal alone does not delete an already-loaded row. -->
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].eventId"
-            label="Event ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
-            description="bareId-normalized event identity: a REFUND id when eventType is REFUND, a RETURN id
-                when eventType is RETURN. Matches OMS externalId whichever kind it is — the single join key
-                for returns reconciliation, with no precedence rule needed on either side."/>
+            label="Refund or Return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
+            description="RELABELLED (was 'Event ID'): bareId-normalized event identity — a REFUND id when
+                eventType is REFUND, a RETURN id when eventType is RETURN. Matches OMS externalId whichever
+                kind it is — the single join key for returns reconciliation, with no precedence rule needed
+                on either side."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].eventType"
             label="Event type" fieldType="string" sequenceNum="2"
             description="REFUND or RETURN — identifies which kind of id eventId carries on this row. Not a

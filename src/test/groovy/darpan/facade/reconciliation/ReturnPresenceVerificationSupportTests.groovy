@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
  * DAR-BE-018, reduced 2026-08-18 (returns-refund-grain-alignment plan, Task 3): with Shopify and OMS
- * now sitting at the same grain (one row per EVENT — eventId matches OMS externalId directly), the
+ * now sitting at the same grain (one row per EVENT — refundOrReturnId matches OMS externalId directly), the
  * generic ruleset compare finds real missing-in-Shopify / missing-in-OMS rows on its own via an
  * ordinary join. This class no longer re-derives presence — it GRADES the rows the compare already
  * wrote to the diff document: a one-sided event younger than graceHours is pending (removed from the
@@ -56,13 +56,13 @@ class ReturnPresenceVerificationSupportTests {
     }
 
     /** A "missing in OMS" row: the Shopify event is present, data carries the Shopify record (createdAt). */
-    private static Map missingInOmsRow(String id, long createdAtMillis, String eventType = "REFUND") {
+    private static Map missingInOmsRow(String id, long createdAtMillis, String refundOrReturnType = "REFUND") {
         return [
                 diffType : "MISSING_IN_FILE_1",
                 primaryId: id,
                 presentIn: SHOPIFY_LABEL,
                 missingIn: OMS_LABEL,
-                data     : JsonOutput.toJson([eventId: id, eventType: eventType, orderId: "7025799037059",
+                data     : JsonOutput.toJson([refundOrReturnId: id, refundOrReturnType: refundOrReturnType, orderId: "7025799037059",
                         createdAt: isoInstant(createdAtMillis)]),
                 message  : "Present in ${SHOPIFY_LABEL}, missing in ${OMS_LABEL}".toString(),
         ]

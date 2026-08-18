@@ -1140,6 +1140,15 @@ class ReconciliationSavedRunSupport {
                     enumCode          : normalize(systemEnum?.enumCode),
                     description       : normalize(systemEnum?.description),
                     label             : resolveEnumLabel(ec, systemEnumId, source.systemEnumId as String),
+                    // The system FAMILY this run's source belongs to — "Shopify" for
+                    // SHOPIFY_RETURN_REFS, "HotWax" for OMS_RETURNS — read off the enum's own
+                    // parentEnumId, which is what the create wizard's two-step picker groups by.
+                    // `label` above names the ENDPOINT once endpoint-level enums exist, so a
+                    // surface that means to name the system (the manager page's System card) has
+                    // no other way to get it. Absent for the parent enums themselves (SHOPIFY,
+                    // OMS), whose own label already is the system name.
+                    systemParentEnumId: normalize(systemEnum?.parentEnumId),
+                    systemParentLabel : resolveEnumLabel(ec, normalize(systemEnum?.parentEnumId), null),
                     fileTypeEnumId    : normalize(source.fileTypeEnumId),
                     fileTypeLabel     : fileTypeEnum ? FacadeSupport.enumLabel(fileTypeEnum) : null,
                     idFieldExpression : normalize(source.primaryIdExpression),

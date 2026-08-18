@@ -567,7 +567,7 @@ class SourceSystemConnectorSupportSmokeTests {
         // The pills that remain must be untouched — a retirement must not sweep its neighbours.
         // 4, not 2: the 2026-08-17 returns-refund-grain-alignment plan's Task 2 (REVISION 2026-08-18)
         // widened the seeded set for this endpoint from {orderId, createdAt} to the four-field EVENT
-        // shape {eventId, eventType, orderId, createdAt}.
+        // shape {refundOrReturnId, refundOrReturnType, orderId, createdAt}.
         assertEquals(4L, ec.entity.find("darpan.reconciliation.SourceSystemConnectorField")
                 .condition("systemEnumId", "SHOPIFY_RETURN_REFS").useCache(false).count())
     }

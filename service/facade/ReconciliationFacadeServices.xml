@@ -80,6 +80,8 @@
                     <parameter name="enumCode"/>
                     <parameter name="description"/>
                     <parameter name="label"/>
+                    <parameter name="systemParentEnumId"/>
+                    <parameter name="systemParentLabel"/>
                     <parameter name="fileTypeEnumId"/>
                     <parameter name="fileTypeLabel"/>
                     <parameter name="idFieldExpression"/>
@@ -497,6 +499,8 @@
                     <parameter name="enumCode"/>
                     <parameter name="description"/>
                     <parameter name="label"/>
+                    <parameter name="systemParentEnumId"/>
+                    <parameter name="systemParentLabel"/>
                     <parameter name="fileTypeEnumId"/>
                     <parameter name="fileTypeLabel"/>
                     <parameter name="idFieldExpression"/>
@@ -763,6 +767,8 @@
                     <parameter name="enumCode"/>
                     <parameter name="description"/>
                     <parameter name="label"/>
+                    <parameter name="systemParentEnumId"/>
+                    <parameter name="systemParentLabel"/>
                     <parameter name="fileTypeEnumId"/>
                     <parameter name="fileTypeLabel"/>
                     <parameter name="idFieldExpression"/>
@@ -1277,6 +1283,8 @@
                     <parameter name="enumCode"/>
                     <parameter name="description"/>
                     <parameter name="label"/>
+                    <parameter name="systemParentEnumId"/>
+                    <parameter name="systemParentLabel"/>
                     <parameter name="fileTypeEnumId"/>
                     <parameter name="fileTypeLabel"/>
                     <parameter name="idFieldExpression"/>
@@ -1366,6 +1374,8 @@
                     <parameter name="enumCode"/>
                     <parameter name="description"/>
                     <parameter name="label"/>
+                    <parameter name="systemParentEnumId"/>
+                    <parameter name="systemParentLabel"/>
                     <parameter name="fileTypeEnumId"/>
                     <parameter name="fileTypeLabel"/>
                     <parameter name="idFieldExpression"/>
@@ -1561,6 +1571,8 @@
                     <parameter name="enumCode"/>
                     <parameter name="description"/>
                     <parameter name="label"/>
+                    <parameter name="systemParentEnumId"/>
+                    <parameter name="systemParentLabel"/>
                     <parameter name="fileTypeEnumId"/>
                     <parameter name="fileTypeLabel"/>
                     <parameter name="idFieldExpression"/>

@@ -39,6 +39,15 @@ class SourceSystemConnectorFieldWriteSupport {
             [systemEnumId: "SHOPIFY_RETURN_REFS", fieldPath: "\$.records[*].orderName",
              reason: "unevidenced primary-ID candidate: normalize(node.name) is nullable and no captured " +
                      "SHOPIFY_RETURN_REFS extract exists to prove it is reliably populated (Plan 2 Task 3)"],
+            // A RENAME is a retirement plus a new row as far as a createOrUpdate seed load is concerned:
+            // the old PK stays behind and the board would offer both names, one of which no longer exists
+            // on the extract. These two shipped in seed data for one day before the rename.
+            [systemEnumId: "SHOPIFY_RETURN_REFS", fieldPath: "\$.records[*].eventId",
+             reason: "renamed 2026-08-18 to \$.records[*].refundOrReturnId — 'event' is ShopifyReturnRefs" +
+                     "Support's internal abstraction, not a Shopify term, and it surfaced verbatim on the " +
+                     "rules board, the run summary's Primary ID card and the diff columns"],
+            [systemEnumId: "SHOPIFY_RETURN_REFS", fieldPath: "\$.records[*].eventType",
+             reason: "renamed 2026-08-18 to \$.records[*].refundOrReturnType — same rename as eventId"],
     ].asImmutable()
 
     /**

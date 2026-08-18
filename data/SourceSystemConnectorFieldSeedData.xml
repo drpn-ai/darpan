@@ -111,28 +111,36 @@
          record per EVENT — a refund OR a return — because OMS reconciliationReturns.externalId is
          usually a refund id but for a small number of returns holds the return id instead, and a
          refund-only Shopify side had no fallback for that case). orderName ($.records[*].orderName,
-         dropped Task 3 Plan 2) and refundId/returnId ($.records[*].refundId / .returnId, dropped
-         this revision) are retired in SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS — seed
-         removal alone does not delete an already-loaded row. -->
-    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].eventId"
-            label="Refund or Return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
-            description="RELABELLED (was 'Event ID'): bareId-normalized event identity — a REFUND id when
-                eventType is REFUND, a RETURN id when eventType is RETURN. Matches OMS externalId whichever
-                kind it is — the single join key for returns reconciliation, with no precedence rule needed
-                on either side."/>
-    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].eventType"
-            label="Event type" fieldType="string" sequenceNum="2"
-            description="REFUND or RETURN — identifies which kind of id eventId carries on this row. Not a
-                join key; useful for filtering or as a comparison field."/>
+         dropped Task 3 Plan 2), refundId/returnId ($.records[*].refundId / .returnId, dropped this
+         revision, never seeded) and eventId/eventType ($.records[*].eventId / .eventType, renamed
+         2026-08-18 to refundOrReturnId/refundOrReturnType — 'event' is an internal abstraction that
+         was leaking onto the rules board) are retired in
+         SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS — seed removal alone does not delete an
+         already-loaded row, and a rename is a delete plus an insert as far as a createOrUpdate seed
+         load is concerned. -->
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].refundOrReturnId"
+            label="Refund ID / Return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
+            description="RENAMED 2026-08-18 (was '$.records[*].eventId', labelled 'Event ID' then 'Refund or
+                Return ID'): 'event' is this extractor's internal abstraction, not a Shopify term, and it
+                surfaced verbatim on the rules board, the run summary and the diff columns. bareId-normalized
+                identity — a REFUND id when refundOrReturnType is REFUND, a RETURN id when it is RETURN.
+                Matches OMS externalId whichever kind it is: the single join key for returns reconciliation,
+                with no precedence rule needed on either side."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].refundOrReturnType"
+            label="Refund or return" fieldType="string" sequenceNum="2"
+            description="RENAMED 2026-08-18 (was '$.records[*].eventType'). REFUND or RETURN — identifies
+                which kind of id refundOrReturnId carries on this row. Not a join key; useful for filtering
+                or as a comparison field."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].orderId"
             label="Order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
             description="bareId(legacyResourceId ?: id) — the bare GID tail, matching the numeric Shopify
-                reference the OMS side stores. Unchanged by the event-per-record reshape; still a grouping /
-                secondary key, not the join key."/>
+                reference the OMS side stores. Unchanged by the per-refund/per-return reshape; still a
+                grouping / secondary key, not the join key."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].createdAt"
-            label="Event created" fieldType="string" sequenceNum="4"
-            description="RELABELLED (was 'Order created'): this is the individual event's own creation date
-                — a refund row carries the refund's createdAt, a return row carries the return's — never the
-                order's creation date. Windowing filters on this field, not on any order-level date."/>
+            label="Refund or return created" fieldType="string" sequenceNum="4"
+            description="RELABELLED (was 'Order created', then 'Event created'): the individual refund's or
+                return's own creation date — a refund row carries the refund's createdAt, a return row
+                carries the return's — never the order's creation date. Windowing filters on this field, not
+                on any order-level date."/>
 
 </entity-facade-xml>

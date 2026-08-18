@@ -1208,7 +1208,7 @@ end'''
                         file1SystemMessageRemoteId : "SHOPIFY_REMOTE",
                         file1SourceConfigId        : "KREWE_SHOPIFY_RETURNS",
                         file1SourceConfigType      : "SHOPIFY_RETURN_REFS_API",
-                        file1PrimaryIdExpression   : "\$.eventId",
+                        file1PrimaryIdExpression   : "\$.refundOrReturnId",
                         file2SystemEnumId          : "OMS_RETURNS",
                         file2SourceTypeEnumId      : "AUT_SRC_API",
                         file2SystemMessageRemoteId : "HOTWAX_ORDERS_API",
@@ -1232,6 +1232,47 @@ end'''
         // inherited parent description ("Admin GraphQL Orders" / "Orders API").
         assertEquals("Shopify Return References", file1Option.systemMessageRemoteLabel)
         assertEquals("Reconciliation Returns API", file2Option.systemMessageRemoteLabel)
+
+        // The SYSTEM the endpoint belongs to, read off the enum's parentEnumId. `label` names the
+        // ENDPOINT for these two, so without this the manager page's System card has nothing to show
+        // but the endpoint name — which is what the operator reported seeing under "SYSTEM".
+        assertEquals("SHOPIFY", file1Option.systemParentEnumId)
+        assertEquals("Shopify", file1Option.systemParentLabel)
+        assertEquals("OMS", file2Option.systemParentEnumId)
+        assertEquals("HotWax", file2Option.systemParentLabel)
+    }
+
+    /**
+     * The family enums themselves have no parent, so the parent keys must come back null rather than
+     * echoing the system's own label — a caller that preferred a self-referential parentLabel would
+     * work by accident here and break the moment an endpoint enum was selected.
+     */
+    @Test
+    void savedRunSystemOptionsOmitParentLabelForTheFamilyEnumsThemselves() {
+        Map<String, Object> createResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters([
+                        runName                 : "Parentless Systems",
+                        file1SystemEnumId       : "OMS",
+                        file1FileTypeEnumId     : "DftCsv",
+                        file1PrimaryIdExpression: "order_id",
+                        file2SystemEnumId       : "SHOPIFY",
+                        file2FileTypeEnumId     : "DftCsv",
+                        file2PrimaryIdExpression: "shopify_order_id",
+                        rules                   : [],
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        ruleSetRunFixturesToCleanUp.add([ruleSetId: createResult.savedRun.savedRunId as String,
+                                          compareScopeId: createResult.savedRun.compareScopeId as String])
+
+        List<Map<String, Object>> systemOptions = (List<Map<String, Object>>) (createResult.savedRun.systemOptions ?: [])
+        systemOptions.each { Map<String, Object> option ->
+            assertNull(option.systemParentEnumId, "family enum ${option.enumId} must carry no parent enum id")
+            assertNull(option.systemParentLabel, "family enum ${option.enumId} must carry no parent label")
+        }
     }
 
     @Test

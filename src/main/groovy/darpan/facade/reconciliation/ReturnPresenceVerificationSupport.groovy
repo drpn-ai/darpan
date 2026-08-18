@@ -27,10 +27,10 @@ import static darpan.common.ValueSupport.normalizeInt
  * mismatched grains, was largely noise).
  *
  * Task 1 of that plan (REVISION 2026-08-18) reshaped the Shopify extractor to one record per EVENT —
- * {@code {eventId, eventType, orderId, createdAt}} — where eventId is a refund id OR a return id (see
- * ShopifyReturnRefsSupport's class doc). OMS externalId now matches eventId directly, so BOTH sides sit
+ * {@code {refundOrReturnId, refundOrReturnType, orderId, createdAt}} — where refundOrReturnId is a refund id OR a return id (see
+ * ShopifyReturnRefsSupport's class doc). OMS externalId now matches refundOrReturnId directly, so BOTH sides sit
  * at the same grain and the ordinary ruleset join (CompareDatasetSupport, keyed on
- * eventId <-> externalId) finds real missing-in-OMS / missing-in-Shopify rows correctly and at the
+ * refundOrReturnId <-> externalId) finds real missing-in-OMS / missing-in-Shopify rows correctly and at the
  * right grain, on its own. Task 3 (this class, this revision) therefore RETIRES the id-matching
  * machinery entirely as pure redundancy — the byOrder index, the refund-then-return fallback,
  * matchedCount, ordersMatchedForward — all of it existed only to decide "is this OMS return present in
@@ -47,8 +47,8 @@ import static darpan.common.ValueSupport.normalizeInt
  * redundant RETURN row for an already-refunded return, not to re-associate a refund back to its return
  * for matching purposes. The suppression's entire reason to exist was to stop ONE OMS return being
  * double-reported against TWO Shopify ids it might be keyed by (refund id primary, return id fallback)
- * inside a single order-scoped byOrder lookup. With the byOrder lookup gone and eventId a single flat
- * join key with no precedence rule (an OMS externalId now matches exactly one Shopify eventId, full
+ * inside a single order-scoped byOrder lookup. With the byOrder lookup gone and refundOrReturnId a single flat
+ * join key with no precedence rule (an OMS externalId now matches exactly one Shopify refundOrReturnId, full
  * stop), there is no second id for the same OMS return to be checked against, no per-order grouping to
  * suppress within, and nothing left for this suppression to protect. It is retired as dead weight, not
  * kept — the thing it used to guard against (double-counting one return under two ids) cannot happen

@@ -645,7 +645,7 @@ def runVerificationPass = { Map serviceResult, Object file1Source, Object file2S
 // each row's OWN embedded date straight out of the diff document the compare already wrote, so unlike
 // the retired shape this pass no longer needs either side's raw extract file as an input.
 def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source, Object file2Source,
-                                          String file1Label, String file2Label ->
+                                          String file1Label, String file2Label, String runOwnerUserGroupId ->
     if (serviceResult.ruleExecutionFailed == true) return
     List sides = [[source: file1Source, label: file1Label], [source: file2Source, label: file2Label]]
     Map omsReturnsSide = sides.find { Map side ->
@@ -658,6 +658,29 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
 
     File diffFile = resolveOutputFile(serviceResult)
     if (diffFile == null || !diffFile.isFile()) return
+
+    // Cancellation-refund suppression (2026-08-18): the OMS API is what gets called, so the connector
+    // and the config id both come from the OMS side — even though every row being suppressed is a
+    // Shopify event. buildFencedLookup applies the same lookup#* shape fence the other two verify
+    // stages use; here its return value is used as the FENCE VERDICT (null = no service declared,
+    // wrong service shape, or no config id) rather than as the closure actually dispatched.
+    Map<String, Object> omsConnector = resolveConnectorFor(omsReturnsSide.source)
+    String orderStateLookupServiceName = normalize(omsConnector?.orderStateLookupServiceName)
+    def orderStateFenceVerdict = buildFencedLookup(omsConnector, orderStateLookupServiceName,
+            omsReturnsSide.source, "externalIds")
+    // buildFencedLookup does not pass companyUserGroupId, so on its own it would fall back to the
+    // session's active tenant — and a scheduled run's session tenant is not guaranteed to be the run
+    // owner's (the 2026-07-31 scheduled-automation failure). Wrap it rather than changing the shared
+    // helper, which the exchange pair stage also uses. A null runOwnerUserGroupId is dropped by
+    // runInternalService's own null filtering, degrading to exactly the old session-tenant behaviour.
+    Closure cancelledOrderLookup = orderStateFenceVerdict == null ? null : { List<String> ids ->
+        Map out = (Map) runInternalService(orderStateLookupServiceName, [
+                (normalize(omsConnector.configParameterName) ?: "sourceConfigId"): normalize(omsReturnsSide.source?.sourceConfigId),
+                externalIds       : ids,
+                companyUserGroupId: runOwnerUserGroupId,
+        ])
+        [ok: out?.ok, ordersByExternalId: out?.ordersByExternalId ?: [:], errors: out?.errors ?: []]
+    }
 
     def returnsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_VERIFY) : null
     Map returnsVerification
@@ -676,11 +699,14 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
                 // runExchangeVerificationPass reads at :543) and may be null for a saved run with no
                 // window (e.g. two static files) — the filter degrades to grace-only behaviour then.
                 windowStartMillis: windowStartDate?.time,
+                // Null when the OMS_RETURNS connector declares no orderStateLookupServiceName, which
+                // disables cancellation-refund suppression without affecting grace/window grading.
+                cancelledOrderLookup: cancelledOrderLookup,
         ])
     } catch (Throwable t) {
         checkFailed = true
         returnsVerification = [performed: false, rewritten: false, pendingCount: 0, preWindowSuppressedCount: 0,
-                removedCount: 0, auditNote: null,
+                removedCount: 0, cancelledRefundSuppressedCount: 0, auditNote: null,
                 warnings: ["Return presence check failed: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map
     }
     if (ec.message.hasError()) {
@@ -713,6 +739,7 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
              metricsJson : JsonOutput.toJson([performed: returnsVerification.performed == true,
                      pendingCount: returnsVerification.pendingCount ?: 0,
                      preWindowSuppressedCount: returnsVerification.preWindowSuppressedCount ?: 0,
+                     cancelledRefundSuppressedCount: returnsVerification.cancelledRefundSuppressedCount ?: 0,
                      removedCount: returnsVerification.removedCount ?: 0])])
 }
 
@@ -918,7 +945,7 @@ try {
                                     runExchangeVerificationPass(serviceResult, file1Source, file2Source,
                                             (Map) file1Result, (Map) file2Result, file1Label, file2Label)
                                     runReturnPresenceVerificationPass(serviceResult, file1Source, file2Source,
-                                            file1Label, file2Label)
+                                            file1Label, file2Label, savedRun.companyUserGroupId as String)
                                     String resultDataManagerPath = serviceResult.diffLocation ?
                                             (DataManagerSupport.relativeDataManagerPath(ec, new File(serviceResult.diffLocation as String)) ?: serviceResult.diffFileName) :
                                             serviceResult.diffFileName

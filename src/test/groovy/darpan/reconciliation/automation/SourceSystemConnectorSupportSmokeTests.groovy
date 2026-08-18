@@ -653,4 +653,49 @@ class SourceSystemConnectorSupportSmokeTests {
         assertNull(omsReturns.pairLookupServiceName,
                 "OMS_RETURNS drives the returns suppression, not the exchange pair verify stage")
     }
+
+    /**
+     * Dispatch contract for the cancellation-refund suppression (2026-08-18).
+     *
+     * runSavedRunDiff's returns verify stage calls the service named by orderStateLookupServiceName
+     * with exactly three parameters: the connector's own configParameterName, externalIds, and
+     * companyUserGroupId (the run owner's tenant — a scheduled run's session tenant is not guaranteed
+     * to be the owner's). Moqui drops undeclared in-parameters silently, so a renamed parameter would
+     * not raise anything: the lookup would just return ok=false or resolve against the wrong tenant,
+     * the stage would fail closed, and a run that suppresses nothing looks exactly like a healthy one.
+     * This pins the contract at build time instead, since the run path itself cannot be exercised
+     * offline (an API-source run dies at extraction without live credentials).
+     */
+    @Test
+    void theOrderStateLookupServiceDeclaresEveryParameterTheReturnsStageDispatches() {
+        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS")
+        assertNotNull(connector, "OMS_RETURNS connector row should resolve")
+        String serviceName = connector.orderStateLookupServiceName as String
+
+        // "<package>.<ServicesFile>.<verb>#<noun>" -> the file that must define it.
+        String noun = serviceName.substring(serviceName.indexOf("#") + 1)
+        String verb = serviceName.substring(serviceName.lastIndexOf(".") + 1, serviceName.indexOf("#"))
+        Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
+        Path servicePath = backendRoot.resolve(
+                "runtime/component/darpan-hotwax/service/reconciliation/HotWaxOmsExtractionServices.xml")
+        assertTrue(Files.exists(servicePath), "service file not found at ${servicePath}")
+
+        def service = new XmlParser(false, false).parse(servicePath.toFile()).children().find {
+            it.name() == "service" && it.attributes().get("noun") == noun && it.attributes().get("verb") == verb
+        }
+        assertNotNull(service, "${serviceName} is seeded on OMS_RETURNS but defined nowhere")
+
+        List<String> declared = service.children()
+                .find { it.name() == "in-parameters" }?.children()
+                ?.collect { it.attributes().get("name") as String } ?: []
+
+        // The config id, under the name THIS connector row says to send it as.
+        assertTrue(declared.contains(connector.configParameterName as String),
+                "dispatch sends the config id as '${connector.configParameterName}'; service declares ${declared}")
+        // The id batch, under the name buildFencedLookup/the returns stage pass it as.
+        assertTrue(declared.contains("externalIds"), "service must accept externalIds; declares ${declared}")
+        // The run owner's tenant, so a scheduled run does not resolve config against a session tenant.
+        assertTrue(declared.contains("companyUserGroupId"),
+                "service must accept companyUserGroupId or scheduled runs silently use the wrong tenant; declares ${declared}")
+    }
 }

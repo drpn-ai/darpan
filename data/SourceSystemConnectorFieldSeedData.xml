@@ -102,27 +102,34 @@
             label="Order name" fieldType="String" isPrimaryIdCandidate="Y" sequenceNum="2"
             description="Shopify order name."/>
 
-    <!-- Shopify return references (DAR-BE-018 task 9). NEW — this endpoint had no pills anywhere.
-         Derived from the EMITTED record shape pinned at ShopifyReturnRefsSupport.groovy:245-249 and
-         built at :261-269, NOT from ShopifySourceCatalog.defaultSelectedFieldPaths (that is the
-         GraphQL selection, which is not what rules run against).
-         refundIds / returnIds / refunds / returns are top-level but LIST-VALUED and are therefore
-         deliberately absent — a rule on any of them would validate, match nothing, and report no
-         error. Note the key names differ from SHOPIFY: orderId/orderName, not id/name. -->
+    <!-- Shopify return references (DAR-BE-018 task 9; 2026-08-17 returns-refund-grain-alignment plan,
+         Task 2, REVISION 2026-08-18). Derived from the EMITTED record shape pinned at
+         ShopifyReturnRefsSupport.groovy:244-252 (Task 1 first reshaped this endpoint to one record
+         per REFUND with refundId/returnId columns; REVISION 2026-08-18 reshaped it again to one
+         record per EVENT — a refund OR a return — because OMS reconciliationReturns.externalId is
+         usually a refund id but for a small number of returns holds the return id instead, and a
+         refund-only Shopify side had no fallback for that case). orderName ($.records[*].orderName,
+         dropped Task 3 Plan 2) and refundId/returnId ($.records[*].refundId / .returnId, dropped
+         this revision) are retired in SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS — seed
+         removal alone does not delete an already-loaded row. -->
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].eventId"
+            label="Event ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
+            description="bareId-normalized event identity: a REFUND id when eventType is REFUND, a RETURN id
+                when eventType is RETURN. Matches OMS externalId whichever kind it is — the single join key
+                for returns reconciliation, with no precedence rule needed on either side."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].eventType"
+            label="Event type" fieldType="string" sequenceNum="2"
+            description="REFUND or RETURN — identifies which kind of id eventId carries on this row. Not a
+                join key; useful for filtering or as a comparison field."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].orderId"
-            label="Order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
+            label="Order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
             description="bareId(legacyResourceId ?: id) — the bare GID tail, matching the numeric Shopify
-                reference the OMS side stores."/>
-    <!-- orderName (normalize(node.name), $.records[*].orderName) was DROPPED here (Task 3, Plan 2):
-         no captured SHOPIFY_RETURN_REFS extract exists anywhere in the repo to prove the field is
-         reliably populated, and the field is documented nullable at
-         ShopifyReturnRefsSupport.groovy:263. An unevidenced primary-ID candidate produces a run that
-         silently matches nothing and reports no error, which is worse than shipping with orderId as
-         the sole primary-ID candidate. Re-add only once a real captured extract proves it populated
-         on every sampled record. -->
+                reference the OMS side stores. Unchanged by the event-per-record reshape; still a grouping /
+                secondary key, not the join key."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].createdAt"
-            label="Order created" fieldType="string" sequenceNum="3"
-            description="Order creation date. NOT the refund/return event date — those live inside the
-                list-valued refunds[]/returns[] and are not offerable as pills."/>
+            label="Event created" fieldType="string" sequenceNum="4"
+            description="RELABELLED (was 'Order created'): this is the individual event's own creation date
+                — a refund row carries the refund's createdAt, a return row carries the return's — never the
+                order's creation date. Windowing filters on this field, not on any order-level date."/>
 
 </entity-facade-xml>

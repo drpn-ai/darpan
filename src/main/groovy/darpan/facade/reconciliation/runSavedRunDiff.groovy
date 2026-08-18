@@ -633,20 +633,21 @@ def runVerificationPass = { Map serviceResult, Object file1Source, Object file2S
              errorMessage: verification.lookupFailed && verification.warnings ? verification.warnings.first().toString() : null])
 }
 
-// Return presence verify stage (DAR-BE-018): mirrors runExchangeVerificationPass's shape — resolve
-// each side's connector, gate on the pair of returns connectors' resolved systemEnumIds (never on
-// hardcoded source names, so an orders reconciliation never enters this path and no existing saved
-// run changes behaviour), open a STAGE_VERIFY step, call the file-facing wrapper, complete the step.
-// Unlike the exchange pass (a live Shopify sweep + OMS point lookup), this check reads the two
-// sides' already-written extract files — both are REQUIRED inputs here, not an optional sidecar —
-// and the wrapper itself (ReturnPresenceVerificationSupport.verifyReturnPresenceForRun) degrades a
-// missing/unreadable file to a warning rather than throwing, so no pre-check on file existence is
-// needed before invoking it.
+// Return presence verify stage (DAR-BE-018; reduced 2026-08-18 — returns-refund-grain-alignment plan,
+// Task 3): resolve each side's connector, gate on the pair of returns connectors' resolved
+// systemEnumIds (never on hardcoded source names, so an orders reconciliation never enters this path
+// and no existing saved run changes behaviour), open a STAGE_VERIFY step, call the file-facing filter,
+// complete the step. Once the Shopify/OMS grains matched (Task 1), the generic ruleset compare already
+// found the real missing-in-Shopify / missing-in-OMS rows via an ordinary join — this stage no longer
+// re-derives presence itself. It now only GRADES rows the compare already reported missing, converting
+// grace-window-young ones to pending (removed from the diff) and gating pre-window Shopify events out
+// of the missing-in-OMS count; see ReturnPresenceVerificationSupport's class doc. That grading reads
+// each row's OWN embedded date straight out of the diff document the compare already wrote, so unlike
+// the retired shape this pass no longer needs either side's raw extract file as an input.
 def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source, Object file2Source,
-                                          Map file1Result, Map file2Result, String file1Label, String file2Label ->
+                                          String file1Label, String file2Label ->
     if (serviceResult.ruleExecutionFailed == true) return
-    List sides = [[source: file1Source, extractResult: file1Result, fileSide: "FILE_1", label: file1Label],
-                  [source: file2Source, extractResult: file2Result, fileSide: "FILE_2", label: file2Label]]
+    List sides = [[source: file1Source, label: file1Label], [source: file2Source, label: file2Label]]
     Map omsReturnsSide = sides.find { Map side ->
         normalize(resolveConnectorFor(side.source)?.systemEnumId) == ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS
     }
@@ -663,44 +664,42 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
     boolean checkFailed = false
     try {
         returnsVerification = ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
-                omsFile         : resolveLocationFile(normalize(omsReturnsSide.extractResult?.fileLocation)),
-                shopifyFile     : resolveLocationFile(normalize(shopifyReturnsSide.extractResult?.fileLocation)),
-                diffFile        : diffFile,
-                nowMillis       : System.currentTimeMillis(),
-                // C2: sides[].label is already plumbed here (file1Label/file2Label -> sides above)
-                // but nothing previously read it — appended rows had no presentIn/missingIn side
-                // labels at all, on top of missing primaryId. Thread it through.
-                omsSideLabel    : omsReturnsSide.label,
-                shopifySideLabel: shopifyReturnsSide.label,
-                // Important #3 (fix-wave-C): the run's reporting window start, so the wrapper can
-                // gate the reverse (missing-in-OMS) pass against refunds the Shopify extractor only
-                // emitted because of its own lookback widening (RQ-23). windowStartDate is already
-                // resolved above (same variable runExchangeVerificationPass reads at :543) and may
-                // be null for a saved run with no window (e.g. two static files) — the wrapper
-                // degrades to pre-fix behaviour in that case rather than throwing.
+                diffFile         : diffFile,
+                file1Label       : file1Label,
+                file2Label       : file2Label,
+                omsSideLabel     : omsReturnsSide.label,
+                shopifySideLabel : shopifyReturnsSide.label,
+                nowMillis        : System.currentTimeMillis(),
+                // The run's reporting window start, so the filter can gate the missing-in-OMS
+                // direction against events the Shopify extractor only emitted because of its own
+                // lookback widening (RQ-23). windowStartDate is already resolved above (same variable
+                // runExchangeVerificationPass reads at :543) and may be null for a saved run with no
+                // window (e.g. two static files) — the filter degrades to grace-only behaviour then.
                 windowStartMillis: windowStartDate?.time,
         ])
     } catch (Throwable t) {
         checkFailed = true
-        returnsVerification = [performed: false, appendedCount: 0, auditNote: null,
+        returnsVerification = [performed: false, rewritten: false, pendingCount: 0, preWindowSuppressedCount: 0,
+                removedCount: 0, auditNote: null,
                 warnings: ["Return presence check failed: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map
     }
     if (ec.message.hasError()) {
         returnsVerification.warnings = ((returnsVerification.warnings ?: []) as List) + ((ec.message.getErrors() ?: []) as List)
         ec.message.clearErrors()
     }
-    // Bump ONLY the two counters appendDiffRows itself bumps on disk (totalDifferences,
-    // missingObjectDifferenceCount) inside verifyReturnPresenceForRun, so the in-memory summary
-    // that feeds the persisted run-result row and the returned tiles never drifts from what the
-    // diff file's own JSON now says. Deliberately NOT touching missingInFile1Count/
-    // missingInFile2Count: the wrapper does not bump the file's onlyInFile1Count/onlyInFile2Count
-    // either (return-presence misses run in both directions — missingInShopify and missingInOms —
-    // and attributing the combined appended count to a single side would misreport it).
-    long appended = ((returnsVerification.appendedCount ?: 0) as long)
-    if (appended > 0L) {
-        serviceResult.differenceCount = ((serviceResult.differenceCount ?: 0) as long) + appended
+    // The filter REMOVES rows from the diff file it already found (grace/window suppression), the
+    // mirror image of the old append — so counts move DOWN here, exactly like runVerificationPass's
+    // own handling of MissingDiffVerificationSupport's rewritten/removedCount above.
+    if (returnsVerification.rewritten) {
+        long removed = ((returnsVerification.removedCount ?: 0) as long)
+        long removedMissingInFile1 = ((returnsVerification.removedMissingInFile1 ?: 0) as long)
+        long removedMissingInFile2 = ((returnsVerification.removedMissingInFile2 ?: 0) as long)
+        serviceResult.differenceCount = Math.max(0L, ((serviceResult.differenceCount ?: 0) as long) - removed)
+        serviceResult.missingInFile1Count = Math.max(0L, ((serviceResult.missingInFile1Count ?: 0) as long) - removedMissingInFile1)
+        serviceResult.missingInFile2Count = Math.max(0L, ((serviceResult.missingInFile2Count ?: 0) as long) - removedMissingInFile2)
         if (serviceResult.missingObjectDifferenceCount != null) {
-            serviceResult.missingObjectDifferenceCount = (serviceResult.missingObjectDifferenceCount as long) + appended
+            serviceResult.missingObjectDifferenceCount = Math.max(0L,
+                    (serviceResult.missingObjectDifferenceCount as long) - removed)
         }
     }
     List returnsNotes = []
@@ -709,11 +708,12 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
     if (returnsNotes) serviceResult.processingWarnings = ((serviceResult.processingWarnings ?: []) as List) + returnsNotes
     RunObservability.endStep(ec, returnsStep,
             checkFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
-            [recordCount : appended,
+            [recordCount : (returnsVerification.removedCount ?: 0),
              errorMessage: checkFailed && returnsVerification.warnings ? returnsVerification.warnings.first().toString() : null,
              metricsJson : JsonOutput.toJson([performed: returnsVerification.performed == true,
-                     matchedCount: returnsVerification.matchedCount ?: 0, pendingCount: returnsVerification.pendingCount ?: 0,
-                     appendedCount: appended])])
+                     pendingCount: returnsVerification.pendingCount ?: 0,
+                     preWindowSuppressedCount: returnsVerification.preWindowSuppressedCount ?: 0,
+                     removedCount: returnsVerification.removedCount ?: 0])])
 }
 
 try {
@@ -918,7 +918,7 @@ try {
                                     runExchangeVerificationPass(serviceResult, file1Source, file2Source,
                                             (Map) file1Result, (Map) file2Result, file1Label, file2Label)
                                     runReturnPresenceVerificationPass(serviceResult, file1Source, file2Source,
-                                            (Map) file1Result, (Map) file2Result, file1Label, file2Label)
+                                            file1Label, file2Label)
                                     String resultDataManagerPath = serviceResult.diffLocation ?
                                             (DataManagerSupport.relativeDataManagerPath(ec, new File(serviceResult.diffLocation as String)) ?: serviceResult.diffFileName) :
                                             serviceResult.diffFileName

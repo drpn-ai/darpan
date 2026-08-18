@@ -1,487 +1,386 @@
 package darpan.facade.reconciliation
 
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
-import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
- * The DAR-BE-018 return identity rule (design §4): refund id is the spine, return id is a
- * forward-only backup, every match is scoped to the owning order, neither-matches is missing, and
- * anything younger than the grace is pending rather than missing.
+ * DAR-BE-018, reduced 2026-08-18 (returns-refund-grain-alignment plan, Task 3): with Shopify and OMS
+ * now sitting at the same grain (one row per EVENT — eventId matches OMS externalId directly), the
+ * generic ruleset compare finds real missing-in-Shopify / missing-in-OMS rows on its own via an
+ * ordinary join. This class no longer re-derives presence — it GRADES the rows the compare already
+ * wrote to the diff document: a one-sided event younger than graceHours is pending (removed from the
+ * diff), and a missing-in-OMS event that predates the run's reporting windowStartMillis is excluded
+ * outright (it only exists because of the Shopify extractor's own lookback widening).
+ *
+ * The retired id-matching behaviour (byOrder index, refund-then-return fallback, matchedCount,
+ * ordersMatchedForward/per-order forward-match suppression) had its own test coverage in the prior
+ * revision of this file; none of it survives here because none of it survives in the class — the
+ * generic compare's join replaced it entirely. See the class doc for the reasoning, including why the
+ * per-order suppression specifically was retired rather than narrowed.
+ *
+ * Fixtures reproduce the {@code ReconciliationServices.writeDiffDatasetOutput} line-oriented format,
+ * with each row's {@code data} column itself JSON-encoded a second time — exactly how
+ * {@code CompareDatasetSupport.convertMissingDiffToRuleSetDiffDataset} writes a "missing" row's
+ * present-side record (a {@code to_json(struct(col("*")))} column) — since that embedded record is
+ * this class's only source for the grace/window date now.
  */
 class ReturnPresenceVerificationSupportTests {
 
+    @TempDir
+    File tempDir
+
+    private static final String OMS_LABEL = "HotWax OMS"
+    private static final String SHOPIFY_LABEL = "Shopify"
+
     private static final long NOW = 1_800_000_000_000L
-    private static final long OLD = NOW - 24L * 3600_000L      // well outside the 3h grace
-    private static final long RECENT = NOW - 30L * 60_000L     // inside the grace
+    private static final long OLD = NOW - 24L * 3600_000L      // well outside the 3h default grace
+    private static final long RECENT = NOW - 30L * 60_000L     // inside the 3h default grace
 
-    @Test
-    void matchesAnOmsReturnAgainstARefundIdOnItsOwnOrder() {
-        Map result = verify(
-                [omsReturn("5001", "7025799037059", OLD)],
-                [shopifyOrder("7025799037059", ["5001"], [])])
-
-        assertEquals(1, result.matchedCount)
-        assertEquals(0, ((List) result.missingInShopify).size())
+    /** A "missing in Shopify" row: the OMS return is present, data carries the OMS record (entryDate). */
+    private static Map missingInShopifyRow(String id, long entryDateMillis) {
+        return [
+                diffType : "MISSING_IN_FILE_2",
+                primaryId: id,
+                presentIn: OMS_LABEL,
+                missingIn: SHOPIFY_LABEL,
+                data     : JsonOutput.toJson([externalId: id, orderExternalId: "7025799037059",
+                        entryDate: entryDateMillis, returnId: "R-${id}".toString()]),
+                message  : "Present in ${OMS_LABEL}, missing in ${SHOPIFY_LABEL}".toString(),
+        ]
     }
 
-    @Test
-    void fallsBackToTheReturnIdWhenNoRefundMatches() {
-        // The permanent ex-IN-PROGRESS minority: OMS stamped the Return id and never backfilled it.
-        Map result = verify(
-                [omsReturn("9001", "7025799037059", OLD)],
-                [shopifyOrder("7025799037059", ["5001"], ["9001"])])
-
-        assertEquals(1, result.matchedCount)
-        assertEquals(0, ((List) result.missingInShopify).size())
+    /** A "missing in OMS" row: the Shopify event is present, data carries the Shopify record (createdAt). */
+    private static Map missingInOmsRow(String id, long createdAtMillis, String eventType = "REFUND") {
+        return [
+                diffType : "MISSING_IN_FILE_1",
+                primaryId: id,
+                presentIn: SHOPIFY_LABEL,
+                missingIn: OMS_LABEL,
+                data     : JsonOutput.toJson([eventId: id, eventType: eventType, orderId: "7025799037059",
+                        createdAt: isoInstant(createdAtMillis)]),
+                message  : "Present in ${SHOPIFY_LABEL}, missing in ${OMS_LABEL}".toString(),
+        ]
     }
 
-    @Test
-    void reportsMissingInShopifyWhenNeitherIdSetMatches() {
-        Map result = verify(
-                [omsReturn("7777", "7025799037059", OLD)],
-                [shopifyOrder("7025799037059", ["5001"], ["9001"])])
-
-        List missing = (List) result.missingInShopify
-        assertEquals(1, missing.size())
-        // C2: the row is keyed by primaryId (not the old bare "externalId" field) — primaryId is
-        // what OutputDescriptorSupport/DiffDetailClassifier/RULESET_CSV_COLUMNS all read.
-        assertEquals("7777", ((Map) missing[0]).primaryId)
+    private static String isoInstant(long millis) {
+        return new Date(millis).toInstant().toString()
     }
 
-    @Test
-    void neverMatchesAcrossOrders() {
-        // The bare id space is shared across types and orders; only orderExternalId scoping keeps a
-        // numeric collision from becoming a false match (design §2).
-        Map result = verify(
-                [omsReturn("5001", "ORDER_A", OLD)],
-                [shopifyOrder("ORDER_A", [], []), shopifyOrder("ORDER_B", ["5001"], [])])
-
-        assertEquals(0, result.matchedCount)
-        assertEquals(1, ((List) result.missingInShopify).size())
-    }
-
-    @Test
-    void holdsAYoungOneSidedReturnAsPendingNotMissing() {
-        Map result = verify(
-                [omsReturn("7777", "7025799037059", RECENT)],
-                [shopifyOrder("7025799037059", [], [])])
-
-        assertEquals(0, ((List) result.missingInShopify).size())
-        assertEquals(1, result.pendingCount)
-    }
-
-    @Test
-    void reportsAShopifyRefundWithNoOmsReturnAsMissingInOms() {
-        Map result = verify(
-                [],
-                [shopifyOrder("7025799037059", ["5001"], [])])
-
-        List missing = (List) result.missingInOms
-        assertEquals(1, missing.size())
-        // C2: the row is keyed by primaryId (not the old bare "refundId" field).
-        assertEquals("5001", ((Map) missing[0]).primaryId)
-    }
-
-    @Test
-    void doesNotExpectARefundedShopifyReturnSeparatelyFromItsRefund() {
-        // The Return object's event is represented by its refund. Expecting both would phantom-flag
-        // every refunded RMA as missing-in-OMS (design §4).
-        Map result = verify(
-                [omsReturn("5001", "7025799037059", OLD)],
-                [shopifyOrder("7025799037059", ["5001"], ["9001"])])
-
-        assertEquals(0, ((List) result.missingInOms).size())
-    }
-
-    @Test
-    void suppressesReverseMissingWhenTheOrderAlreadyMatchedForward() {
-        // The ex-IN-PROGRESS-then-refunded case: OMS keyed the return by its Return id, so the
-        // refund id is nobody's externalId. The event IS captured — just under the other id.
-        Map result = verify(
-                [omsReturn("9001", "7025799037059", OLD)],
-                [shopifyOrder("7025799037059", ["5001"], ["9001"])])
-
-        assertEquals(1, result.matchedCount)
-        assertEquals(0, ((List) result.missingInOms).size())
-    }
-
-    @Test
-    void auditNoteAlwaysShowsItsWorkEvenWhenEverythingMatched() {
-        Map result = verify(
-                [omsReturn("5001", "7025799037059", OLD)],
-                [shopifyOrder("7025799037059", ["5001"], [])])
-
-        String note = result.auditNote as String
-        assertTrue(note.contains("1 matched"), "operator always gets a sentence: ${note}")
-        assertTrue(note.contains("3h"), "the grace must be stated: ${note}")
-    }
-
-    @Test
-    void auditNoteStatesTheSuppressionCaveatOnlyWhenASuppressionOccurred() {
-        // Return-id fallback match (same fixture as the reverse-suppression test): the order
-        // matches forward, so its reverse check is suppressed and the caveat must be disclosed.
-        Map suppressed = verify(
-                [omsReturn("9001", "7025799037059", OLD)],
-                [shopifyOrder("7025799037059", ["5001"], ["9001"])])
-        assertTrue(((String) suppressed.auditNote).contains("suppressed"),
-                "a suppressed order must be disclosed: ${suppressed.auditNote}")
-
-        // Neither id set matches: no forward match, so no order is suppressed and the caveat
-        // would be noise.
-        Map notSuppressed = verify(
-                [omsReturn("7777", "7025799037059", OLD)],
-                [shopifyOrder("7025799037059", ["5001"], ["9001"])])
-        assertFalse(((String) notSuppressed.auditNote).contains("suppressed"),
-                "no suppression occurred, the caveat must not appear: ${notSuppressed.auditNote}")
-    }
-
-    @Test
-    void readsBothExtractFilesAndAppendsMissingRowsToTheDiffFile() {
-        File omsFile = File.createTempFile("oms-returns-", ".json")
-        File shopifyFile = File.createTempFile("shopify-return-refs-", ".json")
-        File diffFile = File.createTempFile("diff-", ".json")
-        try {
-            omsFile.text = groovy.json.JsonOutput.toJson([records: [
-                    omsReturn("7777", "7025799037059", OLD),
-            ], metadata: [:]])
-            shopifyFile.text = groovy.json.JsonOutput.toJson([records: [
-                    shopifyOrder("7025799037059", ["5001"], []),
-            ], metadata: [:]])
-            // Mirrors ReconciliationServices.writeDiffDatasetOutput's line-oriented format (see
-            // ExchangePairVerificationSupportTests.diffFile()/MissingDiffVerificationSupportTests
-            // .writeDiffDocument): appendDiffRows scans line-by-line and only recognizes
-            // "differences":[ when it opens its OWN line. A single-line envelope such as
-            // '{"differences":[],...}' never matches that check, so the append would silently no-op
-            // (caught by appendDiffRows's own try/catch as a warning, not a thrown failure) and this
-            // test's assertions on appendedCount/diffFile.text would fail against the real class.
-            diffFile.text = '{\n' +
-                    '"summary":{"totalDifferences":0,"onlyInFile1Count":0,"onlyInFile2Count":0,"missingObjectDifferenceCount":0},\n' +
-                    '"processingWarnings":[],\n' +
-                    '"differences":[]\n' +
-                    '}\n'
-
-            Map result = ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
-                    omsFile    : omsFile,
-                    shopifyFile: shopifyFile,
-                    diffFile   : diffFile,
-                    nowMillis  : NOW,
-            ])
-
-            assertTrue(result.performed as boolean)
-            // One OMS return matching nothing, and one Shopify refund with no OMS counterpart.
-            assertEquals(2, result.appendedCount)
-            assertTrue(diffFile.text.contains("RETURN_MISSING_IN_SHOPIFY"))
-            assertTrue(diffFile.text.contains("RETURN_MISSING_IN_OMS"))
-        } finally {
-            omsFile.delete(); shopifyFile.delete(); diffFile.delete()
-        }
-    }
-
-    @Test
-    void everyAppendedDiffRowInTheWrittenArtifactCarriesAPrimaryId() {
-        // C2: the prior test suite only ever asserted the returned Map's own keys, never the
-        // artifact contract — every appended row actually landed on disk (and exported) as
-        // "RETURN_MISSING_IN_SHOPIFY,,,,,,,,,," because primaryId was never set. This reads back
-        // what actually landed in the diff FILE, the thing ReconciliationOutputSupport /
-        // OutputDescriptorSupport / DiffDetailClassifier all consume downstream.
-        File omsFile = File.createTempFile("oms-returns-", ".json")
-        File shopifyFile = File.createTempFile("shopify-return-refs-", ".json")
-        File diffFile = File.createTempFile("diff-", ".json")
-        try {
-            omsFile.text = groovy.json.JsonOutput.toJson([records: [
-                    omsReturn("7777", "7025799037059", OLD),
-            ], metadata: [:]])
-            shopifyFile.text = groovy.json.JsonOutput.toJson([records: [
-                    shopifyOrder("7025799037059", ["5001"], []),
-            ], metadata: [:]])
-            diffFile.text = '{\n' +
-                    '"summary":{"totalDifferences":0,"onlyInFile1Count":0,"onlyInFile2Count":0,"missingObjectDifferenceCount":0},\n' +
-                    '"processingWarnings":[],\n' +
-                    '"differences":[]\n' +
-                    '}\n'
-
-            ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
-                    omsFile         : omsFile,
-                    shopifyFile     : shopifyFile,
-                    diffFile        : diffFile,
-                    nowMillis       : NOW,
-                    omsSideLabel    : "HotWax OMS",
-                    shopifySideLabel: "Shopify",
-            ])
-
-            Map written = (Map) new groovy.json.JsonSlurper().parse(diffFile)
-            List differences = (List) written.differences
-            assertEquals(2, differences.size())
-            differences.each { Object row ->
-                String primaryId = ((Map) row).primaryId as String
-                assertNotNull(primaryId, "every appended row must carry a primaryId: ${row}")
-                assertFalse(primaryId.trim().isEmpty(), "primaryId must not be blank: ${row}")
-                assertNotNull(((Map) row).missingIn, "every appended row must carry a missingIn side label: ${row}")
+    private File writeDiffDocument(List<Map> rows, Map summaryOverride = null) {
+        File file = new File(tempDir, "returns-diff-${System.nanoTime()}.json")
+        Map metadata = [file1Label: SHOPIFY_LABEL, file2Label: OMS_LABEL, reconciliation: "RULESET"]
+        // file1 = Shopify, file2 = OMS: "only in file1" = present in Shopify only = missing in OMS;
+        // "only in file2" = present in OMS only = missing in Shopify. Mirrors writeRuleSetOutput's own
+        // onlyInFile1Count/onlyInFile2Count <-> missingInFile2Count/missingInFile1Count mapping.
+        int missingInOmsCount = rows.count { it.missingIn == OMS_LABEL } as int
+        int missingInShopifyCount = rows.count { it.missingIn == SHOPIFY_LABEL } as int
+        Map summary = summaryOverride ?: [
+                totalDifferences            : rows.size(),
+                onlyInFile1Count            : missingInOmsCount,
+                onlyInFile2Count            : missingInShopifyCount,
+                missingObjectDifferenceCount: rows.size(),
+        ]
+        file.withWriter("UTF-8") { writer ->
+            writer << "{\n"
+            writer << "\"metadata\":" + JsonOutput.toJson(metadata) + ",\n"
+            writer << "\"summary\":" + JsonOutput.toJson(summary) + ",\n"
+            writer << "\"validationErrors\":" + JsonOutput.toJson([]) + ",\n"
+            writer << "\"processingWarnings\":" + JsonOutput.toJson(["compare warning"]) + ",\n"
+            writer << "\"differences\":["
+            boolean first = true
+            rows.each { Map row ->
+                if (!first) writer << ","
+                writer << "\n" << JsonOutput.toJson(row)
+                first = false
             }
-        } finally {
-            omsFile.delete(); shopifyFile.delete(); diffFile.delete()
+            writer << "]\n}"
         }
+        return file
+    }
+
+    private static Map parseDocument(File file) {
+        return (Map) new JsonSlurper().parseText(file.getText("UTF-8"))
+    }
+
+    private Map verify(File file, Long windowStartMillis = null) {
+        return ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
+                diffFile         : file,
+                file1Label       : SHOPIFY_LABEL,
+                file2Label       : OMS_LABEL,
+                omsSideLabel     : OMS_LABEL,
+                shopifySideLabel : SHOPIFY_LABEL,
+                nowMillis        : NOW,
+                windowStartMillis: windowStartMillis,
+        ])
+    }
+
+    // --- GRACE: the behaviour this task exists to keep ---
+
+    @Test
+    void aOneSidedReturnYoungerThanGraceIsNotReportedMissing() {
+        File file = writeDiffDocument([missingInShopifyRow("7777", RECENT)])
+
+        Map result = verify(file)
+
+        assertTrue((Boolean) result.performed)
+        assertTrue((Boolean) result.rewritten)
+        assertEquals(1, result.pendingCount)
+        assertEquals(1, result.removedCount)
+
+        Map document = parseDocument(file)
+        assertEquals([], ((List) document.differences))
+        assertEquals(0, ((Map) document.summary).totalDifferences)
     }
 
     @Test
-    void anOmsReturnWithEpochMillisEntryDateInsideGraceIsPendingNotMissing() {
-        // C3: real captured OMS REST output serializes timestamps as epoch-millis integers (verified
-        // directly against runtime/datamanager/reconciliation-runs/krewe_uat/20260512-055125929/
-        // oms-orders-1775001600000-1777593600000.json: entryDate = 1777030973104, an int, not an
-        // ISO-8601 string). The shared omsReturn() fixture below now emits epoch millis for exactly
-        // this reason — this test additionally pins the raw-Number AND all-digits-String forms.
-        Map numberForm = verify(
-                [[externalId: "7777", orderExternalId: "7025799037059", entryDate: RECENT, returnId: "R-7777"]],
-                [shopifyOrder("7025799037059", [], [])])
-        assertEquals(0, ((List) numberForm.missingInShopify).size(), "an epoch-millis Number entryDate inside the grace must not report missing")
-        assertEquals(1, numberForm.pendingCount)
+    void aOneSidedReturnOlderThanGraceIsStillReportedMissing() {
+        File file = writeDiffDocument([missingInShopifyRow("7777", OLD)])
 
-        Map stringForm = verify(
-                [[externalId: "7778", orderExternalId: "7025799037059", entryDate: String.valueOf(RECENT), returnId: "R-7778"]],
-                [shopifyOrder("7025799037059", [], [])])
-        assertEquals(0, ((List) stringForm.missingInShopify).size(), "an epoch-millis all-digits String entryDate inside the grace must not report missing")
-        assertEquals(1, stringForm.pendingCount)
-    }
+        Map result = verify(file)
 
-    @Test
-    void anOmsReturnWithEpochMillisEntryDateOutsideGraceIsStillReportedMissing() {
-        // The other half of C3: epoch-millis parsing must not accidentally make everything pending —
-        // an OMS return older than the grace, expressed in epoch millis, must still be missing.
-        Map result = verify(
-                [[externalId: "7777", orderExternalId: "7025799037059", entryDate: OLD, returnId: "R-7777"]],
-                [shopifyOrder("7025799037059", [], [])])
-
-        assertEquals(1, ((List) result.missingInShopify).size())
+        assertTrue((Boolean) result.performed)
+        assertFalse((Boolean) result.rewritten)
         assertEquals(0, result.pendingCount)
+        assertEquals(0, result.removedCount)
+
+        Map document = parseDocument(file)
+        assertEquals(["7777"], ((List) document.differences).collect { it.primaryId })
+        assertEquals(1, ((Map) document.summary).totalDifferences)
     }
 
     @Test
-    void aRecentRefundOnAnOldOrderIsPendingNotMissing() {
-        // I1: the reverse grace must key off the REFUND's own createdAt (the upstream extractor's
-        // refundsCreatedAt map, keyed by the same bare refund id), not the order's. An order that is
-        // months old but whose refund was created moments ago must still read as pending.
-        Map order = [orderId: "7025799037059", refundIds: ["5001"], returnIds: [],
-                     createdAt: new Date(OLD).toInstant().toString(),
-                     refundsCreatedAt: ["5001": new Date(RECENT).toInstant().toString()]]
+    void aRecentMissingInOmsShopifyEventIsHeldAsPendingNotMissing() {
+        // Same grace behaviour, other direction: the Shopify side is present, OMS hasn't caught up yet.
+        File file = writeDiffDocument([missingInOmsRow("5001", RECENT)])
 
-        Map result = verify([], [order])
+        Map result = verify(file)
 
-        assertEquals(0, ((List) result.missingInOms).size(), "a young refund on an old order must not be reported missing")
+        assertTrue((Boolean) result.rewritten)
         assertEquals(1, result.pendingCount)
+        Map document = parseDocument(file)
+        assertEquals([], (List) document.differences)
     }
 
     @Test
-    void anOldRefundOnARecentOrderIsStillReportedMissing() {
-        // The other half of I1: keying on the refund's own date must not accidentally suppress a
-        // genuinely stale refund just because the order itself is recent.
-        Map order = [orderId: "7025799037059", refundIds: ["5001"], returnIds: [],
-                     createdAt: new Date(RECENT).toInstant().toString(),
-                     refundsCreatedAt: ["5001": new Date(OLD).toInstant().toString()]]
+    void anOldMissingInOmsShopifyEventIsStillReportedMissing() {
+        File file = writeDiffDocument([missingInOmsRow("5001", OLD)])
 
-        Map result = verify([], [order])
+        Map result = verify(file)
 
-        assertEquals(1, ((List) result.missingInOms).size(), "a stale refund on a recent order must still be reported missing")
+        assertFalse((Boolean) result.rewritten)
         assertEquals(0, result.pendingCount)
+        Map document = parseDocument(file)
+        assertEquals(["5001"], ((List) document.differences).collect { it.primaryId })
     }
 
     @Test
-    void fallsBackToOrderCreatedAtWhenRefundsCreatedAtIsAbsent() {
-        // Older extract shape without refundsCreatedAt at all: the order's own createdAt remains the
-        // fallback clock, preserving pre-fix behavior for that case.
-        Map order = [orderId: "7025799037059", refundIds: ["5001"], returnIds: [],
-                     createdAt: new Date(RECENT).toInstant().toString()]
-
-        Map result = verify([], [order])
-
-        assertEquals(0, ((List) result.missingInOms).size())
-        assertEquals(1, result.pendingCount)
-    }
-
-    @Test
-    void readsTheNewRefundsListShapeForTheReverseGrace() {
-        // Important #1 (fix-wave-C): the upstream extractor now emits refunds as a
-        // `refunds: [{id, createdAt}, ...]` list instead of a refundsCreatedAt map (a Spark
-        // schema-inference fix on the emitting side). The new shape must drive the same reverse
-        // grace check I1 already proved against the old map shape.
-        Map order = [orderId: "7025799037059", refundIds: ["5001"], returnIds: [],
-                     createdAt: new Date(OLD).toInstant().toString(),
-                     refunds  : [[id: "5001", createdAt: new Date(RECENT).toInstant().toString()]]]
-
-        Map result = verify([], [order])
-
-        assertEquals(0, ((List) result.missingInOms).size(), "a young refund (list shape) on an old order must not be reported missing")
-        assertEquals(1, result.pendingCount)
-    }
-
-    @Test
-    void fallsBackToTheOldRefundsCreatedAtMapShapeWhenRefundsListIsAbsent() {
-        // Cross-repo landing independence: when only the older map shape is present (the Shopify-
-        // side fix not yet deployed), the fallback must behave exactly as before.
-        Map order = [orderId: "7025799037059", refundIds: ["5001"], returnIds: [],
-                     createdAt: new Date(OLD).toInstant().toString(),
-                     refundsCreatedAt: ["5001": new Date(RECENT).toInstant().toString()]]
-
-        Map result = verify([], [order])
-
-        assertEquals(0, ((List) result.missingInOms).size())
-        assertEquals(1, result.pendingCount)
-    }
-
-    @Test
-    void aPreWindowShopifyRefundStillSatisfiesTheForwardMatch() {
-        // Important #3: OMS lags Shopify by ~38min (RQ-23). The Shopify extractor now widens its
-        // fetch/emit floor by a lookback, so a refund created just BEFORE windowStart can still be
-        // present here -- and the forward pass must match against it, which is the entire point of
-        // the widened net.
-        long windowStart = 1_800_000_000_000L
-        long omsEntry = windowStart + 5 * 60_000L        // just inside the reporting window
-        long refundCreated = windowStart - 30 * 60_000L  // just before it, inside the lookback
-
-        Map order = [orderId: "7025799037059", refundIds: ["5001"], returnIds: [],
-                     createdAt: new Date(refundCreated).toInstant().toString(),
-                     refunds  : [[id: "5001", createdAt: new Date(refundCreated).toInstant().toString()]]]
-        Map omsReturnRecord = [externalId: "5001", orderExternalId: "7025799037059",
-                                entryDate: omsEntry, returnId: "R-5001"]
-
-        Map result = ReturnPresenceVerificationSupport.verifyReturnPresence([
-                omsReturns       : [omsReturnRecord],
-                shopifyOrders    : [order],
-                nowMillis        : windowStart + 3600_000L,
-                windowStartMillis: windowStart,
+    void gradesEachRowIndependentlyLeavingOldOnesAndRemovingYoungOnes() {
+        File file = writeDiffDocument([
+                missingInShopifyRow("7777", OLD),
+                missingInShopifyRow("7778", RECENT),
+                missingInOmsRow("5001", OLD),
+                missingInOmsRow("5002", RECENT),
+        ], [
+                totalDifferences            : 4,
+                onlyInFile1Count            : 2,
+                onlyInFile2Count            : 2,
+                missingObjectDifferenceCount: 4,
         ])
 
-        assertEquals(1, result.matchedCount, "a pre-window Shopify refund (within the lookback) must still satisfy the forward match")
-        assertEquals(0, ((List) result.missingInShopify).size())
+        Map result = verify(file)
+
+        assertEquals(2, result.pendingCount)
+        assertEquals(2, result.removedCount)
+        Map document = parseDocument(file)
+        assertEquals(["7777", "5001"] as Set, (((List) document.differences).collect { it.primaryId } as Set))
+        assertEquals(2, ((Map) document.summary).totalDifferences)
+        assertEquals(1, ((Map) document.summary).onlyInFile1Count)
+        assertEquals(1, ((Map) document.summary).onlyInFile2Count)
+        assertEquals(2, ((Map) document.summary).missingObjectDifferenceCount)
     }
 
+    // --- WINDOW-START GATE: the other behaviour this task exists to keep ---
+
     @Test
-    void aPreWindowShopifyRefundIsNotSeparatelyReportedMissingInOms() {
-        // The other half of Important #3, isolated from the forward-match suppression already
-        // covered by suppressesReverseMissingWhenTheOrderAlreadyMatchedForward: there is NO OMS
-        // return at all here, so ordersMatchedForward stays empty and cannot be masking this. The
-        // refund's own createdAt predates windowStart -- available only because of the Shopify
-        // extractor's lookback widening -- and must not be reported missing-in-OMS: doing so would
-        // just relocate the false-missing this fix closes from the OMS side to the Shopify side.
+    void aPreWindowMissingInOmsEventIsExcludedEvenThoughItIsOldEnoughToBeGraceEligible() {
         long windowStart = 1_800_000_000_000L
-        long refundCreated = windowStart - 30 * 60_000L  // pre-window, and well outside the grace too
+        long eventCreated = windowStart - 30 * 60_000L // before windowStart, and outside grace too
 
-        Map order = [orderId: "7025799037059", refundIds: ["5001"], returnIds: [],
-                     createdAt: new Date(refundCreated).toInstant().toString(),
-                     refunds  : [[id: "5001", createdAt: new Date(refundCreated).toInstant().toString()]]]
+        File file = writeDiffDocument([missingInOmsRow("5001", eventCreated)])
 
-        Map result = ReturnPresenceVerificationSupport.verifyReturnPresence([
-                omsReturns       : [],
-                shopifyOrders    : [order],
+        Map result = ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
+                diffFile         : file,
+                file1Label       : SHOPIFY_LABEL,
+                file2Label       : OMS_LABEL,
+                omsSideLabel     : OMS_LABEL,
+                shopifySideLabel : SHOPIFY_LABEL,
                 nowMillis        : windowStart + 4 * 3600_000L,
                 windowStartMillis: windowStart,
         ])
 
-        assertEquals(0, ((List) result.missingInOms).size())
-        assertEquals(0, result.pendingCount, "gated out before the grace check, not merely marked pending")
+        assertTrue((Boolean) result.rewritten)
+        assertEquals(1, result.removedCount)
+        // Gated out before the grace check — not counted as pending.
+        assertEquals(0, result.pendingCount)
+        assertEquals(1, result.preWindowSuppressedCount)
+        Map document = parseDocument(file)
+        assertEquals([], (List) document.differences)
     }
 
     @Test
-    void degradesToPreFixBehaviourWhenNoWindowStartIsSupplied() {
-        // Callers that do not thread windowStartMillis (older call sites, or this test file's own
-        // verify() helper) must keep seeing pre-fix behaviour: no gating beyond the existing grace
-        // check, even for a refund that predates what would have been the reporting window.
-        Map order = [orderId: "7025799037059", refundIds: ["5001"], returnIds: [],
-                     createdAt: new Date(OLD).toInstant().toString(),
-                     refunds  : [[id: "5001", createdAt: new Date(OLD).toInstant().toString()]]]
+    void theWindowStartGateNeverAppliesToTheMissingInShopifyDirection() {
+        // A pre-window OMS return has no lookback-driven artifact to correct for — only the
+        // missing-in-OMS direction is gated. This one is old enough to be genuinely missing.
+        long windowStart = 1_800_000_000_000L
+        long entryDate = windowStart - 30 * 60_000L
 
-        Map result = verify([], [order])
+        File file = writeDiffDocument([missingInShopifyRow("7777", entryDate)])
 
-        assertEquals(1, ((List) result.missingInOms).size())
-    }
-
-    @Test
-    void matchesAGidFormOmsExternalIdAgainstABareShopifyRefundId() {
-        // I5: the OMS side of the match must be GID-normalized too. The Shopify side already strips
-        // GIDs down to the bare id; the OMS returns header format (bare vs GID) has never been
-        // observed live (open half of OQ-8), so a GID-form externalId must still match.
-        Map result = verify(
-                [[externalId: "gid://shopify/Refund/5001", orderExternalId: "7025799037059",
-                  entryDate: OLD, returnId: "R-5001"]],
-                [shopifyOrder("7025799037059", ["5001"], [])])
-
-        assertEquals(1, result.matchedCount, "a GID-form OMS externalId must still match the bare Shopify refund id")
-        assertEquals(0, ((List) result.missingInShopify).size())
-    }
-
-    @Test
-    void matchesAGidFormOrderExternalIdAndExternalIdAgainstABareShopifyOrderAndRefundPair() {
-        // Important #2 (fix-wave-C re-review): orderExternalId comes off the same OMS returns
-        // endpoint and the same connector projection as externalId, so the SAME bare-vs-GID
-        // uncertainty (OQ-8) applies to it. The original I5 fix normalized only externalId; a
-        // GID-form orderExternalId would make every byOrder.get(orderExternalId) lookup return null,
-        // silently defeating I5 for every OMS return regardless of externalId's own form.
-        Map result = verify(
-                [[externalId: "gid://shopify/Refund/5001", orderExternalId: "gid://shopify/Order/7025799037059",
-                  entryDate: OLD, returnId: "R-5001"]],
-                [shopifyOrder("7025799037059", ["5001"], [])])
-
-        assertEquals(1, result.matchedCount, "a GID-form orderExternalId must still match the bare Shopify order id")
-        assertEquals(0, ((List) result.missingInShopify).size())
-    }
-
-    @Test
-    void countsMalformedOmsAndShopifyRecordsWithoutFailingTheCheck() {
-        // M2: a non-Map entry, or one missing its required id field, must be counted rather than
-        // silently dropped — mirrors ExchangePairVerificationSupport's own warnings posture.
-        Map result = verify(
-                ["not-a-map", [orderExternalId: "7025799037059"] /* missing externalId */,
-                 omsReturn("7777", "7025799037059", OLD)],
-                [42, [refundIds: ["5001"]] /* missing orderId */,
-                 shopifyOrder("7025799037059", [], [])])
-
-        assertEquals(2, result.malformedOmsReturnCount)
-        assertEquals(2, result.malformedShopifyOrderCount)
-    }
-
-    @Test
-    void degradesToAWarningWhenAnExtractFileIsMissing() {
-        // The compare already succeeded; a verification failure must not fail the whole run.
-        File diffFile = File.createTempFile("diff-", ".json")
-        try {
-            diffFile.text = '{"differences":[],"processingWarnings":[]}'
-            Map result = ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
-                    omsFile    : new File("/nonexistent/oms.json"),
-                    shopifyFile: new File("/nonexistent/shopify.json"),
-                    diffFile   : diffFile,
-                    nowMillis  : NOW,
-            ])
-
-            assertEquals(false, result.performed)
-            assertTrue(((List) result.warnings).size() > 0, "a skipped check must say so")
-        } finally {
-            diffFile.delete()
-        }
-    }
-
-    private static Map verify(List omsReturns, List shopifyOrders) {
-        return ReturnPresenceVerificationSupport.verifyReturnPresence([
-                omsReturns   : omsReturns,
-                shopifyOrders: shopifyOrders,
-                nowMillis    : NOW,
+        Map result = ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
+                diffFile         : file,
+                file1Label       : SHOPIFY_LABEL,
+                file2Label       : OMS_LABEL,
+                omsSideLabel     : OMS_LABEL,
+                shopifySideLabel : SHOPIFY_LABEL,
+                nowMillis        : windowStart + 4 * 3600_000L,
+                windowStartMillis: windowStart,
         ])
+
+        assertFalse((Boolean) result.rewritten)
+        assertEquals(0, result.removedCount)
+        Map document = parseDocument(file)
+        assertEquals(["7777"], ((List) document.differences).collect { it.primaryId })
     }
 
-    private static Map omsReturn(String externalId, String orderExternalId, long entryMillis) {
-        // C3: real OMS REST output serializes entryDate as an epoch-millis integer, not an
-        // ISO-8601 string (verified against a captured extract — see the class doc and
-        // anOmsReturnWithEpochMillisEntryDateInsideGraceIsPendingNotMissing). The old ISO-string
-        // fixture here let every grace/pending test pass without ever exercising the code path the
-        // real endpoint actually uses; every caller of this helper now proves the epoch-millis path.
-        return [externalId: externalId, orderExternalId: orderExternalId,
-                entryDate: entryMillis, returnId: "R-${externalId}".toString()]
+    @Test
+    void degradesToGraceOnlyBehaviourWhenNoWindowStartIsSupplied() {
+        File file = writeDiffDocument([missingInOmsRow("5001", OLD)])
+
+        Map result = verify(file, null)
+
+        assertFalse((Boolean) result.rewritten)
+        assertEquals(0, result.preWindowSuppressedCount)
+        Map document = parseDocument(file)
+        assertEquals(["5001"], ((List) document.differences).collect { it.primaryId })
     }
 
-    private static Map shopifyOrder(String orderId, List refundIds, List returnIds) {
-        return [orderId: orderId, refundIds: refundIds, returnIds: returnIds,
-                createdAt: new Date(OLD).toInstant().toString()]
+    // --- Non-returns rows and rule rows must never be touched ---
+
+    @Test
+    void leavesRuleDiffRowsAndOtherSidesUntouched() {
+        Map ruleRow = [diffType: "rule_diff", primaryId: "3001", field: "grandTotal",
+                       file1Value: "10.00", file2Value: "12.00", ruleId: "rule_1", message: "grandTotal mismatch"]
+        File file = writeDiffDocument([missingInShopifyRow("7777", RECENT), ruleRow], [
+                totalDifferences            : 2,
+                onlyInFile1Count            : 0,
+                onlyInFile2Count            : 1,
+                missingObjectDifferenceCount: 1,
+                ruleDifferenceCount         : 1,
+        ])
+
+        Map result = verify(file)
+
+        assertTrue((Boolean) result.rewritten)
+        Map document = parseDocument(file)
+        assertEquals(["3001"], ((List) document.differences).collect { it.primaryId })
+        assertEquals(1, ((Map) document.summary).totalDifferences)
+        assertEquals(1, ((Map) document.summary).ruleDifferenceCount)
+    }
+
+    // --- Malformed / degraded-input posture ---
+
+    @Test
+    void aRowWithNoParseableOwnDateIsLeftAsReportedAndCountedMalformed() {
+        Map row = [diffType: "MISSING_IN_FILE_2", primaryId: "7777", presentIn: OMS_LABEL, missingIn: SHOPIFY_LABEL,
+                   data: JsonOutput.toJson([externalId: "7777", orderExternalId: "7025799037059"]) /* no entryDate */,
+                   message: "Present in ${OMS_LABEL}, missing in ${SHOPIFY_LABEL}".toString()]
+        File file = writeDiffDocument([row])
+
+        Map result = verify(file)
+
+        assertFalse((Boolean) result.rewritten)
+        assertEquals(1, result.malformedCount)
+        assertTrue(((List) result.warnings).any { it.toString().contains("could not grade") })
+        Map document = parseDocument(file)
+        assertEquals(["7777"], ((List) document.differences).collect { it.primaryId })
+    }
+
+    @Test
+    void degradesToAWarningWhenTheDiffFileIsMissing() {
+        Map result = ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
+                diffFile        : new File(tempDir, "nonexistent.json"),
+                file1Label      : SHOPIFY_LABEL,
+                file2Label      : OMS_LABEL,
+                omsSideLabel    : OMS_LABEL,
+                shopifySideLabel: SHOPIFY_LABEL,
+                nowMillis       : NOW,
+        ])
+
+        assertEquals(false, result.performed)
+        assertTrue(((List) result.warnings).size() > 0, "a skipped check must say so")
+    }
+
+    // --- Audit note: always shows its work, window-start clause only when it applies ---
+
+    @Test
+    void auditNoteAlwaysShowsItsWorkEvenWhenNothingIsPending() {
+        File file = writeDiffDocument([missingInShopifyRow("7777", OLD)])
+
+        Map result = verify(file)
+
+        String note = result.auditNote as String
+        assertTrue(note.startsWith(ReturnPresenceVerificationSupport.AUDIT_NOTE_PREFIX), "note: ${note}")
+        assertTrue(note.contains("0 pending"), "operator always gets a sentence: ${note}")
+        assertTrue(note.contains("3h"), "the grace must be stated: ${note}")
+        assertFalse(note.contains("pre-window"), "no window-start suppression occurred: ${note}")
+    }
+
+    @Test
+    void auditNoteStatesThePreWindowClauseOnlyWhenItApplies() {
+        long windowStart = 1_800_000_000_000L
+        File file = writeDiffDocument([missingInOmsRow("5001", windowStart - 30 * 60_000L)])
+
+        Map result = ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
+                diffFile         : file,
+                file1Label       : SHOPIFY_LABEL,
+                file2Label       : OMS_LABEL,
+                omsSideLabel     : OMS_LABEL,
+                shopifySideLabel : SHOPIFY_LABEL,
+                nowMillis        : windowStart + 4 * 3600_000L,
+                windowStartMillis: windowStart,
+        ])
+
+        String note = result.auditNote as String
+        assertTrue(note.contains("pre-window"), "a window-start suppression must be disclosed: ${note}")
+    }
+
+    // --- Real captured OMS shape: entryDate as epoch-millis (Number) and as an all-digits String ---
+
+    @Test
+    void gradesAnEpochMillisNumberEntryDateTheSameAsAnIsoString() {
+        File file = writeDiffDocument([missingInShopifyRow("7777", RECENT)])
+        Map result = verify(file)
+        assertTrue((Boolean) result.rewritten)
+        assertEquals(1, result.pendingCount)
+    }
+
+    @Test
+    void gradesAnAllDigitsStringEntryDateTheSameAsANumber() {
+        Map row = [diffType: "MISSING_IN_FILE_2", primaryId: "7778", presentIn: OMS_LABEL, missingIn: SHOPIFY_LABEL,
+                   data: JsonOutput.toJson([externalId: "7778", orderExternalId: "7025799037059",
+                           entryDate: String.valueOf(RECENT), returnId: "R-7778"]),
+                   message: "Present in ${OMS_LABEL}, missing in ${SHOPIFY_LABEL}".toString()]
+        File file = writeDiffDocument([row])
+
+        Map result = verify(file)
+
+        assertTrue((Boolean) result.rewritten)
+        assertEquals(1, result.pendingCount)
     }
 }

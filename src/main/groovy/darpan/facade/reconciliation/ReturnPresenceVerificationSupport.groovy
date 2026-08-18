@@ -1,413 +1,432 @@
 package darpan.facade.reconciliation
 
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.time.Instant
-import java.util.regex.Matcher
 import java.util.regex.Pattern
 
 import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.normalizeInt
 
 /**
- * Return presence verification (DAR-BE-018, design §4).
+ * Return presence GRACE FILTER (DAR-BE-018; 2026-08-17/18 returns-refund-grain-alignment plan, Task 3).
  *
- * Forward: an OMS return is present in Shopify if its externalId appears among its own order's
- * refund ids (primary) or that order's return ids (backup). Neither → missing in Shopify.
+ * SHAPE HISTORY — read before restoring anything this class used to do. Before that plan, Shopify's
+ * return-refs extract emitted one record per ORDER (refundIds[]/returnIds[] id-set lists) while OMS
+ * reconciliationReturns emitted one record per RETURN, keyed by a Shopify refund OR return id. The two
+ * sides sat at different GRAINS, so an ordinary compare_id join between them was meaningless. This
+ * class used to bridge that gap itself: it read BOTH full extracts, built a per-order id index
+ * (byOrder), matched each OMS return against its own order's refund ids (primary) or return ids
+ * (fallback), tracked matchedCount / ordersMatchedForward, and APPENDED its own missing-in-Shopify /
+ * missing-in-OMS diff rows on top of whatever the generic ruleset compare produced (which, at
+ * mismatched grains, was largely noise).
  *
- * Reverse: a Shopify refund whose id is no OMS return's externalId on that order is missing in OMS,
- * EXCEPT where the order already matched forward — that suppression is what keeps the permanent
- * ex-IN-PROGRESS minority (keyed by Return id, never backfilled to the refund id) from phantom
- * -flagging. A refunded Shopify Return is never separately expected; its event is its refund.
+ * Task 1 of that plan (REVISION 2026-08-18) reshaped the Shopify extractor to one record per EVENT —
+ * {@code {eventId, eventType, orderId, createdAt}} — where eventId is a refund id OR a return id (see
+ * ShopifyReturnRefsSupport's class doc). OMS externalId now matches eventId directly, so BOTH sides sit
+ * at the same grain and the ordinary ruleset join (CompareDatasetSupport, keyed on
+ * eventId <-> externalId) finds real missing-in-OMS / missing-in-Shopify rows correctly and at the
+ * right grain, on its own. Task 3 (this class, this revision) therefore RETIRES the id-matching
+ * machinery entirely as pure redundancy — the byOrder index, the refund-then-return fallback,
+ * matchedCount, ordersMatchedForward — all of it existed only to decide "is this OMS return present in
+ * Shopify", which the generic compare now does correctly. That machinery was ALSO already broken by
+ * Task 1 before this class was touched: it read refundIds/returnIds/refunds/returns, fields Task 1
+ * removed from the Shopify record entirely.
  *
- * Grace: a one-sided return younger than graceHours is pending, not missing. Shopify→OMS return
- * sync was measured at ~38 minutes (RQ-23); the 3h default matches the exchange stage. The reverse
- * (missing-in-OMS) grace is keyed on the REFUND's own createdAt (from the upstream extractor's
- * refundsCreatedAt map), not the order's — a refund created minutes ago on a months-old order must
- * still read as young (fix I1; see verifyReturnPresence below).
+ * PER-ORDER FORWARD-MATCH SUPPRESSION — RETIRED, not narrowed (the judgement call this task exists to
+ * make). The old class doc named this a known phase-1 imprecision: an order with more than one return
+ * could mask a second missing refund, because the suppression worked per ORDER rather than per EVENT.
+ * Fixing it properly, the old doc said, needed either the design's §8 typed-field hedge or "a Shopify
+ * Return->Refund link". Task 1 built exactly that link (Return.refunds, consumed by
+ * ShopifyReturnRefsSupport's refunded-return narrowing) — but it used the link to stop EMITTING a
+ * redundant RETURN row for an already-refunded return, not to re-associate a refund back to its return
+ * for matching purposes. The suppression's entire reason to exist was to stop ONE OMS return being
+ * double-reported against TWO Shopify ids it might be keyed by (refund id primary, return id fallback)
+ * inside a single order-scoped byOrder lookup. With the byOrder lookup gone and eventId a single flat
+ * join key with no precedence rule (an OMS externalId now matches exactly one Shopify eventId, full
+ * stop), there is no second id for the same OMS return to be checked against, no per-order grouping to
+ * suppress within, and nothing left for this suppression to protect. It is retired as dead weight, not
+ * kept — the thing it used to guard against (double-counting one return under two ids) cannot happen
+ * once there is only one id.
  *
- * ID normalization: BOTH the OMS-side externalId AND orderExternalId are GID-tail-normalized the
- * same way CompareDatasetSupport.applyIdNormalizer's SHOPIFY_GID_TAIL does for Spark columns, since
- * the OMS returns endpoint's id format (bare vs GID) has never been observed live (OQ-8) — that
- * uncertainty applies identically to both fields, which come off the same endpoint and the same
- * connector projection. The normalization is idempotent for bare numerics, so this is free
- * insurance either way (fix I5, widened to orderExternalId as Important #2 of the fix-wave-C
- * re-review: leaving orderExternalId un-normalized would silently fail every byOrder lookup if OMS
- * ever emits GIDs, nullifying I5's own premise).
+ * WHAT THIS CLASS DOES NOW: two behaviours a plain present/absent join cannot replicate because it has
+ * no notion of "how new":
  *
- * Reporting window vs. lookup floor (Important #3, fix-wave-C): the upstream Shopify extractor now
- * fetches/emits events from [windowStart - lookback, windowEnd) rather than [windowStart, windowEnd)
- * — see ShopifyReturnRefsSupport's class doc — because OMS lags Shopify by ~38min (RQ-23), so a
- * Shopify refund for an OMS return sitting just inside windowStart can itself have been created just
- * BEFORE windowStart. The forward pass above is deliberately unaffected: it may match against ANY
- * emitted event, pre-window included, which is the entire point of the widened net. The reverse pass
- * must NOT report a pre-window Shopify refund as missing-in-OMS, though — that would just relocate
- * the false-missing this fix closes from the OMS side to the Shopify side — so it is additionally
- * gated on the caller-supplied windowStartMillis (verifyReturnPresence's windowStartMillis arg,
- * threaded from runSavedRunDiff.groovy's own windowStartDate, which already knows the run's window).
- * A caller that does not supply windowStartMillis degrades to pre-fix behaviour (no gate).
+ *   GRACE: a return/refund event that the generic compare reported missing on one side, but whose OWN
+ *   createdAt (the Shopify event's createdAt, or the OMS return's entryDate) is younger than
+ *   graceHours, is PENDING rather than missing — OMS lags Shopify by roughly 38 minutes (RQ-23), so a
+ *   one-sided event inside that lag window is expected, not a defect. Graded against the record's OWN
+ *   date, never the order's — a refund on a months-old order can still be minutes old.
  *
- * Known phase-1 imprecision: on an order carrying several returns, the forward-match suppression is
- * per-order rather than per-event. Exact reverse attribution needs the design's §8 typed-field hedge
- * or a Shopify Return→Refund link. Accepted, and stated in the audit note.
+ *   WINDOW-START GATE: a missing-in-OMS row (Shopify present, OMS absent) whose event predates the
+ *   run's reporting windowStartMillis is never reported at all, pending or otherwise. It is only
+ *   present in the extract because ShopifyReturnRefsSupport's own lookback widens its fetch/emit floor
+ *   backward from windowStart (see that class's LOOKBACK doc) so a refund the OMS side hasn't caught up
+ *   to yet is still visible for forward matching. Reporting a pre-window event missing-in-OMS would
+ *   just relocate the false-missing that lookback exists to close, from the OMS side onto the Shopify
+ *   side. One-directional by construction: a pre-window OMS return has no equivalent lookback-driven
+ *   artifact to correct for, so missing-in-Shopify rows are graded on grace alone.
+ *
+ * MECHANISM: this is now a POST-COMPARE FILTER over the diff document the generic ruleset compare
+ * already wrote — the same streaming read/rewrite MissingDiffVerificationSupport uses (candidate scan,
+ * then a sibling-temp-file rewrite, atomic replace, summary counts adjusted, an audit note appended),
+ * but the removal criterion is each row's OWN embedded date against grace/window rather than a live
+ * source-of-record lookup. A "missing" ruleset diff row's data column already carries the full record
+ * from the side that IS present (CompareDatasetSupport.buildJsonDataDf's struct(col("*")), surfaced
+ * through convertMissingDiffToRuleSetDiffDataset) — that embedded record supplies the date this filter
+ * grades, with no need to re-read either source extract file directly. There is therefore no more
+ * "pure function over two lists" half of this class the way there used to be — the pure unit now is
+ * grading one already-written row, not joining two full record sets.
  */
 class ReturnPresenceVerificationSupport {
 
-    static final String TYPE_MISSING_IN_SHOPIFY = "RETURN_MISSING_IN_SHOPIFY"
-    static final String TYPE_MISSING_IN_OMS = "RETURN_MISSING_IN_OMS"
     static final int DEFAULT_GRACE_HOURS = 3
     static final String DEFAULT_OMS_SIDE_LABEL = "OMS"
     static final String DEFAULT_SHOPIFY_SIDE_LABEL = "Shopify"
-    // Mirrors ExchangePairVerificationSupport.AUDIT_NOTE_PREFIX: the opening phrase of the
-    // always-emitted audit sentence. Fix I6: now consumed by TenantNotificationSupport's
-    // partitionAuditNotes (previously that classifier recognized only the exchange and
-    // missing-diff prefixes, so every returns run's always-on note fell into "warnings" and
-    // misclassified the run as WITH ISSUES, all-clear runs included).
+    // Mirrors ExchangePairVerificationSupport.AUDIT_NOTE_PREFIX / MissingDiffVerificationSupport
+    // .AUDIT_NOTE_PREFIX: the opening phrase of the always-emitted audit sentence, consumed by
+    // TenantNotificationSupport.partitionAuditNotes so a returns run's own "show your work" note is
+    // classified as a note, not folded into "warnings" (which would misreport an all-clear run as WITH
+    // ISSUES). Unchanged across this revision even though everything the sentence describes changed.
     static final String AUDIT_NOTE_PREFIX = "Return presence check: "
-    // Mirrors CompareDatasetSupport.applyIdNormalizer's SHOPIFY_GID_TAIL Spark expression exactly,
-    // for the plain-Groovy (non-Spark) values this class compares. See fix I5 above.
-    private static final Pattern SHOPIFY_GID_TAIL_PATTERN = Pattern.compile(/gid:\/\/shopify\/[^\/]+\/(\d+)(?:\?.*)?$/)
-    private static final Pattern TRAILING_DIGITS_PATTERN = Pattern.compile(/(\d+)$/)
+
+    private static final String DIFFERENCES_HEADER = "\"differences\":["
+    private static final String SUMMARY_PREFIX = "\"summary\":"
+    private static final String PROCESSING_WARNINGS_PREFIX = "\"processingWarnings\":"
     // All-digits form: what a JSON epoch-millis integer looks like once ValueSupport.normalize has
-    // already turned it into a String. See parseMillis / fix C3.
+    // already turned it into a String (OMS entryDate is serialized this way — see the retired C3 fix
+    // this class used to carry, and SourceSystemConnectorFieldSeedData's OMS_RETURNS entryDate pill).
     private static final Pattern ALL_DIGITS_PATTERN = Pattern.compile(/^\d+$/)
 
-    static Map<String, Object> verifyReturnPresence(Map<String, Object> args) {
-        List omsReturns = (args?.omsReturns instanceof List) ? (List) args.omsReturns : []
-        List shopifyOrders = (args?.shopifyOrders instanceof List) ? (List) args.shopifyOrders : []
+    /**
+     * args:
+     *   diffFile          : File — ruleset diff document (writeDiffDatasetOutput format), required
+     *   omsSideLabel      : String — the file1Label/file2Label value the OMS-returns connector resolved to
+     *   shopifySideLabel  : String — the file1Label/file2Label value the Shopify-return-refs connector resolved to
+     *   file1Label        : String, file2Label : String — as written into the document's metadata,
+     *                        needed only to attribute removals back to onlyInFile1Count/onlyInFile2Count
+     *   graceHours        : optional, default DEFAULT_GRACE_HOURS
+     *   nowMillis         : optional, default now
+     *   windowStartMillis : optional — the run's REPORTING window start (see class doc's WINDOW-START
+     *                        GATE); a caller that omits it degrades to grace-only behaviour
+     *
+     * returns [performed, rewritten, pendingCount, preWindowSuppressedCount, malformedCount,
+     *          removedCount, removedMissingInFile1, removedMissingInFile2, warnings, auditNote]
+     */
+    static Map<String, Object> verifyReturnPresenceForRun(Map<String, Object> args) {
+        File diffFile = (File) args?.diffFile
+        String omsSideLabel = normalize(args?.omsSideLabel) ?: DEFAULT_OMS_SIDE_LABEL
+        String shopifySideLabel = normalize(args?.shopifySideLabel) ?: DEFAULT_SHOPIFY_SIDE_LABEL
+        String file1Label = normalize(args?.file1Label)
+        String file2Label = normalize(args?.file2Label)
         int graceHours = normalizeInt(args?.graceHours, DEFAULT_GRACE_HOURS)
         long nowMillis = (args?.nowMillis instanceof Number)
                 ? ((Number) args.nowMillis).longValue()
                 : System.currentTimeMillis()
         long graceFloor = nowMillis - graceHours * 3600_000L
-        // Important #3 (fix-wave-C): the run's REPORTING window start, distinct from the wider
-        // lookup floor the Shopify extractor now fetches from. Optional and nullable — a caller
-        // that does not supply it (older call site, or a test) gets pre-fix behaviour. See the
-        // class doc's "Reporting window vs. lookup floor" section.
         Long windowStartMillis = (args?.windowStartMillis instanceof Number)
                 ? ((Number) args.windowStartMillis).longValue()
                 : null
-        // C2 fix: appended diff rows must carry the fields the rest of the pipeline actually reads
-        // (RULESET_DIFF_SCHEMA / RULESET_CSV_COLUMNS / OutputDescriptorSupport / DiffDetailClassifier
-        // all key off primaryId + presentIn/missingIn + message) — a row missing them exported as
-        // "RETURN_MISSING_IN_SHOPIFY,,,,,,,,,," and displayed with no id at all. Labels default to
-        // the same words ExchangePairVerificationSupport defaults its own OMS-side label to.
-        String omsSideLabel = normalize(args?.omsSideLabel) ?: DEFAULT_OMS_SIDE_LABEL
-        String shopifySideLabel = normalize(args?.shopifySideLabel) ?: DEFAULT_SHOPIFY_SIDE_LABEL
 
-        Map<String, Map<String, Set<String>>> byOrder = indexShopifyOrders(shopifyOrders)
+        String omsToken = DiffDetailClassifier.normalizeToken(omsSideLabel)
+        String shopifyToken = DiffDetailClassifier.normalizeToken(shopifySideLabel)
+        String file1Token = DiffDetailClassifier.normalizeToken(file1Label)
+        String file2Token = DiffDetailClassifier.normalizeToken(file2Label)
 
-        int matchedCount = 0
-        int pendingCount = 0
-        // M2: malformed input records were dropped with no signal at all — unlike
-        // ExchangePairVerificationSupport, which surfaces its own skip conditions as warnings.
-        int malformedOmsReturnCount = 0
-        int malformedShopifyOrderCount = 0
-        List<Map<String, Object>> missingInShopify = []
-        Set<String> ordersMatchedForward = new HashSet<>()
-
-        omsReturns.each { Object raw ->
-            if (!(raw instanceof Map)) { malformedOmsReturnCount++; return }
-            Map omsReturn = (Map) raw
-            // I5 fix, widened by Important #2 (fix-wave-C): GID-normalize BOTH OMS-side ids before
-            // comparing against Shopify's (already bare) id sets/order keys. orderExternalId was
-            // left un-normalized by the original I5 fix, which nullified it end to end: if OMS ever
-            // emits GIDs, byOrder.get(orderExternalId) below would return null for every return and
-            // every OMS return would report missing-in-Shopify regardless of externalId. Idempotent
-            // for bare numerics, so this cannot regress the observed case.
-            String externalId = stripShopifyGidTail(normalize(omsReturn.get("externalId")))
-            String orderExternalId = stripShopifyGidTail(normalize(omsReturn.get("orderExternalId")))
-            if (!externalId || !orderExternalId) { malformedOmsReturnCount++; return }
-
-            Map<String, Set<String>> order = byOrder.get(orderExternalId)
-            boolean refundMatch = order != null && order.get("refundIds").contains(externalId)
-            boolean returnMatch = !refundMatch && order != null && order.get("returnIds").contains(externalId)
-
-            if (refundMatch || returnMatch) {
-                matchedCount++
-                ordersMatchedForward.add(orderExternalId)
-                return
-            }
-
-            if (parseMillis(omsReturn.get("entryDate")) > graceFloor) {
-                pendingCount++
-                return
-            }
-            String returnId = normalize(omsReturn.get("returnId"))
-            String returnDescriptor = (returnId ? "return ${returnId}" : "return").toString()
-            missingInShopify.add([
-                    diffType : TYPE_MISSING_IN_SHOPIFY,
-                    primaryId: externalId,
-                    presentIn: omsSideLabel,
-                    missingIn: shopifySideLabel,
-                    message  : "${omsSideLabel} ${returnDescriptor} (id ${externalId}) on order ${orderExternalId} has no matching refund or return in ${shopifySideLabel}.".toString(),
-                    data     : [orderExternalId: orderExternalId, returnId: returnId],
-            ])
-        }
-
-        List<Map<String, Object>> missingInOms = []
-        int suppressedOrderCount = 0
-        shopifyOrders.each { Object raw ->
-            if (!(raw instanceof Map)) { malformedShopifyOrderCount++; return }
-            Map order = (Map) raw
-            String orderId = normalize(order.get("orderId"))
-            if (!orderId) { malformedShopifyOrderCount++; return }
-            // Per design §4: the event is demonstrably captured under the other id, so do not
-            // re-report it against this order. Counted so the audit note can disclose that a
-            // per-order (not per-return) suppression occurred — see design §4 known phase-1
-            // imprecision: an order with more than one return could mask a second missing refund.
-            if (ordersMatchedForward.contains(orderId)) {
-                suppressedOrderCount++
-                return
-            }
-
-            // I1 fix: the reverse grace must measure the REFUND's own creation time, not the
-            // order's — a refund created 5 minutes ago on a 3-month-old order is still young. The
-            // upstream Shopify extractor emits per-refund createdAt (Important #1, fix-wave-C: now a
-            // `refunds: [{id, createdAt}, ...]` list — a data-keyed map inflated the Spark-inferred
-            // ingest schema's field count to the file's total distinct id count; see
-            // resolveRefundsCreatedAt). Fall back to the order's createdAt only when no per-event
-            // date is available at all (an older extract shape with neither shape present).
-            Map<String, String> refundsCreatedAt = resolveRefundsCreatedAt(order)
-            long orderCreatedMillis = parseMillis(order.get("createdAt"))
-
-            // Invariant: any refundId here equal to an OMS externalId on this order would already
-            // have set refundMatch = true in the forward pass above (same normalized string, same
-            // order lookup), which adds this order to ordersMatchedForward and skips it at the
-            // guard above — so no membership check against OMS ids is needed or reachable here.
-            idSet(order.get("refundIds")).each { String refundId ->
-                String rawRefundCreatedAt = refundsCreatedAt.get(refundId)
-                long refundCreatedMillis = rawRefundCreatedAt ? parseMillis(rawRefundCreatedAt) : orderCreatedMillis
-                // Important #3 (fix-wave-C): this refund can be present ONLY because the Shopify
-                // extractor's fetch/emit floor now reaches back before windowStart (RQ-23 lookback,
-                // see class doc). It was available to the forward pass above for exactly that
-                // reason; the reverse pass must not turn around and report it missing-in-OMS, which
-                // would just relocate the false-missing onto the other side. Gate on the caller-
-                // supplied reporting windowStartMillis; absent that, degrade to pre-fix behaviour.
-                if (windowStartMillis != null && refundCreatedMillis < windowStartMillis) return
-                if (refundCreatedMillis > graceFloor) {
-                    pendingCount++
-                    return
-                }
-                missingInOms.add([
-                        diffType : TYPE_MISSING_IN_OMS,
-                        primaryId: refundId,
-                        presentIn: shopifySideLabel,
-                        missingIn: omsSideLabel,
-                        message  : "${shopifySideLabel} refund ${refundId} on order ${orderId} has no matching return in ${omsSideLabel}.".toString(),
-                        data     : [orderExternalId: orderId],
-                ])
-            }
-        }
-
-        return [
-                matchedCount              : matchedCount,
-                pendingCount              : pendingCount,
-                missingInShopify          : missingInShopify,
-                missingInOms              : missingInOms,
-                malformedOmsReturnCount   : malformedOmsReturnCount,
-                malformedShopifyOrderCount: malformedShopifyOrderCount,
-                auditNote                 : buildAuditNote(matchedCount, missingInShopify.size(),
-                        missingInOms.size(), pendingCount, graceHours, suppressedOrderCount),
-        ]
-    }
-
-    /**
-     * File-facing wrapper over verifyReturnPresence. Kept separate from the rule itself so the rule
-     * stays a pure function over two lists and can be tested without touching disk.
-     *
-     * Advisory by design: the compare has already succeeded by the time this runs, so a missing or
-     * unreadable extract degrades to a warning rather than failing the run — the same posture as the
-     * exchange manifest sidecar.
-     */
-    static Map<String, Object> verifyReturnPresenceForRun(Map<String, Object> args) {
         List<String> warnings = []
-        File omsFile = (File) args?.omsFile
-        File shopifyFile = (File) args?.shopifyFile
-        File diffFile = (File) args?.diffFile
-
-        List omsReturns = readRecords(omsFile, "OMS returns", warnings)
-        List shopifyOrders = readRecords(shopifyFile, "Shopify return references", warnings)
-        if (omsReturns == null || shopifyOrders == null || diffFile == null || !diffFile.isFile()) {
-            return [performed: false, appendedCount: 0, warnings: warnings, auditNote: null]
+        Map<String, Object> inert = [performed: false, rewritten: false, pendingCount: 0,
+                preWindowSuppressedCount: 0, malformedCount: 0, removedCount: 0,
+                removedMissingInFile1: 0, removedMissingInFile2: 0,
+                warnings: warnings, auditNote: null] as Map<String, Object>
+        if (diffFile == null || !diffFile.isFile()) {
+            warnings.add("Return presence check skipped: diff file was not available.")
+            return inert
         }
 
-        Map<String, Object> result = verifyReturnPresence([
-                omsReturns       : omsReturns,
-                shopifyOrders    : shopifyOrders,
-                graceHours       : args?.graceHours,
-                nowMillis        : args?.nowMillis,
-                omsSideLabel     : args?.omsSideLabel,
-                shopifySideLabel : args?.shopifySideLabel,
-                // Important #3 (fix-wave-C): threaded straight through from the caller (runSavedRunDiff
-                // .groovy's windowStartDate), which already resolves the run's reporting window.
-                // verifyReturnPresence itself degrades to pre-fix behaviour when this is absent.
-                windowStartMillis: args?.windowStartMillis,
-        ])
+        // Pass 1 — stream the already-written diff document one row at a time (diff files reach GB
+        // scale; see MissingDiffVerificationSupport's own OOM-avoidance doc) and grade every candidate
+        // missing row (one belonging to the OMS side or the Shopify side of THIS run) against grace and
+        // the window-start gate, using that row's own embedded record data — never a fresh join.
+        JsonSlurper slurper = new JsonSlurper()
+        Map<String, Set<String>> removeIdsByToken = [:]
+        int pendingCount = 0
+        int preWindowCount = 0
+        int malformedCount = 0
+        boolean sawDifferencesHeader = false
 
-        // M2: surface malformed-record counts as ordinary (actionable) warnings — deliberately NOT
-        // prefixed with AUDIT_NOTE_PREFIX, so partitionAuditNotes keeps treating this as real signal
-        // rather than folding it into the always-on "show your work" sentence (fix I6).
-        int malformedOmsCount = normalizeInt(result.malformedOmsReturnCount, 0)
-        int malformedShopifyCount = normalizeInt(result.malformedShopifyOrderCount, 0)
-        if (malformedOmsCount > 0) {
-            warnings.add("Return presence check skipped ${malformedOmsCount} malformed OMS return record(s) (not an object, or missing externalId/orderExternalId).".toString())
-        }
-        if (malformedShopifyCount > 0) {
-            warnings.add("Return presence check skipped ${malformedShopifyCount} malformed Shopify return reference record(s) (not an object, or missing orderId).".toString())
-        }
+        diffFile.withReader("UTF-8") { Reader reader ->
+            BufferedReader lines = new BufferedReader(reader)
+            String line
+            boolean inRows = false
+            while ((line = lines.readLine()) != null) {
+                if (!inRows) {
+                    if (line.startsWith(DIFFERENCES_HEADER)) {
+                        sawDifferencesHeader = true
+                        inRows = !line.startsWith(DIFFERENCES_HEADER + "]")
+                    }
+                    continue
+                }
+                String rowJson = stripRowLine(line)
+                if (rowJson == null) break
+                if (!rowJson.contains("\"missingIn\"")) continue
+                Map row = parseRowQuietly(slurper, rowJson)
+                if (row == null) continue
 
-        List<Map<String, Object>> rows = []
-        rows.addAll((List) result.missingInShopify)
-        rows.addAll((List) result.missingInOms)
+                String missingToken = DiffDetailClassifier.normalizeToken(row.get("missingIn"))
+                boolean missingInOms = missingToken && missingToken == omsToken
+                boolean missingInShopify = !missingInOms && missingToken && missingToken == shopifyToken
+                if (!missingInOms && !missingInShopify) continue
 
-        // appendDiffRows is `protected static VOID` (ExchangePairVerificationSupport.groovy:246) with
-        // signature (File diffFile, List<Map> rows, String auditNote, Map<String,Integer> summaryBumps).
-        // It does NOT return a count and its 4th argument is the summary-bump map, not a warnings list.
-        // Wrap it exactly as the exchange stage does (:154-160): skip when there are no rows, and treat
-        // a write failure as a warning — the compare already succeeded, so this must not fail the run.
-        int appended = 0
-        if (rows) {
-            try {
-                ExchangePairVerificationSupport.appendDiffRows(diffFile, rows, result.auditNote as String,
-                        [totalDifferences: rows.size(), missingObjectDifferenceCount: rows.size()])
-                appended = rows.size()
-            } catch (Exception e) {
-                warnings.add("Return presence check could not write diff rows: ${e.message}".toString())
+                // The row's data column carries the record from the side that IS present — the
+                // Shopify event (createdAt) when missing-in-OMS, the OMS return (entryDate) when
+                // missing-in-Shopify. See the class doc's MECHANISM section.
+                Map data = parseEmbeddedData(slurper, row.get("data"))
+                Long ownCreatedMillis = data == null ? null
+                        : parseMillisOrNull(missingInOms ? data.get("createdAt") : data.get("entryDate"))
+                if (ownCreatedMillis == null) {
+                    // Cannot grade without a date. Conservative posture (mirrors the rest of this
+                    // pipeline's M2/lookback bias): never silently suppress a row we cannot prove is
+                    // young — leave it exactly as the generic compare reported it, but say so.
+                    malformedCount++
+                    continue
+                }
+
+                boolean remove = false
+                boolean pending = false
+                boolean preWindow = false
+                if (missingInOms && windowStartMillis != null && ownCreatedMillis < windowStartMillis) {
+                    // WINDOW-START GATE: only ever present because of the extractor's lookback; never
+                    // genuinely missing-in-OMS. Not counted as pending — it is not "recent", it is
+                    // out-of-scope for this run's reporting window entirely.
+                    remove = true
+                    preWindow = true
+                } else if (ownCreatedMillis > graceFloor) {
+                    remove = true
+                    pending = true
+                }
+                if (!remove) continue
+
+                String rowId = rowIdOf(row)
+                if (!rowId) continue
+                removeIdsByToken.computeIfAbsent(missingToken) { new LinkedHashSet<String>() }.add(rowId)
+                if (pending) pendingCount++
+                else if (preWindow) preWindowCount++
             }
         }
+        if (!sawDifferencesHeader) {
+            warnings.add("Return presence check skipped: diff document has no differences section.")
+            return inert
+        }
+        // M2 posture (carried over from the retired matching code): surface malformed counts as an
+        // ordinary (actionable) warning, deliberately NOT folded into the AUDIT_NOTE_PREFIX sentence,
+        // so partitionAuditNotes keeps treating this as real signal rather than "show your work" noise.
+        if (malformedCount > 0) {
+            warnings.add("Return presence check could not grade ${malformedCount} reported-missing return/refund row(s) against the grace window (no parseable data.createdAt/data.entryDate); left as reported.".toString())
+        }
 
-        Map<String, Object> out = new LinkedHashMap<>(result)
-        out.put("performed", true)
-        out.put("appendedCount", appended)
-        out.put("warnings", warnings)
-        return out
+        int removedCount = (removeIdsByToken.values()*.size().sum() ?: 0) as int
+        String auditNote = buildAuditNote(pendingCount, preWindowCount, graceHours)
+        if (removedCount == 0) {
+            return [performed: true, rewritten: false, pendingCount: 0, preWindowSuppressedCount: 0,
+                    malformedCount: malformedCount, removedCount: 0, removedMissingInFile1: 0, removedMissingInFile2: 0,
+                    warnings: warnings, auditNote: auditNote] as Map<String, Object>
+        }
+
+        int removedMissingInOms = removeIdsByToken.get(omsToken)?.size() ?: 0
+        int removedMissingInShopify = removeIdsByToken.get(shopifyToken)?.size() ?: 0
+        // onlyInFile1Count counts records present only in file1 = missing in file2, and vice versa —
+        // same mapping MissingDiffVerificationSupport's own adjustSummary relies on.
+        int removedMissingInFile1 = (omsToken && omsToken == file1Token ? removedMissingInOms : 0) +
+                (shopifyToken && shopifyToken == file1Token ? removedMissingInShopify : 0)
+        int removedMissingInFile2 = (omsToken && omsToken == file2Token ? removedMissingInOms : 0) +
+                (shopifyToken && shopifyToken == file2Token ? removedMissingInShopify : 0)
+
+        // Pass 2 — stream-rewrite to a sibling temp file, then atomically replace the original.
+        File tempFile = new File(diffFile.getParentFile(), diffFile.getName() + ".returns-verify-tmp")
+        diffFile.withReader("UTF-8") { Reader reader ->
+            BufferedReader lines = new BufferedReader(reader)
+            tempFile.withWriter("UTF-8") { Writer writer ->
+                String line
+                boolean inRows = false
+                boolean documentClosed = false
+                boolean firstRowWritten = false
+                while ((line = lines.readLine()) != null) {
+                    if (documentClosed) continue
+                    if (!inRows) {
+                        if (line.startsWith(SUMMARY_PREFIX)) {
+                            writer << SUMMARY_PREFIX + JsonOutput.toJson(adjustSummary(slurper, line,
+                                    removedCount, removedMissingInFile1, removedMissingInFile2)) + ",\n"
+                        } else if (line.startsWith(DIFFERENCES_HEADER)) {
+                            inRows = !line.startsWith(DIFFERENCES_HEADER + "]")
+                            if (inRows) writer << DIFFERENCES_HEADER
+                            else writer << line << "\n"
+                        } else if (line.startsWith(PROCESSING_WARNINGS_PREFIX)) {
+                            writer << PROCESSING_WARNINGS_PREFIX + JsonOutput.toJson(
+                                    appendedWarnings(slurper, line, auditNote)) + ",\n"
+                        } else {
+                            writer << line << "\n"
+                        }
+                        continue
+                    }
+                    String rowJson = stripRowLine(line)
+                    if (rowJson == null) {
+                        writer << "]\n}"
+                        documentClosed = true
+                        continue
+                    }
+                    boolean lastRow = line.endsWith("]")
+                    boolean removeRow = false
+                    if (rowJson.contains("\"missingIn\"")) {
+                        Map row = parseRowQuietly(slurper, rowJson)
+                        String missingToken = row == null ? null : DiffDetailClassifier.normalizeToken(row.get("missingIn"))
+                        String rowId = row == null ? null : rowIdOf(row)
+                        removeRow = rowId != null && removeIdsByToken.get(missingToken)?.contains(rowId)
+                    }
+                    if (!removeRow) {
+                        if (firstRowWritten) writer << ","
+                        writer << "\n" << rowJson
+                        firstRowWritten = true
+                    }
+                    if (lastRow) {
+                        writer << "]\n}"
+                        documentClosed = true
+                        inRows = false
+                    }
+                }
+            }
+        }
+        replaceFile(tempFile, diffFile)
+
+        return [performed: true, rewritten: true, pendingCount: pendingCount, preWindowSuppressedCount: preWindowCount,
+                malformedCount: malformedCount, removedCount: removedCount,
+                removedMissingInFile1: removedMissingInFile1, removedMissingInFile2: removedMissingInFile2,
+                warnings: warnings, auditNote: auditNote] as Map<String, Object>
     }
 
-    private static List readRecords(File file, String label, List<String> warnings) {
-        if (file == null || !file.isFile()) {
-            warnings.add("${label} extract was not available; the return presence check did not run.".toString())
-            return null
-        }
+    /** A row line ends with "," (more rows follow) or "]" (last row); the closing "}" line ends the region. */
+    private static String stripRowLine(String line) {
+        String trimmed = line.trim()
+        if (trimmed == "}" || trimmed == "]" || trimmed.isEmpty()) return null
+        if (trimmed.endsWith(",") || trimmed.endsWith("]")) return trimmed.substring(0, trimmed.length() - 1)
+        return trimmed
+    }
+
+    private static Map parseRowQuietly(JsonSlurper slurper, String rowJson) {
         try {
-            Object parsed = new groovy.json.JsonSlurper().parse(file, "UTF-8")
-            Object records = (parsed instanceof Map) ? ((Map) parsed).get("records") : parsed
-            return (records instanceof List) ? (List) records : []
-        } catch (Exception e) {
-            warnings.add("${label} extract could not be read (${e.message}); the return presence check did not run.".toString())
+            Object parsed = slurper.parseText(rowJson)
+            return parsed instanceof Map ? (Map) parsed : null
+        } catch (Exception ignored) {
             return null
         }
-    }
-
-    private static Map<String, Map<String, Set<String>>> indexShopifyOrders(List shopifyOrders) {
-        Map<String, Map<String, Set<String>>> byOrder = [:]
-        shopifyOrders.each { Object raw ->
-            if (!(raw instanceof Map)) return
-            Map order = (Map) raw
-            String orderId = normalize(order.get("orderId"))
-            if (!orderId) return
-            byOrder.put(orderId, [
-                    refundIds: idSet(order.get("refundIds")),
-                    returnIds: idSet(order.get("returnIds")),
-            ])
-        }
-        return byOrder
-    }
-
-    private static Set<String> idSet(Object rawIds) {
-        if (!(rawIds instanceof List)) return new HashSet<String>()
-        return ((List) rawIds).collect { normalize(it) }.findAll { it } as Set<String>
     }
 
     /**
-     * C3 fix: real captured OMS REST output serializes timestamps as epoch-millis integers, not
-     * ISO-8601 strings — verified directly against a captured extract (entryDate/orderDate/
-     * createdStamp all ints). The old Instant.parse-only implementation returned 0L for every such
-     * value, which is always <= graceFloor, so every young unmatched OMS return silently reported
-     * missing instead of pending. Accepts a raw Number, an all-digits String (what normalize()
-     * turns a JSON integer into), or an ISO-8601 String, in that order.
+     * The row's data column is itself a JSON-encoded STRING (CompareDatasetSupport's
+     * convertMissingDiffToRuleSetDiffDataset carries it through as `to_json(struct(col("*")))`), so
+     * reading it needs a second parse beyond the row's own. Defensively accepts an already-decoded Map
+     * too, in case a future writer stops double-encoding it.
      */
-    private static long parseMillis(Object rawTimestamp) {
+    private static Map parseEmbeddedData(JsonSlurper slurper, Object rawData) {
+        if (rawData instanceof Map) return (Map) rawData
+        String text = normalize(rawData)
+        if (!text) return null
+        try {
+            Object parsed = slurper.parseText(text)
+            return parsed instanceof Map ? (Map) parsed : null
+        } catch (Exception ignored) {
+            return null
+        }
+    }
+
+    /** Ruleset diff rows carry the record id in primaryId; generic diff rows in id. */
+    private static String rowIdOf(Map row) {
+        String primaryId = row.get("primaryId")?.toString()?.trim()
+        if (primaryId) return primaryId
+        String id = row.get("id")?.toString()?.trim()
+        return id ?: null
+    }
+
+    /**
+     * Accepts a raw Number, an all-digits String (an epoch-millis integer once ValueSupport.normalize
+     * has stringified it — OMS entryDate is serialized this way), or an ISO-8601 String (Shopify
+     * createdAt). Returns null rather than a sentinel on failure — a null date must never look
+     * artificially "old" or "young"; see the malformedCount handling at the call site.
+     */
+    private static Long parseMillisOrNull(Object rawTimestamp) {
         if (rawTimestamp instanceof Number) return ((Number) rawTimestamp).longValue()
         String value = normalize(rawTimestamp)
-        if (!value) return 0L
+        if (!value) return null
         if (ALL_DIGITS_PATTERN.matcher(value).matches()) {
             try {
                 return Long.parseLong(value)
             } catch (NumberFormatException ignored) {
-                return 0L
+                return null
             }
         }
         try {
             return Instant.parse(value).toEpochMilli()
         } catch (Exception ignored) {
-            return 0L
+            return null
+        }
+    }
+
+    private static Map adjustSummary(JsonSlurper slurper, String summaryLine, int removedCount,
+                                     int removedMissingInFile1, int removedMissingInFile2) {
+        Object fragment = headerFragment(slurper, summaryLine, SUMMARY_PREFIX)
+        Map summary = fragment instanceof Map ? (Map) fragment : [:]
+        decrement(summary, "totalDifferences", removedCount)
+        decrement(summary, "onlyInFile1Count", removedMissingInFile2)
+        decrement(summary, "onlyInFile2Count", removedMissingInFile1)
+        decrement(summary, "missingObjectDifferenceCount", removedCount)
+        return summary
+    }
+
+    private static List appendedWarnings(JsonSlurper slurper, String warningsLine, String auditNote) {
+        Object fragment = headerFragment(slurper, warningsLine, PROCESSING_WARNINGS_PREFIX)
+        List warningsList = fragment instanceof List ? new ArrayList((List) fragment) : []
+        if (auditNote) warningsList.add(auditNote)
+        return warningsList
+    }
+
+    private static Object headerFragment(JsonSlurper slurper, String line, String prefix) {
+        String fragment = line.substring(prefix.length()).trim()
+        if (fragment.endsWith(",")) fragment = fragment.substring(0, fragment.length() - 1)
+        try {
+            return slurper.parseText(fragment)
+        } catch (Exception ignored) {
+            return null
+        }
+    }
+
+    private static void decrement(Map summary, String key, int by) {
+        Object value = summary.get(key)
+        if (value instanceof Number && by > 0) summary.put(key, Math.max(0L, ((Number) value).longValue() - by))
+    }
+
+    private static void replaceFile(File source, File target) {
+        Path sourcePath = source.toPath()
+        Path targetPath = target.toPath()
+        try {
+            Files.move(sourcePath, targetPath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } catch (AtomicMoveNotSupportedException ignored) {
+            Files.move(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING)
         }
     }
 
     /**
-     * I5 fix: mirrors CompareDatasetSupport.applyIdNormalizer's SHOPIFY_GID_TAIL Spark expression
-     * exactly, for the plain-Groovy value comparisons this class does. A `gid://shopify/.../123`
-     * value yields "123"; a bare numeric value passes through unchanged (idempotent); anything else
-     * (no trailing digits at all) passes through unchanged too.
+     * One sentence the operator always gets — even a run with nothing pending shows its work. The
+     * window-start clause is only appended when it can actually apply (mirrors the retired
+     * suppression-caveat sentence's own "never a blanket disclaimer" rule).
      */
-    private static String stripShopifyGidTail(String value) {
-        if (!value) return value
-        Matcher gidMatcher = SHOPIFY_GID_TAIL_PATTERN.matcher(value)
-        if (gidMatcher.find()) return gidMatcher.group(1)
-        Matcher digitsMatcher = TRAILING_DIGITS_PATTERN.matcher(value)
-        if (digitsMatcher.find()) return digitsMatcher.group(1)
-        return value
-    }
-
-    /**
-     * Important #1 (fix-wave-C): the upstream Shopify extractor now emits `refunds: [{id,
-     * createdAt}, ...]` — a stable-shape list — instead of a `refundsCreatedAt: {id: createdAt}`
-     * map. The map shape's field count tracked the number of distinct refund ids in the file, which
-     * a plain (schema-inferring) Spark JSON read turns into a StructType whose width is the union of
-     * every id across the whole window (see ShopifyReturnRefsSupport's class doc). Read the list
-     * shape when present; fall back to the old map shape so the two repos' fixes can land
-     * independently of each other.
-     */
-    private static Map<String, String> resolveRefundsCreatedAt(Map order) {
-        Object refundsList = order.get("refunds")
-        if (refundsList instanceof List) {
-            Map<String, String> out = [:]
-            ((List) refundsList).each { Object raw ->
-                if (!(raw instanceof Map)) return
-                String id = normalize(((Map) raw).get("id"))
-                if (id) out.put(id, normalize(((Map) raw).get("createdAt")))
-            }
-            return out
-        }
-        return normalizedStringMap(order.get("refundsCreatedAt"))
-    }
-
-    /** I1 fix: normalized (trimmed, blank-key-dropped) String->String view of a raw JSON map. */
-    private static Map<String, String> normalizedStringMap(Object rawMap) {
-        Map<String, String> out = [:]
-        if (!(rawMap instanceof Map)) return out
-        ((Map) rawMap).each { Object key, Object value ->
-            String normalizedKey = normalize(key)
-            if (normalizedKey) out.put(normalizedKey, normalize(value))
-        }
-        return out
-    }
-
-    /**
-     * One sentence the operator always gets — even an all-matched run shows its work. When at
-     * least one order's reverse check was suppressed by an earlier forward match, a second
-     * sentence discloses it: suppression is per order, not per return event (design §4 known
-     * phase-1 imprecision), so a second missing refund on that order would not be independently
-     * caught. Only appended when it can actually apply — never a blanket disclaimer.
-     */
-    private static String buildAuditNote(int matchedCount, int missingInShopifyCount,
-                                         int missingInOmsCount, int pendingCount, int graceHours,
-                                         int suppressedOrderCount) {
-        String note = "Return presence check: ${matchedCount} matched, ${missingInShopifyCount} missing in Shopify, " +
-                "${missingInOmsCount} missing in OMS, ${pendingCount} pending (younger than ${graceHours}h)."
-        if (suppressedOrderCount > 0) {
-            note += " ${suppressedOrderCount} order(s) had their reverse (missing-in-OMS) check suppressed by " +
-                    "an earlier forward match; on an order with more than one return, a second missing refund " +
-                    "would not be caught independently (known phase-1 limitation)."
+    private static String buildAuditNote(int pendingCount, int preWindowCount, int graceHours) {
+        String note = "${AUDIT_NOTE_PREFIX}${pendingCount} pending (younger than ${graceHours}h)."
+        if (preWindowCount > 0) {
+            note += " ${preWindowCount} pre-window Shopify event(s) excluded from the missing-in-OMS count (extractor lookback artifact, not a genuine gap)."
         }
         return note
     }

@@ -171,6 +171,7 @@
             keepFieldsBase="returnId,externalId,orderExternalId,statusId,entryDate,returnTotal,currencyUomId,returnChannelEnumId"
             filterParameterName="sourceFilters"
             healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            orderStateLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId"
             enabled="Y"/>
 
     <!-- Shopify per-EVENT (refund or return) records for returns reconciliation (DAR-BE-018;

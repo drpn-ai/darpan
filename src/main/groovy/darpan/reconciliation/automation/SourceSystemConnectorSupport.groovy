@@ -199,6 +199,7 @@ class SourceSystemConnectorSupport {
                 pairLookupServiceName          : readString(record, "pairLookupServiceName"),
                 exchangeStateLookupServiceName : readString(record, "exchangeStateLookupServiceName"),
                 exchangeSweepServiceName       : readString(record, "exchangeSweepServiceName"),
+                orderStateLookupServiceName    : readString(record, "orderStateLookupServiceName"),
                 healthCheckServiceName     : readString(record, "healthCheckServiceName"),
                 enabled                    : isEnabled(record),
         ] as Map<String, Object>

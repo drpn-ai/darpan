@@ -619,4 +619,38 @@ class SourceSystemConnectorSupportSmokeTests {
                 "loader would recreate a row this migration deletes, so the resulting state would depend on " +
                 "run order: ${offenders}")
     }
+
+    @Test
+    void omsReturnsConnectorDeclaresTheOrderStateLookupService() {
+        // The cancellation-refund suppression dispatches through this slot. Seeded on OMS_RETURNS only:
+        // it is the OMS API that gets called, even though the rows being suppressed are Shopify events.
+        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS")
+        assertNotNull(connector, "OMS_RETURNS connector row must be seeded")
+        assertEquals("reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId",
+                connector.orderStateLookupServiceName)
+        // Dispatch goes through the same lookup fence as every other verify-stage slot.
+        assertTrue(SourceSystemConnectorSupport.isAllowedLookupServiceShape(
+                connector.orderStateLookupServiceName as String))
+    }
+
+    @Test
+    void onlyOmsReturnsDeclaresTheOrderStateLookupService() {
+        // A second declarer would silently double-dispatch the suppression on a run where both sides
+        // resolve one, so keep the slot single-owner until a second endpoint genuinely needs it.
+        List rows = ec.entity.find(SourceSystemConnectorSupport.ENTITY_NAME)
+                .condition("orderStateLookupServiceName", org.moqui.entity.EntityCondition.IS_NOT_NULL, null)
+                .useCache(false).list()*.systemEnumId
+        assertEquals(["OMS_RETURNS"], rows.sort())
+    }
+
+    @Test
+    void orderStateLookupIsDistinctFromThePairLookupSlot() {
+        // Same service today, but the two slots name DIFFERENT stages (exchange pair verify vs
+        // cancellation-refund suppression). Re-pointing one must not silently move the other, so the
+        // OMS_RETURNS row must not acquire a pairLookupServiceName by copy-paste.
+        Map<String, Object> omsReturns = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS")
+        assertNotNull(omsReturns, "OMS_RETURNS connector row should resolve")
+        assertNull(omsReturns.pairLookupServiceName,
+                "OMS_RETURNS drives the returns suppression, not the exchange pair verify stage")
+    }
 }

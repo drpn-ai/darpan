@@ -704,6 +704,13 @@
                 Shopify exchange must have been imported into OMS). Same lookup fence as
                 lookupServiceName. Blank disables the exchange presence check.</description>
         </field>
+        <field name="orderStateLookupServiceName" type="text-medium">
+            <description>Optional lookup#* service returning full OMS order groups keyed by the originating
+                Shopify order id, so a verify stage can read the originating order's statusId. Same lookup
+                fence as lookupServiceName. Blank disables cancellation-refund suppression for runs where
+                this connector is a side. Distinct from pairLookupServiceName, which names the exchange pair
+                verify stage: same service today, but re-pointing one must not silently move the other.</description>
+        </field>
         <field name="healthCheckServiceName" type="text-medium">
             <description>Optional connection-diagnostics probe (probe#* shape only, enforced by the
                 probe fence) that exercises this connector's stored credentials against the remote

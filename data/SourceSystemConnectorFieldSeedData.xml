@@ -76,7 +76,7 @@
             label="Shopify refund or return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
             description="RELABELLED (was 'Shopify reference'): the OMS side of the primary comparison — a
                 Shopify refund id or, for a small number of returns, a return id instead. Matches Shopify
-                SHOPIFY_RETURN_REFS's eventId whichever kind of id it holds."/>
+                SHOPIFY_RETURN_REFS's refundOrReturnId whichever kind of id it holds."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].orderExternalId"
             label="Order external ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
             description="Order spine — joins a return back to its order."/>

@@ -54,8 +54,8 @@ import static darpan.common.ValueSupport.normalizeInt
  * kept — the thing it used to guard against (double-counting one return under two ids) cannot happen
  * once there is only one id.
  *
- * WHAT THIS CLASS DOES NOW: two behaviours a plain present/absent join cannot replicate because it has
- * no notion of "how new":
+ * WHAT THIS CLASS DOES NOW: three behaviours a plain present/absent join cannot replicate — two because
+ * it has no notion of "how new", and one because it has no notion of WHY a counterpart is absent:
  *
  *   GRACE: a return/refund event that the generic compare reported missing on one side, but whose OWN
  *   createdAt (the Shopify event's createdAt, or the OMS return's entryDate) is younger than
@@ -71,6 +71,22 @@ import static darpan.common.ValueSupport.normalizeInt
  *   just relocate the false-missing that lookback exists to close, from the OMS side onto the Shopify
  *   side. One-directional by construction: a pre-window OMS return has no equivalent lookback-driven
  *   artifact to correct for, so missing-in-Shopify rows are graded on grace alone.
+ *
+ *   CANCELLATION-REFUND SUPPRESSION (2026-08-18): a missing-in-OMS row for a Shopify REFUND whose
+ *   originating HotWax order is ORDER_CANCELLED is not a gap — OMS books a cancellation, not a return,
+ *   so the counterpart can never exist and no amount of waiting will produce one. Unlike the two rules
+ *   above, this one cannot be decided from the row itself: the row carries the refund, not the order's
+ *   status, so it needs a live lookup (injected as cancelledOrderLookup — this class never dispatches a
+ *   service itself). Four constraints, each load-bearing and each pinned by a test:
+ *     (1) DIRECTION — missing-in-OMS only. The same rule applied to missing-in-Shopify explained 1 of
+ *         579 rows in the live probe, indistinguishable from control.
+ *     (2) REFUND ONLY — a RETURN row is never suppressed, even on a cancelled order. Live data showed
+ *         21 REFUND / 0 RETURN on cancelled orders, so a qualifying RETURN means an assumption broke
+ *         and must stay visible rather than be explained away.
+ *     (3) ANY-RECORD-CANCELLED — an order group with mixed statuses suppresses if ANY record is
+ *         cancelled; real groups routinely carry several records.
+ *     (4) FAIL CLOSED — a capped, failed, not-ok or throwing lookup suppresses nothing and never fails
+ *         the run, so a degraded OMS over-reports rather than silently under-reports.
  *
  * MECHANISM: this is now a POST-COMPARE FILTER over the diff document the generic ruleset compare
  * already wrote — the same streaming read/rewrite MissingDiffVerificationSupport uses (candidate scan,
@@ -94,6 +110,13 @@ class ReturnPresenceVerificationSupport {
     // classified as a note, not folded into "warnings" (which would misreport an all-clear run as WITH
     // ISSUES). Unchanged across this revision even though everything the sentence describes changed.
     static final String AUDIT_NOTE_PREFIX = "Return presence check: "
+    /** Matches lookup#HotWaxOmsOrdersByExternalId's PAIR_LOOKUP_MAX_IDS. Keep the two in sync. */
+    static final int ORDER_LOOKUP_CHUNK_SIZE = 100
+    /** Mirrors MissingDiffVerificationSupport.DEFAULT_MAX_LOOKUP_IDS: past this, the sync is broken
+     *  rather than skewed and point-checking it only hammers the source API. */
+    static final int DEFAULT_MAX_ORDER_LOOKUPS = 1000
+    static final String CANCELLED_ORDER_STATUS_ID = "ORDER_CANCELLED"
+    static final String EVENT_TYPE_REFUND = "REFUND"
 
     private static final String DIFFERENCES_HEADER = "\"differences\":["
     private static final String SUMMARY_PREFIX = "\"summary\":"
@@ -114,9 +137,16 @@ class ReturnPresenceVerificationSupport {
      *   nowMillis         : optional, default now
      *   windowStartMillis : optional — the run's REPORTING window start (see class doc's WINDOW-START
      *                        GATE); a caller that omits it degrades to grace-only behaviour
+     *   cancelledOrderLookup : optional Closure<Map> — List<String> orderIds ->
+     *                        [ok: Boolean, ordersByExternalId: Map<String, ?>, errors: List<String>],
+     *                        matching lookup#HotWaxOmsOrdersByExternalId. Each value is an order GROUP
+     *                        (one order Map or a List of them, each with a statusId). Absent disables
+     *                        cancellation-refund suppression entirely
+     *   maxOrderLookups   : optional cap on candidate orders, default DEFAULT_MAX_ORDER_LOOKUPS
      *
      * returns [performed, rewritten, pendingCount, preWindowSuppressedCount, malformedCount,
-     *          removedCount, removedMissingInFile1, removedMissingInFile2, warnings, auditNote]
+     *          removedCount, removedMissingInFile1, removedMissingInFile2, cancelledRefundSuppressedCount,
+     *          warnings, auditNote]
      */
     static Map<String, Object> verifyReturnPresenceForRun(Map<String, Object> args) {
         File diffFile = (File) args?.diffFile
@@ -132,6 +162,8 @@ class ReturnPresenceVerificationSupport {
         Long windowStartMillis = (args?.windowStartMillis instanceof Number)
                 ? ((Number) args.windowStartMillis).longValue()
                 : null
+        Closure cancelledOrderLookup = (args?.cancelledOrderLookup instanceof Closure) ? (Closure) args.cancelledOrderLookup : null
+        int maxOrderLookups = normalizeInt(args?.maxOrderLookups, DEFAULT_MAX_ORDER_LOOKUPS)
 
         String omsToken = DiffDetailClassifier.normalizeToken(omsSideLabel)
         String shopifyToken = DiffDetailClassifier.normalizeToken(shopifySideLabel)
@@ -141,7 +173,7 @@ class ReturnPresenceVerificationSupport {
         List<String> warnings = []
         Map<String, Object> inert = [performed: false, rewritten: false, pendingCount: 0,
                 preWindowSuppressedCount: 0, malformedCount: 0, removedCount: 0,
-                removedMissingInFile1: 0, removedMissingInFile2: 0,
+                removedMissingInFile1: 0, removedMissingInFile2: 0, cancelledRefundSuppressedCount: 0,
                 warnings: warnings, auditNote: null] as Map<String, Object>
         if (diffFile == null || !diffFile.isFile()) {
             warnings.add("Return presence check skipped: diff file was not available.")
@@ -154,6 +186,9 @@ class ReturnPresenceVerificationSupport {
         // the window-start gate, using that row's own embedded record data — never a fresh join.
         JsonSlurper slurper = new JsonSlurper()
         Map<String, Set<String>> removeIdsByToken = [:]
+        // orderId -> row ids of the missing-in-OMS REFUND rows grading LEFT in place. Populated in
+        // Pass 1, resolved in bulk in Pass 1.5 (CANCELLATION-REFUND SUPPRESSION, see class doc).
+        Map<String, Set<String>> candidateRowIdsByOrderId = [:]
         int pendingCount = 0
         int preWindowCount = 0
         int malformedCount = 0
@@ -209,6 +244,19 @@ class ReturnPresenceVerificationSupport {
                     remove = true
                     pending = true
                 }
+                // Cancellation-refund candidates: missing-in-OMS REFUND rows that grading did NOT
+                // already remove. Collected here rather than looked up inline — the lookup is one HTTP
+                // call per id and must be batched, and this loop is the streaming pass that must not
+                // block on network I/O. Independent of the grading decision above: a row already
+                // removed as pending/pre-window needs no second reason to go.
+                if (missingInOms && !remove && cancelledOrderLookup != null) {
+                    String eventType = normalize(data.get("refundOrReturnType"))
+                    String orderId = normalize(data.get("orderId"))
+                    String candidateRowId = rowIdOf(row)
+                    if (EVENT_TYPE_REFUND.equalsIgnoreCase(eventType) && orderId && candidateRowId) {
+                        candidateRowIdsByOrderId.computeIfAbsent(orderId) { new LinkedHashSet<String>() }.add(candidateRowId)
+                    }
+                }
                 if (!remove) continue
 
                 String rowId = rowIdOf(row)
@@ -229,11 +277,48 @@ class ReturnPresenceVerificationSupport {
             warnings.add("Return presence check could not grade ${malformedCount} reported-missing return/refund row(s) against the grace window (no parseable data.createdAt/data.entryDate); left as reported.".toString())
         }
 
+        // Pass 1.5 — CANCELLATION-REFUND SUPPRESSION. Resolve each candidate order's OMS status in
+        // chunks and fold the cancelled ones into the SAME removal set Pass 2 already consumes, so the
+        // rewrite, the summary arithmetic and the audit-note plumbing are reused unchanged. Fails
+        // closed at every step: a capped, failed, not-ok or throwing lookup suppresses nothing and
+        // never fails the run.
+        int cancelledRefundCount = 0
+        if (cancelledOrderLookup != null && !candidateRowIdsByOrderId.isEmpty()) {
+            List<String> orderIds = new ArrayList<>(candidateRowIdsByOrderId.keySet())
+            if (orderIds.size() > maxOrderLookups) {
+                warnings.add("Cancellation-refund check skipped: ${orderIds.size()} candidate order(s) exceeds the ${maxOrderLookups}-lookup cap; no rows were suppressed.".toString())
+            } else {
+                orderIds.collate(ORDER_LOOKUP_CHUNK_SIZE).each { List<String> chunk ->
+                    Map chunkResult
+                    try {
+                        chunkResult = (Map) cancelledOrderLookup.call(chunk)
+                    } catch (Throwable t) {
+                        // `return` skips THIS chunk only — one failed chunk must not discard a
+                        // succeeding one, since each chunk is an independent batch of orders.
+                        warnings.add("Cancellation-refund lookup failed for ${chunk.size()} order(s): ${normalize(t.message) ?: t.class.simpleName}".toString())
+                        return
+                    }
+                    if (chunkResult?.ok != true) {
+                        warnings.add("Cancellation-refund lookup did not complete for ${chunk.size()} order(s): ${(chunkResult?.errors ?: []).join('; ')}".toString())
+                        return
+                    }
+                    ((Map) (chunkResult.ordersByExternalId ?: [:])).each { Object orderIdKey, Object group ->
+                        if (!containsCancelledOrder(group)) return
+                        Set<String> rowIds = candidateRowIdsByOrderId.get(normalize(orderIdKey))
+                        if (!rowIds) return
+                        removeIdsByToken.computeIfAbsent(omsToken) { new LinkedHashSet<String>() }.addAll(rowIds)
+                        cancelledRefundCount += rowIds.size()
+                    }
+                }
+            }
+        }
+
         int removedCount = (removeIdsByToken.values()*.size().sum() ?: 0) as int
-        String auditNote = buildAuditNote(pendingCount, preWindowCount, graceHours)
+        String auditNote = buildAuditNote(pendingCount, preWindowCount, graceHours, cancelledRefundCount)
         if (removedCount == 0) {
             return [performed: true, rewritten: false, pendingCount: 0, preWindowSuppressedCount: 0,
                     malformedCount: malformedCount, removedCount: 0, removedMissingInFile1: 0, removedMissingInFile2: 0,
+                    cancelledRefundSuppressedCount: 0,
                     warnings: warnings, auditNote: auditNote] as Map<String, Object>
         }
 
@@ -305,6 +390,7 @@ class ReturnPresenceVerificationSupport {
         return [performed: true, rewritten: true, pendingCount: pendingCount, preWindowSuppressedCount: preWindowCount,
                 malformedCount: malformedCount, removedCount: removedCount,
                 removedMissingInFile1: removedMissingInFile1, removedMissingInFile2: removedMissingInFile2,
+                cancelledRefundSuppressedCount: cancelledRefundCount,
                 warnings: warnings, auditNote: auditNote] as Map<String, Object>
     }
 
@@ -375,6 +461,18 @@ class ReturnPresenceVerificationSupport {
         }
     }
 
+    /**
+     * True when ANY record in an OMS order group is cancelled. Groups routinely carry several records
+     * (split shipments); the live probe saw 1,093 status values across 579 orders. Accepts a bare Map
+     * as well as a List, since the lookup contract only promises "an order group".
+     */
+    private static boolean containsCancelledOrder(Object group) {
+        List records = (group instanceof List) ? (List) group : (group == null ? [] : [group])
+        return records.any { Object record ->
+            record instanceof Map && CANCELLED_ORDER_STATUS_ID.equalsIgnoreCase(normalize(((Map) record).get("statusId")))
+        }
+    }
+
     private static Map adjustSummary(JsonSlurper slurper, String summaryLine, int removedCount,
                                      int removedMissingInFile1, int removedMissingInFile2) {
         Object fragment = headerFragment(slurper, summaryLine, SUMMARY_PREFIX)
@@ -423,10 +521,14 @@ class ReturnPresenceVerificationSupport {
      * window-start clause is only appended when it can actually apply (mirrors the retired
      * suppression-caveat sentence's own "never a blanket disclaimer" rule).
      */
-    private static String buildAuditNote(int pendingCount, int preWindowCount, int graceHours) {
+    private static String buildAuditNote(int pendingCount, int preWindowCount, int graceHours,
+                                         int cancelledRefundCount) {
         String note = "${AUDIT_NOTE_PREFIX}${pendingCount} pending (younger than ${graceHours}h)."
         if (preWindowCount > 0) {
             note += " ${preWindowCount} pre-window Shopify event(s) excluded from the missing-in-OMS count (extractor lookback artifact, not a genuine gap)."
+        }
+        if (cancelledRefundCount > 0) {
+            note += " ${cancelledRefundCount} cancellation refund(s) suppressed from the missing-in-OMS count — the originating HotWax order is ORDER_CANCELLED, which books no return."
         }
         return note
     }

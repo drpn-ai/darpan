@@ -41,6 +41,33 @@ class ReturnPresenceVerificationSupportTests {
     private static final long NOW = 1_800_000_000_000L
     private static final long OLD = NOW - 24L * 3600_000L      // well outside the 3h default grace
     private static final long RECENT = NOW - 30L * 60_000L     // inside the 3h default grace
+    private static final String DEFAULT_ORDER_ID = "7025799037059"
+
+    /**
+     * Stands in for lookup#HotWaxOmsOrdersByExternalId, whose real contract is
+     * [ok, ordersByExternalId, errors] with each value an order GROUP (a List of order Maps, each
+     * carrying statusId) — see OmsRestSourceSupport.summarizePairOrder.
+     */
+    private static Closure lookupReturning(Map<String, Object> ordersByExternalId, boolean ok = true) {
+        return { List ids ->
+            [ok: ok, ordersByExternalId: ok ? ordersByExternalId.subMap(ids) : [:],
+             errors: ok ? [] : ["OMS returned HTTP 503"]]
+        }
+    }
+
+    private Map verifyWithLookup(File file, Closure cancelledOrderLookup, Integer maxOrderLookups = null) {
+        Map args = [
+                diffFile            : file,
+                file1Label          : SHOPIFY_LABEL,
+                file2Label          : OMS_LABEL,
+                omsSideLabel        : OMS_LABEL,
+                shopifySideLabel    : SHOPIFY_LABEL,
+                nowMillis           : NOW,
+                cancelledOrderLookup: cancelledOrderLookup,
+        ]
+        if (maxOrderLookups != null) args.maxOrderLookups = maxOrderLookups
+        return ReturnPresenceVerificationSupport.verifyReturnPresenceForRun(args)
+    }
 
     /** A "missing in Shopify" row: the OMS return is present, data carries the OMS record (entryDate). */
     private static Map missingInShopifyRow(String id, long entryDateMillis) {
@@ -56,13 +83,14 @@ class ReturnPresenceVerificationSupportTests {
     }
 
     /** A "missing in OMS" row: the Shopify event is present, data carries the Shopify record (createdAt). */
-    private static Map missingInOmsRow(String id, long createdAtMillis, String refundOrReturnType = "REFUND") {
+    private static Map missingInOmsRow(String id, long createdAtMillis, String refundOrReturnType = "REFUND",
+                                       String orderId = DEFAULT_ORDER_ID) {
         return [
                 diffType : "MISSING_IN_FILE_1",
                 primaryId: id,
                 presentIn: SHOPIFY_LABEL,
                 missingIn: OMS_LABEL,
-                data     : JsonOutput.toJson([refundOrReturnId: id, refundOrReturnType: refundOrReturnType, orderId: "7025799037059",
+                data     : JsonOutput.toJson([refundOrReturnId: id, refundOrReturnType: refundOrReturnType, orderId: orderId,
                         createdAt: isoInstant(createdAtMillis)]),
                 message  : "Present in ${SHOPIFY_LABEL}, missing in ${OMS_LABEL}".toString(),
         ]
@@ -382,5 +410,179 @@ class ReturnPresenceVerificationSupportTests {
 
         assertTrue((Boolean) result.rewritten)
         assertEquals(1, result.pendingCount)
+    }
+
+    // --- CANCELLATION-REFUND SUPPRESSION (2026-08-18): a Shopify REFUND against an ORDER_CANCELLED
+    // HotWax order can never have an OMS counterpart, because OMS books a cancellation, not a return.
+
+    @Test
+    void suppressesAMissingInOmsRefundWhoseOrderIsCancelled() {
+        File diff = writeDiffDocument([missingInOmsRow("954742210691", OLD, "REFUND", "7120801431683")])
+
+        Map result = verifyWithLookup(diff,
+                lookupReturning(["7120801431683": [[statusId: "ORDER_CANCELLED"]]]))
+
+        assertEquals(1, result.cancelledRefundSuppressedCount)
+        assertEquals(1, result.removedCount)
+        assertEquals(1, result.removedMissingInFile2)
+        // OLD is 24h back against a 3h grace: this row is suppressed by cancellation, NOT by grace.
+        assertEquals(0, result.pendingCount)
+        assertTrue((result.auditNote as String).contains("cancellation refund"))
+        assertEquals([], (List) parseDocument(diff).differences)
+    }
+
+    @Test
+    void keepsAMissingInOmsReturnEvenWhenItsOrderIsCancelled() {
+        // Live data: 21 REFUND / 0 RETURN on cancelled orders. A qualifying RETURN means the assumption
+        // broke; suppressing it would hide exactly the signal that tells us so.
+        File diff = writeDiffDocument([missingInOmsRow("26947223683", OLD, "RETURN", "7120801431683")])
+
+        Map result = verifyWithLookup(diff,
+                lookupReturning(["7120801431683": [[statusId: "ORDER_CANCELLED"]]]))
+
+        assertEquals(0, result.cancelledRefundSuppressedCount)
+        assertEquals(0, result.removedCount)
+        assertEquals(["26947223683"], ((List) parseDocument(diff).differences).collect { it.primaryId })
+    }
+
+    @Test
+    void neverSuppressesTheMissingInShopifyDirection() {
+        // The same rule applied to missing-in-Shopify explained 1 of 579 — indistinguishable from
+        // control. The lookup must not even be consulted for that direction.
+        File diff = writeDiffDocument([missingInShopifyRow("26949222531", OLD)])
+
+        Map result = verifyWithLookup(diff, { List ids ->
+            throw new IllegalStateException("the missing-in-Shopify direction must not be looked up")
+        })
+
+        assertEquals(0, result.cancelledRefundSuppressedCount)
+        assertEquals(0, result.removedCount)
+        assertEquals(["26949222531"], ((List) parseDocument(diff).differences).collect { it.primaryId })
+    }
+
+    @Test
+    void suppressesWhenAnyRecordInTheOrderGroupIsCancelled() {
+        // Real groups carry several records (1,093 status values across 579 orders in the live probe).
+        File diff = writeDiffDocument([missingInOmsRow("954742210691", OLD, "REFUND", "7120801431683")])
+
+        Map result = verifyWithLookup(diff, lookupReturning(["7120801431683":
+                [[statusId: "ORDER_COMPLETED"], [statusId: "ORDER_CANCELLED"]]]))
+
+        assertEquals(1, result.cancelledRefundSuppressedCount)
+    }
+
+    @Test
+    void leavesARefundAloneWhenNoRecordInTheGroupIsCancelled() {
+        File diff = writeDiffDocument([missingInOmsRow("954742210691", OLD, "REFUND", "7120801431683")])
+
+        Map result = verifyWithLookup(diff, lookupReturning(["7120801431683":
+                [[statusId: "ORDER_COMPLETED"], [statusId: "ORDER_APPROVED"]]]))
+
+        assertEquals(0, result.cancelledRefundSuppressedCount)
+        assertEquals(0, result.removedCount)
+    }
+
+    @Test
+    void suppressesNothingWhenTheLookupReportsNotOk() {
+        File diff = writeDiffDocument([missingInOmsRow("954742210691", OLD, "REFUND", "7120801431683")])
+
+        Map result = verifyWithLookup(diff,
+                lookupReturning(["7120801431683": [[statusId: "ORDER_CANCELLED"]]], false))
+
+        assertEquals(0, result.cancelledRefundSuppressedCount)
+        assertEquals(0, result.removedCount)
+        assertTrue(((List) result.warnings).any { it.toString().contains("Cancellation-refund lookup") })
+        assertEquals(["954742210691"], ((List) parseDocument(diff).differences).collect { it.primaryId })
+    }
+
+    @Test
+    void suppressesNothingWhenTheLookupThrows() {
+        File diff = writeDiffDocument([missingInOmsRow("954742210691", OLD, "REFUND", "7120801431683")])
+
+        Map result = verifyWithLookup(diff, { List ids -> throw new RuntimeException("OMS unreachable") })
+
+        assertEquals(0, result.cancelledRefundSuppressedCount)
+        assertEquals(0, result.removedCount)
+        assertTrue(((List) result.warnings).any { it.toString().contains("OMS unreachable") })
+    }
+
+    @Test
+    void omitsTheCancellationSentenceWhenNothingWasSuppressed() {
+        File diff = writeDiffDocument([missingInOmsRow("954742210691", OLD, "REFUND", "7120801431683")])
+
+        Map result = verifyWithLookup(diff,
+                lookupReturning(["7120801431683": [[statusId: "ORDER_COMPLETED"]]]))
+
+        assertFalse((result.auditNote as String).contains("cancellation refund"))
+    }
+
+    @Test
+    void chunksOrderLookupsAtTheServiceCap() {
+        // lookup#HotWaxOmsOrdersByExternalId enforces PAIR_LOOKUP_MAX_IDS = 100 and returns ok=false for
+        // the WHOLE batch on any single failure, so oversized calls fail wholesale.
+        List rows = (1..150).collect { int i ->
+            missingInOmsRow("refund-${i}".toString(), OLD, "REFUND", "order-${i}".toString())
+        }
+        List<Integer> chunkSizes = []
+        File diff = writeDiffDocument(rows)
+
+        verifyWithLookup(diff, { List ids ->
+            chunkSizes.add(ids.size()); [ok: true, ordersByExternalId: [:], errors: []]
+        })
+
+        assertEquals([100, 50], chunkSizes)
+    }
+
+    @Test
+    void oneFailedChunkDoesNotDiscardASucceedingChunk() {
+        List rows = (1..150).collect { int i ->
+            missingInOmsRow("refund-${i}".toString(), OLD, "REFUND", "order-${i}".toString())
+        }
+        File diff = writeDiffDocument(rows)
+        int calls = 0
+
+        Map result = verifyWithLookup(diff, { List ids ->
+            calls++
+            if (calls == 1) return [ok: false, ordersByExternalId: [:], errors: ["boom"]]
+            return [ok: true, ordersByExternalId: ids.collectEntries { [(it): [[statusId: "ORDER_CANCELLED"]]] },
+                    errors: []]
+        })
+
+        assertEquals(50, result.cancelledRefundSuppressedCount)
+        assertTrue(((List) result.warnings).any { it.toString().contains("boom") })
+        assertEquals(100, ((List) parseDocument(diff).differences).size())
+    }
+
+    @Test
+    void skipsTheLookupEntirelyWhenTheCandidateSetExceedsTheCap() {
+        // Past the cap the sync is broken rather than skewed, and point-checking it only hammers the
+        // source API. Mirrors MissingDiffVerificationSupport's own maxLookupIds posture.
+        List rows = (1..5).collect { int i ->
+            missingInOmsRow("refund-${i}".toString(), OLD, "REFUND", "order-${i}".toString())
+        }
+        File diff = writeDiffDocument(rows)
+        boolean called = false
+
+        Map result = verifyWithLookup(diff, { List ids ->
+            called = true; [ok: true, ordersByExternalId: [:], errors: []]
+        }, 4)
+
+        assertFalse(called, "the cap must be enforced before any lookup is dispatched")
+        assertEquals(0, result.cancelledRefundSuppressedCount)
+        assertTrue(((List) result.warnings).any { it.toString().contains("exceeds the 4-lookup cap") })
+    }
+
+    @Test
+    void skipsTheLookupEntirelyWhenNoClosureIsSupplied() {
+        // Absent closure = the connector declares no orderStateLookupServiceName. Behaviour must be
+        // byte-identical to before this feature existed.
+        File diff = writeDiffDocument([missingInOmsRow("954742210691", OLD, "REFUND", "7120801431683")])
+
+        Map result = verify(diff)
+
+        assertEquals(0, result.cancelledRefundSuppressedCount)
+        assertEquals(0, result.removedCount)
+        assertTrue(((List) result.warnings).isEmpty())
+        assertEquals(["954742210691"], ((List) parseDocument(diff).differences).collect { it.primaryId })
     }
 }

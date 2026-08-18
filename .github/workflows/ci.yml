@@ -103,19 +103,25 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
-      # DO NOT "restore" this to moqui/moqui-framework@master. drpn-ai/moqui-framework is our fork,
-      # and the tag below is the prod-pinned upstream ref (d12a86e1) plus one commit: the login
-      # self-deadlock fix in MoquiShiroRealm (c618faf1). Upstream master does NOT contain that fix,
-      # so building against it would run the mysqlTest regression suite against code that still has
-      # the defect — CI would go red, or worse, someone would delete the test.
+      # DO NOT "restore" this to moqui/moqui-framework@master. drpn-ai/moqui-framework is OUR FORK,
+      # and its master carries the prod-pinned upstream ref (d12a86e1) plus the login self-deadlock
+      # fix (merged as 8cde954b): getLoginKey no longer issues the FK-child UserLoginKey insert under
+      # requireNewTransaction, which used to suspend a caller already X-locking the parent
+      # USER_ACCOUNT row. UPSTREAM master does NOT contain that fix, so building against it would run
+      # the mysqlTest regression suite against code that still has the defect — CI would go red, or
+      # worse, someone would delete the test. The fork and upstream share a branch name; that is the
+      # whole trap. Check the URL, not the branch.
       #
-      # It is a TAG, not a branch or a raw SHA: the branch will be rebased or deleted once the fix
-      # goes upstream, and this must not break then. darpan-docker-config's Dockerfile pins the same
-      # tag via MOQUI_FRAMEWORK_REF, so CI and the production image build the same framework.
-      # Retire the fork by repointing both at an upstream ref once the fix is merged there.
-      - name: Clone Moqui framework (drpn-ai fork, pinned tag)
+      # This tracks the fork's master branch, replacing tag v4.0.0-drpn.1 on 2026-08-18 (that tag
+      # dereferences to c618faf1 and predates the fix). Consequence: the ref MOVES, so CI is no
+      # longer pinned to an immutable framework — a green run does not prove a later run builds the
+      # same code. darpan-docker-config's two Dockerfiles pin the same branch via
+      # MOQUI_FRAMEWORK_REF, so CI and the production image still build the same framework; all
+      # three must move together. Retire the fork by repointing all three at an upstream ref once
+      # the fix is merged there.
+      - name: Clone Moqui framework (drpn-ai fork, master)
         run: |
-          git clone --depth 1 --branch v4.0.0-drpn.1 \
+          git clone --depth 1 --branch master \
             https://github.com/drpn-ai/moqui-framework.git darpan-backend
           git -C darpan-backend log --oneline -1
 

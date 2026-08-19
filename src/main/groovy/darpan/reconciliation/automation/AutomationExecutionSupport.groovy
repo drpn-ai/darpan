@@ -1224,6 +1224,22 @@ class AutomationExecutionSupport {
         return latestDue
     }
 
+    /**
+     * A connector row can name a service from a component that is not in this image - database-darpan
+     * is absent from every production Dockerfile today. Moqui's own failure for that case is
+     * "Unknown service", which reads as a bug rather than a missing install. Say what is actually
+     * wrong so an operator knows the fix is a deployment change, not a code change.
+     */
+    static void requireExtractorServiceInstalled(def ec, String serviceName) {
+        if (ec.service.isServiceDefined(serviceName)) return
+        if (serviceName?.startsWith("reconciliation.DatabaseExtractionServices.")) {
+            throw new IllegalStateException("The database source component is not installed on this " +
+                    "deployment, so database sources cannot run here.")
+        }
+        throw new IllegalStateException("Extractor service '${serviceName}' is registered but not " +
+                "installed on this deployment.")
+    }
+
     protected static Map<String, Object> callConfiguredSourceExtractor(def ec, def automation, def source,
             Map<String, Object> window, Map<String, Object> params) {
         Map<String, Object> metadata = resolveSourceExtractorMetadata(ec, source,
@@ -1249,6 +1265,7 @@ class AutomationExecutionSupport {
         if (!SourceSystemConnectorSupport.isAllowedExtractorServiceShape(serviceName)) {
             throw new IllegalStateException("API source extractor service '${serviceName}' does not match an allowed extractor service name pattern.")
         }
+        requireExtractorServiceInstalled(ec, serviceName)
 
         Map<String, Object> serviceParams = [:]
         if (metadata.parameters instanceof Map) serviceParams.putAll((Map<String, Object>) metadata.parameters)

@@ -3487,6 +3487,15 @@ class AutomationExecutionSupportTests {
 
     private static class FakeServiceFacade {
         Closure responder = { FakeServiceCall ignored -> [:] }
+        /**
+         * Mirrors ServiceFacadeImpl.isServiceDefined, which callConfiguredSourceExtractor now consults
+         * so a connector row naming a service from an uninstalled component (database-darpan is absent
+         * from every production image) fails with a legible message instead of "Unknown service".
+         * Defaults to true: these fixtures exercise dispatch, not deployment topology. Set false in a
+         * test that wants the not-installed path.
+         */
+        Closure serviceDefinedCheck = { String ignored -> true }
+        boolean isServiceDefined(String serviceName) { return serviceDefinedCheck(serviceName) }
         List<FakeServiceCall> calls = Collections.synchronizedList([] as List<FakeServiceCall>)
         FakeEc ec
         /**

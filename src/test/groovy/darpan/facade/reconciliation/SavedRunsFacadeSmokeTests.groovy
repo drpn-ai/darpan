@@ -874,7 +874,23 @@ end'''
         // MACH database-source epic Task 2 follow-up: AUT_SRC_DB must flow the same extract-vs-upload
         // path as AUT_SRC_API through create#RuleSetRun and run#SavedRunDiff — no fileTypeEnumId/schema
         // required at create time, and execution dispatches through the connector registry (not the
-        // plain-upload "fileText is required" path), even though no DATABASE connector is registered yet.
+        // plain-upload "fileText is required" path).
+        //
+        // 2026-08-19: a DATABASE connector IS now registered, so create#RuleSetRun resolves
+        // file1SourceConfigId against darpan.database.DatabaseSourceQuery via the row's
+        // configEntityName. Seed the referenced query (and its parent config) so this exercises the
+        // real registry path rather than the no-connector fallback it was originally written against.
+        ec.entity.makeValue("darpan.database.DatabaseSourceConfig")
+                .setAll([databaseSourceConfigId: "TEST_DB_CONFIG", companyUserGroupId: KREWE,
+                         description: "Smoke config", dialect: "MYSQL", host: "unresolvable-db.invalid",
+                         port: 3306, databaseName: "ofbiz", username: "reader", isActive: "Y"])
+                .create()
+        ec.entity.makeValue("darpan.database.DatabaseSourceQuery")
+                .setAll([databaseSourceQueryId: "TEST_DB_QUERY", databaseSourceConfigId: "TEST_DB_CONFIG",
+                         companyUserGroupId: KREWE, description: "Smoke query",
+                         sqlSelect: "SELECT order_id FROM order_header WHERE entry_date >= :windowStart AND entry_date < :windowEnd",
+                         isActive: "Y"])
+                .create()
         Map<String, Object> createResult = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
                 .parameters([
@@ -927,11 +943,15 @@ end'''
                 .call()
 
         assertTrue(ec.message.hasError())
-        // No DATABASE SourceSystemConnector row exists yet (database-darpan component ships it later),
-        // so extraction fails gracefully at connector resolution — proving the DB source took the
-        // registry-driven extract path, not the plain-upload path (which would ask for file1Name/file1Text).
-        assertTrue(ec.message.errors.any { String message -> message.contains("is not supported for manual saved-run execution") },
-                "Unexpected errors: ${ec.message.errors}")
+        // 2026-08-19: the DATABASE connector row now exists, so this dispatches into the real database
+        // extractor instead of bailing at connector resolution. The fixture host is a reserved .invalid
+        // name, so it fails fast and offline at the host guard — which still proves the point this test
+        // exists to make: the DB source took the registry-driven EXTRACT path, not the plain-upload path
+        // (which would have asked for file1Name/file1Text).
+        assertFalse(ec.message.errors.any { String message -> message.contains("is not supported for manual saved-run execution") },
+                "DATABASE is now a registered connector and must no longer be rejected as unsupported: ${ec.message.errors}")
+        assertTrue(ec.message.errors.any { String message -> message.toLowerCase().contains("database") },
+                "expected a database-extraction error proving dispatch reached the extractor: ${ec.message.errors}")
         assertFalse(ec.message.errors.any { String message -> message.contains("file1Name is required") })
         assertFalse(ec.message.errors.any { String message -> message.contains("file1Text is required") })
         ec.message.clearErrors()

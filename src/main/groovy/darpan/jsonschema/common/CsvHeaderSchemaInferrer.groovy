@@ -2,6 +2,7 @@ package jsonschema.common
 
 import com.univocity.parsers.csv.CsvParser
 import com.univocity.parsers.csv.CsvParserSettings
+import com.univocity.parsers.csv.UnescapedQuoteHandling
 
 /**
  * Reads the header row of a CSV sample and turns it into a flat JSON Schema.
@@ -156,7 +157,13 @@ class CsvHeaderSchemaInferrer {
         CsvParserSettings settings = new CsvParserSettings()
         settings.format.setDelimiter(',' as char)
         settings.format.setQuote('"' as char)
-        settings.format.setQuoteEscape('"' as char)
+        // Backslash, NOT the doubled quote a reader might expect. Spark's CSVOptions defaults
+        // `escape` to '\' and passes it straight to univocity's quoteEscape, so `"say ""hi"""`
+        // is NOT unescaped -- Spark names that column literally `"say ""hi"""`. Setting '"' here
+        // made this class unescape to `say "hi"`, and CsvHeaderSparkDialectTests caught it.
+        settings.format.setQuoteEscape('\\' as char)
+        // Spark's default for a quote it cannot account for: keep the raw text to the delimiter.
+        settings.setUnescapedQuoteHandling(UnescapedQuoteHandling.STOP_AT_DELIMITER)
         settings.setLineSeparatorDetectionEnabled(true)
         settings.setHeaderExtractionEnabled(false)
         settings.setMaxCharsPerColumn(-1)

@@ -455,7 +455,7 @@ def writeRuleSetOutput = { Map serviceResult, Map savedRun, String file1Label, S
 // record confirms present are false positives and are removed from the written artifact — with an
 // audit note in processingWarnings — before counts are persisted. Strictly best-effort: nothing in
 // this pass may fail the run; worst case the differences stay exactly as compare reported them.
-def buildVerificationLookup = { Object source ->
+def buildVerificationLookup = { Object source, String runOwnerUserGroupId ->
     if (source == null) return null
     String sourceConfigType = normalize(source?.sourceConfigType)
     Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, normalize(source?.systemEnumId))
@@ -469,8 +469,18 @@ def buildVerificationLookup = { Object source ->
     String configId = normalize(source?.sourceConfigId)
     if (configId == null) return null
     String configParameterName = normalize(connector.configParameterName) ?: "sourceConfigId"
+    // Blank means the canonical order lookups' "orderIds". The returns pair rechecks refund/return
+    // ids, which must not be sent under an order-id name — Moqui would silently drop the parameter
+    // and the lookup would fail its required check rather than say anything useful.
+    String idsParameterName = normalize(connector.lookupIdsParameterName) ?: "orderIds"
     return { List<String> ids ->
-        runInternalService(lookupServiceName, [(configParameterName): configId, orderIds: ids])
+        // companyUserGroupId is the RUN OWNER's tenant, not the session's. Every lookup service in
+        // this slot declares it for exactly that reason, but this dispatch used to omit it, so a
+        // scheduled run resolved its source config against whatever tenant the session happened to
+        // carry (the 2026-07-31 scheduled-automation failure). A null value is dropped by
+        // runInternalService's own null filtering, degrading to the previous session-tenant behaviour.
+        runInternalService(lookupServiceName, [(configParameterName): configId, (idsParameterName): ids,
+                companyUserGroupId: runOwnerUserGroupId])
     }
 }
 
@@ -585,15 +595,16 @@ def runExchangeVerificationPass = { Map serviceResult, Object file1Source, Objec
                      pendingCount: verification.pendingCount ?: 0, deferredLookupCount: verification.deferredLookupCount ?: 0])])
 }
 
-def runVerificationPass = { Map serviceResult, Object file1Source, Object file2Source, String file1Label, String file2Label ->
+def runVerificationPass = { Map serviceResult, Object file1Source, Object file2Source, String file1Label, String file2Label,
+                            String runOwnerUserGroupId ->
     // Rule execution failure preserves partial diffs for investigation — never rewrite those.
     if (serviceResult.ruleExecutionFailed == true) return
     long missingInFile1 = (serviceResult.missingInFile1Count ?: 0) as long
     long missingInFile2 = (serviceResult.missingInFile2Count ?: 0) as long
     if (missingInFile1 <= 0L && missingInFile2 <= 0L) return
     Map<String, Closure> sideLookups = [:]
-    if (missingInFile1 > 0L) { Closure lookup = (Closure) buildVerificationLookup(file1Source); if (lookup != null) sideLookups[file1Label] = lookup }
-    if (missingInFile2 > 0L) { Closure lookup = (Closure) buildVerificationLookup(file2Source); if (lookup != null) sideLookups[file2Label] = lookup }
+    if (missingInFile1 > 0L) { Closure lookup = (Closure) buildVerificationLookup(file1Source, runOwnerUserGroupId); if (lookup != null) sideLookups[file1Label] = lookup }
+    if (missingInFile2 > 0L) { Closure lookup = (Closure) buildVerificationLookup(file2Source, runOwnerUserGroupId); if (lookup != null) sideLookups[file2Label] = lookup }
     if (!sideLookups) return
     File diffFile = resolveOutputFile(serviceResult)
     if (diffFile == null || !diffFile.isFile()) return
@@ -941,7 +952,8 @@ try {
                                     obsStep = null
                                     // Verification pass reads and may rewrite the artifact writeRuleSetOutput
                                     // just produced, and adjusts serviceResult counts BEFORE they are persisted.
-                                    runVerificationPass(serviceResult, file1Source, file2Source, file1Label, file2Label)
+                                    runVerificationPass(serviceResult, file1Source, file2Source, file1Label, file2Label,
+                                            savedRun.companyUserGroupId as String)
                                     runExchangeVerificationPass(serviceResult, file1Source, file2Source,
                                             (Map) file1Result, (Map) file2Result, file1Label, file2Label)
                                     runReturnPresenceVerificationPass(serviceResult, file1Source, file2Source,

@@ -687,6 +687,13 @@
                 rows the lookup confirms present (bulk-export index-skew false positives). Blank
                 disables the verification pass for this connector.</description>
         </field>
+        <field name="lookupIdsParameterName" type="text-short">
+            <description>Parameter name the verification pass sends the candidate id list as when calling
+                lookupServiceName. Blank means "orderIds", which is what the canonical order lookups
+                expect. Set it where the ids being rechecked are not order ids — the returns pair
+                rechecks refund/return ids, and sending those as orderIds would be a silent lie that
+                Moqui would not reject.</description>
+        </field>
         <field name="pairLookupServiceName" type="text-medium">
             <description>Optional lookup#* service returning full order groups keyed by the compare join
                 key (e.g. Shopify externalId) — the OMS side of the exchange pair verify stage. Same

@@ -196,6 +196,7 @@ class SourceSystemConnectorSupport {
                 statusParameterName        : readString(record, "statusParameterName"),
                 filterParameterName        : readString(record, "filterParameterName"),
                 lookupServiceName          : readString(record, "lookupServiceName"),
+                lookupIdsParameterName     : readString(record, "lookupIdsParameterName"),
                 pairLookupServiceName          : readString(record, "pairLookupServiceName"),
                 exchangeStateLookupServiceName : readString(record, "exchangeStateLookupServiceName"),
                 exchangeSweepServiceName       : readString(record, "exchangeSweepServiceName"),

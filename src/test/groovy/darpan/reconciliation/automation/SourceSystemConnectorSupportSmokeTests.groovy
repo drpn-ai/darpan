@@ -698,4 +698,56 @@ class SourceSystemConnectorSupportSmokeTests {
         assertTrue(declared.contains("companyUserGroupId"),
                 "service must accept companyUserGroupId or scheduled runs silently use the wrong tenant; declares ${declared}")
     }
+
+    @Test
+    void shopifyReturnRefsConnectorDeclaresTheRefundOrReturnPointLookup() {
+        // Without this the generic missing-diff verification pass never runs for the returns pair, so
+        // every order the Shopify extract's search-index net misses becomes a permanent false
+        // "missing in Shopify" with nothing to catch it (gorjana prod 2026-08-18: 566 of 601).
+        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY_RETURN_REFS")
+        assertNotNull(connector, "SHOPIFY_RETURN_REFS connector row should resolve")
+        assertEquals("reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyRefundOrReturnIds",
+                connector.lookupServiceName)
+        assertTrue(SourceSystemConnectorSupport.isAllowedLookupServiceShape(connector.lookupServiceName as String))
+        // The rows carry refund/return ids, never order ids — the dispatch must not send them as orderIds.
+        assertEquals("refundOrReturnIds", connector.lookupIdsParameterName)
+    }
+
+    @Test
+    void connectorsWithoutAnIdsParameterNameFallBackToTheOrderIdsDefault() {
+        // buildVerificationLookup defaults a blank slot to "orderIds", so the canonical Shopify orders
+        // lookup must keep resolving blank rather than acquire a redundant explicit value.
+        Map<String, Object> shopify = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY")
+        assertNotNull(shopify, "SHOPIFY connector row should resolve")
+        assertEquals("reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderIds", shopify.lookupServiceName)
+        assertNull(shopify.lookupIdsParameterName, "the orders lookup relies on the orderIds default")
+    }
+
+    @Test
+    void theRefundOrReturnLookupServiceDeclaresEveryParameterTheVerificationPassDispatches() {
+        // Same build-time tripwire as the OMS order-state lookup: Moqui drops undeclared in-parameters
+        // silently, so a rename here would make the pass fail closed and look identical to a clean run.
+        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY_RETURN_REFS")
+        assertNotNull(connector, "SHOPIFY_RETURN_REFS connector row should resolve")
+        String serviceName = connector.lookupServiceName as String
+        String noun = serviceName.substring(serviceName.indexOf("#") + 1)
+        String verb = serviceName.substring(serviceName.lastIndexOf(".") + 1, serviceName.indexOf("#"))
+
+        Path servicePath = ReconciliationSmokeTestSupport.resolveBackendRoot().resolve(
+                "runtime/component/shopify-darpan/service/reconciliation/ShopifyOrderExtractionServices.xml")
+        assertTrue(Files.exists(servicePath), "service file not found at ${servicePath}")
+        def service = new XmlParser(false, false).parse(servicePath.toFile()).children().find {
+            it.name() == "service" && it.attributes().get("noun") == noun && it.attributes().get("verb") == verb
+        }
+        assertNotNull(service, "${serviceName} is seeded on SHOPIFY_RETURN_REFS but defined nowhere")
+
+        List<String> declared = service.children().find { it.name() == "in-parameters" }?.children()
+                ?.collect { it.attributes().get("name") as String } ?: []
+        assertTrue(declared.contains(connector.configParameterName as String),
+                "dispatch sends the config id as '${connector.configParameterName}'; service declares ${declared}")
+        assertTrue(declared.contains(connector.lookupIdsParameterName as String),
+                "dispatch sends ids as '${connector.lookupIdsParameterName}'; service declares ${declared}")
+        assertTrue(declared.contains("companyUserGroupId"),
+                "service must accept companyUserGroupId or scheduled runs resolve config against the wrong tenant; declares ${declared}")
+    }
 }

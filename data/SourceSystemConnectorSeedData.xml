@@ -197,5 +197,7 @@
             systemAliases="SHOPIFY_RETURN_REFS,SHOPIFY_RETURNS,DAR_SYS_SHOPIFY_RETURN_REFS"
             preserveWindowInstants="N"
             keepFieldsBase="refundOrReturnId,refundOrReturnType,orderId,createdAt"
+            lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyRefundOrReturnIds"
+            lookupIdsParameterName="refundOrReturnIds"
             enabled="Y"/>
 </entity-facade-xml>

@@ -200,6 +200,51 @@ class JsonSchemaFacadeSmokeTests {
         assertTrue(fields.any { Map<String, Object> row -> row.fieldName == "less<than>Field" })
     }
 
+    @Test
+    void inferJsonSchemaFromCsvTextReturnsFlatFieldRows() {
+        Map<String, Object> result = ec.service.sync()
+                .name("facade.JsonSchemaFacadeServices.infer#JsonSchemaFromCsvText")
+                .parameters([csvText: "orderId,status,total\n1001,OPEN,5.00\n", isCompleteFile: true])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors.toString())
+        assertTrue((Boolean) result.ok)
+
+        List<Map<String, Object>> fields = (List<Map<String, Object>>) (result.fieldList ?: [])
+        assertEquals(["orderId", "status", "total"], fields.collect { it.fieldPath })
+        assertTrue(fields.every { Map<String, Object> row -> row.type == "string" })
+        assertNotNull(result.jsonSchemaString)
+        assertTrue(((String) result.jsonSchemaString).contains("orderId"))
+    }
+
+    @Test
+    void inferJsonSchemaFromCsvTextReportsDuplicateColumnsAsError() {
+        Map<String, Object> result = ec.service.sync()
+                .name("facade.JsonSchemaFacadeServices.infer#JsonSchemaFromCsvText")
+                .parameters([csvText: "orderId,status,orderId\n1001,OPEN,1001\n", isCompleteFile: true])
+                .disableAuthz()
+                .call()
+
+        assertFalse((Boolean) result.ok)
+        assertTrue(((List) result.errors).any { ((String) it).contains("orderId") },
+                "errors were: ${result.errors}")
+        assertNull(result.fieldList)
+    }
+
+    @Test
+    void inferJsonSchemaFromCsvTextRejectsTruncatedHeaderSlice() {
+        Map<String, Object> result = ec.service.sync()
+                .name("facade.JsonSchemaFacadeServices.infer#JsonSchemaFromCsvText")
+                .parameters([csvText: "orderId,status", isCompleteFile: false])
+                .disableAuthz()
+                .call()
+
+        assertFalse((Boolean) result.ok)
+        assertTrue(((List) result.errors).any { ((String) it).contains("longer than") },
+                "errors were: ${result.errors}")
+    }
+
     private void seedSchema(String jsonSchemaId, String schemaName, String description, String companyUserGroupId) {
         boolean alreadyDisabled = ec.artifactExecution.disableAuthz()
         ArtifactExecutionInfo aei = ec.artifactExecution.push(

@@ -8,6 +8,7 @@ import com.networknt.schema.ValidationMessage
 import com.saasquatch.jsonschemainferrer.JsonSchemaInferrer
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
+import jsonschema.common.CsvHeaderSchemaInferrer
 import jsonschema.common.JsonSchemaConstants
 import jsonschema.common.SchemaFlattener
 
@@ -39,6 +40,43 @@ class JsonSchemaFacadeSupport {
                 jsonSchemaString = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(jsonSchemaNode)
             } catch (Exception e) {
                 ec.message.addError("Error inferring schema: ${e.message}")
+            }
+        }
+
+        Map<String, Object> envelope = FacadeSupport.envelope(ec)
+        return envelope + [
+                fieldList       : fieldList,
+                jsonSchemaString: jsonSchemaString,
+        ]
+    }
+
+    /**
+     * Infer a flat schema from the header row of a CSV sample.
+     *
+     * csvText is a HEAD SLICE of the upload, not necessarily the whole file — see
+     * CsvHeaderSchemaInferrer for why isCompleteFile has to travel with it.
+     */
+    static Map<String, Object> inferJsonSchemaFromCsvText(def ec, Object csvText, Object isCompleteFile) {
+        String csvTextValue = normalize(csvText)
+        String jsonSchemaString = null
+        List<Map> fieldList = null
+
+        if (!csvTextValue) {
+            ec.message.addError("csvText is required")
+        }
+
+        if (!ec.message.hasError()) {
+            try {
+                List<String> columns = CsvHeaderSchemaInferrer.parseHeader(csvTextValue, isCompleteFile as boolean)
+                Map<String, Object> schemaMap = CsvHeaderSchemaInferrer.buildSchemaMap(columns)
+
+                fieldList = SchemaFlattener.flatten(schemaMap)
+                jsonSchemaString = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(schemaMap)
+            } catch (CsvHeaderSchemaInferrer.CsvHeaderException e) {
+                // Message is written for the person holding the file; pass it through unchanged.
+                ec.message.addError(e.message)
+            } catch (Exception e) {
+                ec.message.addError("Error reading CSV header: ${e.message}")
             }
         }
 

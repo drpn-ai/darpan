@@ -33,6 +33,7 @@ facade.HotWaxOmsFacadeServices.save#HotWaxOmsRestSourceConfig
 facade.JsonSchemaFacadeServices.delete#JsonSchema
 facade.JsonSchemaFacadeServices.flatten#JsonSchema
 facade.JsonSchemaFacadeServices.get#JsonSchema
+facade.JsonSchemaFacadeServices.infer#JsonSchemaFromCsvText
 facade.JsonSchemaFacadeServices.infer#JsonSchemaFromText
 facade.JsonSchemaFacadeServices.list#JsonSchemas
 facade.JsonSchemaFacadeServices.save#JsonSchemaText

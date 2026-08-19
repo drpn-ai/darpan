@@ -240,6 +240,31 @@
         </actions>
     </service>
 
+    <service verb="infer" noun="JsonSchemaFromCsvText" authz-action="view" allow-remote="true" authenticate="true">
+        <description>Infer a flat schema from a CSV header row and return flattened editor field rows.
+            csvText is the head slice of the upload; isCompleteFile says whether that slice is the whole file,
+            which is the only thing separating a truncated header from a complete header-only file.</description>
+        <in-parameters>
+            <parameter name="csvText" required="true" allow-html="any"/>
+            <parameter name="isCompleteFile" type="Boolean" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="jsonSchemaString" allow-html="any"/>
+            <parameter name="fieldList" type="List"><parameter name="fieldPath"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="schemaResult" from="darpan.facade.jsonschema.JsonSchemaFacadeSupport.inferJsonSchemaFromCsvText(ec, csvText, isCompleteFile)"/>
+            <set field="ok" from="schemaResult.ok"/>
+            <set field="messages" from="schemaResult.messages"/>
+            <set field="errors" from="schemaResult.errors"/>
+            <set field="jsonSchemaString" from="schemaResult.jsonSchemaString"/>
+            <set field="fieldList" from="schemaResult.fieldList"/>
+        </actions>
+    </service>
+
     <service verb="validate" noun="JsonTextAgainstSchema" authz-action="view" allow-remote="true" authenticate="true">
         <description>Validate JSON text against a saved schema.</description>
         <in-parameters>

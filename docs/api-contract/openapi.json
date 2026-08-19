@@ -129,6 +129,9 @@
                                         "$ref": "#/components/schemas/GetJsonSchemaRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/InferJsonSchemaFromCsvTextRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/InferJsonSchemaFromTextRequest"
                                     },
                                     {
@@ -350,6 +353,7 @@
                                         "facade.JsonSchemaFacadeServices.delete#JsonSchema": "#/components/schemas/DeleteJsonSchemaRequest",
                                         "facade.JsonSchemaFacadeServices.flatten#JsonSchema": "#/components/schemas/FlattenJsonSchemaRequest",
                                         "facade.JsonSchemaFacadeServices.get#JsonSchema": "#/components/schemas/GetJsonSchemaRequest",
+                                        "facade.JsonSchemaFacadeServices.infer#JsonSchemaFromCsvText": "#/components/schemas/InferJsonSchemaFromCsvTextRequest",
                                         "facade.JsonSchemaFacadeServices.infer#JsonSchemaFromText": "#/components/schemas/InferJsonSchemaFromTextRequest",
                                         "facade.JsonSchemaFacadeServices.list#JsonSchemas": "#/components/schemas/ListJsonSchemasRequest",
                                         "facade.JsonSchemaFacadeServices.save#JsonSchemaText": "#/components/schemas/SaveJsonSchemaTextRequest",
@@ -531,6 +535,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetJsonSchemaResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/InferJsonSchemaFromCsvTextResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/InferJsonSchemaFromTextResponse"
@@ -5214,6 +5221,111 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/GetJsonSchemaResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "InferJsonSchemaFromCsvTextParams": {
+                "type": "object",
+                "properties": {
+                    "csvText": {
+                        "type": "string"
+                    },
+                    "isCompleteFile": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "csvText",
+                    "isCompleteFile"
+                ],
+                "description": "Infer a flat schema from a CSV header row and return flattened editor field rows.\n            csvText is the head slice of the upload; isCompleteFile says whether that slice is the whole file,\n            which is the only thing separating a truncated header from a complete header-only file."
+            },
+            "InferJsonSchemaFromCsvTextResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "jsonSchemaString": {
+                        "type": "string"
+                    },
+                    "fieldList": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "InferJsonSchemaFromCsvTextRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.JsonSchemaFacadeServices.infer#JsonSchemaFromCsvText",
+                "x-darpan-method": "facade.JsonSchemaFacadeServices.infer#JsonSchemaFromCsvText",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.JsonSchemaFacadeServices.infer#JsonSchemaFromCsvText"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/InferJsonSchemaFromCsvTextParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "InferJsonSchemaFromCsvTextResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.JsonSchemaFacadeServices.infer#JsonSchemaFromCsvText. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/InferJsonSchemaFromCsvTextResult"
                     }
                 },
                 "required": [
@@ -15204,6 +15316,7 @@
         "facade.JsonSchemaFacadeServices.delete#JsonSchema": "DeleteJsonSchema",
         "facade.JsonSchemaFacadeServices.flatten#JsonSchema": "FlattenJsonSchema",
         "facade.JsonSchemaFacadeServices.get#JsonSchema": "GetJsonSchema",
+        "facade.JsonSchemaFacadeServices.infer#JsonSchemaFromCsvText": "InferJsonSchemaFromCsvText",
         "facade.JsonSchemaFacadeServices.infer#JsonSchemaFromText": "InferJsonSchemaFromText",
         "facade.JsonSchemaFacadeServices.list#JsonSchemas": "ListJsonSchemas",
         "facade.JsonSchemaFacadeServices.save#JsonSchemaText": "SaveJsonSchemaText",

@@ -958,6 +958,57 @@ end'''
     }
 
     @Test
+    void twoInstancesOfTheSameSystemAreAllowedWhenTheSourcesDiffer() {
+        // Comparing two OFBiz instances means both sides are systemEnumId=DATABASE. The old rule
+        // ("systems must be different") conflated system with instance: for DATABASE the instance
+        // identity is the source config, not the enum. Same system + DIFFERENT sources is now valid;
+        // same system + SAME source is still rejected, because that really is a self-comparison.
+        ec.entity.makeValue("darpan.database.DatabaseSourceConfig")
+                .setAll([databaseSourceConfigId: "PAIR_CFG_A", companyUserGroupId: KREWE, dialect: "POSTGRES",
+                         host: "a.example.com", port: 5432, databaseName: "ofbiz_a", username: "ro", isActive: "Y"])
+                .create()
+        ec.entity.makeValue("darpan.database.DatabaseSourceConfig")
+                .setAll([databaseSourceConfigId: "PAIR_CFG_B", companyUserGroupId: KREWE, dialect: "POSTGRES",
+                         host: "b.example.com", port: 5432, databaseName: "ofbiz_b", username: "ro", isActive: "Y"])
+                .create()
+        ec.entity.makeValue("darpan.database.DatabaseSourceQuery")
+                .setAll([databaseSourceQueryId: "PAIR_Q_A", databaseSourceConfigId: "PAIR_CFG_A",
+                         companyUserGroupId: KREWE, sqlSelect: "SELECT order_id FROM order_header", isActive: "Y"])
+                .create()
+        ec.entity.makeValue("darpan.database.DatabaseSourceQuery")
+                .setAll([databaseSourceQueryId: "PAIR_Q_B", databaseSourceConfigId: "PAIR_CFG_B",
+                         companyUserGroupId: KREWE, sqlSelect: "SELECT order_id FROM order_header", isActive: "Y"])
+                .create()
+
+        Map<String, Object> params = [
+                runName                 : "OFBiz A vs OFBiz B",
+                file1SystemEnumId       : "DATABASE", file1SourceTypeEnumId: "AUT_SRC_DB",
+                file1SourceConfigId     : "PAIR_Q_A", file1SourceConfigType: "DATABASE_QUERY",
+                file1PrimaryIdExpression: "\$[*].order_id",
+                file2SystemEnumId       : "DATABASE", file2SourceTypeEnumId: "AUT_SRC_DB",
+                file2SourceConfigId     : "PAIR_Q_B", file2SourceConfigType: "DATABASE_QUERY",
+                file2PrimaryIdExpression: "\$[*].order_id",
+                rules                   : [],
+        ]
+        Map<String, Object> created = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters(params).disableAuthz().call()
+        assertFalse(ec.message.hasError(), "same system with different sources must be allowed: ${ec.message.errors}")
+        assertNotNull(created?.savedRun?.savedRunId)
+        ruleSetRunFixturesToCleanUp << [ruleSetId: created.savedRun.ruleSetId, compareScopeId: created.savedRun.compareScopeId]
+        ec.message.clearErrors()
+
+        // same system AND same source is still a self-comparison and must stay rejected
+        Map<String, Object> selfParams = new LinkedHashMap<>(params)
+        selfParams.runName = "OFBiz A vs itself"
+        selfParams.file2SourceConfigId = "PAIR_Q_A"
+        ec.service.sync().name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters(selfParams).disableAuthz().call()
+        assertTrue(ec.message.hasError(), "same system AND same source must still be rejected")
+        ec.message.clearErrors()
+    }
+
+    @Test
     void ruleSetRunSaveTreatsDatabaseSourceLikeApiSourceAndRequiresSourceConfigId() {
         // Covers save#RuleSetRun's widened file{1,2}UsesConnectorSource gates (the create# twin is
         // covered above): switching an upload source to AUT_SRC_DB via save# must persist the DB

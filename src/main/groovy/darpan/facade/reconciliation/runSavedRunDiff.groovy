@@ -876,8 +876,14 @@ try {
             String defaultFile2SystemEnumId = normalize(file2Source?.systemEnumId)
             String resolvedFile1SystemEnumId = requestedFile1SystemEnumId ?: defaultFile1SystemEnumId
             String resolvedFile2SystemEnumId = requestedFile2SystemEnumId ?: defaultFile2SystemEnumId
-            if (resolvedFile1SystemEnumId == resolvedFile2SystemEnumId) {
-                ec.message.addError("file1SystemEnumId and file2SystemEnumId must be different.")
+            // Same system is fine when the two sides are different sources - that is exactly how two
+            // OFBiz instances are compared (both DATABASE, different source configs). Same system AND
+            // same source is still a self-comparison. Mirrors the create#/save#RuleSetRun rule.
+            String file1SourceConfigIdForPairing = normalize(file1Source?.sourceConfigId) ?: ""
+            String file2SourceConfigIdForPairing = normalize(file2Source?.sourceConfigId) ?: ""
+            if (resolvedFile1SystemEnumId == resolvedFile2SystemEnumId
+                    && file1SourceConfigIdForPairing == file2SourceConfigIdForPairing) {
+                ec.message.addError("file1 and file2 are the same source — use a different system or a different source config.")
             }
 
             if (!ec.message.hasError() && hasApiInput) {

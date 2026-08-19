@@ -188,8 +188,13 @@
             <if condition="file2PrimaryIdExpressionsValue.size() &gt; 5">
                 <message error="true">file2PrimaryIdExpressions defines ${file2PrimaryIdExpressionsValue.size()} fields; the maximum is 5</message>
             </if>
-            <if condition="file1SystemEnumIdValue &amp;&amp; file2SystemEnumIdValue &amp;&amp; file1SystemEnumIdValue == file2SystemEnumIdValue">
-                <message error="true">file1SystemEnumId and file2SystemEnumId must be different</message>
+            <!-- Two sides may share a system provided they are DIFFERENT SOURCES. Comparing two OFBiz
+                 instances makes both sides systemEnumId=DATABASE; the instance identity is the source
+                 config, not the enum. Same system AND same source is still a self-comparison and stays
+                 rejected. create#CsvRun deliberately keeps the stricter rule: uploads carry no source
+                 config, so there is nothing there to tell two same-system sides apart. -->
+            <if condition="file1SystemEnumIdValue &amp;&amp; file2SystemEnumIdValue &amp;&amp; file1SystemEnumIdValue == file2SystemEnumIdValue &amp;&amp; (file1SourceConfigIdValue ?: '') == (file2SourceConfigIdValue ?: '')">
+                <message error="true">file1 and file2 are the same source — use a different system or a different source config</message>
             </if>
             <if condition="file1SourceTypeEnumIdValue &amp;&amp; !file1UsesConnectorSource">
                 <message error="true">file1SourceTypeEnumId '${file1SourceTypeEnumIdValue}' is not supported</message>
@@ -880,8 +885,13 @@
             <if condition="file2PrimaryIdExpressionsValue.size() &gt; 5">
                 <message error="true">file2PrimaryIdExpressions defines ${file2PrimaryIdExpressionsValue.size()} fields; the maximum is 5</message>
             </if>
-            <if condition="file1SystemEnumIdValue &amp;&amp; file2SystemEnumIdValue &amp;&amp; file1SystemEnumIdValue == file2SystemEnumIdValue">
-                <message error="true">file1SystemEnumId and file2SystemEnumId must be different</message>
+            <!-- Two sides may share a system provided they are DIFFERENT SOURCES. Comparing two OFBiz
+                 instances makes both sides systemEnumId=DATABASE; the instance identity is the source
+                 config, not the enum. Same system AND same source is still a self-comparison and stays
+                 rejected. create#CsvRun deliberately keeps the stricter rule: uploads carry no source
+                 config, so there is nothing there to tell two same-system sides apart. -->
+            <if condition="file1SystemEnumIdValue &amp;&amp; file2SystemEnumIdValue &amp;&amp; file1SystemEnumIdValue == file2SystemEnumIdValue &amp;&amp; (file1SourceConfigIdValue ?: '') == (file2SourceConfigIdValue ?: '')">
+                <message error="true">file1 and file2 are the same source — use a different system or a different source config</message>
             </if>
             <if condition="file1SourceTypeEnumIdValue &amp;&amp; !file1UsesConnectorSource">
                 <message error="true">file1SourceTypeEnumId '${file1SourceTypeEnumIdValue}' is not supported</message>

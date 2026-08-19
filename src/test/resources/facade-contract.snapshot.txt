@@ -460,6 +460,7 @@ SERVICE list JsonSchemas
     schemas.createdByUserId : String
     schemas.createdDate : Timestamp
     schemas.description : String
+    schemas.isFlatFieldList : Boolean
     schemas.jsonSchemaId : String
     schemas.lastUpdatedStamp : Timestamp
     schemas.schemaName : String

@@ -233,6 +233,56 @@ class JsonSchemaFacadeSmokeTests {
     }
 
     @Test
+    void csvInferredSchemaRoundTripsAsFlat() {
+        // The contract between the CSV inference service and the list service: a schema built from
+        // a CSV header must come back out of list#JsonSchemas marked flat, or the CSV picker will
+        // hide the very schemas this feature creates.
+        Map<String, Object> inferred = ec.service.sync()
+                .name("facade.JsonSchemaFacadeServices.infer#JsonSchemaFromCsvText")
+                .parameters([csvText: "orderId,status,total\n1001,OPEN,5.00\n", isCompleteFile: true])
+                .disableAuthz()
+                .call()
+        assertTrue((Boolean) inferred.ok, "errors: ${inferred.errors}")
+
+        // save#JsonSchemaText is the service the wizard actually calls (JsonSchemaWizardPage
+        // saveSchema), and it is the only one that CREATES: save#RefinedSchema runs
+        // requireTenantRecordAccess whenever a name or id is supplied, so a brand-new name fails
+        // there with "Schema not found".
+        Map<String, Object> saved = ec.service.sync()
+                .name("facade.JsonSchemaFacadeServices.save#JsonSchemaText")
+                .parameters([schemaName: "csv-roundtrip.csv", schemaText: inferred.jsonSchemaString,
+                             overwrite : false])
+                .disableAuthz()
+                .call()
+        Map savedSchema = (Map) saved.savedSchema
+        assertNotNull(savedSchema?.jsonSchemaId, "save#JsonSchemaText errors: ${ec.message.errors}")
+
+        Map<String, Object> listed = ec.service.sync()
+                .name("facade.JsonSchemaFacadeServices.list#JsonSchemas")
+                .parameters([pageSize: 200])
+                .disableAuthz()
+                .call()
+        Map row = (Map) ((List) listed.schemas).find { it.jsonSchemaId == savedSchema.jsonSchemaId }
+        assertNotNull(row, "the schema just saved should be listed")
+        assertTrue((Boolean) row.isFlatFieldList, "a CSV-derived schema must report as flat")
+    }
+
+    @Test
+    void listJsonSchemasReportsFlatnessPerSchema() {
+        Map<String, Object> result = ec.service.sync()
+                .name("facade.JsonSchemaFacadeServices.list#JsonSchemas")
+                .parameters([pageSize: 200])
+                .disableAuthz()
+                .call()
+
+        assertTrue((Boolean) result.ok, "errors: ${result.errors}")
+        List schemas = (List) result.schemas
+        assertFalse(schemas.isEmpty(), "seeded schemas should be listed")
+        assertTrue(schemas.every { it.containsKey("isFlatFieldList") },
+                "every row must carry isFlatFieldList so the CSV picker can filter on it")
+    }
+
+    @Test
     void inferJsonSchemaFromCsvTextRejectsTruncatedHeaderSlice() {
         Map<String, Object> result = ec.service.sync()
                 .name("facade.JsonSchemaFacadeServices.infer#JsonSchemaFromCsvText")

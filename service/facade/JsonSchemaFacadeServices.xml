@@ -29,6 +29,7 @@
                 <parameter name="companyLabel"/>
                 <parameter name="createdByUserId"/>
                 <parameter name="statusId"/>
+                <parameter name="isFlatFieldList" type="Boolean"/>
                 <parameter name="createdDate" type="Timestamp"/>
                 <parameter name="lastUpdatedStamp" type="Timestamp"/>
             </parameter>
@@ -42,7 +43,7 @@
             <set field="pagination" from="[pageIndex: pageIndexSafe, pageSize: pageSizeSafe, totalCount: 0, pageCount: 1]"/>
             <set field="ignoreTableEnsure" from="jsonschema.common.JsonSchemaUtil.ensureJsonSchemaTable(ec)"/>
             <set field="schemaFinder" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('statusId', 'Active').orderBy('-lastUpdatedStamp').useCache(false)"/>
-            <set field="rows" from="(activeTenantUserGroupId ? schemaFinder.condition('companyUserGroupId', activeTenantUserGroupId).list() : []).collect { item -> [jsonSchemaId: item.jsonSchemaId, schemaName: item.schemaName, description: item.description, systemEnumId: ((item.systemEnumId)?.toString()?.trim()), systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, item.systemEnumId, null, true), companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, item.companyUserGroupId), createdByUserId: item.createdByUserId, statusId: item.statusId, createdDate: item.createdDate, lastUpdatedStamp: item.lastUpdatedStamp] }"/>
+            <set field="rows" from="(activeTenantUserGroupId ? schemaFinder.condition('companyUserGroupId', activeTenantUserGroupId).list() : []).collect { item -> [jsonSchemaId: item.jsonSchemaId, schemaName: item.schemaName, description: item.description, systemEnumId: ((item.systemEnumId)?.toString()?.trim()), systemLabel: jsonschema.common.JsonSchemaUtil.resolveSystemLabel(ec, item.systemEnumId, null, true), companyUserGroupId: item.companyUserGroupId, companyLabel: darpan.facade.common.TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, item.companyUserGroupId), createdByUserId: item.createdByUserId, statusId: item.statusId, isFlatFieldList: jsonschema.common.JsonSchemaUtil.isFlatFieldList(item.schemaText), createdDate: item.createdDate, lastUpdatedStamp: item.lastUpdatedStamp] }"/>
             <set field="filteredRows" from="searchLower ? rows.findAll { row -> [row.schemaName, row.description].any { it?.toString()?.toLowerCase()?.contains(searchLower) } } : rows"/>
             <set field="totalCount" from="filteredRows.size()"/>
             <set field="fromIndex" from="Math.min(pageIndexSafe * pageSizeSafe, totalCount)"/>

@@ -11,6 +11,32 @@ class JsonSchemaUtil {
     private static final String SYSTEM_ENUM_TYPE_ID = JsonSchemaConstants.SYSTEM_ENUM_TYPE_ID
 
     /**
+     * True when every field this schema flattens to is a top-level scalar column.
+     *
+     * A CSV side can only carry flat columns. Offering it a nested schema produces dotted paths
+     * like customer.email, which persist happily and then match nothing at run time — so the CSV
+     * schema picker filters on this. Unparseable or empty text is treated as NOT flat: fail
+     * closed rather than offer a schema nobody can vouch for.
+     */
+    static boolean isFlatFieldList(String schemaText) {
+        if (schemaText == null || schemaText.trim().isEmpty()) return false
+
+        try {
+            Map<String, Object> schemaMap = (Map<String, Object>) mapper.readValue(schemaText, Map.class)
+            List<Map<String, Object>> fieldList = SchemaFlattener.flatten(schemaMap)
+            if (fieldList.isEmpty()) return false
+
+            return fieldList.every { Map<String, Object> field ->
+                String fieldPath = (String) field.fieldPath
+                fieldPath != null && !fieldPath.contains('.') && !fieldPath.contains('[') &&
+                        field.type != 'object' && field.type != 'array'
+            }
+        } catch (Exception ignored) {
+            return false
+        }
+    }
+
+    /**
      * Sanitizes a filename to prevent path traversal/injection.
      * Returns null for tokens that contain path separators or traversal sequences so callers
      * can safely skip filesystem fallbacks without aborting the overall lookup.

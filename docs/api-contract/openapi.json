@@ -5516,6 +5516,9 @@
                                 "statusId": {
                                     "type": "string"
                                 },
+                                "isFlatFieldList": {
+                                    "type": "boolean"
+                                },
                                 "createdDate": {
                                     "oneOf": [
                                         {

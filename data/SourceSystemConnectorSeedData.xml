@@ -201,4 +201,27 @@
             lookupIdsParameterName="refundOrReturnIds"
             lookupMaxIds="10000"
             enabled="Y"/>
+
+    <!-- Database sources. Both sides of a run may be AUT_SRC_DB, which is how two OFBiz instances
+         are compared: same schema, a different SELECT per side. No sendUrlTemplate/remoteId - those
+         are HTTP-shaped and do not route. No keepFieldsParameterName - projection is the SELECT list,
+         where a SQL author expects it. windowFieldName stays blank: the SQL author binds
+         :windowStart/:windowEnd to whatever column they choose, which is strictly more expressive
+         than naming one column here.
+         expectedSourceConfigType MUST remain DATABASE_QUERY - the System/Endpoint reshape's
+         config-type map already assigns that value, and any other is dropped at cutover.
+         healthCheckServiceName MUST be a probe# name: PROBE_SERVICE_NAME reserves that verb for the
+         diagnostics slot so a registry row cannot aim it at an extract or framework service. -->
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="DATABASE"
+            extractServiceName="reconciliation.DatabaseExtractionServices.extract#DatabaseRecords"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="DATABASE_QUERY"
+            configParameterName="databaseSourceQueryId"
+            configEntityName="darpan.database.DatabaseSourceQuery"
+            healthCheckServiceName="facade.DatabaseFacadeServices.probe#DatabaseConnection"
+            systemAliases="DATABASE,DB,DAR_SYS_DATABASE"
+            preserveWindowInstants="N"
+            enabled="Y"/>
 </entity-facade-xml>

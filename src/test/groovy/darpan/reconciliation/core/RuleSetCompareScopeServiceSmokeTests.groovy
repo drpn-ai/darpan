@@ -65,7 +65,11 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertEquals('$.data.orders.edges[*].node.id', prepared.file2IdExpression)
         assertEquals("SHOPIFY_GID_TAIL", prepared.file1IdNormalizer)
         assertEquals("SHOPIFY_GID_TAIL", prepared.file2IdNormalizer)
-        assertEquals("SHOPIFY", prepared.file1Label)
+        // Both sides read as their proper names. This pair used to read "SHOPIFY" / "HotWax" --
+        // resolveEnumLabel gave description-first treatment only to the hard-coded enumId "OMS",
+        // so every other system fell through to its enumCode. FacadeSupport.enumLabel was fixed
+        // for this long ago (see AutomationFacadeSmokeTests); this second resolver was not.
+        assertEquals("Shopify", prepared.file1Label)
         assertEquals("HotWax", prepared.file2Label)
         assertTrue(((List) prepared.validationErrors).isEmpty())
         assertTrue(((List) prepared.processingWarnings).isEmpty())
@@ -150,14 +154,14 @@ class RuleSetCompareScopeServiceSmokeTests {
             row.type == "MISSING_IN_FILE_1" && row.id == "6470624804995"
         }
         assertEquals("HotWax", missingInFile1.presentIn)
-        assertEquals("SHOPIFY", missingInFile1.missingIn)
-        assertTrue((missingInFile1.note as String).contains("missing in SHOPIFY"))
+        assertEquals("Shopify", missingInFile1.missingIn)
+        assertTrue((missingInFile1.note as String).contains("missing in Shopify"))
         assertTrue((missingInFile1.data as String).contains("6470624804995"))
 
         Map<String, Object> missingInFile2 = missingDiffs.find { Map<String, Object> row ->
             row.type == "MISSING_IN_FILE_2" && row.id == "6470622019715"
         }
-        assertEquals("SHOPIFY", missingInFile2.presentIn)
+        assertEquals("Shopify", missingInFile2.presentIn)
         assertEquals("HotWax", missingInFile2.missingIn)
         assertTrue((missingInFile2.note as String).contains("missing in HotWax"))
         assertTrue((missingInFile2.data as String).contains("6470622019715"))
@@ -252,7 +256,7 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertTrue(ec.message.errors.any { String message -> message.contains("nested JSON order IDs") })
         assertFalse(ec.message.errors.any { String message -> message.contains("DARPAN_TEST_ORDER_JSON_SCOPE") })
         assertTrue(ec.message.errors.any { String message -> message.contains("FILE_1") })
-        assertTrue(ec.message.errors.any { String message -> message.contains("SHOPIFY") })
+        assertTrue(ec.message.errors.any { String message -> message.contains("Shopify") })
         assertTrue(ec.message.errors.any { String message -> message.contains("6470622478467") })
         assertTrue(ec.message.errors.any { String message -> message.contains("2 rows") })
         assertTrue(ec.message.errors.any { String message -> message.contains("primaryId must identify exactly one object per file side") })
@@ -321,14 +325,14 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertEquals("DARPAN_TEST_PRODUCT_JSON_SCOPE", missingInFile1.compareScopeId)
         assertEquals("PRODUCT", missingInFile1.objectType)
         assertEquals("HotWax", missingInFile1.presentIn)
-        assertEquals("SHOPIFY", missingInFile1.missingIn)
+        assertEquals("Shopify", missingInFile1.missingIn)
         assertTrue((missingInFile1.data as String).contains("\"productId\":\"P500\""))
 
         Map<String, Object> missingInFile2 = diffs.find { Map<String, Object> row ->
             row.diffType == "MISSING_IN_FILE_2" && row.primaryId == "P300"
         }
         assertTrue(missingInFile2 != null)
-        assertEquals("SHOPIFY", missingInFile2.presentIn)
+        assertEquals("Shopify", missingInFile2.presentIn)
         assertEquals("HotWax", missingInFile2.missingIn)
         assertTrue((missingInFile2.data as String).contains("\"productId\":\"P300\""))
 
@@ -453,7 +457,7 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertTrue(warnings.any { String message -> message.contains("nested JSON order IDs") })
         assertFalse(warnings.any { String message -> message.contains("DARPAN_TEST_ORDER_JSON_SCOPE") })
         assertTrue(warnings.any { String message -> message.contains("FILE_1") })
-        assertTrue(warnings.any { String message -> message.contains("SHOPIFY") })
+        assertTrue(warnings.any { String message -> message.contains("Shopify") })
         assertTrue(warnings.any { String message -> message.contains("6470622478467") })
 
         List<Map<String, Object>> diffs = collectRows((Dataset) result.diffDf)

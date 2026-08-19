@@ -503,8 +503,13 @@ class ReconciliationServices {
                 .useCache(true)
                 .one()
         String description = normalize(enumValue?.description)
-        if (normalize(enumValue?.enumTypeId) == "DarpanSystemSource" && normalized == "OMS") {
-            return description ?: "HotWax"
+        // Every system reads as its description, not just OMS. The old `&& normalized == "OMS"`
+        // gave one system its proper name ("HotWax") and left every other showing its machine
+        // code -- SHOPIFY, NETSUITE, DATABASE -- which surfaced as "SHOPIFY orders-b.csv" sitting
+        // beside a tile reading "Missing from Shopify". This mirrors FacadeSupport.enumLabel,
+        // which was corrected for the same bug; this second copy of the rule was missed.
+        if (normalize(enumValue?.enumTypeId) == "DarpanSystemSource") {
+            if (description) return description
         }
         String code = normalize(enumValue?.enumCode)
         if (code) return code

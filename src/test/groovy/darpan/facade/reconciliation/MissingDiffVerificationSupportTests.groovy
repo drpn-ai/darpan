@@ -313,4 +313,57 @@ class MissingDiffVerificationSupportTests {
         assertEquals([], document.differences)
         assertEquals(0, ((Map) document.summary).totalDifferences)
     }
+
+    @Test
+    void eachSideIsCappedIndependentlyByItsOwnConnectorCap() {
+        // The two sides of a run are different systems with different enumeration guarantees. The
+        // returns pair's Shopify extract cannot be trusted for completeness at all (updated_at is not
+        // reliably bumped), so a large gap there is the STEADY STATE, not evidence of a broken sync —
+        // while for the orders pair a gap that large still means something is wrong. One shared cap
+        // cannot express both, so an over-cap side must not disable a healthy sibling.
+        File file = writeDiffDocument([
+                missingRow("1001", FILE1, FILE2),
+                missingRow("1002", FILE1, FILE2),
+                missingRow("1003", FILE1, FILE2),
+                missingRow("2001", FILE2, FILE1),
+        ])
+        List<String> file1Checked = []
+        Map result = MissingDiffVerificationSupport.verifyMissingDiffs([
+                diffFile        : file,
+                file1Label      : FILE1,
+                file2Label      : FILE2,
+                sideMaxLookupIds: [(FILE2): 2, (FILE1): 10],
+                sideLookups     : [
+                        (FILE2): { List<String> ids -> [ok: true, foundIds: ids, missingIds: [], errors: []] },
+                        (FILE1): { List<String> ids -> file1Checked.addAll(ids); [ok: true, foundIds: ids, missingIds: [], errors: []] },
+                ],
+        ])
+
+        // FILE2 is over its own cap of 2 and contributes nothing...
+        assertTrue(((List) result.warnings).any { it.toString().contains("cap") })
+        // ...but FILE1 is under its cap of 10 and is still verified and removed.
+        assertEquals(["2001"], file1Checked)
+        assertEquals(1, result.removedCount)
+        assertTrue((Boolean) result.rewritten)
+        assertEquals(["1001", "1002", "1003"] as Set,
+                (((List) parseDocument(file).differences).collect { it.primaryId } as Set))
+    }
+
+    @Test
+    void aSideWithNoOwnCapFallsBackToTheSharedDefault() {
+        File file = writeDiffDocument([missingRow("1001", FILE1, FILE2), missingRow("1002", FILE1, FILE2)])
+        int dispatchCalls = 0
+        Map result = MissingDiffVerificationSupport.verifyMissingDiffs([
+                diffFile        : file,
+                file1Label      : FILE1,
+                file2Label      : FILE2,
+                maxLookupIds    : 1,
+                sideMaxLookupIds: [:],
+                sideLookups     : [(FILE2): { List<String> ids -> dispatchCalls++; [ok: true, foundIds: ids, missingIds: [], errors: []] }],
+        ])
+
+        assertFalse((Boolean) result.performed)
+        assertEquals(0, dispatchCalls)
+        assertTrue(((List) result.warnings).any { it.toString().contains("cap") })
+    }
 }

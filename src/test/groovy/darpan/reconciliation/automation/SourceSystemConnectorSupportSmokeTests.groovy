@@ -1,6 +1,7 @@
 package darpan.reconciliation.automation
 
 import darpan.facade.reconciliation.AutomationFacadeSupport
+import darpan.facade.reconciliation.MissingDiffVerificationSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.xml.XmlParser
@@ -749,5 +750,28 @@ class SourceSystemConnectorSupportSmokeTests {
                 "dispatch sends ids as '${connector.lookupIdsParameterName}'; service declares ${declared}")
         assertTrue(declared.contains("companyUserGroupId"),
                 "service must accept companyUserGroupId or scheduled runs resolve config against the wrong tenant; declares ${declared}")
+    }
+
+    @Test
+    void shopifyReturnRefsRaisesItsOwnLookupCapAboveTheSharedDefault() {
+        // The shared 1000 default encodes "a gap this large is not index skew, so do not bother
+        // looking". For the returns pair that reasoning is inverted: 601 of the OMS side's 903 records
+        // were missing-in-Shopify in the 2026-08-18 prod run (67%), because Shopify's updated_at is not
+        // reliably bumped and the extract's net is therefore never complete. At the shared default a
+        // two-day window would switch the pass off exactly when the false positives peak.
+        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY_RETURN_REFS")
+        assertNotNull(connector, "SHOPIFY_RETURN_REFS connector row should resolve")
+        assertEquals(10000, connector.lookupMaxIds)
+        assertTrue((connector.lookupMaxIds as int) > MissingDiffVerificationSupport.DEFAULT_MAX_LOOKUP_IDS,
+                "the point of the per-connector slot is to exceed the shared default")
+    }
+
+    @Test
+    void theOrdersLookupKeepsTheConservativeSharedDefault() {
+        // The orders pair's bulk export IS expected to be near-complete, so a gap past the default
+        // there still means something is broken and skipping remains the right call.
+        Map<String, Object> shopify = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY")
+        assertNotNull(shopify, "SHOPIFY connector row should resolve")
+        assertNull(shopify.lookupMaxIds, "the orders lookup must keep the shared conservative cap")
     }
 }

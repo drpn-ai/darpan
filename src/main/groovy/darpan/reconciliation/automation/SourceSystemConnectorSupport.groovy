@@ -4,6 +4,7 @@ import java.util.regex.Pattern
 
 import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.normalizeBool
+import static darpan.common.ValueSupport.normalizeInt
 import static darpan.common.ValueSupport.readField
 import static darpan.common.ValueSupport.readString
 
@@ -197,6 +198,7 @@ class SourceSystemConnectorSupport {
                 filterParameterName        : readString(record, "filterParameterName"),
                 lookupServiceName          : readString(record, "lookupServiceName"),
                 lookupIdsParameterName     : readString(record, "lookupIdsParameterName"),
+                lookupMaxIds               : normalizeInt(readField(record, "lookupMaxIds"), null),
                 pairLookupServiceName          : readString(record, "pairLookupServiceName"),
                 exchangeStateLookupServiceName : readString(record, "exchangeStateLookupServiceName"),
                 exchangeSweepServiceName       : readString(record, "exchangeSweepServiceName"),

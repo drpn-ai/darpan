@@ -687,6 +687,14 @@
                 rows the lookup confirms present (bulk-export index-skew false positives). Blank
                 disables the verification pass for this connector.</description>
         </field>
+        <field name="lookupMaxIds" type="number-integer">
+            <description>Per-side ceiling on how many reported-missing ids the verification pass will
+                point-check for this connector. Blank uses MissingDiffVerificationSupport's shared
+                default, which encodes "a gap this large is not index skew, so do not bother looking".
+                Raise it where that reasoning does not apply — an extract whose enumeration cannot be
+                trusted for completeness has a large gap as its NORMAL state, and the shared default
+                would switch the pass off exactly when the false positives peak.</description>
+        </field>
         <field name="lookupIdsParameterName" type="text-short">
             <description>Parameter name the verification pass sends the candidate id list as when calling
                 lookupServiceName. Blank means "orderIds", which is what the canonical order lookups

@@ -199,5 +199,6 @@
             keepFieldsBase="refundOrReturnId,refundOrReturnType,orderId,createdAt"
             lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyRefundOrReturnIds"
             lookupIdsParameterName="refundOrReturnIds"
+            lookupMaxIds="10000"
             enabled="Y"/>
 </entity-facade-xml>

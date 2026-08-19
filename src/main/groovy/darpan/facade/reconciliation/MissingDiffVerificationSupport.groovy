@@ -27,7 +27,12 @@ import java.nio.file.StandardCopyOption
 class MissingDiffVerificationSupport {
 
     /** Above this many missing rows per side the pass skips itself: a sync that broken is not
-     *  index skew, and point-checking it would hammer the source API for no signal. */
+     *  index skew, and point-checking it would hammer the source API for no signal.
+     *
+     *  That reasoning holds only where the extract is expected to be near-complete. Where it is NOT —
+     *  the returns pair enumerates through orders(query:) filtered on Shopify's updated_at, which is
+     *  not reliably bumped, so its gap is the steady state rather than a symptom (601 of 903 records,
+     *  gorjana prod 2026-08-18) — the side overrides this via sideMaxLookupIds. */
     static final int DEFAULT_MAX_LOOKUP_IDS = 1000
 
     /** Opening phrase of this pass's audit sentence. Classified at the notification layer
@@ -45,7 +50,11 @@ class MissingDiffVerificationSupport {
      *   file1Label   : String, file2Label : String — side labels as written into the document
      *   sideLookups  : Map side label -> Closure(List<String> ids) returning
      *                  [ok, foundIds, missingIds, errors] (the lookup service contract)
-     *   maxLookupIds : optional per-side cap, default {@link #DEFAULT_MAX_LOOKUP_IDS}
+     *   maxLookupIds : optional cap applied to any side with no entry in sideMaxLookupIds,
+     *                  default {@link #DEFAULT_MAX_LOOKUP_IDS}
+     *   sideMaxLookupIds : optional Map side label -> cap, letting each side carry the cap its own
+     *                  connector declares. A side over ITS OWN cap contributes nothing and must never
+     *                  disable a sibling side that is under its.
      *
      * returns [performed, rewritten, checkedCount, removedCount, confirmedMissingCount,
      *          removedMissingInFile1, removedMissingInFile2, warnings, auditNote]
@@ -55,6 +64,13 @@ class MissingDiffVerificationSupport {
         String file1Token = DiffDetailClassifier.normalizeToken(args.file1Label)
         String file2Token = DiffDetailClassifier.normalizeToken(args.file2Label)
         int maxLookupIds = (args.maxLookupIds instanceof Number) ? ((Number) args.maxLookupIds).intValue() : DEFAULT_MAX_LOOKUP_IDS
+        Map<String, Integer> maxLookupIdsByToken = [:]
+        ((Map) (args.sideMaxLookupIds ?: [:])).each { Object label, Object cap ->
+            String token = DiffDetailClassifier.normalizeToken(label)
+            if (token && cap instanceof Number && ((Number) cap).intValue() > 0) {
+                maxLookupIdsByToken.put(token, ((Number) cap).intValue())
+            }
+        }
         List<String> warnings = []
         Map<String, Object> inert = [performed: false, rewritten: false, checkedCount: 0, removedCount: 0,
                 confirmedMissingCount: 0, removedMissingInFile1: 0, removedMissingInFile2: 0,
@@ -110,8 +126,12 @@ class MissingDiffVerificationSupport {
         sidesByToken.each { String token, Map<String, Object> side ->
             Set<String> candidates = candidateIdsByToken.containsKey(token) ? candidateIdsByToken.get(token) : (Set<String>) null
             if (!candidates) return
-            if (candidates.size() > maxLookupIds) {
-                warnings.add("Verification pass skipped for ${side.label}: ${candidates.size()} missing differences exceeds the ${maxLookupIds}-id lookup cap; a gap that large is not bulk-export index skew.".toString())
+            int sideMaxLookupIds = maxLookupIdsByToken.containsKey(token) ? maxLookupIdsByToken.get(token) : maxLookupIds
+            if (candidates.size() > sideMaxLookupIds) {
+                // `return` skips THIS side only — a side over its own cap must not suppress a sibling
+                // that is under its, since the two sides are different systems with different
+                // completeness guarantees.
+                warnings.add("Verification pass skipped for ${side.label}: ${candidates.size()} missing differences exceeds the ${sideMaxLookupIds}-id lookup cap for this side.".toString())
                 return
             }
             List<String> ids = new ArrayList<>(candidates)

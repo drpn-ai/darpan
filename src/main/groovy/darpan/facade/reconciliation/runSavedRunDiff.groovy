@@ -484,6 +484,20 @@ def buildVerificationLookup = { Object source, String runOwnerUserGroupId ->
     }
 }
 
+// The per-side ceiling on point lookups, as this side's connector declares it. Null means the
+// verification pass applies its own shared default. Resolved separately from the lookup closure so an
+// unreadable/blank cap can never stop a usable lookup from being built.
+def buildVerificationLookupCap = { Object source ->
+    if (source == null) return null
+    String sourceConfigType = normalize(source?.sourceConfigType)
+    Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, normalize(source?.systemEnumId))
+    if (connector == null || normalize(connector.expectedSourceConfigType) != sourceConfigType) {
+        connector = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(ec, sourceConfigType)
+    }
+    Object cap = connector?.lookupMaxIds
+    return (cap instanceof Number && ((Number) cap).intValue() > 0) ? ((Number) cap).intValue() : null
+}
+
 // Exchange pair verify stage (spec 2026-07-30): the OMS-side extract may have written an
 // exchange-manifest sidecar (excluded exchange orders). When one side's connector declares
 // pairLookupServiceName and the other declares exchangeStateLookupServiceName, each manifest
@@ -603,8 +617,23 @@ def runVerificationPass = { Map serviceResult, Object file1Source, Object file2S
     long missingInFile2 = (serviceResult.missingInFile2Count ?: 0) as long
     if (missingInFile1 <= 0L && missingInFile2 <= 0L) return
     Map<String, Closure> sideLookups = [:]
-    if (missingInFile1 > 0L) { Closure lookup = (Closure) buildVerificationLookup(file1Source, runOwnerUserGroupId); if (lookup != null) sideLookups[file1Label] = lookup }
-    if (missingInFile2 > 0L) { Closure lookup = (Closure) buildVerificationLookup(file2Source, runOwnerUserGroupId); if (lookup != null) sideLookups[file2Label] = lookup }
+    Map<String, Integer> sideMaxLookupIds = [:]
+    if (missingInFile1 > 0L) {
+        Closure lookup = (Closure) buildVerificationLookup(file1Source, runOwnerUserGroupId)
+        if (lookup != null) {
+            sideLookups[file1Label] = lookup
+            Integer cap = (Integer) buildVerificationLookupCap(file1Source)
+            if (cap != null) sideMaxLookupIds[file1Label] = cap
+        }
+    }
+    if (missingInFile2 > 0L) {
+        Closure lookup = (Closure) buildVerificationLookup(file2Source, runOwnerUserGroupId)
+        if (lookup != null) {
+            sideLookups[file2Label] = lookup
+            Integer cap = (Integer) buildVerificationLookupCap(file2Source)
+            if (cap != null) sideMaxLookupIds[file2Label] = cap
+        }
+    }
     if (!sideLookups) return
     File diffFile = resolveOutputFile(serviceResult)
     if (diffFile == null || !diffFile.isFile()) return
@@ -613,7 +642,8 @@ def runVerificationPass = { Map serviceResult, Object file1Source, Object file2S
     Map verification
     try {
         verification = MissingDiffVerificationSupport.verifyMissingDiffs([
-                diffFile: diffFile, file1Label: file1Label, file2Label: file2Label, sideLookups: sideLookups])
+                diffFile: diffFile, file1Label: file1Label, file2Label: file2Label, sideLookups: sideLookups,
+                sideMaxLookupIds: sideMaxLookupIds])
     } catch (Throwable t) {
         verification = [performed: true, rewritten: false, checkedCount: 0, removedCount: 0, lookupFailed: true,
                 warnings: ["Verification pass failed: ${normalize(t.message) ?: t.class.simpleName}".toString()], auditNote: null] as Map

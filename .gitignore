@@ -61,3 +61,7 @@ Desktop.ini
 
 # .github/workflows/ is intentionally TRACKED — backend CI restored (MACH audit P0 #2).
 # (Previously ignored by commit 82a1be1 "chore: stop tracking github workflows".)
+
+# Python bytecode from scripts/ (select_tests.py and friends)
+__pycache__/
+*.pyc

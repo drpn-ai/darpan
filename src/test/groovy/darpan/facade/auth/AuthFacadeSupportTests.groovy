@@ -625,7 +625,12 @@ class AuthFacadeSupportTests {
         // Warm the path first: a cold first call spends more than the floor on class loading alone, which
         // would look exactly like padding that is not there.
         3.times { signIn.call() }
-        long elapsedMillis = signIn.call()
+
+        // Take the FASTEST of several samples, not a single one. The bound being asserted is the floor
+        // itself, so there is no headroom to absorb a descheduled sample — and the suite now runs several
+        // JVMs at once, which makes that routine rather than exceptional. A floor would apply to every
+        // call and so would lift the minimum too, which is what keeps this sensitive to the real defect.
+        long elapsedMillis = (1..5).collect { signIn.call() as Long }.min()
 
         assertTrue(elapsedMillis < 25L, "a successful sign-in waited ${elapsedMillis}ms behind the refusal floor")
     }

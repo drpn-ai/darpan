@@ -128,15 +128,125 @@ ext.sparkJava21Opens = [
         '--add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED'
 ]
 
+// Fork width for every Test task here. The old value was 1, which is stricter than the
+// isolation requirement actually is, and it left a multi-core machine running one JVM at a
+// time. The requirement is that a Moqui smoke test not SHARE a JVM (process-global ECFI,
+// Bitronix TM and Spark session all live in statics) — not that it be alone on the machine.
+// Nothing is shared between the concurrent forks: every initMoqui() call site passes its own
+// DB token, and that token names the H2 file, the txlog directory and the Bitronix serverId.
+// So forkEvery stays 1 and only the width opens up.
+// Override with -PtestForks=N; -PtestForks=1 restores the old fully-serial behaviour.
+ext.darpanTestForks = ((project.findProperty('testForks')
+        ?: Math.max(1, Runtime.runtime.availableProcessors().intdiv(2))) as String) as int
+
+// The suite splits in two along one source-visible marker: a class that boots a real
+// ExecutionContextFactory is a smoke test and needs its own JVM; everything else is a plain
+// unit test that needs no isolation at all and is paying for a JVM it never uses.
+//
+// The split is DERIVED from source rather than hand-listed, because a hand-listed pool is how
+// a test silently stops running (see mysqlTest below for what maintaining one by hand costs).
+// scripts/select_tests.py keys off this same marker set — keep them in step.
+// Scanned once, eagerly: ~100 small reads, and computing it here rather than inside the task
+// keeps it out of Groovy's dynamic-dispatch path where a Test task is the closure delegate.
+ext.darpanTestPools = { ->
+    List<String> moquiBootMarkers = ['initMoqui(', 'Moqui.dynamicInit', 'ExecutionContextFactoryImpl']
+    File testSrc = file('src/test/groovy')
+    List<String> smoke = [], unit = []
+    testSrc.eachFileRecurse { File f ->
+        if (!(f.name.endsWith('Test.groovy') || f.name.endsWith('Tests.groovy'))) return
+        String classPattern = testSrc.toPath().relativize(f.toPath()).toString()
+                .replaceFirst(/\.groovy$/, '.class')
+        (moquiBootMarkers.any { f.text.contains(it) } ? smoke : unit) << classPattern
+    }
+    if (smoke.isEmpty()) {
+        throw new GradleException("No test class matched ${moquiBootMarkers} — the marker set has " +
+                "gone stale, and unitTest would silently run Moqui-booting classes in a shared JVM.")
+    }
+    return [smoke: smoke.sort(), unit: unit.sort()]
+}()
+
 test {
     // MySQL-backed tests (@Tag("mysql")) need real InnoDB locking semantics and stay opt-in via
     // the mysqlTest task below, so everyday `./gradlew test` keeps running H2-fast.
     useJUnitPlatform { excludeTags 'mysql' }
-    // Moqui keeps process-global state; isolate smoke test classes so fixture DBs do not leak.
-    maxParallelForks = 1
+    // Still one test class per JVM — see darpanTestForks above for why the width is safe.
+    maxParallelForks = darpanTestForks
     forkEvery = 1
     // JDK 21: open modules for Spark, and quiet the ByteBuddy/Mockito dynamic-agent warning.
     jvmArgs(sparkJava21Opens + ['-XX:+EnableDynamicAgentLoading', '--enable-native-access=ALL-UNNAMED'])
+}
+
+// Fast inner-loop pool: the test classes that never boot Moqui. Because they touch no
+// process-global state they need no per-class fork, so this costs a handful of JVM starts
+// instead of one per class.
+//
+// This is deliberately ADDITIVE. `test` still runs the whole suite, so no existing command
+// changes meaning and nothing silently stops running — this is only a quicker signal to reach
+// for mid-edit, and it says so on every run.
+tasks.register('unitTest', Test) {
+    group = 'verification'
+    description = 'Run only the darpan test classes that do not boot Moqui (fast subset of `test`).'
+    def pools = darpanTestPools
+
+    useJUnitPlatform { excludeTags 'mysql' }
+    // Excluding the smoke classes (rather than listing the unit ones) means a newly added unit
+    // test joins this pool on its own, with no list to update.
+    exclude pools.smoke
+    filter { failOnNoMatchingTests = true }
+
+    forkEvery = 0            // reuse JVMs; nothing here keeps process-global state
+    maxParallelForks = darpanTestForks
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    jvmArgs(sparkJava21Opens + ['-XX:+EnableDynamicAgentLoading', '--enable-native-access=ALL-UNNAMED'])
+
+    doFirst {
+        // Pool sizes, not run counts — a --tests filter narrows this further, so do not phrase it
+        // as "running N classes" or a focused run reports a number it did not run.
+        logger.lifecycle("unitTest pool: ${pools.unit.size()} non-Moqui classes " +
+                "(${pools.smoke.size()} Moqui-booting classes live in smokeTest). " +
+                "Run `${project.path}:testAll` for the full suite.")
+    }
+}
+
+// The other half: only the classes that boot Moqui, one JVM each.
+//
+// The `include` is what makes this cheap, and it is not the same gate as the pool split. Under
+// forkEvery = 1 Gradle starts a JVM per SCANNED class, so without it this task would fork 100
+// times to run 33 classes — the include cuts the scan before anything is forked. The `filter`
+// cannot prevent a fork and buys no time; it is here for failOnNoMatchingTests, which turns a
+// stale pattern into a build failure instead of a green run over an empty result directory.
+tasks.register('smokeTest', Test) {
+    group = 'verification'
+    description = 'Run only the darpan test classes that boot Moqui (one JVM each).'
+    def pools = darpanTestPools
+
+    useJUnitPlatform { excludeTags 'mysql' }
+    include pools.smoke
+    filter { failOnNoMatchingTests = true }
+
+    forkEvery = 1
+    maxParallelForks = darpanTestForks
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    jvmArgs(sparkJava21Opens + ['-XX:+EnableDynamicAgentLoading', '--enable-native-access=ALL-UNNAMED'])
+
+    doFirst {
+        logger.lifecycle("smokeTest pool: ${pools.smoke.size()} Moqui-booting classes, " +
+                "${maxParallelForks} JVM(s) at a time.")
+    }
+}
+
+// The full suite, split across the two pools. Same classes as `test`, but it starts one JVM per
+// smoke class instead of one per class overall — the ~67 forks `test` spends on tests that need
+// no isolation are where its wall clock goes.
+//
+// `test` is deliberately left alone: it still runs everything by itself, so no existing command
+// or CI invocation changes meaning, and nothing silently stops running.
+tasks.register('testAll') {
+    group = 'verification'
+    description = 'Run the full darpan suite as unitTest + smokeTest (faster than `test`, same coverage).'
+    dependsOn 'unitTest', 'smokeTest'
 }
 
 // Opt-in MySQL-backed suite (InnoDB lock behavior that H2 cannot reproduce — no FK parent-row

@@ -174,4 +174,83 @@ class RunNotificationVoice {
         String template = pickLine(STREAK_TEMPLATES, "streak")
         return template?.replace("{n}", Integer.toString(priorCleanRuns + 1))
     }
+
+    static List<String> renderLines(Map<String, Object> model) {
+        Map<String, Object> safeModel = (model ?: [:]) as Map<String, Object>
+        String bucket = ((safeModel.get("bucket"))?.toString()?.trim()) ?: BUCKET_CLEAN
+        String runName = ((safeModel.get("runName"))?.toString()?.trim()) ?: "reconciliation run"
+        String file1Label = ((safeModel.get("file1SystemLabel"))?.toString()?.trim()) ?: "File 1"
+        String file2Label = ((safeModel.get("file2SystemLabel"))?.toString()?.trim()) ?: "File 2"
+        int missingFromFile1 = toCount(safeModel.get("missingFromFile1Count"))
+        int missingFromFile2 = toCount(safeModel.get("missingFromFile2Count"))
+        int mismatches = toCount(safeModel.get("mismatchCount"))
+        int total = toCount(safeModel.get("totalCount"))
+
+        List<String> lines = []
+
+        if (bucket == BUCKET_FAILED || bucket == BUCKET_ISSUES) {
+            // Humour is off from here up. The XML service adds the status and warning lines.
+            lines << (bucket == BUCKET_FAILED
+                    ? "${runName} did not finish.".toString()
+                    : "${runName} finished. Not cleanly.".toString())
+            // The FLAVOUR is switched off above ISSUES — the NUMBERS are not. A run that failed
+            // partway still produced a partial result, and those counts are the operator's only
+            // handle on what did get compared. Dropping them would trade one silent alert
+            // (the all-zeros clean-looking run this whole change exists to fix) for another.
+            // A failure that produced no output at all never reaches here: the service's
+            // noOutput branch renders it without counts, because zeros there mean "never computed".
+            lines.addAll(detailsBlock(missingFromFile1, missingFromFile2, mismatches, file1Label, file2Label))
+            return lines
+        }
+
+        if (bucket == BUCKET_CLEAN) {
+            lines << "${runName} — ${pickLine(CLEAN_HEADLINES, "headline")}".toString()
+            String subline = pickLine(CLEAN_SUBLINES, "subline")
+            if (subline) lines << subline
+            String timeLine = timeOfDayLine((ZonedDateTime) safeModel.get("completedMoment"))
+            if (timeLine) lines << timeLine
+            String streak = streakLine(toCount(safeModel.get("priorCleanRuns")))
+            if (streak) lines << streak
+            return lines
+        }
+
+        lines << "${runName} — ${total} to look at.".toString()
+        lines << sublineFor(bucket, missingFromFile1, missingFromFile2, mismatches, file1Label, file2Label)
+        lines.addAll(detailsBlock(missingFromFile1, missingFromFile2, mismatches, file1Label, file2Label))
+        return lines
+    }
+
+    /**
+     * The count block. Every line is printed even at zero: an omitted line cannot be told apart from
+     * an axis that was never checked, which is the ambiguity this whole change exists to remove.
+     * Single-asterisk bold — Google Chat renders `*Details*`; `**Details**` shows the asterisks.
+     */
+    private static List<String> detailsBlock(int missingFromFile1, int missingFromFile2,
+                                             int mismatches, String file1Label, String file2Label) {
+        return [
+                "",
+                "*Details*",
+                // Inversion: missingFromFile2Count is the count of records only file 1 had.
+                "Missing from ${file2Label}: ${missingFromFile2}".toString(),
+                "Missing from ${file1Label}: ${missingFromFile1}".toString(),
+                "Mismatches: ${mismatches}".toString(),
+        ]
+    }
+
+    private static String sublineFor(String bucket, int missingFromFile1, int missingFromFile2,
+                                     int mismatches, String file1Label, String file2Label) {
+        if (bucket == BUCKET_EVEN_SPLIT) {
+            return "Near enough the same number on each side. That's not coincidence. Check the key before you chase records."
+        }
+        if (bucket == BUCKET_ONE_SIDED) {
+            String haveLabel = missingFromFile2 > 0 ? file1Label : file2Label
+            String lackLabel = missingFromFile2 > 0 ? file2Label : file1Label
+            return "${haveLabel} has them. ${lackLabel} doesn't. All one direction, so this is a delivery gap.".toString()
+        }
+        if (bucket == BUCKET_VALUE_DRIFT) {
+            return "Nothing's missing. They just don't line up on the values."
+        }
+        int missingTotal = missingFromFile1 + missingFromFile2
+        return "${missingTotal} went out and never checked in. ${mismatches} more don't match on the values.".toString()
+    }
 }

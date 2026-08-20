@@ -23,12 +23,15 @@ class TenantNotificationServiceSmokeTests {
         // DARPAN_APP_BASE_URL env or darpan.app.baseUrl resource property; audit H11.2 removed the
         // hardcoded dev fallback (https://hotwax-darpan-dev.web.app) so the test must set its own.
         System.setProperty("darpan.app.baseUrl", "https://hotwax-darpan-dev.web.app")
+        // Copy is randomly selected in production. Pin it so these tests assert on structure, not luck.
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "tenant-notification-service-smoke")
     }
 
     @AfterAll
     void cleanup() {
+        RunNotificationVoice.resetLinePicker()
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 
@@ -53,14 +56,16 @@ class TenantNotificationServiceSmokeTests {
                 .call()
 
         String text = result.payload.text as String
-        assertTrue(text.contains("Darpan run completed: API Automation"))
+        assertTrue(text.contains("API Automation — 4 to look at."), text)
         assertTrue(text.contains("Tenant: Tenant A"))
         assertTrue(text.contains("Result ID: RUN_RESULT_1"))
         assertTrue(text.contains("Run result: <https://hotwax-darpan-dev.web.app/reconciliation/run-result/RS_ORDER/reconciliation-runs%2FAUTO_API%2F20260501%2Fresult.json?runName=API+Automation&file1SystemLabel=SHOPIFY&file2SystemLabel=OMS&tenantId=TENANT_A|Open run result>"))
-        assertTrue(text.contains("Differences: 4"))
-        assertTrue(text.contains("Only in SHOPIFY: 1"))
-        assertTrue(text.contains("Only in OMS: 3"))
-        assertEquals(8, text.readLines().size())
+        // Inversion: onlyInFile1Count is the SHOPIFY-side count, so it is what OMS is missing.
+        assertTrue(text.contains("Missing from OMS: 1"), text)
+        assertTrue(text.contains("Missing from SHOPIFY: 3"), text)
+        assertTrue(text.contains("Mismatches: 0"), text)
+        assertFalse(text.contains("Differences:"), "the redundant total is gone: ${text}")
+        assertEquals(10, text.readLines().size(), text)
     }
 
     @Test
@@ -87,11 +92,12 @@ class TenantNotificationServiceSmokeTests {
                 .call()
 
         String text = result.payload.text as String
-        assertTrue(text.contains("Darpan run completed WITH ISSUES: API Automation"), text)
+        assertTrue(text.contains("API Automation did not finish."), text)
         assertTrue(text.contains("Status: FAILED"), text)
         assertTrue(text.contains("Warnings (1): RuleSet RS_ORDER compare stage failed"), text)
-        // Differences are still reported so the partial result is visible.
-        assertTrue(text.contains("Differences: 4"), text)
+        // Counts are still reported so the partial result is visible.
+        assertTrue(text.contains("Missing from OMS: 1"), text)
+        assertTrue(text.contains("Missing from SHOPIFY: 3"), text)
     }
 
     /**
@@ -124,8 +130,8 @@ class TenantNotificationServiceSmokeTests {
                 .call()
 
         String text = result.payload.text as String
-        assertTrue(text.contains("Darpan run completed: API Order Sync"), text)
-        assertFalse(text.contains("WITH ISSUES"), text)
+        assertTrue(text.contains("API Order Sync — ${RunNotificationVoice.CLEAN_HEADLINES.first()}"), text)
+        assertFalse(text.contains("*Details*"), "three zeros is noise on a clean run: ${text}")
         assertFalse(text.contains("Warnings ("), text)
         // The audit trail itself is not dropped — it moves to its own line.
         assertTrue(text.contains("Notes: Exchange presence check: 116 Shopify exchange(s) in window"), text)
@@ -166,7 +172,7 @@ class TenantNotificationServiceSmokeTests {
                 .call()
 
         String text = result.payload.text as String
-        assertTrue(text.contains("Darpan run completed WITH ISSUES: API Order Sync"), text)
+        assertTrue(text.contains("API Order Sync finished. Not cleanly."), text)
         // Exactly the two real failures — the two audit sentences are excluded from the count.
         assertTrue(text.contains("Warnings (2): Exchange presence check skipped: manifest unreadable (boom).; " +
                 "Shopify exchange sweep failed: connection reset"), text)
@@ -193,7 +199,7 @@ class TenantNotificationServiceSmokeTests {
                 .call()
 
         String text = result.payload.text as String
-        assertTrue(text.contains("Darpan run completed WITH ISSUES: API Automation"), text)
+        assertTrue(text.contains("API Automation finished. Not cleanly."), text)
         assertTrue(text.contains("Warnings (1): Shopify exchange sweep failed"), text)
         assertFalse(text.contains("Notes:"), text)
     }

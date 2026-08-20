@@ -168,4 +168,111 @@ class RunNotificationVoiceTests {
         assertTrue(RunNotificationVoice.streakLine(RunNotificationVoice.LOOKBACK_LIMIT)
                 .toLowerCase().contains("counting"))
     }
+
+    @Test
+    void cleanRunOmitsTheDetailsBlock() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        List<String> lines = RunNotificationVoice.renderLines(
+                cleanModel() + [runName: "Production Orders Automation"])
+        assertFalse(lines.join("\n").contains("*Details*"),
+                "three zeros is noise on a clean run: ${lines}")
+    }
+
+    @Test
+    void detailsBlockNamesTheOppositeSystemForEachMissingCount() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        Map model = RunNotificationVoice.classify(
+                [onlyInFile1Count: 39, onlyInFile2Count: 0, ruleDifferenceCount: 8]) +
+                [runName: "Production Orders Automation",
+                 file1SystemLabel: "HotWax", file2SystemLabel: "Shopify",
+                 priorCleanRuns: 0, completedMoment: null]
+        String text = RunNotificationVoice.renderLines(model).join("\n")
+
+        // onlyInFile1Count is the HotWax-side count, so it is what SHOPIFY is missing.
+        assertTrue(text.contains("Missing from Shopify: 39"), text)
+        assertTrue(text.contains("Missing from HotWax: 0"), text)
+        assertTrue(text.contains("Mismatches: 8"), text)
+    }
+
+    @Test
+    void detailsBlockPrintsAllThreeLinesIncludingZeros() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        Map model = RunNotificationVoice.classify(
+                [onlyInFile1Count: 39, onlyInFile2Count: 0, ruleDifferenceCount: 0]) +
+                [runName: "R", file1SystemLabel: "A", file2SystemLabel: "B",
+                 priorCleanRuns: 0, completedMoment: null]
+        String text = RunNotificationVoice.renderLines(model).join("\n")
+        // An omitted line cannot be told apart from an axis that was never checked.
+        assertTrue(text.contains("Missing from A: 0"), text)
+        assertTrue(text.contains("Mismatches: 0"), text)
+    }
+
+    @Test
+    void detailsHeaderUsesSingleAsteriskBoldForGoogleChat() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        Map model = RunNotificationVoice.classify(
+                [onlyInFile1Count: 1, onlyInFile2Count: 0, ruleDifferenceCount: 0]) +
+                [runName: "R", file1SystemLabel: "A", file2SystemLabel: "B",
+                 priorCleanRuns: 0, completedMoment: null]
+        String text = RunNotificationVoice.renderLines(model).join("\n")
+        assertTrue(text.contains("*Details*"), text)
+        assertFalse(text.contains("**Details**"), "double asterisks render literally in Google Chat")
+    }
+
+    @Test
+    void headlineCountsMissingPlusMismatches() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        Map model = RunNotificationVoice.classify(
+                [onlyInFile1Count: 39, onlyInFile2Count: 0, ruleDifferenceCount: 8]) +
+                [runName: "Production Orders Automation", file1SystemLabel: "A",
+                 file2SystemLabel: "B", priorCleanRuns: 0, completedMoment: null]
+        assertTrue(RunNotificationVoice.renderLines(model).first().contains("47"))
+    }
+
+    @Test
+    void failedRunsCarryNoFlavourAtAll() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        Map model = RunNotificationVoice.classify(
+                [onlyInFile1Count: 0, onlyInFile2Count: 0, ruleDifferenceCount: 0, runFailed: true]) +
+                [runName: "R", file1SystemLabel: "A", file2SystemLabel: "B",
+                 priorCleanRuns: 9, completedMoment: null]
+        String text = RunNotificationVoice.renderLines(model).join("\n")
+        RunNotificationVoice.CLEAN_SUBLINES.each { assertFalse(text.contains(it), text) }
+        assertFalse(text.toLowerCase().contains("in a row"), text)
+    }
+
+    private static Map cleanModel() {
+        return RunNotificationVoice.classify(
+                [onlyInFile1Count: 0, onlyInFile2Count: 0, ruleDifferenceCount: 0]) +
+                [file1SystemLabel: "HotWax", file2SystemLabel: "Shopify",
+                 priorCleanRuns: 0, completedMoment: null]
+    }
+
+    /**
+     * Deliberate deviation from the written plan, which returned a bare headline for these buckets.
+     * A run that failed partway still produced a partial result, and TenantNotificationServiceSmokeTests
+     * had encoded that intent since the audit ("Differences are still reported so the partial result
+     * is visible"). Only the flavour is suppressed above ISSUES, never the numbers.
+     */
+    @Test
+    void failedAndIssueRunsStillReportTheirCounts() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        // A list of pairs, not a map literal: an unquoted Groovy map key is a String, so
+        // [true: ...] would hand the closure "true" rather than the boolean.
+        [[true, RunNotificationVoice.BUCKET_FAILED], [false, RunNotificationVoice.BUCKET_ISSUES]]
+                .each { List pair ->
+            boolean failed = (boolean) pair[0]
+            String expectedBucket = (String) pair[1]
+            Map model = RunNotificationVoice.classify([onlyInFile1Count: 1, onlyInFile2Count: 3,
+                                                       ruleDifferenceCount: 2,
+                                                       runFailed: failed, hasWarnings: !failed]) +
+                    [runName: "R", file1SystemLabel: "SHOPIFY", file2SystemLabel: "OMS",
+                     priorCleanRuns: 0, completedMoment: null]
+            assertEquals(expectedBucket, model.bucket)
+            String text = RunNotificationVoice.renderLines(model).join("\n")
+            assertTrue(text.contains("Missing from OMS: 1"), text)
+            assertTrue(text.contains("Missing from SHOPIFY: 3"), text)
+            assertTrue(text.contains("Mismatches: 2"), text)
+        }
+    }
 }

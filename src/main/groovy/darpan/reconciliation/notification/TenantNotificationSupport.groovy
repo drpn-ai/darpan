@@ -11,6 +11,8 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
 import java.net.URI
+import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -440,5 +442,52 @@ class TenantNotificationSupport {
                 ok        : statusCode >= 200 && statusCode < 300,
                 statusCode: statusCode,
         ]
+    }
+
+    /**
+     * The run's completion instant in the RUN TENANT's zone, for the time-of-day flavour line.
+     *
+     * completedDate is a server timestamp; reading it in the JVM default zone would compute
+     * "Friday afternoon" five and a half hours out for a team on IST, flipping the day for anything
+     * after 18:30.
+     *
+     * Deliberately NOT TenantAccessSupport.resolveActiveTenantTimeZone(ec): that reads the CURRENT
+     * SESSION's active tenant, and this runs on automation and scheduler threads whose active tenant
+     * is not the run's (often there is no user at all). The run's own tenant is read here instead,
+     * with an explicit companyUserGroupId condition on both reads.
+     *
+     * Returns null on any failure — the flavour line simply drops, which is the correct cost.
+     */
+    static ZonedDateTime resolveCompletedMoment(def ec, String tenantId, String resultId) {
+        if (!tenantId || !resultId) return null
+        try {
+            def resultRow = TenantScopedFinder.findGlobalUnscoped(ec,
+                            DarpanEntityConstants.RECONCILIATION_RUN_RESULT,
+                            "completedDate read pinned to run tenant — explicit companyUserGroupId condition applied")
+                    ?.condition("reconciliationRunResultId", resultId)
+                    ?.condition("companyUserGroupId", tenantId)
+                    ?.useCache(false)?.one()
+            def completedDate = resultRow?.completedDate
+            if (completedDate == null) return null
+
+            def tenantSettingRow = TenantScopedFinder.findGlobalUnscoped(ec,
+                            DarpanEntityConstants.TENANT_SETTING,
+                            "tenant timezone read pinned to run tenant — explicit companyUserGroupId condition applied")
+                    ?.condition("companyUserGroupId", tenantId)
+                    ?.useCache(false)?.one()
+            String zoneText = ((tenantSettingRow?.timeZone)?.toString()?.trim())
+            ZoneId zone
+            try {
+                zone = zoneText ? ZoneId.of(zoneText) : ZoneId.of("UTC")
+            } catch (Throwable badZone) {
+                // A stored zone id the JVM does not know must not cost the whole notification.
+                logger.warn("Unknown tenant time zone '{}' for tenant {}; falling back to UTC", zoneText, tenantId)
+                zone = ZoneId.of("UTC")
+            }
+            return ((java.sql.Timestamp) completedDate).toInstant().atZone(zone)
+        } catch (Throwable t) {
+            logger.warn("Completed-moment resolution failed for result {}: {}", resultId, t.message)
+            return null
+        }
     }
 }

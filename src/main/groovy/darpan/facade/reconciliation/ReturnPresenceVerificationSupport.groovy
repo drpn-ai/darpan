@@ -76,8 +76,20 @@ import static darpan.common.ValueSupport.normalizeInt
  *   originating HotWax order is ORDER_CANCELLED is not a gap — OMS books a cancellation, not a return,
  *   so the counterpart can never exist and no amount of waiting will produce one. Unlike the two rules
  *   above, this one cannot be decided from the row itself: the row carries the refund, not the order's
- *   status, so it needs a live lookup (injected as cancelledOrderLookup — this class never dispatches a
- *   service itself). Four constraints, each load-bearing and each pinned by a test:
+ *   status, so it originally needed a live lookup (injected as cancelledOrderLookup — this class never
+ *   dispatches a service itself).
+ *
+ *   FIELD-FIRST since 2026-08-20: the Shopify return-refs extract now selects Order.cancelledAt — a
+ *   scalar on a node it already fetches, so it costs nothing — and stamps it on every event row as
+ *   `orderCancelledAt`. A row carrying that KEY is decided inline and never triggers a lookup; only a
+ *   row from an older extract (key ABSENT, as distinct from present-and-null) falls back to it. Note
+ *   the evidence changed with it: the field reports SHOPIFY's cancellation, and treating that as
+ *   implying OMS cancellation is a deliberate product assumption taken 2026-08-20, not a measured
+ *   equivalence. The OMS-measured rates it stands on are 16.5% cancelled on the missing-in-OMS side
+ *   vs 0.9% on matched controls; if the field's own rates diverge sharply from those, the assumption
+ *   is what to re-examine first.
+ *
+ *   Four constraints, each load-bearing and each pinned by a test:
  *     (1) DIRECTION — missing-in-OMS only. The same rule applied to missing-in-Shopify explained 1 of
  *         579 rows in the live probe, indistinguishable from control.
  *     (2) REFUND ONLY — a RETURN row is never suppressed, even on a cancelled order. Live data showed
@@ -86,7 +98,8 @@ import static darpan.common.ValueSupport.normalizeInt
  *     (3) ANY-RECORD-CANCELLED — an order group with mixed statuses suppresses if ANY record is
  *         cancelled; real groups routinely carry several records.
  *     (4) FAIL CLOSED — a capped, failed, not-ok or throwing lookup suppresses nothing and never fails
- *         the run, so a degraded OMS over-reports rather than silently under-reports.
+ *         the run, so a degraded OMS over-reports rather than silently under-reports. The field path
+ *         has no failure mode to fail closed over: a blank/absent value simply suppresses nothing.
  *
  * MECHANISM: this is now a POST-COMPARE FILTER over the diff document the generic ruleset compare
  * already wrote — the same streaming read/rewrite MissingDiffVerificationSupport uses (candidate scan,
@@ -116,6 +129,8 @@ class ReturnPresenceVerificationSupport {
      *  rather than skewed and point-checking it only hammers the source API. */
     static final int DEFAULT_MAX_ORDER_LOOKUPS = 1000
     static final String CANCELLED_ORDER_STATUS_ID = "ORDER_CANCELLED"
+    /** Order-level cancellation marker stamped on every Shopify event row by ShopifyReturnRefsSupport. */
+    static final String ORDER_CANCELLED_AT_FIELD = "orderCancelledAt"
     static final String EVENT_TYPE_REFUND = "REFUND"
 
     private static final String DIFFERENCES_HEADER = "\"differences\":["
@@ -191,6 +206,7 @@ class ReturnPresenceVerificationSupport {
         Map<String, Set<String>> candidateRowIdsByOrderId = [:]
         int pendingCount = 0
         int preWindowCount = 0
+        int cancelledByFieldCount = 0
         int malformedCount = 0
         boolean sawDifferencesHeader = false
 
@@ -244,17 +260,33 @@ class ReturnPresenceVerificationSupport {
                     remove = true
                     pending = true
                 }
-                // Cancellation-refund candidates: missing-in-OMS REFUND rows that grading did NOT
-                // already remove. Collected here rather than looked up inline — the lookup is one HTTP
-                // call per id and must be batched, and this loop is the streaming pass that must not
-                // block on network I/O. Independent of the grading decision above: a row already
+                // CANCELLATION-REFUND SUPPRESSION — FIELD FIRST (2026-08-20). The Shopify return-refs
+                // extract now stamps the order's own cancelledAt onto every event row, so for any row
+                // carrying that key the answer is already in the row: decide inline, with no lookup,
+                // no chunking, no cap and no fail-closed path to get wrong.
+                //
+                // Only a row from an extract PREDATING the field (key ABSENT, not null) falls through
+                // to the Pass 1.5 point lookup — which is exactly why the extract always writes the
+                // key, null included. Saved runs replay stored artifacts, so old files keep working.
+                //
+                // Candidates for that fallback are collected, never looked up inline: the lookup is
+                // an HTTP call that must be batched, and this is the streaming pass that must not
+                // block on network I/O. Independent of the grading decision above — a row already
                 // removed as pending/pre-window needs no second reason to go.
-                if (missingInOms && !remove && cancelledOrderLookup != null) {
-                    String eventType = normalize(data.get("refundOrReturnType"))
-                    String orderId = normalize(data.get("orderId"))
-                    String candidateRowId = rowIdOf(row)
-                    if (EVENT_TYPE_REFUND.equalsIgnoreCase(eventType) && orderId && candidateRowId) {
-                        candidateRowIdsByOrderId.computeIfAbsent(orderId) { new LinkedHashSet<String>() }.add(candidateRowId)
+                boolean cancelledByField = false
+                if (missingInOms && !remove &&
+                        EVENT_TYPE_REFUND.equalsIgnoreCase(normalize(data.get("refundOrReturnType")))) {
+                    if (data.containsKey(ORDER_CANCELLED_AT_FIELD)) {
+                        if (normalize(data.get(ORDER_CANCELLED_AT_FIELD))) {
+                            remove = true
+                            cancelledByField = true
+                        }
+                    } else if (cancelledOrderLookup != null) {
+                        String orderId = normalize(data.get("orderId"))
+                        String candidateRowId = rowIdOf(row)
+                        if (orderId && candidateRowId) {
+                            candidateRowIdsByOrderId.computeIfAbsent(orderId) { new LinkedHashSet<String>() }.add(candidateRowId)
+                        }
                     }
                 }
                 if (!remove) continue
@@ -264,6 +296,7 @@ class ReturnPresenceVerificationSupport {
                 removeIdsByToken.computeIfAbsent(missingToken) { new LinkedHashSet<String>() }.add(rowId)
                 if (pending) pendingCount++
                 else if (preWindow) preWindowCount++
+                else if (cancelledByField) cancelledByFieldCount++
             }
         }
         if (!sawDifferencesHeader) {
@@ -282,7 +315,7 @@ class ReturnPresenceVerificationSupport {
         // rewrite, the summary arithmetic and the audit-note plumbing are reused unchanged. Fails
         // closed at every step: a capped, failed, not-ok or throwing lookup suppresses nothing and
         // never fails the run.
-        int cancelledRefundCount = 0
+        int cancelledRefundCount = cancelledByFieldCount
         if (cancelledOrderLookup != null && !candidateRowIdsByOrderId.isEmpty()) {
             List<String> orderIds = new ArrayList<>(candidateRowIdsByOrderId.keySet())
             if (orderIds.size() > maxOrderLookups) {
@@ -528,7 +561,7 @@ class ReturnPresenceVerificationSupport {
             note += " ${preWindowCount} pre-window Shopify event(s) excluded from the missing-in-OMS count (extractor lookback artifact, not a genuine gap)."
         }
         if (cancelledRefundCount > 0) {
-            note += " ${cancelledRefundCount} cancellation refund(s) suppressed from the missing-in-OMS count — the originating HotWax order is ORDER_CANCELLED, which books no return."
+            note += " ${cancelledRefundCount} cancellation refund(s) suppressed from the missing-in-OMS count — the originating order is cancelled, which books no return in OMS."
         }
         return note
     }

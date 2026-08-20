@@ -96,6 +96,25 @@ class ReturnPresenceVerificationSupportTests {
         ]
     }
 
+    /**
+     * A row from an extract that CARRIES the orderCancelledAt field. `orderCancelledAt: null` is a
+     * real, meaningful state here (order not cancelled) and must serialize as a present-but-null key
+     * — distinct from missingInOmsRow above, which models an OLDER extract where the key is ABSENT.
+     */
+    private static Map missingInOmsRowWithCancellationField(String id, long createdAtMillis, String orderCancelledAt,
+                                                            String refundOrReturnType = "REFUND",
+                                                            String orderId = DEFAULT_ORDER_ID) {
+        return [
+                diffType : "MISSING_IN_FILE_1",
+                primaryId: id,
+                presentIn: SHOPIFY_LABEL,
+                missingIn: OMS_LABEL,
+                data     : JsonOutput.toJson([refundOrReturnId: id, refundOrReturnType: refundOrReturnType, orderId: orderId,
+                        createdAt: isoInstant(createdAtMillis), orderCancelledAt: orderCancelledAt]),
+                message  : "Present in ${SHOPIFY_LABEL}, missing in ${OMS_LABEL}".toString(),
+        ]
+    }
+
     private static String isoInstant(long millis) {
         return new Date(millis).toInstant().toString()
     }
@@ -584,5 +603,91 @@ class ReturnPresenceVerificationSupportTests {
         assertEquals(0, result.removedCount)
         assertTrue(((List) result.warnings).isEmpty())
         assertEquals(["954742210691"], ((List) parseDocument(diff).differences).collect { it.primaryId })
+    }
+
+    // --- FIELD-FIRST CANCELLATION (2026-08-20): the Shopify extract now stamps the order's own
+    // cancelledAt on every event row, so the row decides itself and the lookup is the fallback.
+
+    @Test
+    void suppressesAMissingInOmsRefundFromTheRowsOwnCancellationFieldWithNoLookupAtAll() {
+        // No cancelledOrderLookup is supplied. Before the field existed this row could not have been
+        // suppressed at all — that is the whole point of moving the evidence into the extract.
+        File diff = writeDiffDocument([
+                missingInOmsRowWithCancellationField("954742210691", OLD, "2026-08-15T10:00:00Z")])
+
+        Map result = verify(diff)
+
+        assertEquals(1, result.cancelledRefundSuppressedCount)
+        assertEquals(1, result.removedCount)
+        assertEquals(1, result.removedMissingInFile2)
+        assertEquals(0, result.pendingCount)
+        assertTrue((result.auditNote as String).contains("cancellation refund"))
+        assertEquals([], (List) parseDocument(diff).differences)
+    }
+
+    @Test
+    void trustsAPresentButNullCancellationFieldAndNeverConsultsTheLookup() {
+        // Key present, value null = "this order is NOT cancelled", proven by the extract. The lookup
+        // would say otherwise; it must never be asked, or the field buys us nothing.
+        boolean[] lookupCalled = [false]
+        File diff = writeDiffDocument([
+                missingInOmsRowWithCancellationField("954742210691", OLD, null)])
+
+        Map result = verifyWithLookup(diff) { List ids ->
+            lookupCalled[0] = true
+            return [ok: true, ordersByExternalId: [(DEFAULT_ORDER_ID): [[statusId: "ORDER_CANCELLED"]]], errors: []]
+        }
+
+        assertFalse(lookupCalled[0], "a row carrying the field must not trigger the point lookup")
+        assertEquals(0, result.cancelledRefundSuppressedCount)
+        assertEquals(0, result.removedCount)
+        assertEquals(["954742210691"], ((List) parseDocument(diff).differences).collect { it.primaryId })
+    }
+
+    @Test
+    void fallsBackToTheLookupOnlyForRowsWhoseExtractPredatesTheField() {
+        // Key ABSENT (old artifact) -> the lookup still has to answer, so saved-run replays of stored
+        // files keep working exactly as before.
+        boolean[] lookupCalled = [false]
+        File diff = writeDiffDocument([missingInOmsRow("954742210691", OLD, "REFUND", "7120801431683")])
+
+        Map result = verifyWithLookup(diff) { List ids ->
+            lookupCalled[0] = true
+            return [ok: true, ordersByExternalId: ["7120801431683": [[statusId: "ORDER_CANCELLED"]]], errors: []]
+        }
+
+        assertTrue(lookupCalled[0], "a row without the field must still fall back to the lookup")
+        assertEquals(1, result.cancelledRefundSuppressedCount)
+        assertEquals(1, result.removedCount)
+    }
+
+    @Test
+    void neverSuppressesAReturnRowFromTheCancellationFieldEither() {
+        // REFUND-ONLY holds on the field path too: live data showed 21 REFUND / 0 RETURN on cancelled
+        // orders, so a qualifying RETURN is a broken assumption that must stay visible.
+        File diff = writeDiffDocument([
+                missingInOmsRowWithCancellationField("26947223683", OLD, "2026-08-15T10:00:00Z", "RETURN")])
+
+        Map result = verify(diff)
+
+        assertEquals(0, result.cancelledRefundSuppressedCount)
+        assertEquals(0, result.removedCount)
+        assertEquals(["26947223683"], ((List) parseDocument(diff).differences).collect { it.primaryId })
+    }
+
+    @Test
+    void countsFieldSuppressedAndLookupSuppressedRowsTogether() {
+        // Mixed artifact: one row carries the field, one predates it. Both must land in the same
+        // count and the same removal set, or the summary arithmetic drifts from the rewritten file.
+        File diff = writeDiffDocument([
+                missingInOmsRowWithCancellationField("111", OLD, "2026-08-15T10:00:00Z", "REFUND", "9001"),
+                missingInOmsRow("222", OLD, "REFUND", "9002")])
+
+        Map result = verifyWithLookup(diff,
+                lookupReturning(["9002": [[statusId: "ORDER_CANCELLED"]]]))
+
+        assertEquals(2, result.cancelledRefundSuppressedCount)
+        assertEquals(2, result.removedCount)
+        assertEquals([], (List) parseDocument(diff).differences)
     }
 }

@@ -32,11 +32,19 @@ class MigrationSupervisorSupport {
     static final String LEDGER_READ_REASON =
             "migration ledger records what ran on this installation, not on a tenant"
 
+    // DarpanMigration and DarpanMigrationPrereq are declared cache="true" — correct for reference
+    // data, wrong for the reads below. These decide whether a migration may run against a client's
+    // production data, and a stale cache would answer that question from a snapshot: a prereq row
+    // added after the first query, or an enabled flag just flipped, would go unseen and the
+    // migration would run anyway. Every decision-making read therefore bypasses the cache.
+
     static final String OUTCOME_APPLIED = "APPLIED"
     static final String OUTCOME_ALREADY_APPLIED = "ALREADY_APPLIED"
     static final String OUTCOME_BLOCKED = "BLOCKED"
     static final String OUTCOME_FAILED = "FAILED"
     static final String OUTCOME_NO_PREVIEW = "NO_PREVIEW"
+    static final String OUTCOME_NOT_FOUND = "NOT_FOUND"
+    static final String OUTCOME_DISABLED = "DISABLED"
 
     /** True when this migration has at least one SUCCESS ledger row. DRY_RUN and FAILED do not count. */
     static boolean hasSucceeded(def ec, String migrationId) {
@@ -57,6 +65,7 @@ class MigrationSupervisorSupport {
      */
     static List<String> unmetPrereqs(def ec, String migrationId) {
         return TenantScopedFinder.findGlobalUnscoped(ec, PREREQ_ENTITY, REGISTRY_READ_REASON)
+                .useCache(false)
                 .condition("migrationId", migrationId)
                 .orderBy("prereqMigrationId")
                 .list()
@@ -66,6 +75,7 @@ class MigrationSupervisorSupport {
 
     static final String STATUS_APPLIED = "APPLIED"
     static final String STATUS_PENDING = "PENDING"
+    static final String STATUS_DISABLED = "DISABLED"
 
     /**
      * Registry, ledger and prerequisite state joined into one row per migration, for the admin
@@ -73,6 +83,7 @@ class MigrationSupervisorSupport {
      */
     static List<Map<String, Object>> statusList(def ec) {
         return TenantScopedFinder.findGlobalUnscoped(ec, REGISTRY_ENTITY, REGISTRY_READ_REASON)
+                .useCache(false)
                 .orderBy("sequenceNum")
                 .list()
                 .collect { row ->
@@ -85,8 +96,15 @@ class MigrationSupervisorSupport {
                             .list()
                     def latest = attempts ? attempts.first() : null
 
+                    boolean enabled = row.getString("enabled") == "Y"
+
                     String status
                     if (hasSucceeded(ec, migrationId)) status = STATUS_APPLIED
+                    // DISABLED outranks PENDING. runPending filters on enabled but statusList does
+                    // not, so a parked migration used to read PENDING while the sweep silently
+                    // skipped it — an operator would run the sweep, see nothing happen, and have
+                    // nothing on the screen explaining why.
+                    else if (!enabled) status = STATUS_DISABLED
                     else if (unmetPrereqs(ec, migrationId)) status = OUTCOME_BLOCKED
                     else status = STATUS_PENDING
 
@@ -94,18 +112,111 @@ class MigrationSupervisorSupport {
                             description   : row.getString("description"),
                             sequenceNum   : row.get("sequenceNum"),
                             supportsDryRun: row.getString("supportsDryRun") == "Y",
+                            enabled       : enabled,
                             status        : status,
                             lastRunDate   : latest?.get("completedDate"),
                             lastStatusId  : latest?.getString("statusId"),
+                            // Read the failure text back out. The supervisor already sanitizes it on
+                            // write; without this the ledger is write-only from the API's point of
+                            // view and diagnosing a client failure needs database access.
+                            lastMessageDetail: latest?.getString("messageDetail"),
+                            lastRunId     : latest?.getString("runId"),
                             rowsAffected  : latest?.get("rowsAffected"),
                             attemptCount  : attempts.size()]
                 }
+    }
+
+    /** Default cap on returned attempts. A ledger row per retry means this list is unbounded. */
+    static final int DEFAULT_HISTORY_LIMIT = 50
+
+    /**
+     * Every recorded attempt at one migration, newest first.
+     *
+     * <p>Separate from {@link #statusList} because status answers "where does this installation
+     * stand" while history answers "what happened here, and why" — the second is what an operator
+     * needs when a client's migration failed and the only alternative is reading the database.</p>
+     */
+    static List<Map<String, Object>> history(def ec, String migrationId, Integer maxRows) {
+        int limit = (maxRows != null && maxRows > 0) ? maxRows : DEFAULT_HISTORY_LIMIT
+        return TenantScopedFinder.findGlobalUnscoped(ec, LEDGER_ENTITY, LEDGER_READ_REASON)
+                .condition("migrationId", migrationId)
+                .orderBy("-startedDate")
+                .limit(limit)
+                .list()
+                .collect { row ->
+                    [runId          : row.getString("runId"),
+                     statusId       : row.getString("statusId"),
+                     startedDate    : row.get("startedDate"),
+                     completedDate  : row.get("completedDate"),
+                     appliedByUserId: row.getString("appliedByUserId"),
+                     rowsAffected   : row.get("rowsAffected"),
+                     messageDetail  : row.getString("messageDetail")]
+                }
+    }
+
+    /** Park or unpark a migration. A parked migration is skipped by the sweep and refused by name. */
+    static boolean setEnabled(def ec, String migrationId, boolean enabled) {
+        def row = TenantScopedFinder.findGlobalUnscoped(ec, REGISTRY_ENTITY, REGISTRY_READ_REASON)
+                .useCache(false)
+                .condition("migrationId", migrationId)
+                .one()
+        if (row == null) {
+            ec.message.addError("No registered migration with id ${migrationId}")
+            return false
+        }
+        row.set("enabled", enabled ? "Y" : "N")
+        row.set("lastUpdatedDate", ec.user.nowTimestamp)
+        row.update()
+        return true
+    }
+
+    /**
+     * Runs one named migration, for targeted remediation on a single installation.
+     *
+     * <p>Applies the same gates as the sweep, in the same order, with one addition: {@code force}
+     * re-runs a migration that already has a SUCCESS row. That exists because re-running a backfill
+     * on a client is a real operation, and the alternative is editing the ledger by hand.</p>
+     *
+     * <p>{@code force} does NOT override prerequisites. Re-running something is a judgement call an
+     * operator can make; running it ahead of its prerequisite breaks the one ordering guarantee the
+     * design rests on, and no flag should be able to do that.</p>
+     */
+    static Map<String, Object> runMigration(def ec, String migrationId, boolean dryRun, boolean force) {
+        def row = TenantScopedFinder.findGlobalUnscoped(ec, REGISTRY_ENTITY, REGISTRY_READ_REASON)
+                .useCache(false)
+                .condition("migrationId", migrationId)
+                .one()
+        if (row == null) {
+            // Loudly, not as an empty success: an agent walking a stale list of ids must not read a
+            // typo as "already done".
+            ec.message.addError("No registered migration with id ${migrationId}")
+            return [migrationId: migrationId, outcome: OUTCOME_NOT_FOUND,
+                    detail     : "no registered migration with that id"]
+        }
+        if (row.getString("enabled") != "Y") {
+            return [migrationId: migrationId, outcome: OUTCOME_DISABLED,
+                    detail     : "this migration is parked; re-enable it before running"]
+        }
+        if (!force && hasSucceeded(ec, migrationId)) {
+            return [migrationId: migrationId, outcome: OUTCOME_ALREADY_APPLIED]
+        }
+
+        List<String> unmet = unmetPrereqs(ec, migrationId)
+        if (unmet) return recordBlocked(ec, migrationId, unmet)
+
+        if (dryRun && row.getString("supportsDryRun") != "Y") {
+            return [migrationId: migrationId, outcome: OUTCOME_NO_PREVIEW,
+                    detail     : "this migration has no preview mode yet"]
+        }
+
+        return runOne(ec, migrationId, row.getString("serviceName"), dryRun)
     }
 
     static List<Map<String, Object>> runPending(def ec, boolean dryRun) {
         List<Map<String, Object>> results = []
 
         def registryRows = TenantScopedFinder.findGlobalUnscoped(ec, REGISTRY_ENTITY, REGISTRY_READ_REASON)
+                .useCache(false)
                 .condition("enabled", "Y")
                 .orderBy("sequenceNum")
                 .list()
@@ -120,17 +231,7 @@ class MigrationSupervisorSupport {
 
             List<String> unmet = unmetPrereqs(ec, migrationId)
             if (unmet) {
-                String detail = "blocked: prerequisite(s) not applied — ${unmet.join(', ')}"
-                String blockedRunId = ec.service.sync()
-                        .name(RECORD_SERVICE)
-                        .parameters([migrationId  : migrationId,
-                                     statusId     : MigrationLedgerSupport.STATUS_BLOCKED,
-                                     messageDetail: detail])
-                        .disableAuthz()
-                        .call()
-                        ?.runId as String
-                results << [migrationId: migrationId, outcome: OUTCOME_BLOCKED,
-                            runId      : blockedRunId, detail: detail]
+                results << recordBlocked(ec, migrationId, unmet)
                 return
             }
             if (dryRun && row.getString("supportsDryRun") != "Y") {
@@ -143,6 +244,21 @@ class MigrationSupervisorSupport {
         }
 
         return results
+    }
+
+    /** Records a BLOCKED attempt and describes it. Shared by the sweep and the targeted run. */
+    private static Map<String, Object> recordBlocked(def ec, String migrationId, List<String> unmet) {
+        String detail = "blocked: prerequisite(s) not applied — ${unmet.join(', ')}"
+        String blockedRunId = ec.service.sync()
+                .name(RECORD_SERVICE)
+                .parameters([migrationId  : migrationId,
+                             statusId     : MigrationLedgerSupport.STATUS_BLOCKED,
+                             messageDetail: detail])
+                .disableAuthz()
+                .call()
+                ?.runId as String
+        return [migrationId: migrationId, outcome: OUTCOME_BLOCKED,
+                runId      : blockedRunId, detail: detail]
     }
 
     private static Map<String, Object> runOne(def ec, String migrationId, String serviceName, boolean dryRun) {

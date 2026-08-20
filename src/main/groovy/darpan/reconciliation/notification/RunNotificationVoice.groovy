@@ -1,5 +1,8 @@
 package darpan.reconciliation.notification
 
+import java.time.DayOfWeek
+import java.time.ZonedDateTime
+
 /**
  * Turns a completed run's counts into a verdict bucket and, in later stages, into the Google Chat
  * message text. Deliberately free of Moqui and I/O so it runs in the fast unitTest pool.
@@ -108,4 +111,45 @@ class RunNotificationVoice {
             "Every record lined up. Nothing owed.",
             "Not one out of place. Take the win.",
     ].asImmutable()
+
+    static final List<String> FRIDAY_AFTERNOON_LINES = [
+            "Friday afternoon, and it's clean. Go.",
+            "Friday, and nothing's outstanding. Good timing.",
+    ].asImmutable()
+
+    static final List<String> EARLY_MORNING_LINES = [
+            "Clean before 7am. Better colleague than most.",
+            "Sorted before the office filled up.",
+    ].asImmutable()
+
+    static final List<String> MONDAY_MORNING_LINES = [
+            "Monday morning. Nothing's on fire.",
+            "Week starts clean. Rare and welcome.",
+    ].asImmutable()
+
+    static final List<String> MIDDAY_LINES = [
+            "Clean run over lunch. Undisturbed.",
+            "Mid-day, all lined up. Carry on.",
+    ].asImmutable()
+
+    /**
+     * Picks a time-of-day flavour line for an already-zoned moment. The zone must be the tenant's,
+     * not the server's — completedDate is a server timestamp, and reading it in the JVM default zone
+     * computes "Friday afternoon" five and a half hours out for a team on IST, flipping the day for
+     * anything after 18:30.
+     *
+     * Returning null outside these windows is deliberate: most runs get no time-of-day line, which is
+     * what keeps the ones that do land feeling observed rather than mechanical.
+     */
+    static String timeOfDayLine(ZonedDateTime moment) {
+        if (moment == null) return null
+        int hour = moment.hour
+        DayOfWeek day = moment.dayOfWeek
+
+        if (hour < 7) return pickLine(EARLY_MORNING_LINES, "timeOfDay")
+        if (day == DayOfWeek.FRIDAY && hour >= 12) return pickLine(FRIDAY_AFTERNOON_LINES, "timeOfDay")
+        if (day == DayOfWeek.MONDAY && hour < 12) return pickLine(MONDAY_MORNING_LINES, "timeOfDay")
+        if (hour >= 12 && hour < 15) return pickLine(MIDDAY_LINES, "timeOfDay")
+        return null
+    }
 }

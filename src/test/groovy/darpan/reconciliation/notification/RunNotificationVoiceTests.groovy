@@ -6,6 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.AfterEach
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import static org.junit.jupiter.api.Assertions.assertNotNull
 
 class RunNotificationVoiceTests {
 
@@ -121,5 +124,28 @@ class RunNotificationVoiceTests {
         (RunNotificationVoice.CLEAN_HEADLINES + RunNotificationVoice.CLEAN_SUBLINES).each { String line ->
             assertFalse(line.toLowerCase().contains("agree"), "banned wording in copy: ${line}")
         }
+    }
+
+    @Test
+    void timeOfDayLineReadsTheZonedMomentNotTheServerClock() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        // 2026-08-21 is a Friday. 15:00 in Asia/Kolkata is 09:30 UTC — the same instant would read
+        // as morning in UTC and afternoon in IST.
+        ZonedDateTime fridayAfternoonIst = ZonedDateTime.of(
+                2026, 8, 21, 15, 0, 0, 0, ZoneId.of("Asia/Kolkata"))
+        assertTrue(RunNotificationVoice.timeOfDayLine(fridayAfternoonIst).toLowerCase().contains("friday"))
+    }
+
+    @Test
+    void timeOfDayLineHandlesEarlyMorning() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        ZonedDateTime earlyWednesday = ZonedDateTime.of(
+                2026, 8, 19, 6, 15, 0, 0, ZoneId.of("Asia/Kolkata"))
+        assertNotNull(RunNotificationVoice.timeOfDayLine(earlyWednesday))
+    }
+
+    @Test
+    void timeOfDayLineIsNullWithoutAMoment() {
+        assertEquals(null, RunNotificationVoice.timeOfDayLine(null))
     }
 }

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- transaction="force-new" is the whole point of this service existing separately.
+         Moqui marks the active transaction rollback-only when a service reports errors, so a ledger
+         write sharing that transaction would be rolled back alongside the migration whose failure it
+         records. force-new pauses the active transaction and commits this row independently.
+
+         This differs from the getLoginKey forced-new transaction that deadlocked production: that
+         one ran once per login against a contended shared row. This runs once per migration against
+         a row keyed (migrationId, runId) that nothing else touches. -->
+    <service verb="record" noun="MigrationRun" authenticate="false" allow-remote="false"
+             transaction="force-new">
+        <description>Write one DarpanMigrationRun ledger row. Internal: called by the supervisor,
+            never by an operator directly.</description>
+        <in-parameters>
+            <parameter name="migrationId" required="true"/>
+            <parameter name="statusId" required="true"/>
+            <parameter name="startedDate" type="Timestamp"/>
+            <parameter name="rowsAffected" type="Integer"/>
+            <parameter name="messageDetail"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="runId"/>
+        </out-parameters>
+        <actions>
+            <set field="runId" from="darpan.migration.MigrationLedgerSupport.write(ec, [
+                    migrationId  : migrationId,
+                    statusId     : statusId,
+                    startedDate  : startedDate,
+                    rowsAffected : rowsAffected,
+                    messageDetail: messageDetail])"/>
+        </actions>
+    </service>
+
+</services>

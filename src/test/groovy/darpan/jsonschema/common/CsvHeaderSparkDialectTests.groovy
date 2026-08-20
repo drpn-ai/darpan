@@ -1,5 +1,6 @@
 package darpan.jsonschema.common
 
+import darpan.reconciliation.core.ReconciliationServices
 import jsonschema.common.CsvHeaderSchemaInferrer
 import org.apache.spark.sql.Dataset
 import org.apache.spark.sql.Row
@@ -72,16 +73,16 @@ class CsvHeaderSparkDialectTests {
                 "parser and Spark disagree on header: ${csvText.readLines().first()}")
     }
 
-    /** Reads the file exactly as ReconciliationServices.ingestFile does (line 410). */
+    /**
+     * Calls the production reader rather than restating its options, so this mirror cannot drift
+     * out of date the next time the read dialect changes.
+     */
     private List<String> sparkColumns(String csvText) {
         Path csvFile = Files.createTempFile("dialect-", ".csv")
         try {
             // UTF-8 with no extra BOM handling, matching what the uploaded file carries.
             Files.write(csvFile, csvText.getBytes("UTF-8"))
-            Dataset<Row> df = spark.read()
-                    .option("header", "true")
-                    .option("multiLine", "true")
-                    .csv(csvFile.toAbsolutePath().toString())
+            Dataset<Row> df = ReconciliationServices.readCsvDataset(spark, csvFile.toAbsolutePath().toString(), true)
             return df.columns().toList()
         } finally {
             Files.deleteIfExists(csvFile)

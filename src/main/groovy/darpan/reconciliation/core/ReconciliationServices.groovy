@@ -407,7 +407,7 @@ class ReconciliationServices {
             }
         } else {
              // CSV
-             df = spark.read().option("header", hasHeader.toString()).option("multiLine", "true").csv(path)
+             df = readCsvDataset(spark, path, hasHeader)
              idDf = CompareDatasetSupport.buildCsvIdDf(df, idSpecs, label, hasHeader)
              dataDf = CompareDatasetSupport.buildCsvDataDf(df, idSpecs, label, hasHeader)
         }
@@ -429,6 +429,28 @@ class ReconciliationServices {
         return rawSpecs.collect { Map spec ->
             [idExpr: normalize(spec?.get('idExpr')), idNormalizer: normalize(spec?.get('idNormalizer'))] as Map
         }
+    }
+
+    /**
+     * The one place CSV read options are chosen. Mirrored by CsvHeaderSparkDialectTests, which pins
+     * the wizard's header parser to whatever this method does -- anything the two disagree on is a
+     * run that matches zero records with no error at all.
+     *
+     * The na().fill("") is not cosmetic. Spark reads a blank cell as null, and both
+     * Dataset.toJSON() (which writes the differences array) and to_json (which writes the record
+     * payloads on missing rows) DROP null fields -- so "this column was blank" and "this column was
+     * not in the file" came out byte-identical, as a difference with one side simply absent. A CSV
+     * cell is text or it is empty; it has no way to express null at all, so filling here loses
+     * nothing and makes an empty value get REPORTED as empty. Setting Spark's nullValue option
+     * instead does not work: the reader maps an unquoted empty field back to null whatever token
+     * that option names.
+     */
+    static Dataset readCsvDataset(SparkSession spark, String path, boolean hasHeader) {
+        Dataset rawDf = spark.read()
+                .option("header", hasHeader.toString())
+                .option("multiLine", "true")
+                .csv(path)
+        return rawDf.na().fill("")
     }
 
     static String resolvePath(ExecutionContext ec, String location) {

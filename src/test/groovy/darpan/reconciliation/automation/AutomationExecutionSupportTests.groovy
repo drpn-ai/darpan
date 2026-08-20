@@ -1417,7 +1417,7 @@ class AutomationExecutionSupportTests {
             assertTrue(text.contains("Darpan run completed: API Automation"))
             assertTrue(text.contains("Tenant: Tenant A"))
             assertTrue(text.contains("Result ID: RUN_RESULT_1"))
-            assertTrue(text.contains("Run result: <https://hotwax-darpan-dev.web.app/reconciliation/run-result/RS_ORDER/reconciliation-runs%2FAUTO_API%2F20260501%2Fresult.json?runName=API+Automation&file1SystemLabel=SHOPIFY&file2SystemLabel=OMS|Open run result>"))
+            assertTrue(text.contains("Run result: <https://hotwax-darpan-dev.web.app/reconciliation/run-result/RS_ORDER/reconciliation-runs%2FAUTO_API%2F20260501%2Fresult.json?runName=API+Automation&file1SystemLabel=SHOPIFY&file2SystemLabel=OMS&tenantId=TENANT_A|Open run result>"))
             assertTrue(text.contains("Differences: 4"))
             assertTrue(text.contains("Only in SHOPIFY: 1"))
             assertTrue(text.contains("Only in OMS: 3"))

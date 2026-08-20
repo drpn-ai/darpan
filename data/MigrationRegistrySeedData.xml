@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Registry of one-time data migrations. ADDING A MIGRATION IS ONE ROW HERE.
+
+     LOAD ORDER: DarpanMigrationPrereq rows reference DarpanMigration by FK in both directions, so
+     every DarpanMigration row must load before any prereq row. When this file is folded into a
+     release upgrade-data.xml, re-check parent-before-child BY HAND after generating — the generator
+     sorts alphabetically and has broken Moqui FK load order before.
+
+     NOT REGISTERED, DELIBERATELY:
+       reconciliation.ReconciliationAutomationServices.sweep#StuckReconciliationRuns
+     That is a recurring watchdog, not a one-time migration. It shares the sweep# verb with
+     RULE_TENANT_STAMPS below, which is why registration is explicit data rather than a scan. -->
+<entity-facade-xml type="darpan-seed">
+
+    <darpan.migration.DarpanMigration migrationId="TENANT_NOTIF_SETTINGS" componentName="darpan"
+            serviceName="reconciliation.ReconciliationNotificationServices.migrate#TenantNotificationSettings"
+            sequenceNum="10" supportsDryRun="N" enabled="Y"
+            description="Seed a default chat space for tenants that have notification settings but no
+                space. Idempotent — tenants that already have any chat space are skipped."/>
+
+    <darpan.migration.DarpanMigration migrationId="UNDECRYPTABLE_HOOKS" componentName="darpan"
+            serviceName="reconciliation.ReconciliationNotificationServices.clear#UndecryptableChatSpaceWebhooks"
+            sequenceNum="20" supportsDryRun="N" enabled="Y"
+            description="Clear chat space webhooks that can no longer be decrypted after a crypt key
+                change. Idempotent, and a no-op on an installation that never stored a webhook."/>
+
+    <darpan.migration.DarpanMigration migrationId="AUTOMATION_FILTERS" componentName="darpan"
+            serviceName="reconciliation.ReconciliationNotificationServices.migrate#AutomationExcludeFilters"
+            sequenceNum="30" supportsDryRun="N" enabled="Y"
+            description="Copy exclusion filters from the rule set into each automation's own
+                snapshot, across every tenant. Idempotent."/>
+
+    <darpan.migration.DarpanMigration migrationId="RULE_TENANT_STAMPS" componentName="darpan"
+            serviceName="reconciliation.ReconciliationRuleEngineServices.sweep#RuleChildTenantStamps"
+            sequenceNum="40" supportsDryRun="N" enabled="Y"
+            description="Backfill the denormalized companyUserGroupId stamp on rule-set child rows
+                created before the stamp existed. Idempotent no-op on already-stamped rows."/>
+
+    <darpan.migration.DarpanMigration migrationId="ENDPOINT_ACCESS" componentName="darpan"
+            serviceName="facade.SourceEndpointFacadeServices.migrate#SourceConfigEndpointAccess"
+            sequenceNum="50" supportsDryRun="N" enabled="Y"
+            description="Translate the legacy canReadOrders flag into explicit
+                SourceConfigEndpointAccess rows. Idempotent by PK."/>
+
+    <darpan.migration.DarpanMigration migrationId="RETIRED_FIELDS" componentName="darpan"
+            serviceName="facade.SourceEndpointFacadeServices.migrate#RetiredConnectorFields"
+            sequenceNum="60" supportsDryRun="N" enabled="Y"
+            description="Delete SourceSystemConnectorField pill rows withdrawn from seed data. Seed
+                loads are createOrUpdate and never delete, so withdrawal needs an explicit deletion.
+                Idempotent — a second run deletes nothing."/>
+
+</entity-facade-xml>

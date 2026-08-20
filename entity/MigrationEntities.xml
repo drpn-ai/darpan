@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+
+    <!-- ========================================================= -->
+    <!-- darpan.migration                                          -->
+    <!--                                                           -->
+    <!-- Moqui has no native migration ledger: load-data is        -->
+    <!-- createOrUpdate and stateless, so it never needed to       -->
+    <!-- remember what it had loaded. These three entities are     -->
+    <!-- that missing memory.                                      -->
+    <!-- ========================================================= -->
+
+    <entity entity-name="DarpanMigration" package="darpan.migration" use="configuration" cache="true">
+        <description>Registry of one-time data migrations. Seed data: adding a migration is one row.
+            Explicit registration rather than a naming-convention scan because the six existing
+            migrations use three different verbs (migrate#, sweep#, clear#) while sweep# also names a
+            recurring watchdog that must never run as part of an upgrade.</description>
+        <field name="migrationId" type="id" is-pk="true"/>
+        <field name="componentName" type="text-short" not-null="true">
+            <description>Owning component. Exists so sibling components can register into the same
+                supervisor later without a schema change.</description>
+        </field>
+        <field name="serviceName" type="text-medium" not-null="true"/>
+        <field name="description" type="text-long">
+            <description>Shown on the admin screen: what an operator needs in order to decide.</description>
+        </field>
+        <field name="sequenceNum" type="number-integer" not-null="true"/>
+        <field name="supportsDryRun" type="text-indicator" default="'N'">
+            <description>'Y' when the service accepts a dryRun parameter. Starts 'N' for every
+                migration that shipped before dry-run support existed; each flips its own flag as it
+                is retrofitted.</description>
+        </field>
+        <field name="enabled" type="text-indicator" default="'Y'"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="lastUpdatedDate" type="date-time"/>
+
+        <!-- The same service registered under two migration ids would run twice and record two
+             independent "first" applications. -->
+        <index name="DARMIG_SVCNAME" unique="true">
+            <index-field name="serviceName"/>
+        </index>
+    </entity>
+
+    <entity entity-name="DarpanMigrationPrereq" package="darpan.migration" use="configuration" cache="true">
+        <description>Migrations that must have succeeded before this one may run. Verified, never
+            sorted on — sequenceNum determines order, these rows determine permission, and keeping
+            them separate avoids a topological sort while still failing loudly if the declared order
+            and the declared dependencies disagree.</description>
+        <field name="migrationId" type="id" is-pk="true"/>
+        <field name="prereqMigrationId" type="id" is-pk="true"/>
+
+        <relationship type="one" related="darpan.migration.DarpanMigration" fk-name="DARMIGPRQ_MIG">
+            <key-map field-name="migrationId"/>
+        </relationship>
+        <relationship type="one" title="Prereq" related="darpan.migration.DarpanMigration" fk-name="DARMIGPRQ_PRQ">
+            <key-map field-name="prereqMigrationId" related-field-name="migrationId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="DarpanMigrationRun" package="darpan.migration" use="transactional" cache="never">
+        <description>One attempt at one migration. runId is part of the key so a failed attempt is
+            never overwritten by a later retry: a table holding only successes answers "what worked"
+            but not "what is wrong here".</description>
+        <field name="migrationId" type="id" is-pk="true"/>
+        <field name="runId" type="id" is-pk="true"/>
+        <field name="startedDate" type="date-time" not-null="true"/>
+        <field name="completedDate" type="date-time"/>
+        <field name="appliedByUserId" type="id"/>
+        <field name="statusId" type="text-short" not-null="true">
+            <description>SUCCESS | FAILED | BLOCKED | DRY_RUN. Only SUCCESS satisfies the
+                "already applied" check.</description>
+        </field>
+        <field name="rowsAffected" type="number-integer"/>
+        <field name="messageDetail" type="text-very-long">
+            <description>Sanitized service messages or error detail. text-very-long rather than
+                text-long for the MySQL row-size limit. Never credentials or raw request
+                secrets.</description>
+        </field>
+
+        <relationship type="one" related="darpan.migration.DarpanMigration" fk-name="DARMIGRUN_MIG">
+            <key-map field-name="migrationId"/>
+        </relationship>
+        <index name="DARMIGRUN_STATUS">
+            <index-field name="migrationId"/>
+            <index-field name="statusId"/>
+        </index>
+    </entity>
+</entities>

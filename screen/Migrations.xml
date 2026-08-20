@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+        menu-image="fa fa-database" menu-image-type="icon" default-menu-title="Migrations"
+        require-authentication="true">
+
+    <!-- Super-admin only. These migrations deliberately sweep every tenant's data, so this must
+         never be reachable from tenant-facing darpan-ui.
+
+         Denial strategy copied verbatim from screen/Settings.xml, including its reasoning: write a
+         403 body directly and then suppress the Moqui render pipeline via sri.dontDoRender = true.
+         A redirect (sendRedirect) would emit HTTP 302 and silently override the 403 we just set, so
+         we must write inline. Moqui exposes no public stopRender() API, so we write the framework
+         field directly — FORWARD-RISK: if the render path ever becomes a Groovy sandbox or makes
+         ScreenRenderImpl fields private, this will break silently at runtime rather than compile
+         time; revisit when upgrading moqui-framework past the current pinned version. -->
+    <pre-actions>
+        <script><![CDATA[
+            if (!darpan.facade.common.TenantAccessSupport.isSuperAdmin(ec)) {
+                if (ec.web != null) {
+                    ec.web.response.setStatus(403)
+                    ec.web.response.setContentType("text/html")
+                    ec.web.response.setCharacterEncoding("UTF-8")
+                    ec.web.response.writer.write("""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Access Denied</title>
+<link rel="stylesheet" href="/apps/darpan/theme-library/css/tokens.css">
+<link rel="stylesheet" href="/apps/darpan/theme-library/css/components.css">
+</head><body class="dt-shell"><div class="dt-container">
+<div class="error-state" role="alert"><h3 class="error-state__title">super-admin access required</h3>
+<p class="error-state__msg">running data migrations is limited to super-admin users — head back to the app to keep working</p>
+</div></div></body></html>""")
+                    ec.web.response.writer.flush()
+                }
+                sri.dontDoRender = true
+            }
+        ]]></script>
+    </pre-actions>
+
+    <transition name="runPending">
+        <service-call name="migration.MigrationServices.run#PendingMigrations"/>
+        <default-response url="."/>
+    </transition>
+
+    <transition name="dryRunAll">
+        <service-call name="migration.MigrationServices.run#PendingMigrations" in-map="[dryRun: true]"/>
+        <default-response url="."/>
+    </transition>
+
+    <actions>
+        <service-call name="migration.MigrationServices.list#MigrationStatus" out-map="context"/>
+    </actions>
+
+    <widgets>
+        <container-box><box-header title="Data Migrations"/>
+            <box-toolbar>
+                <link url="dryRunAll" text="Dry Run All" btn-type="default"/>
+                <link url="runPending" text="Run Pending" btn-type="primary"
+                      confirmation="Run every pending migration against every tenant's data?"/>
+            </box-toolbar>
+            <box-body>
+                <form-list name="MigrationList" list="migrations" skip-form="true" paginate="false"
+                        style="table table-striped table-condensed">
+                    <field name="migrationId"><default-field title="ID"><display/></default-field></field>
+                    <field name="status"><default-field title="Status"><display/></default-field></field>
+                    <field name="lastRunDate"><default-field title="Last Run"><display/></default-field></field>
+                    <field name="rowsAffected"><default-field title="Rows"><display/></default-field></field>
+                    <field name="attemptCount"><default-field title="Attempts"><display/></default-field></field>
+                    <field name="supportsDryRun"><default-field title="Preview"><display/></default-field></field>
+                    <field name="description"><default-field title="Description"><display/></default-field></field>
+                </form-list>
+            </box-body>
+        </container-box>
+    </widgets>
+</screen>

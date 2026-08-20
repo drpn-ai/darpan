@@ -20,6 +20,8 @@
     <subscreens default-item="Reconciliation">
         <subscreens-item name="Reconciliation" menu-title="Reconciliation" location="component://darpan/screen/Reconciliation.xml"/>
         <subscreens-item name="Settings" menu-title="Settings" location="component://darpan/screen/Settings.xml"/>
+        <subscreens-item name="Migrations" menu-title="Migrations"
+                location="component://darpan/screen/Migrations.xml"/>
     </subscreens>
     <widgets>
         <subscreens-panel id="darpan-app" type="popup"/>

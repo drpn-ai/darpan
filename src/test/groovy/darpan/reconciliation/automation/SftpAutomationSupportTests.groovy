@@ -1,6 +1,7 @@
 package darpan.reconciliation.automation
 
 import darpan.facade.reconciliation.RunObservability
+import darpan.reconciliation.notification.RunNotificationVoice
 import darpan.reconciliation.notification.TenantNotificationSupport
 import org.junit.jupiter.api.Test
 
@@ -104,10 +105,10 @@ class SftpAutomationSupportTests {
         assertEquals(webhookUrl, deliveries[0].webhookUrl)
         String text = deliveries[0].payload.text as String
         assertTrue(text.contains("Run result: <https://hotwax-darpan-dev.web.app/reconciliation/run-result/RS_ORDER/reconciliation-runs%2FAUTO_SFTP%2F20260501%2Fresult.json?runName=SFTP+Automation&file1SystemLabel=SHOPIFY&file2SystemLabel=NETSUITE&tenantId=TENANT_A|Open run result>"))
-        assertTrue(text.contains("Only in SHOPIFY: 1"))
-        assertTrue(text.contains("Only in NETSUITE: 2"))
-        assertFalse(text.contains("Only in file 1"))
-        assertFalse(text.contains("Only in file 2"))
+        assertTrue(text.contains("Missing from "), text)
+        // Original intent preserved: the system labels must RESOLVE, never fall back.
+        assertFalse(text.contains("Missing from File 1"), text)
+        assertFalse(text.contains("Missing from File 2"), text)
 
         FakeServiceCall call = ec.service.calls[0]
         assertEquals("reconciliation.ReconciliationAutomationServices.poll#SftpAndReconcile", call.serviceName)
@@ -473,7 +474,7 @@ class SftpAutomationSupportTests {
         assertEquals(1, deliveries.size(), "a terminal SFTP failure must alert exactly once, like the API path")
         assertEquals(webhookUrl, deliveries[0].webhookUrl)
         String text = deliveries[0].payload.text as String
-        assertTrue(text.contains("Darpan run completed WITH ISSUES"), "the delivered payload must be the FAILURE payload")
+        assertTrue(text.contains("Status: FAILED"), "the delivered payload must be the FAILURE payload")
         assertTrue(text.contains("AUT_SRC_SFTP"), "the alert must carry the reason the run died")
         assertNotNull(runResult.notifiedDate, "the alert must claim the CAS on the one row this run owns")
     }
@@ -594,7 +595,7 @@ class SftpAutomationSupportTests {
         assertEquals(SftpAutomationSupport.AUTOMATION_STATUS_FAILED, runResults[0].statusEnumId)
         assertEquals(1, deliveries.size(), "a no-output SFTP failure must alert, like the API path")
         assertEquals(subscriberWebhookUrl, deliveries[0].webhookUrl)
-        assertTrue((deliveries[0].payload.text as String).contains("Darpan run completed WITH ISSUES"))
+        assertTrue((deliveries[0].payload.text as String).contains("Status: FAILED"))
         assertNotNull(runResults[0].notifiedDate)
         assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty(),
                 "the alert's won claim is what purges the subscription — never a purge ahead of it")
@@ -1095,17 +1096,24 @@ class SftpAutomationSupportTests {
         // AutomationExecutionSupportTests) so the new SFTP failure-alert tests can assert that what got
         // delivered is genuinely the failure payload — carrying the reason — and not a success one.
         boolean runFailed = ((params.statusEnumId)?.toString()?.trim()) == SftpAutomationSupport.AUTOMATION_STATUS_FAILED
-        String headerPrefix = runFailed ? "Darpan run completed WITH ISSUES: " : "Darpan run completed: "
-        List<String> lines = ["${headerPrefix}${runName}".toString()]
+        // Delegates to the real renderer instead of reimplementing it. This fake previously built its
+        // own line stack, so this suite stayed green against its own copy no matter what
+        // build#RunCompletedPayload actually produced — hollow green that hid a whole redesign.
+        Map<String, Object> voiceModel = RunNotificationVoice.classify([
+                onlyInFile1Count   : params.onlyInFile1Count,
+                onlyInFile2Count   : params.onlyInFile2Count,
+                ruleDifferenceCount: params.ruleDifferenceCount,
+                runFailed          : runFailed,
+                hasWarnings        : false,
+        ]) + [runName         : runName, file1SystemLabel: file1SystemLabel,
+              file2SystemLabel: file2SystemLabel, priorCleanRuns: 0, completedMoment: null]
+        List<String> lines = RunNotificationVoice.renderLines(voiceModel)
         if (runFailed) lines << "⚠ Status: FAILED — the ruleset did not fully evaluate; results may be incomplete.".toString()
         String terminationReasonValue = ((params.terminationReason)?.toString()?.trim())
         if (terminationReasonValue) lines << "⚠ ${terminationReasonValue}".toString()
         if (tenantLabel) lines << "Tenant: ${tenantLabel}".toString()
         if (resultId) lines << "Result ID: ${resultId}".toString()
         if (resultUrl) lines << "Run result: <${resultUrl}|Open run result>".toString()
-        lines << "Differences: ${displayCount(params.differenceCount)}".toString()
-        lines << "Only in ${file1SystemLabel ?: "File 1"}: ${displayCount(params.onlyInFile1Count)}".toString()
-        lines << "Only in ${file2SystemLabel ?: "File 2"}: ${displayCount(params.onlyInFile2Count)}".toString()
         return [payload: [text: lines.join("\n")]]
     }
 

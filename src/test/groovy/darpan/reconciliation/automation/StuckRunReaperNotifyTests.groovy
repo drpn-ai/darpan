@@ -1,5 +1,6 @@
 package darpan.reconciliation.automation
 
+import darpan.reconciliation.notification.RunNotificationVoice
 import darpan.common.DarpanEntityConstants
 import darpan.reconciliation.notification.TenantNotificationSupport
 import org.junit.jupiter.api.Test
@@ -233,7 +234,12 @@ class StuckRunReaperNotifyTests {
         String runName = ((params.runName)?.toString()?.trim()) ?: ((params.savedRunId)?.toString()?.trim()) ?: "reconciliation run"
         boolean runFailed = ((params.statusEnumId)?.toString()?.trim()) == "AUT_STAT_FAILED"
         String terminationReasonValue = ((params.terminationReason)?.toString()?.trim())
-        List<String> lines = ["Darpan run completed${(runFailed || terminationReasonValue) ? ' WITH ISSUES' : ''}: ${runName}".toString()]
+        // Delegates to the real renderer rather than reimplementing it — the reaper's notify really
+        // does go through build#RunCompletedPayload, so a hand-rolled line stack here would keep this
+        // suite green against copy the production path no longer produces.
+        List<String> lines = RunNotificationVoice.renderLines(
+                RunNotificationVoice.classify([runFailed: runFailed]) +
+                        [runName: runName, priorCleanRuns: 0, completedMoment: null])
         if (runFailed) lines << "⚠ Status: FAILED — the ruleset did not fully evaluate; results may be incomplete.".toString()
         if (terminationReasonValue) lines << "⚠ ${terminationReasonValue}".toString()
         String resultId = ((params.reconciliationRunResultId)?.toString()?.trim())

@@ -50,10 +50,6 @@
             <set field="resultUrl" from="darpan.reconciliation.notification.TenantNotificationSupport.buildRunResultUrl(ec, notificationContext)"/>
             <set field="file1SystemLabelValue" from="darpan.reconciliation.notification.TenantNotificationSupport.resolveFileSystemLabel(ec, notificationContext, 'file1', null)"/>
             <set field="file2SystemLabelValue" from="darpan.reconciliation.notification.TenantNotificationSupport.resolveFileSystemLabel(ec, notificationContext, 'file2', null)"/>
-            <set field="differenceCountValue" from="differenceCount == null ? '0' : (differenceCount instanceof Number ? ((Number) differenceCount).intValue().toString() : (((differenceCount)?.toString()?.trim()) ?: '0'))"/>
-            <set field="onlyInFile1CountValue" from="onlyInFile1Count == null ? '0' : (onlyInFile1Count instanceof Number ? ((Number) onlyInFile1Count).intValue().toString() : (((onlyInFile1Count)?.toString()?.trim()) ?: '0'))"/>
-            <set field="onlyInFile2CountValue" from="onlyInFile2Count == null ? '0' : (onlyInFile2Count instanceof Number ? ((Number) onlyInFile2Count).intValue().toString() : (((onlyInFile2Count)?.toString()?.trim()) ?: '0'))"/>
-            <set field="ruleDifferenceCountValue" from="ruleDifferenceCount == null ? '0' : (ruleDifferenceCount instanceof Number ? ((Number) ruleDifferenceCount).intValue().toString() : (((ruleDifferenceCount)?.toString()?.trim()) ?: '0'))"/>
             <!-- Both verification passes emit one audit sentence on EVERY run, including all-clear ones,
                  into this same list. Counting those as warnings headlined every exchange-enabled run
                  "WITH ISSUES" (reported from prod 2026-08-05, Gorjana API Order Sync: 0 differences,
@@ -64,9 +60,22 @@
             <set field="auditNoteList" from="partitionedWarnings.auditNotes"/>
             <set field="runFailed" from="((statusEnumId)?.toString()?.trim()) == 'AUT_STAT_FAILED'"/>
             <set field="noOutput" from="runFailed &amp;&amp; noOutputProduced == true"/>
-            <set field="headerPrefix" from="noOutput ? 'Darpan run FAILED: ' :
-                    ((runFailed || warningList) ? 'Darpan run completed WITH ISSUES: ' : 'Darpan run completed: ')"/>
-            <set field="lines" from="[headerPrefix + runNameValue]"/>
+            <!-- A no-output failure keeps its original header verbatim: zeros there are not "no
+                 differences", they are "never computed", and the verdict renderer has no counts to
+                 read. Every other run is rendered by RunNotificationVoice, which leads with the
+                 verdict instead of a fixed prefix. -->
+            <if condition="noOutput">
+                <set field="lines" from="['Darpan run FAILED: ' + runNameValue]"/>
+            <else>
+                <set field="voiceCounts" from="[onlyInFile1Count: onlyInFile1Count, onlyInFile2Count: onlyInFile2Count,
+                        ruleDifferenceCount: ruleDifferenceCount, runFailed: runFailed, hasWarnings: (warningList ? true : false)]"/>
+                <set field="voiceModel" from="darpan.reconciliation.notification.RunNotificationVoice.classify(voiceCounts) + [
+                        runName: runNameValue, file1SystemLabel: file1SystemLabelValue, file2SystemLabel: file2SystemLabelValue,
+                        priorCleanRuns: darpan.reconciliation.notification.RunNotificationStreak.countConsecutiveCleanRuns(ec, savedRunId, companyUserGroupId, resultIdValue),
+                        completedMoment: darpan.reconciliation.notification.TenantNotificationSupport.resolveCompletedMoment(ec, companyUserGroupId, resultIdValue)]"/>
+                <set field="lines" from="darpan.reconciliation.notification.RunNotificationVoice.renderLines(voiceModel)"/>
+            </else>
+            </if>
             <if condition="noOutput">
                 <set field="ignoreLine" from="lines.add('⚠ Status: FAILED — the run did not finish and produced no results. Nothing was reconciled.')"/>
             </if>
@@ -85,14 +94,6 @@
             </if>
             <if condition="resultUrl">
                 <set field="ignoreLine" from="lines.add('Run result: &lt;' + resultUrl + '|Open run result&gt;')"/>
-            </if>
-            <!-- Counts are omitted entirely for a no-output failure: zeros there are not "no differences",
-                 they are "never computed", and an operator cannot tell those apart from the numbers. -->
-            <if condition="!noOutput">
-                <set field="ignoreLine" from="lines.add('Differences: ' + differenceCountValue)"/>
-                <set field="ignoreLine" from="lines.add('Only in ' + (file1SystemLabelValue ?: 'File 1') + ': ' + onlyInFile1CountValue)"/>
-                <set field="ignoreLine" from="lines.add('Only in ' + (file2SystemLabelValue ?: 'File 2') + ': ' + onlyInFile2CountValue)"/>
-                <set field="ignoreLine" from="lines.add('Mismatches: ' + ruleDifferenceCountValue)"/>
             </if>
             <if condition="warningList">
                 <set field="ignoreLine" from="lines.add('Warnings (' + warningList.size() + '): ' + warningList.take(3).join('; ') + (warningList.size() > 3 ? ' …' : ''))"/>

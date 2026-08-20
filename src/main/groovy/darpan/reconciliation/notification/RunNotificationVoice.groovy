@@ -68,4 +68,44 @@ class RunNotificationVoice {
         if (!bothSidesMissing && mismatchCount == 0) return BUCKET_ONE_SIDED
         return BUCKET_MIXED
     }
+
+    private static Closure linePicker = null
+    private static final Random RANDOM = new Random()
+
+    static void setLinePicker(Closure picker) { linePicker = picker }
+
+    static void resetLinePicker() { linePicker = null }
+
+    /**
+     * Genuinely random in production, pinned by tests through {@link #setLinePicker}. A deterministic
+     * seed off reconciliationRunResultId was rejected: ids are sequential, so a modulo marches
+     * through the pool in visible order.
+     */
+    static String pickLine(List<String> pool, String slotName) {
+        if (!pool) return null
+        if (linePicker != null) return (String) linePicker.call(pool, slotName)
+        return pool.get(RANDOM.nextInt(pool.size()))
+    }
+
+    static final List<String> CLEAN_HEADLINES = [
+            "spotless.",
+            "nothing to see here. In the best way.",
+            "all lined up.",
+            "clean.",
+            "not a single one out of place.",
+            "no notes.",
+            "everything lined up.",
+            "quiet. Properly quiet.",
+    ].asImmutable()
+
+    static final List<String> CLEAN_SUBLINES = [
+            "All lined up. Nobody has to be a hero today.",
+            "No follow-ups. No thread. No \"quick question\".",
+            "This one's not going in anyone's standup.",
+            "Nothing to chase. Go be unreachable for twenty minutes.",
+            "Zero across the board. Have the second coffee.",
+            "Both systems told the same story. Rare. Enjoy it.",
+            "Every record lined up. Nothing owed.",
+            "Not one out of place. Take the win.",
+    ].asImmutable()
 }

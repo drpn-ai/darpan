@@ -3,6 +3,9 @@ package darpan.reconciliation.notification
 import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.AfterEach
+import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertTrue
 
 class RunNotificationVoiceTests {
 
@@ -83,5 +86,40 @@ class RunNotificationVoiceTests {
                 [onlyInFile1Count: null, onlyInFile2Count: "", ruleDifferenceCount: "not a number"])
         assertEquals(RunNotificationVoice.BUCKET_CLEAN, result.bucket)
         assertEquals(0, result.totalCount)
+    }
+
+    @AfterEach
+    void resetPicker() {
+        RunNotificationVoice.resetLinePicker()
+    }
+
+    @Test
+    void injectedPickerControlsLineSelection() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        assertEquals(RunNotificationVoice.CLEAN_HEADLINES.first(),
+                RunNotificationVoice.pickLine(RunNotificationVoice.CLEAN_HEADLINES, "headline"))
+    }
+
+    @Test
+    void pickLineReturnsNullForAnEmptyPool() {
+        assertEquals(null, RunNotificationVoice.pickLine([], "headline"))
+    }
+
+    @Test
+    void defaultPickerAlwaysReturnsAPoolMember() {
+        // No seeding: production selection is genuinely random. Sequential result ids under a
+        // modulo would march through the pool in order, which reads as more robotic, not less.
+        30.times {
+            assertTrue(RunNotificationVoice.CLEAN_HEADLINES
+                    .contains(RunNotificationVoice.pickLine(RunNotificationVoice.CLEAN_HEADLINES, "headline")))
+        }
+    }
+
+    @Test
+    void copyCorpusNeverUsesTheBannedAgreeWording() {
+        // Project copy rule: systems "line up", they never "agree".
+        (RunNotificationVoice.CLEAN_HEADLINES + RunNotificationVoice.CLEAN_SUBLINES).each { String line ->
+            assertFalse(line.toLowerCase().contains("agree"), "banned wording in copy: ${line}")
+        }
     }
 }

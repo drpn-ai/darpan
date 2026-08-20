@@ -76,4 +76,90 @@
         </actions>
     </service>
 
+    <!-- Targeted remediation on one installation. Split preview from run into two service NAMES
+         rather than a dryRun boolean: a dropped boolean defaults to false, and false is the branch
+         that rewrites data. Two names on the wire cannot be confused that way. -->
+    <service verb="run" noun="Migration" authenticate="false" allow-remote="false"
+             transaction="ignore">
+        <description>Run one named migration. Honours the same gates as the sweep: parked migrations
+            are refused, prerequisites are enforced, and an already-applied migration is skipped
+            unless force is set.</description>
+        <in-parameters>
+            <parameter name="migrationId" required="true"/>
+            <parameter name="force" type="Boolean" default="false">
+                <description>Re-run even when a SUCCESS row exists. For re-running an idempotent
+                    backfill; never overrides prerequisites.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="outcome"><description>APPLIED | ALREADY_APPLIED | BLOCKED | FAILED | DISABLED | NOT_FOUND | NO_PREVIEW</description></parameter>
+            <parameter name="runId"/>
+            <parameter name="rowsAffected" type="Integer"/>
+            <parameter name="detail"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.migration.MigrationSupervisorSupport.runMigration(ec, migrationId, false, force as boolean)"/>
+            <set field="outcome" from="result?.outcome"/>
+            <set field="runId" from="result?.runId"/>
+            <set field="rowsAffected" from="result?.rowsAffected"/>
+            <set field="detail" from="result?.detail"/>
+            <set field="ok" from="outcome == 'APPLIED' || outcome == 'ALREADY_APPLIED'"/>
+        </actions>
+    </service>
+
+    <service verb="dryRun" noun="Migration" authenticate="false" allow-remote="false"
+             transaction="ignore">
+        <description>Preview one named migration. Writes a DRY_RUN ledger row, which never satisfies
+            the already-applied check.</description>
+        <in-parameters>
+            <parameter name="migrationId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="outcome"/>
+            <parameter name="runId"/>
+            <parameter name="rowsAffected" type="Integer"/>
+            <parameter name="detail"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.migration.MigrationSupervisorSupport.runMigration(ec, migrationId, true, false)"/>
+            <set field="outcome" from="result?.outcome"/>
+            <set field="runId" from="result?.runId"/>
+            <set field="rowsAffected" from="result?.rowsAffected"/>
+            <set field="detail" from="result?.detail"/>
+            <set field="ok" from="outcome != 'FAILED' &amp;&amp; outcome != 'NOT_FOUND'"/>
+        </actions>
+    </service>
+
+    <service verb="set" noun="MigrationEnabled" authenticate="false" allow-remote="false">
+        <description>Park or unpark a migration. Parking lets the rest of a sweep through when one
+            migration is broken on an installation, instead of stranding the whole upgrade.</description>
+        <in-parameters>
+            <parameter name="migrationId" required="true"/>
+            <parameter name="enabled" type="Boolean" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="ok" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="ok" from="darpan.migration.MigrationSupervisorSupport.setEnabled(ec, migrationId, enabled as boolean)"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="MigrationHistory" authenticate="false" allow-remote="false">
+        <description>Every recorded attempt at one migration, newest first, with its own failure
+            detail. Read-only.</description>
+        <in-parameters>
+            <parameter name="migrationId" required="true"/>
+            <parameter name="maxRows" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="attempts" type="List"><parameter name="attempt" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="attempts" from="darpan.migration.MigrationSupervisorSupport.history(ec, migrationId, maxRows)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+        </actions>
+    </service>
+
 </services>

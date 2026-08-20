@@ -4,26 +4,39 @@ Release-scoped upgrade data for Darpan 1.5.0 (DAR-BE-005 — shared config acros
 Records must also live in generic source data files under runtime/component/darpan/data/.
 Load with: ./gradlew loadDarpanUpgradeData
 
-ORDERING: hand-verified parent-before-child. EnumerationType precedes its Enumerations, and both
-precede every ConfigTenantAccess row that references configTypeEnumId. release_preflight.py sorts
-alphabetically and WILL break this if the file is regenerated — re-order by hand afterwards.
+ORDERING: hand-verified parent-before-child — EnumerationType precedes its Enumerations.
+release_preflight.py sorts alphabetically and WILL break this if the file is regenerated; re-order
+by hand afterwards.
 
-OPERATOR IMPACT, STEP A (enum definitions): five additive records, no behaviour change. Until they
-load, no config can be shared, because a grant must name a configTypeEnumId that exists.
+OPERATOR IMPACT: five additive records, no behaviour change. Until they load, no config can be
+shared, because a grant must name a configTypeEnumId that exists. Nothing existing is modified, so
+loading this file changes no current reconciliation behaviour.
 
-OPERATOR IMPACT, STEP B (backfill): ONE ConfigTenantAccess row that adds the Betsey Johnson tenant
-to the peer group of Steve Madden's existing HotWax OMS config. After it loads, both tenants read
-and edit the SAME config row and its stored credential. This is a deliberate widening of credential
-access, requested for the shared HotWax account. It is NOT reversible by re-running a loader —
-undo it with facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess.
+NO BACKFILL — DELIBERATE (Aditi, 2026-08-12). An earlier draft of this file also carried a one-time
+ConfigTenantAccess row pre-sharing a HotWax OMS config between two named tenants. It was dropped:
+sharing is granted through the product, not through a data file. A tenant admin uses the "Shared
+with" panel (facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess), which requires them to
+be tenant-admin of BOTH the target tenant and a tenant already using the config — the two-sided
+gate. Pre-seeding a grant meant baking three unverified production tenant/config ids into a release
+artifact to save a few clicks, and a row naming the wrong tenant would silently widen access to that
+tenant's operators. The product path has no such failure mode.
 
-Every other config in every environment stays private and unchanged. Sharing is opt-in.
+Consequently this file is safe to load unconditionally and needs no verification step.
+
+SETUP NOTE for whoever shares a config: the two-sided gate means the acting user must hold
+DARPAN_TENANT_ADMIN in both tenants. That is a permissions assignment in the admin app, not a code
+or data change. Both tenants must also live in the SAME deployment — ConfigTenantAccess is a row in
+one database referencing tenants in that same database, so tenants on separate instances cannot
+share a config by any mechanism.
 
 PREREQUISITE: 1.4.0 upgrade-data must be loaded first.
 -->
 <entity-facade-xml type="darpan-seed">
 
-    <!-- Step A — config-type catalog. -->
+    <!-- Config-type catalog. Adding a value here plus a CONFIG_TYPE_REGISTRY row in
+         SharedConfigAccessSupport is the whole extension path for a new shareable config type.
+         moqui.service.message.SystemMessageRemote is deliberately absent: it is a framework-owned
+         endpoint descriptor already visible to every tenant, not a per-tenant credential. -->
     <moqui.basic.EnumerationType enumTypeId="DarpanSharedConfigType"
             description="Darpan API source config types that support cross-tenant sharing"/>
     <moqui.basic.Enumeration enumId="SCFG_HOTWAX_OMS"
@@ -38,23 +51,5 @@ PREREQUISITE: 1.4.0 upgrade-data must be loaded first.
     <moqui.basic.Enumeration enumId="SCFG_NS_RESTLET"
             description="NetSuite Restlet config (darpan.reconciliation.NsRestletConfig)"
             enumTypeId="DarpanSharedConfigType"/>
-
-    <!-- Step B — one-time backfill for the shared HotWax account.
-         The config is OWNED by Steve Madden and stays that way; this row adds Betsey Johnson as an
-         equal peer. No row is needed for the owning tenant — ownership is access.
-
-         UNVERIFIED-IDS: the three logical ids below (STEVE_MADDEN, BETSEY_JOHNSON,
-         HOTWAX_OMS_SHARED) follow Darpan's tenant naming convention but have NOT been confirmed
-         against the live instance. Tenants are provisioned per environment and never seeded, so the
-         repo cannot confirm them. A row naming the wrong tenant silently widens access to that
-         tenant's operators. Whoever verifies all three against the live instance deletes this
-         UNVERIFIED-IDS marker and the test that pins it, in the same commit — that deletion is the
-         conscious review gate. Do not load this file while the marker is present. -->
-    <darpan.auth.ConfigTenantAccess
-            configTypeEnumId="SCFG_HOTWAX_OMS"
-            configId="HOTWAX_OMS_SHARED"
-            tenantUserGroupId="BETSEY_JOHNSON"
-            fromDate="2026-08-11 00:00:00"
-            grantedByUserId="_NA_"/>
 
 </entity-facade-xml>

@@ -148,4 +148,24 @@ class RunNotificationVoiceTests {
     void timeOfDayLineIsNullWithoutAMoment() {
         assertEquals(null, RunNotificationVoice.timeOfDayLine(null))
     }
+
+    @Test
+    void streakLineIsNullBelowTwoPriorCleanRuns() {
+        assertEquals(null, RunNotificationVoice.streakLine(0))
+        assertEquals(null, RunNotificationVoice.streakLine(1))
+    }
+
+    @Test
+    void streakLineCountsTheCurrentRunToo() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        // Three prior clean runs plus this one is a streak of four.
+        assertTrue(RunNotificationVoice.streakLine(3).contains("4"))
+    }
+
+    @Test
+    void streakLineSaysAndCountingAtTheLookbackCap() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        assertTrue(RunNotificationVoice.streakLine(RunNotificationVoice.LOOKBACK_LIMIT)
+                .toLowerCase().contains("counting"))
+    }
 }

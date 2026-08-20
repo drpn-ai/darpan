@@ -152,4 +152,26 @@ class RunNotificationVoice {
         if (hour >= 12 && hour < 15) return pickLine(MIDDAY_LINES, "timeOfDay")
         return null
     }
+
+    static final List<String> STREAK_TEMPLATES = [
+            "{n} in a row. It's getting cocky.",
+            "{n} straight. Somebody should say something nice to it.",
+            "{n} clean runs back to back. Unbothered.",
+    ].asImmutable()
+
+    /** How far back the streak lookback reads. Rendered as "N and counting." once reached. */
+    static final int LOOKBACK_LIMIT = 20
+
+    /**
+     * @param priorCleanRuns consecutive clean runs BEFORE this one. The rendered streak includes the
+     *        current run, so 3 prior reads as "4 in a row".
+     */
+    static String streakLine(int priorCleanRuns) {
+        if (priorCleanRuns < 2) return null
+        if (priorCleanRuns >= LOOKBACK_LIMIT) {
+            return "${LOOKBACK_LIMIT} and counting.".toString()
+        }
+        String template = pickLine(STREAK_TEMPLATES, "streak")
+        return template?.replace("{n}", Integer.toString(priorCleanRuns + 1))
+    }
 }

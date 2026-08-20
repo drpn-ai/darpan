@@ -419,6 +419,7 @@ class AutomationExecutionSupport {
                         differenceCount          : successFields.differenceCount,
                         onlyInFile1Count         : successFields.onlyInFile1Count,
                         onlyInFile2Count         : successFields.onlyInFile2Count,
+                        ruleDifferenceCount      : reconcileResult.ruleDifferenceCount,
                         statusEnumId             : successFields.statusEnumId,
                         processingWarnings       : (reconcileResult.processingWarnings ?: []) as List,
                 ])

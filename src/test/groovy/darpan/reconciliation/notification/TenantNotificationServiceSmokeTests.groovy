@@ -56,11 +56,11 @@ class TenantNotificationServiceSmokeTests {
         assertTrue(text.contains("Darpan run completed: API Automation"))
         assertTrue(text.contains("Tenant: Tenant A"))
         assertTrue(text.contains("Result ID: RUN_RESULT_1"))
-        assertTrue(text.contains("Run result: <https://hotwax-darpan-dev.web.app/reconciliation/run-result/RS_ORDER/reconciliation-runs%2FAUTO_API%2F20260501%2Fresult.json?runName=API+Automation&file1SystemLabel=SHOPIFY&file2SystemLabel=OMS|Open run result>"))
+        assertTrue(text.contains("Run result: <https://hotwax-darpan-dev.web.app/reconciliation/run-result/RS_ORDER/reconciliation-runs%2FAUTO_API%2F20260501%2Fresult.json?runName=API+Automation&file1SystemLabel=SHOPIFY&file2SystemLabel=OMS&tenantId=TENANT_A|Open run result>"))
         assertTrue(text.contains("Differences: 4"))
         assertTrue(text.contains("Only in SHOPIFY: 1"))
         assertTrue(text.contains("Only in OMS: 3"))
-        assertEquals(7, text.readLines().size())
+        assertEquals(8, text.readLines().size())
     }
 
     @Test
@@ -196,5 +196,84 @@ class TenantNotificationServiceSmokeTests {
         assertTrue(text.contains("Darpan run completed WITH ISSUES: API Automation"), text)
         assertTrue(text.contains("Warnings (1): Shopify exchange sweep failed"), text)
         assertFalse(text.contains("Notes:"), text)
+    }
+
+    /**
+     * differenceCount is onlyInFile1Count + onlyInFile2Count and nothing more
+     * (ReconciliationServices.groovy:111 — both sides are left_anti presence checks). Records present
+     * on BOTH sides with differing values are counted only in ruleDifferenceCount. Without that
+     * parameter this run reported "Differences: 0" and read as a clean sync.
+     */
+    @Test
+    void buildRunCompletedPayloadAcceptsRuleDifferenceCount() {
+        Map result = ec.service.sync()
+                .name("reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload")
+                .parameters([
+                        companyUserGroupId       : "TENANT_A",
+                        companyLabel             : "Tenant A",
+                        runName                  : "Rule Diff Run",
+                        reconciliationRunResultId: "100511",
+                        file1SystemLabel         : "HOTWAX",
+                        file2SystemLabel         : "SHOPIFY",
+                        differenceCount          : 0,
+                        onlyInFile1Count         : 0,
+                        onlyInFile2Count         : 0,
+                        ruleDifferenceCount      : 8,
+                ])
+                .disableAuthz()
+                .call()
+
+        String text = (String) ((Map) result.payload).text
+        // A run with zero missing records but eight value mismatches must NOT read as clean.
+        assertTrue(text.contains("8"), "expected the mismatch count in the payload, got: ${text}")
+    }
+
+    /**
+     * A Google Chat alert reaches an operator who may be working in another tenant. Without the run's
+     * tenant in the link the app cannot switch into it, so the result loads against the wrong tenant
+     * or not at all.
+     */
+    @Test
+    void runResultUrlCarriesTheTenantForDeepLinkSwitching() {
+        Map result = ec.service.sync()
+                .name("reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload")
+                .parameters([
+                        companyUserGroupId       : "TENANT_A",
+                        companyLabel             : "Tenant A",
+                        runName                  : "API Automation",
+                        reconciliationRunResultId: "100511",
+                        savedRunId               : "RS_ORDER",
+                        resultDataManagerPath    : "reconciliation-runs/AUTO_API/20260501/result.json",
+                ])
+                .disableAuthz()
+                .call()
+
+        String text = (String) ((Map) result.payload).text
+        assertTrue(text.contains("tenantId=TENANT_A"),
+                "the link must name the tenant so the UI can switch into it: ${text}")
+    }
+
+    /**
+     * Links already in circulation carry no tenantId and must keep working, so a blank tenant drops
+     * the parameter rather than emitting an empty one.
+     */
+    @Test
+    void runResultUrlOmitsTheTenantWhenItIsBlank() {
+        Map result = ec.service.sync()
+                .name("reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload")
+                .parameters([
+                        companyLabel             : "Tenant A",
+                        runName                  : "API Automation",
+                        reconciliationRunResultId: "100511",
+                        savedRunId               : "RS_ORDER",
+                        resultDataManagerPath    : "reconciliation-runs/AUTO_API/20260501/result.json",
+                ])
+                .disableAuthz()
+                .call()
+
+        String text = (String) ((Map) result.payload).text
+        assertTrue(text.contains("/reconciliation/run-result/RS_ORDER/"), text)
+        assertFalse(text.contains("tenantId"),
+                "a blank tenant must drop the parameter, not emit an empty one: ${text}")
     }
 }

@@ -282,6 +282,7 @@ class SftpAutomationSupport {
                             differenceCount          : updateFields.differenceCount,
                             onlyInFile1Count         : updateFields.onlyInFile1Count,
                             onlyInFile2Count         : updateFields.onlyInFile2Count,
+                            ruleDifferenceCount      : pollResult.ruleDifferenceCount,
                             statusEnumId             : statusEnumId,
                             processingWarnings       : (pollResult.processingWarnings ?: []) as List,
                     ])

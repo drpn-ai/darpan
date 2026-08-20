@@ -23,6 +23,12 @@
             <parameter name="differenceCount"/>
             <parameter name="onlyInFile1Count"/>
             <parameter name="onlyInFile2Count"/>
+            <!-- differenceCount is onlyInFile1Count + onlyInFile2Count and nothing more
+                 (ReconciliationServices.groovy:111 — both sides are left_anti presence checks).
+                 Records present on BOTH sides with differing values are counted only here. Without
+                 this parameter a run with zero missing records and N value mismatches reported
+                 "Differences: 0" and read as a clean sync. -->
+            <parameter name="ruleDifferenceCount"/>
             <!-- Audit 2026-06-11 #5: surface rule failures / processing warnings so a silently broken
                  ruleset does not produce a normal "completed" alert. -->
             <parameter name="statusEnumId"/>
@@ -47,6 +53,7 @@
             <set field="differenceCountValue" from="differenceCount == null ? '0' : (differenceCount instanceof Number ? ((Number) differenceCount).intValue().toString() : (((differenceCount)?.toString()?.trim()) ?: '0'))"/>
             <set field="onlyInFile1CountValue" from="onlyInFile1Count == null ? '0' : (onlyInFile1Count instanceof Number ? ((Number) onlyInFile1Count).intValue().toString() : (((onlyInFile1Count)?.toString()?.trim()) ?: '0'))"/>
             <set field="onlyInFile2CountValue" from="onlyInFile2Count == null ? '0' : (onlyInFile2Count instanceof Number ? ((Number) onlyInFile2Count).intValue().toString() : (((onlyInFile2Count)?.toString()?.trim()) ?: '0'))"/>
+            <set field="ruleDifferenceCountValue" from="ruleDifferenceCount == null ? '0' : (ruleDifferenceCount instanceof Number ? ((Number) ruleDifferenceCount).intValue().toString() : (((ruleDifferenceCount)?.toString()?.trim()) ?: '0'))"/>
             <!-- Both verification passes emit one audit sentence on EVERY run, including all-clear ones,
                  into this same list. Counting those as warnings headlined every exchange-enabled run
                  "WITH ISSUES" (reported from prod 2026-08-05, Gorjana API Order Sync: 0 differences,
@@ -85,6 +92,7 @@
                 <set field="ignoreLine" from="lines.add('Differences: ' + differenceCountValue)"/>
                 <set field="ignoreLine" from="lines.add('Only in ' + (file1SystemLabelValue ?: 'File 1') + ': ' + onlyInFile1CountValue)"/>
                 <set field="ignoreLine" from="lines.add('Only in ' + (file2SystemLabelValue ?: 'File 2') + ': ' + onlyInFile2CountValue)"/>
+                <set field="ignoreLine" from="lines.add('Mismatches: ' + ruleDifferenceCountValue)"/>
             </if>
             <if condition="warningList">
                 <set field="ignoreLine" from="lines.add('Warnings (' + warningList.size() + '): ' + warningList.take(3).join('; ') + (warningList.size() > 3 ? ' …' : ''))"/>

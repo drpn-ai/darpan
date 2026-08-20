@@ -326,6 +326,11 @@ class TenantNotificationSupport {
                 runName         : ((context.runName)?.toString()?.trim()),
                 file1SystemLabel: resolveFileSystemLabel(ec, context, "file1", null),
                 file2SystemLabel: resolveFileSystemLabel(ec, context, "file2", null),
+                // The alert reaches an operator who may be working in a different tenant, and the app
+                // cannot switch into a tenant the link never names. Appended last so the parameters
+                // already in circulation keep their positions. The findAll below drops it when blank,
+                // which is also what makes links sent before this change keep working.
+                tenantId        : ((context.companyUserGroupId)?.toString()?.trim()),
         ].findAll { entry -> ((entry.value)?.toString()?.trim()) } as Map<String, String>
 
         String queryText = queryParams.collect { entry ->

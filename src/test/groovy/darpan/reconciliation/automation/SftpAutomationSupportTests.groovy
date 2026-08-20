@@ -103,7 +103,7 @@ class SftpAutomationSupportTests {
         assertEquals(1, deliveries.size())
         assertEquals(webhookUrl, deliveries[0].webhookUrl)
         String text = deliveries[0].payload.text as String
-        assertTrue(text.contains("Run result: <https://hotwax-darpan-dev.web.app/reconciliation/run-result/RS_ORDER/reconciliation-runs%2FAUTO_SFTP%2F20260501%2Fresult.json?runName=SFTP+Automation&file1SystemLabel=SHOPIFY&file2SystemLabel=NETSUITE|Open run result>"))
+        assertTrue(text.contains("Run result: <https://hotwax-darpan-dev.web.app/reconciliation/run-result/RS_ORDER/reconciliation-runs%2FAUTO_SFTP%2F20260501%2Fresult.json?runName=SFTP+Automation&file1SystemLabel=SHOPIFY&file2SystemLabel=NETSUITE&tenantId=TENANT_A|Open run result>"))
         assertTrue(text.contains("Only in SHOPIFY: 1"))
         assertTrue(text.contains("Only in NETSUITE: 2"))
         assertFalse(text.contains("Only in file 1"))

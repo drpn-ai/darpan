@@ -1,6 +1,7 @@
 package darpan.reconciliation.automation
 
 import darpan.facade.reconciliation.RunObservability
+import darpan.reconciliation.notification.RunNotificationVoice
 import darpan.reconciliation.notification.TenantNotificationSupport
 import darpan.reconciliation.source.SourceFilterSupport
 import org.junit.jupiter.api.Test
@@ -872,7 +873,7 @@ class AutomationExecutionSupportTests {
             // Exactly once, to the subscriber, for the attempt they never saw.
             assertEquals(1, deliveries.size())
             assertEquals(meWebhookUrl, deliveries[0].webhookUrl)
-            assertTrue((deliveries[0].payload.text as String).startsWith("Darpan run completed: API Automation"))
+            assertTrue((deliveries[0].payload.text as String).startsWith("API Automation"))
             assertTrue(ec.entity.rows["darpan.reconciliation.ReconciliationRunNotifySubscription"].isEmpty(),
                     "the chain is over, so the subscription must not outlive it")
         } finally {
@@ -961,7 +962,7 @@ class AutomationExecutionSupportTests {
             assertNotNull(secondRunResult.notifiedDate)
             // The payload that would go missing under an adopt-the-old-row regression.
             assertEquals(2, deliveries.size(), "the re-drive's completion alert must not be swallowed as ALREADY_NOTIFIED")
-            assertTrue((deliveries[1].payload.text as String).startsWith("Darpan run completed: API Automation"))
+            assertTrue((deliveries[1].payload.text as String).startsWith("API Automation"))
         } finally {
             TenantNotificationSupport.resetDeliveryHook()
         }
@@ -1414,15 +1415,16 @@ class AutomationExecutionSupportTests {
             assertEquals(1, deliveries.size())
             assertEquals(webhookUrl, deliveries[0].webhookUrl)
             String text = deliveries[0].payload.text as String
-            assertTrue(text.contains("Darpan run completed: API Automation"))
+            // Routing/plumbing assertions only. Copy lives in RunNotificationVoiceTests, so this
+            // suite pins tokens a copy tweak cannot move.
+            assertTrue(text.startsWith("API Automation"), text)
             assertTrue(text.contains("Tenant: Tenant A"))
             assertTrue(text.contains("Result ID: RUN_RESULT_1"))
             assertTrue(text.contains("Run result: <https://hotwax-darpan-dev.web.app/reconciliation/run-result/RS_ORDER/reconciliation-runs%2FAUTO_API%2F20260501%2Fresult.json?runName=API+Automation&file1SystemLabel=SHOPIFY&file2SystemLabel=OMS|Open run result>"))
-            assertTrue(text.contains("Differences: 4"))
-            assertTrue(text.contains("Only in SHOPIFY: 1"))
-            assertTrue(text.contains("Only in OMS: 3"))
-            assertFalse(text.contains("Only in file 1"))
-            assertFalse(text.contains("Only in file 2"))
+            assertTrue(text.contains("Missing from "), text)
+            // Original intent preserved: the system labels must RESOLVE, never fall back.
+            assertFalse(text.contains("Missing from File 1"), text)
+            assertFalse(text.contains("Missing from File 2"), text)
         } finally {
             TenantNotificationSupport.resetDeliveryHook()
         }
@@ -3279,22 +3281,27 @@ class AutomationExecutionSupportTests {
                     value instanceof Number ? ((Number) value).intValue().toString() :
                             (((value)?.toString()?.trim()) ?: "0")
         }
-        // Task 7: mirror the real build#RunCompletedPayload template's failure rendering (see
-        // ReconciliationNotificationServices.xml) so failure-path tests can assert on 'Status: FAILED'.
+        // Delegates to the real renderer instead of reimplementing it. This fake previously built its
+        // own line stack, so these suites stayed green against their own copy no matter what
+        // build#RunCompletedPayload actually produced — hollow green that hid a whole redesign.
         List<String> warningList = (params.processingWarnings instanceof List ? (List) params.processingWarnings : [])
                 .collect { ((it)?.toString()?.trim()) }.findAll { it }
         boolean runFailed = ((params.statusEnumId)?.toString()?.trim()) == AutomationExecutionSupport.STATUS_FAILED
-        String headerPrefix = (runFailed || warningList) ? "Darpan run completed WITH ISSUES: " : "Darpan run completed: "
-        List<String> lines = ["${headerPrefix}${runName}".toString()]
+        Map<String, Object> voiceModel = RunNotificationVoice.classify([
+                onlyInFile1Count   : params.onlyInFile1Count,
+                onlyInFile2Count   : params.onlyInFile2Count,
+                ruleDifferenceCount: params.ruleDifferenceCount,
+                runFailed          : runFailed,
+                hasWarnings        : (warningList ? true : false),
+        ]) + [runName         : runName, file1SystemLabel: file1SystemLabel,
+              file2SystemLabel: file2SystemLabel, priorCleanRuns: 0, completedMoment: null]
+        List<String> lines = RunNotificationVoice.renderLines(voiceModel)
         if (runFailed) lines << "⚠ Status: FAILED — the ruleset did not fully evaluate; results may be incomplete.".toString()
         String terminationReasonValue = ((params.terminationReason)?.toString()?.trim())
         if (terminationReasonValue) lines << "⚠ ${terminationReasonValue}".toString()
         if (tenantLabel) lines << "Tenant: ${tenantLabel}".toString()
         if (resultId) lines << "Result ID: ${resultId}".toString()
         if (resultUrl) lines << "Run result: <${resultUrl}|Open run result>".toString()
-        lines << "Differences: ${displayCount(params.differenceCount)}".toString()
-        lines << "Only in ${file1SystemLabel ?: "File 1"}: ${displayCount(params.onlyInFile1Count)}".toString()
-        lines << "Only in ${file2SystemLabel ?: "File 2"}: ${displayCount(params.onlyInFile2Count)}".toString()
         if (warningList) lines << "Warnings (${warningList.size()}): ${warningList.take(3).join('; ')}${warningList.size() > 3 ? ' …' : ''}".toString()
         return [payload: [text: lines.join("\n")]]
     }

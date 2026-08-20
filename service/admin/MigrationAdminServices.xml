@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- The remote surface over the migration supervisor: everything an operator or an agent acting
+         for one can do to a client installation's migrations, and nothing else.
+
+         These are admin.* and NOT facade.* on purpose. The facade.* ArtifactGroup is granted to
+         every authenticated user (see data/SecuritySeedData.xml's auto-grant warning), so a
+         cross-tenant migration runner named into it would be reachable by any tenant operator.
+         admin.* is matched by the DARPAN_ADMIN_API group's artifactName="admin\..*" member and
+         restricted to super admins.
+
+         The migration.* services these delegate to stay allow-remote="false".
+
+         SCOPE IS THE INSTALLATION, not the tenant. Every registered migration is a cross-tenant
+         sweep; "which client" is chosen by pointing at that client's backend. -->
+
+    <service verb="get" noun="MigrationStatus" allow-remote="true" authz-action="view">
+        <description>Registry and ledger state for every registered migration on this installation,
+            in sequence order, including the detail of the most recent attempt. Read-only.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="migrations" type="List">
+                <description>One row per registered migration, sequenceNum order.</description>
+                <parameter name="migration" type="Map">
+                    <parameter name="migrationId"/><parameter name="description"/>
+                    <parameter name="sequenceNum" type="Integer"/>
+                    <parameter name="supportsDryRun" type="Boolean"/>
+                    <parameter name="enabled" type="Boolean"/>
+                    <parameter name="status"><description>APPLIED | PENDING | BLOCKED | DISABLED</description></parameter>
+                    <parameter name="lastRunDate" type="Timestamp"/>
+                    <parameter name="lastStatusId"/>
+                    <parameter name="lastMessageDetail"><description>Sanitized detail of the most recent attempt.</description></parameter>
+                    <parameter name="lastRunId"/>
+                    <parameter name="rowsAffected" type="Integer"/>
+                    <parameter name="attemptCount" type="Integer"/>
+                </parameter>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="migrations" from="darpan.migration.MigrationAdminSupport.listStatus(ec)"/>
+            <set field="ok" from="migrations != null &amp;&amp; !ec.message.hasError()"/>
+            <set field="migrations" from="migrations ?: []"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="MigrationHistory" allow-remote="true" authz-action="view">
+        <description>Every recorded attempt at one migration, newest first, each with its own
+            sanitized failure detail. This is how a failed migration is diagnosed without database
+            access.</description>
+        <in-parameters>
+            <parameter name="migrationId" required="true"/>
+            <parameter name="maxRows" type="Integer"><description>Default 50.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="attempts" type="List">
+                <parameter name="attempt" type="Map">
+                    <parameter name="runId"/><parameter name="statusId"/>
+                    <parameter name="startedDate" type="Timestamp"/>
+                    <parameter name="completedDate" type="Timestamp"/>
+                    <parameter name="appliedByUserId"/>
+                    <parameter name="rowsAffected" type="Integer"/>
+                    <parameter name="messageDetail"/>
+                </parameter>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="attempts" from="darpan.migration.MigrationAdminSupport.history(ec, migrationId, maxRows)"/>
+            <set field="ok" from="attempts != null &amp;&amp; !ec.message.hasError()"/>
+            <set field="attempts" from="attempts ?: []"/>
+        </actions>
+    </service>
+
+    <!-- transaction="ignore" on every runner, for the same reason run#PendingMigrations carries it:
+         these must not own a transaction that a failing migration can poison. -->
+    <service verb="run" noun="PendingMigrations" allow-remote="true" transaction="ignore">
+        <description>Run every registered migration on this installation with no SUCCESS ledger row,
+            in sequence order. Idempotent: a second call applies nothing. Sweeps every tenant's data;
+            super admin only.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="results" type="List">
+                <parameter name="result" type="Map">
+                    <parameter name="migrationId"/><parameter name="outcome"/>
+                    <parameter name="runId"/><parameter name="rowsAffected" type="Integer"/>
+                    <parameter name="detail"/>
+                </parameter>
+            </parameter>
+            <parameter name="appliedCount" type="Integer"/>
+            <parameter name="skippedCount" type="Integer"/>
+            <parameter name="blockedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="outcome" from="darpan.migration.MigrationAdminSupport.runPending(ec, false)"/>
+            <set field="results" from="outcome?.results ?: []"/>
+            <set field="appliedCount" from="outcome?.appliedCount ?: 0"/>
+            <set field="skippedCount" from="outcome?.skippedCount ?: 0"/>
+            <set field="blockedCount" from="outcome?.blockedCount ?: 0"/>
+            <set field="failedCount" from="outcome?.failedCount ?: 0"/>
+            <set field="ok" from="outcome != null &amp;&amp; failedCount == 0"/>
+        </actions>
+    </service>
+
+    <!-- A separate service rather than a dryRun in-parameter. A boolean that decides between
+         "preview" and "irreversibly rewrite every tenant's data" is one dropped parameter away from
+         disaster: an omitted flag defaults to false, which is the destructive branch. Two distinct
+         method names on the wire cannot be confused that way. -->
+    <service verb="dryRun" noun="PendingMigrations" allow-remote="true" transaction="ignore">
+        <description>Preview what running the pending migrations would do. Writes DRY_RUN ledger rows
+            only; a DRY_RUN row never satisfies the already-applied check.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="results" type="List">
+                <parameter name="result" type="Map">
+                    <parameter name="migrationId"/><parameter name="outcome"/>
+                    <parameter name="runId"/><parameter name="rowsAffected" type="Integer"/>
+                    <parameter name="detail"/>
+                </parameter>
+            </parameter>
+            <parameter name="appliedCount" type="Integer"/>
+            <parameter name="skippedCount" type="Integer"/>
+            <parameter name="blockedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="outcome" from="darpan.migration.MigrationAdminSupport.runPending(ec, true)"/>
+            <set field="results" from="outcome?.results ?: []"/>
+            <set field="appliedCount" from="outcome?.appliedCount ?: 0"/>
+            <set field="skippedCount" from="outcome?.skippedCount ?: 0"/>
+            <set field="blockedCount" from="outcome?.blockedCount ?: 0"/>
+            <set field="failedCount" from="outcome?.failedCount ?: 0"/>
+            <set field="ok" from="outcome != null &amp;&amp; failedCount == 0"/>
+        </actions>
+    </service>
+
+    <service verb="run" noun="Migration" allow-remote="true" transaction="ignore">
+        <description>Run one named migration, for targeted remediation. Parked migrations are
+            refused, prerequisites are enforced, and an already-applied migration is skipped unless
+            force is set.</description>
+        <in-parameters>
+            <parameter name="migrationId" required="true"/>
+            <parameter name="force" type="Boolean" default="false">
+                <description>Re-run even when a SUCCESS row exists — for re-running an idempotent
+                    backfill. Never overrides prerequisites.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="outcome"><description>APPLIED | ALREADY_APPLIED | BLOCKED | FAILED | DISABLED | NOT_FOUND | NO_PREVIEW</description></parameter>
+            <parameter name="runId"/>
+            <parameter name="rowsAffected" type="Integer"/>
+            <parameter name="detail"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.migration.MigrationAdminSupport.runMigration(ec, migrationId, false, force as boolean)"/>
+            <set field="outcome" from="result?.outcome"/>
+            <set field="runId" from="result?.runId"/>
+            <set field="rowsAffected" from="result?.rowsAffected"/>
+            <set field="detail" from="result?.detail"/>
+            <set field="ok" from="outcome == 'APPLIED' || outcome == 'ALREADY_APPLIED'"/>
+        </actions>
+    </service>
+
+    <service verb="dryRun" noun="Migration" allow-remote="true" transaction="ignore">
+        <description>Preview one named migration.</description>
+        <in-parameters><parameter name="migrationId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="outcome"/>
+            <parameter name="runId"/>
+            <parameter name="rowsAffected" type="Integer"/>
+            <parameter name="detail"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.migration.MigrationAdminSupport.runMigration(ec, migrationId, true, false)"/>
+            <set field="outcome" from="result?.outcome"/>
+            <set field="runId" from="result?.runId"/>
+            <set field="rowsAffected" from="result?.rowsAffected"/>
+            <set field="detail" from="result?.detail"/>
+            <set field="ok" from="outcome != null &amp;&amp; outcome != 'FAILED' &amp;&amp; outcome != 'NOT_FOUND'"/>
+        </actions>
+    </service>
+
+    <service verb="set" noun="MigrationEnabled" allow-remote="true">
+        <description>Park or unpark a migration on this installation. Parking lets the rest of a
+            sweep through when one migration is broken, instead of stranding the whole upgrade.
+            A parked migration reports status DISABLED and is refused even when named directly.</description>
+        <in-parameters>
+            <parameter name="migrationId" required="true"/>
+            <parameter name="enabled" type="Boolean" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="ok" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="ok" from="darpan.migration.MigrationAdminSupport.setEnabled(ec, migrationId, enabled as boolean)"/>
+        </actions>
+    </service>
+
+</services>

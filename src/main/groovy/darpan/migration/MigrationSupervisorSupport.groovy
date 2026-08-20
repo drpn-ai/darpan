@@ -17,6 +17,7 @@ class MigrationSupervisorSupport {
     static final String REGISTRY_ENTITY = "darpan.migration.DarpanMigration"
     static final String LEDGER_ENTITY = "darpan.migration.DarpanMigrationRun"
     static final String RECORD_SERVICE = "migration.MigrationServices.record#MigrationRun"
+    static final String PREREQ_ENTITY = "darpan.migration.DarpanMigrationPrereq"
 
     static final String OUTCOME_APPLIED = "APPLIED"
     static final String OUTCOME_ALREADY_APPLIED = "ALREADY_APPLIED"
@@ -33,6 +34,25 @@ class MigrationSupervisorSupport {
                 .count() > 0
     }
 
+    /**
+     * Prerequisites of this migration that have no SUCCESS ledger row.
+     *
+     * <p>Verified rather than sorted on: sequenceNum decides the order the registry is walked, these
+     * rows decide whether a migration reached in that order is allowed to run. Separating the two
+     * avoids a topological sort for what is currently seven migrations, and makes a disagreement
+     * between declared order and declared dependency visible as a BLOCKED outcome rather than as
+     * silently wrong results.</p>
+     */
+    static List<String> unmetPrereqs(def ec, String migrationId) {
+        return ec.entity.find(PREREQ_ENTITY)
+                .condition("migrationId", migrationId)
+                .orderBy("prereqMigrationId")
+                .disableAuthz()
+                .list()
+                .collect { it.getString("prereqMigrationId") }
+                .findAll { !hasSucceeded(ec, it) }
+    }
+
     static List<Map<String, Object>> runPending(def ec, boolean dryRun) {
         List<Map<String, Object>> results = []
 
@@ -47,6 +67,22 @@ class MigrationSupervisorSupport {
 
             if (hasSucceeded(ec, migrationId)) {
                 results << [migrationId: migrationId, outcome: OUTCOME_ALREADY_APPLIED]
+                return
+            }
+
+            List<String> unmet = unmetPrereqs(ec, migrationId)
+            if (unmet) {
+                String detail = "blocked: prerequisite(s) not applied — ${unmet.join(', ')}"
+                String blockedRunId = ec.service.sync()
+                        .name(RECORD_SERVICE)
+                        .parameters([migrationId  : migrationId,
+                                     statusId     : MigrationLedgerSupport.STATUS_BLOCKED,
+                                     messageDetail: detail])
+                        .disableAuthz()
+                        .call()
+                        ?.runId as String
+                results << [migrationId: migrationId, outcome: OUTCOME_BLOCKED,
+                            runId      : blockedRunId, detail: detail]
                 return
             }
             if (dryRun && row.getString("supportsDryRun") != "Y") {

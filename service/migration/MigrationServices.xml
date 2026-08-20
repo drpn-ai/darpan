@@ -63,4 +63,17 @@
         </actions>
     </service>
 
+    <service verb="list" noun="MigrationStatus" authenticate="false" allow-remote="false">
+        <description>Registry and ledger state for every registered migration, in sequence order.
+            Read-only; drives the Migrations screen.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="migrations" type="List"><parameter name="migration" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="migrations" from="darpan.migration.MigrationSupervisorSupport.statusList(ec)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+        </actions>
+    </service>
+
 </services>

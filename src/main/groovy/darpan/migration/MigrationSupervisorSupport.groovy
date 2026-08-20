@@ -53,6 +53,45 @@ class MigrationSupervisorSupport {
                 .findAll { !hasSucceeded(ec, it) }
     }
 
+    static final String STATUS_APPLIED = "APPLIED"
+    static final String STATUS_PENDING = "PENDING"
+
+    /**
+     * Registry, ledger and prerequisite state joined into one row per migration, for the admin
+     * screen. Kept in Groovy rather than screen XML so it is testable.
+     */
+    static List<Map<String, Object>> statusList(def ec) {
+        return ec.entity.find(REGISTRY_ENTITY)
+                .orderBy("sequenceNum")
+                .disableAuthz()
+                .list()
+                .collect { row ->
+                    String migrationId = row.getString("migrationId")
+
+                    def attempts = ec.entity.find(LEDGER_ENTITY)
+                            .condition("migrationId", migrationId)
+                            .orderBy("-startedDate")
+                            .disableAuthz()
+                            .list()
+                    def latest = attempts ? attempts.first() : null
+
+                    String status
+                    if (hasSucceeded(ec, migrationId)) status = STATUS_APPLIED
+                    else if (unmetPrereqs(ec, migrationId)) status = OUTCOME_BLOCKED
+                    else status = STATUS_PENDING
+
+                    return [migrationId   : migrationId,
+                            description   : row.getString("description"),
+                            sequenceNum   : row.get("sequenceNum"),
+                            supportsDryRun: row.getString("supportsDryRun") == "Y",
+                            status        : status,
+                            lastRunDate   : latest?.get("completedDate"),
+                            lastStatusId  : latest?.getString("statusId"),
+                            rowsAffected  : latest?.get("rowsAffected"),
+                            attemptCount  : attempts.size()]
+                }
+    }
+
     static List<Map<String, Object>> runPending(def ec, boolean dryRun) {
         List<Map<String, Object>> results = []
 

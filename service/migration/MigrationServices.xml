@@ -33,4 +33,34 @@
         </actions>
     </service>
 
+    <!-- transaction="ignore" on purpose: this service must not own a transaction that a failing
+         migration can poison. Each migration runs in its own; each ledger row is written by
+         record#MigrationRun in a forced-new one. -->
+    <service verb="run" noun="PendingMigrations" authenticate="false" allow-remote="false"
+             transaction="ignore">
+        <description>Run every registered migration that has no SUCCESS ledger row, in sequenceNum
+            order. Idempotent: a second run applies nothing. Not remote — an operator runs this from
+            the Migrations screen, and it deliberately sweeps every tenant's data.</description>
+        <in-parameters>
+            <parameter name="dryRun" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="results" type="List"><parameter name="result" type="Map"/></parameter>
+            <parameter name="appliedCount" type="Integer"/>
+            <parameter name="skippedCount" type="Integer"/>
+            <parameter name="blockedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="results" from="darpan.migration.MigrationSupervisorSupport.runPending(ec, dryRun as boolean)"/>
+            <set field="appliedCount" from="results.count { it.outcome == 'APPLIED' }"/>
+            <set field="skippedCount" from="results.count { it.outcome == 'ALREADY_APPLIED' || it.outcome == 'NO_PREVIEW' }"/>
+            <set field="blockedCount" from="results.count { it.outcome == 'BLOCKED' }"/>
+            <set field="failedCount" from="results.count { it.outcome == 'FAILED' }"/>
+            <set field="ok" from="failedCount == 0"/>
+            <message>Applied ${appliedCount}, skipped ${skippedCount}, blocked ${blockedCount}, failed ${failedCount}.</message>
+        </actions>
+    </service>
+
 </services>

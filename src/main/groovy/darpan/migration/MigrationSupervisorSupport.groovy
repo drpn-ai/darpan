@@ -1,5 +1,7 @@
 package darpan.migration
 
+import darpan.facade.common.TenantScopedFinder
+
 import java.sql.Timestamp
 
 /**
@@ -19,6 +21,17 @@ class MigrationSupervisorSupport {
     static final String RECORD_SERVICE = "migration.MigrationServices.record#MigrationRun"
     static final String PREREQ_ENTITY = "darpan.migration.DarpanMigrationPrereq"
 
+    /**
+     * Justifications for the tenant-unscoped reads below. The migration entities carry no
+     * companyUserGroupId at all — a migration is a property of the INSTALLATION, not of a tenant —
+     * so there is no tenant condition to apply and TenantScopedFinder.findTenantScoped would
+     * default-deny every row. findGlobalUnscoped is the sanctioned opt-out for exactly this shape.
+     */
+    static final String REGISTRY_READ_REASON =
+            "migration registry is installation-wide reference data, not tenant-owned"
+    static final String LEDGER_READ_REASON =
+            "migration ledger records what ran on this installation, not on a tenant"
+
     static final String OUTCOME_APPLIED = "APPLIED"
     static final String OUTCOME_ALREADY_APPLIED = "ALREADY_APPLIED"
     static final String OUTCOME_BLOCKED = "BLOCKED"
@@ -27,10 +40,9 @@ class MigrationSupervisorSupport {
 
     /** True when this migration has at least one SUCCESS ledger row. DRY_RUN and FAILED do not count. */
     static boolean hasSucceeded(def ec, String migrationId) {
-        return ec.entity.find(LEDGER_ENTITY)
+        return TenantScopedFinder.findGlobalUnscoped(ec, LEDGER_ENTITY, LEDGER_READ_REASON)
                 .condition("migrationId", migrationId)
                 .condition("statusId", MigrationLedgerSupport.STATUS_SUCCESS)
-                .disableAuthz()
                 .count() > 0
     }
 
@@ -44,10 +56,9 @@ class MigrationSupervisorSupport {
      * silently wrong results.</p>
      */
     static List<String> unmetPrereqs(def ec, String migrationId) {
-        return ec.entity.find(PREREQ_ENTITY)
+        return TenantScopedFinder.findGlobalUnscoped(ec, PREREQ_ENTITY, REGISTRY_READ_REASON)
                 .condition("migrationId", migrationId)
                 .orderBy("prereqMigrationId")
-                .disableAuthz()
                 .list()
                 .collect { it.getString("prereqMigrationId") }
                 .findAll { !hasSucceeded(ec, it) }
@@ -61,17 +72,16 @@ class MigrationSupervisorSupport {
      * screen. Kept in Groovy rather than screen XML so it is testable.
      */
     static List<Map<String, Object>> statusList(def ec) {
-        return ec.entity.find(REGISTRY_ENTITY)
+        return TenantScopedFinder.findGlobalUnscoped(ec, REGISTRY_ENTITY, REGISTRY_READ_REASON)
                 .orderBy("sequenceNum")
-                .disableAuthz()
                 .list()
                 .collect { row ->
                     String migrationId = row.getString("migrationId")
 
-                    def attempts = ec.entity.find(LEDGER_ENTITY)
+                    def attempts = TenantScopedFinder
+                            .findGlobalUnscoped(ec, LEDGER_ENTITY, LEDGER_READ_REASON)
                             .condition("migrationId", migrationId)
                             .orderBy("-startedDate")
-                            .disableAuthz()
                             .list()
                     def latest = attempts ? attempts.first() : null
 
@@ -95,10 +105,9 @@ class MigrationSupervisorSupport {
     static List<Map<String, Object>> runPending(def ec, boolean dryRun) {
         List<Map<String, Object>> results = []
 
-        def registryRows = ec.entity.find(REGISTRY_ENTITY)
+        def registryRows = TenantScopedFinder.findGlobalUnscoped(ec, REGISTRY_ENTITY, REGISTRY_READ_REASON)
                 .condition("enabled", "Y")
                 .orderBy("sequenceNum")
-                .disableAuthz()
                 .list()
 
         registryRows.each { row ->

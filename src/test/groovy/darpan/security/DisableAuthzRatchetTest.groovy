@@ -70,13 +70,18 @@ class DisableAuthzRatchetTest {
      * {@code AutomationFacadeSupport.backfillAutomationExcludeFilters}): one new bare service-call
      * write (create a filter row for a pre-existing automation) that has no
      * {@code TenantScopedFinder} write equivalent; its own reads use
-     * {@code findGlobalUnscoped} instead and add nothing. Remaining calls are service calls
+     * {@code findGlobalUnscoped} instead and add nothing. Raised 12 -> 15 by the migration
+     * supervisor (2026-08-20, {@code migration/MigrationSupervisorSupport}): three new bare
+     * service-call sites — the registered-migration invocation and two {@code record#MigrationRun}
+     * ledger writes — none of which has a {@code TenantScopedFinder} equivalent, since that finder
+     * wraps reads only. All five entity reads in that class use {@code findGlobalUnscoped}.
+     * Remaining calls are service calls
      * (guarded {@code metaClass.respondsTo} patterns) or the two entity-read sites that cannot
      * safely use {@code findGlobalUnscoped} without breaking test-stub compatibility
      * ({@code FacadeSupport:32}, {@code ReconciliationOutputSupport:140}). See class Javadoc
      * for the full per-site breakdown.
      */
-    static final int BASELINE = 12
+    static final int BASELINE = 15
 
     /**
      * Allowlisted files matched by their path <em>relative to srcRoot</em>

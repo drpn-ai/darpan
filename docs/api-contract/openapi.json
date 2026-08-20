@@ -33,6 +33,27 @@
                                         "$ref": "#/components/schemas/UpdateTenantMemberRoleRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/DryRunMigrationRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/DryRunPendingMigrationsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetMigrationHistoryRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetMigrationStatusRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RunMigrationRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RunPendingMigrationsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SetMigrationEnabledRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetAdminSessionInfoRequest"
                                     },
                                     {
@@ -321,6 +342,13 @@
                                         "admin.MembershipAdminServices.add#TenantMember": "#/components/schemas/AddTenantMemberRequest",
                                         "admin.MembershipAdminServices.remove#TenantMember": "#/components/schemas/RemoveTenantMemberRequest",
                                         "admin.MembershipAdminServices.update#TenantMemberRole": "#/components/schemas/UpdateTenantMemberRoleRequest",
+                                        "admin.MigrationAdminServices.dryRun#Migration": "#/components/schemas/DryRunMigrationRequest",
+                                        "admin.MigrationAdminServices.dryRun#PendingMigrations": "#/components/schemas/DryRunPendingMigrationsRequest",
+                                        "admin.MigrationAdminServices.get#MigrationHistory": "#/components/schemas/GetMigrationHistoryRequest",
+                                        "admin.MigrationAdminServices.get#MigrationStatus": "#/components/schemas/GetMigrationStatusRequest",
+                                        "admin.MigrationAdminServices.run#Migration": "#/components/schemas/RunMigrationRequest",
+                                        "admin.MigrationAdminServices.run#PendingMigrations": "#/components/schemas/RunPendingMigrationsRequest",
+                                        "admin.MigrationAdminServices.set#MigrationEnabled": "#/components/schemas/SetMigrationEnabledRequest",
                                         "admin.ObserveAdminServices.get#AdminSessionInfo": "#/components/schemas/GetAdminSessionInfoRequest",
                                         "admin.TenantAdminServices.create#Tenant": "#/components/schemas/CreateTenantRequest",
                                         "admin.TenantAdminServices.deactivate#Tenant": "#/components/schemas/DeactivateTenantRequest",
@@ -439,6 +467,27 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/UpdateTenantMemberRoleResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/DryRunMigrationResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/DryRunPendingMigrationsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetMigrationHistoryResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetMigrationStatusResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RunMigrationResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RunPendingMigrationsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SetMigrationEnabledResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetAdminSessionInfoResponse"
@@ -1057,6 +1106,778 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/UpdateTenantMemberRoleResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "DryRunMigrationParams": {
+                "type": "object",
+                "properties": {
+                    "migrationId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "migrationId"
+                ],
+                "description": "Preview one named migration."
+            },
+            "DryRunMigrationResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "outcome": {
+                        "type": "string"
+                    },
+                    "runId": {
+                        "type": "string"
+                    },
+                    "rowsAffected": {
+                        "type": "integer"
+                    },
+                    "detail": {
+                        "type": "string"
+                    }
+                }
+            },
+            "DryRunMigrationRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.MigrationAdminServices.dryRun#Migration",
+                "x-darpan-method": "admin.MigrationAdminServices.dryRun#Migration",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.MigrationAdminServices.dryRun#Migration"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DryRunMigrationParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DryRunMigrationResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.MigrationAdminServices.dryRun#Migration. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DryRunMigrationResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "DryRunPendingMigrationsParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "Preview what running the pending migrations would do. Writes DRY_RUN ledger rows\n            only; a DRY_RUN row never satisfies the already-applied check."
+            },
+            "DryRunPendingMigrationsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "result": {
+                                    "type": "object",
+                                    "properties": {
+                                        "migrationId": {
+                                            "type": "string"
+                                        },
+                                        "outcome": {
+                                            "type": "string"
+                                        },
+                                        "runId": {
+                                            "type": "string"
+                                        },
+                                        "rowsAffected": {
+                                            "type": "integer"
+                                        },
+                                        "detail": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "appliedCount": {
+                        "type": "integer"
+                    },
+                    "skippedCount": {
+                        "type": "integer"
+                    },
+                    "blockedCount": {
+                        "type": "integer"
+                    },
+                    "failedCount": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "DryRunPendingMigrationsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.MigrationAdminServices.dryRun#PendingMigrations",
+                "x-darpan-method": "admin.MigrationAdminServices.dryRun#PendingMigrations",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.MigrationAdminServices.dryRun#PendingMigrations"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DryRunPendingMigrationsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DryRunPendingMigrationsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.MigrationAdminServices.dryRun#PendingMigrations. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DryRunPendingMigrationsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetMigrationHistoryParams": {
+                "type": "object",
+                "properties": {
+                    "migrationId": {
+                        "type": "string"
+                    },
+                    "maxRows": {
+                        "type": "integer",
+                        "description": "Default 50."
+                    }
+                },
+                "required": [
+                    "migrationId"
+                ],
+                "description": "Every recorded attempt at one migration, newest first, each with its own\n            sanitized failure detail. This is how a failed migration is diagnosed without database\n            access."
+            },
+            "GetMigrationHistoryResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "attempts": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "attempt": {
+                                    "type": "object",
+                                    "properties": {
+                                        "runId": {
+                                            "type": "string"
+                                        },
+                                        "statusId": {
+                                            "type": "string"
+                                        },
+                                        "startedDate": {
+                                            "oneOf": [
+                                                {
+                                                    "type": "string"
+                                                },
+                                                {
+                                                    "type": "number"
+                                                }
+                                            ],
+                                            "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                        },
+                                        "completedDate": {
+                                            "oneOf": [
+                                                {
+                                                    "type": "string"
+                                                },
+                                                {
+                                                    "type": "number"
+                                                }
+                                            ],
+                                            "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                        },
+                                        "appliedByUserId": {
+                                            "type": "string"
+                                        },
+                                        "rowsAffected": {
+                                            "type": "integer"
+                                        },
+                                        "messageDetail": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "GetMigrationHistoryRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.MigrationAdminServices.get#MigrationHistory",
+                "x-darpan-method": "admin.MigrationAdminServices.get#MigrationHistory",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.MigrationAdminServices.get#MigrationHistory"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetMigrationHistoryParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetMigrationHistoryResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.MigrationAdminServices.get#MigrationHistory. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetMigrationHistoryResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetMigrationStatusParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "Registry and ledger state for every registered migration on this installation,\n            in sequence order, including the detail of the most recent attempt. Read-only."
+            },
+            "GetMigrationStatusResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "migrations": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "migration": {
+                                    "type": "object",
+                                    "properties": {
+                                        "migrationId": {
+                                            "type": "string"
+                                        },
+                                        "description": {
+                                            "type": "string"
+                                        },
+                                        "sequenceNum": {
+                                            "type": "integer"
+                                        },
+                                        "supportsDryRun": {
+                                            "type": "boolean"
+                                        },
+                                        "enabled": {
+                                            "type": "boolean"
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "description": "APPLIED | PENDING | BLOCKED | DISABLED"
+                                        },
+                                        "lastRunDate": {
+                                            "oneOf": [
+                                                {
+                                                    "type": "string"
+                                                },
+                                                {
+                                                    "type": "number"
+                                                }
+                                            ],
+                                            "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                        },
+                                        "lastStatusId": {
+                                            "type": "string"
+                                        },
+                                        "lastMessageDetail": {
+                                            "type": "string",
+                                            "description": "Sanitized detail of the most recent attempt."
+                                        },
+                                        "lastRunId": {
+                                            "type": "string"
+                                        },
+                                        "rowsAffected": {
+                                            "type": "integer"
+                                        },
+                                        "attemptCount": {
+                                            "type": "integer"
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "description": "One row per registered migration, sequenceNum order."
+                    }
+                }
+            },
+            "GetMigrationStatusRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.MigrationAdminServices.get#MigrationStatus",
+                "x-darpan-method": "admin.MigrationAdminServices.get#MigrationStatus",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.MigrationAdminServices.get#MigrationStatus"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetMigrationStatusParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetMigrationStatusResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.MigrationAdminServices.get#MigrationStatus. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetMigrationStatusResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RunMigrationParams": {
+                "type": "object",
+                "properties": {
+                    "migrationId": {
+                        "type": "string"
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "description": "Re-run even when a SUCCESS row exists \u2014 for re-running an idempotent\n                    backfill. Never overrides prerequisites."
+                    }
+                },
+                "required": [
+                    "migrationId"
+                ],
+                "description": "Run one named migration, for targeted remediation. Parked migrations are\n            refused, prerequisites are enforced, and an already-applied migration is skipped unless\n            force is set."
+            },
+            "RunMigrationResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "outcome": {
+                        "type": "string",
+                        "description": "APPLIED | ALREADY_APPLIED | BLOCKED | FAILED | DISABLED | NOT_FOUND | NO_PREVIEW"
+                    },
+                    "runId": {
+                        "type": "string"
+                    },
+                    "rowsAffected": {
+                        "type": "integer"
+                    },
+                    "detail": {
+                        "type": "string"
+                    }
+                }
+            },
+            "RunMigrationRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.MigrationAdminServices.run#Migration",
+                "x-darpan-method": "admin.MigrationAdminServices.run#Migration",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.MigrationAdminServices.run#Migration"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RunMigrationParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RunMigrationResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.MigrationAdminServices.run#Migration. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RunMigrationResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RunPendingMigrationsParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "Run every registered migration on this installation with no SUCCESS ledger row,\n            in sequence order. Idempotent: a second call applies nothing. Sweeps every tenant's data;\n            super admin only."
+            },
+            "RunPendingMigrationsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "result": {
+                                    "type": "object",
+                                    "properties": {
+                                        "migrationId": {
+                                            "type": "string"
+                                        },
+                                        "outcome": {
+                                            "type": "string"
+                                        },
+                                        "runId": {
+                                            "type": "string"
+                                        },
+                                        "rowsAffected": {
+                                            "type": "integer"
+                                        },
+                                        "detail": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "appliedCount": {
+                        "type": "integer"
+                    },
+                    "skippedCount": {
+                        "type": "integer"
+                    },
+                    "blockedCount": {
+                        "type": "integer"
+                    },
+                    "failedCount": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "RunPendingMigrationsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.MigrationAdminServices.run#PendingMigrations",
+                "x-darpan-method": "admin.MigrationAdminServices.run#PendingMigrations",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.MigrationAdminServices.run#PendingMigrations"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RunPendingMigrationsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RunPendingMigrationsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.MigrationAdminServices.run#PendingMigrations. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RunPendingMigrationsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SetMigrationEnabledParams": {
+                "type": "object",
+                "properties": {
+                    "migrationId": {
+                        "type": "string"
+                    },
+                    "enabled": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "migrationId",
+                    "enabled"
+                ],
+                "description": "Park or unpark a migration on this installation. Parking lets the rest of a\n            sweep through when one migration is broken, instead of stranding the whole upgrade.\n            A parked migration reports status DISABLED and is refused even when named directly."
+            },
+            "SetMigrationEnabledResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "SetMigrationEnabledRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.MigrationAdminServices.set#MigrationEnabled",
+                "x-darpan-method": "admin.MigrationAdminServices.set#MigrationEnabled",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.MigrationAdminServices.set#MigrationEnabled"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SetMigrationEnabledParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SetMigrationEnabledResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.MigrationAdminServices.set#MigrationEnabled. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SetMigrationEnabledResult"
                     }
                 },
                 "required": [
@@ -15287,6 +16108,13 @@
         "admin.MembershipAdminServices.add#TenantMember": "AddTenantMember",
         "admin.MembershipAdminServices.remove#TenantMember": "RemoveTenantMember",
         "admin.MembershipAdminServices.update#TenantMemberRole": "UpdateTenantMemberRole",
+        "admin.MigrationAdminServices.dryRun#Migration": "DryRunMigration",
+        "admin.MigrationAdminServices.dryRun#PendingMigrations": "DryRunPendingMigrations",
+        "admin.MigrationAdminServices.get#MigrationHistory": "GetMigrationHistory",
+        "admin.MigrationAdminServices.get#MigrationStatus": "GetMigrationStatus",
+        "admin.MigrationAdminServices.run#Migration": "RunMigration",
+        "admin.MigrationAdminServices.run#PendingMigrations": "RunPendingMigrations",
+        "admin.MigrationAdminServices.set#MigrationEnabled": "SetMigrationEnabled",
         "admin.ObserveAdminServices.get#AdminSessionInfo": "GetAdminSessionInfo",
         "admin.TenantAdminServices.create#Tenant": "CreateTenant",
         "admin.TenantAdminServices.deactivate#Tenant": "DeactivateTenant",

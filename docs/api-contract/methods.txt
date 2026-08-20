@@ -1,6 +1,13 @@
 admin.MembershipAdminServices.add#TenantMember
 admin.MembershipAdminServices.remove#TenantMember
 admin.MembershipAdminServices.update#TenantMemberRole
+admin.MigrationAdminServices.dryRun#Migration
+admin.MigrationAdminServices.dryRun#PendingMigrations
+admin.MigrationAdminServices.get#MigrationHistory
+admin.MigrationAdminServices.get#MigrationStatus
+admin.MigrationAdminServices.run#Migration
+admin.MigrationAdminServices.run#PendingMigrations
+admin.MigrationAdminServices.set#MigrationEnabled
 admin.ObserveAdminServices.get#AdminSessionInfo
 admin.TenantAdminServices.create#Tenant
 admin.TenantAdminServices.deactivate#Tenant

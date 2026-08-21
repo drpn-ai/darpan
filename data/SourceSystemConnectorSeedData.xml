@@ -199,7 +199,7 @@
             endpointLabel="Shopify Return References"
             systemAliases="SHOPIFY_RETURN_REFS,SHOPIFY_RETURNS,DAR_SYS_SHOPIFY_RETURN_REFS"
             preserveWindowInstants="N"
-            keepFieldsBase="refundOrReturnId,refundOrReturnType,orderId,createdAt,orderCancelledAt"
+            keepFieldsBase="refundOrReturnId,refundOrReturnType,orderId,createdAt,orderCancelledAt,refundLineEverFulfilled"
             lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyRefundOrReturnIds"
             lookupIdsParameterName="refundOrReturnIds"
             lookupMaxIds="10000"

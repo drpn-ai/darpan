@@ -136,6 +136,16 @@ class ReturnPresenceVerificationSupportTests {
         ])
     }
 
+    /** Missing-in-OMS REFUND row carrying the tri-state cancelled-item verdict. */
+    private static Map missingInOmsRefundWithFulfilment(String id, long createdAtMillis, Boolean everFulfilled,
+                                                        String orderId = DEFAULT_ORDER_ID) {
+        Map data = [refundOrReturnId: id, refundOrReturnType: "REFUND", orderId: orderId,
+                    createdAt: isoInstant(createdAtMillis), refundLineEverFulfilled: everFulfilled]
+        return [diffType : "MISSING_IN_FILE_1", primaryId: id, presentIn: SHOPIFY_LABEL, missingIn: OMS_LABEL,
+                data     : JsonOutput.toJson(data),
+                message  : "Present in ${SHOPIFY_LABEL}, missing in ${OMS_LABEL}".toString()]
+    }
+
     private static String isoInstant(long millis) {
         return new Date(millis).toInstant().toString()
     }
@@ -775,5 +785,68 @@ class ReturnPresenceVerificationSupportTests {
 
         assertEquals(900, read.size())
         assertTrue(read.contains("order1") && read.contains("order900"))
+    }
+
+    // --- CANCELLED-ITEM SUPPRESSION (2026-08-21): a refund whose lines never shipped cannot be a
+    // return. Measured 22/25 on unmatched refunds and 0/8 on matched ones.
+
+    @Test
+    void suppressesAMissingInOmsRefundWhoseLineWasNeverShipped() {
+        File diff = writeDiffDocument([missingInOmsRefundWithFulfilment("955076870275", OLD, Boolean.FALSE)])
+
+        Map result = verify(diff)
+
+        assertEquals(1, result.cancelledItemSuppressedCount)
+        assertEquals(1, result.removedCount)
+        assertTrue((result.auditNote as String).contains("cancelled-item refund"))
+        assertEquals([], (List) parseDocument(diff).differences)
+    }
+
+    @Test
+    void keepsAMissingInOmsRefundWhoseLineWasShipped() {
+        File diff = writeDiffDocument([missingInOmsRefundWithFulfilment("955071692931", OLD, Boolean.TRUE)])
+
+        Map result = verify(diff)
+
+        assertEquals(0, result.cancelledItemSuppressedCount)
+        assertEquals(0, result.removedCount)
+    }
+
+    @Test
+    void treatsAnUnknownFulfilmentVerdictAsKeepNotSuppress() {
+        // null means the fulfillment view was truncated or unreadable. Suppressing on ignorance is the
+        // one direction that hides real differences, so unknown must never collapse into "cancelled".
+        File diff = writeDiffDocument([missingInOmsRefundWithFulfilment("955180187779", OLD, null)])
+
+        Map result = verify(diff)
+
+        assertEquals(0, result.cancelledItemSuppressedCount)
+        assertEquals(0, result.removedCount)
+        assertEquals(["955180187779"], ((List) parseDocument(diff).differences).collect { it.primaryId })
+    }
+
+    @Test
+    void neverAppliesTheCancelledItemRuleToTheMissingInShopifyDirection() {
+        // Direction gate, same as every other rule here: an OMS return with no Shopify event is a
+        // different question entirely, and the field does not even exist on that side's rows.
+        File diff = writeDiffDocument([missingInShopifyRow("26949222531", OLD)])
+
+        Map result = verify(diff)
+
+        assertEquals(0, result.cancelledItemSuppressedCount)
+        assertEquals(["26949222531"], ((List) parseDocument(diff).differences).collect { it.primaryId })
+    }
+
+    @Test
+    void countsCancelledItemAndSupersededSuppressionsSeparately() {
+        File diff = writeDiffDocument([
+                missingInOmsRefundWithFulfilment("955076870275", OLD, Boolean.FALSE, "8001"),
+                missingInOmsRowWithCancellationField("27051229315", OLD, null, "RETURN", "8002")])
+
+        Map result = verifyWithOmsExtract(diff, writeOmsExtract(["8002"]))
+
+        assertEquals(1, result.cancelledItemSuppressedCount)
+        assertEquals(1, result.siblingReturnSuppressedCount)
+        assertEquals(2, result.removedCount)
     }
 }

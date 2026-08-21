@@ -148,6 +148,8 @@ class ReturnPresenceVerificationSupport {
     static final String CANCELLED_ORDER_STATUS_ID = "ORDER_CANCELLED"
     /** Order-level cancellation marker stamped on every Shopify event row by ShopifyReturnRefsSupport. */
     static final String ORDER_CANCELLED_AT_FIELD = "orderCancelledAt"
+    /** Tri-state on a REFUND row: TRUE shipped, FALSE never shipped, absent/null unknown. */
+    static final String REFUND_LINE_EVER_FULFILLED_FIELD = "refundLineEverFulfilled"
     static final String EVENT_TYPE_REFUND = "REFUND"
     static final String EVENT_TYPE_RETURN = "RETURN"
     /** Streaming scan target — extracts reach GB scale and only this one field is needed. */
@@ -232,6 +234,7 @@ class ReturnPresenceVerificationSupport {
         int preWindowCount = 0
         int cancelledByFieldCount = 0
         int siblingReturnCount = 0
+        int cancelledItemCount = 0
         int malformedCount = 0
         boolean sawDifferencesHeader = false
 
@@ -320,6 +323,22 @@ class ReturnPresenceVerificationSupport {
                 // books ONE return per settled outcome, keyed on the refund. So the leftovers are
                 // Shopify bookkeeping, not gaps. RETURN ONLY — a second REFUND on an
                 // already-reconciled order is a real event and must stay visible.
+                // CANCELLED-ITEM SUPPRESSION (2026-08-21). A refund whose lines were never shipped is
+                // an item cancellation, and OMS books a cancellation rather than a return — so no
+                // counterpart can ever exist. Structural, like the order-level rule, not a
+                // correlation: an item that never shipped cannot have been returned.
+                //
+                // Strictly FALSE, never falsy. The field is tri-state and null means "we could not
+                // tell" (a truncated fulfillment view, or a refund whose line list saturated). Reading
+                // null as false would suppress on ignorance, which is the one direction that hides
+                // real differences.
+                boolean cancelledItemSuppressed = false
+                if (missingInOms && !remove &&
+                        EVENT_TYPE_REFUND.equalsIgnoreCase(normalize(data.get("refundOrReturnType"))) &&
+                        Boolean.FALSE == data.get(REFUND_LINE_EVER_FULFILLED_FIELD)) {
+                    remove = true
+                    cancelledItemSuppressed = true
+                }
                 boolean siblingSuppressed = false
                 if (missingInOms && !remove && !omsOrderIds.isEmpty() &&
                         EVENT_TYPE_RETURN.equalsIgnoreCase(normalize(data.get("refundOrReturnType")))) {
@@ -338,6 +357,7 @@ class ReturnPresenceVerificationSupport {
                 else if (preWindow) preWindowCount++
                 else if (cancelledByField) cancelledByFieldCount++
                 else if (siblingSuppressed) siblingReturnCount++
+                else if (cancelledItemSuppressed) cancelledItemCount++
             }
         }
         if (!sawDifferencesHeader) {
@@ -388,11 +408,11 @@ class ReturnPresenceVerificationSupport {
         }
 
         int removedCount = (removeIdsByToken.values()*.size().sum() ?: 0) as int
-        String auditNote = buildAuditNote(pendingCount, preWindowCount, graceHours, cancelledRefundCount, siblingReturnCount)
+        String auditNote = buildAuditNote(pendingCount, preWindowCount, graceHours, cancelledRefundCount, siblingReturnCount, cancelledItemCount)
         if (removedCount == 0) {
             return [performed: true, rewritten: false, pendingCount: 0, preWindowSuppressedCount: 0,
                     malformedCount: malformedCount, removedCount: 0, removedMissingInFile1: 0, removedMissingInFile2: 0,
-                    cancelledRefundSuppressedCount: 0, siblingReturnSuppressedCount: 0,
+                    cancelledRefundSuppressedCount: 0, siblingReturnSuppressedCount: 0, cancelledItemSuppressedCount: 0,
                     warnings: warnings, auditNote: auditNote] as Map<String, Object>
         }
 
@@ -466,6 +486,7 @@ class ReturnPresenceVerificationSupport {
                 removedMissingInFile1: removedMissingInFile1, removedMissingInFile2: removedMissingInFile2,
                 cancelledRefundSuppressedCount: cancelledRefundCount,
                 siblingReturnSuppressedCount: siblingReturnCount,
+                cancelledItemSuppressedCount: cancelledItemCount,
                 warnings: warnings, auditNote: auditNote] as Map<String, Object>
     }
 
@@ -628,7 +649,8 @@ class ReturnPresenceVerificationSupport {
     }
 
     private static String buildAuditNote(int pendingCount, int preWindowCount, int graceHours,
-                                         int cancelledRefundCount, int siblingReturnCount = 0) {
+                                         int cancelledRefundCount, int siblingReturnCount = 0,
+                                         int cancelledItemCount = 0) {
         String note = "${AUDIT_NOTE_PREFIX}${pendingCount} pending (younger than ${graceHours}h)."
         if (preWindowCount > 0) {
             note += " ${preWindowCount} pre-window Shopify event(s) excluded from the missing-in-OMS count (extractor lookback artifact, not a genuine gap)."
@@ -638,6 +660,9 @@ class ReturnPresenceVerificationSupport {
         }
         if (siblingReturnCount > 0) {
             note += " ${siblingReturnCount} superseded return(s) suppressed from the missing-in-OMS count — OMS booked a return for the same order, so the leftover Shopify Return object is bookkeeping, not a gap."
+        }
+        if (cancelledItemCount > 0) {
+            note += " ${cancelledItemCount} cancelled-item refund(s) suppressed from the missing-in-OMS count — the refunded line was never shipped, so it cannot have been returned and OMS books a cancellation instead."
         }
         return note
     }

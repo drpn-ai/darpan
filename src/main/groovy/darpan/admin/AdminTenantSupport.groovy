@@ -21,6 +21,8 @@ class AdminTenantSupport {
         if (ec.entity.find("moqui.security.UserGroup").condition("userGroupId", tenantId).one() != null) {
             ec.message.addError("Tenant ${tenantId} already exists."); return null
         }
+        String createTimeZoneError = timeZone?.trim() ? TenantAccessSupport.validateTimeZone(timeZone) : null
+        if (createTimeZoneError) { ec.message.addError(createTimeZoneError); return null }
         ec.service.sync().name("create#moqui.security.UserGroup").parameters([
             userGroupId: tenantId, description: label.trim(),
             groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID,
@@ -39,6 +41,14 @@ class AdminTenantSupport {
         if (!AdminAccessSupport.requireSuperAdmin(ec)) return false
         def group = findTenantGroup(ec, tenantUserGroupId)
         if (group == null) return false
+        // Validate BEFORE any write, the same way TenantAccessSupport.saveUserSettings does: a
+        // rejected timezone must not leave a half-applied rename behind. An unvalidated zone is
+        // also invisible downstream — the browser's Intl silently falls back to the viewer's own
+        // zone, so timestamps keep rendering and merely stop agreeing with the schedule label.
+        if (timeZone?.trim()) {
+            String timeZoneError = TenantAccessSupport.validateTimeZone(timeZone)
+            if (timeZoneError) { ec.message.addError(timeZoneError); return false }
+        }
         if (label?.trim()) {
             ec.service.sync().name("update#moqui.security.UserGroup").parameters([
                 userGroupId: tenantUserGroupId, description: label.trim()]).call()

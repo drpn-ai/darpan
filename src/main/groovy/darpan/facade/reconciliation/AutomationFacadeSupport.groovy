@@ -560,6 +560,45 @@ class AutomationFacadeSupport {
         } as List<Map<String, Object>>
     }
 
+    /**
+     * A complete save#Automation in-map for a sync: every operator-owned field read back off the
+     * stored row, the derived input mode, and the merged source entries. Sync delegates persistence to
+     * save#Automation rather than growing a second writer, so this map is the whole contract.
+     *
+     * Three shapes here are load-bearing:
+     *   `sources` is the declared parameter name. `sourceEntries` is the internal name that
+     *     prepareAutomationSave reads after the XML rebuilds the list, and would be silently ignored.
+     *   isActive is a BOOLEAN — prepareAutomationSave reads `input.isActive == false`, so the stored
+     *     "N" string compares false and would silently reactivate a paused automation.
+     *   nextScheduledFireTime/lastScheduledFireTime pass through — omit them and the next fire is
+     *     recomputed from now, shifting a schedule sync must leave alone.
+     */
+    static Map<String, Object> buildAutomationSyncPayload(def automation, String derivedInputModeEnumId,
+            List<Map<String, Object>> sourceEntries) {
+        return [
+                automationId            : normalize(readField(automation, "automationId")),
+                automationName          : readField(automation, "automationName"),
+                description             : readField(automation, "description"),
+                savedRunId              : normalize(readField(automation, "savedRunId")),
+                savedRunType            : normalizeLower(readField(automation, "savedRunType")) ?: "ruleset",
+                inputModeEnumId         : derivedInputModeEnumId,
+                scheduleExpr            : readField(automation, "scheduleExpr"),
+                nextScheduledFireTime   : readField(automation, "nextScheduledFireTime"),
+                lastScheduledFireTime   : readField(automation, "lastScheduledFireTime"),
+                relativeWindowTypeEnumId: readField(automation, "relativeWindowTypeEnumId"),
+                relativeWindowCount     : readField(automation, "relativeWindowCount"),
+                customWindowStartDate   : readField(automation, "customWindowStartDate"),
+                customWindowEndDate     : readField(automation, "customWindowEndDate"),
+                maxWindowDays           : readField(automation, "maxWindowDays"),
+                splitWindowDays         : readField(automation, "splitWindowDays"),
+                windowTimeZone          : readField(automation, "windowTimeZone"),
+                safeConfigJson          : readField(automation, "safeConfigJson"),
+                chatSpaceId             : normalize(readField(automation, "chatSpaceId")) ?: null,
+                isActive                : normalize(readField(automation, "isActive")) != "N",
+                sources                 : sourceEntries ?: [],
+        ] as Map<String, Object>
+    }
+
 
     /**
      * One-time backfill for automations created before exclusion filters existed. The create-time

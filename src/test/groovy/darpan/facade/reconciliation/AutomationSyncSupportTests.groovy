@@ -143,4 +143,77 @@ class AutomationSyncSupportTests {
                 [storedSftpSource("FILE_1"), storedSftpSource("FILE_2")], derivedFile1(), [:])
         assertEquals(["FILE_1"], merged.collect { ((Map) it).fileSide })
     }
+
+    private static Map pausedAutomation() {
+        return [
+                automationId            : "AUT1",
+                automationName          : "Orders Daily Reconciliation",
+                description             : "nightly",
+                savedRunId              : "RS_ORDERS",
+                savedRunType            : "ruleset",
+                inputModeEnumId         : AutomationFacadeSupport.INPUT_MODE_SFTP_FILES,
+                scheduleExpr            : "0 0 7 * * ?",
+                nextScheduledFireTime   : new java.sql.Timestamp(1_800_000_000_000L),
+                lastScheduledFireTime   : new java.sql.Timestamp(1_700_000_000_000L),
+                relativeWindowTypeEnumId: "AUT_WIN_PREV_DAY",
+                relativeWindowCount     : 1,
+                maxWindowDays           : 28,
+                splitWindowDays         : 28,
+                windowTimeZone          : "Asia/Kolkata",
+                chatSpaceId             : "CS1",
+                isActive                : "N",
+        ]
+    }
+
+    @Test
+    void syncPayloadPassesIsActiveAsBooleanSoAPausedAutomationStaysPaused() {
+        Map payload = AutomationFacadeSupport.buildAutomationSyncPayload(
+                pausedAutomation(), AutomationFacadeSupport.INPUT_MODE_API_RANGE, [])
+        // prepareAutomationSave reads `input.isActive == false`; the stored "N" string yields "Y".
+        assertEquals(Boolean.FALSE, payload.isActive)
+    }
+
+    @Test
+    void syncPayloadCarriesTheStoredFireTimesSoTheScheduleDoesNotShift() {
+        Map automation = pausedAutomation()
+        Map payload = AutomationFacadeSupport.buildAutomationSyncPayload(
+                automation, AutomationFacadeSupport.INPUT_MODE_API_RANGE, [])
+        assertEquals(automation.nextScheduledFireTime, payload.nextScheduledFireTime)
+        assertEquals(automation.lastScheduledFireTime, payload.lastScheduledFireTime)
+    }
+
+    @Test
+    void syncPayloadNamesTheSourceListSourcesNotSourceEntries() {
+        List entries = [[fileSide: "FILE_1"]]
+        Map payload = AutomationFacadeSupport.buildAutomationSyncPayload(
+                pausedAutomation(), AutomationFacadeSupport.INPUT_MODE_API_RANGE, entries)
+        // save#Automation declares `sources`; `sourceEntries` is its internal name and is ignored.
+        assertEquals(entries, payload.get("sources"))
+        assertFalse(payload.containsKey("sourceEntries"))
+    }
+
+    @Test
+    void syncPayloadPreservesEveryOperatorOwnedAutomationField() {
+        Map payload = AutomationFacadeSupport.buildAutomationSyncPayload(
+                pausedAutomation(), AutomationFacadeSupport.INPUT_MODE_API_RANGE, [])
+        assertEquals("Orders Daily Reconciliation", payload.automationName)
+        assertEquals("nightly", payload.description)
+        assertEquals("0 0 7 * * ?", payload.scheduleExpr)
+        assertEquals("AUT_WIN_PREV_DAY", payload.relativeWindowTypeEnumId)
+        assertEquals(1, payload.relativeWindowCount)
+        assertEquals("Asia/Kolkata", payload.windowTimeZone)
+        assertEquals("CS1", payload.chatSpaceId)
+        assertEquals(28, payload.maxWindowDays)
+        assertEquals(28, payload.splitWindowDays)
+    }
+
+    @Test
+    void syncPayloadKeepsTheSavedRunAndTakesTheDerivedInputMode() {
+        Map payload = AutomationFacadeSupport.buildAutomationSyncPayload(
+                pausedAutomation(), AutomationFacadeSupport.INPUT_MODE_API_RANGE, [])
+        assertEquals("RS_ORDERS", payload.savedRunId)
+        assertEquals("ruleset", payload.savedRunType)
+        assertEquals(AutomationFacadeSupport.INPUT_MODE_API_RANGE, payload.inputModeEnumId)
+        assertEquals("AUT1", payload.automationId)
+    }
 }

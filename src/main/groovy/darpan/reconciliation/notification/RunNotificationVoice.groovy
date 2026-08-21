@@ -90,46 +90,57 @@ class RunNotificationVoice {
         return pool.get(RANDOM.nextInt(pool.size()))
     }
 
+    /**
+     * The verdict clause. This is the ONE place a clean run asserts that it is clean — every other
+     * pool adds a different dimension. Entries carry no terminator: the plain tier fuses a tail
+     * clause straight onto them, and the renderer supplies the full stop otherwise.
+     */
     static final List<String> CLEAN_HEADLINES = [
-            "spotless.",
-            "nothing to see here. In the best way.",
-            "all lined up.",
-            "clean.",
-            "not a single one out of place.",
-            "no notes.",
-            "everything lined up.",
-            "quiet. Properly quiet.",
+            "every record lined up",
+            "everything lined up, both sides",
+            "no gaps, no mismatches",
+            "every record accounted for on both sides",
+            "both systems came back with the same story",
+            "clean the whole way through",
+            "nothing out of place on either side",
+            "every record matched, start to finish",
     ].asImmutable()
 
-    static final List<String> CLEAN_SUBLINES = [
-            "All lined up. Nobody has to be a hero today.",
-            "No follow-ups. No thread. No \"quick question\".",
-            "This one's not going in anyone's standup.",
-            "Nothing to chase. Go be unreachable for twenty minutes.",
-            "Zero across the board. Have the second coffee.",
-            "Both systems told the same story. Rare. Enjoy it.",
-            "Every record lined up. Nothing owed.",
-            "Not one out of place. Take the win.",
+    /**
+     * Fused onto the verdict when there is no streak and no time hook. These are continuations, not
+     * sentences: each must open with a comma or a dash so it attaches grammatically. The old pool
+     * held standalone sentences, every one of which re-asserted the headline's own claim.
+     */
+    static final List<String> CLEAN_TAILS = [
+            ", nothing to chase.",
+            ", nothing owed.",
+            " — nothing here needs a follow-up.",
+            ", so this one's not going in anyone's standup.",
+            ", and nobody has to be a hero today.",
+            " — no thread, no \"quick question\".",
     ].asImmutable()
 
+    // Time closers carry the time consequence and nothing else. Saying "clean" here would repeat
+    // the verdict the headline already delivered, which is exactly what made the old message read
+    // as three shuffled synonyms. One sentence each: a second one competes with the first.
     static final List<String> FRIDAY_AFTERNOON_LINES = [
-            "Friday afternoon, and it's clean. Go.",
-            "Friday, and nothing's outstanding. Good timing.",
+            "Nothing following you into Friday evening.",
+            "Good way to head into the weekend.",
     ].asImmutable()
 
     static final List<String> EARLY_MORNING_LINES = [
-            "Clean before 7am. Better colleague than most.",
-            "Sorted before the office filled up.",
+            "Sorted before the office was even open.",
+            "Done before anyone was at a desk.",
     ].asImmutable()
 
     static final List<String> MONDAY_MORNING_LINES = [
-            "Monday morning. Nothing's on fire.",
-            "Week starts clean. Rare and welcome.",
+            "Nothing waiting for you at the top of the week.",
+            "Decent way to start the week.",
     ].asImmutable()
 
     static final List<String> MIDDAY_LINES = [
-            "Clean run over lunch. Undisturbed.",
-            "Mid-day, all lined up. Carry on.",
+            "Nothing to interrupt the afternoon.",
+            "Back to your lunch.",
     ].asImmutable()
 
     /**
@@ -138,8 +149,9 @@ class RunNotificationVoice {
      * computes "Friday afternoon" five and a half hours out for a team on IST, flipping the day for
      * anything after 18:30.
      *
-     * Returning null outside these windows is deliberate: most runs get no time-of-day line, which is
-     * what keeps the ones that do land feeling observed rather than mechanical.
+     * Returning null outside these windows is deliberate. It is also load-bearing: a null here with
+     * no streak is what drops the message to a single fused line, so most clean runs are one
+     * sentence and the ones that earn a second line read as observed rather than mechanical.
      */
     static String timeOfDayLine(ZonedDateTime moment) {
         if (moment == null) return null
@@ -153,10 +165,15 @@ class RunNotificationVoice {
         return null
     }
 
+    /**
+     * Streak closers open with a connective so they read as continuing the verdict rather than
+     * starting a second, unrelated thought. One sentence each — the old entries each appended a
+     * punchline ("It's getting cocky"), giving the message two closers competing for the last word.
+     */
     static final List<String> STREAK_TEMPLATES = [
-            "{n} in a row. It's getting cocky.",
-            "{n} straight. Somebody should say something nice to it.",
-            "{n} clean runs back to back. Unbothered.",
+            "That's {n} in a row now.",
+            "Makes it {n} straight.",
+            "{n} in a row, and whatever you changed is holding.",
     ].asImmutable()
 
     /** How far back the streak lookback reads. Rendered as "N and counting." once reached. */
@@ -192,7 +209,7 @@ class RunNotificationVoice {
             // Humour is off from here up. The XML service adds the status and warning lines.
             lines << (bucket == BUCKET_FAILED
                     ? "${runName} did not finish.".toString()
-                    : "${runName} finished. Not cleanly.".toString())
+                    : "${runName} finished, but not cleanly.".toString())
             // The FLAVOUR is switched off above ISSUES — the NUMBERS are not. A run that failed
             // partway still produced a partial result, and those counts are the operator's only
             // handle on what did get compared. Dropping them would trade one silent alert
@@ -203,21 +220,40 @@ class RunNotificationVoice {
             return lines
         }
 
-        if (bucket == BUCKET_CLEAN) {
-            lines << "${runName} — ${pickLine(CLEAN_HEADLINES, "headline")}".toString()
-            String subline = pickLine(CLEAN_SUBLINES, "subline")
-            if (subline) lines << subline
-            String timeLine = timeOfDayLine((ZonedDateTime) safeModel.get("completedMoment"))
-            if (timeLine) lines << timeLine
-            String streak = streakLine(toCount(safeModel.get("priorCleanRuns")))
-            if (streak) lines << streak
-            return lines
-        }
+        if (bucket == BUCKET_CLEAN) return renderClean(runName, safeModel)
 
-        lines << "${runName} — ${total} to look at.".toString()
-        lines << sublineFor(bucket, missingFromFile1, missingFromFile2, mismatches, file1Label, file2Label)
+        lines << headlineFor(bucket, runName, total, missingFromFile2, mismatches, file1Label, file2Label)
+        lines << diagnosisFor(bucket, mismatches)
         lines.addAll(detailsBlock(missingFromFile1, missingFromFile2, mismatches, file1Label, file2Label))
         return lines
+    }
+
+    /**
+     * A clean run renders as a verdict plus AT MOST ONE closer.
+     *
+     * The old shape drew a headline, a subline and a time line from three independent pools and
+     * printed all of them (plus a streak, so a clean run on a streak stacked four lines). Every pool
+     * asserted the same proposition, so lines two onward carried no information line one had not
+     * already spent, and each arrived with its own subject and its own punchline. Independent random
+     * draws across synonymous pools do not produce variety; they produce noise.
+     *
+     * Closers are ranked by information value. A streak is a fact the operator does not already
+     * have. A time-of-day hook is context. With neither there is nothing worth a second line, so the
+     * tail fuses into the verdict and the whole message is one sentence — that length change is the
+     * point, because a message whose shape varies with what is actually true reads as written rather
+     * than assembled.
+     */
+    private static List<String> renderClean(String runName, Map<String, Object> model) {
+        String verdict = "${runName} — ${pickLine(CLEAN_HEADLINES, "headline")}".toString()
+
+        String streak = streakLine(toCount(model.get("priorCleanRuns")))
+        if (streak) return [verdict + ".", streak]
+
+        String timeLine = timeOfDayLine((ZonedDateTime) model.get("completedMoment"))
+        if (timeLine) return [verdict + ".", timeLine]
+
+        String tail = pickLine(CLEAN_TAILS, "tail")
+        return [tail ? (verdict + tail) : (verdict + ".")]
     }
 
     /**
@@ -237,20 +273,55 @@ class RunNotificationVoice {
         ]
     }
 
-    private static String sublineFor(String bucket, int missingFromFile1, int missingFromFile2,
-                                     int mismatches, String file1Label, String file2Label) {
+    /**
+     * Scale and shape in one line, so a reader knows what KIND of run this is before reading further.
+     * The old headline was a bare total for every bucket, which deferred the whole diagnosis to the
+     * line below and left four very different runs looking identical at a glance.
+     *
+     * MIXED is a catch-all over two genuinely different shapes — both sides missing but lopsided, and
+     * missing plus value mismatches — so it picks its shape phrase from the mismatch count rather
+     * than describing the second and mis-describing the first.
+     */
+    private static String headlineFor(String bucket, String runName, int total, int missingFromFile2,
+                                      int mismatches, String file1Label, String file2Label) {
+        String shape
+        if (bucket == BUCKET_ONE_SIDED) {
+            // missingFromFile2 > 0 means file 1 held them, so file 2's system is the one short.
+            shape = "all missing from ${missingFromFile2 > 0 ? file2Label : file1Label}".toString()
+        } else if (bucket == BUCKET_EVEN_SPLIT) {
+            shape = "near-evenly split"
+        } else if (bucket == BUCKET_VALUE_DRIFT) {
+            shape = "all value mismatches"
+        } else {
+            shape = mismatches > 0 ? "missing and mismatched" : "missing on both sides"
+        }
+        return "${runName} — ${total} to look at, ${shape}.".toString()
+    }
+
+    /**
+     * What the shape implies, and nothing else.
+     *
+     * These lines carry no numbers on purpose. The old ones re-narrated the very counts printed
+     * three lines below them — "39 went out and never checked in" sitting above
+     * "Missing from Shopify: 39" — so the prose and the Details block said the same thing twice, in
+     * two registers. The block owns the arithmetic; this line owns the reading of it.
+     *
+     * One sentence each, and each opens by referring back to the headline ("That shape", "Those
+     * are", "Both sides") so the two lines read as one thought rather than two stacked fragments.
+     */
+    private static String diagnosisFor(String bucket, int mismatches) {
         if (bucket == BUCKET_EVEN_SPLIT) {
-            return "Near enough the same number on each side. That's not coincidence. Check the key before you chase records."
+            return "Two sides short by nearly the same amount rarely means two separate outages — check the join key before chasing records."
         }
         if (bucket == BUCKET_ONE_SIDED) {
-            String haveLabel = missingFromFile2 > 0 ? file1Label : file2Label
-            String lackLabel = missingFromFile2 > 0 ? file2Label : file1Label
-            return "${haveLabel} has them. ${lackLabel} doesn't. All one direction, so this is a delivery gap.".toString()
+            return "That shape usually points at delivery rather than matching."
         }
         if (bucket == BUCKET_VALUE_DRIFT) {
-            return "Nothing's missing. They just don't line up on the values."
+            return "Both sides hold every record; they just don't line up on what's inside them."
         }
-        int missingTotal = missingFromFile1 + missingFromFile2
-        return "${missingTotal} went out and never checked in. ${mismatches} more don't match on the values.".toString()
+        if (mismatches > 0) {
+            return "Those are usually two different causes — worth splitting before you start."
+        }
+        return "Both directions, but lopsided, which is likelier to be two separate gaps than one."
     }
 }

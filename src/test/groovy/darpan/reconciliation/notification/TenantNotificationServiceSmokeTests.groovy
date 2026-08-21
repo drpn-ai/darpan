@@ -56,7 +56,7 @@ class TenantNotificationServiceSmokeTests {
                 .call()
 
         String text = result.payload.text as String
-        assertTrue(text.contains("API Automation — 4 to look at."), text)
+        assertTrue(text.contains("API Automation — 4 to look at, missing on both sides."), text)
         assertTrue(text.contains("Tenant: Tenant A"))
         assertTrue(text.contains("Result ID: RUN_RESULT_1"))
         assertTrue(text.contains("Run result: <https://hotwax-darpan-dev.web.app/reconciliation/run-result/RS_ORDER/reconciliation-runs%2FAUTO_API%2F20260501%2Fresult.json?runName=API+Automation&file1SystemLabel=SHOPIFY&file2SystemLabel=OMS&tenantId=TENANT_A|Open run result>"))
@@ -172,7 +172,7 @@ class TenantNotificationServiceSmokeTests {
                 .call()
 
         String text = result.payload.text as String
-        assertTrue(text.contains("API Order Sync finished. Not cleanly."), text)
+        assertTrue(text.contains("API Order Sync finished, but not cleanly."), text)
         // Exactly the two real failures — the two audit sentences are excluded from the count.
         assertTrue(text.contains("Warnings (2): Exchange presence check skipped: manifest unreadable (boom).; " +
                 "Shopify exchange sweep failed: connection reset"), text)
@@ -199,7 +199,7 @@ class TenantNotificationServiceSmokeTests {
                 .call()
 
         String text = result.payload.text as String
-        assertTrue(text.contains("API Automation finished. Not cleanly."), text)
+        assertTrue(text.contains("API Automation finished, but not cleanly."), text)
         assertTrue(text.contains("Warnings (1): Shopify exchange sweep failed"), text)
         assertFalse(text.contains("Notes:"), text)
     }

@@ -121,7 +121,7 @@ class RunNotificationVoiceTests {
     @Test
     void copyCorpusNeverUsesTheBannedAgreeWording() {
         // Project copy rule: systems "line up", they never "agree".
-        (RunNotificationVoice.CLEAN_HEADLINES + RunNotificationVoice.CLEAN_SUBLINES).each { String line ->
+        (RunNotificationVoice.CLEAN_HEADLINES + RunNotificationVoice.CLEAN_TAILS).each { String line ->
             assertFalse(line.toLowerCase().contains("agree"), "banned wording in copy: ${line}")
         }
     }
@@ -237,8 +237,186 @@ class RunNotificationVoiceTests {
                 [runName: "R", file1SystemLabel: "A", file2SystemLabel: "B",
                  priorCleanRuns: 9, completedMoment: null]
         String text = RunNotificationVoice.renderLines(model).join("\n")
-        RunNotificationVoice.CLEAN_SUBLINES.each { assertFalse(text.contains(it), text) }
+        RunNotificationVoice.CLEAN_TAILS.each { assertFalse(text.contains(it), text) }
         assertFalse(text.toLowerCase().contains("in a row"), text)
+    }
+
+    @Test
+    void cleanRunWithAStreakRendersTheVerdictAndTheStreakOnly() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        // Early morning AND a streak: both closers are available, and only the streak may fire.
+        ZonedDateTime earlyFriday = ZonedDateTime.of(2026, 8, 21, 5, 30, 0, 0, ZoneId.of("Asia/Kolkata"))
+        List<String> lines = RunNotificationVoice.renderLines(
+                cleanModel() + [runName: "Production Orders Automation",
+                                priorCleanRuns: 3, completedMoment: earlyFriday])
+
+        assertEquals(2, lines.size(), "a clean run carries exactly one closer: ${lines}".toString())
+        assertTrue(lines.get(1).contains("4"), lines.toString())
+        RunNotificationVoice.EARLY_MORNING_LINES.each { String timeLine ->
+            assertFalse(lines.contains(timeLine), "time closer stacked on the streak: ${lines}".toString())
+        }
+    }
+
+    @Test
+    void cleanRunWithoutAStreakFallsBackToTheTimeOfDayCloser() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        ZonedDateTime earlyWednesday = ZonedDateTime.of(2026, 8, 19, 5, 30, 0, 0, ZoneId.of("Asia/Kolkata"))
+        List<String> lines = RunNotificationVoice.renderLines(
+                cleanModel() + [runName: "SM Prod Orders Automation",
+                                priorCleanRuns: 0, completedMoment: earlyWednesday])
+
+        assertEquals(2, lines.size(), "a clean run carries exactly one closer: ${lines}".toString())
+        assertEquals(RunNotificationVoice.EARLY_MORNING_LINES.first(), lines.get(1))
+    }
+
+    @Test
+    void cleanRunWithNoStreakAndNoTimeHookCollapsesToOneFusedLine() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        // 16:00 on a Wednesday hits none of the time windows, so there is no closer to spend a
+        // second line on. Three lines of identical rhythm on every clean run is what made the
+        // message read as assembled rather than written.
+        ZonedDateTime plainWednesday = ZonedDateTime.of(2026, 8, 19, 16, 0, 0, 0, ZoneId.of("Asia/Kolkata"))
+        List<String> lines = RunNotificationVoice.renderLines(
+                cleanModel() + [runName: "Production Orders Automation",
+                                priorCleanRuns: 0, completedMoment: plainWednesday])
+
+        assertEquals(1, lines.size(), "with no context hook the verdict and tail fuse: ${lines}".toString())
+        String only = lines.first()
+        assertTrue(only.startsWith("Production Orders Automation \u2014 "), only)
+        assertTrue(only.contains(RunNotificationVoice.CLEAN_HEADLINES.first()), only)
+        assertTrue(only.endsWith(RunNotificationVoice.CLEAN_TAILS.first()), only)
+    }
+
+    @Test
+    void cleanHeadlinesEndWithoutPunctuationSoTheyCanFuse() {
+        RunNotificationVoice.CLEAN_HEADLINES.each { String headline ->
+            assertFalse(headline.endsWith(".") || headline.endsWith("!"),
+                    "a headline must fuse with a tail clause, so it carries no terminator: ${headline}".toString())
+        }
+    }
+
+    @Test
+    void cleanTailsAreGrammaticalContinuationsNotStandaloneSentences() {
+        RunNotificationVoice.CLEAN_TAILS.each { String tail ->
+            assertTrue(tail.startsWith(",") || tail.startsWith(" \u2014"),
+                    "a tail attaches to the verdict; it is not its own sentence: ${tail}".toString())
+        }
+    }
+
+    @Test
+    void everyCloserCarriesASinglePunchline() {
+        // Two punchlines in one breath compete and cancel. One sentence per closer.
+        List<String> closers = RunNotificationVoice.STREAK_TEMPLATES +
+                RunNotificationVoice.EARLY_MORNING_LINES + RunNotificationVoice.FRIDAY_AFTERNOON_LINES +
+                RunNotificationVoice.MONDAY_MORNING_LINES + RunNotificationVoice.MIDDAY_LINES
+        closers.each { String closer ->
+            assertEquals(1, closer.count("."), "closer must be a single sentence: ${closer}".toString())
+        }
+    }
+
+    @Test
+    void noCloserRestatesTheVerdictsCleanlinessClaim() {
+        // Dimension ownership: the headline is the ONLY place cleanliness is asserted, and every
+        // closer adds a different axis - time, or the length of the series. A closer that says it
+        // again is the synonym collision this restructure exists to remove. Applies to the streak
+        // templates too: "clean the whole way through." followed by "That's 4 clean runs in a row"
+        // echoes the verdict one line after making it.
+        List<String> closers = RunNotificationVoice.EARLY_MORNING_LINES +
+                RunNotificationVoice.FRIDAY_AFTERNOON_LINES + RunNotificationVoice.MONDAY_MORNING_LINES +
+                RunNotificationVoice.MIDDAY_LINES + RunNotificationVoice.STREAK_TEMPLATES +
+                RunNotificationVoice.CLEAN_TAILS
+        closers.each { String closer ->
+            assertFalse(closer.toLowerCase().contains("clean"),
+                    "the headline already said it was clean: ${closer}".toString())
+        }
+    }
+
+    private static Map shapeModel(int onlyIn1, int onlyIn2, int ruleDiffs) {
+        return RunNotificationVoice.classify(
+                [onlyInFile1Count: onlyIn1, onlyInFile2Count: onlyIn2, ruleDifferenceCount: ruleDiffs]) +
+                [runName: "Production Orders Automation",
+                 file1SystemLabel: "HotWax", file2SystemLabel: "Shopify",
+                 priorCleanRuns: 0, completedMoment: null]
+    }
+
+    /** Every bucket that renders a headline + diagnosis pair, with counts that produce it. */
+    private static List<Map> everyShapeBucket() {
+        return [[label: "ONE_SIDED", model: shapeModel(39, 0, 0)],
+                [label: "EVEN_SPLIT", model: shapeModel(12, 12, 0)],
+                [label: "VALUE_DRIFT", model: shapeModel(0, 0, 8)],
+                [label: "MIXED missing+mismatched", model: shapeModel(39, 0, 8)],
+                [label: "MIXED missing only", model: shapeModel(1, 3, 0)]]
+    }
+
+    @Test
+    void diagnosisLinesCarryNoNumbersBecauseTheDetailsBlockOwnsThem() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        // The old sublines re-narrated the very counts printed three lines below them
+        // ("39 went out and never checked in" over "Missing from Shopify: 39"). Prose may name the
+        // SHAPE of a run; the Details block owns the arithmetic.
+        everyShapeBucket().each { Map bucketCase ->
+            String diagnosis = RunNotificationVoice.renderLines(bucketCase.model as Map).get(1)
+            assertFalse(diagnosis ==~ /.*\d.*/,
+                    "${bucketCase.label} diagnosis repeats a count: ${diagnosis}".toString())
+        }
+    }
+
+    @Test
+    void diagnosisLinesAreSingleSentences() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        // Stacked fragments ("Nothing's missing. They just don't line up.") are the mechanical
+        // rhythm that made these read as assembled.
+        everyShapeBucket().each { Map bucketCase ->
+            String diagnosis = RunNotificationVoice.renderLines(bucketCase.model as Map).get(1)
+            assertEquals(1, diagnosis.count("."),
+                    "${bucketCase.label} diagnosis is more than one sentence: ${diagnosis}".toString())
+        }
+    }
+
+    @Test
+    void oneSidedHeadlineNamesTheSystemMissingTheRecords() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        // onlyInFile1Count 39 means HotWax has them and SHOPIFY does not.
+        String headline = RunNotificationVoice.renderLines(shapeModel(39, 0, 0)).first()
+        assertTrue(headline.contains("39 to look at, all missing from Shopify"), headline)
+    }
+
+    @Test
+    void evenSplitHeadlineNamesTheSplitSoTheDiagnosisNeedNot() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        String headline = RunNotificationVoice.renderLines(shapeModel(12, 12, 0)).first()
+        assertTrue(headline.contains("24 to look at, near-evenly split"), headline)
+    }
+
+    @Test
+    void valueDriftHeadlineSaysNothingIsActuallyMissing() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        String headline = RunNotificationVoice.renderLines(shapeModel(0, 0, 8)).first()
+        assertTrue(headline.contains("8 to look at, all value mismatches"), headline)
+    }
+
+    @Test
+    void mixedHeadlineDistinguishesMissingOnlyFromMissingPlusMismatched() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        // MIXED is a catch-all: it covers "both sides missing, lopsided" AND "missing plus value
+        // mismatches". One headline for both told the operator the wrong thing about the first,
+        // and the old diagnosis printed "0 more don't match on the values" for it.
+        String bothAxes = RunNotificationVoice.renderLines(shapeModel(39, 0, 8)).first()
+        assertTrue(bothAxes.contains("47 to look at, missing and mismatched"), bothAxes)
+
+        String missingOnly = RunNotificationVoice.renderLines(shapeModel(1, 3, 0)).first()
+        assertTrue(missingOnly.contains("4 to look at, missing on both sides"), missingOnly)
+    }
+
+    @Test
+    void issuesHeaderReadsAsOneClauseNotTwoFragments() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        Map model = RunNotificationVoice.classify(
+                [onlyInFile1Count: 0, onlyInFile2Count: 0, ruleDifferenceCount: 0, hasWarnings: true]) +
+                [runName: "API Order Sync", file1SystemLabel: "A", file2SystemLabel: "B",
+                 priorCleanRuns: 0, completedMoment: null]
+        String headline = RunNotificationVoice.renderLines(model).first()
+        assertEquals("API Order Sync finished, but not cleanly.", headline)
     }
 
     private static Map cleanModel() {

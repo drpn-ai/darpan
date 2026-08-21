@@ -168,10 +168,13 @@
             systemAliases="OMS_RETURNS,HOTWAX_RETURNS,DAR_SYS_OMS_RETURNS"
             preserveWindowInstants="N"
             keepFieldsParameterName="keepRecordFields"
-            keepFieldsBase="returnId,externalId,orderExternalId,statusId,entryDate,returnTotal,currencyUomId,returnChannelEnumId"
+            keepFieldsBase="returnId,shopifyReturnId,externalId,orderExternalId,statusId,entryDate,returnTotal,currencyUomId,returnChannelEnumId"
             filterParameterName="sourceFilters"
             healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
             orderStateLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId"
+            lookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsReturnsByExternalId"
+            lookupIdsParameterName="externalIds"
+            lookupMaxIds="10000"
             enabled="Y"/>
 
     <!-- Shopify per-EVENT (refund or return) records for returns reconciliation (DAR-BE-018;

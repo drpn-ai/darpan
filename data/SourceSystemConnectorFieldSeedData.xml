@@ -66,30 +66,41 @@
          connector, because the returns endpoint's server-side projection includes the channel field.
          If OMS ever narrows that projection or implements the RQ-24 server-side channel filter,
          remove this row.
-         The three primary-ID candidates are a NEW decision (primaryIdOptionsForSystem had no case for
-         this endpoint): returnId is the OMS identity, externalId the Shopify reference,
-         orderExternalId the order spine. -->
+         The primary-ID candidates were a NEW decision (primaryIdOptionsForSystem had no case for
+         this endpoint): returnId is the OMS identity, shopifyReturnId / externalId the Shopify
+         reference, orderExternalId the order spine.
+         PREFER shopifyReturnId OVER externalId as the join key (2026-08-20). externalId is BLANK on
+         RETURN_REQUESTED returns — the refund id does not exist until a refund does — and those
+         returns now clear the endpoint's server-side "has a Shopify ref" filter, so they arrive in
+         the extract with no key at all and can only land as false missing-in-Shopify rows.
+         shopifyReturnId was present on every record observed in the 2026-08-20 live probe, spanned
+         both the return and refund id ranges, and equalled externalId wherever externalId existed. -->
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].returnId"
             label="Return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
             description="OMS return identity."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].shopifyReturnId"
+            label="Shopify reference" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
+            description="PREFERRED join key. Holds whichever Shopify id is the reference — refund or return —
+                despite the name, and unlike externalId it is populated on RETURN_REQUESTED returns that have
+                no refund yet. Matches Shopify SHOPIFY_RETURN_REFS's refundOrReturnId."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].externalId"
-            label="Shopify refund or return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
-            description="RELABELLED (was 'Shopify reference'): the OMS side of the primary comparison — a
-                Shopify refund id or, for a small number of returns, a return id instead. Matches Shopify
-                SHOPIFY_RETURN_REFS's refundOrReturnId whichever kind of id it holds."/>
+            label="Shopify refund or return ID (legacy)" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            description="The original join key — a Shopify refund id or, for a small number of returns, a return
+                id instead. BLANK on returns with no refund yet, which is why shopifyReturnId above supersedes it.
+                Kept as a candidate so existing rule sets keyed on it keep resolving."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].orderExternalId"
-            label="Order external ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            label="Order external ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="4"
             description="Order spine — joins a return back to its order."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].statusId"
-            label="Status" fieldType="string" sequenceNum="4" description="Server-side projected."/>
+            label="Status" fieldType="string" sequenceNum="5" description="Server-side projected."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].entryDate"
-            label="Entry date" fieldType="string" sequenceNum="5" description="Server-side projected."/>
+            label="Entry date" fieldType="string" sequenceNum="6" description="Server-side projected."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].returnTotal"
-            label="Return total" fieldType="string" sequenceNum="6" description="Server-side projected."/>
+            label="Return total" fieldType="string" sequenceNum="7" description="Server-side projected."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].currencyUomId"
-            label="Currency" fieldType="string" sequenceNum="7" description="Server-side projected."/>
+            label="Currency" fieldType="string" sequenceNum="8" description="Server-side projected."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].returnChannelEnumId"
-            label="Return channel" fieldType="string" sequenceNum="8"
+            label="Return channel" fieldType="string" sequenceNum="9"
             description="Included in the endpoint's server-side projection, so a rule drawn on it sees a value.
                 Remove if OMS narrows the projection or ships the RQ-24 server-side channel filter."/>
 

@@ -288,4 +288,65 @@ class AutomationSyncSupportTests {
         // A missing run is not drift. Calling it out-of-date offers an action that cannot work.
         assertTrue(status.inSync as Boolean)
     }
+
+    @Test
+    void mergeKeepsTheStoredSourceTypeWhenTheRunDidNotRecordOne() {
+        // RuleSetCompareSource.sourceTypeEnumId is nullable; ReconciliationAutomationSource's is
+        // not-null. Writing the run's null through makes validateSources reject the entire sync.
+        Map<String, Map<String, Object>> derived = derivedFile1([sourceTypeEnumId: null])
+        List merged = AutomationFacadeSupport.mergeSyncedSourceEntries(
+                [storedSftpSource("FILE_1")], derived, [FILE_1: []])
+        assertEquals(AutomationFacadeSupport.SOURCE_TYPE_SFTP, ((Map) merged[0]).sourceTypeEnumId)
+    }
+
+    @Test
+    void mergeStillTakesTheRunsSourceTypeWhenItHasOne() {
+        Map<String, Map<String, Object>> derived = derivedFile1([sourceTypeEnumId: AutomationFacadeSupport.SOURCE_TYPE_API])
+        List merged = AutomationFacadeSupport.mergeSyncedSourceEntries(
+                [storedSftpSource("FILE_1")], derived, [FILE_1: []])
+        assertEquals(AutomationFacadeSupport.SOURCE_TYPE_API, ((Map) merged[0]).sourceTypeEnumId)
+    }
+
+    @Test
+    void mergeKeepsTheStoredEndpointWhenTheRunDidNotRecordOne() {
+        // An API source must carry systemMessageRemoteId or nsRestletConfigId. RuleSetCompareSource
+        // may hold neither, and writing that null through makes validateSources reject the sync.
+        Map stored = storedSftpSource("FILE_1") + [systemMessageRemoteId: "OMS_REMOTE"]
+        Map<String, Map<String, Object>> derived = derivedFile1([systemMessageRemoteId: null])
+        List merged = AutomationFacadeSupport.mergeSyncedSourceEntries([stored], derived, [FILE_1: []])
+        assertEquals("OMS_REMOTE", ((Map) merged[0]).systemMessageRemoteId)
+    }
+
+    @Test
+    void mergeTakesTheRunsEndpointWhenItHasOne() {
+        Map stored = storedSftpSource("FILE_1") + [systemMessageRemoteId: "OMS_REMOTE"]
+        Map<String, Map<String, Object>> derived = derivedFile1([systemMessageRemoteId: "SHOPIFY_REMOTE"])
+        List merged = AutomationFacadeSupport.mergeSyncedSourceEntries([stored], derived, [FILE_1: []])
+        assertEquals("SHOPIFY_REMOTE", ((Map) merged[0]).systemMessageRemoteId)
+    }
+
+    @Test
+    void syncStatusDoesNotReportDriftOnFieldsSyncWillNotChange() {
+        // The merge keeps the stored value where the run is blank. Comparing against the raw derive
+        // would report drift here forever, because no sync could ever resolve it.
+        Map automation = [inputModeEnumId: AutomationFacadeSupport.INPUT_MODE_API_RANGE,
+                          compareScopeId : "CS_ORDERS"]
+        List stored = [[fileSide             : "FILE_1", schemaFileName: "run-schema.json",
+                        sourceTypeEnumId     : AutomationFacadeSupport.SOURCE_TYPE_API,
+                        systemMessageRemoteId: "OMS_REMOTE", excludeFilters: []]]
+        Map derived = derivedConfigFor("run-schema.json", AutomationFacadeSupport.INPUT_MODE_API_RANGE)
+        // The run records no endpoint at all — exactly the blank case merge preserves.
+        Map status = AutomationFacadeSupport.buildAutomationSyncStatus(automation, stored, derived)
+        assertTrue(status.inSync as Boolean, "reported drift sync cannot fix: ${status.changedFields}")
+    }
+
+    @Test
+    void syncedInputModeFollowsTheMergedSourcesNotTheRawRun() {
+        // The run recorded no source types, so the raw derive would say API_RANGE; merge restores the
+        // stored SFTP type, and the persisted mode has to follow that or validateSources rejects it.
+        List merged = AutomationFacadeSupport.mergeSyncedSourceEntries(
+                [storedSftpSource("FILE_1")], derivedFile1([sourceTypeEnumId: null]), [FILE_1: []])
+        assertEquals(AutomationFacadeSupport.INPUT_MODE_SFTP_FILES,
+                AutomationFacadeSupport.resolveSyncedInputMode(merged))
+    }
 }

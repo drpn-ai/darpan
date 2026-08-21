@@ -17,6 +17,7 @@ import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNotEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
@@ -983,5 +984,155 @@ class AutomationFacadeSmokeTests {
         if (existing != null) return
 
         ReconciliationSmokeTestSupport.insertEntityDirect(ec, entityName, fields)
+    }
+
+    // ─── sync#Automation: re-derive an automation's snapshot from its saved run ──────────────
+
+    /** An automation on a ruleset-backed run whose FILE_1 schema is a known value sync must restore. */
+    private Map<String, Object> createSyncFixtureAutomation(String automationName) {
+        Map<String, Object> saveResult = callFacade("facade.ReconciliationFacadeServices.save#Automation", [
+                automationName          : automationName,
+                inputModeEnumId         : "AUT_IN_API_RANGE",
+                savedRun                : [
+                        runName            : "${automationName} Run".toString(),
+                        file1SystemEnumId       : "OMS",
+                        file1SchemaFileName     : "run-schema-oms.json",
+                        file1PrimaryIdExpression: "order_id",
+                        file2SystemEnumId       : "SHOPIFY",
+                        file2SchemaFileName     : "run-schema-shopify.json",
+                        file2PrimaryIdExpression: "order_id",
+                ],
+                scheduleExpr            : "PT1H",
+                relativeWindowTypeEnumId: "AUT_WIN_PREV_DAY",
+                relativeWindowCount     : 1,
+                windowTimeZone          : "UTC",
+                sources                 : [
+                        [fileSide: "FILE_1", sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "OMS",
+                         fileTypeEnumId: "DftCsv", systemMessageRemoteId: "OMS_REMOTE"],
+                        [fileSide: "FILE_2", sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "SHOPIFY",
+                         fileTypeEnumId: "DftCsv", systemMessageRemoteId: "SHOPIFY_REMOTE"],
+                ],
+        ])
+        assertTrue((Boolean) saveResult.ok, saveResult.errors?.toString())
+        return (Map<String, Object>) saveResult.automation
+    }
+
+
+    /**
+     * Drop a sync fixture's rows. These automations hold an FK to SHOPIFY_REMOTE, which
+     * shopifyEndpointOptionsDoNotDependOnSystemRemoteSeed deletes — leaving one behind makes that
+     * test's delete fail and turns this suite into a test-ordering coin flip. Every sync test below
+     * calls this from a finally block, matching the try/finally idiom this file already uses.
+     */
+    private void deleteSyncFixtureAutomation(String automationId) {
+        if (!automationId) return
+        ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter")
+                .condition("automationId", automationId).disableAuthz().deleteAll()
+        ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource")
+                .condition("automationId", automationId).disableAuthz().deleteAll()
+        ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution")
+                .condition("automationId", automationId).disableAuthz().deleteAll()
+        ec.entity.find("darpan.reconciliation.ReconciliationAutomation")
+                .condition("automationId", automationId).disableAuthz().deleteAll()
+    }
+
+    private void makeSourceStale(String automationId, String fileSide) {
+        def source = ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource")
+                .condition("automationId", automationId).condition("fileSide", fileSide)
+                .disableAuthz().useCache(false).one()
+        source.set("schemaFileName", "stale-schema.json")
+        source.set("remotePathTemplate", "/drop/orders")
+        source.update()
+    }
+
+    @Test
+    void syncAutomationRestoresRunFieldsAndKeepsOperatorSettings() {
+        Map<String, Object> automation = createSyncFixtureAutomation("Sync Restore")
+        String automationId = automation.automationId as String
+        try {
+            makeSourceStale(automationId, "FILE_1")
+            callFacade("facade.ReconciliationFacadeServices.pause#Automation", [automationId: automationId])
+
+            Map<String, Object> result = callFacade("facade.ReconciliationFacadeServices.sync#Automation",
+                    [automationId: automationId])
+
+            assertTrue((Boolean) result.ok, result.errors?.toString())
+            def source = ec.entity.find("darpan.reconciliation.ReconciliationAutomationSource")
+                    .condition("automationId", automationId).condition("fileSide", "FILE_1")
+                    .disableAuthz().useCache(false).one()
+            assertEquals("run-schema-oms.json", source.schemaFileName, "sync did not restore the run's schema")
+            assertEquals("/drop/orders", source.remotePathTemplate, "the SFTP carve-out was not preserved")
+            def row = ec.entity.find("darpan.reconciliation.ReconciliationAutomation")
+                    .condition("automationId", automationId).disableAuthz().useCache(false).one()
+            assertEquals("N", row.isActive, "sync reactivated a paused automation")
+        } finally {
+            deleteSyncFixtureAutomation(automationId)
+        }
+    }
+
+    @Test
+    void syncAutomationReplacesExclusionFiltersRatherThanMergingThem() {
+        Map<String, Object> automation = createSyncFixtureAutomation("Sync Filters")
+        String automationId = automation.automationId as String
+        try {
+            ec.service.sync().name("create#darpan.reconciliation.ReconciliationAutomationSourceFilter")
+                    .parameters([automationId      : automationId, fileSide: "FILE_1", sequenceNum: 99,
+                                 fieldExpression   : "status", operator: "EXCLUDE_IN",
+                                 filterValues      : "HAND_TUNED",
+                                 companyUserGroupId: KREWE]).disableAuthz().call()
+
+            Map<String, Object> result = callFacade("facade.ReconciliationFacadeServices.sync#Automation",
+                    [automationId: automationId])
+
+            assertTrue((Boolean) result.ok, result.errors?.toString())
+            List filters = ec.entity.find("darpan.reconciliation.ReconciliationAutomationSourceFilter")
+                    .condition("automationId", automationId).condition("fileSide", "FILE_1")
+                    .disableAuthz().useCache(false).list() ?: []
+            assertTrue(filters.every { it.filterValues != "HAND_TUNED" },
+                    "hand-tuned filter survived: sync merged instead of replacing")
+        } finally {
+            deleteSyncFixtureAutomation(automationId)
+        }
+    }
+
+    @Test
+    void syncAutomationRefusesWhenTheSavedRunIsGone() {
+        Map<String, Object> automation = createSyncFixtureAutomation("Sync Orphan")
+        String automationId = automation.automationId as String
+        try {
+            def row = ec.entity.find("darpan.reconciliation.ReconciliationAutomation")
+                    .condition("automationId", automationId).disableAuthz().useCache(false).one()
+            row.set("savedRunId", "RS_DOES_NOT_EXIST")
+            row.update()
+
+            Map<String, Object> result = callFacade("facade.ReconciliationFacadeServices.sync#Automation",
+                    [automationId: automationId])
+
+            assertFalse((Boolean) result.ok, "sync should refuse an automation whose run is gone")
+        } finally {
+            deleteSyncFixtureAutomation(automationId)
+        }
+    }
+
+    @Test
+    void getAutomationReportsDriftAndThenInSyncAfterSyncing() {
+        Map<String, Object> automation = createSyncFixtureAutomation("Sync Status")
+        String automationId = automation.automationId as String
+        try {
+            makeSourceStale(automationId, "FILE_1")
+
+            Map<String, Object> before = callFacade("facade.ReconciliationFacadeServices.get#Automation",
+                    [automationId: automationId])
+            assertFalse(((Map) before.syncStatus).inSync as Boolean, "drift was not reported")
+
+            callFacade("facade.ReconciliationFacadeServices.sync#Automation", [automationId: automationId])
+
+            Map<String, Object> after = callFacade("facade.ReconciliationFacadeServices.get#Automation",
+                    [automationId: automationId])
+            assertTrue(((Map) after.syncStatus).inSync as Boolean,
+                    "still drifted after sync: ${((Map) after.syncStatus).changedFields}")
+        } finally {
+            deleteSyncFixtureAutomation(automationId)
+        }
     }
 }

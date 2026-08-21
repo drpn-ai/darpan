@@ -77,6 +77,7 @@ facade.ReconciliationFacadeServices.save#Mapping
 facade.ReconciliationFacadeServices.save#RuleSetRun
 facade.ReconciliationFacadeServices.save#SavedRunName
 facade.ReconciliationFacadeServices.subscribe#RunNotification
+facade.ReconciliationFacadeServices.sync#Automation
 facade.ReconciliationFacadeServices.unsubscribe#RunNotification
 facade.SearchFacadeServices.search#NavigationTargets
 facade.SettingsFacadeServices.delete#TenantChatSpace

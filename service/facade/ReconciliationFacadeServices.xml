@@ -2344,6 +2344,68 @@
         </actions>
     </service>
 
+    <service verb="sync" noun="Automation" allow-remote="true" authenticate="true">
+        <description>Re-derive an automation's snapshot from its saved run. Overwrites the compare
+            scope, input mode, both source definitions and the exclusion filters; preserves the name,
+            schedule, window, chat space, active status, and the SFTP server, path and pattern the run
+            cannot supply. Never re-points the automation at a different run.
+
+            Writes nothing directly: it derives, merges the result over the stored source rows, and
+            delegates to save#Automation, which already deletes and recreates every source and filter
+            row on each save. That inherits the whole save path (validateSources, validateApiSource,
+            applyApiSourceMetadataDefaults, tenant stamping, the response builder) rather than growing
+            a second writer that would drift from it.</description>
+        <in-parameters>
+            <parameter name="automationId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="automation" type="Map"/>
+            <parameter name="changedFields" type="List"><parameter name="changedField"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="automationIdValue" from="((automationId)?.toString()?.trim())"/>
+            <if condition="!automationIdValue">
+                <message error="true">automationId is required</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for automation changes.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="automationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', automationIdValue).disableAuthz().useCache(false).one()"/>
+                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, automationRecord)">
+                    <message error="true">Automation '${automationIdValue}' was not found.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="derivedConfig" from="darpan.facade.reconciliation.AutomationFacadeSupport.deriveRunAuthoritativeConfig(ec, automationRecord)"/>
+                <if condition="derivedConfig.savedRunMissing">
+                    <message error="true">This automation's saved run is no longer available, so it cannot be synced.</message>
+                </if>
+                <if condition="derivedConfig.error">
+                    <message error="true">${derivedConfig.error}</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="storedSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', automationIdValue).orderBy('fileSide').disableAuthz().useCache(false).list() ?: []"/>
+                <set field="changedFields" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationSyncStatus(automationRecord, darpan.facade.reconciliation.AutomationFacadeSupport.attachCapturedFilters(ec, storedSources, automationIdValue), derivedConfig).changedFields"/>
+                <set field="mergedSources" from="darpan.facade.reconciliation.AutomationFacadeSupport.mergeSyncedSourceEntries(storedSources, derivedConfig.sourcesByFileSide, derivedConfig.filtersByFileSide)"/>
+                <set field="syncPayload" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationSyncPayload(automationRecord, darpan.facade.reconciliation.AutomationFacadeSupport.resolveSyncedInputMode(mergedSources), mergedSources)"/>
+                <service-call name="facade.ReconciliationFacadeServices.save#Automation"
+                        in-map="syncPayload" out-map="saveResult"/>
+                <set field="automation" from="saveResult.automation"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <message>Synced ${automation?.automationName ?: automationIdValue} with its saved run.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
     <service verb="delete" noun="Automation" allow-remote="true" authenticate="true">
         <description>Delete one tenant-scoped automation configuration, its source rows, and its execution history rows.</description>
         <in-parameters>

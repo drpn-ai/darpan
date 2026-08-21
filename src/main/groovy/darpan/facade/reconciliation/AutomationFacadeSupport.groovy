@@ -541,6 +541,21 @@ class AutomationFacadeSupport {
                 .collect { String fileSide ->
                     Map<String, Object> entry = new LinkedHashMap<>(derivedByFileSide.get(fileSide))
                     def stored = storedByFileSide.get(fileSide)
+                    // The run is authoritative WHERE IT HAS A VALUE. Every run-authoritative column is
+                    // nullable on RuleSetCompareSource, while several are required on
+                    // ReconciliationAutomationSource (sourceTypeEnumId is not-null; an API source must
+                    // carry systemMessageRemoteId or nsRestletConfigId). A run that never recorded one
+                    // cannot supply it, and writing the null through makes validateSources reject the
+                    // whole sync — leaving the operator no way to sync at all.
+                    //
+                    // Blank therefore means "no opinion", not "cleared". Nothing in the product can
+                    // blank these on a rule set: they are set when the run is created, and a run that
+                    // changes endpoint sets the NEW value, which is non-blank and overwrites normally.
+                    RUN_AUTHORITATIVE_SOURCE_FIELDS.each { String fieldName ->
+                        if (normalize(entry.get(fieldName))) return
+                        String storedValue = stored != null ? normalize(readField(stored, fieldName)) : null
+                        if (storedValue) entry.put(fieldName, storedValue)
+                    }
                     OPERATOR_OWNED_SOURCE_FIELDS.each { String fieldName ->
                         String preserved = stored != null ? normalize(readField(stored, fieldName)) : null
                         if (preserved) entry.put(fieldName, preserved)
@@ -548,6 +563,21 @@ class AutomationFacadeSupport {
                     entry.put("excludeFilters", toDeclaredExcludeFilterRows(filtersByFileSide?.get(fileSide)))
                     return entry
                 } as List<Map<String, Object>>
+    }
+
+    /**
+     * The input mode a sync will actually persist. Computed from the MERGED entries, not the raw
+     * derive: merge restores a stored sourceTypeEnumId where the run recorded none, and that
+     * substitution can flip the mode. Deriving from the raw run would let the payload declare
+     * AUT_IN_API_RANGE while carrying an AUT_SRC_SFTP source, which validateSources rejects.
+     */
+    static String resolveSyncedInputMode(List<Map<String, Object>> mergedSourceEntries) {
+        Map<String, Map<String, Object>> byFileSide = [:]
+        (mergedSourceEntries ?: []).each { Map<String, Object> entry ->
+            String fileSide = normalize(entry?.get("fileSide"))
+            if (fileSide) byFileSide.put(fileSide, entry)
+        }
+        return deriveInputModeFromSources(byFileSide)
     }
 
     /** Rule set filter rows re-keyed to save#Automation's declared excludeFilters sub-parameters. */
@@ -614,10 +644,22 @@ class AutomationFacadeSupport {
                     savedRunMissing  : (derivedConfig?.savedRunMissing ?: false) as Boolean]
         }
 
+        // Compare against what sync would WRITE, not against the raw derive. mergeSyncedSourceEntries
+        // preserves operator-owned columns and keeps stored values where the run is blank, so comparing
+        // the raw derive reports drift on fields sync will never change — permanent, unfixable drift.
+        List<Map<String, Object>> merged = mergeSyncedSourceEntries(storedSources,
+                (derivedConfig?.sourcesByFileSide ?: [:]) as Map<String, Map<String, Object>>,
+                (derivedConfig?.filtersByFileSide ?: [:]) as Map<String, List<Map<String, Object>>>)
+        Map<String, Map<String, Object>> mergedByFileSide = [:]
+        merged.each { Map<String, Object> entry ->
+            String fileSide = normalize(entry?.get("fileSide"))
+            if (fileSide) mergedByFileSide.put(fileSide, entry)
+        }
+
         List<String> changedFields = []
-        String derivedInputMode = normalize(derivedConfig?.inputModeEnumId)
-        boolean inputModeChanging = derivedInputMode &&
-                derivedInputMode != normalize(readField(automation, "inputModeEnumId"))
+        String syncedInputMode = resolveSyncedInputMode(merged)
+        boolean inputModeChanging = syncedInputMode &&
+                syncedInputMode != normalize(readField(automation, "inputModeEnumId"))
         if (inputModeChanging) changedFields.add("inputMode")
 
         String derivedCompareScopeId = normalize(derivedConfig?.compareScopeId)
@@ -630,16 +672,11 @@ class AutomationFacadeSupport {
             String fileSide = normalize(readField(stored, "fileSide"))
             if (fileSide) storedByFileSide.put(fileSide, stored)
         }
-        Map derivedByFileSide = (derivedConfig?.sourcesByFileSide instanceof Map) ?
-                (Map) derivedConfig.sourcesByFileSide : [:]
-        Map derivedFiltersByFileSide = (derivedConfig?.filtersByFileSide instanceof Map) ?
-                (Map) derivedConfig.filtersByFileSide : [:]
 
         FILE_SIDES.each { String fileSide ->
             def stored = storedByFileSide.get(fileSide)
-            Object derivedRaw = derivedByFileSide.get(fileSide)
-            Map derived = (derivedRaw instanceof Map) ? (Map) derivedRaw : null
-            if (derived == null) {
+            Map mergedEntry = mergedByFileSide.get(fileSide)
+            if (mergedEntry == null) {
                 if (stored != null) changedFields.add("${fileSide}.removed".toString())
                 return
             }
@@ -648,15 +685,14 @@ class AutomationFacadeSupport {
                 return
             }
             (RUN_AUTHORITATIVE_SOURCE_FIELDS + ["databaseSourceQueryId"]).each { String fieldName ->
-                if (normalize(derived.get(fieldName)) != normalize(readField(stored, fieldName))) {
+                if (normalize(mergedEntry.get(fieldName)) != normalize(readField(stored, fieldName))) {
                     changedFields.add("${fileSide}.${fieldName}".toString())
                 }
             }
-            List derivedFilters = toDeclaredExcludeFilterRows(
-                    derivedFiltersByFileSide.get(fileSide) as List<Map<String, Object>>)
+            List mergedFilters = (mergedEntry.get("excludeFilters") ?: []) as List
             List storedFilters = toDeclaredExcludeFilterRows(
                     filterRowsFromSource(stored) as List<Map<String, Object>>)
-            if (derivedFilters != storedFilters) changedFields.add("${fileSide}.excludeFilters".toString())
+            if (mergedFilters != storedFilters) changedFields.add("${fileSide}.excludeFilters".toString())
         }
 
         return [inSync           : changedFields.isEmpty(), changedFields: changedFields,

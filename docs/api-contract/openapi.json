@@ -261,6 +261,9 @@
                                         "$ref": "#/components/schemas/SubscribeRunNotificationRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/SyncAutomationRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/UnsubscribeRunNotificationRequest"
                                     },
                                     {
@@ -418,6 +421,7 @@
                                         "facade.ReconciliationFacadeServices.save#RuleSetRun": "#/components/schemas/SaveRuleSetRunRequest",
                                         "facade.ReconciliationFacadeServices.save#SavedRunName": "#/components/schemas/SaveSavedRunNameRequest",
                                         "facade.ReconciliationFacadeServices.subscribe#RunNotification": "#/components/schemas/SubscribeRunNotificationRequest",
+                                        "facade.ReconciliationFacadeServices.sync#Automation": "#/components/schemas/SyncAutomationRequest",
                                         "facade.ReconciliationFacadeServices.unsubscribe#RunNotification": "#/components/schemas/UnsubscribeRunNotificationRequest",
                                         "facade.SearchFacadeServices.search#NavigationTargets": "#/components/schemas/SearchNavigationTargetsRequest",
                                         "facade.SettingsFacadeServices.delete#TenantChatSpace": "#/components/schemas/DeleteTenantChatSpaceRequest",
@@ -695,6 +699,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SubscribeRunNotificationResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SyncAutomationResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/UnsubscribeRunNotificationResponse"
@@ -8119,6 +8126,9 @@
                     },
                     "automation": {
                         "type": "object"
+                    },
+                    "syncStatus": {
+                        "type": "object"
                     }
                 }
             },
@@ -12817,6 +12827,107 @@
                     "result"
                 ]
             },
+            "SyncAutomationParams": {
+                "type": "object",
+                "properties": {
+                    "automationId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "automationId"
+                ],
+                "description": "Re-derive an automation's snapshot from its saved run. Overwrites the compare\n            scope, input mode, both source definitions and the exclusion filters; preserves the name,\n            schedule, window, chat space, active status, and the SFTP server, path and pattern the run\n            cannot supply. Never re-points the automation at a different run.\n\n            Writes nothing directly: it derives, merges the result over the stored source rows, and\n            delegates to save#Automation, which already deletes and recreates every source and filter\n            row on each save. That inherits the whole save path (validateSources, validateApiSource,\n            applyApiSourceMetadataDefaults, tenant stamping, the response builder) rather than growing\n            a second writer that would drift from it."
+            },
+            "SyncAutomationResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "automation": {
+                        "type": "object"
+                    },
+                    "changedFields": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "SyncAutomationRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.sync#Automation",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.sync#Automation",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.sync#Automation"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SyncAutomationParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SyncAutomationResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.sync#Automation. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SyncAutomationResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "UnsubscribeRunNotificationParams": {
                 "type": "object",
                 "properties": {
@@ -14111,7 +14222,7 @@
                 "properties": {
                     
                 },
-                "description": "List active-tenant Google Chat spaces, including the webhook URL in clear text."
+                "description": "List active-tenant chat spaces (Google Chat or Slack), including the webhook URL in clear text."
             },
             "ListTenantChatSpacesResult": {
                 "type": "object",
@@ -14140,6 +14251,18 @@
                                     "type": "string"
                                 },
                                 "spaceName": {
+                                    "type": "string"
+                                },
+                                "chatProviderEnumId": {
+                                    "type": "string"
+                                },
+                                "chatProviderLabel": {
+                                    "type": "string"
+                                },
+                                "webhookConfigured": {
+                                    "type": "boolean"
+                                },
+                                "webhookUrl": {
                                     "type": "string"
                                 },
                                 "googleChatConfigured": {
@@ -14846,6 +14969,12 @@
                     "spaceName": {
                         "type": "string"
                     },
+                    "chatProviderEnumId": {
+                        "type": "string"
+                    },
+                    "webhookUrl": {
+                        "type": "string"
+                    },
                     "googleChatWebhookUrl": {
                         "type": "string"
                     },
@@ -14856,7 +14985,7 @@
                 "required": [
                     "spaceName"
                 ],
-                "description": "Create or update one named Google Chat space for the active tenant."
+                "description": "Create or update one named chat space (Google Chat or Slack) for the active tenant."
             },
             "SaveTenantChatSpaceResult": {
                 "type": "object",
@@ -16184,6 +16313,7 @@
         "facade.ReconciliationFacadeServices.save#RuleSetRun": "SaveRuleSetRun",
         "facade.ReconciliationFacadeServices.save#SavedRunName": "SaveSavedRunName",
         "facade.ReconciliationFacadeServices.subscribe#RunNotification": "SubscribeRunNotification",
+        "facade.ReconciliationFacadeServices.sync#Automation": "SyncAutomation",
         "facade.ReconciliationFacadeServices.unsubscribe#RunNotification": "UnsubscribeRunNotification",
         "facade.SearchFacadeServices.search#NavigationTargets": "SearchNavigationTargets",
         "facade.SettingsFacadeServices.delete#TenantChatSpace": "DeleteTenantChatSpace",

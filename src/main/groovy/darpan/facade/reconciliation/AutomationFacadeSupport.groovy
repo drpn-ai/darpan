@@ -599,6 +599,93 @@ class AutomationFacadeSupport {
         ] as Map<String, Object>
     }
 
+    /**
+     * Whether an automation's snapshot still matches its run, and which fields differ. Derived from the
+     * SAME deriveRunAuthoritativeConfig output sync#Automation applies, so the marker can never claim a
+     * change sync would not make, or miss one it would.
+     *
+     * A missing or unresolvable saved run is reported as savedRunMissing and NOT as drift: there is
+     * nothing to sync to, so calling it out-of-date would offer an action that cannot work.
+     */
+    static Map<String, Object> buildAutomationSyncStatus(def automation, List storedSources,
+            Map<String, Object> derivedConfig) {
+        if (derivedConfig?.savedRunMissing || derivedConfig?.error) {
+            return [inSync           : true, changedFields: [], inputModeChanging: false,
+                    savedRunMissing  : (derivedConfig?.savedRunMissing ?: false) as Boolean]
+        }
+
+        List<String> changedFields = []
+        String derivedInputMode = normalize(derivedConfig?.inputModeEnumId)
+        boolean inputModeChanging = derivedInputMode &&
+                derivedInputMode != normalize(readField(automation, "inputModeEnumId"))
+        if (inputModeChanging) changedFields.add("inputMode")
+
+        String derivedCompareScopeId = normalize(derivedConfig?.compareScopeId)
+        if (derivedCompareScopeId && derivedCompareScopeId != normalize(readField(automation, "compareScopeId"))) {
+            changedFields.add("compareScope")
+        }
+
+        Map storedByFileSide = [:]
+        (storedSources ?: []).each { def stored ->
+            String fileSide = normalize(readField(stored, "fileSide"))
+            if (fileSide) storedByFileSide.put(fileSide, stored)
+        }
+        Map derivedByFileSide = (derivedConfig?.sourcesByFileSide instanceof Map) ?
+                (Map) derivedConfig.sourcesByFileSide : [:]
+        Map derivedFiltersByFileSide = (derivedConfig?.filtersByFileSide instanceof Map) ?
+                (Map) derivedConfig.filtersByFileSide : [:]
+
+        FILE_SIDES.each { String fileSide ->
+            def stored = storedByFileSide.get(fileSide)
+            Object derivedRaw = derivedByFileSide.get(fileSide)
+            Map derived = (derivedRaw instanceof Map) ? (Map) derivedRaw : null
+            if (derived == null) {
+                if (stored != null) changedFields.add("${fileSide}.removed".toString())
+                return
+            }
+            if (stored == null) {
+                changedFields.add("${fileSide}.added".toString())
+                return
+            }
+            (RUN_AUTHORITATIVE_SOURCE_FIELDS + ["databaseSourceQueryId"]).each { String fieldName ->
+                if (normalize(derived.get(fieldName)) != normalize(readField(stored, fieldName))) {
+                    changedFields.add("${fileSide}.${fieldName}".toString())
+                }
+            }
+            List derivedFilters = toDeclaredExcludeFilterRows(
+                    derivedFiltersByFileSide.get(fileSide) as List<Map<String, Object>>)
+            List storedFilters = toDeclaredExcludeFilterRows(
+                    filterRowsFromSource(stored) as List<Map<String, Object>>)
+            if (derivedFilters != storedFilters) changedFields.add("${fileSide}.excludeFilters".toString())
+        }
+
+        return [inSync           : changedFields.isEmpty(), changedFields: changedFields,
+                inputModeChanging: inputModeChanging, savedRunMissing: false]
+    }
+
+    /** The excludeFilters list attached to a source row by attachCapturedFilters, or empty. */
+    protected static List<Map<String, Object>> filterRowsFromSource(def storedSource) {
+        Object attached = readField(storedSource, "excludeFilters")
+        return (attached instanceof Collection) ? new ArrayList<>((Collection) attached) : []
+    }
+
+    /**
+     * Source rows narrowed to the columns sync compares, with their own filter rows attached, so
+     * buildAutomationSyncStatus stays a pure comparison with no entity access of its own.
+     */
+    static List<Map<String, Object>> attachCapturedFilters(def ec, List sources, String automationId) {
+        Map<String, List<Map<String, Object>>> capturedByFileSide = captureSourceFiltersByFileSide(ec, automationId)
+        return (sources ?: []).collect { def source ->
+            String fileSide = normalize(readField(source, "fileSide"))
+            Map<String, Object> row = [fileSide: fileSide]
+            (RUN_AUTHORITATIVE_SOURCE_FIELDS + ["databaseSourceQueryId"]).each { String fieldName ->
+                row.put(fieldName, readField(source, fieldName))
+            }
+            row.put("excludeFilters", capturedByFileSide?.get(fileSide) ?: [])
+            return row
+        } as List<Map<String, Object>>
+    }
+
 
     /**
      * One-time backfill for automations created before exclusion filters existed. The create-time

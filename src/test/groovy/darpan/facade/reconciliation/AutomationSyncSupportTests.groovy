@@ -216,4 +216,76 @@ class AutomationSyncSupportTests {
         assertEquals(AutomationFacadeSupport.INPUT_MODE_API_RANGE, payload.inputModeEnumId)
         assertEquals("AUT1", payload.automationId)
     }
+
+    private static Map derivedConfigFor(String schemaFileName, String inputMode, List filters = []) {
+        return [
+                savedRunMissing  : false,
+                error            : null,
+                compareScopeId   : "CS_ORDERS",
+                inputModeEnumId  : inputMode,
+                sourcesByFileSide: [FILE_1: [fileSide        : "FILE_1", schemaFileName: schemaFileName,
+                                             sourceTypeEnumId: AutomationFacadeSupport.SOURCE_TYPE_API]],
+                filtersByFileSide: [FILE_1: filters],
+        ]
+    }
+
+    private static List storedFile1(String schemaFileName, List excludeFilters = []) {
+        return [[fileSide        : "FILE_1", schemaFileName: schemaFileName,
+                 sourceTypeEnumId: AutomationFacadeSupport.SOURCE_TYPE_API,
+                 excludeFilters  : excludeFilters]]
+    }
+
+    @Test
+    void syncStatusIsInSyncWhenNothingDiffers() {
+        Map automation = [inputModeEnumId: AutomationFacadeSupport.INPUT_MODE_API_RANGE,
+                          compareScopeId : "CS_ORDERS"]
+        Map status = AutomationFacadeSupport.buildAutomationSyncStatus(automation,
+                storedFile1("run-schema.json"),
+                derivedConfigFor("run-schema.json", AutomationFacadeSupport.INPUT_MODE_API_RANGE))
+        assertTrue(status.inSync as Boolean, "unexpected drift: ${status.changedFields}")
+        assertEquals([], status.changedFields)
+        assertFalse(status.inputModeChanging as Boolean)
+    }
+
+    @Test
+    void syncStatusNamesAChangedSourceField() {
+        Map automation = [inputModeEnumId: AutomationFacadeSupport.INPUT_MODE_API_RANGE,
+                          compareScopeId : "CS_ORDERS"]
+        Map status = AutomationFacadeSupport.buildAutomationSyncStatus(automation,
+                storedFile1("stale-schema.json"),
+                derivedConfigFor("run-schema.json", AutomationFacadeSupport.INPUT_MODE_API_RANGE))
+        assertFalse(status.inSync as Boolean)
+        assertTrue((status.changedFields as List).contains("FILE_1.schemaFileName"))
+    }
+
+    @Test
+    void syncStatusNoticesFilterDrift() {
+        Map automation = [inputModeEnumId: AutomationFacadeSupport.INPUT_MODE_API_RANGE,
+                          compareScopeId : "CS_ORDERS"]
+        Map status = AutomationFacadeSupport.buildAutomationSyncStatus(automation,
+                storedFile1("run-schema.json", [[fieldExpression: "status", operator: "EXCLUDE_IN",
+                                                 filterValues   : "CANCELLED"]]),
+                derivedConfigFor("run-schema.json", AutomationFacadeSupport.INPUT_MODE_API_RANGE, []))
+        assertTrue((status.changedFields as List).contains("FILE_1.excludeFilters"))
+    }
+
+    @Test
+    void syncStatusFlagsAnInputModeFlip() {
+        Map automation = [inputModeEnumId: AutomationFacadeSupport.INPUT_MODE_SFTP_FILES,
+                          compareScopeId : "CS_ORDERS"]
+        Map status = AutomationFacadeSupport.buildAutomationSyncStatus(automation,
+                storedFile1("run-schema.json"),
+                derivedConfigFor("run-schema.json", AutomationFacadeSupport.INPUT_MODE_API_RANGE))
+        assertTrue(status.inputModeChanging as Boolean)
+        assertTrue((status.changedFields as List).contains("inputMode"))
+    }
+
+    @Test
+    void syncStatusReportsAMissingSavedRunWithoutClaimingDrift() {
+        Map status = AutomationFacadeSupport.buildAutomationSyncStatus([:], [],
+                [savedRunMissing: true, sourcesByFileSide: [:], filtersByFileSide: [:]])
+        assertTrue(status.savedRunMissing as Boolean)
+        // A missing run is not drift. Calling it out-of-date offers an action that cannot work.
+        assertTrue(status.inSync as Boolean)
+    }
 }

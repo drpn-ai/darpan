@@ -2049,6 +2049,7 @@
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
             <parameter name="automation" type="Map"/>
+            <parameter name="syncStatus" type="Map"/>
         </out-parameters>
         <actions>
             <set field="automationIdValue" from="((automationId)?.toString()?.trim())"/>
@@ -2065,6 +2066,11 @@
                 <set field="automationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', automationIdValue).orderBy('fileSide').disableAuthz().useCache(false).list() ?: []"/>
                 <set field="automationExecutions" from="darpan.facade.reconciliation.AutomationFacadeSupport.collapseExecutionHistory(ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).orderBy('-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [])"/>
                 <set field="automation" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationRow(ec, automationRecord, true, automationSources, automationExecutions)"/>
+                <!-- Snapshot drift: derived from the SAME deriveRunAuthoritativeConfig that
+                     sync#Automation applies, so the edit form's out-of-date marker can never
+                     disagree with what Sync would actually change. Read-only. -->
+                <set field="automationSourcesForSync" from="darpan.facade.reconciliation.AutomationFacadeSupport.attachCapturedFilters(ec, automationSources, automationIdValue)"/>
+                <set field="syncStatus" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationSyncStatus(automationRecord, automationSourcesForSync, darpan.facade.reconciliation.AutomationFacadeSupport.deriveRunAuthoritativeConfig(ec, automationRecord))"/>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

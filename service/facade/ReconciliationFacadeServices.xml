@@ -2205,6 +2205,16 @@
             <if condition="!ec.message.hasError()">
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for automation changes.')"/>
             </if>
+            <!-- An automation is a SNAPSHOT of its saved run, not a pointer at one: re-pointing it
+                 leaves the snapshot derived from the old run, which is an incoherent automation with
+                 no repair path. The edit form no longer offers the choice; this stops /rpc/json from
+                 offering it either. Use sync#Automation to pull the run's current config instead. -->
+            <if condition="!ec.message.hasError() &amp;&amp; ((automationId)?.toString()?.trim()) &amp;&amp; ((savedRunId)?.toString()?.trim())">
+                <set field="existingAutomationForRunGuard" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', ((automationId)?.toString()?.trim())).disableAuthz().useCache(false).one()"/>
+                <if condition="existingAutomationForRunGuard &amp;&amp; ((existingAutomationForRunGuard.savedRunId)?.toString()?.trim()) &amp;&amp; ((existingAutomationForRunGuard.savedRunId)?.toString()?.trim()) != ((savedRunId)?.toString()?.trim())">
+                    <message error="true">An automation's saved run cannot be changed. Create a new automation for a different run.</message>
+                </if>
+            </if>
             <set field="saveAutomationInput" from="[
                     automationId: automationIdValue,
                     automationName: automationNameValue,

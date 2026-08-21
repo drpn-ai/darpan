@@ -1135,4 +1135,44 @@ class AutomationFacadeSmokeTests {
             deleteSyncFixtureAutomation(automationId)
         }
     }
+
+    @Test
+    void saveAutomationRefusesToRepointAnExistingAutomationAtADifferentRun() {
+        Map<String, Object> first = createSyncFixtureAutomation("Sync Repoint Target")
+        Map<String, Object> second = createSyncFixtureAutomation("Sync Repoint Source")
+        String automationId = first.automationId as String
+        String originalSavedRunId = first.savedRunId as String
+        String otherSavedRunId = second.savedRunId as String
+        try {
+            assertNotEquals(originalSavedRunId, otherSavedRunId)
+
+            // Everything except savedRunId is a valid save. Without that, an empty `sources` list is
+            // rejected on its own and the assertion below passes with no guard in place at all.
+            Map<String, Object> result = callFacade("facade.ReconciliationFacadeServices.save#Automation", [
+                    automationId            : automationId,
+                    automationName          : "Sync Repoint Target",
+                    inputModeEnumId         : "AUT_IN_API_RANGE",
+                    savedRunId              : otherSavedRunId,
+                    savedRunType            : "ruleset",
+                    scheduleExpr            : "PT1H",
+                    relativeWindowTypeEnumId: "AUT_WIN_PREV_DAY",
+                    relativeWindowCount     : 1,
+                    windowTimeZone          : "UTC",
+                    sources                 : [
+                            [fileSide: "FILE_1", sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "OMS",
+                             fileTypeEnumId: "DftCsv", systemMessageRemoteId: "OMS_REMOTE"],
+                            [fileSide: "FILE_2", sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "SHOPIFY",
+                             fileTypeEnumId: "DftCsv", systemMessageRemoteId: "SHOPIFY_REMOTE"],
+                    ],
+            ])
+
+            assertFalse((Boolean) result.ok, "save should refuse to re-point an existing automation")
+            def row = ec.entity.find("darpan.reconciliation.ReconciliationAutomation")
+                    .condition("automationId", automationId).disableAuthz().useCache(false).one()
+            assertEquals(originalSavedRunId, row.savedRunId, "the stored run must be untouched")
+        } finally {
+            deleteSyncFixtureAutomation(automationId)
+            deleteSyncFixtureAutomation(second.automationId as String)
+        }
+    }
 }

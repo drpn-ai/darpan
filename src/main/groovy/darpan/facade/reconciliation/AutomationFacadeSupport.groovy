@@ -421,6 +421,96 @@ class AutomationFacadeSupport {
         }
     }
 
+    static final String SOURCE_CONFIG_TYPE_DATABASE_QUERY = "DATABASE_QUERY"
+
+    /**
+     * Run-owned columns that also exist on ReconciliationAutomationSource. Used to copy the run's
+     * values in AND to compare stored against derived for drift, so it must contain only real stored
+     * columns — see runAuthoritativeFieldListHoldsOnlyStoredSourceColumns.
+     */
+    static final List<String> RUN_AUTHORITATIVE_SOURCE_FIELDS = [
+            "sourceTypeEnumId", "systemEnumId", "fileTypeEnumId", "schemaFileName",
+            "recordRootExpression", "primaryIdExpression", "idValueNormalizer",
+            "systemMessageRemoteId", "nsRestletConfigId",
+    ].asImmutable()
+
+    /**
+     * Input mode follows the run's source types. SFTP on either side means the automation polls
+     * files; anything else (API, DATABASE) runs on a date window.
+     */
+    static String deriveInputModeFromSources(Map<String, Map<String, Object>> sourcesByFileSide) {
+        boolean anySftp = FILE_SIDES.any { String fileSide ->
+            normalize((sourcesByFileSide?.get(fileSide))?.get("sourceTypeEnumId")) == SOURCE_TYPE_SFTP
+        }
+        return anySftp ? INPUT_MODE_SFTP_FILES : INPUT_MODE_API_RANGE
+    }
+
+    /**
+     * A DATABASE run source carries its DatabaseSourceQuery id in RuleSetCompareSource.sourceConfigId,
+     * discriminated by sourceConfigType — the DATABASE connector's expectedSourceConfigType
+     * (data/SourceSystemConnectorSeedData.xml). Null for every other system, whose sourceConfigId
+     * means something else entirely and must never land in databaseSourceQueryId.
+     */
+    static String deriveDatabaseSourceQueryId(Object runSource) {
+        Map source = (runSource instanceof Map) ? (Map) runSource : [:]
+        if (normalize(readField(source, "sourceConfigType")) != SOURCE_CONFIG_TYPE_DATABASE_QUERY) return null
+        return normalize(readField(source, "sourceConfigId")) ?: null
+    }
+
+    /**
+     * The run's current configuration for an automation, as the sync path needs it. Pure read; writes
+     * nothing. Returns savedRunMissing rather than throwing so both callers (sync#Automation and
+     * get#Automation's syncStatus) can render the state.
+     */
+    static Map<String, Object> deriveRunAuthoritativeConfig(def ec, def automation) {
+        String savedRunId = normalize(readField(automation, "savedRunId"))
+        String savedRunType = normalizeLower(readField(automation, "savedRunType")) ?: "ruleset"
+        if (!savedRunId || savedRunType != "ruleset") {
+            return [savedRunMissing: true, error: null, sourcesByFileSide: [:], filtersByFileSide: [:]]
+        }
+
+        Map<String, Object> resolved = ReconciliationSavedRunSupport.resolveRuleSetRun(ec, savedRunId)
+        if (resolved.error) {
+            return [savedRunMissing: false, error: resolved.error as String,
+                    sourcesByFileSide: [:], filtersByFileSide: [:]]
+        }
+        if (!resolved.savedRun) {
+            return [savedRunMissing: true, error: null, sourcesByFileSide: [:], filtersByFileSide: [:]]
+        }
+
+        String compareScopeId = normalize(((Map) resolved.savedRun)?.get("compareScopeId"))
+        Map sourceBySide = (resolved.sourceBySide instanceof Map) ? (Map) resolved.sourceBySide : [:]
+
+        Map<String, Map<String, Object>> sourcesByFileSide = [:]
+        Map<String, List<Map<String, Object>>> filtersByFileSide = [:]
+        FILE_SIDES.each { String fileSide ->
+            def runSource = sourceBySide.get(fileSide)
+            if (runSource == null) return
+            Map<String, Object> derived = [fileSide: fileSide]
+            RUN_AUTHORITATIVE_SOURCE_FIELDS.each { String fieldName ->
+                derived.put(fieldName, normalize(readField(runSource, fieldName)) ?: null)
+            }
+            String queryId = deriveDatabaseSourceQueryId(runSource)
+            if (queryId) derived.put("databaseSourceQueryId", queryId)
+            // Transient: feeds applyApiSourceMetadataDefaults' config-id chain inside
+            // prepareAutomationSave. Never stored — sourceCreateMap does not list it.
+            String sourceConfigId = normalize(readField(runSource, "sourceConfigId"))
+            if (sourceConfigId) derived.put("sourceConfigId", sourceConfigId)
+            sourcesByFileSide.put(fileSide, derived)
+            filtersByFileSide.put(fileSide, seedFromRuleSet(ec, compareScopeId, fileSide))
+        }
+
+        return [
+                savedRunMissing  : false,
+                error            : null,
+                compareScopeId   : compareScopeId,
+                inputModeEnumId  : deriveInputModeFromSources(sourcesByFileSide),
+                sourcesByFileSide: sourcesByFileSide,
+                filtersByFileSide: filtersByFileSide,
+        ]
+    }
+
+
     /**
      * One-time backfill for automations created before exclusion filters existed. The create-time
      * seed only fires for a fileSide with no ReconciliationAutomationSource row, and every existing

@@ -26,9 +26,12 @@ class RunObservabilityCoreTest {
     void stageSequenceIsOrdered() {
         assertEquals(1, RunObservability.stageSequenceOf(RunObservability.STAGE_RESOLVE))
         assertEquals(4, RunObservability.stageSequenceOf(RunObservability.STAGE_COMPARE))
-        // VERIFY sits after WRITE_OUTPUT: the verification pass rechecks (and may rewrite) the
-        // written artifact, so it cannot precede it.
-        assertEquals(6, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY))
+        // VERIFY sits BEFORE WRITE_OUTPUT: the compare stage materializes its own Spark output and
+        // the verification passes recheck it, so the artifact WRITE_OUTPUT finalizes -- and the run
+        // row it persists -- is the verified one. A timeline that wrote before verifying read as if
+        // the results were settled while they were still being corrected.
+        assertEquals(5, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY))
+        assertEquals(6, RunObservability.stageSequenceOf(RunObservability.STAGE_WRITE_OUTPUT))
         assertEquals(7, RunObservability.stageSequenceOf(RunObservability.STAGE_NOTIFY))
         assertEquals(0, RunObservability.stageSequenceOf("UNKNOWN_STAGE"))
     }

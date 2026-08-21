@@ -301,6 +301,34 @@ class ReconciliationOutputSupportTests {
     }
 
     @Test
+    void sourceDetailsUseTheRunsOwnWindowWhenNothingElseCarriesIt() {
+        // Mid-run the status service passes empty metadata -- no output document exists yet -- and a
+        // manually started run has no automation execution row to fall back to. Before the run
+        // recorded the window it actually used, an API run showed the "API date range" heading with
+        // nothing under it for its whole duration.
+        Map<String, Object> runResult = [
+                reconciliationRunResultId: "RUN_RESULT_LIVE",
+                file1DataManagerPath     : "runtime://datamanager/reconciliation-runs/RS/20260820/file1-api/RS_RETURNS_PROD_file1.json",
+                file1Name                : "RS_RETURNS_PROD_file1.json",
+                windowStartDate          : Timestamp.valueOf("2026-08-19 00:00:00"),
+                windowEndDate            : Timestamp.valueOf("2026-08-20 00:00:00"),
+        ]
+        def ec = new Expando(
+                resource: new FakeResource(),
+                entity  : new FakeEntity([
+                        "darpan.reconciliation.ReconciliationRunResult"          : [runResult],
+                        "darpan.reconciliation.ReconciliationAutomationExecution": [],
+                ])
+        )
+
+        Map<String, Object> sourceDetails = OutputDescriptorSupport.buildRunResultSourceDetails(ec, runResult, [:])
+
+        assertNotNull(sourceDetails)
+        assertEquals("API", sourceDetails.mode)
+        assertEquals([start: "2026-08-19 00:00:00.0", end: "2026-08-20 00:00:00.0"], sourceDetails.dateRange)
+    }
+
+    @Test
     void sourceDetailsReadDateRangeFromBoundedArtifactHeader(@TempDir File dataManagerRoot) {
         String runFolderPath = "reconciliation-runs/RS_API_ORDER_SYNC/20260505-195645688"
         String resultPath = "${runFolderPath}/RS_API_ORDER_SYNC_result.json"

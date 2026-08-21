@@ -121,9 +121,12 @@ class OutputDescriptorSupport {
         metadata = metadata ?: [:]
         def automationExecution = resolveAutomationExecutionForRunResult(ec, runResult)
 
-        // Lazy chain: artifact headers are only consulted when the diff document and execution row
-        // carry no window, and readArtifactMetadataHeader never reads past its bounded prefix.
-        Map<String, Object> dateRange = firstDateRange(metadata) ?: dateRangeFromExecution(automationExecution) ?:
+        // Lazy chain: the run row's own window comes first because it is the only source that exists
+        // for the whole life of the run -- the diff document is not written until WRITE_OUTPUT, and a
+        // manually started run has no execution row at all. Artifact headers stay last, and
+        // readArtifactMetadataHeader never reads past its bounded prefix.
+        Map<String, Object> dateRange = firstDateRange(metadata) ?: dateRangeFromRunResult(runResult) ?:
+                dateRangeFromExecution(automationExecution) ?:
                 firstDateRange(readArtifactMetadataHeader(ec, runResult.file1DataManagerPath)) ?:
                 firstDateRange(readArtifactMetadataHeader(ec, runResult.file2DataManagerPath))
 
@@ -274,6 +277,18 @@ class OutputDescriptorSupport {
         } catch (Exception ignored) {
             return null
         }
+    }
+
+    /**
+     * The API window this run actually used, stamped onto the run row at beginRun. Runs created
+     * before that column existed read null here and fall through to the older sources, so no
+     * backfill is needed.
+     */
+    protected static Map<String, Object> dateRangeFromRunResult(def runResult) {
+        if (runResult == null) return null
+        String start = normalize(runResult.windowStartDate)
+        String end = normalize(runResult.windowEndDate)
+        return start || end ? [start: start, end: end].findAll { entry -> entry.value } as Map<String, Object> : null
     }
 
     protected static Map<String, Object> dateRangeFromExecution(def execution) {

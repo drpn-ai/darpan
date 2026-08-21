@@ -54,6 +54,12 @@
         <field name="compareScopeId" type="id"/>
         <field name="companyUserGroupId" type="id"/>
         <field name="createdByUserId" type="id"/>
+        <field name="windowStartDate" type="date-time">
+            <description>API window this run extracted, recorded when the run starts so the run
+                result screen can name the window for the whole life of the run. Null for file-mode
+                runs and for runs created before this column existed.</description>
+        </field>
+        <field name="windowEndDate" type="date-time"/>
         <field name="file1Name" type="text-medium"/>
         <field name="file1DataManagerPath" type="text-long"/>
         <field name="file2Name" type="text-medium"/>

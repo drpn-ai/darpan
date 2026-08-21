@@ -66,6 +66,24 @@ class RunObservabilityWriteTest {
     }
 
     @Test
+    void beginRunRecordsTheApiWindowTheRunUsed() {
+        // The run row is the only source that can name a run's window for the whole life of the run:
+        // the diff document is not written until WRITE_OUTPUT, and a manually started run has no
+        // automation execution row to read a window off.
+        def ec = new FakeEc()
+        Timestamp windowStart = Timestamp.valueOf("2026-08-19 00:00:00")
+        Timestamp windowEnd = Timestamp.valueOf("2026-08-20 00:00:00")
+
+        String runId = RunObservability.beginRun(ec, [savedRunId: "SR1", companyUserGroupId: "KREWE",
+                                                     windowStartDate: windowStart, windowEndDate: windowEnd])
+
+        assertNotNull(runId)
+        def run = ec.store.find { it.entityName == RunObservability.RUN_RESULT_ENTITY }
+        assertEquals(windowStart, run.get("windowStartDate"))
+        assertEquals(windowEnd, run.get("windowEndDate"))
+    }
+
+    @Test
     void stepLifecycleWritesRunningThenTerminal() {
         def ec = new FakeEc()
         String runId = RunObservability.beginRun(ec, [savedRunId: "SR1", companyUserGroupId: "KREWE"])

@@ -35,9 +35,14 @@ class RunObservability {
     static final String STAGE_EXTRACT_FILE1 = "EXTRACT_FILE1"
     static final String STAGE_EXTRACT_FILE2 = "EXTRACT_FILE2"
     static final String STAGE_COMPARE       = "COMPARE"
+    /** Finalizes the run: the verified artifact plus the persisted ReconciliationRunResult row.
+     *  Sits AFTER verification -- COMPARE materializes the Spark output it needs (the diffs stream
+     *  straight from the Dataset and are never all in memory), the verification passes correct it,
+     *  and only then are the results the operator downloads settled. */
     static final String STAGE_WRITE_OUTPUT  = "WRITE_OUTPUT"
-    /** Verification pass: point-lookup recheck of missing-in-side diffs against lookup-capable
-     *  sources; runs after WRITE_OUTPUT because it verifies (and may rewrite) the written artifact. */
+    /** Verification passes: point-lookup rechecks of the compared output against lookup-capable
+     *  sources. Each one records the systems it rechecked in its own metricsJson, because several
+     *  passes share this stage code and would otherwise be indistinguishable on the timeline. */
     static final String STAGE_VERIFY        = "VERIFY"
     static final String STAGE_NOTIFY        = "NOTIFY"
 
@@ -46,8 +51,8 @@ class RunObservability {
             (STAGE_EXTRACT_FILE1): 2,
             (STAGE_EXTRACT_FILE2): 3,
             (STAGE_COMPARE)      : 4,
-            (STAGE_WRITE_OUTPUT) : 5,
-            (STAGE_VERIFY)       : 6,
+            (STAGE_VERIFY)       : 5,
+            (STAGE_WRITE_OUTPUT) : 6,
             (STAGE_NOTIFY)       : 7,
     ]
 
@@ -67,6 +72,7 @@ class RunObservability {
                     if (runId) run.set("reconciliationRunResultId", runId)
                     ["savedRunId", "savedRunType", "reconciliationRunId", "reconciliationMappingId",
                      "ruleSetId", "compareScopeId", "companyUserGroupId", "createdByUserId",
+                     "windowStartDate", "windowEndDate",
                      "file1Name", "file2Name", "reconciliationType"].each { String k ->
                         if (ctx.get(k) != null) run.set(k, ctx.get(k))
                     }

@@ -115,6 +115,27 @@ class ReturnPresenceVerificationSupportTests {
         ]
     }
 
+    /** Minimal OMS extract carrying only what the superseded-sibling rule scans for. */
+    private File writeOmsExtract(List<String> orderExternalIds) {
+        File file = new File(tempDir, "oms-extract-${System.nanoTime()}.json")
+        file.setText('{"records":[' + orderExternalIds.collect {
+            JsonOutput.toJson([returnId: "M1", externalId: "x", orderExternalId: it])
+        }.join(",") + '],"metadata":{}}', "UTF-8")
+        return file
+    }
+
+    private Map verifyWithOmsExtract(File diff, File omsExtract) {
+        return ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
+                diffFile         : diff,
+                file1Label       : SHOPIFY_LABEL,
+                file2Label       : OMS_LABEL,
+                omsSideLabel     : OMS_LABEL,
+                shopifySideLabel : SHOPIFY_LABEL,
+                nowMillis        : NOW,
+                omsExtractFile   : omsExtract,
+        ])
+    }
+
     private static String isoInstant(long millis) {
         return new Date(millis).toInstant().toString()
     }
@@ -689,5 +710,70 @@ class ReturnPresenceVerificationSupportTests {
         assertEquals(2, result.cancelledRefundSuppressedCount)
         assertEquals(2, result.removedCount)
         assertEquals([], (List) parseDocument(diff).differences)
+    }
+
+    // --- SUPERSEDED-SIBLING SUPPRESSION (2026-08-20). Shopify keeps every Return object ever created
+    // on an order, including drafts superseded before any refund; OMS books one per settled outcome.
+
+    @Test
+    void suppressesAMissingInOmsReturnWhoseOrderOmsAlreadyBooked() {
+        // Live case, order 6950050758787: Shopify held three Returns, OMS one row keyed on the refund.
+        File diff = writeDiffDocument([missingInOmsRow("27051229315", OLD, "RETURN", "6950050758787")])
+
+        Map result = verifyWithOmsExtract(diff, writeOmsExtract(["6950050758787"]))
+
+        assertEquals(1, result.siblingReturnSuppressedCount)
+        assertEquals(1, result.removedCount)
+        assertTrue((result.auditNote as String).contains("superseded return"))
+        assertEquals([], (List) parseDocument(diff).differences)
+    }
+
+    @Test
+    void keepsAMissingInOmsRefundEvenWhenTheOrderWasBooked() {
+        // RETURN-only: a second refund on an already-reconciled order is a real event. Validated on
+        // the live 14, where exactly one REFUND sibling had to stay reported.
+        File diff = writeDiffDocument([missingInOmsRow("954982236291", OLD, "REFUND", "7005613588611")])
+
+        Map result = verifyWithOmsExtract(diff, writeOmsExtract(["7005613588611"]))
+
+        assertEquals(0, result.siblingReturnSuppressedCount)
+        assertEquals(0, result.removedCount)
+        assertEquals(["954982236291"], ((List) parseDocument(diff).differences).collect { it.primaryId })
+    }
+
+    @Test
+    void keepsAMissingInOmsReturnWhenOmsBookedNothingForThatOrder() {
+        File diff = writeDiffDocument([missingInOmsRow("27103363203", OLD, "RETURN", "6945586774147")])
+
+        Map result = verifyWithOmsExtract(diff, writeOmsExtract(["9999999999"]))
+
+        assertEquals(0, result.siblingReturnSuppressedCount)
+        assertEquals(0, result.removedCount)
+    }
+
+    @Test
+    void suppressesNothingWhenTheOmsExtractIsAbsent() {
+        // Fail OPEN on knowledge, CLOSED on suppression: no extract means an empty set, so the rule
+        // cannot fire on incomplete knowledge.
+        File diff = writeDiffDocument([missingInOmsRow("27051229315", OLD, "RETURN", "6950050758787")])
+
+        Map result = verifyWithOmsExtract(diff, new File(tempDir, "does-not-exist.json"))
+
+        assertEquals(0, result.siblingReturnSuppressedCount)
+        assertEquals(0, result.removedCount)
+    }
+
+    @Test
+    void readsOrderIdsFromAnExtractLargerThanOneReadChunk() {
+        // The scan is a streaming read, not a parse — a match must still resolve when it straddles a
+        // chunk boundary.
+        List<String> ids = (1..900).collect { "order${it}".toString() }
+        File extract = writeOmsExtract(ids)
+        assertTrue(extract.length() > 8192, "fixture must exceed one read chunk: ${extract.length()}")
+
+        Set<String> read = ReturnPresenceVerificationSupport.readOmsOrderIds(extract)
+
+        assertEquals(900, read.size())
+        assertTrue(read.contains("order1") && read.contains("order900"))
     }
 }

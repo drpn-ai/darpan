@@ -116,6 +116,11 @@ String obsRunId = ec.message.hasError() ? null : RunObservability.beginRun(ec, [
         savedRunId        : savedRunIdValue,
         companyUserGroupId: TenantAccessSupport.currentActiveTenantUserGroupId(ec),
         createdByUserId   : TenantAccessSupport.currentUserId(ec),
+        // Recorded on the run itself so the run-result screen can name the window while the run is
+        // still going: no diff document exists before WRITE_OUTPUT, and a manual run has no
+        // execution row. Null for file-mode runs, which beginRun skips.
+        windowStartDate   : windowStartDateValue,
+        windowEndDate     : windowEndDateValue,
 ])
 Map<String, Object> obsCtx = [companyUserGroupId: TenantAccessSupport.currentActiveTenantUserGroupId(ec)]
 boolean obsTerminalWritten = false
@@ -604,7 +609,8 @@ def runExchangeVerificationPass = { Map serviceResult, Object file1Source, Objec
             verification.lookupFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
             [recordCount : verification.sweepExchangeCount ?: 0,
              errorMessage: verification.lookupFailed && verification.warnings ? verification.warnings.first().toString() : null,
-             metricsJson : JsonOutput.toJson([sweepExchangeCount: verification.sweepExchangeCount ?: 0,
+             metricsJson : JsonOutput.toJson([verifiedSystems: [omsSide.label, shopifySide.label].findAll { it },
+                     sweepExchangeCount: verification.sweepExchangeCount ?: 0,
                      matchedCount: verification.matchedCount ?: 0, missingCount: appended, inTransitCount: verification.inTransitCount ?: 0,
                      pendingCount: verification.pendingCount ?: 0, deferredLookupCount: verification.deferredLookupCount ?: 0])])
 }
@@ -668,10 +674,14 @@ def runVerificationPass = { Map serviceResult, Object file1Source, Object file2S
     if (verification.auditNote) verificationNotes.add(verification.auditNote)
     verificationNotes.addAll((verification.warnings ?: []) as List)
     if (verificationNotes) serviceResult.processingWarnings = ((serviceResult.processingWarnings ?: []) as List) + verificationNotes
+    // verifiedSystems names the sides this pass actually rechecked -- several passes share the
+    // VERIFY stage code, so without it a run that ran two of them shows two identical timeline rows.
     RunObservability.endStep(ec, verifyStep,
             verification.lookupFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
             [recordCount : verification.checkedCount ?: 0,
-             errorMessage: verification.lookupFailed && verification.warnings ? verification.warnings.first().toString() : null])
+             errorMessage: verification.lookupFailed && verification.warnings ? verification.warnings.first().toString() : null,
+             metricsJson : JsonOutput.toJson([verifiedSystems: sideLookups.keySet() as List,
+                     checkedCount: verification.checkedCount ?: 0, removedCount: verification.removedCount ?: 0])])
 }
 
 // Return presence verify stage (DAR-BE-018; reduced 2026-08-18 — returns-refund-grain-alignment plan,
@@ -683,12 +693,17 @@ def runVerificationPass = { Map serviceResult, Object file1Source, Object file2S
 // re-derives presence itself. It now only GRADES rows the compare already reported missing, converting
 // grace-window-young ones to pending (removed from the diff) and gating pre-window Shopify events out
 // of the missing-in-OMS count; see ReturnPresenceVerificationSupport's class doc. That grading reads
-// each row's OWN embedded date straight out of the diff document the compare already wrote, so unlike
-// the retired shape this pass no longer needs either side's raw extract file as an input.
+// each row's OWN embedded date straight out of the diff document the compare already wrote.
+//
+// It does take the OMS extract again as of 2026-08-20, for the superseded-sibling rule alone: that
+// rule asks "did OMS book a return for this ORDER at all", which no row in the diff can answer, since
+// a matched event is by definition not in the diff. Grace and window grading remain file-free.
 def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source, Object file2Source,
+                                          Map file1Result, Map file2Result,
                                           String file1Label, String file2Label, String runOwnerUserGroupId ->
     if (serviceResult.ruleExecutionFailed == true) return
-    List sides = [[source: file1Source, label: file1Label], [source: file2Source, label: file2Label]]
+    List sides = [[source: file1Source, extractResult: file1Result, label: file1Label],
+                  [source: file2Source, extractResult: file2Result, label: file2Label]]
     Map omsReturnsSide = sides.find { Map side ->
         normalize(resolveConnectorFor(side.source)?.systemEnumId) == ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS
     }
@@ -699,6 +714,9 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
 
     File diffFile = resolveOutputFile(serviceResult)
     if (diffFile == null || !diffFile.isFile()) return
+
+    String omsReturnsFileLocation = normalize(omsReturnsSide.extractResult?.fileLocation)
+    File omsReturnsExtractFile = omsReturnsFileLocation == null ? null : resolveLocationFile(omsReturnsFileLocation)
 
     // Cancellation-refund suppression (2026-08-18): the OMS API is what gets called, so the connector
     // and the config id both come from the OMS side — even though every row being suppressed is a
@@ -740,6 +758,10 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
                 // runExchangeVerificationPass reads at :543) and may be null for a saved run with no
                 // window (e.g. two static files) — the filter degrades to grace-only behaviour then.
                 windowStartMillis: windowStartDate?.time,
+                // OMS extract for the superseded-sibling rule. Resolved the same way the exchange
+                // pass resolves its manifest sidecar. Null (no location, or an unreadable file) simply
+                // disables that one rule — the set comes back empty and nothing is suppressed.
+                omsExtractFile   : omsReturnsExtractFile,
                 // Null when the OMS_RETURNS connector declares no orderStateLookupServiceName, which
                 // disables cancellation-refund suppression without affecting grace/window grading.
                 cancelledOrderLookup: cancelledOrderLookup,
@@ -747,7 +769,7 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
     } catch (Throwable t) {
         checkFailed = true
         returnsVerification = [performed: false, rewritten: false, pendingCount: 0, preWindowSuppressedCount: 0,
-                removedCount: 0, cancelledRefundSuppressedCount: 0, auditNote: null,
+                removedCount: 0, cancelledRefundSuppressedCount: 0, siblingReturnSuppressedCount: 0, auditNote: null,
                 warnings: ["Return presence check failed: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map
     }
     if (ec.message.hasError()) {
@@ -777,10 +799,12 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
             checkFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
             [recordCount : (returnsVerification.removedCount ?: 0),
              errorMessage: checkFailed && returnsVerification.warnings ? returnsVerification.warnings.first().toString() : null,
-             metricsJson : JsonOutput.toJson([performed: returnsVerification.performed == true,
+             metricsJson : JsonOutput.toJson([verifiedSystems: [omsReturnsSide.label, shopifyReturnsSide.label].findAll { it },
+                     performed: returnsVerification.performed == true,
                      pendingCount: returnsVerification.pendingCount ?: 0,
                      preWindowSuppressedCount: returnsVerification.preWindowSuppressedCount ?: 0,
                      cancelledRefundSuppressedCount: returnsVerification.cancelledRefundSuppressedCount ?: 0,
+                     siblingReturnSuppressedCount: returnsVerification.siblingReturnSuppressedCount ?: 0,
                      removedCount: returnsVerification.removedCount ?: 0])])
 }
 
@@ -978,22 +1002,27 @@ try {
                                 ruleSetPersistedSources = (serviceResult.persistedSources ?: []) as List
                                 if (!ec.message.hasError()) {
                                     obsRuleExecutionFailed = serviceResult.ruleExecutionFailed == true
+                                    // The compare stage materializes its own output: the diffs stream
+                                    // straight from the Spark Dataset to the artifact and are never all
+                                    // held in memory, so producing the file is the tail of COMPARE rather
+                                    // than a results write. The verification passes then correct that
+                                    // artifact and the counts, and WRITE_OUTPUT below finalizes both --
+                                    // so the results a person downloads are the verified ones, and the
+                                    // timeline no longer reads as if they were settled before checking.
+                                    writeRuleSetOutput(serviceResult, savedRun, file1Label, file2Label, artifactContext)
                                     RunObservability.endStep(ec, obsStep,
                                             obsRuleExecutionFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
                                             [recordCount: serviceResult.differenceCount, errorMessage: obsRuleExecutionFailed ? "rule execution failed" : null])
-                                    obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_WRITE_OUTPUT) : null
-                                    obsStage = RunObservability.STAGE_WRITE_OUTPUT
-                                    writeRuleSetOutput(serviceResult, savedRun, file1Label, file2Label, artifactContext)
-                                    RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [:])
                                     obsStep = null
-                                    // Verification pass reads and may rewrite the artifact writeRuleSetOutput
-                                    // just produced, and adjusts serviceResult counts BEFORE they are persisted.
                                     runVerificationPass(serviceResult, file1Source, file2Source, file1Label, file2Label,
                                             savedRun.companyUserGroupId as String)
                                     runExchangeVerificationPass(serviceResult, file1Source, file2Source,
                                             (Map) file1Result, (Map) file2Result, file1Label, file2Label)
                                     runReturnPresenceVerificationPass(serviceResult, file1Source, file2Source,
+                                            (Map) file1Result, (Map) file2Result,
                                             file1Label, file2Label, savedRun.companyUserGroupId as String)
+                                    obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_WRITE_OUTPUT) : null
+                                    obsStage = RunObservability.STAGE_WRITE_OUTPUT
                                     String resultDataManagerPath = serviceResult.diffLocation ?
                                             (DataManagerSupport.relativeDataManagerPath(ec, new File(serviceResult.diffLocation as String)) ?: serviceResult.diffFileName) :
                                             serviceResult.diffFileName
@@ -1015,6 +1044,9 @@ try {
                                         onlyInFile1Count         : serviceResult.missingInFile2Count,
                                         onlyInFile2Count         : serviceResult.missingInFile1Count,
                                     ])
+                                    RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS,
+                                            [recordCount: serviceResult.differenceCount])
+                                    obsStep = null
                                     serviceResult.reconciliationRunResultId = reconciliationRunResultId
                                     serviceResult.diffFileName = resultDataManagerPath
                                     runResult = [

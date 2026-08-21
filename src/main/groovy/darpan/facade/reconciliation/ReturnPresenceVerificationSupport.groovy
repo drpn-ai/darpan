@@ -89,7 +89,24 @@ import static darpan.common.ValueSupport.normalizeInt
  *   vs 0.9% on matched controls; if the field's own rates diverge sharply from those, the assumption
  *   is what to re-examine first.
  *
- *   Four constraints, each load-bearing and each pinned by a test:
+ *   SUPERSEDED-SIBLING SUPPRESSION (2026-08-20): a missing-in-OMS RETURN row whose ORDER already has
+ *   a booked OMS return is not a gap either. Shopify keeps every Return object ever created on an
+ *   order — including drafts superseded minutes later, before any refund existed — while OMS books
+ *   ONE return per settled outcome, keyed on the refund. Live example, order 6950050758787: Shopify
+ *   held Returns 27050967171 (16:57), 27051229315 (17:02) and 27051491459 (refunded 17:05); OMS held
+ *   exactly one row keyed on refund 954960281731, whose total equalled the refund's two line items.
+ *   The refund reconciled; the two unrefunded drafts were reported as gaps.
+ *   RETURN ONLY, on the same reasoning as the cancellation rule: a second REFUND on an
+ *   already-reconciled order is a real event and stays visible (validated on the live 14 — the rule
+ *   suppressed 4 RETURN drafts and correctly left a REFUND sibling reported).
+ *   This one reads the OMS EXTRACT, so unlike the rules above it needs that file; absent or
+ *   unreadable, the set is empty and the rule simply does not fire.
+ *
+ *   NOTE: a per-order forward-match behaviour existed here before and was removed in 45c8268 when
+ *   this class was reduced to a grace/window filter. This is a deliberate, evidence-led restoration
+ *   of a narrower version of it, not an oversight being re-fixed.
+ *
+ *   Four constraints on the cancellation rule, each load-bearing and each pinned by a test:
  *     (1) DIRECTION — missing-in-OMS only. The same rule applied to missing-in-Shopify explained 1 of
  *         579 rows in the live probe, indistinguishable from control.
  *     (2) REFUND ONLY — a RETURN row is never suppressed, even on a cancelled order. Live data showed
@@ -132,6 +149,9 @@ class ReturnPresenceVerificationSupport {
     /** Order-level cancellation marker stamped on every Shopify event row by ShopifyReturnRefsSupport. */
     static final String ORDER_CANCELLED_AT_FIELD = "orderCancelledAt"
     static final String EVENT_TYPE_REFUND = "REFUND"
+    static final String EVENT_TYPE_RETURN = "RETURN"
+    /** Streaming scan target — extracts reach GB scale and only this one field is needed. */
+    private static final Pattern ORDER_EXTERNAL_ID = Pattern.compile('"orderExternalId"\\s*:\\s*"([^"]+)"')
 
     private static final String DIFFERENCES_HEADER = "\"differences\":["
     private static final String SUMMARY_PREFIX = "\"summary\":"
@@ -199,6 +219,10 @@ class ReturnPresenceVerificationSupport {
         // scale; see MissingDiffVerificationSupport's own OOM-avoidance doc) and grade every candidate
         // missing row (one belonging to the OMS side or the Shopify side of THIS run) against grace and
         // the window-start gate, using that row's own embedded record data — never a fresh join.
+        // SUPERSEDED-SIBLING SUPPRESSION (2026-08-20) — see the class doc. Read once, before the
+        // streaming pass, so the per-row test is a set membership rather than a file touch.
+        Set<String> omsOrderIds = readOmsOrderIds(args?.omsExtractFile as File)
+
         JsonSlurper slurper = new JsonSlurper()
         Map<String, Set<String>> removeIdsByToken = [:]
         // orderId -> row ids of the missing-in-OMS REFUND rows grading LEFT in place. Populated in
@@ -207,6 +231,7 @@ class ReturnPresenceVerificationSupport {
         int pendingCount = 0
         int preWindowCount = 0
         int cancelledByFieldCount = 0
+        int siblingReturnCount = 0
         int malformedCount = 0
         boolean sawDifferencesHeader = false
 
@@ -289,6 +314,21 @@ class ReturnPresenceVerificationSupport {
                         }
                     }
                 }
+                // SUPERSEDED-SIBLING SUPPRESSION: a missing-in-OMS RETURN row on an order OMS did
+                // book a return for. Shopify keeps every Return object a shopper or agent ever
+                // created on an order, including drafts that were superseded before any refund; OMS
+                // books ONE return per settled outcome, keyed on the refund. So the leftovers are
+                // Shopify bookkeeping, not gaps. RETURN ONLY — a second REFUND on an
+                // already-reconciled order is a real event and must stay visible.
+                boolean siblingSuppressed = false
+                if (missingInOms && !remove && !omsOrderIds.isEmpty() &&
+                        EVENT_TYPE_RETURN.equalsIgnoreCase(normalize(data.get("refundOrReturnType")))) {
+                    String siblingOrderId = normalize(data.get("orderId"))
+                    if (siblingOrderId && omsOrderIds.contains(siblingOrderId)) {
+                        remove = true
+                        siblingSuppressed = true
+                    }
+                }
                 if (!remove) continue
 
                 String rowId = rowIdOf(row)
@@ -297,6 +337,7 @@ class ReturnPresenceVerificationSupport {
                 if (pending) pendingCount++
                 else if (preWindow) preWindowCount++
                 else if (cancelledByField) cancelledByFieldCount++
+                else if (siblingSuppressed) siblingReturnCount++
             }
         }
         if (!sawDifferencesHeader) {
@@ -347,11 +388,11 @@ class ReturnPresenceVerificationSupport {
         }
 
         int removedCount = (removeIdsByToken.values()*.size().sum() ?: 0) as int
-        String auditNote = buildAuditNote(pendingCount, preWindowCount, graceHours, cancelledRefundCount)
+        String auditNote = buildAuditNote(pendingCount, preWindowCount, graceHours, cancelledRefundCount, siblingReturnCount)
         if (removedCount == 0) {
             return [performed: true, rewritten: false, pendingCount: 0, preWindowSuppressedCount: 0,
                     malformedCount: malformedCount, removedCount: 0, removedMissingInFile1: 0, removedMissingInFile2: 0,
-                    cancelledRefundSuppressedCount: 0,
+                    cancelledRefundSuppressedCount: 0, siblingReturnSuppressedCount: 0,
                     warnings: warnings, auditNote: auditNote] as Map<String, Object>
         }
 
@@ -424,6 +465,7 @@ class ReturnPresenceVerificationSupport {
                 malformedCount: malformedCount, removedCount: removedCount,
                 removedMissingInFile1: removedMissingInFile1, removedMissingInFile2: removedMissingInFile2,
                 cancelledRefundSuppressedCount: cancelledRefundCount,
+                siblingReturnSuppressedCount: siblingReturnCount,
                 warnings: warnings, auditNote: auditNote] as Map<String, Object>
     }
 
@@ -554,14 +596,48 @@ class ReturnPresenceVerificationSupport {
      * window-start clause is only appended when it can actually apply (mirrors the retired
      * suppression-caveat sentence's own "never a blanket disclaimer" rule).
      */
+    /**
+     * Streaming scan of the OMS extract for the set of orders OMS booked a return for. Deliberately
+     * NOT a JsonSlurper parse: a backfill window's extract reaches GB scale and exactly one field is
+     * wanted. A null/absent/unreadable file yields an EMPTY set, which disables the suppression
+     * entirely rather than suppressing on incomplete knowledge.
+     */
+    protected static Set<String> readOmsOrderIds(File omsExtractFile) {
+        Set<String> ids = new HashSet<String>()
+        if (omsExtractFile == null || !omsExtractFile.isFile()) return ids
+        try {
+            omsExtractFile.withReader("UTF-8") { Reader reader ->
+                StringBuilder buffer = new StringBuilder()
+                char[] chunk = new char[8192]
+                int read
+                while ((read = reader.read(chunk)) > 0) {
+                    buffer.append(chunk, 0, read)
+                    def matcher = ORDER_EXTERNAL_ID.matcher(buffer)
+                    int consumed = 0
+                    while (matcher.find()) { ids.add(matcher.group(1)); consumed = matcher.end() }
+                    if (consumed > 0) buffer.delete(0, consumed)
+                    // Keep a short tail so a match split across two chunk boundaries still resolves.
+                    if (buffer.length() > 8192) buffer.delete(0, buffer.length() - 512)
+                }
+            }
+        } catch (Exception ignored) {
+            // Fail open: an unreadable extract must not suppress anything, and must not fail the run.
+            return new HashSet<String>()
+        }
+        return ids
+    }
+
     private static String buildAuditNote(int pendingCount, int preWindowCount, int graceHours,
-                                         int cancelledRefundCount) {
+                                         int cancelledRefundCount, int siblingReturnCount = 0) {
         String note = "${AUDIT_NOTE_PREFIX}${pendingCount} pending (younger than ${graceHours}h)."
         if (preWindowCount > 0) {
             note += " ${preWindowCount} pre-window Shopify event(s) excluded from the missing-in-OMS count (extractor lookback artifact, not a genuine gap)."
         }
         if (cancelledRefundCount > 0) {
             note += " ${cancelledRefundCount} cancellation refund(s) suppressed from the missing-in-OMS count — the originating order is cancelled, which books no return in OMS."
+        }
+        if (siblingReturnCount > 0) {
+            note += " ${siblingReturnCount} superseded return(s) suppressed from the missing-in-OMS count — OMS booked a return for the same order, so the leftover Shopify Return object is bookkeeping, not a gap."
         }
         return note
     }

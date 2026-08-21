@@ -510,6 +510,56 @@ class AutomationFacadeSupport {
         ]
     }
 
+    /**
+     * Operator-owned source columns the run cannot supply. The wizard always asks for remote path and
+     * file-name pattern and auto-picks an SFTP server only when the tenant has exactly one, so these
+     * are answers, not derivations. extractStatusIds has no RuleSetCompareSource equivalent at all.
+     */
+    static final List<String> OPERATOR_OWNED_SOURCE_FIELDS = [
+            "sftpServerId", "remotePathTemplate", "fileNamePattern", "extractStatusIds",
+    ].asImmutable()
+
+    /**
+     * One save#Automation `sources` entry per side the RUN defines: run-authoritative columns from the
+     * derive, operator-owned columns carried over from the stored row. A side the run no longer
+     * defines disappears; a side the automation lacks is added.
+     *
+     * excludeFilters is ALWAYS set (replace, not merge), and its rows are re-keyed to the declared
+     * `values` list parameter: seedFromRuleSet returns `filterValues`, which save#Automation does not
+     * declare and Moqui may strip before validateExcludeFilterPayload ever sees it.
+     */
+    static List<Map<String, Object>> mergeSyncedSourceEntries(List storedSources,
+            Map<String, Map<String, Object>> derivedByFileSide,
+            Map<String, List<Map<String, Object>>> filtersByFileSide) {
+        Map<String, Object> storedByFileSide = [:]
+        (storedSources ?: []).each { def stored ->
+            String fileSide = normalize(readField(stored, "fileSide"))
+            if (fileSide) storedByFileSide.put(fileSide, stored)
+        }
+
+        return FILE_SIDES.findAll { String fileSide -> derivedByFileSide?.containsKey(fileSide) }
+                .collect { String fileSide ->
+                    Map<String, Object> entry = new LinkedHashMap<>(derivedByFileSide.get(fileSide))
+                    def stored = storedByFileSide.get(fileSide)
+                    OPERATOR_OWNED_SOURCE_FIELDS.each { String fieldName ->
+                        String preserved = stored != null ? normalize(readField(stored, fieldName)) : null
+                        if (preserved) entry.put(fieldName, preserved)
+                    }
+                    entry.put("excludeFilters", toDeclaredExcludeFilterRows(filtersByFileSide?.get(fileSide)))
+                    return entry
+                } as List<Map<String, Object>>
+    }
+
+    /** Rule set filter rows re-keyed to save#Automation's declared excludeFilters sub-parameters. */
+    protected static List<Map<String, Object>> toDeclaredExcludeFilterRows(List<Map<String, Object>> rows) {
+        return (rows ?: []).collect { Map<String, Object> row ->
+            [fieldExpression: normalize(row?.get("fieldExpression")),
+             operator       : normalize(row?.get("operator")),
+             values         : SourceFilterSupport.splitValues(
+                     row?.containsKey("values") ? row.get("values") : row?.get("filterValues"))] as Map<String, Object>
+        } as List<Map<String, Object>>
+    }
+
 
     /**
      * One-time backfill for automations created before exclusion filters existed. The create-time

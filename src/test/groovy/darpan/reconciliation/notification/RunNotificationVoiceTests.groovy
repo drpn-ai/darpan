@@ -298,18 +298,19 @@ class RunNotificationVoiceTests {
     @Test
     void cleanTailsAreGrammaticalContinuationsNotStandaloneSentences() {
         RunNotificationVoice.CLEAN_TAILS.each { String tail ->
-            assertTrue(tail.startsWith(",") || tail.startsWith(" \u2014"),
+            assertTrue(tail.startsWith(",") || tail.startsWith(";"),
                     "a tail attaches to the verdict; it is not its own sentence: ${tail}".toString())
+            // The verdict already spends an em dash between the run name and the headline, so a
+            // dashed tail puts two in one sentence.
+            assertFalse(tail.contains("\u2014"),
+                    "a dashed tail doubles the verdict's own dash: ${tail}".toString())
         }
     }
 
     @Test
     void everyCloserCarriesASinglePunchline() {
         // Two punchlines in one breath compete and cancel. One sentence per closer.
-        List<String> closers = RunNotificationVoice.STREAK_TEMPLATES +
-                RunNotificationVoice.EARLY_MORNING_LINES + RunNotificationVoice.FRIDAY_AFTERNOON_LINES +
-                RunNotificationVoice.MONDAY_MORNING_LINES + RunNotificationVoice.MIDDAY_LINES
-        closers.each { String closer ->
+        allCloserLines().each { String closer ->
             assertEquals(1, closer.count("."), "closer must be a single sentence: ${closer}".toString())
         }
     }
@@ -321,11 +322,7 @@ class RunNotificationVoiceTests {
         // again is the synonym collision this restructure exists to remove. Applies to the streak
         // templates too: "clean the whole way through." followed by "That's 4 clean runs in a row"
         // echoes the verdict one line after making it.
-        List<String> closers = RunNotificationVoice.EARLY_MORNING_LINES +
-                RunNotificationVoice.FRIDAY_AFTERNOON_LINES + RunNotificationVoice.MONDAY_MORNING_LINES +
-                RunNotificationVoice.MIDDAY_LINES + RunNotificationVoice.STREAK_TEMPLATES +
-                RunNotificationVoice.CLEAN_TAILS
-        closers.each { String closer ->
+        (allCloserLines() + RunNotificationVoice.CLEAN_TAILS).each { String closer ->
             assertFalse(closer.toLowerCase().contains("clean"),
                     "the headline already said it was clean: ${closer}".toString())
         }
@@ -451,6 +448,407 @@ class RunNotificationVoiceTests {
             assertTrue(text.contains("Missing from OMS: 1"), text)
             assertTrue(text.contains("Missing from SHOPIFY: 3"), text)
             assertTrue(text.contains("Mismatches: 2"), text)
+        }
+    }
+
+    // -------------------------------------------------------------------------------------
+    // Corpus size and non-repetition.
+    //
+    // A clean run is the message an operator sees most, and pool size alone never fixed it:
+    // uniform random WITH replacement collides on the birthday bound, so the first repeat lands
+    // at roughly 1.25*sqrt(N) draws. Eight headlines therefore repeated inside about four
+    // messages however well written they were. Size raises the ceiling; the cycle dealer below
+    // is what actually makes a repeat rare, by spending a pool out before reshuffling it.
+    // -------------------------------------------------------------------------------------
+
+    /**
+     * Clean runs an operator may plausibly see in a week — a twice-hourly automation on a working
+     * week, not a daily one. The corpus must outlast it without repeating a message.
+     */
+    private static final int WEEK_OF_RUNS = 75
+
+    /** Every pool that can supply the closing line of a clean run. */
+    private static List<String> allCloserLines() {
+        return RunNotificationVoice.STREAK_TEMPLATES + RunNotificationVoice.LONG_STREAK_TEMPLATES +
+                RunNotificationVoice.EARLY_MORNING_LINES + RunNotificationVoice.FRIDAY_AFTERNOON_LINES +
+                RunNotificationVoice.MONDAY_MORNING_LINES + RunNotificationVoice.MIDDAY_LINES +
+                RunNotificationVoice.LATE_EVENING_LINES + RunNotificationVoice.WEEKEND_LINES
+    }
+
+    private static List<String> allDiagnosisLines() {
+        return RunNotificationVoice.ONE_SIDED_DIAGNOSES + RunNotificationVoice.EVEN_SPLIT_DIAGNOSES +
+                RunNotificationVoice.VALUE_DRIFT_DIAGNOSES +
+                RunNotificationVoice.MIXED_MISMATCH_DIAGNOSES +
+                RunNotificationVoice.MIXED_MISSING_DIAGNOSES
+    }
+
+    private static List<List<String>> everyPool() {
+        return [RunNotificationVoice.CLEAN_HEADLINES, RunNotificationVoice.CLEAN_TAILS,
+                RunNotificationVoice.STREAK_TEMPLATES, RunNotificationVoice.LONG_STREAK_TEMPLATES,
+                RunNotificationVoice.EARLY_MORNING_LINES, RunNotificationVoice.FRIDAY_AFTERNOON_LINES,
+                RunNotificationVoice.MONDAY_MORNING_LINES, RunNotificationVoice.MIDDAY_LINES,
+                RunNotificationVoice.LATE_EVENING_LINES, RunNotificationVoice.WEEKEND_LINES,
+                RunNotificationVoice.ONE_SIDED_DIAGNOSES, RunNotificationVoice.EVEN_SPLIT_DIAGNOSES,
+                RunNotificationVoice.VALUE_DRIFT_DIAGNOSES,
+                RunNotificationVoice.MIXED_MISMATCH_DIAGNOSES,
+                RunNotificationVoice.MIXED_MISSING_DIAGNOSES, RunNotificationVoice.SHAPE_FRAMES]
+    }
+
+    @Test
+    void theHeadlinePoolAloneCoversAFullWeekOfCleanRuns() {
+        // The headline is the one slot every clean message spends, so it sets the repeat floor for
+        // the whole message. One full dealer cycle has to outlast a week on its own.
+        assertTrue(RunNotificationVoice.CLEAN_HEADLINES.size() >= WEEK_OF_RUNS,
+                "headline pool is ${RunNotificationVoice.CLEAN_HEADLINES.size()}, under a week of runs".toString())
+    }
+
+    @Test
+    void everySupportingPoolIsDeepEnoughToAvoidAVisiblePattern() {
+        Map<String, Integer> floors = [
+                tails         : 60, streaks: 30, cappedStreaks: 12,
+                earlyMorning  : 18, fridayAfternoon: 18, mondayMorning: 18,
+                midday        : 18, lateEvening: 18, weekend: 18]
+        Map<String, List<String>> pools = [
+                tails         : RunNotificationVoice.CLEAN_TAILS,
+                streaks       : RunNotificationVoice.STREAK_TEMPLATES,
+                cappedStreaks : RunNotificationVoice.LONG_STREAK_TEMPLATES,
+                earlyMorning  : RunNotificationVoice.EARLY_MORNING_LINES,
+                fridayAfternoon: RunNotificationVoice.FRIDAY_AFTERNOON_LINES,
+                mondayMorning : RunNotificationVoice.MONDAY_MORNING_LINES,
+                midday        : RunNotificationVoice.MIDDAY_LINES,
+                lateEvening   : RunNotificationVoice.LATE_EVENING_LINES,
+                weekend       : RunNotificationVoice.WEEKEND_LINES]
+        floors.each { String name, Integer floor ->
+            assertTrue(pools.get(name).size() >= floor,
+                    "${name} pool is ${pools.get(name).size()}, below its floor of ${floor}".toString())
+        }
+        allDiagnosisLines() // touched so an empty diagnosis pool fails loudly below
+        [RunNotificationVoice.ONE_SIDED_DIAGNOSES, RunNotificationVoice.EVEN_SPLIT_DIAGNOSES,
+         RunNotificationVoice.VALUE_DRIFT_DIAGNOSES, RunNotificationVoice.MIXED_MISMATCH_DIAGNOSES,
+         RunNotificationVoice.MIXED_MISSING_DIAGNOSES].each { List<String> pool ->
+            assertTrue(pool.size() >= 10, "diagnosis pool is only ${pool.size()} deep: ${pool}".toString())
+        }
+    }
+
+    @Test
+    void noPoolContainsADuplicateEntry() {
+        // A duplicated line halves the effective cycle length silently.
+        everyPool().each { List<String> pool ->
+            assertEquals(pool.size(), pool.toSet().size(),
+                    "pool holds a duplicate entry: ${pool}".toString())
+        }
+    }
+
+    @Test
+    void theDealerSpendsEveryEntryBeforeReshuffling() {
+        RunNotificationVoice.resetLinePicker()
+        List<String> pool = RunNotificationVoice.CLEAN_HEADLINES
+        List<String> dealt = (1..pool.size()).collect {
+            RunNotificationVoice.pickLine(pool, "headline")
+        }
+        assertEquals(pool.size(), dealt.toSet().size(),
+                "a single cycle repeated a line, so selection is still with replacement: ${dealt}".toString())
+        assertEquals(pool.toSet(), dealt.toSet())
+    }
+
+    @Test
+    void theDealerNeverRepeatsBackToBackAcrossACycleBoundary() {
+        // A fresh shuffle can otherwise open on the entry the previous cycle closed with, which is
+        // the one adjacent repeat a cycle dealer cannot rule out by construction.
+        RunNotificationVoice.resetLinePicker()
+        List<String> pool = RunNotificationVoice.CLEAN_TAILS
+        List<String> dealt = (1..(pool.size() * 4)).collect {
+            RunNotificationVoice.pickLine(pool, "tail")
+        }
+        dealt.eachWithIndex { String line, int index ->
+            if (index > 0) {
+                assertFalse(line == dealt.get(index - 1),
+                        "back-to-back repeat at draw ${index}: ${line}".toString())
+            }
+        }
+    }
+
+    @Test
+    void poolsSharingASlotNameKeepSeparateCycles() {
+        // Every time-of-day pool is drawn under the slot name "timeOfDay". Keying the dealer on the
+        // slot name alone would deal Monday copy into a Saturday message.
+        RunNotificationVoice.resetLinePicker()
+        20.times {
+            assertTrue(RunNotificationVoice.MIDDAY_LINES.contains(
+                    RunNotificationVoice.pickLine(RunNotificationVoice.MIDDAY_LINES, "timeOfDay")))
+            assertTrue(RunNotificationVoice.WEEKEND_LINES.contains(
+                    RunNotificationVoice.pickLine(RunNotificationVoice.WEEKEND_LINES, "timeOfDay")))
+        }
+    }
+
+    @Test
+    void aWeekOfCleanRunsProducesNoRepeatedMessage() {
+        RunNotificationVoice.resetLinePicker()
+        // 16:00 Wednesday hits no time window, so this is the leanest clean message there is:
+        // one fused line, headline plus tail, and nothing else to carry variety.
+        ZonedDateTime plainWednesday = ZonedDateTime.of(
+                2026, 8, 19, 16, 0, 0, 0, ZoneId.of("Asia/Kolkata"))
+        List<String> rendered = (1..WEEK_OF_RUNS).collect {
+            RunNotificationVoice.renderLines(cleanModel() +
+                    [runName: "Production Orders Automation", priorCleanRuns: 0,
+                     completedMoment: plainWednesday]).join("\n")
+        }
+        assertEquals(WEEK_OF_RUNS, rendered.toSet().size(),
+                "a week of clean runs repeated a message: ${rendered.countBy { it }.findAll { it.value > 1 }}".toString())
+    }
+
+    @Test
+    void aWeekOfStreakingCleanRunsProducesNoRepeatedMessage() {
+        RunNotificationVoice.resetLinePicker()
+        // The likeliest real shape: a daily automation that has been clean for a while, so the
+        // streak closer wins every time and the message is headline plus streak.
+        List<String> rendered = (1..WEEK_OF_RUNS).collect { int index ->
+            RunNotificationVoice.renderLines(cleanModel() +
+                    [runName: "Production Orders Automation", priorCleanRuns: 4,
+                     completedMoment: null]).join("\n")
+        }
+        assertEquals(WEEK_OF_RUNS, rendered.toSet().size(),
+                "a week of streaking clean runs repeated a message: ${rendered.countBy { it }.findAll { it.value > 1 }}".toString())
+    }
+
+    @Test
+    void aCappedStreakStillVariesItsClosingLine() {
+        RunNotificationVoice.resetLinePicker()
+        // At the lookback cap the renderer used to return one frozen string, so an automation that
+        // had been clean for twenty runs printed an identical second line forever. That is the
+        // staleness this whole change exists to remove, and it got worse the healthier a tenant was.
+        List<String> dealt = (1..RunNotificationVoice.LONG_STREAK_TEMPLATES.size()).collect {
+            RunNotificationVoice.streakLine(RunNotificationVoice.LOOKBACK_LIMIT)
+        }
+        assertEquals(RunNotificationVoice.LONG_STREAK_TEMPLATES.size(), dealt.toSet().size(),
+                "capped streak copy is still frozen: ${dealt}".toString())
+    }
+
+    @Test
+    void everyStreakTemplateKeepsTheCountPlaceholder() {
+        (RunNotificationVoice.STREAK_TEMPLATES + RunNotificationVoice.LONG_STREAK_TEMPLATES)
+                .each { String template ->
+            assertTrue(template.contains("{n}"),
+                    "a streak line that drops the number is just flavour: ${template}".toString())
+        }
+    }
+
+    @Test
+    void everyCappedStreakLineRendersTheLookbackLimit() {
+        RunNotificationVoice.resetLinePicker()
+        RunNotificationVoice.LONG_STREAK_TEMPLATES.size().times {
+            String line = RunNotificationVoice.streakLine(RunNotificationVoice.LOOKBACK_LIMIT)
+            assertTrue(line.contains(Integer.toString(RunNotificationVoice.LOOKBACK_LIMIT)), line)
+            assertFalse(line.contains("{n}"), "unrendered placeholder: ${line}".toString())
+        }
+    }
+
+    @Test
+    void everyDiagnosisLineIsASingleSentenceCarryingNoCounts() {
+        // Same discipline the first entry of each pool was already held to: the Details block owns
+        // the arithmetic, and stacked fragments are the mechanical rhythm this voice avoids.
+        allDiagnosisLines().each { String line ->
+            assertEquals(1, line.count("."),
+                    "diagnosis is more than one sentence: ${line}".toString())
+            assertFalse(line ==~ /.*\d.*/, "diagnosis repeats a count: ${line}".toString())
+        }
+    }
+
+    @Test
+    void everyDiagnosisPoolEntryStaysReachableThroughTheRenderer() {
+        // Each bucket must draw from its own pool, not fall back to a shared default.
+        everyShapeBucket().each { Map bucketCase ->
+            RunNotificationVoice.resetLinePicker()
+            Set<String> seen = (1..40).collect {
+                RunNotificationVoice.renderLines(bucketCase.model as Map).get(1)
+            }.toSet()
+            assertTrue(seen.size() >= 10,
+                    "${bucketCase.label} only ever renders ${seen.size()} diagnosis lines: ${seen}".toString())
+        }
+    }
+
+    @Test
+    void noPoolAnywhereUsesTheBannedAgreeWording() {
+        // Project copy rule: systems "line up", they never "agree". Checked across the whole corpus
+        // rather than the two clean pools, and as a substring so "disagreement" is caught too.
+        (RunNotificationVoice.CLEAN_HEADLINES + RunNotificationVoice.CLEAN_TAILS +
+                allCloserLines() + allDiagnosisLines()).each { String line ->
+            assertFalse(line.toLowerCase().contains("agree"), "banned wording in copy: ${line}".toString())
+        }
+    }
+
+    @Test
+    void weekendRunsGetTheirOwnCloser() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        // 2026-08-22 is a Saturday. A run landing on a day nobody is working is a different fact
+        // about the reader's day than "midday", which is what it used to be flattened into.
+        ZonedDateTime saturdayMidday = ZonedDateTime.of(
+                2026, 8, 22, 12, 0, 0, 0, ZoneId.of("Asia/Kolkata"))
+        assertEquals(RunNotificationVoice.WEEKEND_LINES.first(),
+                RunNotificationVoice.timeOfDayLine(saturdayMidday))
+    }
+
+    @Test
+    void lateEveningRunsGetTheirOwnCloser() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        ZonedDateTime wednesdayNight = ZonedDateTime.of(
+                2026, 8, 19, 22, 30, 0, 0, ZoneId.of("Asia/Kolkata"))
+        assertEquals(RunNotificationVoice.LATE_EVENING_LINES.first(),
+                RunNotificationVoice.timeOfDayLine(wednesdayNight))
+    }
+
+    @Test
+    void earlyMorningOutranksTheWeekendWindow() {
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        // Saturday 05:30 is both, and "before anyone was at a desk" is the sharper observation.
+        ZonedDateTime saturdayDawn = ZonedDateTime.of(
+                2026, 8, 22, 5, 30, 0, 0, ZoneId.of("Asia/Kolkata"))
+        assertEquals(RunNotificationVoice.EARLY_MORNING_LINES.first(),
+                RunNotificationVoice.timeOfDayLine(saturdayDawn))
+    }
+
+    @Test
+    void aPlainWeekdayAfternoonStillHasNoTimeCloser() {
+        // Load-bearing: a null here with no streak is what collapses the message to one fused line,
+        // so the message SHAPE varies with what is actually true. Widening the windows must not
+        // quietly make every clean run two lines again.
+        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
+        ZonedDateTime wednesdayLateAfternoon = ZonedDateTime.of(
+                2026, 8, 19, 16, 0, 0, 0, ZoneId.of("Asia/Kolkata"))
+        assertEquals(null, RunNotificationVoice.timeOfDayLine(wednesdayLateAfternoon))
+        ZonedDateTime tuesdayMidMorning = ZonedDateTime.of(
+                2026, 8, 18, 10, 0, 0, 0, ZoneId.of("Asia/Kolkata"))
+        assertEquals(null, RunNotificationVoice.timeOfDayLine(tuesdayMidMorning))
+    }
+
+    // -------------------------------------------------------------------------------------
+    // Register guards.
+    //
+    // The clean-run copy is allowed to be funny — it is the one message nobody has to action, and
+    // a flat one stops being read. But it posts into CUSTOMER Google Chat spaces, not an internal
+    // channel, so "funny" has a hard boundary: it may be about the data behaving, never about a
+    // person. These tests hold that boundary mechanically, because the pools are the part of this
+    // file most likely to be extended quickly and least likely to be reviewed carefully.
+    // -------------------------------------------------------------------------------------
+
+    private static List<String> wholeCorpus() {
+        return RunNotificationVoice.CLEAN_HEADLINES + RunNotificationVoice.CLEAN_TAILS +
+                allCloserLines() + allDiagnosisLines() + RunNotificationVoice.SHAPE_FRAMES
+    }
+
+    @Test
+    void noCopyAnywhereReadsAsUnprofessionalInACustomerChatSpace() {
+        // Word boundaries, not substrings: "assembled" and "asset" are not profanity, and a
+        // substring match would ban them and quietly shrink the corpus instead of failing loudly.
+        List<String> banned = ["damn", "damned", "hell", "crap", "wtf", "sucks", "sucked", "screwed",
+                               "bloody", "ass", "idiot", "idiots", "stupid", "dumb", "moron", "lazy",
+                               "incompetent", "useless", "clueless", "amateur", "sloppy"]
+        wholeCorpus().each { String line ->
+            banned.each { String word ->
+                assertFalse(line.toLowerCase() ==~ /.*\b${word}\b.*/,
+                        "copy that posts to a customer chat space cannot say \"${word}\": ${line}".toString())
+            }
+        }
+    }
+
+    @Test
+    void noCopyBlamesTheReaderOrAnyoneElse() {
+        // Humour about the data behaving is in scope. Humour that lands on a person is not, and the
+        // reader of a reconciliation notification is often the person who owns the pipeline.
+        List<String> blaming = ["your fault", "you broke", "you forgot", "you missed", "your mistake",
+                                "someone messed", "someone broke", "whoever broke", "finally"]
+        wholeCorpus().each { String line ->
+            blaming.each { String phrase ->
+                assertFalse(line.toLowerCase().contains(phrase),
+                        "copy points at a person rather than the data: ${line}".toString())
+            }
+        }
+    }
+
+    @Test
+    void noCopyShoutsOrCarriesCharactersGoogleChatWillNotRenderPlainly() {
+        // Quiet confidence is the voice; an exclamation mark is the pep-talk register it rules out.
+        // The character check is practical rather than stylistic: this payload is plain text, and a
+        // smart quote or an emoji pasted in from a doc renders inconsistently across Chat clients.
+        wholeCorpus().each { String line ->
+            assertFalse(line.contains("!"), "copy shouts: ${line}".toString())
+            line.toCharArray().each { char c ->
+                boolean plain = ((int) c) < 128 || ((int) c) == 0x2014
+                assertTrue(plain,
+                        "non-plain character U+${Integer.toHexString((int) c)} in copy: ${line}".toString())
+            }
+        }
+    }
+
+    /**
+     * Words too common to count as an echo. Without these the check would fire on almost every
+     * pair, because "nothing" is the single most useful word in both halves of this message.
+     */
+    private static final Set<String> FILLER_WORDS = [
+            "nothing", "anything", "everything", "something", "nobody", "anybody", "anyone",
+            "someone", "everyone", "another", "because", "without", "whatever", "though",
+            "should", "before", "after", "which", "there", "their", "still", "almost",
+            "really", "actually", "entire", "entirely", "genuinely"] as Set
+
+    /** Six-character stems, so "boringly" and "boring" register as the same word. */
+    private static Set<String> contentStems(String line) {
+        return ((line.toLowerCase() =~ /[a-z]+/).collect { it as String })
+                .findAll { String word -> word.length() >= 6 && !FILLER_WORDS.contains(word) }
+                .collect { String word -> word.substring(0, 6) } as Set
+    }
+
+    @Test
+    void noHeadlineAndTailPairRepeatsAContentWord() {
+        // The headline and the tail are drawn independently, so EVERY pair is reachable and the
+        // whole grid has to hold. It shipped one round with "both sides told the same boring story,
+        // which is the most boring thing you'll read today" reachable, which is the failure mode a
+        // bigger corpus makes MORE likely, not less: more entries means more chances that two of
+        // them reach for the same joke.
+        //
+        // Scoped to the fused one-line form on purpose. Headline and tail land in one sentence,
+        // where an echo is glaring; a closer is a separate sentence on its own line, where the same
+        // repetition reads as a callback rather than a stumble.
+        RunNotificationVoice.CLEAN_HEADLINES.each { String headline ->
+            Set<String> headlineStems = contentStems(headline)
+            RunNotificationVoice.CLEAN_TAILS.each { String tail ->
+                Collection<String> shared = headlineStems.intersect(contentStems(tail))
+                assertTrue(shared.isEmpty(),
+                        "headline and tail echo ${shared}: ${headline}${tail}".toString())
+            }
+        }
+    }
+
+    @Test
+    void everyShapeFrameReadsCorrectlyAtOneAndAtMany() {
+        // A frame is interpolated with a raw count, so it must be number-agnostic. "{n} differences"
+        // and "{n} need a look" both render "1 differences" on a single-difference run — which is
+        // the run an operator is most likely to be reading closely, not least.
+        List<String> agreementTraps = ["differences", "records", "need ", "are ", "items"]
+        RunNotificationVoice.SHAPE_FRAMES.each { String frame ->
+            assertTrue(frame.contains("{n}"), "frame drops the count: ${frame}".toString())
+            agreementTraps.each { String trap ->
+                assertFalse(frame.toLowerCase().contains(trap),
+                        "frame breaks at a count of one: ${frame}".toString())
+            }
+        }
+    }
+
+    @Test
+    void aRecurringProblemDoesNotRenderAByteIdenticalHeadlineEveryDay() {
+        // This surface was a single hardcoded string for three rounds. A clean run at least varied;
+        // a tenant working through a recurring one-sided gap got the same headline every day for as
+        // long as the problem lasted, which is the reader with the LEAST patience for it.
+        RunNotificationVoice.resetLinePicker()
+        Set<String> headlines = (1..RunNotificationVoice.SHAPE_FRAMES.size()).collect {
+            RunNotificationVoice.renderLines(shapeModel(39, 0, 0)).first()
+        }.toSet()
+        assertEquals(RunNotificationVoice.SHAPE_FRAMES.size(), headlines.size(),
+                "recurring-problem headline still repeats: ${headlines}".toString())
+        // The facts inside the frame are NOT variable: every rendering still carries the count and
+        // names the system that is short.
+        headlines.each { String headline ->
+            assertTrue(headline.contains("39"), headline)
+            assertTrue(headline.contains("all missing from Shopify"), headline)
         }
     }
 }

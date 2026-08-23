@@ -225,6 +225,17 @@ class AutomationExecutionSupport {
                 return
             }
 
+            // Per-window params: executionParams is built ONCE outside this loop, but the execution id
+            // is minted per child window, so the extractors get their own copy carrying it. Extractors
+            // name their default output folder after this id (extractOmsOrders.groovy:
+            // resolveReconciliationRunLocation(ec, automationExecutionId ?: configIdValue, timestamp)),
+            // and without it they fall back to the SOURCE CONFIG id — which every tenant sharing that
+            // OMS connection also falls back to, for a file name that is identical across tenants for
+            // the same window. Two runs then write the same path and one compares the other's extract
+            // (sm-darpan 2026-08-22: a KG Canada run reconciled 98 Dolce Vita orders).
+            Map<String, Object> windowParams = new LinkedHashMap<String, Object>(executionParams)
+            windowParams.automationExecutionId = automationExecutionId
+
             // Audit 2026-06-11 #16: hold the Spark Datasets persisted by reconcile#RuleSetCompareScope
             // so the finally below unpersists them on every exit path of this automation execution.
             List autoPersistedSources = []
@@ -278,7 +289,7 @@ class AutomationExecutionSupport {
                 openStep = null
 
                 openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE1)
-                Map<String, Object> file1Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file1Source, window, executionParams), file1Source)
+                Map<String, Object> file1Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file1Source, window, windowParams), file1Source)
                 RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [recordCount: file1Result.recordCount])
                 openStep = null
                 // Task 2c: refresh the clock after source-1 extraction, a real (possibly slow) I/O call —
@@ -293,7 +304,7 @@ class AutomationExecutionSupport {
                 // this throws RunCancelledException out of the run loop, caught below.
                 RunObservability.checkpointCancel(ec, mintedRunResultId)
                 openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE2)
-                Map<String, Object> file2Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file2Source, window, executionParams), file2Source)
+                Map<String, Object> file2Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file2Source, window, windowParams), file2Source)
                 RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [recordCount: file2Result.recordCount])
                 openStep = null
                 // Task 2c: after source-2 extraction too — a NO_DATA window returns just below without
@@ -1271,6 +1282,9 @@ class AutomationExecutionSupport {
         Map<String, Object> serviceParams = [:]
         if (metadata.parameters instanceof Map) serviceParams.putAll((Map<String, Object>) metadata.parameters)
         serviceParams.automationId = normalize(readField(automation, "automationId"))
+        // Every extract service declares this ("Automation execution id used to choose the default
+        // data-manager output folder"); it is what keeps one run's extract file off another run's path.
+        serviceParams.automationExecutionId = normalize(params?.automationExecutionId)
         serviceParams.companyUserGroupId = normalize(readField(automation, "companyUserGroupId"))
         serviceParams.fileSide = normalize(readField(source, "fileSide"))
         serviceParams.systemEnumId = normalize(readField(source, "systemEnumId"))

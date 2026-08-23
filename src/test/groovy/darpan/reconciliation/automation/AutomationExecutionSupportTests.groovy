@@ -321,6 +321,68 @@ class AutomationExecutionSupportTests {
                 ((List<Map>) duplicateResult.executionResults)[0].statusEnumId)
     }
 
+    /**
+     * sm-darpan 2026-08-22: a KG Canada run compared 98 Dolce Vita orders against KG's Shopify
+     * store. Both tenants' automations extract from the same shared HotWaxOmsRestSourceConfig, and
+     * extractOmsOrders.groovy names its output folder
+     * {@code resolveReconciliationRunLocation(ec, automationExecutionId ?: omsRestSourceConfigId, timestamp)}.
+     * This sink never passed automationExecutionId, so every tenant sharing one OMS config fell back
+     * to the SAME folder token and wrote the SAME file name (oms-orders-{from}-{thru}.json) for the
+     * same window — one run's compare then read the other run's extract. The extract services have
+     * always declared the parameter ("Automation execution id used to choose the default
+     * data-manager output folder"); only the wire from here was missing.
+     *
+     * The id must come from the per-window execution row, not from the automation: executionParams
+     * is built once OUTSIDE the window loop, while a split window mints one execution per child
+     * window, and two child windows sharing a folder collide with each other.
+     */
+    @Test
+    void extractorsReceiveTheExecutionIdSoOneTenantsExtractCannotLandOnAnothers() {
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                return [
+                        dataAvailable: true,
+                        fileLocation : "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName     : "${call.params.fileSide}.json".toString(),
+                        recordCount  : 7,
+                ]
+            }
+            if (call.serviceName == "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope") {
+                return [
+                        reconciliationType: "ORDER",
+                        diffLocation      : "reconciliation-runs/AUTO_API/20260501/result.json",
+                        diffFileName      : "result.json",
+                        differenceCount   : 0,
+                        onlyInFile1Count  : 0,
+                        onlyInFile2Count  : 0,
+                        validationErrors  : [],
+                        processingWarnings: [],
+                ]
+            }
+            return [:]
+        }
+
+        AutomationExecutionSupport.executeAutomation(ec, [
+                automationId     : "AUTO_API",
+                scheduledFireTime: NOW,
+        ])
+
+        FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+        assertNotNull(execution.automationExecutionId)
+
+        List<FakeServiceCall> extracts = ec.service.calls.findAll {
+            it.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE
+        }
+        assertEquals(2, extracts.size())
+        extracts.each { FakeServiceCall extract ->
+            assertEquals(execution.automationExecutionId, extract.params.automationExecutionId,
+                    "${extract.params.fileSide} extract must be told which execution it belongs to, or its " +
+                            "output folder falls back to the source-config id that every tenant shares")
+        }
+    }
+
     @Test
     void apiExecutionPersistsRunResultWhenCompareReturnsOnlyDiffFileName() {
         FakeEc ec = fakeEc()

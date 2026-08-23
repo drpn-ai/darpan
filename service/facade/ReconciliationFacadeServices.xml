@@ -2985,7 +2985,7 @@
                 <set field="steps" from="stepRows.collect { row -> [stageCode: row.stageCode, stageSequence: row.stageSequence, statusEnumId: row.statusEnumId, startedDate: row.startedDate, completedDate: row.completedDate, recordCount: row.recordCount, errorMessage: row.errorMessage, metricsJson: row.metricsJson] }"/>
                 <set field="subscriptionRow" from="ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('reconciliationRunResultId', runIdValue).condition('userId', ec.user.userId).disableAuthz().useCache(false).one()"/>
                 <set field="mySubscription" from="subscriptionRow != null"/>
-                <set field="mySubscriptionSpaceName" from="subscriptionRow ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('chatSpaceId', subscriptionRow.chatSpaceId).condition('companyUserGroupId', runRow.companyUserGroupId).disableAuthz().useCache(false).one()?.spaceName : null"/>
+                <set field="mySubscriptionSpaceName" from="subscriptionRow ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.reconciliation.TenantChatSpace', 'chatSpaceId', subscriptionRow.chatSpaceId, runRow.companyUserGroupId, 'subscription space name verified against the run tenant after a primary-key read')?.spaceName : null"/>
                 <set field="cancelRequestedDate" from="runRow.cancelRequestedDate"/>
                 <set field="resultFileName" from="darpan.facade.reconciliation.OutputDescriptorSupport.resolveRunResultFileName(ec, runRow)"/>
                 <set field="sourceDetails" from="darpan.facade.reconciliation.OutputDescriptorSupport.buildRunResultSourceDetails(ec, runRow, [:])"/>
@@ -3066,7 +3066,7 @@
             <if condition="!ec.message.hasError()">
                 <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
                 <set field="defaultChatSpaceId" from="darpan.facade.settings.UserNotificationPreferenceSupport.getDefaultChatSpaceId(ec, tenantId)"/>
-                <set field="spaceRow" from="defaultChatSpaceId ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('chatSpaceId', defaultChatSpaceId).condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).one() : null"/>
+                <set field="spaceRow" from="defaultChatSpaceId ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.reconciliation.TenantChatSpace', 'chatSpaceId', defaultChatSpaceId, tenantId, 'default chat-space read verified against the active tenant after a primary-key read') : null"/>
                 <if condition="spaceRow == null || ((spaceRow.isActive)?.toString()?.trim()) == 'N'">
                     <set field="needsDefaultChatSpace" from="true"/>
                     <message error="true">Set a default chat space to get notified.</message>

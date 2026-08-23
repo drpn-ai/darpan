@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Release-scoped upgrade data for Darpan 1.6.0 (Slack as a chat notification provider).
+Records must also live in generic source data files under runtime/component/darpan/data/.
+Load with: ./gradlew loadDarpanUpgradeData
+
+ORDERING: hand-verified parent-before-child — EnumerationType precedes its Enumerations.
+release_preflight.py sorts alphabetically and WILL break this if the file is regenerated; re-order
+by hand afterwards.
+
+OPERATOR IMPACT: three additive records, no behaviour change. Nothing existing is modified, and no
+current notification changes destination or wording.
+
+Until these load, a tenant admin cannot save a Slack chat space —
+facade.SettingsFacadeServices.save#TenantChatSpace checks the catalog first and reports
+"The chat provider catalog is not loaded on this deployment" rather than failing on a foreign key.
+Google Chat spaces are unaffected either way: TenantChatSpace.chatProviderEnumId is nullable and a
+null provider resolves to CHAT_PROV_GOOGLE, so every space that exists today keeps delivering with
+or without this file.
+
+NO BACKFILL IN THIS FILE — DELIBERATE. Copying each space's legacy googleChatWebhookUrl into the new
+provider-agnostic webhookUrl column is done by the service
+reconciliation.ReconciliationNotificationServices.migrate#ChatSpaceWebhookUrls, not by a data file:
+the values are per-tenant secrets that must not be baked into a release artifact. That service is
+also OPTIONAL for this release — TenantNotificationSupport.resolveWebhookUrl falls back to the legacy
+column, so notifications keep working unrun. It must be run before the release that drops
+googleChatWebhookUrl.
+
+PREREQUISITE: 1.5.0 upgrade-data must be loaded first.
+-->
+<entity-facade-xml type="darpan-seed">
+
+    <!-- Chat destination providers. TenantChatSpace.chatProviderEnumId FKs this. Adding a provider
+         here also needs a delivery branch and a webhook host pin in TenantNotificationSupport — the
+         enum row alone buys nothing, and a provider with no host pin would bypass the SSRF control
+         on a tenant-admin-supplied URL. -->
+    <moqui.basic.EnumerationType enumTypeId="DarpanChatProvider"
+            description="Chat products Darpan can post run notifications to"/>
+    <moqui.basic.Enumeration enumId="CHAT_PROV_GOOGLE"
+            enumTypeId="DarpanChatProvider"
+            enumCode="GOOGLE_CHAT"
+            description="Google Chat"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="CHAT_PROV_SLACK"
+            enumTypeId="DarpanChatProvider"
+            enumCode="SLACK"
+            description="Slack"
+            sequenceNum="2"/>
+
+</entity-facade-xml>

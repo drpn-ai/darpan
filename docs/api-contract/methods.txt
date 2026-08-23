@@ -101,5 +101,10 @@ facade.ShopifyFacadeServices.delete#ShopifyAuthConfig
 facade.ShopifyFacadeServices.get#ShopifyAuthConfig
 facade.ShopifyFacadeServices.list#ShopifyAuthConfigs
 facade.ShopifyFacadeServices.save#ShopifyAuthConfig
+facade.SlackFacadeServices.begin#SlackInstall
+facade.SlackFacadeServices.disconnect#SlackWorkspace
+facade.SlackFacadeServices.get#SlackInstall
+facade.SlackFacadeServices.list#SlackChannels
+facade.SlackFacadeServices.save#SlackBotToken
 facade.SourceEndpointFacadeServices.list#SourceConfigEndpoints
 facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess

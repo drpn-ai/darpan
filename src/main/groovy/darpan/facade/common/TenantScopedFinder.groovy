@@ -149,6 +149,36 @@ class TenantScopedFinder {
      * @return an {@code EntityFind} with authz disabled and NO tenant condition applied
      * @throws IllegalArgumentException if {@code reason} is blank or null
      */
+    /**
+     * Reads one row by its complete primary key and returns it ONLY if it belongs to the given
+     * tenant — verified in code, after the read.
+     *
+     * <h3>Why the obvious version does not work</h3>
+     * <p>{@code ec.entity.find(e).condition(pkField, pk).condition("companyUserGroupId", tenant).one()}
+     * <b>silently ignores the tenant condition</b> when the primary key is fully specified: Moqui
+     * takes a primary-key lookup path and the extra condition never reaches the query. Proven
+     * 2026-08-23 against SlackWorkspaceInstall — identical conditions gave {@code list().size() == 0}
+     * and {@code count() == 0}, while {@code one()} returned a row belonging to another tenant.</p>
+     *
+     * <p>So a tenant pin expressed as a condition alongside a complete PK is decoration. This method
+     * is the safe replacement, and it mirrors what
+     * {@code TenantNotificationSupport.notifyRunCompleted} has always done by hand: read the row,
+     * then compare {@code companyUserGroupId} in Groovy.</p>
+     *
+     * @return the row, or null when it does not exist or belongs to a different tenant
+     */
+    static def findOneOwnedByTenant(def ec, String entityName, String pkFieldName, Object pkValue,
+                                    Object tenantId, String reason) {
+        String pk = ((pkValue)?.toString()?.trim())
+        String tenant = ((tenantId)?.toString()?.trim())
+        if (!pk || !tenant) return null
+        def row = findGlobalUnscoped(ec, entityName, reason)
+                ?.condition(pkFieldName, pk)
+                ?.useCache(false)?.one()
+        if (row == null) return null
+        return ((row.companyUserGroupId)?.toString()?.trim()) == tenant ? row : null
+    }
+
     static def findGlobalUnscoped(def ec, String entityName, String reason) {
         if (!reason?.trim()) {
             throw new IllegalArgumentException(

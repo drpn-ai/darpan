@@ -17,6 +17,43 @@
         </actions>
         <default-response type="none"/>
     </transition>
+    <!-- Slack app install callback — GET /apps/darpan/slackOauthCallback
+         PUBLIC BY NECESSITY: Slack redirects the installing admin's browser here, so the request
+         carries no Darpan session. The `state` parameter is the entire authorization: it is minted
+         by the authenticated facade.SlackFacadeServices.begin#SlackInstall, bound to one tenant,
+         single-use, and expires in minutes. Do not add anything here that trusts the query string
+         beyond that redeemed state.
+         Never logs or reflects the authorization code. Always ends in a redirect back to the SPA;
+         failures come back as a short slug, never as raw Slack text.
+
+         read-only="true" IS REQUIRED and is not a claim that this transition does not write — it
+         does (it stores the install). ScreenRenderImpl.groovy:418 refuses to run any transition with
+         actions when the request carries a query string, as blanket CSRF protection. An OAuth
+         callback is unavoidably a GET with query parameters, so without this the transition throws
+         "Cannot run screen transition with actions from non-secure request or with URL parameters"
+         before a single line of it executes. The protection is not lost: the single-use, tenant-bound
+         `state` token is OAuth's own CSRF defence and is what actually guards this endpoint. -->
+    <transition name="slackOauthCallback" method="get" read-only="true">
+        <parameter name="code"/>
+        <parameter name="state"/>
+        <parameter name="error"/>
+        <actions>
+            <script><![CDATA[
+                String redirectUrl = darpan.reconciliation.notification.SlackOAuthSupport
+                        .handleCallback(ec, code, state, error)
+                if (redirectUrl) {
+                    ec.web.response.sendRedirect(redirectUrl)
+                } else {
+                    // No app base URL configured, so there is no SPA to return to. Say so plainly
+                    // rather than redirecting to a guessed host.
+                    ec.web.response.setContentType("text/plain")
+                    ec.web.response.writer.write("Slack connected, but Darpan has no app base URL configured to return you to. Set DARPAN_APP_BASE_URL.")
+                }
+            ]]></script>
+        </actions>
+        <default-response type="none"/>
+    </transition>
+
     <subscreens default-item="Reconciliation">
         <subscreens-item name="Reconciliation" menu-title="Reconciliation" location="component://darpan/screen/Reconciliation.xml"/>
         <subscreens-item name="Settings" menu-title="Settings" location="component://darpan/screen/Settings.xml"/>

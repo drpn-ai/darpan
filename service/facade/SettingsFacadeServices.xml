@@ -169,13 +169,22 @@
     </service>
 
     <service verb="list" noun="TenantChatSpaces" authz-action="view" allow-remote="true" authenticate="true">
-        <description>List active-tenant Google Chat spaces, including the webhook URL in clear text.</description>
+        <description>List active-tenant chat spaces (Google Chat or Slack), including the webhook URL in clear text.</description>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
             <parameter name="chatSpaces" type="List">
                 <parameter name="chatSpaceId"/><parameter name="spaceName"/>
+                <parameter name="chatProviderEnumId"/><parameter name="chatProviderLabel"/>
+                <parameter name="slackInstallId"/><parameter name="slackChannelId"/>
+                <parameter name="slackChannelName"/><parameter name="deliveryMode"/>
+                <parameter name="webhookConfigured" type="Boolean"/>
+                <parameter name="webhookUrl"/>
+                <!-- googleChat* are the pre-Slack names, kept one release. They deliberately mirror the
+                     RESOLVED values rather than the legacy column: a browser still running an older UI
+                     bundle reads only these two, and mirroring means such a bundle shows a Slack space as
+                     configured (mislabelled) instead of as broken. -->
                 <parameter name="googleChatConfigured" type="Boolean"/>
                 <parameter name="googleChatWebhookUrl"/>
                 <parameter name="isActive"/><parameter name="inUse" type="Boolean"/>
@@ -188,7 +197,7 @@
             <set field="spaceRows" from="tenantId ? (ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('companyUserGroupId', tenantId).orderBy('spaceName').disableAuthz().useCache(false).list() ?: []) : []"/>
             <set field="automationSpaceIds" from="tenantId ? (ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).list().collect { ((it.chatSpaceId)?.toString()?.trim()) }.findAll { it } as Set) : ([] as Set)"/>
             <set field="subscriptionSpaceIds" from="spaceRows ? (ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('chatSpaceId', 'in', spaceRows.collect { it.chatSpaceId }).disableAuthz().useCache(false).list().collect { ((it.chatSpaceId)?.toString()?.trim()) }.findAll { it } as Set) : ([] as Set)"/>
-            <set field="chatSpaces" from="spaceRows.collect { row -> [chatSpaceId: row.chatSpaceId, spaceName: row.spaceName, googleChatConfigured: !!((row.googleChatWebhookUrl)?.toString()?.trim()), googleChatWebhookUrl: ((row.googleChatWebhookUrl)?.toString()?.trim()), isActive: ((row.isActive)?.toString()?.trim()) ?: 'Y', inUse: automationSpaceIds.contains(row.chatSpaceId) || subscriptionSpaceIds.contains(row.chatSpaceId), createdByUserId: row.createdByUserId, createdDate: row.createdDate, lastUpdatedDate: row.lastUpdatedDate] }"/>
+            <set field="chatSpaces" from="spaceRows.collect { row -> darpan.facade.settings.ChatSpaceFacadeSupport.toChatSpaceMap(ec, row, automationSpaceIds.contains(row.chatSpaceId) || subscriptionSpaceIds.contains(row.chatSpaceId)) }"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
@@ -196,10 +205,17 @@
     </service>
 
     <service verb="save" noun="TenantChatSpace" allow-remote="true" authenticate="true">
-        <description>Create or update one named Google Chat space for the active tenant.</description>
+        <description>Create or update one named chat space (Google Chat or Slack) for the active tenant.</description>
         <in-parameters>
             <parameter name="chatSpaceId"/>
             <parameter name="spaceName" required="true"/>
+            <parameter name="chatProviderEnumId"/>
+            <parameter name="slackInstallId"/>
+            <parameter name="slackChannelId"/>
+            <parameter name="slackChannelName"/>
+            <parameter name="webhookUrl" allow-html="true"/>
+            <!-- Pre-Slack parameter name, accepted one release as an alias for webhookUrl so an older
+                 UI bundle can still save a Google Chat space. -->
             <parameter name="googleChatWebhookUrl" allow-html="true"/>
             <parameter name="isActive" type="Boolean" default-value="true"/>
         </in-parameters>
@@ -217,7 +233,7 @@
             </if>
             <set field="chatSpaceIdValue" from="((chatSpaceId)?.toString()?.trim())"/>
             <set field="spaceNameValue" from="((spaceName)?.toString()?.trim())"/>
-            <set field="existingSpace" from="(!ec.message.hasError() &amp;&amp; chatSpaceIdValue) ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('chatSpaceId', chatSpaceIdValue).condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).one() : null"/>
+            <set field="existingSpace" from="(!ec.message.hasError() &amp;&amp; chatSpaceIdValue) ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.reconciliation.TenantChatSpace', 'chatSpaceId', chatSpaceIdValue, tenantId, 'chat-space edit target verified against the active tenant after a primary-key read') : null"/>
             <if condition="!ec.message.hasError() &amp;&amp; chatSpaceIdValue &amp;&amp; existingSpace == null">
                 <message error="true">Chat space '${chatSpaceIdValue}' was not found.</message>
             </if>
@@ -227,23 +243,74 @@
                 <if condition="spaceNameValue &amp;&amp; nameClash != null">
                     <message error="true">A chat space named '${spaceNameValue}' already exists.</message>
                 </if>
-                <set field="googleChatWebhookUrlValue" from="((googleChatWebhookUrl)?.toString()?.trim())"/>
-                <set field="googleChatWebhookUrlToSave" from="googleChatWebhookUrlValue ?: ((existingSpace?.googleChatWebhookUrl)?.toString()?.trim())"/>
-                <if condition="!googleChatWebhookUrlToSave"><message error="true">Google Chat webhook URL is required.</message></if>
-                <set field="validationError" from="darpan.reconciliation.notification.TenantNotificationSupport.validateGoogleChatWebhookUrl(googleChatWebhookUrlToSave)"/>
-                <if condition="validationError"><message error="true">${validationError}</message></if>
+                <!-- Provider resolution order: explicit input, then the row's current provider on an
+                     edit, then Google Chat. An edit that does not mention the provider must never
+                     silently re-point a Slack space at the Google Chat validator. -->
+                <set field="chatProviderToSave" from="darpan.reconciliation.notification.TenantNotificationSupport.resolveChatProvider(((chatProviderEnumId)?.toString()?.trim()) ?: ((existingSpace?.chatProviderEnumId)?.toString()?.trim()))"/>
+                <set field="providerError" from="darpan.facade.settings.ChatSpaceFacadeSupport.validateChatProvider(ec, chatProviderToSave)"/>
+                <if condition="providerError"><message error="true">${providerError}</message></if>
+                <!-- Slack bot coordinates. When present they REPLACE the webhook requirement: the
+                     workspace token plus a channel id is the whole configuration, and demanding a
+                     webhook URL as well would make the bot path impossible to save. -->
+                <set field="slackInstallIdToSave" from="((slackInstallId)?.toString()?.trim()) ?: ((existingSpace?.slackInstallId)?.toString()?.trim())"/>
+                <set field="slackChannelIdToSave" from="((slackChannelId)?.toString()?.trim()) ?: ((existingSpace?.slackChannelId)?.toString()?.trim())"/>
+                <!-- Switching provider away from Slack drops the Slack coordinates, so a Google Chat
+                     space cannot keep a stale channel id that would silently win at delivery time. -->
+                <if condition="chatProviderToSave != darpan.reconciliation.notification.TenantNotificationSupport.PROVIDER_SLACK">
+                    <set field="slackInstallIdToSave" from="null"/>
+                    <set field="slackChannelIdToSave" from="null"/>
+                </if>
+                <set field="slackError" from="darpan.facade.settings.ChatSpaceFacadeSupport.validateSlackDestination(ec, tenantId, slackInstallIdToSave, slackChannelIdToSave)"/>
+                <if condition="slackError"><message error="true">${slackError}</message></if>
+                <set field="usesSlackBot" from="!ec.message.hasError() &amp;&amp; slackInstallIdToSave &amp;&amp; slackChannelIdToSave"/>
+
+                <!-- webhookUrl is the field; googleChatWebhookUrl is the one-release input alias. -->
+                <set field="webhookUrlValue" from="((webhookUrl)?.toString()?.trim()) ?: ((googleChatWebhookUrl)?.toString()?.trim())"/>
+                <set field="webhookUrlToSave" from="webhookUrlValue ?: darpan.reconciliation.notification.TenantNotificationSupport.resolveWebhookUrl(existingSpace)"/>
+                <if condition="!usesSlackBot">
+                    <if condition="!webhookUrlToSave"><message error="true">Webhook URL is required.</message></if>
+                    <set field="validationError" from="darpan.reconciliation.notification.TenantNotificationSupport.validateWebhookUrl(chatProviderToSave, webhookUrlToSave)"/>
+                    <if condition="validationError"><message error="true">${validationError}</message></if>
+                <else>
+                    <!-- A webhook supplied alongside bot coordinates is still validated, because it
+                         stays on the row as the fallback path. -->
+                    <if condition="webhookUrlValue">
+                        <set field="validationError" from="darpan.reconciliation.notification.TenantNotificationSupport.validateWebhookUrl(chatProviderToSave, webhookUrlValue)"/>
+                        <if condition="validationError"><message error="true">${validationError}</message></if>
+                    </if>
+                </else>
+                </if>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="nowTs" from="ec.user.nowTimestamp"/>
                 <set field="isActiveValue" from="isActive == null ? 'Y' : ((isActive instanceof Boolean ? isActive : ['Y', 'YES', 'TRUE', '1', 'ON'].contains(isActive.toString().trim().toUpperCase(Locale.ROOT))) ? 'Y' : 'N')"/>
-                <set field="chatSpaceMap" from="[chatSpaceId: chatSpaceIdValue ?: null, companyUserGroupId: tenantId, spaceName: spaceNameValue, googleChatWebhookUrl: googleChatWebhookUrlToSave, isActive: isActiveValue, createdByUserId: ((existingSpace?.createdByUserId)?.toString()?.trim()) ?: darpan.facade.common.TenantAccessSupport.currentUserId(ec), createdDate: existingSpace?.createdDate ?: nowTs, lastUpdatedDate: nowTs].findAll { it.value != null }"/>
+                <!-- The legacy column is written in lockstep ONLY for Google Chat spaces. That keeps a
+                     rollback to the pre-Slack release working for every space that release could have
+                     handled, while a Slack space correctly reads as unconfigured there instead of
+                     handing a hooks.slack.com URL to the Google Chat sender. Nulling the legacy column
+                     outright would have made a rollback lose the webhook for every edited space. -->
+                <set field="legacyWebhookToSave" from="chatProviderToSave == darpan.reconciliation.notification.TenantNotificationSupport.PROVIDER_GOOGLE ? webhookUrlToSave : null"/>
+                <!-- Persisted provider, not the resolved one: a Google Chat space on a deployment
+                     whose provider catalog has not loaded must still save, and writing the id there
+                     would hit the TCSPACE_PROVIDER foreign key. Null reads back as Google Chat. -->
+                <set field="chatProviderToPersist" from="darpan.facade.settings.ChatSpaceFacadeSupport.resolvePersistableProvider(ec, chatProviderToSave)"/>
+                <set field="chatSpaceMap" from="[chatSpaceId: chatSpaceIdValue ?: null, companyUserGroupId: tenantId, spaceName: spaceNameValue, chatProviderEnumId: chatProviderToPersist, webhookUrl: webhookUrlToSave, isActive: isActiveValue, createdByUserId: ((existingSpace?.createdByUserId)?.toString()?.trim()) ?: darpan.facade.common.TenantAccessSupport.currentUserId(ec), createdDate: existingSpace?.createdDate ?: nowTs, lastUpdatedDate: nowTs].findAll { it.value != null }"/>
+                <!-- Set separately, not via the findAll map above: null is the intended value for a
+                     Slack space and findAll strips nulls, which would leave a stale Google webhook
+                     behind when a space is switched from Google Chat to Slack. -->
+                <set field="ignoreLegacy" from="chatSpaceMap.put('googleChatWebhookUrl', legacyWebhookToSave)"/>
+                <!-- Set explicitly, not through the null-stripping map literal: null is the intended
+                     value when a space moves off Slack, and stripping it would strand the old channel. -->
+                <set field="ignoreInstall" from="chatSpaceMap.put('slackInstallId', slackInstallIdToSave)"/>
+                <set field="ignoreChannel" from="chatSpaceMap.put('slackChannelId', slackChannelIdToSave)"/>
+                <set field="ignoreChannelName" from="chatSpaceMap.put('slackChannelName', usesSlackBot ? (((slackChannelName)?.toString()?.trim()) ?: ((existingSpace?.slackChannelName)?.toString()?.trim())) : null)"/>
                 <service-call name="store#darpan.reconciliation.TenantChatSpace" in-map="chatSpaceMap" out-map="storeResult"/>
                 <set field="chatSpaceIdValue" from="chatSpaceIdValue ?: ((storeResult?.chatSpaceId)?.toString()?.trim())"/>
                 <if condition="!ec.message.hasError()"><message>Saved chat space.</message></if>
             </if>
-            <set field="savedSpace" from="chatSpaceIdValue ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('chatSpaceId', chatSpaceIdValue).condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).one() : null"/>
+            <set field="savedSpace" from="chatSpaceIdValue ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.reconciliation.TenantChatSpace', 'chatSpaceId', chatSpaceIdValue, tenantId, 'chat-space edit target verified against the active tenant after a primary-key read') : null"/>
             <set field="savedSpaceInUse" from="savedSpace ? (ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('chatSpaceId', savedSpace.chatSpaceId).disableAuthz().useCache(false).count() > 0 || ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('chatSpaceId', savedSpace.chatSpaceId).disableAuthz().useCache(false).count() > 0) : false"/>
-            <set field="chatSpace" from="savedSpace ? [chatSpaceId: savedSpace.chatSpaceId, spaceName: savedSpace.spaceName, googleChatConfigured: !!((savedSpace.googleChatWebhookUrl)?.toString()?.trim()), googleChatWebhookUrl: ((savedSpace.googleChatWebhookUrl)?.toString()?.trim()), isActive: ((savedSpace.isActive)?.toString()?.trim()) ?: 'Y', inUse: savedSpaceInUse, createdByUserId: savedSpace.createdByUserId, createdDate: savedSpace.createdDate, lastUpdatedDate: savedSpace.lastUpdatedDate] : null"/>
+            <set field="chatSpace" from="savedSpace ? darpan.facade.settings.ChatSpaceFacadeSupport.toChatSpaceMap(ec, savedSpace, savedSpaceInUse) : null"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
@@ -265,7 +332,7 @@
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for chat spaces.')"/>
             </if>
             <set field="chatSpaceIdValue" from="((chatSpaceId)?.toString()?.trim())"/>
-            <set field="spaceRow" from="(!ec.message.hasError() &amp;&amp; chatSpaceIdValue) ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('chatSpaceId', chatSpaceIdValue).condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).one() : null"/>
+            <set field="spaceRow" from="(!ec.message.hasError() &amp;&amp; chatSpaceIdValue) ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.reconciliation.TenantChatSpace', 'chatSpaceId', chatSpaceIdValue, tenantId, 'chat-space edit target verified against the active tenant after a primary-key read') : null"/>
             <if condition="!ec.message.hasError() &amp;&amp; spaceRow == null">
                 <message error="true">Chat space '${chatSpaceIdValue}' was not found.</message>
             </if>
@@ -299,7 +366,7 @@
         <actions>
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <set field="defaultChatSpaceId" from="darpan.facade.settings.UserNotificationPreferenceSupport.getDefaultChatSpaceId(ec, tenantId)"/>
-            <set field="spaceRow" from="defaultChatSpaceId ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('chatSpaceId', defaultChatSpaceId).condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).one() : null"/>
+            <set field="spaceRow" from="defaultChatSpaceId ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.reconciliation.TenantChatSpace', 'chatSpaceId', defaultChatSpaceId, tenantId, 'default chat-space read verified against the active tenant after a primary-key read') : null"/>
             <set field="userNotificationDefault" from="(spaceRow != null &amp;&amp; ((spaceRow.isActive)?.toString()?.trim()) != 'N') ? [chatSpaceId: spaceRow.chatSpaceId, spaceName: spaceRow.spaceName, isActive: ((spaceRow.isActive)?.toString()?.trim()) ?: 'Y'] : null"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
@@ -322,7 +389,7 @@
             <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
             <if condition="!tenantId"><message error="true">Active tenant is required for notification defaults.</message></if>
             <set field="chatSpaceIdValue" from="((chatSpaceId)?.toString()?.trim())"/>
-            <set field="spaceRow" from="(!ec.message.hasError() &amp;&amp; chatSpaceIdValue) ? ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('chatSpaceId', chatSpaceIdValue).condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).one() : null"/>
+            <set field="spaceRow" from="(!ec.message.hasError() &amp;&amp; chatSpaceIdValue) ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.reconciliation.TenantChatSpace', 'chatSpaceId', chatSpaceIdValue, tenantId, 'chat-space edit target verified against the active tenant after a primary-key read') : null"/>
             <if condition="!ec.message.hasError() &amp;&amp; chatSpaceIdValue &amp;&amp; (spaceRow == null || ((spaceRow.isActive)?.toString()?.trim()) == 'N')">
                 <message error="true">Chat space '${chatSpaceIdValue}' was not found or is inactive.</message>
             </if>

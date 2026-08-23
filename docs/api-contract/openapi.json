@@ -333,6 +333,21 @@
                                         "$ref": "#/components/schemas/SaveShopifyAuthConfigRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/BeginSlackInstallRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/DisconnectSlackWorkspaceRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetSlackInstallRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ListSlackChannelsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveSlackBotTokenRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ListSourceConfigEndpointsRequest"
                                     },
                                     {
@@ -445,6 +460,11 @@
                                         "facade.ShopifyFacadeServices.get#ShopifyAuthConfig": "#/components/schemas/GetShopifyAuthConfigRequest",
                                         "facade.ShopifyFacadeServices.list#ShopifyAuthConfigs": "#/components/schemas/ListShopifyAuthConfigsRequest",
                                         "facade.ShopifyFacadeServices.save#ShopifyAuthConfig": "#/components/schemas/SaveShopifyAuthConfigRequest",
+                                        "facade.SlackFacadeServices.begin#SlackInstall": "#/components/schemas/BeginSlackInstallRequest",
+                                        "facade.SlackFacadeServices.disconnect#SlackWorkspace": "#/components/schemas/DisconnectSlackWorkspaceRequest",
+                                        "facade.SlackFacadeServices.get#SlackInstall": "#/components/schemas/GetSlackInstallRequest",
+                                        "facade.SlackFacadeServices.list#SlackChannels": "#/components/schemas/ListSlackChannelsRequest",
+                                        "facade.SlackFacadeServices.save#SlackBotToken": "#/components/schemas/SaveSlackBotTokenRequest",
                                         "facade.SourceEndpointFacadeServices.list#SourceConfigEndpoints": "#/components/schemas/ListSourceConfigEndpointsRequest",
                                         "facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess": "#/components/schemas/StoreSourceConfigEndpointAccessRequest"
                                     }
@@ -771,6 +791,21 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveShopifyAuthConfigResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/BeginSlackInstallResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/DisconnectSlackWorkspaceResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetSlackInstallResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ListSlackChannelsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveSlackBotTokenResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ListSourceConfigEndpointsResponse"
@@ -14259,6 +14294,18 @@
                                 "chatProviderLabel": {
                                     "type": "string"
                                 },
+                                "slackInstallId": {
+                                    "type": "string"
+                                },
+                                "slackChannelId": {
+                                    "type": "string"
+                                },
+                                "slackChannelName": {
+                                    "type": "string"
+                                },
+                                "deliveryMode": {
+                                    "type": "string"
+                                },
                                 "webhookConfigured": {
                                     "type": "boolean"
                                 },
@@ -14970,6 +15017,15 @@
                         "type": "string"
                     },
                     "chatProviderEnumId": {
+                        "type": "string"
+                    },
+                    "slackInstallId": {
+                        "type": "string"
+                    },
+                    "slackChannelId": {
+                        "type": "string"
+                    },
+                    "slackChannelName": {
                         "type": "string"
                     },
                     "webhookUrl": {
@@ -16011,6 +16067,557 @@
                     "result"
                 ]
             },
+            "BeginSlackInstallParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "Start the Slack app install for the active tenant: mint a single-use state token\n            and return the Slack authorize URL the browser should be sent to. Does not contact Slack."
+            },
+            "BeginSlackInstallResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "authorizeUrl": {
+                        "type": "string"
+                    }
+                }
+            },
+            "BeginSlackInstallRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SlackFacadeServices.begin#SlackInstall",
+                "x-darpan-method": "facade.SlackFacadeServices.begin#SlackInstall",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SlackFacadeServices.begin#SlackInstall"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/BeginSlackInstallParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "BeginSlackInstallResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SlackFacadeServices.begin#SlackInstall. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/BeginSlackInstallResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "DisconnectSlackWorkspaceParams": {
+                "type": "object",
+                "properties": {
+                    "slackInstallId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "slackInstallId"
+                ],
+                "description": "Deactivate a connected workspace. Refuses while chat spaces still post through\n            it, naming them \u2014 silently disconnecting would leave those destinations resolving to\n            nothing and the tenant would learn about it from missing notifications."
+            },
+            "DisconnectSlackWorkspaceResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "DisconnectSlackWorkspaceRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SlackFacadeServices.disconnect#SlackWorkspace",
+                "x-darpan-method": "facade.SlackFacadeServices.disconnect#SlackWorkspace",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SlackFacadeServices.disconnect#SlackWorkspace"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DisconnectSlackWorkspaceParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DisconnectSlackWorkspaceResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SlackFacadeServices.disconnect#SlackWorkspace. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DisconnectSlackWorkspaceResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetSlackInstallParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "The active tenant's connected Slack workspaces. Returns identity and granted\n            scopes only \u2014 never the bot token."
+            },
+            "GetSlackInstallResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "slackConfigured": {
+                        "type": "boolean"
+                    },
+                    "oauthAvailable": {
+                        "type": "boolean"
+                    },
+                    "installs": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "slackInstallId": {
+                                    "type": "string"
+                                },
+                                "teamId": {
+                                    "type": "string"
+                                },
+                                "teamName": {
+                                    "type": "string"
+                                },
+                                "botUserId": {
+                                    "type": "string"
+                                },
+                                "grantedScopes": {
+                                    "type": "string"
+                                },
+                                "isActive": {
+                                    "type": "string"
+                                },
+                                "installedDate": {
+                                    "oneOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "type": "number"
+                                        }
+                                    ],
+                                    "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "GetSlackInstallRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SlackFacadeServices.get#SlackInstall",
+                "x-darpan-method": "facade.SlackFacadeServices.get#SlackInstall",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SlackFacadeServices.get#SlackInstall"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetSlackInstallParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetSlackInstallResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SlackFacadeServices.get#SlackInstall. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetSlackInstallResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ListSlackChannelsParams": {
+                "type": "object",
+                "properties": {
+                    "slackInstallId": {
+                        "type": "string"
+                    },
+                    "cursor": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "slackInstallId"
+                ],
+                "description": "One page of channels from a connected workspace, for the chat-space channel\n            picker. Paginated rather than exhaustive: conversations.list is rate-limit Tier 2 and a\n            large workspace has thousands of channels."
+            },
+            "ListSlackChannelsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "channels": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string"
+                                },
+                                "name": {
+                                    "type": "string"
+                                },
+                                "isPrivate": {
+                                    "type": "boolean"
+                                },
+                                "isMember": {
+                                    "type": "boolean"
+                                }
+                            }
+                        }
+                    },
+                    "nextCursor": {
+                        "type": "string"
+                    },
+                    "botUserId": {
+                        "type": "string"
+                    }
+                }
+            },
+            "ListSlackChannelsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SlackFacadeServices.list#SlackChannels",
+                "x-darpan-method": "facade.SlackFacadeServices.list#SlackChannels",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SlackFacadeServices.list#SlackChannels"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ListSlackChannelsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ListSlackChannelsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SlackFacadeServices.list#SlackChannels. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ListSlackChannelsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SaveSlackBotTokenParams": {
+                "type": "object",
+                "properties": {
+                    "botAccessToken": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "botAccessToken"
+                ],
+                "description": "Connect a Slack workspace by pasting a bot user OAuth token (xoxb-), for\n            workspaces whose administrators do not permit installing the Darpan app. The token is\n            verified against Slack before it is stored, and the workspace identity is taken from\n            Slack's answer rather than from the caller.\n\n            Storing goes through the entity facade so the encrypted column is written correctly; a\n            token placed into the database any other way would be plaintext where reads expect\n            ciphertext."
+            },
+            "SaveSlackBotTokenResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "install": {
+                        "type": "object",
+                        "properties": {
+                            "slackInstallId": {
+                                "type": "string"
+                            },
+                            "teamId": {
+                                "type": "string"
+                            },
+                            "teamName": {
+                                "type": "string"
+                            },
+                            "botUserId": {
+                                "type": "string"
+                            },
+                            "grantedScopes": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "missingScopes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "SaveSlackBotTokenRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SlackFacadeServices.save#SlackBotToken",
+                "x-darpan-method": "facade.SlackFacadeServices.save#SlackBotToken",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SlackFacadeServices.save#SlackBotToken"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveSlackBotTokenParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveSlackBotTokenResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SlackFacadeServices.save#SlackBotToken. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveSlackBotTokenResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "ListSourceConfigEndpointsParams": {
                 "type": "object",
                 "properties": {
@@ -16337,6 +16944,11 @@
         "facade.ShopifyFacadeServices.get#ShopifyAuthConfig": "GetShopifyAuthConfig",
         "facade.ShopifyFacadeServices.list#ShopifyAuthConfigs": "ListShopifyAuthConfigs",
         "facade.ShopifyFacadeServices.save#ShopifyAuthConfig": "SaveShopifyAuthConfig",
+        "facade.SlackFacadeServices.begin#SlackInstall": "BeginSlackInstall",
+        "facade.SlackFacadeServices.disconnect#SlackWorkspace": "DisconnectSlackWorkspace",
+        "facade.SlackFacadeServices.get#SlackInstall": "GetSlackInstall",
+        "facade.SlackFacadeServices.list#SlackChannels": "ListSlackChannels",
+        "facade.SlackFacadeServices.save#SlackBotToken": "SaveSlackBotToken",
         "facade.SourceEndpointFacadeServices.list#SourceConfigEndpoints": "ListSourceConfigEndpoints",
         "facade.SourceEndpointFacadeServices.store#SourceConfigEndpointAccess": "StoreSourceConfigEndpointAccess"
     }

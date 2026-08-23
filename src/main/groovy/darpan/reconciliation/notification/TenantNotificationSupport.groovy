@@ -22,6 +22,17 @@ import java.time.Duration
 
 class TenantNotificationSupport {
     static final String GOOGLE_CHAT_HOST = "chat.googleapis.com"
+    static final String SLACK_WEBHOOK_HOST = "hooks.slack.com"
+    /**
+     * DarpanChatProvider enum ids. A space with a null provider is Google Chat: every row written
+     * before Slack support predates the column, and resolving null here rather than backfilling the
+     * table is what lets the feature ship without a required data migration.
+     */
+    static final String PROVIDER_GOOGLE = "CHAT_PROV_GOOGLE"
+    static final String PROVIDER_SLACK = "CHAT_PROV_SLACK"
+    /** How a destination is actually reached — a Slack space can be either. */
+    static final String DELIVERY_WEBHOOK = "WEBHOOK"
+    static final String DELIVERY_SLACK_BOT = "SLACK_BOT"
     static final String APP_BASE_URL_ENV = "DARPAN_APP_BASE_URL"
     static final String APP_BASE_URL_PROPERTY = "darpan.app.baseUrl"
     // Audit H11.2 — DEFAULT_APP_BASE_URL was 'https://hotwax-darpan-dev.web.app', meaning every prod
@@ -40,6 +51,68 @@ class TenantNotificationSupport {
 
     static void resetDeliveryHook() {
         deliveryHook = null
+    }
+
+    /**
+     * Normalizes a stored provider id. Null/blank is Google Chat — see PROVIDER_GOOGLE. An
+     * unrecognized value is returned as-is so validation and delivery can fail closed on it rather
+     * than silently posting it somewhere.
+     */
+    static String resolveChatProvider(Object rawProvider) {
+        return ((rawProvider)?.toString()?.trim()) ?: PROVIDER_GOOGLE
+    }
+
+    /**
+     * The webhook URL for a chat-space row, whichever column currently holds it.
+     *
+     * <p>webhookUrl is the field going forward; googleChatWebhookUrl is the pre-Slack column kept one
+     * release. Reading the new column first and falling back means a deployment whose
+     * migrate#ChatSpaceWebhookUrls has not run yet keeps delivering normally instead of resolving
+     * every space to "not configured" and going silent.</p>
+     */
+    static String resolveWebhookUrl(def spaceRow) {
+        if (spaceRow == null) return null
+        return ((spaceRow.webhookUrl)?.toString()?.trim()) ?:
+                ((spaceRow.googleChatWebhookUrl)?.toString()?.trim())
+    }
+
+    /**
+     * Validates a webhook URL against the pin for its provider. Blank returns null (no error), the
+     * same contract the Google-only validator has always had — "required" is enforced by the caller.
+     *
+     * <p>An unknown provider is an error, not a pass-through: these host pins are the SSRF control
+     * on a tenant-admin-supplied URL, so a provider with no pin must never reach delivery.</p>
+     */
+    static String validateWebhookUrl(Object rawProvider, Object rawWebhookUrl) {
+        String provider = resolveChatProvider(rawProvider)
+        if (provider == PROVIDER_SLACK) return validateSlackWebhookUrl(rawWebhookUrl)
+        if (provider == PROVIDER_GOOGLE) return validateGoogleChatWebhookUrl(rawWebhookUrl)
+        return "Unknown chat provider '${provider}'.".toString()
+    }
+
+    static String validateSlackWebhookUrl(Object rawWebhookUrl) {
+        String webhookUrl = ((rawWebhookUrl)?.toString()?.trim())
+        if (!webhookUrl) return null
+
+        URI uri
+        try {
+            uri = URI.create(webhookUrl)
+        } catch (Exception ignored) {
+            return "Slack webhook URL is invalid."
+        }
+
+        if (uri.scheme != "https") return "Slack webhook URL must use https."
+        if (uri.host != SLACK_WEBHOOK_HOST) return "Slack webhook URL must use hooks.slack.com."
+        if (!uri.path?.startsWith("/services/")) {
+            return "Slack webhook URL must target a Slack incoming webhook endpoint."
+        }
+        // /services/T00000000/B00000000/<secret> — a URL truncated on paste still passes the prefix
+        // check above and then fails only at delivery time, hours later, with nothing in the UI.
+        List<String> pathSegments = uri.path.substring("/services/".length()).split("/").findAll { it } as List<String>
+        if (pathSegments.size() < 3) {
+            return "Slack webhook URL is incomplete. Copy the whole URL from the Slack app's Incoming Webhooks page."
+        }
+        return null
     }
 
     static String validateGoogleChatWebhookUrl(Object rawWebhookUrl) {
@@ -117,20 +190,78 @@ class TenantNotificationSupport {
         int deliveredCount = 0
         int failedCount = 0
         for (Map<String, Object> destination : destinations) {
+            String destinationProvider = resolveChatProvider(destination.chatProviderEnumId)
             try {
-                Map<String, Object> delivery = deliverGoogleChat((String) destination.webhookUrl, payload)
-                if (delivery.ok == true) { deliveredCount++ } else {
+                Map<String, Object> delivery = deliverToDestination(destination, payload)
+                if (delivery.ok == true) {
+                    deliveredCount++
+                    recordSlackMessage(ec, resultId, destination, delivery)
+                } else {
                     failedCount++
-                    logger.warn("Google Chat run notification returned status {} for tenant {} result {} space {}",
-                            delivery.statusCode, tenantId, resultId, destination.spaceName)
+                    // providerMessage carries Slack's plain-text reason ("invalid_token",
+                    // "no_service"), which is the only signal on that provider — it answers a dead
+                    // webhook with HTTP 200 and reports the failure in the body.
+                    logger.warn("{} run notification returned status {}{} for tenant {} result {} space {}",
+                            destinationProvider, delivery.statusCode,
+                            delivery.providerMessage ? " (${delivery.providerMessage})" : "",
+                            tenantId, resultId, destination.spaceName)
                 }
             } catch (Throwable t) {
                 failedCount++
-                logger.warn("Google Chat run notification failed for tenant {} result {} space {}: {}",
-                        tenantId, resultId, destination.spaceName, t.message)
+                logger.warn("{} run notification failed for tenant {} result {} space {}: {}",
+                        destinationProvider, tenantId, resultId, destination.spaceName, t.message)
             }
         }
         return [ok: failedCount == 0, attempted: true, deliveredCount: deliveredCount, failedCount: failedCount]
+    }
+
+    /**
+     * Turns a chat-space row into a deliverable destination, or null when it cannot deliver.
+     *
+     * <p>A Slack space resolves two ways. If it names a workspace install, delivery goes through
+     * {@code chat.postMessage} with that install's bot token — the path that returns a message
+     * {@code ts}. If it has only a webhook URL, it falls back to incoming-webhook delivery, which is
+     * what keeps Darpan usable in a workspace whose admins do not permit app installation. The bot
+     * path wins when a space somehow has both, because it is strictly more capable.</p>
+     */
+    static Map<String, Object> describeDestination(def ec, String tenantId, String chatSpaceId, def spaceRow) {
+        if (spaceRow == null) return null
+        if (((spaceRow.isActive)?.toString()?.trim()) == "N") return null
+
+        String provider = resolveChatProvider(spaceRow.chatProviderEnumId)
+        Map<String, Object> base = [chatSpaceId: chatSpaceId, spaceName: spaceRow.spaceName,
+                                    chatProviderEnumId: provider]
+
+        if (provider == PROVIDER_SLACK) {
+            String installId = ((spaceRow.slackInstallId)?.toString()?.trim())
+            String channelId = ((spaceRow.slackChannelId)?.toString()?.trim())
+            if (installId && channelId) {
+                String botToken = SlackOAuthSupport.resolveBotToken(ec, tenantId, installId)
+                if (botToken) {
+                    return base + [deliveryMode: DELIVERY_SLACK_BOT, slackInstallId: installId,
+                                   slackChannelId: channelId, botToken: botToken]
+                }
+                // An install that has been disconnected leaves its spaces pointing at nothing. Falling
+                // through to the webhook branch is deliberate: a space that ALSO has a webhook keeps
+                // working, and one that does not is reported as unusable rather than silently dropped.
+            }
+        }
+
+        String webhookUrl = resolveWebhookUrl(spaceRow)
+        if (!webhookUrl) return null
+        return base + [deliveryMode: DELIVERY_WEBHOOK, webhookUrl: webhookUrl]
+    }
+
+    /** Operator-facing reason a space could not be used, for the automation-linked warn. */
+    private static String describeUnusableSpace(def ec, String tenantId, def spaceRow) {
+        if (spaceRow == null) return "space not found for this tenant"
+        if (((spaceRow.isActive)?.toString()?.trim()) == "N") return "space is deactivated"
+        if (resolveChatProvider(spaceRow.chatProviderEnumId) == PROVIDER_SLACK
+                && ((spaceRow.slackInstallId)?.toString()?.trim())
+                && !SlackOAuthSupport.resolveBotToken(ec, tenantId, spaceRow.slackInstallId)) {
+            return "the Slack workspace it posts through has been disconnected"
+        }
+        return "space has no webhook or Slack channel configured"
     }
 
     /**
@@ -164,19 +295,15 @@ class TenantNotificationSupport {
                     ?.condition("chatSpaceId", chatSpaceId)
                     ?.condition("companyUserGroupId", tenantId)
                     ?.useCache(false)?.one()
-            String webhookUrl = ((spaceRow?.googleChatWebhookUrl)?.toString()?.trim())
-            boolean spaceUsable = spaceRow != null && ((spaceRow.isActive)?.toString()?.trim()) != "N" && webhookUrl
-            if (spaceUsable) {
-                destinations.add([chatSpaceId: chatSpaceId, spaceName: spaceRow.spaceName, webhookUrl: webhookUrl])
+            Map<String, Object> destination = describeDestination(ec, tenantId, chatSpaceId, spaceRow)
+            if (destination != null) {
+                destinations.add(destination)
             } else if (chatSpaceId == automationChatSpaceId) {
                 // Spec-promised warn (review finding 3): dropping a subscriber's own space is expected
                 // self-service churn and stays silent, but dropping the AUTOMATION's linked space is an
-                // operator-facing configuration gap (deactivated space, or one that lost its webhook) —
-                // surface it. Never log the webhook URL itself.
-                String reason = spaceRow == null ? "space not found for this tenant" :
-                        (((spaceRow.isActive)?.toString()?.trim()) == "N" ? "space is deactivated" : "space has no webhook configured")
+                // operator-facing configuration gap — surface it. Never log the webhook URL or token.
                 logger.warn("Automation-linked chat space dropped from run notification: space {} ({}) result {} — {}",
-                        spaceRow?.spaceName, chatSpaceId, resultId, reason)
+                        spaceRow?.spaceName, chatSpaceId, resultId, describeUnusableSpace(ec, tenantId, spaceRow))
             }
         }
         return [destinations: destinations, subscriptionRows: subscriptionRows]
@@ -295,6 +422,32 @@ class TenantNotificationSupport {
                 logger.warn("Failed to purge run notification subscription for result {} user {}: {}",
                         resultId, subscriptionRow?.userId, t.message)
             }
+        }
+    }
+
+    /**
+     * Stores the {@code ts} a Slack bot delivery returned, so the message can later be edited in
+     * place rather than followed by a second one.
+     *
+     * <p>Best-effort by design: the notification has already been delivered by the time this runs,
+     * and losing the edit handle must never turn a successful alert into a reported failure.</p>
+     */
+    private static void recordSlackMessage(def ec, String resultId, Map<String, Object> destination,
+                                           Map<String, Object> delivery) {
+        String messageTs = ((delivery?.ts)?.toString()?.trim())
+        if (!messageTs) return
+        try {
+            def messageRow = ec.entity.makeValue("darpan.reconciliation.SlackPostedMessage")
+            messageRow.set("reconciliationRunResultId", resultId)
+            messageRow.set("chatSpaceId", destination.chatSpaceId)
+            messageRow.set("slackChannelId", ((delivery.slackChannelId)?.toString()?.trim()) ?:
+                    ((destination.slackChannelId)?.toString()?.trim()))
+            messageRow.set("messageTs", messageTs)
+            messageRow.set("postedDate", ec.user.nowTimestamp)
+            messageRow.createOrUpdate()
+        } catch (Throwable t) {
+            logger.warn("Could not record the Slack message handle for result {} space {}: {}",
+                    resultId, destination?.chatSpaceId, t.message)
         }
     }
 
@@ -424,9 +577,96 @@ class TenantNotificationSupport {
         return value.replaceAll(/\/+$/, "")
     }
 
+    /**
+     * The single delivery entry point: picks the provider transport, or hands off to the test hook.
+     *
+     * <p>The hook is checked here, before the provider branch, and is still called with exactly
+     * {@code (webhookUrl, payload)} — every existing test closure declares two parameters, and a
+     * Groovy closure with a declared arity throws when called with three. Provider-specific response
+     * handling is therefore tested through {@link #interpretSlackResponse} rather than through the
+     * hook.</p>
+     */
+    protected static Map<String, Object> deliverToDestination(Map<String, Object> destination,
+                                                              Map<String, Object> payload) {
+        boolean botDelivery = destination.deliveryMode == DELIVERY_SLACK_BOT
+        // The hook is still handed a single String, not the destination map: every existing test
+        // closure declares (String, Map), and a Groovy closure with a declared arity throws when the
+        // shape changes. For bot delivery that String is the channel id — the thing a test would
+        // assert on anyway.
+        String destinationRef = botDelivery ?
+                ((destination.slackChannelId)?.toString()) : ((destination.webhookUrl)?.toString())
+        if (deliveryHook != null) {
+            return (deliveryHook.call(destinationRef, payload) ?: [:]) as Map<String, Object>
+        }
+
+        if (botDelivery) {
+            Map<String, Object> outcome = SlackApiClient.postMessage(
+                    (String) destination.botToken, (String) destination.slackChannelId,
+                    ((payload?.text)?.toString()) ?: "")
+            // Normalized onto the shape the notify loop already logs, so the Google Chat and webhook
+            // paths keep reading identically.
+            return [ok             : outcome.ok,
+                    statusCode     : outcome.statusCode,
+                    providerMessage: outcome.operatorMessage ?: outcome.errorCode,
+                    errorCode      : outcome.errorCode,
+                    transient      : outcome.transient,
+                    ts             : outcome.ts,
+                    slackChannelId : outcome.channelId]
+        }
+        return resolveChatProvider(destination.chatProviderEnumId) == PROVIDER_SLACK ?
+                deliverSlack(destinationRef, payload) : deliverGoogleChat(destinationRef, payload)
+    }
+
     protected static Map<String, Object> deliverGoogleChat(String webhookUrl, Map<String, Object> payload) {
         if (deliveryHook != null) return (deliveryHook.call(webhookUrl, payload) ?: [:]) as Map<String, Object>
 
+        Map<String, Object> response = postJson(webhookUrl, payload)
+        int statusCode = (int) response.statusCode
+        return [
+                ok        : statusCode >= 200 && statusCode < 300,
+                statusCode: statusCode,
+        ]
+    }
+
+    protected static Map<String, Object> deliverSlack(String webhookUrl, Map<String, Object> payload) {
+        if (deliveryHook != null) return (deliveryHook.call(webhookUrl, payload) ?: [:]) as Map<String, Object>
+
+        Map<String, Object> response = postJson(webhookUrl, payload)
+        return interpretSlackResponse((int) response.statusCode, response.body)
+    }
+
+    /**
+     * Slack's incoming-webhook success contract, isolated so it can be tested without a socket.
+     *
+     * <p>A webhook success is <b>HTTP 200 with the plain-text body {@code ok}</b> — nothing else.
+     * Failures come back as 400/403/404 carrying a code in the body ({@code invalid_payload},
+     * {@code invalid_token}, {@code no_service}, {@code no_text}, {@code channel_is_archived},
+     * {@code action_prohibited}, {@code channel_not_found}), which the status check alone catches;
+     * the body is kept so the operator learns WHICH of those happened, since they need different fixes.</p>
+     *
+     * <p>The body is still required to equal {@code ok} rather than trusting 2xx: the cost is one
+     * comparison, and it guards a case the status cannot — a proxy or captive gateway answering 200
+     * with its own page, which is otherwise indistinguishable from a delivered message. An empty
+     * 200 body fails for the same reason.</p>
+     *
+     * <p>NOTE the contrast with the Slack <b>Web API</b> ({@link SlackApiClient}), which is the
+     * opposite: it reports failure as HTTP 200 with {@code {"ok": false, "error": ...}}. The two
+     * Slack surfaces do not share an error contract, and assuming they do breaks one of them.</p>
+     */
+    static Map<String, Object> interpretSlackResponse(int statusCode, Object rawBody) {
+        String body = ((rawBody)?.toString()?.trim())
+        // "ok" is the receiver deliberately: body is null for a null/absent response body, and
+        // body.equalsIgnoreCase(...) throws there — inside the delivery loop that surfaced as an
+        // exception rather than as the failed delivery it actually is.
+        boolean ok = statusCode >= 200 && statusCode < 300 && "ok".equalsIgnoreCase(body)
+        return [
+                ok             : ok,
+                statusCode     : statusCode,
+                providerMessage: ok ? null : (body ?: null),
+        ]
+    }
+
+    private static Map<String, Object> postJson(String webhookUrl, Map<String, Object> payload) {
         String body = JsonOutput.toJson(payload)
         HttpClient client = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -437,11 +677,7 @@ class TenantNotificationSupport {
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build()
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString())
-        int statusCode = response.statusCode()
-        return [
-                ok        : statusCode >= 200 && statusCode < 300,
-                statusCode: statusCode,
-        ]
+        return [statusCode: response.statusCode(), body: response.body()]
     }
 
     /**
@@ -461,12 +697,11 @@ class TenantNotificationSupport {
     static ZonedDateTime resolveCompletedMoment(def ec, String tenantId, String resultId) {
         if (!tenantId || !resultId) return null
         try {
-            def resultRow = TenantScopedFinder.findGlobalUnscoped(ec,
-                            DarpanEntityConstants.RECONCILIATION_RUN_RESULT,
-                            "completedDate read pinned to run tenant — explicit companyUserGroupId condition applied")
-                    ?.condition("reconciliationRunResultId", resultId)
-                    ?.condition("companyUserGroupId", tenantId)
-                    ?.useCache(false)?.one()
+            // Same primary-key trap as the chat-space read above.
+            def resultRow = TenantScopedFinder.findOneOwnedByTenant(ec,
+                    DarpanEntityConstants.RECONCILIATION_RUN_RESULT, "reconciliationRunResultId",
+                    resultId, tenantId,
+                    "completedDate read verified against the run tenant after a primary-key read")
             def completedDate = resultRow?.completedDate
             if (completedDate == null) return null
 

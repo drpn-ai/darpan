@@ -140,6 +140,45 @@
         </actions>
     </service>
 
+    <service verb="migrate" noun="ChatSpaceWebhookUrls" authenticate="false">
+        <description>One-time upgrade for Slack support: copy each chat space's legacy
+            googleChatWebhookUrl into the provider-agnostic webhookUrl column and stamp its provider as
+            CHAT_PROV_GOOGLE. Idempotent — a row that already has webhookUrl is left untouched.
+
+            NOT required for delivery. TenantNotificationSupport.resolveWebhookUrl falls back to the
+            legacy column, so notifications keep working unrun; this exists so the legacy column can be
+            dropped in the following release, and so the settings list stops depending on the fallback.
+            Internal only, not remote: it reads and writes across every tenant with no per-request
+            authorization check.</description>
+        <out-parameters>
+            <parameter name="migratedSpaceCount" type="Integer"/>
+            <parameter name="skippedSpaceCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="migratedSpaceCount" from="0"/>
+            <set field="skippedSpaceCount" from="0"/>
+            <set field="spaceRows" from="ec.entity.find('darpan.reconciliation.TenantChatSpace').disableAuthz().useCache(false).list() ?: []"/>
+            <iterate list="spaceRows" entry="spaceRow">
+                <set field="existingWebhookUrl" from="((spaceRow.webhookUrl)?.toString()?.trim())"/>
+                <set field="legacyWebhookUrl" from="((spaceRow.googleChatWebhookUrl)?.toString()?.trim())"/>
+                <if condition="!existingWebhookUrl &amp;&amp; legacyWebhookUrl">
+                    <set field="ignoreWebhook" from="spaceRow.set('webhookUrl', legacyWebhookUrl)"/>
+                    <!-- Every row predating this release is a Google Chat space by construction: the
+                         product could not create any other kind. Stamping it explicitly means the
+                         provider column stops relying on the null-reads-as-Google rule. -->
+                    <if condition="!((spaceRow.chatProviderEnumId)?.toString()?.trim())">
+                        <set field="ignoreProvider" from="spaceRow.set('chatProviderEnumId', 'CHAT_PROV_GOOGLE')"/>
+                    </if>
+                    <set field="ignoreUpdate" from="spaceRow.update()"/>
+                    <set field="migratedSpaceCount" from="migratedSpaceCount + 1"/>
+                <else>
+                    <set field="skippedSpaceCount" from="skippedSpaceCount + 1"/>
+                </else>
+                </if>
+            </iterate>
+        </actions>
+    </service>
+
     <service verb="clear" noun="UndecryptableChatSpaceWebhooks" authenticate="false">
         <description>One-time upgrade for the 2026-08-14 removal of encrypt="true" from
             TenantChatSpace.googleChatWebhookUrl. Moqui only decrypts a field still declared encrypted, so

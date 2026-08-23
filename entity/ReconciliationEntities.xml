@@ -186,31 +186,161 @@
     </entity>
 
     <entity entity-name="TenantChatSpace" package="darpan.reconciliation" use="configuration">
-        <description>Named Google Chat space registry entry for one tenant. Users pick a default
-            from this list and automations link to one; replaces the single-webhook
-            TenantNotificationSetting (retired).</description>
+        <description>Named chat destination registry entry for one tenant, on one chat provider
+            (Google Chat or Slack). Users pick a default from this list and automations link to one;
+            replaces the single-webhook TenantNotificationSetting (retired).</description>
         <field name="chatSpaceId" type="id" is-pk="true"/>
         <field name="companyUserGroupId" type="id" not-null="true"/>
         <field name="spaceName" type="text-medium" not-null="true">
             <description>Display label, unique per tenant (case-insensitive, service-validated).</description>
         </field>
+        <field name="chatProviderEnumId" type="id">
+            <description>Which chat product this destination posts to (DarpanChatProvider:
+                CHAT_PROV_GOOGLE / CHAT_PROV_SLACK). Nullable, and null reads as CHAT_PROV_GOOGLE
+                everywhere — every row written before Slack support predates this column, and a
+                not-null default cannot be applied to them without a backfill that the delivery path
+                does not need. Resolve through TenantNotificationSupport.resolveChatProvider, never
+                by reading the column raw.</description>
+        </field>
+        <field name="webhookUrl" type="text-very-long">
+            <description>Incoming webhook URL for this destination, whichever provider it belongs to.
+                Supersedes googleChatWebhookUrl; migrate#ChatSpaceWebhookUrls copies the old column
+                into this one. Reads must go through TenantNotificationSupport.resolveWebhookUrl,
+                which falls back to the legacy column so a space keeps delivering if the migration
+                has not run yet. Clear text by the same 2026-08-14 decision recorded below.</description>
+        </field>
         <field name="googleChatWebhookUrl" type="text-very-long">
-            <description>Google Chat incoming webhook URL. Stored and returned in clear text by decision
-                2026-08-14: at-rest encryption here shared entity_ds_crypt_pass with the API credential
-                fields, so a key problem silently broke notification delivery for a value that is
-                re-pastable from Google Chat in seconds. Reads are no longer masked either.</description>
+            <description>DEPRECATED — superseded by webhookUrl; kept one release for migration, remove
+                after the release that ships Slack support. Google Chat incoming webhook URL. Stored
+                and returned in clear text by decision 2026-08-14: at-rest encryption here shared
+                entity_ds_crypt_pass with the API credential fields, so a key problem silently broke
+                notification delivery for a value that is re-pastable from Google Chat in seconds.
+                Reads are no longer masked either.</description>
+        </field>
+        <field name="slackInstallId" type="id">
+            <description>The workspace install this destination posts through, when the provider is
+                Slack and the tenant has connected a workspace. Null with a webhookUrl present means
+                the webhook fallback: a workspace that restricts app installation can still paste an
+                incoming-webhook URL, so one user-facing provider has two delivery paths.</description>
+        </field>
+        <field name="slackChannelId" type="text-medium">
+            <description>Slack channel id (C…/G…). The id, never the name — a channel rename would
+                silently break delivery keyed on a name, and chat.postMessage accepts the id for
+                every conversation type while it accepts names only for public channels.</description>
+        </field>
+        <field name="slackChannelName" type="text-medium">
+            <description>Channel name captured at pick time, for display only. May go stale after a
+                rename; never used to address a message.</description>
         </field>
         <field name="isActive" type="text-indicator" default="'Y'"/>
         <field name="createdByUserId" type="id"/>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>
+        <relationship type="one" title="SlackInstall" related="darpan.reconciliation.SlackWorkspaceInstall" fk-name="TCSPACE_SLACK_INSTALL">
+            <key-map field-name="slackInstallId"/>
+        </relationship>
         <relationship type="one" title="Company" related="moqui.security.UserGroup" fk-name="TCSPACE_COMPANY">
             <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
         </relationship>
         <relationship type="one" title="CreatedBy" related="moqui.security.UserAccount" fk-name="TCSPACE_CREATED_BY">
             <key-map field-name="createdByUserId" related-field-name="userId"/>
         </relationship>
+        <relationship type="one" title="ChatProvider" related="moqui.basic.Enumeration" fk-name="TCSPACE_PROVIDER">
+            <key-map field-name="chatProviderEnumId" related-field-name="enumId"/>
+        </relationship>
     </entity>
+    <entity entity-name="SlackWorkspaceInstall" package="darpan.reconciliation" use="configuration">
+        <description>One tenant's authorised Slack workspace: the bot token obtained through the
+            OAuth v2 install flow, plus the workspace identity it belongs to. A tenant may connect
+            more than one workspace; a TenantChatSpace names which one it posts through.</description>
+        <field name="slackInstallId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="teamId" type="text-medium" not-null="true">
+            <description>Slack workspace id (T…). Identity of the install; a re-install of the same
+                workspace updates this row rather than creating a second one.</description>
+        </field>
+        <field name="teamName" type="text-medium"/>
+        <field name="appId" type="text-medium"/>
+        <field name="botUserId" type="text-medium">
+            <description>The bot's own user id (U…), for the "invite @Darpan to that channel"
+                instruction the channel picker shows for private channels.</description>
+        </field>
+        <field name="botAccessToken" type="text-long" encrypt="true">
+            <description>The xoxb- bot token from oauth.v2.access. Deliberately the TOP-LEVEL
+                access_token, never authed_user.access_token — the user-scoped token posts as the
+                installing human and works in testing (the installer is usually an admin) while
+                failing or misattributing for everyone else.
+
+                Encrypted at rest, unlike TenantChatSpace.googleChatWebhookUrl which had encryption
+                removed 2026-08-14. The reasoning there was that a webhook URL is re-pastable from
+                Google Chat in seconds, so encryption bought little against the risk of a key
+                problem silently breaking delivery. This is a bearer credential with workspace write
+                access, and recovery from a key problem is one click of "Reconnect Slack" — so the
+                trade runs the other way here.</description>
+        </field>
+        <field name="grantedScopes" type="text-long">
+            <description>Scope list returned by the install, so a missing_scope failure can be
+                explained against what was actually granted rather than what was requested.</description>
+        </field>
+        <field name="installedByUserId" type="id"/>
+        <field name="installedDate" type="date-time"/>
+        <field name="lastUpdatedDate" type="date-time"/>
+        <field name="isActive" type="text-indicator" default="'Y'"/>
+        <relationship type="one" title="Company" related="moqui.security.UserGroup" fk-name="SLKINST_COMPANY">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+        <relationship type="one" title="InstalledBy" related="moqui.security.UserAccount" fk-name="SLKINST_INSTALLED_BY">
+            <key-map field-name="installedByUserId" related-field-name="userId"/>
+        </relationship>
+        <index name="SLKINST_TENANT_TEAM">
+            <index-field name="companyUserGroupId"/>
+            <index-field name="teamId"/>
+        </index>
+    </entity>
+
+    <entity entity-name="SlackOAuthState" package="darpan.reconciliation" use="transactional" cache="never">
+        <description>A single-use CSRF token for one in-flight Slack install.
+
+            The OAuth callback is necessarily a public, unauthenticated endpoint, so this row is the
+            ONLY thing binding a returning `code` to the tenant that asked for it. It is minted by an
+            authenticated facade call, consumed exactly once, and expires in minutes. A state value
+            that merely encoded the tenant id would be forgeable, and forging it would let an
+            attacker attach their own workspace to another tenant's notifications.</description>
+        <field name="stateToken" type="text-medium" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="initiatedByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="expiresDate" type="date-time"/>
+        <field name="consumedDate" type="date-time">
+            <description>Stamped before the tenant is returned to the caller. Non-null means this
+                state has already been redeemed and must never be accepted again — a replayed
+                callback is either a double-click or an attack, and both are refused the same way.</description>
+        </field>
+        <relationship type="one" title="Company" related="moqui.security.UserGroup" fk-name="SLKSTATE_COMPANY">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="SlackPostedMessage" package="darpan.reconciliation" use="transactional" cache="never">
+        <description>The Slack message a run posted to one destination, keyed by its `ts`.
+
+            chat.postMessage returns a ts; an incoming webhook returns the bare string "ok" and no
+            handle at all. Keeping the ts is what makes a later chat.update possible — a run message
+            that evolves as steps complete rather than one terminal alert. Rows are written by the
+            bot delivery path only.</description>
+        <field name="reconciliationRunResultId" type="id" is-pk="true"/>
+        <field name="chatSpaceId" type="id" is-pk="true"/>
+        <field name="slackChannelId" type="text-medium"/>
+        <field name="messageTs" type="text-medium"/>
+        <field name="postedDate" type="date-time"/>
+        <relationship type="one" related="darpan.reconciliation.ReconciliationRunResult" fk-name="SLKMSG_RESULT">
+            <key-map field-name="reconciliationRunResultId"/>
+        </relationship>
+        <relationship type="one" related="darpan.reconciliation.TenantChatSpace" fk-name="SLKMSG_SPACE">
+            <key-map field-name="chatSpaceId"/>
+        </relationship>
+    </entity>
+
     <entity entity-name="ReconciliationRunNotifySubscription" package="darpan.reconciliation" use="transactional" cache="never">
         <description>One user's notify-me subscription on one running reconciliation. chatSpaceId is a
             snapshot of the user's default chat space at click time; unsubscribe deletes the row.</description>

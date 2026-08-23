@@ -266,6 +266,24 @@
             description="Admin/platform-owned SFTP server"
             enumTypeId="DarpanSftpScope"/>
 
+    <!-- Chat destination providers. TenantChatSpace.chatProviderEnumId FKs this, so these two rows
+         must exist before any Slack-provider space can be saved; a tenant with no rows loaded can
+         still save Google Chat spaces, because a null provider resolves to CHAT_PROV_GOOGLE.
+         Adding a provider here also needs a delivery branch and a host pin in
+         TenantNotificationSupport — the enum alone buys nothing. -->
+    <moqui.basic.EnumerationType enumTypeId="DarpanChatProvider"
+            description="Chat products Darpan can post run notifications to"/>
+    <moqui.basic.Enumeration enumId="CHAT_PROV_GOOGLE"
+            enumTypeId="DarpanChatProvider"
+            enumCode="GOOGLE_CHAT"
+            description="Google Chat"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="CHAT_PROV_SLACK"
+            enumTypeId="DarpanChatProvider"
+            enumCode="SLACK"
+            description="Slack"
+            sequenceNum="2"/>
+
     <!-- DAR-BE-005 — the catalog of config types that can be shared across tenants. Adding a value
          here plus a CONFIG_TYPE_REGISTRY row in SharedConfigAccessSupport is the whole extension
          path for a new shareable config type. moqui.service.message.SystemMessageRemote is

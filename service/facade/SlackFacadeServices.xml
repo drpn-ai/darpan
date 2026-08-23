@@ -1,0 +1,224 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- Slack workspace connection for the active tenant.
+
+         SECURITY NOTE: data/SecuritySeedData.xml grants AUTHZA_ALL on facade.* to every tenant tier,
+         so authz-action alone does NOT keep a view-only member out of a write here. Every mutating
+         service below calls requireActiveTenantWriteAccess explicitly, matching save#TenantChatSpace.
+
+         The bot token is never an out-parameter of anything in this file. -->
+
+    <service verb="begin" noun="SlackInstall" allow-remote="true" authenticate="true">
+        <description>Start the Slack app install for the active tenant: mint a single-use state token
+            and return the Slack authorize URL the browser should be sent to. Does not contact Slack.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="authorizeUrl"/>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><message error="true">Active tenant is required to connect Slack.</message></if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for chat spaces.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="clientId" from="darpan.reconciliation.notification.SlackOAuthSupport.resolveClientId(ec)"/>
+                <set field="redirectUri" from="darpan.reconciliation.notification.SlackOAuthSupport.resolveRedirectUri(ec)"/>
+                <!-- Refuse here rather than sending the admin to Slack with a redirect_uri Slack will
+                     reject: that failure surfaces as Slack's own error page, which says nothing about
+                     Darpan being misconfigured and gives the operator nothing to act on. -->
+                <if condition="!clientId">
+                    <message error="true">Slack is not configured on this deployment. Set darpan.slack.clientId and darpan.slack.clientSecret.</message>
+                </if>
+                <if condition="!redirectUri">
+                    <message error="true">Slack cannot be connected until an app base URL or darpan.slack.redirectUri is configured.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="stateToken" from="darpan.reconciliation.notification.SlackOAuthSupport.mintState(ec, tenantId, darpan.facade.common.TenantAccessSupport.currentUserId(ec))"/>
+                <set field="authorizeUrl" from="darpan.reconciliation.notification.SlackOAuthSupport.buildAuthorizeUrl(clientId, redirectUri, stateToken)"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="SlackBotToken" allow-remote="true" authenticate="true">
+        <description>Connect a Slack workspace by pasting a bot user OAuth token (xoxb-), for
+            workspaces whose administrators do not permit installing the Darpan app. The token is
+            verified against Slack before it is stored, and the workspace identity is taken from
+            Slack's answer rather than from the caller.
+
+            Storing goes through the entity facade so the encrypted column is written correctly; a
+            token placed into the database any other way would be plaintext where reads expect
+            ciphertext.</description>
+        <in-parameters>
+            <parameter name="botAccessToken" required="true" allow-html="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="install" type="Map">
+                <parameter name="slackInstallId"/><parameter name="teamId"/><parameter name="teamName"/>
+                <parameter name="botUserId"/><parameter name="grantedScopes"/>
+            </parameter>
+            <parameter name="missingScopes" type="List"><parameter name="scope"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><message error="true">Active tenant is required to connect Slack.</message></if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for chat spaces.')"/>
+            </if>
+            <set field="tokenValue" from="((botAccessToken)?.toString()?.trim())"/>
+            <if condition="!ec.message.hasError() &amp;&amp; !tokenValue">
+                <message error="true">Paste the bot user OAuth token.</message>
+            </if>
+            <!-- Shape check before spending a network call, and before the value can be mistaken for
+                 a user token: xoxp- authenticates fine and posts as the human who created it. -->
+            <if condition="!ec.message.hasError() &amp;&amp; !tokenValue.startsWith('xoxb-')">
+                <message error="true">That is not a bot token. Copy the "Bot User OAuth Token", which starts with xoxb-.</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="identity" from="darpan.reconciliation.notification.SlackApiClient.authTest(tokenValue)"/>
+                <if condition="identity.ok != true">
+                    <message error="true">Slack rejected that token: ${identity.operatorMessage}</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="installId" from="darpan.reconciliation.notification.SlackOAuthSupport.upsertInstall(ec, tenantId, darpan.facade.common.TenantAccessSupport.currentUserId(ec), [ok: true, teamId: identity.teamId, teamName: identity.teamName, botUserId: identity.botUserId, botAccessToken: tokenValue, grantedScopes: identity.grantedScopes])"/>
+                <set field="missingScopes" from="identity.missingScopes ?: []"/>
+                <set field="install" from="[slackInstallId: installId, teamId: identity.teamId, teamName: identity.teamName, botUserId: identity.botUserId, grantedScopes: identity.grantedScopes]"/>
+                <message>Connected to ${identity.teamName ?: 'Slack'} as ${identity.botName ?: 'the Darpan app'}.</message>
+                <!-- A partial token still delivers, so this is a warning rather than a refusal —
+                     but it names exactly what will not work. -->
+                <if condition="missingScopes">
+                    <message>Missing scope(s): ${missingScopes.join(', ')}. Notifications will still send, but channel listing or posting to channels the app has not joined may fail.</message>
+                </if>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="SlackInstall" authz-action="view" allow-remote="true" authenticate="true">
+        <description>The active tenant's connected Slack workspaces. Returns identity and granted
+            scopes only — never the bot token.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <!-- Slack is always usable now that a bot token can be pasted; oauthAvailable says
+                 whether the one-click install is ALSO offered on this deployment. Before the token
+                 path existed these were the same thing, and conflating them hid Slack entirely on
+                 any deployment without a client id. -->
+            <parameter name="slackConfigured" type="Boolean"/>
+            <parameter name="oauthAvailable" type="Boolean"/>
+            <parameter name="installs" type="List">
+                <parameter name="slackInstallId"/><parameter name="teamId"/><parameter name="teamName"/>
+                <parameter name="botUserId"/><parameter name="grantedScopes"/>
+                <parameter name="isActive"/><parameter name="installedDate" type="Timestamp"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="slackConfigured" from="true"/>
+            <set field="oauthAvailable" from="!!darpan.reconciliation.notification.SlackOAuthSupport.resolveClientId(ec) &amp;&amp; !!darpan.reconciliation.notification.SlackOAuthSupport.resolveRedirectUri(ec)"/>
+            <!-- .list() honours the tenant condition; only the primary-key .one() path drops it. -->
+            <set field="installRows" from="tenantId ? (ec.entity.find('darpan.reconciliation.SlackWorkspaceInstall').condition('companyUserGroupId', tenantId).condition('isActive', 'Y').orderBy('teamName').disableAuthz().useCache(false).list() ?: []) : []"/>
+            <set field="installs" from="installRows.collect { row -> [slackInstallId: row.slackInstallId, teamId: row.teamId, teamName: row.teamName, botUserId: row.botUserId, grantedScopes: row.grantedScopes, isActive: ((row.isActive)?.toString()?.trim()) ?: 'Y', installedDate: row.installedDate] }"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="list" noun="SlackChannels" authz-action="view" allow-remote="true" authenticate="true">
+        <description>One page of channels from a connected workspace, for the chat-space channel
+            picker. Paginated rather than exhaustive: conversations.list is rate-limit Tier 2 and a
+            large workspace has thousands of channels.</description>
+        <in-parameters>
+            <parameter name="slackInstallId" required="true"/>
+            <parameter name="cursor"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="channels" type="List">
+                <parameter name="id"/><parameter name="name"/>
+                <parameter name="isPrivate" type="Boolean"/><parameter name="isMember" type="Boolean"/>
+            </parameter>
+            <parameter name="nextCursor"/>
+            <parameter name="botUserId"/>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><message error="true">Active tenant is required to list Slack channels.</message></if>
+            <set field="installRow" from="!ec.message.hasError() ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.reconciliation.SlackWorkspaceInstall', 'slackInstallId', slackInstallId, tenantId, 'Slack install verified against the active tenant after a primary-key read') : null"/>
+            <if condition="!ec.message.hasError() &amp;&amp; installRow == null">
+                <message error="true">That Slack workspace is not connected for this tenant.</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="botUserId" from="((installRow.botUserId)?.toString()?.trim())"/>
+                <set field="outcome" from="darpan.reconciliation.notification.SlackApiClient.listConversations(((installRow.botAccessToken)?.toString()?.trim()), cursor, null)"/>
+                <if condition="outcome.ok != true">
+                    <message error="true">${outcome.operatorMessage}</message>
+                <else>
+                    <set field="channels" from="outcome.channels"/>
+                    <set field="nextCursor" from="outcome.nextCursor"/>
+                </else>
+                </if>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="disconnect" noun="SlackWorkspace" allow-remote="true" authenticate="true">
+        <description>Deactivate a connected workspace. Refuses while chat spaces still post through
+            it, naming them — silently disconnecting would leave those destinations resolving to
+            nothing and the tenant would learn about it from missing notifications.</description>
+        <in-parameters><parameter name="slackInstallId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><message error="true">Active tenant is required to disconnect Slack.</message></if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for chat spaces.')"/>
+            </if>
+            <set field="installRow" from="!ec.message.hasError() ? darpan.facade.common.TenantScopedFinder.findOneOwnedByTenant(ec, 'darpan.reconciliation.SlackWorkspaceInstall', 'slackInstallId', slackInstallId, tenantId, 'Slack install verified against the active tenant after a primary-key read') : null"/>
+            <if condition="!ec.message.hasError() &amp;&amp; installRow == null">
+                <message error="true">That Slack workspace is not connected for this tenant.</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="dependentSpaces" from="ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('companyUserGroupId', tenantId).condition('slackInstallId', slackInstallId).disableAuthz().useCache(false).list() ?: []"/>
+                <if condition="dependentSpaces">
+                    <message error="true">Still in use by ${dependentSpaces.size()} chat space(s): ${dependentSpaces.collect { it.spaceName }.join(', ')}. Repoint or delete them first.</message>
+                <else>
+                    <set field="ignoreDeactivate" from="installRow.set('isActive', 'N')"/>
+                    <set field="ignoreUpdated" from="installRow.set('lastUpdatedDate', ec.user.nowTimestamp)"/>
+                    <set field="ignoreUpdate" from="installRow.update()"/>
+                    <message>Disconnected ${installRow.teamName ?: 'the Slack workspace'}.</message>
+                </else>
+                </if>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+</services>

@@ -168,12 +168,19 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="botUserId" from="((installRow.botUserId)?.toString()?.trim())"/>
-                <set field="outcome" from="darpan.reconciliation.notification.SlackApiClient.listConversations(((installRow.botAccessToken)?.toString()?.trim()), cursor, null)"/>
+                <!-- All pages, not one: Slack filters AFTER taking a page, so page one routinely
+                     comes back short with more behind the cursor, and a partial list looks complete. -->
+                <set field="outcome" from="darpan.reconciliation.notification.SlackApiClient.listAllConversations(((installRow.botAccessToken)?.toString()?.trim()))"/>
                 <if condition="outcome.ok != true">
                     <message error="true">${outcome.operatorMessage}</message>
                 <else>
                     <set field="channels" from="outcome.channels"/>
                     <set field="nextCursor" from="outcome.nextCursor"/>
+                    <!-- Never a silent cap: a workspace big enough to exceed the page limit is told,
+                         rather than shown an arbitrary subset it cannot tell is incomplete. -->
+                    <if condition="outcome.truncated == true">
+                        <message>Showing the first ${channels.size()} channels; this workspace has more than Darpan lists at once.</message>
+                    </if>
                 </else>
                 </if>
             </if>

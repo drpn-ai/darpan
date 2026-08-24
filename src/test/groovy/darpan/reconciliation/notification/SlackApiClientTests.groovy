@@ -20,6 +20,32 @@ class SlackApiClientTests {
     void clearHook() { SlackApiClient.resetTransportHook() }
 
     @Test
+    void parametersAreFormEncodedBecauseSlackSilentlyIgnoresAJsonBodyOnSomeMethods() {
+        // The bug this pins: conversations.list does not read a JSON body and does not say so. It
+        // answers ok:true with a plausible channel list, having ignored every parameter and applied
+        // its defaults — so the picker silently never offered a private channel. Measured live
+        // 2026-08-24: JSON body -> 0 private channels, form-encoded -> 1.
+        String encoded = SlackApiClient.formEncode([
+                types           : "public_channel,private_channel",
+                exclude_archived: true,
+                limit           : 200,
+        ])
+        assertTrue(encoded.contains("types=public_channel%2Cprivate_channel"),
+                "types must survive encoding, comma included: ${encoded}")
+        assertTrue(encoded.contains("exclude_archived=true"))
+        assertTrue(encoded.contains("limit=200"))
+        assertFalse(encoded.startsWith("{"), "a JSON body is silently ignored by some methods")
+    }
+
+    @Test
+    void formEncodingSkipsNullsAndEscapesValues() {
+        String encoded = SlackApiClient.formEncode([channel: "C1", cursor: null, text: "a b&c=d"])
+        assertFalse(encoded.contains("cursor"), "a null cursor must not be sent as the string 'null'")
+        assertTrue(encoded.contains("text=a+b%26c%3Dd"),
+                "unescaped & or = would truncate or forge later parameters: ${encoded}")
+    }
+
+    @Test
     void anOkTrueBodyIsTheOnlySuccess() {
         Map<String, Object> outcome = SlackApiClient.interpretResponse(200, '{"ok":true,"channel":"C1","ts":"1712.45"}')
         assertTrue(outcome.ok as boolean)
@@ -135,6 +161,49 @@ class SlackApiClientTests {
         assertEquals(false, channels[1].isMember)
         assertEquals(true, channels[2].isMember)
         assertEquals("dXNlcjpVMDYxTkZUVDI=", outcome.nextCursor)
+    }
+
+    @Test
+    void allPagesAreDrainedBecauseOneLooksCompleteWhenItIsNot() {
+        // Slack filters AFTER taking a page, so page one comes back short while next_cursor still
+        // points at more. Stopping there shows an arbitrary subset the operator cannot tell is partial.
+        int calls = 0
+        SlackApiClient.setTransportHook { String method, String token, Map params ->
+            calls++
+            return calls == 1
+                    ? [statusCode: 200, body: '{"ok":true,"channels":[{"id":"C1","name":"one"}],"response_metadata":{"next_cursor":"PAGE2"}}']
+                    : [statusCode: 200, body: '{"ok":true,"channels":[{"id":"C2","name":"two"}],"response_metadata":{"next_cursor":""}}']
+        }
+        Map<String, Object> outcome = SlackApiClient.listAllConversations("xoxb-test")
+        assertTrue(outcome.ok as boolean)
+        assertEquals(2, ((List) outcome.channels).size())
+        assertEquals(2, outcome.pagesFetched)
+        assertEquals(false, outcome.truncated)
+    }
+
+    @Test
+    void hittingThePageCapIsReportedRatherThanSilentlySwallowed() {
+        // A silent cap reads exactly like "that is all the channels there are".
+        SlackApiClient.setTransportHook { String method, String token, Map params ->
+            return [statusCode: 200, body: '{"ok":true,"channels":[{"id":"C1","name":"x"}],"response_metadata":{"next_cursor":"MORE"}}']
+        }
+        Map<String, Object> outcome = SlackApiClient.listAllConversations("xoxb-test")
+        assertEquals(SlackApiClient.MAX_CONVERSATION_PAGES, outcome.pagesFetched)
+        assertEquals(true, outcome.truncated)
+    }
+
+    @Test
+    void aFailureMidPaginationIsReturnedNotPartiallySwallowed() {
+        int calls = 0
+        SlackApiClient.setTransportHook { String method, String token, Map params ->
+            calls++
+            return calls == 1
+                    ? [statusCode: 200, body: '{"ok":true,"channels":[{"id":"C1","name":"one"}],"response_metadata":{"next_cursor":"PAGE2"}}']
+                    : [statusCode: 200, body: '{"ok":false,"error":"token_revoked"}']
+        }
+        Map<String, Object> outcome = SlackApiClient.listAllConversations("xoxb-test")
+        assertFalse(outcome.ok as boolean)
+        assertEquals("token_revoked", outcome.errorCode)
     }
 
     @Test

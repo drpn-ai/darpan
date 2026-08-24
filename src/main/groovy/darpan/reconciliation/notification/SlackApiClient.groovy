@@ -1,12 +1,13 @@
 package darpan.reconciliation.notification
 
-import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
 import java.net.URI
+import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.charset.StandardCharsets
 import java.time.Duration
 
 /**
@@ -158,6 +159,45 @@ class SlackApiClient {
         return outcome
     }
 
+    /** Page cap for {@link #listAllConversations}. 10 x 200 covers ~2000 conversations. */
+    static final int MAX_CONVERSATION_PAGES = 10
+
+    /**
+     * Every conversation the picker should offer, following Slack's cursor to exhaustion.
+     *
+     * <p>One page is not enough and the shortfall is invisible: Slack applies {@code types} and
+     * {@code exclude_archived} AFTER taking a page of {@code limit}, so a page routinely returns
+     * fewer rows than asked for while {@code next_cursor} still points at more. A caller that reads
+     * page one and stops shows a plausible, arbitrary subset — and the operator simply cannot find
+     * their channel, with nothing indicating the list is partial.</p>
+     *
+     * <p>Bounded rather than unbounded because this endpoint is rate-limit Tier 2 (~20 req/min).
+     * Hitting the cap is REPORTED via {@code truncated} rather than silently swallowed, so a
+     * workspace large enough to exceed it says so instead of quietly hiding channels.</p>
+     *
+     * @return {@code [ok, channels, truncated, pagesFetched, ...]}
+     */
+    static Map<String, Object> listAllConversations(String botToken) {
+        List<Map<String, Object>> collected = []
+        String cursor = null
+        int pages = 0
+        Map<String, Object> last = null
+        while (pages < MAX_CONVERSATION_PAGES) {
+            last = listConversations(botToken, cursor, 200)
+            pages++
+            if (last.ok != true) return last
+            collected.addAll((List<Map<String, Object>>) last.channels)
+            cursor = ((last.nextCursor)?.toString()?.trim())
+            if (!cursor) break
+        }
+        Map<String, Object> outcome = new LinkedHashMap<String, Object>(last)
+        outcome.put("channels", collected)
+        outcome.put("pagesFetched", pages)
+        outcome.put("truncated", cursor ? true : false)
+        outcome.put("nextCursor", null)
+        return outcome
+    }
+
     /**
      * The Slack Web API success contract, isolated from transport so it can be tested exhaustively.
      *
@@ -255,6 +295,36 @@ class SlackApiClient {
         }
     }
 
+    /**
+     * Form-encodes parameters for the Slack Web API.
+     *
+     * <h3>Why not JSON</h3>
+     * <p>Slack accepts {@code application/x-www-form-urlencoded} on every Web API method, but
+     * {@code application/json} on only some. {@code conversations.list} is one that does NOT read a
+     * JSON body — and it does not say so. It answers {@code ok:true} with a perfectly plausible
+     * channel list, having silently ignored every parameter and applied its defaults.</p>
+     *
+     * <p>Measured against a live workspace on 2026-08-24, same token, same params:</p>
+     * <pre>
+     *   POST + JSON body    : ok=true  15 channels  0 private   &lt;- types ignored
+     *   POST + form-encoded : ok=true  15 channels  1 private   &lt;- types honoured
+     * </pre>
+     *
+     * <p>So the channel picker never offered a private channel to anyone, and nothing surfaced it:
+     * no error, no empty result, just a list that looked complete. Encoding is therefore uniform
+     * here rather than per-method — the next method added must not have to rediscover this.</p>
+     *
+     * <p>A future {@code blocks} payload is the one thing that would need care: form encoding
+     * requires it as a JSON-encoded STRING value, not a nested structure.</p>
+     */
+    static String formEncode(Map<String, Object> params) {
+        return (params ?: [:]).findAll { entry -> entry.value != null }
+                .collect { entry ->
+                    "${URLEncoder.encode(entry.key as String, StandardCharsets.UTF_8.name())}=" +
+                            "${URLEncoder.encode(entry.value as String, StandardCharsets.UTF_8.name())}"
+                }.join("&")
+    }
+
     private static Map<String, Object> call(String method, String botToken, Map<String, Object> params) {
         if (transportHook != null) {
             return (transportHook.call(method, botToken, params) ?: [:]) as Map<String, Object>
@@ -262,9 +332,9 @@ class SlackApiClient {
         HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
         HttpRequest request = HttpRequest.newBuilder(URI.create("${API_BASE}/${method}"))
                 .timeout(Duration.ofSeconds(15))
-                .header("Content-Type", "application/json; charset=utf-8")
+                .header("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
                 .header("Authorization", "Bearer ${botToken}")
-                .POST(HttpRequest.BodyPublishers.ofString(JsonOutput.toJson(params)))
+                .POST(HttpRequest.BodyPublishers.ofString(formEncode(params)))
                 .build()
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString())
         return [

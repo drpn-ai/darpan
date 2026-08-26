@@ -1,44 +1,99 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Release-scoped upgrade data for Darpan 1.5.0 (DAR-BE-005 — shared config across tenants).
-Records must also live in generic source data files under runtime/component/darpan/data/.
-Load with: ./gradlew loadDarpanUpgradeData
+Release-scoped upgrade data for Darpan 1.5.0.
+Assembled from the generic seed files under runtime/component/darpan/data/ over the range
+v1.4.0..v1.5.0, then hand-ordered. Load with: ./gradlew loadDarpanUpgradeData
 
-ORDERING: hand-verified parent-before-child — EnumerationType precedes its Enumerations.
-release_preflight.py sorts alphabetically and WILL break this if the file is regenerated; re-order
-by hand afterwards.
+ORDERING: hand-verified parent-before-child, and it matters in three places. Moqui's entity-facade
+loader inserts rows in DOCUMENT ORDER — it does not topologically sort — so a child ahead of its
+parent fails with a raw *_ibfk_* constraint error that points nowhere near this file. The three
+chains are: EnumerationType before its Enumerations; a parent Enumeration before any Enumeration
+naming it in parentEnumId (a self-reference); and Enumeration before SourceSystemConnector before
+SourceSystemConnectorField. release_preflight.py sorts alphabetically and WILL break all three if
+this file is regenerated. Re-order by hand afterwards.
 
-OPERATOR IMPACT: five additive records, no behaviour change. Until they load, no config can be
-shared, because a grant must name a configTypeEnumId that exists. Nothing existing is modified, so
-loading this file changes no current reconciliation behaviour.
+OPERATOR IMPACT: 54 records. Additive except for three deliberate restatements of rows that already
+exist in every deployed environment (create-or-update by primary key, so they change only the named
+column):
 
-NO BACKFILL — DELIBERATE (Aditi, 2026-08-12). An earlier draft of this file also carried a one-time
-ConfigTenantAccess row pre-sharing a HotWax OMS config between two named tenants. It was dropped:
-sharing is granted through the product, not through a data file. A tenant admin uses the "Shared
-with" panel (facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess), which requires them to
-be tenant-admin of BOTH the target tenant and a tenant already using the config — the two-sided
-gate. Pre-seeding a grant meant baking three unverified production tenant/config ids into a release
-artifact to save a few clicks, and a row naming the wrong tenant would silently widen access to that
-tenant's operators. The product path has no such failure mode.
+  - Enumeration OMS and SHOPIFY are restated with their readable descriptions, "HotWax" and
+    "Shopify". Deployed databases hold the shouty "SHOPIFY", which is what an operator sees wherever
+    a system is named — "Extracting SHOPIFY", "Missing from SHOPIFY", and the compared-files labels.
+    The seed file has been correct for some time; only the stored rows are stale. These fix FUTURE
+    runs only: a run's file labels are stamped into its output document when it executes, so
+    historical runs keep the name they were stamped with (decision, 2026-08-13).
+  - Enumeration OMS_TRANSFER_ORDERS, which shipped in 1.4.0, gains parentEnumId="OMS" so it groups
+    under HotWax in the two-step source picker. Until this loads, transfer orders appear as a
+    top-level system rather than as an endpoint of HotWax.
+
+Everything else is new capability. Until this file loads on an upgraded environment:
+
+  - No config can be shared across tenants. A grant must name a configTypeEnumId that exists, so
+    every attempt fails on config_tenant_access_ibfk_2 — and it fails for all four config types,
+    not just the one that was tried.
+  - A tenant admin cannot save a Slack chat space; save#TenantChatSpace checks the provider catalog
+    first and reports "The chat provider catalog is not loaded on this deployment". Google Chat
+    spaces are unaffected either way: chatProviderEnumId is nullable and a null provider resolves to
+    CHAT_PROV_GOOGLE, so every space that exists today keeps delivering with or without this file.
+  - Databases, the OMS reconciliationOrders and reconciliationReturns endpoints, and the Shopify
+    return-reference extractor do not appear as selectable sources, and their extract services are
+    not dispatchable — the security allow-list is derived from enabled connector rows.
+  - The rules board offers no field pills for any endpoint, because the pill list moved out of
+    Groovy constants into SourceSystemConnectorField rows.
+  - The Migrations screen lists nothing and run#PendingMigrations does nothing, because the registry
+    it walks is empty.
+
+NO BACKFILL, AND NO CREDENTIALS — DELIBERATE. Two things that could have been data are services
+instead, because their values are per-tenant secrets or per-tenant ids that must not be baked into a
+release artifact:
+
+  - Cross-tenant sharing is granted through the product ("Shared with" on the config edit form,
+    facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess), which enforces a two-sided gate —
+    the acting user must hold DARPAN_TENANT_ADMIN in BOTH tenants. Pre-seeding a grant would mean
+    committing production tenant and config ids to this file, and a row naming the wrong tenant
+    would silently widen access. Both tenants must also live in the SAME deployment:
+    ConfigTenantAccess is a row referencing tenants in its own database.
+  - Copying each chat space's legacy googleChatWebhookUrl into the provider-agnostic webhookUrl
+    column is done by migrate#ChatSpaceWebhookUrls, now registered in the migration registry below.
+    It is OPTIONAL for this release — resolveWebhookUrl falls back to the legacy column.
 
 Consequently this file is safe to load unconditionally and needs no verification step.
 
-SETUP NOTE for whoever shares a config: the two-sided gate means the acting user must hold
-DARPAN_TENANT_ADMIN in both tenants. That is a permissions assignment in the admin app, not a code
-or data change. Both tenants must also live in the SAME deployment — ConfigTenantAccess is a row in
-one database referencing tenants in that same database, so tenants on separate instances cannot
-share a config by any mechanism.
+ONE-TIME SERVICES: this release replaces "run these by hand" with a registry. After loading, run
+admin migration run#PendingMigrations once (or use the Migrations screen); it is idempotent, walks
+the six registered migrations in sequence, skips any already applied, and records each in a ledger
+written in a forced-new transaction so a failure survives rollback. That covers 1.2.0's
+migrate#TenantNotificationSettings and 1.3.0's migrate#AutomationExcludeFilters, so an environment
+behind on those no longer needs to chase them individually.
 
-PREREQUISITE: 1.4.0 upgrade-data must be loaded first.
+PREREQUISITE: 1.4.0 upgrade-data must be loaded first. This file is release-scoped and does not
+re-carry 1.4.0's three records (AUT_WIN_STATE, the OMS_TRANSFER_ORDERS enum, and its connector row)
+— it only amends the transfer-order enum, which a create-or-update will happily insert in full if
+the row is absent, but the connector row it needs would still be missing.
 -->
 <entity-facade-xml type="darpan-seed">
 
-    <!-- Config-type catalog. Adding a value here plus a CONFIG_TYPE_REGISTRY row in
-         SharedConfigAccessSupport is the whole extension path for a new shareable config type.
-         moqui.service.message.SystemMessageRemote is deliberately absent: it is a framework-owned
-         endpoint descriptor already visible to every tenant, not a per-tenant credential. -->
+    <!-- Enumeration types first: every Enumeration below FKs its type. -->
+    <moqui.basic.EnumerationType enumTypeId="DarpanChatProvider"
+            description="Chat products Darpan can post run notifications to"/>
     <moqui.basic.EnumerationType enumTypeId="DarpanSharedConfigType"
             description="Darpan API source config types that support cross-tenant sharing"/>
+
+    <!-- Chat destination providers. TenantChatSpace.chatProviderEnumId FKs these. -->
+    <moqui.basic.Enumeration enumId="CHAT_PROV_GOOGLE"
+            enumTypeId="DarpanChatProvider"
+            enumCode="GOOGLE_CHAT"
+            description="Google Chat"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="CHAT_PROV_SLACK"
+            enumTypeId="DarpanChatProvider"
+            enumCode="SLACK"
+            description="Slack"
+            sequenceNum="2"/>
+
+    <!-- DAR-BE-005 catalog of config types that can be shared across tenants.
+         ConfigTenantAccess.configTypeEnumId FKs these; without them every grant dies on
+         config_tenant_access_ibfk_2. -->
     <moqui.basic.Enumeration enumId="SCFG_HOTWAX_OMS"
             description="HotWax OMS REST source config (darpan.hotwax.HotWaxOmsRestSourceConfig)"
             enumTypeId="DarpanSharedConfigType"/>
@@ -51,5 +106,268 @@ PREREQUISITE: 1.4.0 upgrade-data must be loaded first.
     <moqui.basic.Enumeration enumId="SCFG_NS_RESTLET"
             description="NetSuite Restlet config (darpan.reconciliation.NsRestletConfig)"
             enumTypeId="DarpanSharedConfigType"/>
+
+    <!-- Source-system enums. OMS and SHOPIFY are RESTATEMENTS (description correction, see header)
+         and must also precede the rows below that name them in parentEnumId — a self-reference on
+         Enumeration, so document order decides whether the load succeeds. -->
+    <moqui.basic.Enumeration
+            enumId="OMS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX"
+            description="HotWax"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration
+            enumId="SHOPIFY"
+            enumTypeId="DarpanSystemSource"
+            enumCode="SHOPIFY"
+            description="Shopify"
+            sequenceNum="2"/>
+
+    <!-- Endpoint enums grouped under those two parents. OMS_TRANSFER_ORDERS is a restatement that
+         adds parentEnumId; the other three are new. Each precedes the SourceSystemConnector row that
+         references it by systemEnumId. -->
+    <moqui.basic.Enumeration
+            enumId="OMS_TRANSFER_ORDERS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_TRANSFER_ORDERS"
+            description="HotWax Transfer Orders"
+            sequenceNum="6"
+            parentEnumId="OMS"/>
+    <moqui.basic.Enumeration
+            enumId="OMS_RECON_ORDERS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_RECON_ORDERS"
+            description="HotWax Orders (Reconciliation API)"
+            sequenceNum="7"
+            parentEnumId="OMS"/>
+    <moqui.basic.Enumeration
+            enumId="OMS_RETURNS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_RETURNS"
+            description="HotWax Returns (Reconciliation API)"
+            sequenceNum="8"
+            parentEnumId="OMS"/>
+    <moqui.basic.Enumeration
+            enumId="SHOPIFY_RETURN_REFS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="SHOPIFY_RETURN_REFS"
+            description="Shopify Order Return References"
+            sequenceNum="9"
+            parentEnumId="SHOPIFY"/>
+
+    <!-- Anonymous forced-password-change entry point. Parent ArtifactGroup DARPAN_AUTH_API already
+         exists in every deployed environment, so this row has no forward FK reference. -->
+    <moqui.security.ArtifactGroupMember artifactGroupId="DARPAN_AUTH_API"
+            artifactName="facade.AuthFacadeServices.change#ExpiredPassword" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"/>
+
+    <!-- Connector registry rows. Each depends on its enum above; each is depended on by the field
+         rows below. -->
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="DATABASE"
+            extractServiceName="reconciliation.DatabaseExtractionServices.extract#DatabaseRecords"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="DATABASE_QUERY"
+            configParameterName="databaseSourceQueryId"
+            configEntityName="darpan.database.DatabaseSourceQuery"
+            healthCheckServiceName="facade.DatabaseFacadeServices.probe#DatabaseConnection"
+            systemAliases="DATABASE,DB,DAR_SYS_DATABASE"
+            preserveWindowInstants="N"
+            enabled="Y"/>
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_RECON_ORDERS"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_REST_RECON"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Reconciliation Orders API"
+            sendUrlTemplate="{baseUrl}/rest/s1/oms/reconciliationOrders"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders"
+            systemAliases="OMS_RECON_ORDERS,HOTWAX_RECON_ORDERS,DAR_SYS_OMS_RECON"
+            preserveWindowInstants="N"
+            keepFieldsParameterName="keepRecordFields"
+            keepFieldsBase="orderId,orderName,externalId,grandTotal,orderDate,statusId"
+            filterParameterName="sourceFilters"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            enabled="Y"/>
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_RETURNS"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReturns"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_REST_RETURNS"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Reconciliation Returns API"
+            sendUrlTemplate="{baseUrl}/rest/s1/oms/reconciliationReturns"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReturns"
+            systemAliases="OMS_RETURNS,HOTWAX_RETURNS,DAR_SYS_OMS_RETURNS"
+            preserveWindowInstants="N"
+            keepFieldsParameterName="keepRecordFields"
+            keepFieldsBase="returnId,shopifyReturnId,externalId,orderExternalId,statusId,entryDate,returnTotal,currencyUomId,returnChannelEnumId"
+            filterParameterName="sourceFilters"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            orderStateLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId"
+            lookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsReturnsByExternalId"
+            lookupIdsParameterName="externalIds"
+            lookupMaxIds="10000"
+            enabled="Y"/>
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="SHOPIFY_RETURN_REFS"
+            extractServiceName="reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrderReturnRefs"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="SHOPIFY_RETURN_REFS_API"
+            configParameterName="shopifyAuthConfigId"
+            configEntityName="darpan.shopify.ShopifyAuthConfig"
+            remoteId="SHOPIFY_REMOTE"
+            endpointLabel="Shopify Return References"
+            systemAliases="SHOPIFY_RETURN_REFS,SHOPIFY_RETURNS,DAR_SYS_SHOPIFY_RETURN_REFS"
+            preserveWindowInstants="N"
+            keepFieldsBase="refundOrReturnId,refundOrReturnType,orderId,createdAt,orderCancelledAt,refundLineEverFulfilled"
+            lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyRefundOrReturnIds"
+            lookupIdsParameterName="refundOrReturnIds"
+            lookupMaxIds="10000"
+            enabled="Y"/>
+
+    <!-- Rules-board field pills, moved out of Groovy constants into data. Every row FKs a
+         SourceSystemConnector by systemEnumId: OMS and SHOPIFY already exist in deployed environments, the
+         other three are created immediately above. -->
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].orderId"
+            label="Order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
+            description="OMS order identity. In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].orderName"
+            label="Order name" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
+            description="Operator-facing order name. In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].externalId"
+            label="External ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            description="Shopify reference stored on the OMS order. In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].grandTotal"
+            label="Grand total" fieldType="string" sequenceNum="4"
+            description="In keepFieldsBase. Comparison only — not key-like."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].orderDate"
+            label="Order date" fieldType="string" sequenceNum="5"
+            description="In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].statusId"
+            label="Status" fieldType="string" sequenceNum="6"
+            description="In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].salesChannelEnumId"
+            label="Sales channel" fieldType="string" sequenceNum="7"
+            description="NOT in keepFieldsBase. Offered because exclusion filters run before projection on the
+                legacy endpoint, so the raw field is testable. This is a shipping exclusion use case."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].productStoreId"
+            label="Product store" fieldType="string" sequenceNum="8"
+            description="NOT in keepFieldsBase. Same reason as salesChannelEnumId."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RECON_ORDERS" fieldPath="$.records[*].orderId"
+            label="Order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
+            description="Server-side projected by /rest/s1/oms/reconciliationOrders."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RECON_ORDERS" fieldPath="$.records[*].orderName"
+            label="Order name" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
+            description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RECON_ORDERS" fieldPath="$.records[*].externalId"
+            label="External ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RECON_ORDERS" fieldPath="$.records[*].grandTotal"
+            label="Grand total" fieldType="string" sequenceNum="4" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RECON_ORDERS" fieldPath="$.records[*].orderDate"
+            label="Order date" fieldType="string" sequenceNum="5" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RECON_ORDERS" fieldPath="$.records[*].statusId"
+            label="Status" fieldType="string" sequenceNum="6" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].returnId"
+            label="Return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
+            description="OMS return identity."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].shopifyReturnId"
+            label="Shopify reference" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
+            description="PREFERRED join key. Holds whichever Shopify id is the reference — refund or return —
+                despite the name, and unlike externalId it is populated on RETURN_REQUESTED returns that have
+                no refund yet. Matches Shopify SHOPIFY_RETURN_REFS's refundOrReturnId."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].externalId"
+            label="Shopify refund or return ID (legacy)" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            description="The original join key — a Shopify refund id or, for a small number of returns, a return
+                id instead. BLANK on returns with no refund yet, which is why shopifyReturnId above supersedes it.
+                Kept as a candidate so existing rule sets keyed on it keep resolving."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].orderExternalId"
+            label="Order external ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="4"
+            description="Order spine — joins a return back to its order."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].statusId"
+            label="Status" fieldType="string" sequenceNum="5" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].entryDate"
+            label="Entry date" fieldType="string" sequenceNum="6" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].returnTotal"
+            label="Return total" fieldType="string" sequenceNum="7" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].currencyUomId"
+            label="Currency" fieldType="string" sequenceNum="8" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].returnChannelEnumId"
+            label="Return channel" fieldType="string" sequenceNum="9"
+            description="Included in the endpoint's server-side projection, so a rule drawn on it sees a value.
+                Remove if OMS narrows the projection or ships the RQ-24 server-side channel filter."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].id"
+            label="Order ID" fieldType="ID" isPrimaryIdCandidate="Y" sequenceNum="1"
+            description="Shopify order GID."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].name"
+            label="Order name" fieldType="String" isPrimaryIdCandidate="Y" sequenceNum="2"
+            description="Shopify order name."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].refundOrReturnId"
+            label="Refund ID / Return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
+            description="RENAMED 2026-08-18 (was '$.records[*].eventId', labelled 'Event ID' then 'Refund or
+                Return ID'): 'event' is this extractor's internal abstraction, not a Shopify term, and it
+                surfaced verbatim on the rules board, the run summary and the diff columns. bareId-normalized
+                identity — a REFUND id when refundOrReturnType is REFUND, a RETURN id when it is RETURN.
+                Matches OMS externalId whichever kind it is: the single join key for returns reconciliation,
+                with no precedence rule needed on either side."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].refundOrReturnType"
+            label="Refund or return" fieldType="string" sequenceNum="2"
+            description="RENAMED 2026-08-18 (was '$.records[*].eventType'). REFUND or RETURN — identifies
+                which kind of id refundOrReturnId carries on this row. Not a join key; useful for filtering
+                or as a comparison field."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].orderId"
+            label="Order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            description="bareId(legacyResourceId ?: id) — the bare GID tail, matching the numeric Shopify
+                reference the OMS side stores. Unchanged by the per-refund/per-return reshape; still a
+                grouping / secondary key, not the join key."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].createdAt"
+            label="Refund or return created" fieldType="string" sequenceNum="4"
+            description="RELABELLED (was 'Order created', then 'Event created'): the individual refund's or
+                return's own creation date — a refund row carries the refund's createdAt, a return row
+                carries the return's — never the order's creation date. Windowing filters on this field, not
+                on any order-level date."/>
+
+    <!-- One-time data migration registry. No DarpanMigrationPrereq rows exist yet; when they do,
+         they must follow every DarpanMigration row. -->
+    <darpan.migration.DarpanMigration migrationId="TENANT_NOTIF_SETTINGS" componentName="darpan"
+            serviceName="reconciliation.ReconciliationNotificationServices.migrate#TenantNotificationSettings"
+            sequenceNum="10" supportsDryRun="N" enabled="Y"
+            description="Seed a default chat space for tenants that have notification settings but no
+                space. Idempotent — tenants that already have any chat space are skipped."/>
+    <darpan.migration.DarpanMigration migrationId="UNDECRYPTABLE_HOOKS" componentName="darpan"
+            serviceName="reconciliation.ReconciliationNotificationServices.clear#UndecryptableChatSpaceWebhooks"
+            sequenceNum="20" supportsDryRun="N" enabled="Y"
+            description="Clear chat space webhooks that can no longer be decrypted after a crypt key
+                change. Idempotent, and a no-op on an installation that never stored a webhook."/>
+    <darpan.migration.DarpanMigration migrationId="AUTOMATION_FILTERS" componentName="darpan"
+            serviceName="reconciliation.ReconciliationNotificationServices.migrate#AutomationExcludeFilters"
+            sequenceNum="30" supportsDryRun="N" enabled="Y"
+            description="Copy exclusion filters from the rule set into each automation's own
+                snapshot, across every tenant. Idempotent."/>
+    <darpan.migration.DarpanMigration migrationId="RULE_TENANT_STAMPS" componentName="darpan"
+            serviceName="reconciliation.ReconciliationRuleEngineServices.sweep#RuleChildTenantStamps"
+            sequenceNum="40" supportsDryRun="N" enabled="Y"
+            description="Backfill the denormalized companyUserGroupId stamp on rule-set child rows
+                created before the stamp existed. Idempotent no-op on already-stamped rows."/>
+    <darpan.migration.DarpanMigration migrationId="ENDPOINT_ACCESS" componentName="darpan"
+            serviceName="facade.SourceEndpointFacadeServices.migrate#SourceConfigEndpointAccess"
+            sequenceNum="50" supportsDryRun="N" enabled="Y"
+            description="Translate the legacy canReadOrders flag into explicit
+                SourceConfigEndpointAccess rows. Idempotent by PK."/>
+    <darpan.migration.DarpanMigration migrationId="RETIRED_FIELDS" componentName="darpan"
+            serviceName="facade.SourceEndpointFacadeServices.migrate#RetiredConnectorFields"
+            sequenceNum="60" supportsDryRun="N" enabled="Y"
+            description="Delete SourceSystemConnectorField pill rows withdrawn from seed data. Seed
+                loads are createOrUpdate and never delete, so withdrawal needs an explicit deletion.
+                Idempotent — a second run deletes nothing."/>
 
 </entity-facade-xml>

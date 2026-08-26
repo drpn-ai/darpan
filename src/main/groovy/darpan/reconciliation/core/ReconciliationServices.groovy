@@ -15,6 +15,9 @@ import org.moqui.context.ExecutionContext
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
+import java.sql.Timestamp
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.regex.Pattern
 
 import static darpan.common.ValueSupport.normalize
@@ -294,7 +297,7 @@ class ReconciliationServices {
 
              // Write JSON
             Map outputMetadata = [
-                timestamp: ec.user.nowTimestamp?.toString(),
+                timestamp: formatMetadataTimestamp(ec.user.nowTimestamp),
                 file1Label: label1,
                 file2Label: label2,
                 file1Type: type1,
@@ -798,6 +801,24 @@ class ReconciliationServices {
     static String determineReconciliationType(String file1Type, String file2Type) { return CompareIdExpressionSupport.determineReconciliationType(file1Type, file2Type) }
 
     static String compareScopeDisplayName(Object compareScopeId, Object compareScopeDescription) { return CompareIdExpressionSupport.compareScopeDisplayName(compareScopeId, compareScopeDescription) }
+
+    /**
+     * Renders a run-output metadata timestamp as an absolute instant (ISO-8601, UTC offset).
+     *
+     * java.sql.Timestamp.toString() emits a ZONE-LESS wall clock ("2026-08-26 03:00:57.579") in
+     * whatever zone the JVM happens to run in. darpan-ui re-parses that with `new Date(string)`,
+     * which assumes the BROWSER's zone, then renders it in the tenant's display zone -- two
+     * stacked conversions that silently move the value. A 07:00 UTC run stamped on a UTC-4 host
+     * surfaced as "Aug 25, 4:30 PM" for an IST viewer on an America/Chicago tenant, a day early
+     * and 9h30m off. Keeping the offset in the string removes both guesses.
+     */
+    static String formatMetadataTimestamp(Object value) {
+        if (value == null) return null
+        if (value instanceof Timestamp) {
+            return OffsetDateTime.ofInstant(((Timestamp) value).toInstant(), ZoneOffset.UTC).toString()
+        }
+        return value.toString()
+    }
 
     static Dataset buildMissingDiffRows(Dataset presentDataDf, Dataset missingIdDf, String diffType,
                                         String presentLabel, String missingLabel, String note) { return CompareDatasetSupport.buildMissingDiffRows(presentDataDf, missingIdDf, diffType, presentLabel, missingLabel, note) }

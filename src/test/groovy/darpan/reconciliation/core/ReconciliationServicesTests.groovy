@@ -2,6 +2,10 @@ package darpan.reconciliation.core
 
 import org.junit.jupiter.api.Test
 
+import java.sql.Timestamp
+import java.time.Instant
+import java.time.OffsetDateTime
+
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertThrows
@@ -110,5 +114,43 @@ class ReconciliationServicesTests {
         Map spec = ReconciliationServices.parseIdSpec('order_id|CASE_FOLD', true)
         assertEquals('order_id', spec.idExpr)
         assertEquals('CASE_FOLD', spec.idNormalizer)
+    }
+
+    // Run-output metadata timestamps must travel as absolute instants. A bare
+    // java.sql.Timestamp.toString() emits a zone-less wall clock ("2026-08-26 03:00:57.579"),
+    // which darpan-ui re-parses in the BROWSER's zone and then renders in the tenant's
+    // display zone -- two stacked conversions that moved a 2:00 AM run to 4:30 PM the
+    // previous day for an IST viewer on an America/Chicago tenant.
+    @Test
+    void formatsMetadataTimestampAsParseableInstant() {
+        Timestamp runInstant = Timestamp.from(Instant.parse("2026-08-26T07:00:57.579Z"))
+
+        String formatted = ReconciliationServices.formatMetadataTimestamp(runInstant)
+
+        assertEquals(runInstant.toInstant(), OffsetDateTime.parse(formatted).toInstant())
+    }
+
+    @Test
+    void metadataTimestampResolvesToSameInstantRegardlessOfDefaultZone() {
+        Timestamp runInstant = Timestamp.from(Instant.parse("2026-08-26T07:00:57.579Z"))
+        TimeZone originalZone = TimeZone.getDefault()
+
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("America/New_York"))
+            String fromNewYork = ReconciliationServices.formatMetadataTimestamp(runInstant)
+
+            TimeZone.setDefault(TimeZone.getTimeZone("Asia/Kolkata"))
+            String fromKolkata = ReconciliationServices.formatMetadataTimestamp(runInstant)
+
+            assertEquals(OffsetDateTime.parse(fromNewYork).toInstant(),
+                    OffsetDateTime.parse(fromKolkata).toInstant())
+        } finally {
+            TimeZone.setDefault(originalZone)
+        }
+    }
+
+    @Test
+    void formatsNullMetadataTimestampAsNull() {
+        assertNull(ReconciliationServices.formatMetadataTimestamp(null))
     }
 }

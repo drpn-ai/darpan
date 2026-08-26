@@ -265,7 +265,7 @@ if (ruleSetIdValue) {
         boolean ruleExecutionFailed = reconcileResult.ruleExecutionFailed == true
 
         Map outputMetadata = [
-            timestamp                : ec.user.nowTimestamp?.toString(),
+            timestamp                : ReconciliationServices.formatMetadataTimestamp(ec.user.nowTimestamp),
             companyUserGroupId       : normalize(ruleSetValue?.companyUserGroupId),
             savedRunId               : ruleSetIdValue,
             savedRunName             : ruleSetNameValue,

@@ -432,7 +432,7 @@ if (ruleSetIdValue) {
             safeToken(compareScopeConfig.compareScopeId as String, safeToken(ruleSetIdValue, 'ruleset')))
     String defaultBaseName = "${compareScopeNameToken}-diff-${timestamp}.json"
     Map outputMetadata = [
-            timestamp          : ec.user.nowTimestamp?.toString(),
+            timestamp          : ReconciliationServices.formatMetadataTimestamp(ec.user.nowTimestamp),
             reconciliationRunId: normalize(reconciliationRunId),
             file1Label         : compareScopeConfig.file1Label,
             file2Label         : compareScopeConfig.file2Label,

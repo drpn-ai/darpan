@@ -3685,4 +3685,84 @@ class AutomationExecutionSupportTests {
             return work.call()
         }
     }
+
+    // --- missing-diff verification on the scheduled path ---------------------------------------
+    // The scheduled path has never verified its differences: STAGE_VERIFY appears 0 times in this
+    // package, while runSavedRunDiff.groovy runs three verification passes. On gorjana automation
+    // 100616 that gap meant a scheduled run reporting ~532 differences where the verified
+    // interactive rerun reported 2. Rollout is flag-gated and OFF by default because enabling it
+    // adds a ~46s stage to a path with a documented 60s transaction ceiling (design
+    // 2026-08-26-reconciliation-pipeline-unification, steps 3-4).
+
+    @Test
+    void missingDiffVerificationIsOffByDefaultOnTheScheduledPath() {
+        System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
+        assertFalse(AutomationExecutionSupport.isMissingDiffVerificationEnabled(),
+                "enabling verification changes reported difference counts by orders of magnitude; " +
+                "it must never switch on merely by deploying")
+    }
+
+    @Test
+    void missingDiffVerificationTurnsOnOnlyForAnExplicitTrue() {
+        try {
+            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY, "true")
+            assertTrue(AutomationExecutionSupport.isMissingDiffVerificationEnabled())
+            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY, "yes")
+            assertFalse(AutomationExecutionSupport.isMissingDiffVerificationEnabled(),
+                    "only an explicit 'true' may arm this; a typo must fail closed")
+        } finally {
+            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
+        }
+    }
+
+    @Test
+    void aDisabledVerificationTouchesNothingAtAll() {
+        System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
+        Map<String, Object> reconcileResult = [differenceCount: 532L, missingInFile1Count: 500L,
+                                               missingInFile2Count: 32L]
+
+        // Every collaborator is null on purpose: with the flag off this must return before it can
+        // touch the execution context, so a null ec proves no work was attempted.
+        boolean ran = AutomationExecutionSupport.verifyMissingDiffsIfEnabled(
+                null, null, null, null, reconcileResult, null, null)
+
+        assertFalse(ran)
+        assertEquals(532L, reconcileResult.differenceCount, "a disabled pass must not move any count")
+        assertEquals(500L, reconcileResult.missingInFile1Count)
+        assertNull(reconcileResult.processingWarnings, "a disabled pass must not annotate the result")
+    }
+
+    @Test
+    void anEnabledVerificationStillSkipsARunWithNothingMissing() {
+        try {
+            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY, "true")
+            Map<String, Object> reconcileResult = [differenceCount: 4L, missingInFile1Count: 0L,
+                                                   missingInFile2Count: 0L, ruleDifferenceCount: 4L]
+
+            boolean ran = AutomationExecutionSupport.verifyMissingDiffsIfEnabled(
+                    null, null, null, null, reconcileResult, null, null)
+
+            assertFalse(ran, "value mismatches are not missing-object diffs; there is nothing to recheck")
+            assertEquals(4L, reconcileResult.differenceCount)
+        } finally {
+            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
+        }
+    }
+
+    @Test
+    void anEnabledVerificationSkipsARunWhoseRulesFailed() {
+        try {
+            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY, "true")
+            Map<String, Object> reconcileResult = [ruleExecutionFailed: true, differenceCount: 9L,
+                                                   missingInFile1Count: 9L, missingInFile2Count: 0L]
+
+            boolean ran = AutomationExecutionSupport.verifyMissingDiffsIfEnabled(
+                    null, null, null, null, reconcileResult, null, null)
+
+            assertFalse(ran, "partial diffs from a rule failure are kept for investigation, never rewritten")
+            assertEquals(9L, reconcileResult.differenceCount)
+        } finally {
+            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
+        }
+    }
 }

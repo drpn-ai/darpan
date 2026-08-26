@@ -8,7 +8,9 @@ import darpan.facade.common.SharedConfigAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
+import darpan.facade.reconciliation.MissingDiffVerificationSupport
 import darpan.facade.reconciliation.RunObservability
+import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.reconciliation.core.ReconciliationServices
 import darpan.reconciliation.notification.TenantNotificationSupport
 import groovy.json.JsonSlurper
@@ -95,6 +97,21 @@ class AutomationExecutionSupport {
     // with a backoff nextRetryDate; the 5-min scanner re-drives due rows, incrementing retryCount, and
     // dead-letters once retryCount reaches maxRetryCount. Permanent (config/fence) failures skip retry
     // and go straight to FAILED.
+    /**
+     * Arms the missing-diff verification pass on the SCHEDULED path. Off unless explicitly "true".
+     *
+     * A system property rather than an entity field on purpose: this is a rollout switch, not tenant
+     * configuration, and it must be flippable without an entity migration, a contract regeneration
+     * and a UI change (the same reason maxRetryCount and the retry backoffs are properties here).
+     *
+     * Default OFF is deliberate and must stay that way until the timeout envelope is resolved:
+     * verification took ~46s on gorjana automation 100616, and this path has a documented history of
+     * dying at the 60s transaction boundary. A rolled-back run fails far more confusingly than an
+     * unverified one. Enabling it also changes reported difference counts by orders of magnitude
+     * (532 -> 2 on that run), which needs an operator comms note, not a silent deploy.
+     */
+    static final String VERIFY_MISSING_DIFFS_PROPERTY = "darpan.reconciliation.automation.verifyMissingDiffs"
+
     static final int MAX_RETRY_COUNT_DEFAULT =
             Math.max(0, (System.getProperty("darpan.reconciliation.automation.maxRetryCount") ?: "3").toInteger())
     static final long RETRY_BACKOFF_BASE_MINUTES =
@@ -365,6 +382,11 @@ class AutomationExecutionSupport {
                 RunObservability.checkpointCancel(ec, mintedRunResultId)
                 autoPersistedSources = (reconcileResult.persistedSources ?: []) as List
                 requireReconcileOutput(ec, reconcileResult)
+                // Verification rewrites the diff document and adjusts the summary, so it must run
+                // BEFORE the result artifact is built or any count is persisted or notified.
+                // No-op unless VERIFY_MISSING_DIFFS_PROPERTY is armed.
+                verifyMissingDiffsIfEnabled(ec, automation, file1Source, file2Source, reconcileResult,
+                        mintedRunResultId, stepCtx)
                 ensureAutomationResultArtifact(ec, automation, file1Source, file2Source, reconcileResult, window, executionParams)
                 String resultDataManagerPath = normalizeDataManagerPath(ec,
                         reconcileResult.resultDataManagerPath ?: reconcileResult.diffLocation ?: reconcileResult.diffFileName)
@@ -865,6 +887,98 @@ class AutomationExecutionSupport {
                 lastUpdatedDate: stamp,
         ])
         return [automationExecutionId: executionId, statusEnumId: STATUS_PENDING, requeued: true]
+    }
+
+    /** Read live, not cached in a static, so the switch can be flipped without a restart. */
+    static boolean isMissingDiffVerificationEnabled() {
+        return "true".equalsIgnoreCase(System.getProperty(VERIFY_MISSING_DIFFS_PROPERTY) ?: "false")
+    }
+
+    /**
+     * Recheck rows the compare reported missing against each side's primary datastore, the same pass
+     * {@code runSavedRunDiff.groovy} has always run and this path never has.
+     *
+     * <p>Shares {@link RunVerificationSupport} with the interactive path rather than copying its
+     * closures, so the two entry points cannot drift again — this file and runSavedRunDiff are
+     * already kept in sync by hand-written "mirrors" comments, and a fourth such point would
+     * guarantee a repeat of the 100616 divergence.</p>
+     *
+     * <p>Returns whether the pass actually ran. Best-effort throughout: a lookup failure degrades to
+     * a processing warning and never fails a run that has already produced a complete compare.</p>
+     */
+    protected static boolean verifyMissingDiffsIfEnabled(def ec, def automation, def file1Source, def file2Source,
+                                                         Map<String, Object> reconcileResult,
+                                                         String runResultId, Map stepCtx) {
+        // Both guards run before anything touches ec, so a disabled or empty pass costs nothing.
+        if (!isMissingDiffVerificationEnabled()) return false
+        if (!RunVerificationSupport.shouldVerifyMissingDiffs(reconcileResult)) return false
+
+        long missingInFile1 = RunVerificationSupport.missingCount(reconcileResult, "missingInFile1Count")
+        long missingInFile2 = RunVerificationSupport.missingCount(reconcileResult, "missingInFile2Count")
+        // The RUN OWNER's tenant, never the session's: the scheduler authenticates as anonymous _NA_,
+        // which belongs to no tenant, so a session-derived value would resolve the wrong source config
+        // (the 2026-07-31 scheduled-automation failure).
+        String runOwnerUserGroupId = normalize(readField(automation, "companyUserGroupId"))
+        // Routed through the single audited dispatch seam rather than opening its own
+        // disableAuthz site (DisableAuthzRatchetTest pins the count exactly).
+        Closure dispatcher = { String serviceName, Map serviceParams ->
+            return dispatchInternalService(ec, serviceName,
+                    (serviceParams ?: [:]).findAll { entry -> entry.value != null } as Map<String, Object>)
+        }
+
+        Map<String, Closure> sideLookups = [:]
+        Map<String, Integer> sideMaxLookupIds = [:]
+        String file1Label = normalize(reconcileResult.file1Label) ?: "file1"
+        String file2Label = normalize(reconcileResult.file2Label) ?: "file2"
+        [[missingInFile1, file1Source, file1Label], [missingInFile2, file2Source, file2Label]].each { List side ->
+            if (((long) side[0]) <= 0L) return
+            Closure lookup = RunVerificationSupport.buildVerificationLookup(ec, side[1], runOwnerUserGroupId, dispatcher)
+            if (lookup == null) return
+            sideLookups.put((String) side[2], lookup)
+            Integer cap = RunVerificationSupport.buildVerificationLookupCap(ec, side[1])
+            if (cap != null) sideMaxLookupIds.put((String) side[2], cap)
+        }
+        if (!sideLookups) return false
+
+        File diffFile = resolveDiffFile(ec, reconcileResult)
+        if (diffFile == null || !diffFile.isFile()) return false
+
+        def verifyStep = runResultId ? RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_VERIFY) : null
+        Map verification
+        try {
+            verification = MissingDiffVerificationSupport.verifyMissingDiffs([
+                    diffFile: diffFile, file1Label: file1Label, file2Label: file2Label,
+                    sideLookups: sideLookups, sideMaxLookupIds: sideMaxLookupIds])
+        } catch (Throwable t) {
+            verification = [performed: true, rewritten: false, checkedCount: 0, removedCount: 0, lookupFailed: true,
+                            warnings: ["Verification pass failed: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map
+        }
+        // Best-effort after a complete compare: demote any service-level error the lookup raised
+        // (auth config, transport) to a warning so it cannot fail an otherwise finished run.
+        if (ec.message.hasError()) {
+            verification.warnings = ((verification.warnings ?: []) as List) + ((ec.message.getErrors() ?: []) as List)
+            verification.lookupFailed = true
+            ec.message.clearErrors()
+        }
+        RunVerificationSupport.applyVerificationOutcome(reconcileResult, verification, missingInFile1, missingInFile2)
+        RunObservability.endStep(ec, verifyStep,
+                verification.lookupFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
+                [recordCount : verification.checkedCount ?: 0,
+                 errorMessage: verification.lookupFailed && verification.warnings ? verification.warnings.first().toString() : null])
+        return true
+    }
+
+    /** The diff document the compare just wrote, which the verification pass rewrites in place. */
+    protected static File resolveDiffFile(def ec, Map<String, Object> reconcileResult) {
+        String location = normalize(reconcileResult?.diffLocation)
+        if (location) {
+            File located = location.startsWith("/") ? new File(location)
+                    : ec.resource.getLocationReference(location)?.getFile()
+            if (located != null && located.isFile()) return located
+        }
+        String diffFileName = normalize(reconcileResult?.diffFileName)
+        if (diffFileName?.contains("/")) return DataManagerSupport.resolveDataManagerFile(ec, diffFileName, false)
+        return null
     }
 
     /**
@@ -1573,19 +1687,31 @@ class AutomationExecutionSupport {
                 sparkAppName        : normalize(params.sparkAppName) ?: "AutomationRuleSetCompareScope",
         ].findAll { it.value != null } as Map<String, Object>
 
-        def call = ec.service.sync()
-                .name("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope")
-                .parameters(serviceParams)
+        return dispatchInternalService(ec,
+                "reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope", serviceParams)
+    }
+
+    /**
+     * The single authz-relaxed service-dispatch seam on the automation path.
+     *
+     * <p>Callers reach internal reconciliation services under the automation's own tenant anchor,
+     * not a session's — the scheduler authenticates as anonymous {@code _NA_}, which belongs to no
+     * tenant. Consolidated so there is ONE audited site rather than a copy per call site; every
+     * caller is responsible for having established the tenant anchor before dispatching.</p>
+     *
+     * <p>Deliberately does not filter null parameters: two of its callers pass maps that have
+     * already been filtered, and adding a second filter here would change what the third sends.</p>
+     */
+    protected static Map<String, Object> dispatchInternalService(def ec, String serviceName,
+                                                                 Map<String, Object> serviceParams) {
+        def call = ec.service.sync().name(serviceName).parameters(serviceParams)
         if (call?.metaClass?.respondsTo(call, "disableAuthz")) call = call.disableAuthz()
         return (call.call() ?: [:]) as Map<String, Object>
     }
 
     protected static Map<String, Object> callExecuteAutomationService(def ec, Map<String, Object> executeParams) {
-        def call = ec.service.sync()
-                .name("reconciliation.ReconciliationAutomationServices.execute#Automation")
-                .parameters(executeParams)
-        if (call?.metaClass?.respondsTo(call, "disableAuthz")) call = call.disableAuthz()
-        return (call.call() ?: [:]) as Map<String, Object>
+        return dispatchInternalService(ec,
+                "reconciliation.ReconciliationAutomationServices.execute#Automation", executeParams)
     }
 
     /**
@@ -1735,7 +1861,7 @@ class AutomationExecutionSupport {
                 DataManagerSupport.runArtifactFileName(runToken, "result", "result.json"),
                 "${runToken}-diff.json",
                 [
-                        timestamp              : nowTimestamp(ec)?.toString(),
+                        timestamp              : ReconciliationServices.formatMetadataTimestamp(nowTimestamp(ec)),
                         automationId           : normalize(readField(automation, "automationId")),
                         automationName         : normalize(readField(automation, "automationName")),
                         companyUserGroupId     : normalize(readField(automation, "companyUserGroupId")),

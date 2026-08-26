@@ -80,8 +80,17 @@ class DisableAuthzRatchetTest {
      * safely use {@code findGlobalUnscoped} without breaking test-stub compatibility
      * ({@code FacadeSupport:32}, {@code ReconciliationOutputSupport:140}). See class Javadoc
      * for the full per-site breakdown.
+     *
+     * <p>Lowered 15 -&gt; 14 (2026-08-26) by the reconciliation-pipeline unification, step 3
+     * ({@code 2026-08-26-reconciliation-pipeline-unification-design}). Bringing the missing-diff
+     * verification pass to the scheduled path needed an authz-relaxed lookup dispatch; rather than
+     * add a fourth copy of the guarded {@code metaClass.respondsTo} pattern to
+     * {@code AutomationExecutionSupport}, the two byte-identical existing copies
+     * ({@code callRuleSetCompareScope}, {@code callExecuteAutomationService}) and the new caller were
+     * collapsed onto one audited {@code dispatchInternalService} seam — net -1 site, and one place to
+     * audit instead of three.</p>
      */
-    static final int BASELINE = 15
+    static final int BASELINE = 14
 
     /**
      * Allowlisted files matched by their path <em>relative to srcRoot</em>

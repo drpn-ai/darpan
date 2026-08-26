@@ -9,6 +9,7 @@ import darpan.facade.reconciliation.ReconciliationApiWindowSupport
 import darpan.facade.reconciliation.ReconciliationOutputSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
 import darpan.facade.reconciliation.ReturnPresenceVerificationSupport
+import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.facade.reconciliation.RunObservability
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.core.ReconciliationServices
@@ -425,7 +426,7 @@ def writeRuleSetOutput = { Map serviceResult, Map savedRun, String file1Label, S
             DataManagerSupport.runArtifactFileName(artifactContext.runToken, "result", "result.json"),
             "${artifactContext.runToken}-diff.json",
             [
-                    timestamp              : ec.user.nowTimestamp?.toString(),
+                    timestamp              : ReconciliationServices.formatMetadataTimestamp(ec.user.nowTimestamp),
                     file1Label             : file1Label,
                     file2Label             : file2Label,
                     file1Type              : serviceResult.file1Type,
@@ -461,46 +462,17 @@ def writeRuleSetOutput = { Map serviceResult, Map savedRun, String file1Label, S
 // audit note in processingWarnings — before counts are persisted. Strictly best-effort: nothing in
 // this pass may fail the run; worst case the differences stay exactly as compare reported them.
 def buildVerificationLookup = { Object source, String runOwnerUserGroupId ->
-    if (source == null) return null
-    String sourceConfigType = normalize(source?.sourceConfigType)
-    Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, normalize(source?.systemEnumId))
-    if (connector == null || normalize(connector.expectedSourceConfigType) != sourceConfigType) {
-        connector = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(ec, sourceConfigType)
-    }
-    String lookupServiceName = connector == null ? null : normalize(connector.lookupServiceName)
-    if (lookupServiceName == null) return null
-    // Narrower sibling of the extractor fence: the lookup slot may only dispatch lookup#* services.
-    if (!SourceSystemConnectorSupport.isAllowedLookupServiceShape(lookupServiceName)) return null
-    String configId = normalize(source?.sourceConfigId)
-    if (configId == null) return null
-    String configParameterName = normalize(connector.configParameterName) ?: "sourceConfigId"
-    // Blank means the canonical order lookups' "orderIds". The returns pair rechecks refund/return
-    // ids, which must not be sent under an order-id name — Moqui would silently drop the parameter
-    // and the lookup would fail its required check rather than say anything useful.
-    String idsParameterName = normalize(connector.lookupIdsParameterName) ?: "orderIds"
-    return { List<String> ids ->
-        // companyUserGroupId is the RUN OWNER's tenant, not the session's. Every lookup service in
-        // this slot declares it for exactly that reason, but this dispatch used to omit it, so a
-        // scheduled run resolved its source config against whatever tenant the session happened to
-        // carry (the 2026-07-31 scheduled-automation failure). A null value is dropped by
-        // runInternalService's own null filtering, degrading to the previous session-tenant behaviour.
-        runInternalService(lookupServiceName, [(configParameterName): configId, (idsParameterName): ids,
-                companyUserGroupId: runOwnerUserGroupId])
-    }
+    // Delegates to RunVerificationSupport so the scheduled path can build the identical lookup
+    // (design 2026-08-26-reconciliation-pipeline-unification, step 2). runInternalService is passed
+    // as the dispatch seam because the two entry points invoke services differently.
+    return RunVerificationSupport.buildVerificationLookup(ec, source, runOwnerUserGroupId, runInternalService)
 }
 
 // The per-side ceiling on point lookups, as this side's connector declares it. Null means the
 // verification pass applies its own shared default. Resolved separately from the lookup closure so an
 // unreadable/blank cap can never stop a usable lookup from being built.
 def buildVerificationLookupCap = { Object source ->
-    if (source == null) return null
-    String sourceConfigType = normalize(source?.sourceConfigType)
-    Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, normalize(source?.systemEnumId))
-    if (connector == null || normalize(connector.expectedSourceConfigType) != sourceConfigType) {
-        connector = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(ec, sourceConfigType)
-    }
-    Object cap = connector?.lookupMaxIds
-    return (cap instanceof Number && ((Number) cap).intValue() > 0) ? ((Number) cap).intValue() : null
+    return RunVerificationSupport.buildVerificationLookupCap(ec, source)
 }
 
 // Exchange pair verify stage (spec 2026-07-30): the OMS-side extract may have written an
@@ -508,13 +480,7 @@ def buildVerificationLookupCap = { Object source ->
 // pairLookupServiceName and the other declares exchangeStateLookupServiceName, each manifest
 // pair is point-checked against both sources of record. Best-effort like the missing-diff pass.
 def resolveConnectorFor = { Object source ->
-    if (source == null) return null
-    String sourceConfigType = normalize(source?.sourceConfigType)
-    Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, normalize(source?.systemEnumId))
-    if (connector == null || normalize(connector.expectedSourceConfigType) != sourceConfigType) {
-        connector = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(ec, sourceConfigType)
-    }
-    return connector
+    return RunVerificationSupport.resolveConnector(ec, source)
 }
 
 def buildFencedLookup = { Map<String, Object> connector, String serviceName, Object source, String idsParameterName ->
@@ -618,10 +584,9 @@ def runExchangeVerificationPass = { Map serviceResult, Object file1Source, Objec
 def runVerificationPass = { Map serviceResult, Object file1Source, Object file2Source, String file1Label, String file2Label,
                             String runOwnerUserGroupId ->
     // Rule execution failure preserves partial diffs for investigation — never rewrite those.
-    if (serviceResult.ruleExecutionFailed == true) return
-    long missingInFile1 = (serviceResult.missingInFile1Count ?: 0) as long
-    long missingInFile2 = (serviceResult.missingInFile2Count ?: 0) as long
-    if (missingInFile1 <= 0L && missingInFile2 <= 0L) return
+    if (!RunVerificationSupport.shouldVerifyMissingDiffs(serviceResult)) return
+    long missingInFile1 = RunVerificationSupport.missingCount(serviceResult, "missingInFile1Count")
+    long missingInFile2 = RunVerificationSupport.missingCount(serviceResult, "missingInFile2Count")
     Map<String, Closure> sideLookups = [:]
     Map<String, Integer> sideMaxLookupIds = [:]
     if (missingInFile1 > 0L) {
@@ -661,19 +626,7 @@ def runVerificationPass = { Map serviceResult, Object file1Source, Object file2S
         verification.lookupFailed = true
         ec.message.clearErrors()
     }
-    if (verification.rewritten) {
-        serviceResult.differenceCount = Math.max(0L, ((serviceResult.differenceCount ?: 0) as long) - ((verification.removedCount ?: 0) as long))
-        serviceResult.missingInFile1Count = Math.max(0L, missingInFile1 - ((verification.removedMissingInFile1 ?: 0) as long))
-        serviceResult.missingInFile2Count = Math.max(0L, missingInFile2 - ((verification.removedMissingInFile2 ?: 0) as long))
-        if (serviceResult.missingObjectDifferenceCount != null) {
-            serviceResult.missingObjectDifferenceCount = Math.max(0L,
-                    (serviceResult.missingObjectDifferenceCount as long) - ((verification.removedCount ?: 0) as long))
-        }
-    }
-    List verificationNotes = []
-    if (verification.auditNote) verificationNotes.add(verification.auditNote)
-    verificationNotes.addAll((verification.warnings ?: []) as List)
-    if (verificationNotes) serviceResult.processingWarnings = ((serviceResult.processingWarnings ?: []) as List) + verificationNotes
+    RunVerificationSupport.applyVerificationOutcome(serviceResult, verification, missingInFile1, missingInFile2)
     // verifiedSystems names the sides this pass actually rechecked -- several passes share the
     // VERIFY stage code, so without it a run that ran two of them shows two identical timeline rows.
     RunObservability.endStep(ec, verifyStep,

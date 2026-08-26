@@ -40,7 +40,9 @@ class ApiContractGenerator {
      * removed method, removed/renamed parameter or out-field, or a type change — together with
      * updating the compat baseline. Additive changes never bump it (additive-only policy).
      */
-    static final int CONTRACT_VERSION = 2
+    // 3 (1.5.0): list#TenantChatSpaces dropped the out-field chatSpaces[].googleChatWebhookUrlMasked
+    //            when chat webhooks moved to clear text; googleChatWebhookUrl replaces it.
+    static final int CONTRACT_VERSION = 3
 
     static final Map<String, Map<String, Object>> SCALAR_TYPES = [
             String    : [type: "string"],

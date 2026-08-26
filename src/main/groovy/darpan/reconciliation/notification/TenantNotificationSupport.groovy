@@ -530,7 +530,72 @@ class TenantNotificationSupport {
         return [warnings: warnings, auditNotes: auditNotes]
     }
 
+    /** Endpoint -> system is one parentEnumId hop; the cap only stops a malformed cycle. */
+    private static final int SYSTEM_SOURCE_MAX_HOPS = 5
+
+    /**
+     * Name the SYSTEM behind an endpoint enum. Endpoints and systems share
+     * enumTypeId="DarpanSystemSource" and are told apart only by parentEnumId: OMS_RETURNS
+     * ("HotWax Returns (Reconciliation API)") carries parentEnumId=OMS ("HotWax"), while a
+     * top-level system carries none. Walking up is what turns an extract endpoint into the system
+     * a reader actually thinks in.
+     *
+     * Returns null rather than a guess when the id is unknown, is not a DarpanSystemSource, or the
+     * lookup throws — every caller has a stamped label to fall back to, and a wrong system name is
+     * worse than a verbose-but-true endpoint name.
+     */
+    static String resolveSystemSourceName(def ec, Object enumIdValue) {
+        String enumId = (enumIdValue)?.toString()?.trim()
+        if (!enumId || ec == null) return null
+
+        try {
+            String currentId = enumId
+            def row = null
+            for (int hop = 0; hop < SYSTEM_SOURCE_MAX_HOPS; hop++) {
+                def candidate = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.basic.Enumeration",
+                                "framework reference data: system source name lookup")
+                        .condition("enumId", currentId)
+                        .useCache(true)
+                        .one()
+                // A missing parent row leaves `row` on the last one that resolved, so a half-seeded
+                // graph degrades to the endpoint's own name instead of to nothing.
+                if (candidate == null) break
+                row = candidate
+
+                String parentId = (candidate.parentEnumId)?.toString()?.trim()
+                if (!parentId || parentId == currentId) break
+                currentId = parentId
+            }
+
+            if (row == null) return null
+            if (((row.enumTypeId)?.toString()?.trim()) != "DarpanSystemSource") return null
+            return ((row.description)?.toString()?.trim()) ?: null
+        } catch (Throwable ignored) {
+            return null
+        }
+    }
+
+    /**
+     * A reconciliation count is per SYSTEM ("Missing from HotWax: 259"), not per extract endpoint.
+     * Reported from prod 2026-08-26: alerts read "Missing from HotWax Returns (Reconciliation API)",
+     * because the automation stamps the endpoint label into ${prefix}SystemLabel and this preferred
+     * that stamped label over the enum it also stamps. The system name now wins when one resolves.
+     *
+     * The stamped label is still the fallback, and it carries two real cases: sources with no system
+     * identity at all (CSV/SFTP uploads), and the pairing below.
+     */
     static String resolveFileSystemLabel(def ec, Map<String, Object> context, String prefix, String fallback) {
+        String otherPrefix = ("file1" == prefix) ? "file2" : "file1"
+        String systemName = resolveSystemSourceName(ec, context["${prefix}SystemEnumId"])
+        String otherSystemName = resolveSystemSourceName(ec, context["${otherPrefix}SystemEnumId"])
+
+        // Two endpoints of the SAME system (HotWax Returns vs HotWax Transfer Orders) would both
+        // render "Missing from HotWax", leaving two different counts wearing one name and no way to
+        // tell them apart. That pairing keeps the endpoint labels, which are what distinguish them.
+        // darpan-ui's darpanSystemNamePair carries the same guard for the run-result tiles.
+        boolean bothSidesSameSystem = systemName && otherSystemName && systemName.equalsIgnoreCase(otherSystemName)
+        if (systemName && !bothSidesSameSystem) return systemName
+
         String explicitLabel = ((context["${prefix}SystemLabel"])?.toString()?.trim()) ?:
                 ((context["${prefix}Label"])?.toString()?.trim())
         if (explicitLabel) return explicitLabel

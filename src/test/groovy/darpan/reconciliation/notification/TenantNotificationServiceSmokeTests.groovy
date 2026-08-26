@@ -27,6 +27,10 @@ class TenantNotificationServiceSmokeTests {
         RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "tenant-notification-service-smoke")
+        // The REAL seed file, not a hand-copied fixture: the endpoint->system links these alerts are
+        // named from live in parentEnumId there (OMS_RETURNS -> OMS), so loading it means a future
+        // seed edit is caught here rather than silently diverging from what production resolves.
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/DarpanSystemSourceSeedData.xml")
     }
 
     @AfterAll
@@ -136,6 +140,80 @@ class TenantNotificationServiceSmokeTests {
         // The audit trail itself is not dropped — it moves to its own line.
         assertTrue(text.contains("Notes: Exchange presence check: 116 Shopify exchange(s) in window"), text)
         assertTrue(text.contains("7 in transit (return not yet closed)."), text)
+    }
+
+    /**
+     * Reported from prod 2026-08-26 (Gorjana, Daily Return Reconciliation, result 100617): the
+     * Details block named the ENDPOINTS ("Missing from HotWax Returns (Reconciliation API)"), not
+     * the systems. A count is per system, and the operator reading the alert thinks in systems.
+     *
+     * Endpoints and systems share enumTypeId="DarpanSystemSource"; an endpoint carries parentEnumId
+     * pointing at its system (OMS_RETURNS -> OMS, "HotWax"), a top-level system carries none. The
+     * automation stamps the endpoint label AND the endpoint enum id, so the system name is one hop
+     * away and nothing walked it.
+     */
+    @Test
+    void buildRunCompletedPayloadNamesSystemsRatherThanTheEndpointsThatFedThem() {
+        Map result = ec.service.sync()
+                .name("reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload")
+                .parameters([
+                        companyUserGroupId       : "TENANT_A",
+                        companyLabel             : "Gorjana",
+                        runName                  : "Daily Return Reconciliation",
+                        savedRunId               : "RS_RETURNS",
+                        reconciliationRunResultId: "100617",
+                        resultDataManagerPath    : "reconciliation-runs/AUTO_RETURNS/20260826/result.json",
+                        // Exactly what AutomationExecutionSupport stamps: endpoint label + endpoint enum.
+                        file1SystemLabel         : "Shopify Order Return References",
+                        file1SystemEnumId        : "SHOPIFY_RETURN_REFS",
+                        file2SystemLabel         : "HotWax Returns (Reconciliation API)",
+                        file2SystemEnumId        : "OMS_RETURNS",
+                        differenceCount          : 660,
+                        onlyInFile1Count         : 259,
+                        onlyInFile2Count         : 401,
+                ])
+                .disableAuthz()
+                .call()
+
+        String text = result.payload.text as String
+        assertTrue(text.contains("Missing from HotWax:"), text)
+        assertTrue(text.contains("Missing from Shopify:"), text)
+        assertFalse(text.contains("Reconciliation API"), "endpoint name leaked into the alert: ${text}")
+        assertFalse(text.contains("Order Return References"), "endpoint name leaked into the alert: ${text}")
+    }
+
+    /**
+     * The one pairing that must NOT collapse: two endpoints of the SAME system would both render
+     * "Missing from HotWax", leaving two different counts with identical labels and no way to tell
+     * which is which. That pairing keeps the endpoint names, which are what distinguishes them.
+     * darpan-ui's darpanSystemNamePair carries the same guard for the run-result tiles.
+     */
+    @Test
+    void buildRunCompletedPayloadKeepsEndpointNamesWhenBothSidesAreTheSameSystem() {
+        Map result = ec.service.sync()
+                .name("reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload")
+                .parameters([
+                        companyUserGroupId       : "TENANT_A",
+                        companyLabel             : "Gorjana",
+                        runName                  : "HotWax Cross-Endpoint",
+                        savedRunId               : "RS_HOTWAX",
+                        reconciliationRunResultId: "100618",
+                        resultDataManagerPath    : "reconciliation-runs/AUTO_HW/20260826/result.json",
+                        file1SystemLabel         : "HotWax Returns (Reconciliation API)",
+                        file1SystemEnumId        : "OMS_RETURNS",
+                        file2SystemLabel         : "HotWax Transfer Orders",
+                        file2SystemEnumId        : "OMS_TRANSFER_ORDERS",
+                        differenceCount          : 5,
+                        onlyInFile1Count         : 2,
+                        onlyInFile2Count         : 3,
+                ])
+                .disableAuthz()
+                .call()
+
+        String text = result.payload.text as String
+        assertTrue(text.contains("HotWax Returns (Reconciliation API)"), text)
+        assertTrue(text.contains("HotWax Transfer Orders"), text)
+        assertFalse(text.contains("Missing from HotWax:"), "collapsed two HotWax endpoints into one name: ${text}")
     }
 
     /**

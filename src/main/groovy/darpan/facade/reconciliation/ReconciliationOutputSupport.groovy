@@ -352,6 +352,24 @@ class ReconciliationOutputSupport {
                 Map<String, Object> sourceDetails = OutputDescriptorSupport.buildGeneratedOutputSourceDetails(ec, fileNameValue, document)
                 if (sourceDetails) outputFile.sourceDetails = sourceDetails
 
+                // metadata.timestamp is a zone-less wall clock written in whatever zone the JVM that
+                // ran the reconciliation happened to use (see ReconciliationServices
+                // .formatMetadataTimestamp). darpan-ui re-parses it with `new Date(string)`, which
+                // assumes the BROWSER's zone, then renders it in the tenant's display zone — two
+                // stacked guesses that moved a 09:10 UTC run to "Aug 25, 4:40 PM" for an IST viewer
+                // on an America/Los_Angeles tenant: a day early and 9h30m out.
+                //
+                // ReconciliationRunResult.createdDate is a real instant, so it needs no parsing
+                // guess at all. Shipping it alongside the string also repairs every run ALREADY on
+                // disk, which re-stamping the files going forward can never do. Tenant access was
+                // enforced by canAccessGeneratedOutputFile above, so this read is already gated.
+                def artifactRunResult = resolveRunResultForArtifactPath(ec, fileNameValue)
+                Object runResultCreatedDate = OutputDescriptorSupport.timestampValue(artifactRunResult?.createdDate)
+                if (runResultCreatedDate != null) {
+                    metadata = new LinkedHashMap<String, Object>(metadata)
+                    metadata.put("createdDate", runResultCreatedDate)
+                }
+
                 result = [metadata: metadata, summary: summary, outputFile: outputFile]
                 result.putAll(page)
             }

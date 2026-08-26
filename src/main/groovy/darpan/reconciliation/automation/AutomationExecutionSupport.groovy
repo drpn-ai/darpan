@@ -111,6 +111,19 @@ class AutomationExecutionSupport {
      * (532 -> 2 on that run), which needs an operator comms note, not a silent deploy.
      */
     static final String VERIFY_MISSING_DIFFS_PROPERTY = "darpan.reconciliation.automation.verifyMissingDiffs"
+    /**
+     * Optional comma-separated automationIds to narrow the arming property to. Empty or unset means
+     * every automation once armed.
+     *
+     * The arming property is JVM-wide, so on its own it switches verification on for EVERY
+     * automation on an instance at once, with no way to try one first. This narrows it without an
+     * entity migration, a contract regeneration or a UI change, and deletes cleanly when the default
+     * eventually flips — which is the point: this is rollout scaffolding, not tenant configuration,
+     * and it should not become permanent config surface for a correctness feature that ought to end
+     * up on everywhere.
+     */
+    static final String VERIFY_MISSING_DIFFS_AUTOMATIONS_PROPERTY =
+            "darpan.reconciliation.automation.verifyMissingDiffsAutomationIds"
 
     static final int MAX_RETRY_COUNT_DEFAULT =
             Math.max(0, (System.getProperty("darpan.reconciliation.automation.maxRetryCount") ?: "3").toInteger())
@@ -889,9 +902,20 @@ class AutomationExecutionSupport {
         return [automationExecutionId: executionId, statusEnumId: STATUS_PENDING, requeued: true]
     }
 
-    /** Read live, not cached in a static, so the switch can be flipped without a restart. */
-    static boolean isMissingDiffVerificationEnabled() {
-        return "true".equalsIgnoreCase(System.getProperty(VERIFY_MISSING_DIFFS_PROPERTY) ?: "false")
+    /**
+     * Read live, not cached in a static, so the switch can be flipped without a restart.
+     *
+     * <p>Two gates, and the arming property is always the one that decides: naming an automation in
+     * the allow-list must never be the thing that switches verification on. A configured allow-list
+     * with no automationId to test fails closed.</p>
+     */
+    static boolean isMissingDiffVerificationEnabled(String automationId = null) {
+        if (!"true".equalsIgnoreCase(System.getProperty(VERIFY_MISSING_DIFFS_PROPERTY) ?: "false")) return false
+        String allowList = normalize(System.getProperty(VERIFY_MISSING_DIFFS_AUTOMATIONS_PROPERTY))
+        if (!allowList) return true
+        String candidate = normalize(automationId)
+        if (!candidate) return false
+        return allowList.split(",").collect { String entry -> entry.trim() }.contains(candidate)
     }
 
     /**
@@ -910,7 +934,7 @@ class AutomationExecutionSupport {
                                                          Map<String, Object> reconcileResult,
                                                          String runResultId, Map stepCtx) {
         // Both guards run before anything touches ec, so a disabled or empty pass costs nothing.
-        if (!isMissingDiffVerificationEnabled()) return false
+        if (!isMissingDiffVerificationEnabled(normalize(readField(automation, "automationId")))) return false
         if (!RunVerificationSupport.shouldVerifyMissingDiffs(reconcileResult)) return false
 
         long missingInFile1 = RunVerificationSupport.missingCount(reconcileResult, "missingInFile1Count")

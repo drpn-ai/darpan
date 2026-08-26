@@ -3,7 +3,10 @@ package darpan.reconciliation.automation
 import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
+import darpan.facade.reconciliation.RunObservability
+import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
+import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
@@ -18,6 +21,7 @@ import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNotEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -43,6 +47,12 @@ class AutomationExecutionServiceSmokeTests {
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "api-automation-execution-smoke")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AutomationSeedData.xml")
+        // The verification tests below resolve a real connector (OMS_RETURNS) to build their lookup;
+        // without this the registry catalog is empty and buildVerificationLookup returns null for
+        // every source. Mirrors HotWaxOmsRestSourceConfigFacadeSmokeTests, which loads it for the
+        // same reason. The existing tests here inject their extractor via setSourceExtractor and are
+        // unaffected by the registry being populated.
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompareScopeFixtures(ec)
         // Task 8 filter fixtures save real automations through save#Automation, which needs a source
         // type simple enough to pass validateSources without extra wiring. AUT_SRC_DB looks simplest
@@ -967,5 +977,109 @@ class AutomationExecutionServiceSmokeTests {
                 .parameters(parameters)
                 .disableAuthz()
                 .call()
+    }
+
+    // --- verification on the SCHEDULED path (design step 4) ------------------------------------
+    // Until now this path had never verified anything: STAGE_VERIFY appeared 0 times in the whole
+    // automation package, and the step-3 unit tests only cover the flag GATE (off, or nothing to
+    // verify). Nothing proved the pass actually executes here. These two do.
+
+    @Test
+    void verificationRunsOnTheScheduledPathAndRecordsItsOwnStage() {
+        File diffFile = writeMissingDiffDocument(["9001", "9002", "9003"])
+        String runId = RunObservability.beginRun(ec, [
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID, savedRunId: "DARPAN_TEST_COMPARE_RS"])
+        Map<String, Object> reconcileResult = [
+                differenceCount: 3L, missingInFile1Count: 0L, missingInFile2Count: 3L,
+                missingObjectDifferenceCount: 3L,
+                file1Label: "OMS", file2Label: "SHOPIFY",
+                diffLocation: diffFile.absolutePath,
+        ]
+        def automation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation")
+                .condition("automationId", "AUTO_API_ARTIFACT").disableAuthz().useCache(false).one()
+
+        boolean ran
+        try {
+            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY, "true")
+            ran = AutomationExecutionSupport.verifyMissingDiffsIfEnabled(ec, automation,
+                    omsReturnsSource(), omsReturnsSource(), reconcileResult, runId, [:])
+        } finally {
+            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
+            diffFile.delete()
+        }
+
+        assertTrue(ran, "with the flag armed, a real diff and a lookup-capable connector, the pass must execute here")
+
+        // The stage is the operator-visible proof. A scheduled run that verifies but shows no
+        // VERIFY row in its timeline is indistinguishable from one that never verified at all —
+        // which is exactly the confusion this whole change exists to remove.
+        def verifyStep = ec.entity.find(RunObservability.RUN_STEP_ENTITY)
+                .condition("reconciliationRunResultId", runId)
+                .condition("stageCode", RunObservability.STAGE_VERIFY)
+                .disableAuthz().useCache(false).one()
+        assertNotNull(verifyStep, "the scheduled path must record its VERIFY stage like the interactive one does")
+        assertNotEquals(RunObservability.STATUS_RUNNING, verifyStep.statusEnumId,
+                "the step must be closed, not left RUNNING for the stuck-run reaper to find")
+    }
+
+    @Test
+    void aVerificationLookupCarriesTheAutomationsOwnTenantNotTheSessions() {
+        // The scheduler authenticates as anonymous _NA_, which belongs to no tenant. Every lookup
+        // service in this slot declares companyUserGroupId for exactly that reason, and omitting it
+        // is what broke every scheduled automation on 2026-07-31. Asserted against REAL seeded
+        // connector data (parameter names come from the registry, not from a literal here).
+        List<Map> dispatched = []
+        Closure stubDispatcher = { String serviceName, Map serviceParams ->
+            dispatched.add([service: serviceName, params: serviceParams])
+            return [:]
+        }
+
+        Closure lookup = RunVerificationSupport.buildVerificationLookup(
+                ec, omsReturnsSource(), OTHER_TENANT_USER_GROUP_ID, stubDispatcher)
+
+        assertNotNull(lookup, "OMS_RETURNS declares a lookupServiceName, so a lookup must be buildable")
+        lookup.call(["27151073411"])
+
+        assertEquals(1, dispatched.size())
+        Map call = dispatched.first()
+        assertTrue(((String) call.service).contains("lookup#"),
+                "the lookup slot may only dispatch lookup#* services: ${call.service}")
+        assertEquals(OTHER_TENANT_USER_GROUP_ID, call.params.companyUserGroupId,
+                "the lookup must carry the RUN OWNER's tenant, never whatever the session happened to have")
+        assertEquals(["27151073411"], call.params.externalIds,
+                "ids must go under the connector-declared lookupIdsParameterName, not a hardcoded orderIds")
+    }
+
+    /** A source row shaped like the automation's own, pointing at the seeded OMS_RETURNS connector. */
+    private static Map<String, Object> omsReturnsSource() {
+        return [systemEnumId    : "OMS_RETURNS",
+                sourceConfigType: "HOTWAX_OMS_REST_RETURNS",
+                sourceConfigId  : "SMOKE_OMS_RETURNS_CFG",
+                fileSide        : AutomationExecutionSupport.FILE_SIDE_2] as Map<String, Object>
+    }
+
+    /** Mirrors ReconciliationServices.writeDiffDatasetOutput's line-oriented writer exactly. */
+    private File writeMissingDiffDocument(List<String> ids) {
+        File file = File.createTempFile("automation-verify-diff-", ".json")
+        file.withWriter("UTF-8") { writer ->
+            writer << "{\n"
+            writer << "\"metadata\":" + JsonOutput.toJson([file1Label: "OMS", file2Label: "SHOPIFY",
+                    reconciliation: "RULESET"]) + ",\n"
+            writer << "\"summary\":" + JsonOutput.toJson([totalDifferences: ids.size(),
+                    onlyInFile1Count: ids.size(), onlyInFile2Count: 0]) + ",\n"
+            writer << "\"validationErrors\":[],\n"
+            writer << "\"processingWarnings\":[],\n"
+            writer << "\"differences\":["
+            boolean first = true
+            ids.each { String id ->
+                if (!first) writer << ","
+                writer << "\n" << JsonOutput.toJson([diffType: "missing_in_SHOPIFY", compareScopeId: "SCOPE_1",
+                        objectType: "RETURNS", primaryId: id, presentIn: "OMS", missingIn: "SHOPIFY",
+                        data: JsonOutput.toJson([returnId: id]), message: "Present in OMS, missing in SHOPIFY"])
+                first = false
+            }
+            writer << "]\n}"
+        }
+        return file
     }
 }

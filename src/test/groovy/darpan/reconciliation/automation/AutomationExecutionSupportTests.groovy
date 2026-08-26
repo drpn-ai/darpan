@@ -3765,4 +3765,63 @@ class AutomationExecutionSupportTests {
             System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
         }
     }
+
+    // --- canarying verification to specific automations ----------------------------------------
+    // The arming property is JVM-wide, so on its own it switches verification on for EVERY
+    // automation on an instance at once — no way to try one first. The allow-list narrows it
+    // without an entity migration, a contract regeneration or a UI change, and deletes cleanly
+    // when the default eventually flips (design step 4).
+
+    @Test
+    void anEmptyAllowListMeansEveryAutomationOnceArmed() {
+        try {
+            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY, "true")
+            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_AUTOMATIONS_PROPERTY)
+            assertTrue(AutomationExecutionSupport.isMissingDiffVerificationEnabled("100616"))
+            assertTrue(AutomationExecutionSupport.isMissingDiffVerificationEnabled("ANY_OTHER"))
+        } finally {
+            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
+        }
+    }
+
+    @Test
+    void anAllowListRestrictsVerificationToTheNamedAutomations() {
+        try {
+            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY, "true")
+            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_AUTOMATIONS_PROPERTY, "100616, 100053")
+            assertTrue(AutomationExecutionSupport.isMissingDiffVerificationEnabled("100616"),
+                    "whitespace around a listed id must not exclude it")
+            assertTrue(AutomationExecutionSupport.isMissingDiffVerificationEnabled("100053"))
+            assertFalse(AutomationExecutionSupport.isMissingDiffVerificationEnabled("100999"),
+                    "an automation outside the canary must stay on the old behaviour")
+        } finally {
+            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
+            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_AUTOMATIONS_PROPERTY)
+        }
+    }
+
+    @Test
+    void anAllowListWithAnUnknownAutomationIdFailsClosed() {
+        try {
+            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY, "true")
+            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_AUTOMATIONS_PROPERTY, "100616")
+            assertFalse(AutomationExecutionSupport.isMissingDiffVerificationEnabled(null),
+                    "a canary that cannot identify the automation must not verify it")
+        } finally {
+            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
+            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_AUTOMATIONS_PROPERTY)
+        }
+    }
+
+    @Test
+    void theAllowListCannotArmVerificationOnItsOwn() {
+        try {
+            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
+            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_AUTOMATIONS_PROPERTY, "100616")
+            assertFalse(AutomationExecutionSupport.isMissingDiffVerificationEnabled("100616"),
+                    "naming an automation must never be the thing that switches verification on")
+        } finally {
+            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_AUTOMATIONS_PROPERTY)
+        }
+    }
 }

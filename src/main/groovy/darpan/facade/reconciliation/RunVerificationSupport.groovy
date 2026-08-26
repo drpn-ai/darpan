@@ -2,7 +2,10 @@ package darpan.facade.reconciliation
 
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 
+import static darpan.common.ValueSupport.hasField
+import static darpan.common.ValueSupport.readField
 import static darpan.common.ValueSupport.normalize
+import static darpan.common.ValueSupport.readOptionalString
 
 /**
  * The verification pass's decision, lookup-resolution and count-adjustment logic, callable from any
@@ -96,8 +99,16 @@ class RunVerificationSupport {
      */
     static Map<String, Object> resolveConnector(def ec, Object source) {
         if (source == null) return null
-        String sourceConfigType = normalize(source?.sourceConfigType)
-        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, normalize(source?.systemEnumId))
+        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, readOptionalString(source, "systemEnumId"))
+        // TWO SOURCE SHAPES REACH HERE. A saved run passes a Map carrying sourceConfigType; a
+        // scheduled run passes a ReconciliationAutomationSource row, which has no such column and
+        // whose systemEnumId is the only key it has. Reading the field blind threw an EntityException
+        // out of every scheduled run once verification defaulted on (2026-08-26) — Moqui's
+        // EntityValue.get raises on an undeclared name where a Map simply answers null. So: absent
+        // means "this shape keys on systemEnumId alone", which is NOT the same as present-and-blank,
+        // where the saved-run contract still expects the config-type fallback below.
+        if (!hasField(source, "sourceConfigType")) return connector
+        String sourceConfigType = normalize(readField(source, "sourceConfigType"))
         if (connector == null || normalize(connector.expectedSourceConfigType) != sourceConfigType) {
             connector = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(ec, sourceConfigType)
         }
@@ -122,9 +133,15 @@ class RunVerificationSupport {
         if (lookupServiceName == null) return null
         // Narrower sibling of the extractor fence: the lookup slot may only dispatch lookup#* services.
         if (!SourceSystemConnectorSupport.isAllowedLookupServiceShape(lookupServiceName)) return null
-        String configId = normalize(source?.sourceConfigId)
-        if (configId == null) return null
+        // Same two shapes as resolveConnector. A saved-run Map carries a generic sourceConfigId; an
+        // automation source row does not — it carries the id under the connector's OWN parameter name
+        // (omsRestSourceConfigId, shopifyAuthConfigId, databaseSourceQueryId...), which is exactly
+        // what configParameterName names. Falling back to it is what makes the lookup resolvable on
+        // the scheduled path at all; without it verification ran, found no config, and silently
+        // rechecked nothing.
         String configParameterName = normalize(connector.configParameterName) ?: "sourceConfigId"
+        String configId = readOptionalString(source, "sourceConfigId") ?: readOptionalString(source, configParameterName)
+        if (configId == null) return null
         // Blank means the canonical order lookups' "orderIds". The returns pair rechecks refund/return
         // ids, which must not be sent under an order-id name — Moqui would silently drop the parameter.
         String idsParameterName = normalize(connector.lookupIdsParameterName) ?: "orderIds"

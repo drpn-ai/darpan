@@ -98,32 +98,34 @@ class AutomationExecutionSupport {
     // dead-letters once retryCount reaches maxRetryCount. Permanent (config/fence) failures skip retry
     // and go straight to FAILED.
     /**
-     * Arms the missing-diff verification pass on the SCHEDULED path. Off unless explicitly "true".
+     * Kill switch for the missing-diff verification pass on the SCHEDULED path. ON unless the
+     * property is explicitly "false".
      *
-     * A system property rather than an entity field on purpose: this is a rollout switch, not tenant
-     * configuration, and it must be flippable without an entity migration, a contract regeneration
-     * and a UI change (the same reason maxRetryCount and the retry backoffs are properties here).
+     * DEFAULT ON since 2026-08-26. A scheduled run and an interactive run over the same window must
+     * report the same differences; while this defaulted off they did not, and could disagree by
+     * orders of magnitude (532 vs 2 on gorjana automation 100616). An unverified count is not a
+     * safer count — it is a wrong one that reads as authoritative, and it is the number that reaches
+     * the operator through run alerts. Verification is a correctness feature, so it is on everywhere
+     * and stays on unless someone deliberately turns it off.
      *
-     * Default OFF is deliberate and must stay that way until the timeout envelope is resolved:
-     * verification took ~46s on gorjana automation 100616, and this path has a documented history of
-     * dying at the 60s transaction boundary. A rolled-back run fails far more confusingly than an
-     * unverified one. Enabling it also changes reported difference counts by orders of magnitude
-     * (532 -> 2 on that run), which needs an operator comms note, not a silent deploy.
+     * The transaction ceiling that once justified defaulting off does not apply here:
+     * execute#Automation is transaction="ignore" and executeAutomation suspends any caller
+     * transaction, so the scheduled body runs with no ambient transaction and a ~46s stage has
+     * nothing to time out against. The 60s ceiling belongs to the request path and was fixed
+     * 2026-08-05.
+     *
+     * A system property rather than an entity field on purpose: a kill switch must be flippable on a
+     * sick instance without an entity migration, a contract regeneration and a UI change (the same
+     * reason maxRetryCount and the retry backoffs are properties here). It is deliberately NOT
+     * per-tenant or per-automation configuration — "which automations tell the truth" is not a
+     * setting anyone should be able to hold wrong.
+     *
+     * FAIL DIRECTION INVERTED with the default: an unrecognised value now leaves verification ON,
+     * because on is the safe state. Only an exact "false" disables it. The pass already fails closed
+     * internally — a failed, capped or throwing lookup reclassifies nothing — so leaving it armed on
+     * a typo cannot suppress a real difference.
      */
     static final String VERIFY_MISSING_DIFFS_PROPERTY = "darpan.reconciliation.automation.verifyMissingDiffs"
-    /**
-     * Optional comma-separated automationIds to narrow the arming property to. Empty or unset means
-     * every automation once armed.
-     *
-     * The arming property is JVM-wide, so on its own it switches verification on for EVERY
-     * automation on an instance at once, with no way to try one first. This narrows it without an
-     * entity migration, a contract regeneration or a UI change, and deletes cleanly when the default
-     * eventually flips — which is the point: this is rollout scaffolding, not tenant configuration,
-     * and it should not become permanent config surface for a correctness feature that ought to end
-     * up on everywhere.
-     */
-    static final String VERIFY_MISSING_DIFFS_AUTOMATIONS_PROPERTY =
-            "darpan.reconciliation.automation.verifyMissingDiffsAutomationIds"
 
     static final int MAX_RETRY_COUNT_DEFAULT =
             Math.max(0, (System.getProperty("darpan.reconciliation.automation.maxRetryCount") ?: "3").toInteger())
@@ -397,7 +399,7 @@ class AutomationExecutionSupport {
                 requireReconcileOutput(ec, reconcileResult)
                 // Verification rewrites the diff document and adjusts the summary, so it must run
                 // BEFORE the result artifact is built or any count is persisted or notified.
-                // No-op unless VERIFY_MISSING_DIFFS_PROPERTY is armed.
+                // Runs by default; a no-op only if VERIFY_MISSING_DIFFS_PROPERTY is explicitly "false".
                 verifyMissingDiffsIfEnabled(ec, automation, file1Source, file2Source, reconcileResult,
                         mintedRunResultId, stepCtx)
                 ensureAutomationResultArtifact(ec, automation, file1Source, file2Source, reconcileResult, window, executionParams)
@@ -903,19 +905,15 @@ class AutomationExecutionSupport {
     }
 
     /**
-     * Read live, not cached in a static, so the switch can be flipped without a restart.
+     * Read live, not cached in a static, so the kill switch can be flipped without a restart.
      *
-     * <p>Two gates, and the arming property is always the one that decides: naming an automation in
-     * the allow-list must never be the thing that switches verification on. A configured allow-list
-     * with no automationId to test fails closed.</p>
+     * <p>No per-automation allow-list. The canary one existed only to roll this out while the
+     * default was off, and it deletes with the flip by design. Keeping it would have left a
+     * supported way to run most automations unverified while the switch still read "on" — which is
+     * exactly the silent disagreement between the two run paths that flipping the default ends.</p>
      */
-    static boolean isMissingDiffVerificationEnabled(String automationId = null) {
-        if (!"true".equalsIgnoreCase(System.getProperty(VERIFY_MISSING_DIFFS_PROPERTY) ?: "false")) return false
-        String allowList = normalize(System.getProperty(VERIFY_MISSING_DIFFS_AUTOMATIONS_PROPERTY))
-        if (!allowList) return true
-        String candidate = normalize(automationId)
-        if (!candidate) return false
-        return allowList.split(",").collect { String entry -> entry.trim() }.contains(candidate)
+    static boolean isMissingDiffVerificationEnabled() {
+        return !"false".equalsIgnoreCase(System.getProperty(VERIFY_MISSING_DIFFS_PROPERTY) ?: "true")
     }
 
     /**
@@ -934,7 +932,7 @@ class AutomationExecutionSupport {
                                                          Map<String, Object> reconcileResult,
                                                          String runResultId, Map stepCtx) {
         // Both guards run before anything touches ec, so a disabled or empty pass costs nothing.
-        if (!isMissingDiffVerificationEnabled(normalize(readField(automation, "automationId")))) return false
+        if (!isMissingDiffVerificationEnabled()) return false
         if (!RunVerificationSupport.shouldVerifyMissingDiffs(reconcileResult)) return false
 
         long missingInFile1 = RunVerificationSupport.missingCount(reconcileResult, "missingInFile1Count")
@@ -954,13 +952,28 @@ class AutomationExecutionSupport {
         Map<String, Integer> sideMaxLookupIds = [:]
         String file1Label = normalize(reconcileResult.file1Label) ?: "file1"
         String file2Label = normalize(reconcileResult.file2Label) ?: "file2"
-        [[missingInFile1, file1Source, file1Label], [missingInFile2, file2Source, file2Label]].each { List side ->
-            if (((long) side[0]) <= 0L) return
-            Closure lookup = RunVerificationSupport.buildVerificationLookup(ec, side[1], runOwnerUserGroupId, dispatcher)
-            if (lookup == null) return
-            sideLookups.put((String) side[2], lookup)
-            Integer cap = RunVerificationSupport.buildVerificationLookupCap(ec, side[1])
-            if (cap != null) sideMaxLookupIds.put((String) side[2], cap)
+        // PREPARING the lookups is inside the guard, not just running them. Building one reads the
+        // connector registry and the source row, and a source shape this code cannot read must
+        // degrade to an unverified run with a visible warning — never a failed one. That is not
+        // hypothetical: resolveConnector threw an EntityException out of every scheduled run the
+        // moment verification defaulted on, because it read a field ReconciliationAutomationSource
+        // does not declare. The compare had already finished; failing the run discarded it.
+        try {
+            [[missingInFile1, file1Source, file1Label], [missingInFile2, file2Source, file2Label]].each { List side ->
+                if (((long) side[0]) <= 0L) return
+                Closure lookup = RunVerificationSupport.buildVerificationLookup(ec, side[1], runOwnerUserGroupId, dispatcher)
+                if (lookup == null) return
+                sideLookups.put((String) side[2], lookup)
+                Integer cap = RunVerificationSupport.buildVerificationLookupCap(ec, side[1])
+                if (cap != null) sideMaxLookupIds.put((String) side[2], cap)
+            }
+        } catch (Throwable t) {
+            RunVerificationSupport.applyVerificationOutcome(reconcileResult,
+                    [performed: false, rewritten: false, lookupFailed: true,
+                     warnings: ["Verification could not be prepared, so this run's differences are unverified: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map,
+                    missingInFile1, missingInFile2)
+            if (ec?.message?.hasError()) ec.message.clearErrors()
+            return false
         }
         if (!sideLookups) return false
 

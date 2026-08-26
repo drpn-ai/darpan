@@ -3687,29 +3687,38 @@ class AutomationExecutionSupportTests {
     }
 
     // --- missing-diff verification on the scheduled path ---------------------------------------
-    // The scheduled path has never verified its differences: STAGE_VERIFY appears 0 times in this
-    // package, while runSavedRunDiff.groovy runs three verification passes. On gorjana automation
-    // 100616 that gap meant a scheduled run reporting ~532 differences where the verified
-    // interactive rerun reported 2. Rollout is flag-gated and OFF by default because enabling it
-    // adds a ~46s stage to a path with a documented 60s transaction ceiling (design
-    // 2026-08-26-reconciliation-pipeline-unification, steps 3-4).
+    // The scheduled path did not verify its differences until 2026-08-26, while runSavedRunDiff.groovy
+    // always ran three verification passes. On gorjana automation 100616 that gap meant a scheduled
+    // run reporting ~532 differences where the verified interactive rerun reported 2. Verification is
+    // now ON by default on both paths: the two must agree on the same window, and an unverified count
+    // is not a safer number, it is a wrong one that reaches operators through run alerts. What is left
+    // is a kill switch, not a rollout flag (design 2026-08-26-reconciliation-pipeline-unification,
+    // step 4). The ~46s stage has no transaction to overrun here — execute#Automation is
+    // transaction="ignore" and executeAutomation suspends any caller transaction.
 
     @Test
-    void missingDiffVerificationIsOffByDefaultOnTheScheduledPath() {
+    void missingDiffVerificationIsOnByDefaultOnTheScheduledPath() {
         System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
-        assertFalse(AutomationExecutionSupport.isMissingDiffVerificationEnabled(),
-                "enabling verification changes reported difference counts by orders of magnitude; " +
-                "it must never switch on merely by deploying")
+        assertTrue(AutomationExecutionSupport.isMissingDiffVerificationEnabled(),
+                "a scheduled run and an interactive run over the same window must report the same " +
+                "differences; verification must not need switching on to get that")
     }
 
     @Test
-    void missingDiffVerificationTurnsOnOnlyForAnExplicitTrue() {
+    void missingDiffVerificationTurnsOffOnlyForAnExplicitFalse() {
         try {
-            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY, "true")
-            assertTrue(AutomationExecutionSupport.isMissingDiffVerificationEnabled())
-            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY, "yes")
+            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY, "false")
+            assertFalse(AutomationExecutionSupport.isMissingDiffVerificationEnabled())
+            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY, "no")
+            assertTrue(AutomationExecutionSupport.isMissingDiffVerificationEnabled(),
+                    "the fail direction inverted with the default: on is now the safe state, so a " +
+                    "typo must leave verification running rather than silently disable it")
+            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY, "")
+            assertTrue(AutomationExecutionSupport.isMissingDiffVerificationEnabled(),
+                    "a blank value is not a decision to stop verifying")
+            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY, "FALSE")
             assertFalse(AutomationExecutionSupport.isMissingDiffVerificationEnabled(),
-                    "only an explicit 'true' may arm this; a typo must fail closed")
+                    "the kill switch is case-insensitive, as the arming flag was")
         } finally {
             System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
         }
@@ -3717,19 +3726,23 @@ class AutomationExecutionSupportTests {
 
     @Test
     void aDisabledVerificationTouchesNothingAtAll() {
-        System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
-        Map<String, Object> reconcileResult = [differenceCount: 532L, missingInFile1Count: 500L,
-                                               missingInFile2Count: 32L]
+        try {
+            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY, "false")
+            Map<String, Object> reconcileResult = [differenceCount: 532L, missingInFile1Count: 500L,
+                                                   missingInFile2Count: 32L]
 
-        // Every collaborator is null on purpose: with the flag off this must return before it can
-        // touch the execution context, so a null ec proves no work was attempted.
-        boolean ran = AutomationExecutionSupport.verifyMissingDiffsIfEnabled(
-                null, null, null, null, reconcileResult, null, null)
+            // Every collaborator is null on purpose: with the switch off this must return before it
+            // can touch the execution context, so a null ec proves no work was attempted.
+            boolean ran = AutomationExecutionSupport.verifyMissingDiffsIfEnabled(
+                    null, null, null, null, reconcileResult, null, null)
 
-        assertFalse(ran)
-        assertEquals(532L, reconcileResult.differenceCount, "a disabled pass must not move any count")
-        assertEquals(500L, reconcileResult.missingInFile1Count)
-        assertNull(reconcileResult.processingWarnings, "a disabled pass must not annotate the result")
+            assertFalse(ran)
+            assertEquals(532L, reconcileResult.differenceCount, "a disabled pass must not move any count")
+            assertEquals(500L, reconcileResult.missingInFile1Count)
+            assertNull(reconcileResult.processingWarnings, "a disabled pass must not annotate the result")
+        } finally {
+            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
+        }
     }
 
     @Test
@@ -3766,62 +3779,7 @@ class AutomationExecutionSupportTests {
         }
     }
 
-    // --- canarying verification to specific automations ----------------------------------------
-    // The arming property is JVM-wide, so on its own it switches verification on for EVERY
-    // automation on an instance at once — no way to try one first. The allow-list narrows it
-    // without an entity migration, a contract regeneration or a UI change, and deletes cleanly
-    // when the default eventually flips (design step 4).
-
-    @Test
-    void anEmptyAllowListMeansEveryAutomationOnceArmed() {
-        try {
-            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY, "true")
-            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_AUTOMATIONS_PROPERTY)
-            assertTrue(AutomationExecutionSupport.isMissingDiffVerificationEnabled("100616"))
-            assertTrue(AutomationExecutionSupport.isMissingDiffVerificationEnabled("ANY_OTHER"))
-        } finally {
-            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
-        }
-    }
-
-    @Test
-    void anAllowListRestrictsVerificationToTheNamedAutomations() {
-        try {
-            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY, "true")
-            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_AUTOMATIONS_PROPERTY, "100616, 100053")
-            assertTrue(AutomationExecutionSupport.isMissingDiffVerificationEnabled("100616"),
-                    "whitespace around a listed id must not exclude it")
-            assertTrue(AutomationExecutionSupport.isMissingDiffVerificationEnabled("100053"))
-            assertFalse(AutomationExecutionSupport.isMissingDiffVerificationEnabled("100999"),
-                    "an automation outside the canary must stay on the old behaviour")
-        } finally {
-            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
-            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_AUTOMATIONS_PROPERTY)
-        }
-    }
-
-    @Test
-    void anAllowListWithAnUnknownAutomationIdFailsClosed() {
-        try {
-            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY, "true")
-            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_AUTOMATIONS_PROPERTY, "100616")
-            assertFalse(AutomationExecutionSupport.isMissingDiffVerificationEnabled(null),
-                    "a canary that cannot identify the automation must not verify it")
-        } finally {
-            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
-            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_AUTOMATIONS_PROPERTY)
-        }
-    }
-
-    @Test
-    void theAllowListCannotArmVerificationOnItsOwn() {
-        try {
-            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
-            System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_AUTOMATIONS_PROPERTY, "100616")
-            assertFalse(AutomationExecutionSupport.isMissingDiffVerificationEnabled("100616"),
-                    "naming an automation must never be the thing that switches verification on")
-        } finally {
-            System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_AUTOMATIONS_PROPERTY)
-        }
-    }
+    // The per-automation canary allow-list was removed with the default flip (step 4). It existed to
+    // roll verification out while it defaulted off; retaining it would have left a supported way to
+    // run most automations unverified while the switch still read "on".
 }

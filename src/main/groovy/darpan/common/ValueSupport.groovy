@@ -97,6 +97,28 @@ class ValueSupport {
         return pathParts ? pathParts.last() : normalized
     }
 
+    /**
+     * Whether {@code record} actually carries {@code fieldName} at all.
+     *
+     * <p>Ask this BEFORE {@link #readField} on anything that might be a Moqui EntityValue:
+     * {@code EntityValueBase.get} THROWS an EntityException on a name the entity does not declare,
+     * rather than returning null the way a Map does. Two run sources with different shapes reach the
+     * same shared code — a saved run passes a Map carrying {@code sourceConfigType}, a scheduled run
+     * passes a ReconciliationAutomationSource row that has no such column — so "is there one" and
+     * "what is it" are genuinely different questions here.</p>
+     */
+    static boolean hasField(def record, String fieldName) {
+        if (record == null || !fieldName) return false
+        if (record instanceof Map) return ((Map) record).containsKey(fieldName)
+        if (record.metaClass.respondsTo(record, "isField", String)) return record.isField(fieldName)
+        return record.metaClass.hasProperty(record, fieldName) != null
+    }
+
+    /** {@link #readString} for a field that may not exist on this record shape; null when absent. */
+    static String readOptionalString(def record, String fieldName) {
+        return hasField(record, fieldName) ? normalize(readField(record, fieldName)) : null
+    }
+
     static Object readField(def record, String fieldName) {
         if (record == null || !fieldName) return null
         if (record instanceof Map) return record[fieldName]

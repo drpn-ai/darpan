@@ -235,6 +235,25 @@ class SourceSystemConnectorSupportSmokeTests {
     }
 
     @Test
+    void shopifyReturnRefsConnectorDeclaresTheExclusionFilterParameter() {
+        // Opted in 2026-08-27 for return-status exclusion. Without filterParameterName the rules board
+        // hides the exclusion control (AutomationFacadeSupport.supportsExcludeFiltersForSystem ->
+        // RuleSetBoard.supportsExclusions) and a configured rule would never dispatch. The canonical
+        // SHOPIFY connector is unaffected and keeps its opt-out — see the sibling test above.
+        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY_RETURN_REFS")
+        assertNotNull(connector, "SHOPIFY_RETURN_REFS connector row should resolve")
+        assertEquals("sourceFilters", connector.filterParameterName)
+    }
+
+    @Test
+    void theBoardOffersAReturnStatusPillForShopifyReturnRefs() {
+        ReconciliationSmokeTestSupport.loadSeedData(ec,
+                "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
+        assertTrue(pillPaths("SHOPIFY_RETURN_REFS").contains('$.records[*].returnStatus'),
+                "returnStatus must be offerable as an exclusion pill: ${pillPaths("SHOPIFY_RETURN_REFS")}")
+    }
+
+    @Test
     void theBoardsOmsFieldPillsCoverEveryKeepFieldsBaseField() {
         // FINAL-REVIEW CRITICAL 1b, updated for Task 5 (Plan 2): the OMS field pills used to be a
         // hand-written AutomationFacadeSupport constant mirroring keepFieldsBase plus
@@ -569,7 +588,10 @@ class SourceSystemConnectorSupportSmokeTests {
         // 4, not 2: the 2026-08-17 returns-refund-grain-alignment plan's Task 2 (REVISION 2026-08-18)
         // widened the seeded set for this endpoint from {orderId, createdAt} to the four-field EVENT
         // shape {refundOrReturnId, refundOrReturnType, orderId, createdAt}.
-        assertEquals(4L, ec.entity.find("darpan.reconciliation.SourceSystemConnectorField")
+        // 5, not 4: returnStatus was seeded 2026-08-27 for return-status exclusion. The COUNT is
+        // incidental to what this test guards — that the retirement swept only the withdrawn row —
+        // so it tracks the seed file and is expected to move whenever a pill is legitimately added.
+        assertEquals(5L, ec.entity.find("darpan.reconciliation.SourceSystemConnectorField")
                 .condition("systemEnumId", "SHOPIFY_RETURN_REFS").useCache(false).count())
     }
 

@@ -153,5 +153,13 @@
                 return's own creation date — a refund row carries the refund's createdAt, a return row
                 carries the return's — never the order's creation date. Windowing filters on this field, not
                 on any order-level date."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].returnStatus"
+            label="Return status" fieldType="string" sequenceNum="5"
+            description="ADDED 2026-08-27. Shopify ReturnStatus — REQUESTED, OPEN, CLOSED, DECLINED,
+                CANCELED. Present on RETURN rows only: a REFUND row has no return status, so a rule on
+                this field can never match one. Because a refunded return is represented by its
+                refund's row alone, this field only ever describes an UNREFUNDED return — excluding
+                OPEN excludes unrefunded OPEN returns. Exclude REQUESTED,OPEN to drop in-progress
+                returns that have no OMS counterpart yet."/>
 
 </entity-facade-xml>

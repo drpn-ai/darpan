@@ -29,6 +29,29 @@ column):
     and a widened keepFieldsBase (POST-1.5.0, 2026-08-27). Until this loads, the rules board hides
     the exclusion control for Shopify returns and any configured return-status rule is inert.
 
+ONE MANUAL STEP THIS TIME — the return-status pill was RENAMED on 2026-08-27, hours after it first
+shipped, from $.records[*].returnStatus to $.records[*].returnWorkflowStatus. Shopify's own
+Order.returnStatus is a DIFFERENT field holding a DIFFERENT enum (OrderReturnStatus: IN_PROGRESS,
+INSPECTION_COMPLETE, NO_RETURN, RETURN_FAILED, RETURN_REQUESTED, RETURNED); this pill selects
+Return.status (ReturnStatus: REQUESTED, OPEN, CLOSED, DECLINED, CANCELED). An operator on production
+read the docs the old name pointed at, excluded on IN_PROGRESS, and dropped nothing.
+
+A seed load is createOrUpdate and never deletes, so loading this file INSERTS the new pill but leaves
+the old one behind, and the board would offer both — one of which no longer exists on the extract, so
+a rule on it silently matches nothing forever. The old PK is declared in
+SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS, which the RETIRED_FIELDS migration deletes —
+but that migration is ALREADY APPLIED on every environment that ran 1.5.0's migrations, and
+run#PendingMigrations skips anything already applied. It must therefore be re-run explicitly ONCE per
+environment, after this file loads:
+
+    admin.MigrationAdminServices.run#Migration  migrationId=RETIRED_FIELDS  force=true
+
+(the Migrations screen's per-migration run with force set does the same). It is idempotent — a second
+run deletes nothing. Skip it and the stale "Return status" pill stays on the rules board.
+
+Any exclusion rule already saved against the OLD path keeps its stored expression and will match
+nothing after the rename; re-add it on the new pill, with values REQUESTED,OPEN.
+
 Everything else is new capability. Until this file loads on an upgraded environment:
 
   - No config can be shared across tenants. A grant must name a configTypeEnumId that exists, so
@@ -232,7 +255,7 @@ the row is absent, but the connector row it needs would still be missing.
             systemAliases="SHOPIFY_RETURN_REFS,SHOPIFY_RETURNS,DAR_SYS_SHOPIFY_RETURN_REFS"
             preserveWindowInstants="N"
             filterParameterName="sourceFilters"
-            keepFieldsBase="refundOrReturnId,refundOrReturnType,orderId,createdAt,orderCancelledAt,refundLineEverFulfilled,returnStatus"
+            keepFieldsBase="refundOrReturnId,refundOrReturnType,orderId,createdAt,orderCancelledAt,refundLineEverFulfilled,returnWorkflowStatus"
             lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyRefundOrReturnIds"
             lookupIdsParameterName="refundOrReturnIds"
             lookupMaxIds="10000"
@@ -339,14 +362,18 @@ the row is absent, but the connector row it needs would still be missing.
                 return's own creation date — a refund row carries the refund's createdAt, a return row
                 carries the return's — never the order's creation date. Windowing filters on this field, not
                 on any order-level date."/>
-    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].returnStatus"
-            label="Return status" fieldType="string" sequenceNum="5"
-            description="ADDED 2026-08-27. Shopify ReturnStatus — REQUESTED, OPEN, CLOSED, DECLINED,
-                CANCELED. Present on RETURN rows only: a REFUND row has no return status, so a rule on
-                this field can never match one. Because a refunded return is represented by its
-                refund's row alone, this field only ever describes an UNREFUNDED return — excluding
-                OPEN excludes unrefunded OPEN returns. Exclude REQUESTED,OPEN to drop in-progress
-                returns that have no OMS counterpart yet."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].returnWorkflowStatus"
+            label="Return workflow status" fieldType="string" sequenceNum="5"
+            description="ADDED 2026-08-27, RENAMED the same day from returnStatus. Holds a Shopify
+                ReturnStatus: REQUESTED, OPEN, CLOSED, DECLINED, CANCELED. It is NOT Shopify's
+                Order.returnStatus, a different field holding an OrderReturnStatus (IN_PROGRESS,
+                INSPECTION_COMPLETE, NO_RETURN, RETURN_FAILED, RETURN_REQUESTED, RETURNED) that
+                aggregates a whole order for display; under the old name an operator excluded on
+                IN_PROGRESS and matched nothing. Present on RETURN rows only: a REFUND row has no
+                return status, so a rule on this field can never match one. Because a refunded return
+                is represented by its refund's row alone, this field only ever describes an UNREFUNDED
+                return — excluding OPEN excludes unrefunded OPEN returns. Exclude REQUESTED,OPEN to
+                drop in-progress returns that have no OMS counterpart yet."/>
 
     <!-- One-time data migration registry. No DarpanMigrationPrereq rows exist yet; when they do,
          they must follow every DarpanMigration row. -->

@@ -246,11 +246,43 @@ class SourceSystemConnectorSupportSmokeTests {
     }
 
     @Test
-    void theBoardOffersAReturnStatusPillForShopifyReturnRefs() {
+    void theBoardOffersAReturnWorkflowStatusPillForShopifyReturnRefs() {
+        // RENAMED 2026-08-27, hours after it first shipped, because the old name collided with a real
+        // Shopify field that carries DIFFERENT values. Order.returnStatus is an OrderReturnStatus
+        // (IN_PROGRESS, INSPECTION_COMPLETE, NO_RETURN, RETURN_FAILED, RETURN_REQUESTED, RETURNED);
+        // this pill selects Return.status, a ReturnStatus (REQUESTED, OPEN, CLOSED, DECLINED,
+        // CANCELED). An operator on prod read Shopify's docs for the aggregate, excluded on
+        // IN_PROGRESS and dropped nothing — and because a rule matching nothing reports
+        // excludedCount 0, it was indistinguishable from an undeployed feature.
         ReconciliationSmokeTestSupport.loadSeedData(ec,
                 "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
-        assertTrue(pillPaths("SHOPIFY_RETURN_REFS").contains('$.records[*].returnStatus'),
-                "returnStatus must be offerable as an exclusion pill: ${pillPaths("SHOPIFY_RETURN_REFS")}")
+        assertTrue(pillPaths("SHOPIFY_RETURN_REFS").contains('$.records[*].returnWorkflowStatus'),
+                "returnWorkflowStatus must be offerable as an exclusion pill: ${pillPaths("SHOPIFY_RETURN_REFS")}")
+        assertFalse(pillPaths("SHOPIFY_RETURN_REFS").contains('$.records[*].returnStatus'),
+                "the colliding name must not still be on offer: ${pillPaths("SHOPIFY_RETURN_REFS")}")
+    }
+
+    @Test
+    void theRenamedReturnStatusPillIsDeclaredRetiredSoLoadedDatabasesLoseIt() {
+        // A rename is a retirement plus a new row as far as a createOrUpdate seed load is concerned:
+        // the old PK survives in every database that already loaded it, and the board would offer
+        // BOTH names — one of which no longer exists on the extract, so a rule on it silently matches
+        // nothing forever. This endpoint's eventId/eventType rename set the precedent.
+        assertTrue(SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS.any { Map<String, String> row ->
+            row.systemEnumId == "SHOPIFY_RETURN_REFS" && row.fieldPath == '$.records[*].returnStatus'
+        }, "the old returnStatus pill must be declared retired: ${SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS}")
+    }
+
+    @Test
+    void theShopifyReturnRefsKeepFieldsBaseNamesTheRenamedField() {
+        // keepFieldsBase is documentation-only on this row (the service declares no keep-fields
+        // parameter), but it is what a reader consults for the record shape — leaving the old name
+        // would re-teach exactly the mistake the rename fixes.
+        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY_RETURN_REFS")
+        assertNotNull(connector, "SHOPIFY_RETURN_REFS connector row should resolve")
+        List<String> keepFields = ((String) connector.keepFieldsBase).split(",").collect { it.trim() }
+        assertTrue(keepFields.contains("returnWorkflowStatus"), "keepFieldsBase should name the new key: ${keepFields}")
+        assertFalse(keepFields.contains("returnStatus"), "keepFieldsBase should drop the old key: ${keepFields}")
     }
 
     @Test
@@ -588,7 +620,7 @@ class SourceSystemConnectorSupportSmokeTests {
         // 4, not 2: the 2026-08-17 returns-refund-grain-alignment plan's Task 2 (REVISION 2026-08-18)
         // widened the seeded set for this endpoint from {orderId, createdAt} to the four-field EVENT
         // shape {refundOrReturnId, refundOrReturnType, orderId, createdAt}.
-        // 5, not 4: returnStatus was seeded 2026-08-27 for return-status exclusion. The COUNT is
+        // 5, not 4: returnWorkflowStatus was seeded 2026-08-27 for return-status exclusion. The COUNT is
         // incidental to what this test guards — that the retirement swept only the withdrawn row —
         // so it tracks the seed file and is expected to move whenever a pill is legitimately added.
         assertEquals(5L, ec.entity.find("darpan.reconciliation.SourceSystemConnectorField")

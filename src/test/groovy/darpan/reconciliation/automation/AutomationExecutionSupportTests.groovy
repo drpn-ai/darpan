@@ -2907,9 +2907,9 @@ class AutomationExecutionSupportTests {
                 automationId   : "AUTO_API",
                 fileSide       : "FILE_1",
                 sequenceNum    : 2,
-                fieldExpression: "returnStatus",
+                fieldExpression: "returnWorkflowStatus",
                 operator       : "EXCLUDE_IN",
-                filterValues   : "RETURNED",
+                filterValues   : "CLOSED",
         ])
         ec.entity.add("darpan.reconciliation.ReconciliationAutomationSourceFilter", [
                 automationId   : "AUTO_API",
@@ -2924,7 +2924,7 @@ class AutomationExecutionSupportTests {
 
         assertEquals([1, 2], filters*.sequenceNum)
         assertEquals("salesChannelEnumId", filters[0].fieldExpression)
-        assertEquals("returnStatus", filters[1].fieldExpression)
+        assertEquals("returnWorkflowStatus", filters[1].fieldExpression)
     }
 
     @Test

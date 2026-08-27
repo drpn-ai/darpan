@@ -48,6 +48,13 @@ class SourceSystemConnectorFieldWriteSupport {
                      "rules board, the run summary's Primary ID card and the diff columns"],
             [systemEnumId: "SHOPIFY_RETURN_REFS", fieldPath: "\$.records[*].eventType",
              reason: "renamed 2026-08-18 to \$.records[*].refundOrReturnType — same rename as eventId"],
+            [systemEnumId: "SHOPIFY_RETURN_REFS", fieldPath: "\$.records[*].returnStatus",
+             reason: "renamed 2026-08-27 to \$.records[*].returnWorkflowStatus, hours after it shipped: " +
+                     "Shopify's OWN Order.returnStatus is a different field holding a different enum " +
+                     "(OrderReturnStatus — IN_PROGRESS, INSPECTION_COMPLETE, NO_RETURN, RETURN_FAILED, " +
+                     "RETURN_REQUESTED, RETURNED), while this pill selects Return.status (ReturnStatus — " +
+                     "REQUESTED, OPEN, CLOSED, DECLINED, CANCELED). An operator on prod read the docs " +
+                     "the old name pointed at, excluded on IN_PROGRESS, and dropped nothing"],
     ].asImmutable()
 
     /**

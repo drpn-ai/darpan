@@ -1,10 +1,13 @@
 package darpan.facade.reconciliation
 
+import groovy.json.JsonSlurper
+
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 
 import static darpan.common.ValueSupport.hasField
 import static darpan.common.ValueSupport.readField
 import static darpan.common.ValueSupport.normalize
+import static darpan.common.ValueSupport.normalizeBlankToNull
 import static darpan.common.ValueSupport.readOptionalString
 
 /**
@@ -126,7 +129,8 @@ class RunVerificationSupport {
      * service in this slot declares it for that reason — a scheduled run has no user-derived tenant,
      * and omitting it is what broke the 2026-07-31 scheduled automations.</p>
      */
-    static Closure buildVerificationLookup(def ec, Object source, String runOwnerUserGroupId, Closure dispatcher) {
+    static Closure buildVerificationLookup(def ec, Object source, String runOwnerUserGroupId, Closure dispatcher,
+                                          Map<String, Object> runConfigDefaults = null) {
         if (source == null || dispatcher == null) return null
         Map<String, Object> connector = resolveConnector(ec, source)
         String lookupServiceName = connector == null ? null : normalize(connector.lookupServiceName)
@@ -140,7 +144,7 @@ class RunVerificationSupport {
         // the scheduled path at all; without it verification ran, found no config, and silently
         // rechecked nothing.
         String configParameterName = normalize(connector.configParameterName) ?: "sourceConfigId"
-        String configId = readOptionalString(source, "sourceConfigId") ?: readOptionalString(source, configParameterName)
+        String configId = resolveSourceConfigId(source, connector, runConfigDefaults)
         if (configId == null) return null
         // Blank means the canonical order lookups' "orderIds". The returns pair rechecks refund/return
         // ids, which must not be sent under an order-id name — Moqui would silently drop the parameter.
@@ -148,6 +152,347 @@ class RunVerificationSupport {
         return { List<String> ids ->
             dispatcher.call(lookupServiceName, [(configParameterName): configId, (idsParameterName): ids,
                                                 companyUserGroupId   : runOwnerUserGroupId])
+        }
+    }
+
+    /**
+     * The config id backing a run source, across BOTH run shapes.
+     *
+     * <p>A saved run passes a Map carrying a generic {@code sourceConfigId}. A scheduled run passes a
+     * {@code ReconciliationAutomationSource} row, which has no such column — and for the API/SFTP
+     * connectors (OMS, Shopify) has no config column at all. Those keep the id in
+     * {@code safeMetadataJson.parameters} under the connector's own parameter name, which
+     * {@code AutomationExecutionSupport.resolveSourceExtractorMetadata} states outright: they
+     * <em>"store the config id in safeMetadataJson.parameters, never as a column on the source row"</em>.
+     * Only a connector whose {@code configParameterName} names a real column (DATABASE →
+     * {@code databaseSourceQueryId}) is readable directly.</p>
+     *
+     * <p><b>Reading only the two column shapes is what made verification inert on the scheduled path
+     * (2026-08-27).</b> It returned null for every OMS/Shopify automation, so no lookup was built, no
+     * side was rechecked, and {@code verifyMissingDiffsIfEnabled} returned false without opening a
+     * VERIFY step — indistinguishable from the pass being switched off. The smoke fixture that
+     * covered it was a hand-built Map with a {@code sourceConfigId} key, a shape the scheduled path
+     * never produces, so the suite stayed green throughout.</p>
+     *
+     * <p>Returns null when no id is declared anywhere on the source; the caller decides whether a
+     * tenant-wide default applies (the scheduled path resolves one, the same as it does for extraction).</p>
+     */
+    static String resolveSourceConfigId(Object source, Map<String, Object> connector,
+                                        Map<String, Object> runConfigDefaults = null) {
+        if (source == null) return null
+        String configParameterName = normalize(connector?.get("configParameterName")) ?: "sourceConfigId"
+        String columnValue = readOptionalString(source, "sourceConfigId") ?:
+                readOptionalString(source, configParameterName)
+        if (columnValue) return columnValue
+        Object parameters = parseJsonMap(readOptionalString(source, "safeMetadataJson")).get("parameters")
+        String declared = parameters instanceof Map ?
+                normalizeBlankToNull(((Map) parameters).get(configParameterName)) : null
+        if (declared) return declared
+        // Last link in the SAME chain resolveSourceExtractorMetadata walks, and in the same order:
+        // row column -> the source's own metadata -> the run's resolved defaults. The scheduled path
+        // computes those defaults once per execution (resolveSourceExtractorConfigDefaults, which
+        // ends at the tenant's single active config), so a source that extracted fine with no id of
+        // its own now verifies with the same id it extracted with. Null for the interactive path,
+        // whose sources always carry their own.
+        return normalizeBlankToNull(runConfigDefaults?.get(configParameterName))
+    }
+
+    /**
+     * Resolve a run's file location to a real File, or null.
+     *
+     * <p>Lifted from {@code runSavedRunDiff.groovy}'s {@code resolveLocationFile} closure. The
+     * try/catch is the one addition: a scheduled run's extract location may be a data-manager
+     * relative path that {@code getLocationReference} rejects outright, and every caller here treats
+     * null as "this optional input is unavailable" and degrades a rule rather than failing a run.</p>
+     */
+    static File resolveLocationFile(def ec, String location) {
+        String value = normalize(location)
+        if (!value) return null
+        if (value.startsWith("/")) return new File(value)
+        try {
+            return ec?.resource?.getLocationReference(value)?.getFile()
+        } catch (Throwable ignored) {
+            return null
+        }
+    }
+
+    /**
+     * The OMS order-state lookup behind cancellation-refund suppression, or null when this run
+     * cannot do it.
+     *
+     * <p>The OMS API is what gets called, so the connector, the config id and the tenant all come
+     * from the OMS side even though every row being suppressed is a Shopify event. Same {@code
+     * lookup#*} shape fence the other verification slots use, and the same shape-tolerant config
+     * resolution — {@code runSavedRunDiff}'s own {@code buildFencedLookup} reads
+     * {@code source?.sourceConfigId} directly, which on a {@code ReconciliationAutomationSource}
+     * row raises an EntityException rather than answering null.</p>
+     */
+    static Closure buildCancelledOrderLookup(def ec, Object omsSource, Map<String, Object> connector,
+                                             String runOwnerUserGroupId, Closure dispatcher,
+                                             Map<String, Object> runConfigDefaults = null) {
+        if (omsSource == null || connector == null || dispatcher == null) return null
+        String serviceName = normalize(connector.get("orderStateLookupServiceName"))
+        if (serviceName == null) return null
+        if (!SourceSystemConnectorSupport.isAllowedLookupServiceShape(serviceName)) return null
+        String configId = resolveSourceConfigId(omsSource, connector, runConfigDefaults)
+        if (configId == null) return null
+        String configParameterName = normalize(connector.get("configParameterName")) ?: "sourceConfigId"
+        return { List<String> ids ->
+            Map out = (Map) dispatcher.call(serviceName, [(configParameterName): configId,
+                                                          externalIds       : ids,
+                                                          companyUserGroupId: runOwnerUserGroupId])
+            return [ok: out?.get("ok"), ordersByExternalId: out?.get("ordersByExternalId") ?: [:],
+                    errors: out?.get("errors") ?: []]
+        }
+    }
+
+    /**
+     * Resolve the return-presence pass for a run, or null when this run is not a returns pair.
+     *
+     * <p>args: {@code ec}, {@code diffFile}, {@code sides} (each {@code [source, extractResult, label]}),
+     * {@code file1Label}, {@code file2Label}, {@code windowStartMillis}, {@code runOwnerUserGroupId},
+     * {@code dispatcher}, {@code runConfigDefaults}.</p>
+     *
+     * <p>Returns {@code [omsLabel, shopifyLabel, run]}, where {@code run} is a no-arg closure that
+     * executes the pass and returns its verification map. Split that way so the STAGE_VERIFY step
+     * opens only once the caller knows the pass applies — a run that is not a returns pair must leave
+     * no VERIFY row claiming it was checked — while every resolution decision stays here, shared.</p>
+     */
+    static Map prepareReturnPresencePass(Map args) {
+        def ec = args?.get("ec")
+        File diffFile = (File) args?.get("diffFile")
+        if (ec == null || diffFile == null || !diffFile.isFile()) return null
+
+        List sides = (args.get("sides") ?: []) as List
+        Map omsSide = (Map) sides.find { Map side ->
+            normalize(resolveConnector(ec, side?.get("source"))?.systemEnumId) ==
+                    ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS
+        }
+        Map shopifySide = (Map) sides.find { Map side ->
+            normalize(resolveConnector(ec, side?.get("source"))?.systemEnumId) ==
+                    ReconciliationSavedRunSupport.SYSTEM_SHOPIFY_RETURN_REFS
+        }
+        if (omsSide == null || shopifySide == null) return null
+
+        Map<String, Object> omsConnector = resolveConnector(ec, omsSide.get("source"))
+        Map<String, Object> runConfigDefaults = args.get("runConfigDefaults") instanceof Map ?
+                (Map<String, Object>) args.get("runConfigDefaults") : null
+        // OMS extract for the superseded-sibling rule. Null (no location, or an unreadable file)
+        // disables that one rule; the set comes back empty and nothing is suppressed by it.
+        File omsExtractFile = resolveLocationFile(ec,
+                normalize((omsSide.get("extractResult") as Map)?.get("fileLocation")))
+        Closure cancelledOrderLookup = buildCancelledOrderLookup(ec, omsSide.get("source"), omsConnector,
+                normalize(args.get("runOwnerUserGroupId")), (Closure) args.get("dispatcher"), runConfigDefaults)
+
+        String omsLabel = normalize(omsSide.get("label"))
+        String shopifyLabel = normalize(shopifySide.get("label"))
+        return [omsLabel    : omsLabel,
+                shopifyLabel: shopifyLabel,
+                run         : {
+                    return ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
+                            diffFile            : diffFile,
+                            file1Label          : normalize(args.get("file1Label")),
+                            file2Label          : normalize(args.get("file2Label")),
+                            omsSideLabel        : omsLabel,
+                            shopifySideLabel    : shopifyLabel,
+                            nowMillis           : System.currentTimeMillis(),
+                            windowStartMillis   : args.get("windowStartMillis"),
+                            omsExtractFile      : omsExtractFile,
+                            cancelledOrderLookup: cancelledOrderLookup,
+                    ])
+                }] as Map
+    }
+
+    /**
+     * Resolve the exchange-pair pass for a run, or null when it does not apply.
+     *
+     * <p>args: {@code ec}, {@code diffFile}, {@code sides} (each {@code [source, extractResult, label,
+     * fileSide]}), {@code windowStartMillis}, {@code windowEndMillis}, {@code runOwnerUserGroupId},
+     * {@code dispatcher}, {@code runConfigDefaults}.</p>
+     *
+     * <p>Sides are identified by capability, not by system id: the OMS side is whichever declares a
+     * {@code pairLookupServiceName}, the Shopify side whichever declares an
+     * {@code exchangeSweepServiceName}. Presence semantics need a window — exchanges are enumerated
+     * from Shopify by return date — so a run without one resolves to null rather than sweeping an
+     * unbounded range.</p>
+     *
+     * <p>Returns {@code [omsLabel, shopifyLabel, omsFileSide, run]}, the same prepare/run split
+     * {@link #prepareReturnPresencePass} uses so the caller opens STAGE_VERIFY only once it knows the
+     * pass applies.</p>
+     */
+    static Map prepareExchangePairPass(Map args) {
+        def ec = args?.get("ec")
+        File diffFile = (File) args?.get("diffFile")
+        if (ec == null || diffFile == null || !diffFile.isFile()) return null
+        Long windowStartMillis = longOrNull(args.get("windowStartMillis"))
+        Long windowEndMillis = longOrNull(args.get("windowEndMillis"))
+        if (windowStartMillis == null || windowEndMillis == null) return null
+
+        List sides = (args.get("sides") ?: []) as List
+        Map omsSide = null, shopifySide = null
+        Map<String, Object> omsConnector = null, shopifyConnector = null
+        for (Map side : sides) {
+            Map<String, Object> connector = resolveConnector(ec, side?.get("source"))
+            if (connector == null) continue
+            if (omsSide == null && normalize(connector.get("pairLookupServiceName"))) {
+                omsSide = side; omsConnector = connector
+            } else if (shopifySide == null && normalize(connector.get("exchangeSweepServiceName"))) {
+                shopifySide = side; shopifyConnector = connector
+            }
+        }
+        if (omsSide == null || shopifySide == null) return null
+
+        Map<String, Object> runConfigDefaults = args.get("runConfigDefaults") instanceof Map ?
+                (Map<String, Object>) args.get("runConfigDefaults") : null
+        String runOwnerUserGroupId = normalize(args.get("runOwnerUserGroupId"))
+        Closure dispatcher = (Closure) args.get("dispatcher")
+        if (dispatcher == null) return null
+
+        // The manifest sidecar is OPTIONAL context (fast matching): an OMS window with zero exchange
+        // orders writes none, and the presence check must still run — Shopify exchanges that were
+        // never imported are exactly what it exists to catch.
+        String omsFileLocation = normalize((omsSide.get("extractResult") as Map)?.get("fileLocation"))
+        File manifestFile = omsFileLocation == null ? null :
+                resolveLocationFile(ec, omsFileLocation.replaceAll(/(?i)\.json$/, "") + ".exchange-manifest.json")
+
+        Closure omsPairLookup = buildFencedSourceLookup(ec, omsSide.get("source"), omsConnector,
+                normalize(omsConnector.get("pairLookupServiceName")), "externalIds",
+                runOwnerUserGroupId, dispatcher, runConfigDefaults)
+        String sweepServiceName = normalize(shopifyConnector.get("exchangeSweepServiceName"))
+        String shopifyConfigId = resolveSourceConfigId(shopifySide.get("source"), shopifyConnector, runConfigDefaults)
+        String shopifyConfigParameterName = normalize(shopifyConnector.get("configParameterName")) ?: "sourceConfigId"
+        if (omsPairLookup == null || shopifyConfigId == null
+                || !SourceSystemConnectorSupport.isAllowedLookupServiceShape(sweepServiceName)) return null
+
+        String omsLabel = normalize(omsSide.get("label"))
+        String shopifyLabel = normalize(shopifySide.get("label"))
+        return [omsLabel    : omsLabel,
+                shopifyLabel: shopifyLabel,
+                omsFileSide : normalize(omsSide.get("fileSide")),
+                run         : {
+                    return ExchangePairVerificationSupport.verifyExchangePairs([
+                            manifestFile     : manifestFile,
+                            diffFile         : diffFile,
+                            nowMillis        : System.currentTimeMillis(),
+                            windowStartMillis: windowStartMillis,
+                            windowEndMillis  : windowEndMillis,
+                            omsSideLabel     : omsLabel,
+                            omsFileSide      : normalize(omsSide.get("fileSide")),
+                            shopifySweep     : { long sweepStartMillis, long sweepEndMillis ->
+                                Map out = (Map) dispatcher.call(sweepServiceName,
+                                        [(shopifyConfigParameterName): shopifyConfigId,
+                                         windowStartMillis           : sweepStartMillis,
+                                         windowEndMillis             : sweepEndMillis,
+                                         companyUserGroupId          : runOwnerUserGroupId])
+                                return [ok       : out?.get("ok"), exchanges: out?.get("exchanges") ?: [],
+                                        truncated: out?.get("truncated") == true, errors: out?.get("errors") ?: []]
+                            },
+                            omsPairLookup    : { List<String> ids ->
+                                Map out = (Map) omsPairLookup.call(ids)
+                                return [ok: out?.get("ok"), ordersByExternalId: out?.get("ordersByExternalId") ?: [:],
+                                        errors: out?.get("errors") ?: []]
+                            },
+                    ])
+                }] as Map
+    }
+
+    /**
+     * Fold a completed exchange-pair pass back into the compare's summary, in place.
+     *
+     * <p>This pass APPENDS rows the compare never found (Shopify exchanges absent from OMS), so every
+     * count moves UP — the mirror image of {@link #applyVerificationOutcome}. The appended rows are
+     * missing on the OMS side, so they land on that side's own missing count.</p>
+     */
+    static Map applyExchangeOutcome(Map serviceResult, Map verification, String omsFileSide) {
+        if (serviceResult == null) return serviceResult
+        Map result = verification ?: [:]
+        long appended = longValue(result.get("appendedCount"))
+        if (appended > 0L) {
+            serviceResult.put("differenceCount", longValue(serviceResult.get("differenceCount")) + appended)
+            String missingCountKey = "FILE_1" == omsFileSide ? "missingInFile1Count" : "missingInFile2Count"
+            serviceResult.put(missingCountKey, longValue(serviceResult.get(missingCountKey)) + appended)
+            if (serviceResult.get("missingObjectDifferenceCount") != null) {
+                serviceResult.put("missingObjectDifferenceCount",
+                        longValue(serviceResult.get("missingObjectDifferenceCount")) + appended)
+            }
+        }
+        List notes = []
+        if (result.get("auditNote")) notes.add(result.get("auditNote"))
+        notes.addAll((result.get("warnings") ?: []) as List)
+        if (notes) {
+            serviceResult.put("processingWarnings",
+                    ((serviceResult.get("processingWarnings") ?: []) as List) + notes)
+        }
+        return serviceResult
+    }
+
+    /** The STAGE_VERIFY metrics body for an exchange-pair pass, shared by both entry points. */
+    static Map<String, Object> exchangePairMetrics(Map verification, String omsLabel, String shopifyLabel) {
+        Map result = verification ?: [:]
+        return [verifiedSystems    : [omsLabel, shopifyLabel].findAll { it },
+                sweepExchangeCount : result.get("sweepExchangeCount") ?: 0,
+                matchedCount       : result.get("matchedCount") ?: 0,
+                missingCount       : longValue(result.get("appendedCount")),
+                inTransitCount     : result.get("inTransitCount") ?: 0,
+                pendingCount       : result.get("pendingCount") ?: 0,
+                deferredLookupCount: result.get("deferredLookupCount") ?: 0] as Map<String, Object>
+    }
+
+    /**
+     * A fenced, tenant-carrying lookup closure for an arbitrary connector-declared lookup slot.
+     *
+     * <p>Generalises {@code runSavedRunDiff}'s {@code buildFencedLookup}, with two corrections it did
+     * not have: shape-tolerant config resolution (its {@code source?.sourceConfigId} raises on an
+     * automation source row) and an explicit {@code companyUserGroupId}. The scheduler authenticates
+     * as anonymous {@code _NA_}, so a lookup that relies on the session's tenant resolves the wrong
+     * config or none at all.</p>
+     */
+    static Closure buildFencedSourceLookup(def ec, Object source, Map<String, Object> connector,
+                                           String serviceName, String idsParameterName,
+                                           String runOwnerUserGroupId, Closure dispatcher,
+                                           Map<String, Object> runConfigDefaults = null) {
+        if (source == null || connector == null || dispatcher == null) return null
+        String lookupServiceName = normalize(serviceName)
+        if (lookupServiceName == null) return null
+        if (!SourceSystemConnectorSupport.isAllowedLookupServiceShape(lookupServiceName)) return null
+        String configId = resolveSourceConfigId(source, connector, runConfigDefaults)
+        if (configId == null) return null
+        String configParameterName = normalize(connector.get("configParameterName")) ?: "sourceConfigId"
+        return { List<String> ids ->
+            return dispatcher.call(lookupServiceName, [(configParameterName): configId,
+                                                       (idsParameterName)   : ids,
+                                                       companyUserGroupId   : runOwnerUserGroupId])
+        }
+    }
+
+    private static Long longOrNull(Object raw) {
+        return raw instanceof Number ? ((Number) raw).longValue() : null
+    }
+
+    /**
+     * The STAGE_VERIFY metrics body for a return-presence pass. Shared so the two entry points cannot
+     * publish differently-shaped timeline metrics for the same pass — several passes share the stage
+     * code and are told apart only by what they record here.
+     */
+    static Map<String, Object> returnPresenceMetrics(Map verification, String omsLabel, String shopifyLabel) {
+        Map result = verification ?: [:]
+        return [verifiedSystems               : [omsLabel, shopifyLabel].findAll { it },
+                performed                     : result.get("performed") == true,
+                pendingCount                  : result.get("pendingCount") ?: 0,
+                preWindowSuppressedCount      : result.get("preWindowSuppressedCount") ?: 0,
+                cancelledRefundSuppressedCount: result.get("cancelledRefundSuppressedCount") ?: 0,
+                siblingReturnSuppressedCount  : result.get("siblingReturnSuppressedCount") ?: 0,
+                removedCount                  : result.get("removedCount") ?: 0] as Map<String, Object>
+    }
+
+    /** Lenient JSON-object read: an absent, blank or malformed document is an empty map, never a throw. */
+    private static Map<String, Object> parseJsonMap(String rawJson) {
+        if (!rawJson) return [:]
+        try {
+            Object parsed = new JsonSlurper().parseText(rawJson)
+            return parsed instanceof Map ? (Map<String, Object>) parsed : [:]
+        } catch (Exception ignored) {
+            return [:]
         }
     }
 

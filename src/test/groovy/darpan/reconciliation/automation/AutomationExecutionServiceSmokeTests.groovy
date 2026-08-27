@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -53,6 +54,10 @@ class AutomationExecutionServiceSmokeTests {
         // same reason. The existing tests here inject their extractor via setSourceExtractor and are
         // unaffected by the registry being populated.
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorSeedData.xml")
+        // The returns fixtures below key on the OMS_RETURNS / SHOPIFY_RETURN_REFS systems, and
+        // ReconciliationAutomationSource.systemEnumId is FK-checked against Enumeration -- without
+        // these rows the source create fails on referential integrity before any assertion runs.
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/DarpanSystemSourceSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompareScopeFixtures(ec)
         // Task 8 filter fixtures save real automations through save#Automation, which needs a source
         // type simple enough to pass validateSources without extra wiring. AUT_SRC_DB looks simplest
@@ -554,6 +559,70 @@ class AutomationExecutionServiceSmokeTests {
         ])
     }
 
+    /**
+     * A returns automation with the two connectors the returns passes key on, seeded the way a real
+     * one is: the API config id lives in safeMetadataJson.parameters, never as a column.
+     * configIdsBySide maps a file side to its config id; omit a side to leave it with none.
+     */
+    private void seedReturnsAutomation(String automationId, Map<String, String> configIdsBySide) {
+        seedSourcePair(automationId,
+                [(AutomationExecutionSupport.FILE_SIDE_1): ["SHOPIFY_RETURN_REFS", "shopifyAuthConfigId"],
+                 (AutomationExecutionSupport.FILE_SIDE_2): ["OMS_RETURNS", "omsRestSourceConfigId"]],
+                configIdsBySide)
+    }
+
+    /** The same fixture for the orders connectors, which are the pair the exchange passes key on. */
+    private void seedExchangeAutomation(String automationId, Map<String, String> configIdsBySide) {
+        seedSourcePair(automationId,
+                [(AutomationExecutionSupport.FILE_SIDE_1): ["SHOPIFY", "shopifyAuthConfigId"],
+                 (AutomationExecutionSupport.FILE_SIDE_2): ["OMS", "omsRestSourceConfigId"]],
+                configIdsBySide)
+    }
+
+    private void seedSourcePair(String automationId, Map<String, List<String>> specBySide,
+                                Map<String, String> configIdsBySide) {
+        upsertEntityValue("darpan.reconciliation.ReconciliationAutomation",
+                [automationId: automationId], [
+                automationId            : automationId,
+                automationName          : "Returns Verification Smoke",
+                companyUserGroupId      : TEST_COMPANY_USER_GROUP_ID,
+                createdByUserId         : TEST_USER_ID,
+                inputModeEnumId         : AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE,
+                savedRunId              : "DARPAN_TEST_COMPARE_RS",
+                savedRunType            : "ruleset",
+                ruleSetId               : "DARPAN_TEST_COMPARE_RS",
+                compareScopeId          : "DARPAN_TEST_ORDER_JSON_SCOPE",
+                relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
+                relativeWindowCount     : 1,
+                windowTimeZone          : "UTC",
+                isActive                : "Y",
+                createdDate             : ec.user.nowTimestamp,
+                lastUpdatedDate         : ec.user.nowTimestamp,
+        ])
+        specBySide.each { side, spec ->
+            String configId = configIdsBySide?.get(side)
+            upsertEntityValue("darpan.reconciliation.ReconciliationAutomationSource",
+                    [automationId: automationId, fileSide: side], [
+                    automationId      : automationId,
+                    fileSide          : side,
+                    companyUserGroupId: TEST_COMPANY_USER_GROUP_ID,
+                    createdByUserId   : TEST_USER_ID,
+                    sourceTypeEnumId  : AutomationExecutionSupport.AUTOMATION_SOURCE_API,
+                    systemEnumId      : spec[0],
+                    fileTypeEnumId    : "DftJson",
+                    // Exactly where the API connectors keep it, and nowhere else.
+                    safeMetadataJson  : configId ? JsonOutput.toJson([parameters: [(spec[1]): configId]]) : null,
+                    createdDate       : ec.user.nowTimestamp,
+                    lastUpdatedDate   : ec.user.nowTimestamp,
+            ])
+        }
+    }
+
+    /** The row as the runner sees it: loaded by loadAutomationSources, not hand-built. */
+    private def loadReturnsSource(String automationId, String fileSide) {
+        return AutomationRuntimeSupport.loadAutomationSources(ec, automationId)[fileSide]
+    }
+
     private void upsertEntityValue(String entityName, Map<String, Object> pkFields, Map<String, Object> fields) {
         def existing = ec.entity.find(entityName)
                 .condition(pkFields)
@@ -1048,6 +1117,278 @@ class AutomationExecutionServiceSmokeTests {
                 "the lookup must carry the RUN OWNER's tenant, never whatever the session happened to have")
         assertEquals(["27151073411"], call.params.externalIds,
                 "ids must go under the connector-declared lookupIdsParameterName, not a hardcoded orderIds")
+    }
+
+    @Test
+    void aScheduledSourceWithNoIdOfItsOwnFallsBackToTheRunsResolvedDefault() {
+        // The commonest real shape: nothing on the row, nothing in metadata. The extractor still
+        // runs, because resolveSourceExtractorConfigDefaults resolved the tenant's single active
+        // config once per execution. Verification has to consult the SAME value or it goes inert on
+        // exactly the automations whose extract worked fine.
+        seedReturnsAutomation("AUTO_RET_NO_ID", [:])
+        def source = loadReturnsSource("AUTO_RET_NO_ID", AutomationExecutionSupport.FILE_SIDE_2)
+
+        List<Map> dispatched = []
+        Closure stubDispatcher = { String serviceName, Map serviceParams ->
+            dispatched.add([service: serviceName, params: serviceParams])
+            return [:]
+        }
+
+        Closure lookup = RunVerificationSupport.buildVerificationLookup(
+                ec, source, TEST_COMPANY_USER_GROUP_ID, stubDispatcher,
+                [omsRestSourceConfigId: "TENANT_DEFAULT_CFG"] as Map<String, Object>)
+
+        assertNotNull(lookup, "a source with no id of its own must use the run's resolved config default")
+        lookup.call(["27151073411"])
+        assertEquals("TENANT_DEFAULT_CFG", dispatched.first().params.omsRestSourceConfigId,
+                "the fallback must travel under the connector-declared configParameterName")
+    }
+
+    @Test
+    void aSourcesOwnConfigIdBeatsTheRunsDefault() {
+        seedReturnsAutomation("AUTO_RET_PRECEDENCE", [(AutomationExecutionSupport.FILE_SIDE_2): "SOURCE_OWN_CFG"])
+        def source = loadReturnsSource("AUTO_RET_PRECEDENCE", AutomationExecutionSupport.FILE_SIDE_2)
+
+        List<Map> dispatched = []
+        Closure stubDispatcher = { String serviceName, Map serviceParams ->
+            dispatched.add([service: serviceName, params: serviceParams])
+            return [:]
+        }
+
+        RunVerificationSupport.buildVerificationLookup(ec, source, TEST_COMPANY_USER_GROUP_ID, stubDispatcher,
+                [omsRestSourceConfigId: "TENANT_DEFAULT_CFG"] as Map<String, Object>).call(["1"])
+
+        assertEquals("SOURCE_OWN_CFG", dispatched.first().params.omsRestSourceConfigId,
+                "same precedence the extractor uses: what the source declares wins over the tenant default")
+    }
+
+    @Test
+    void theScheduledPassRunsOnRealSourceRowsUsingTheRunsConfigDefaults() {
+        // End to end on the real shape: rows loaded the way the runner loads them, no config id
+        // anywhere on them, and the run's defaults supplied the way executeAutomation supplies them.
+        // Before the resolver fix this returned false and opened no VERIFY step at all.
+        seedReturnsAutomation("AUTO_RET_EXEC_DEFAULTS", [:])
+        File diffFile = writeMissingDiffDocument(["9001", "9002"])
+        String runId = RunObservability.beginRun(ec, [
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID, savedRunId: "DARPAN_TEST_COMPARE_RS"])
+        Map<String, Object> reconcileResult = [
+                differenceCount: 2L, missingInFile1Count: 0L, missingInFile2Count: 2L,
+                missingObjectDifferenceCount: 2L,
+                file1Label: "SHOPIFY", file2Label: "OMS",
+                diffLocation: diffFile.absolutePath,
+        ]
+        def automation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation")
+                .condition("automationId", "AUTO_RET_EXEC_DEFAULTS").disableAuthz().useCache(false).one()
+
+        boolean ran
+        try {
+            ran = AutomationExecutionSupport.verifyMissingDiffsIfEnabled(ec, automation,
+                    loadReturnsSource("AUTO_RET_EXEC_DEFAULTS", AutomationExecutionSupport.FILE_SIDE_1),
+                    loadReturnsSource("AUTO_RET_EXEC_DEFAULTS", AutomationExecutionSupport.FILE_SIDE_2),
+                    reconcileResult, runId, [:],
+                    [sourceExtractorConfigDefaults: [omsRestSourceConfigId: "TENANT_DEFAULT_CFG"]] as Map<String, Object>)
+        } finally {
+            diffFile.delete()
+        }
+
+        assertTrue(ran, "with real automation source rows and the run's config defaults, the pass must execute")
+        def verifyStep = ec.entity.find(RunObservability.RUN_STEP_ENTITY)
+                .condition("reconciliationRunResultId", runId)
+                .condition("stageCode", RunObservability.STAGE_VERIFY)
+                .disableAuthz().useCache(false).one()
+        assertNotNull(verifyStep, "the scheduled path must record its VERIFY stage on the real source shape too")
+    }
+
+    // --- pass parity: every verification pass the interactive path runs, the scheduled one runs too
+
+    @Test
+    void theReturnPresencePassRunsOnTheScheduledPath() {
+        // Third of the three verification passes, and the one that matters most for a returns
+        // automation: it carries the grace/window-edge gate and cancelled-order refund suppression.
+        // Interactive-only until now, so a scheduled RS_RETURNS run published counts an interactive
+        // rerun of the same window would have corrected.
+        seedReturnsAutomation("AUTO_RET_PRESENCE", [(AutomationExecutionSupport.FILE_SIDE_2): "SMOKE_OMS_RETURNS_CFG"])
+        File diffFile = writeMissingDiffDocument(["9001", "9002"])
+        String runId = RunObservability.beginRun(ec, [
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID, savedRunId: "DARPAN_TEST_COMPARE_RS"])
+        Map<String, Object> reconcileResult = [
+                differenceCount: 2L, missingInFile1Count: 0L, missingInFile2Count: 2L,
+                missingObjectDifferenceCount: 2L,
+                file1Label: "SHOPIFY", file2Label: "OMS",
+                diffLocation: diffFile.absolutePath,
+        ]
+        def automation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation")
+                .condition("automationId", "AUTO_RET_PRESENCE").disableAuthz().useCache(false).one()
+
+        boolean ran
+        try {
+            ran = AutomationExecutionSupport.verifyReturnPresenceIfEnabled(ec, automation,
+                    loadReturnsSource("AUTO_RET_PRESENCE", AutomationExecutionSupport.FILE_SIDE_1),
+                    loadReturnsSource("AUTO_RET_PRESENCE", AutomationExecutionSupport.FILE_SIDE_2),
+                    [fileLocation: null], [fileLocation: null],
+                    reconcileResult, runId, [:], null)
+        } finally {
+            diffFile.delete()
+        }
+
+        assertTrue(ran, "an OMS_RETURNS/SHOPIFY_RETURN_REFS pair must run the return-presence pass on the scheduled path")
+        def verifyStep = ec.entity.find(RunObservability.RUN_STEP_ENTITY)
+                .condition("reconciliationRunResultId", runId)
+                .condition("stageCode", RunObservability.STAGE_VERIFY)
+                .disableAuthz().useCache(false).one()
+        assertNotNull(verifyStep, "the pass must record its own VERIFY step, or it is invisible on the timeline")
+    }
+
+    @Test
+    void theScheduledNotifyStageIsVisibleOnTheTimeline() {
+        // Both paths notify, but only the interactive one opened a NOTIFY step. A scheduled run's
+        // alert was therefore invisible on the run timeline: "did it fire?" was unanswerable from
+        // the UI, which is the last stage-level difference between a triggered run and a manual one.
+        String runId = RunObservability.beginRun(ec, [
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID, savedRunId: "DARPAN_TEST_COMPARE_RS"])
+
+        AutomationExecutionSupport.notifyRunCompletedWithStage(ec, runId, [:], [
+                reconciliationRunResultId: runId,
+                runName                  : "Returns Verification Smoke",
+                companyUserGroupId       : TEST_COMPANY_USER_GROUP_ID,
+                differenceCount          : 2L,
+                statusEnumId             : "DAR_RUN_SUCCEEDED",
+        ] as Map<String, Object>)
+
+        def notifyStep = ec.entity.find(RunObservability.RUN_STEP_ENTITY)
+                .condition("reconciliationRunResultId", runId)
+                .condition("stageCode", RunObservability.STAGE_NOTIFY)
+                .disableAuthz().useCache(false).one()
+        assertNotNull(notifyStep, "a scheduled run must record its NOTIFY stage like the interactive one does")
+        assertNotEquals(RunObservability.STATUS_RUNNING, notifyStep.statusEnumId,
+                "the step must be closed, not left RUNNING for the stuck-run reaper to find")
+    }
+
+    @Test
+    void theExchangePairPassRunsOnTheScheduledPath() {
+        // Second of the three passes. The OMS orders connector declares pairLookupServiceName and the
+        // Shopify orders connector declares exchangeSweepServiceName, so an orders automation is
+        // exactly the pair this pass applies to -- and it never ran on a scheduled one.
+        seedExchangeAutomation("AUTO_EXCHANGE_PAIR",
+                [(AutomationExecutionSupport.FILE_SIDE_1): "SMOKE_SHOPIFY_CFG",
+                 (AutomationExecutionSupport.FILE_SIDE_2): "SMOKE_OMS_CFG"])
+        File diffFile = writeMissingDiffDocument(["9001"])
+        String runId = RunObservability.beginRun(ec, [
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID, savedRunId: "DARPAN_TEST_COMPARE_RS"])
+        Map<String, Object> reconcileResult = [
+                differenceCount: 1L, missingInFile1Count: 0L, missingInFile2Count: 1L,
+                file1Label: "SHOPIFY", file2Label: "OMS", diffLocation: diffFile.absolutePath,
+        ]
+        def automation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation")
+                .condition("automationId", "AUTO_EXCHANGE_PAIR").disableAuthz().useCache(false).one()
+        long now = 1756000000000L
+
+        boolean ran
+        try {
+            ran = AutomationExecutionSupport.verifyExchangePairsIfEnabled(ec, automation,
+                    loadReturnsSource("AUTO_EXCHANGE_PAIR", AutomationExecutionSupport.FILE_SIDE_1),
+                    loadReturnsSource("AUTO_EXCHANGE_PAIR", AutomationExecutionSupport.FILE_SIDE_2),
+                    [fileLocation: null], [fileLocation: null], reconcileResult, runId, [:],
+                    [childWindowStartDate: new Timestamp(now - 86_400_000L),
+                     childWindowEndDate  : new Timestamp(now)] as Map<String, Object>, null)
+        } finally {
+            diffFile.delete()
+        }
+
+        assertTrue(ran, "an OMS/SHOPIFY orders pair with a window must run the exchange pair pass here too")
+        assertNotNull(ec.entity.find(RunObservability.RUN_STEP_ENTITY)
+                .condition("reconciliationRunResultId", runId)
+                .condition("stageCode", RunObservability.STAGE_VERIFY)
+                .disableAuthz().useCache(false).one(),
+                "the exchange pass must record its own VERIFY step")
+    }
+
+    @Test
+    void theExchangePairPassIsSkippedWithoutAWindow() {
+        // Presence semantics need a window: exchanges are enumerated from Shopify by return date.
+        // A windowless run must skip rather than sweep an unbounded range.
+        seedExchangeAutomation("AUTO_EXCHANGE_NOWINDOW",
+                [(AutomationExecutionSupport.FILE_SIDE_1): "SMOKE_SHOPIFY_CFG",
+                 (AutomationExecutionSupport.FILE_SIDE_2): "SMOKE_OMS_CFG"])
+        File diffFile = writeMissingDiffDocument(["9001"])
+        String runId = RunObservability.beginRun(ec, [
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID, savedRunId: "DARPAN_TEST_COMPARE_RS"])
+        def automation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation")
+                .condition("automationId", "AUTO_EXCHANGE_NOWINDOW").disableAuthz().useCache(false).one()
+
+        boolean ran
+        try {
+            ran = AutomationExecutionSupport.verifyExchangePairsIfEnabled(ec, automation,
+                    loadReturnsSource("AUTO_EXCHANGE_NOWINDOW", AutomationExecutionSupport.FILE_SIDE_1),
+                    loadReturnsSource("AUTO_EXCHANGE_NOWINDOW", AutomationExecutionSupport.FILE_SIDE_2),
+                    [fileLocation: null], [fileLocation: null],
+                    [differenceCount: 1L, file1Label: "SHOPIFY", file2Label: "OMS",
+                     diffLocation: diffFile.absolutePath] as Map<String, Object>,
+                    runId, [:], null, null)
+        } finally {
+            diffFile.delete()
+        }
+
+        assertFalse(ran, "without a window the exchange pass must not run")
+        assertNull(ec.entity.find(RunObservability.RUN_STEP_ENTITY)
+                .condition("reconciliationRunResultId", runId)
+                .condition("stageCode", RunObservability.STAGE_VERIFY)
+                .disableAuthz().useCache(false).one(),
+                "a pass that did not apply must leave no VERIFY step behind")
+    }
+
+    @Test
+    void theReturnPresencePassIsSkippedWhenTheRunIsNotAReturnsPair() {
+        // AUTO_API_ARTIFACT is a SHOPIFY/OMS orders pair. Neither connector is a returns connector,
+        // so the pass must not run -- and must not leave a VERIFY step claiming it did.
+        String runId = RunObservability.beginRun(ec, [
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID, savedRunId: "DARPAN_TEST_COMPARE_RS"])
+        def automation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation")
+                .condition("automationId", "AUTO_API_ARTIFACT").disableAuthz().useCache(false).one()
+        Map<String, Object> sources = AutomationRuntimeSupport.loadAutomationSources(ec, "AUTO_API_ARTIFACT")
+
+        boolean ran = AutomationExecutionSupport.verifyReturnPresenceIfEnabled(ec, automation,
+                sources[AutomationExecutionSupport.FILE_SIDE_1], sources[AutomationExecutionSupport.FILE_SIDE_2],
+                [fileLocation: null], [fileLocation: null],
+                [differenceCount: 1L, file1Label: "SHOPIFY", file2Label: "OMS"] as Map<String, Object>,
+                runId, [:], null)
+
+        assertFalse(ran, "an orders pair has no returns connector on either side, so the pass must not run")
+        assertNull(ec.entity.find(RunObservability.RUN_STEP_ENTITY)
+                .condition("reconciliationRunResultId", runId)
+                .condition("stageCode", RunObservability.STAGE_VERIFY)
+                .disableAuthz().useCache(false).one(),
+                "a pass that did not apply must leave no VERIFY step behind")
+    }
+
+    // --- the REAL scheduled source shape, not a saved run's (2026-08-27) -------------------------
+    // omsReturnsSource() below is a hand-built Map carrying a `sourceConfigId` KEY. No automation
+    // source has ever had one: ReconciliationAutomationSource declares no such column, and
+    // resolveSourceExtractorMetadata says so outright -- the API connectors "store the config id in
+    // safeMetadataJson.parameters, never as a column on the source row". So that fixture proved the
+    // pass works on a shape the scheduled path never produces, while on the real one the lookup came
+    // back null and verification silently skipped every OMS/Shopify automation it was built for.
+    // These tests load rows through loadAutomationSources, the same call the runner makes.
+
+    @Test
+    void aRealScheduledSourceRowResolvesTheConfigIdFromItsOwnMetadata() {
+        seedReturnsAutomation("AUTO_RET_METADATA", [(AutomationExecutionSupport.FILE_SIDE_2): "SMOKE_OMS_RETURNS_CFG"])
+        def source = loadReturnsSource("AUTO_RET_METADATA", AutomationExecutionSupport.FILE_SIDE_2)
+
+        List<Map> dispatched = []
+        Closure stubDispatcher = { String serviceName, Map serviceParams ->
+            dispatched.add([service: serviceName, params: serviceParams])
+            return [:]
+        }
+
+        Closure lookup = RunVerificationSupport.buildVerificationLookup(
+                ec, source, TEST_COMPANY_USER_GROUP_ID, stubDispatcher)
+
+        assertNotNull(lookup, "a real ReconciliationAutomationSource row must resolve its config id, " +
+                "or verification silently does nothing on every scheduled OMS/Shopify run")
+        lookup.call(["27151073411"])
+        assertEquals("SMOKE_OMS_RETURNS_CFG", dispatched.first().params.omsRestSourceConfigId,
+                "the id must travel under the connector-declared configParameterName")
     }
 
     /** A source row shaped like the automation's own, pointing at the seeded OMS_RETURNS connector. */

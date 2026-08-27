@@ -3,12 +3,10 @@ import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
-import darpan.facade.reconciliation.ExchangePairVerificationSupport
 import darpan.facade.reconciliation.MissingDiffVerificationSupport
 import darpan.facade.reconciliation.ReconciliationApiWindowSupport
 import darpan.facade.reconciliation.ReconciliationOutputSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
-import darpan.facade.reconciliation.ReturnPresenceVerificationSupport
 import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.facade.reconciliation.RunObservability
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
@@ -161,13 +159,6 @@ def runInternalService = { String serviceName, Map params ->
 // Lifted from resolveOutputFile's primary resolution branch below (exact same location-string ->
 // File semantics) so the exchange verify pass can resolve the manifest sidecar location, which has
 // no serviceResult-style diffFileName fallback to search for.
-def resolveLocationFile = { String location ->
-    String locationValue = normalize(location)
-    if (!locationValue) return null
-    return locationValue.startsWith("/") ?
-            new File(locationValue) :
-            ec.resource.getLocationReference(locationValue)?.getFile()
-}
 def resolveOutputFile = { Map serviceResult ->
     File outputFile = null
     String diffLocationValue = normalize(serviceResult?.diffLocation)
@@ -479,76 +470,31 @@ def buildVerificationLookupCap = { Object source ->
 // exchange-manifest sidecar (excluded exchange orders). When one side's connector declares
 // pairLookupServiceName and the other declares exchangeStateLookupServiceName, each manifest
 // pair is point-checked against both sources of record. Best-effort like the missing-diff pass.
-def resolveConnectorFor = { Object source ->
-    return RunVerificationSupport.resolveConnector(ec, source)
-}
 
-def buildFencedLookup = { Map<String, Object> connector, String serviceName, Object source, String idsParameterName ->
-    if (connector == null || serviceName == null) return null
-    if (!SourceSystemConnectorSupport.isAllowedLookupServiceShape(serviceName)) return null
-    String configId = normalize(source?.sourceConfigId)
-    if (configId == null) return null
-    String configParameterName = normalize(connector.configParameterName) ?: "sourceConfigId"
-    return { List<String> ids -> runInternalService(serviceName, [(configParameterName): configId, (idsParameterName): ids]) }
-}
 
 def runExchangeVerificationPass = { Map serviceResult, Object file1Source, Object file2Source,
-                                    Map file1Result, Map file2Result, String file1Label, String file2Label ->
+                                    Map file1Result, Map file2Result, String file1Label, String file2Label,
+                                    String runOwnerUserGroupId ->
     if (serviceResult.ruleExecutionFailed == true) return
-    // Presence semantics need a window: exchanges are enumerated from Shopify by return date.
-    if (windowStartDate == null || windowEndDate == null) return
-    List sides = [[source: file1Source, extractResult: file1Result, fileSide: "FILE_1", label: file1Label],
-                  [source: file2Source, extractResult: file2Result, fileSide: "FILE_2", label: file2Label]]
-    def omsSide = null, shopifySide = null
-    Map omsConnector = null, shopifyConnector = null
-    for (Map side : sides) {
-        Map<String, Object> connector = resolveConnectorFor(side.source)
-        if (connector == null) continue
-        if (omsSide == null && normalize(connector.pairLookupServiceName)) { omsSide = side; omsConnector = connector }
-        else if (shopifySide == null && normalize(connector.exchangeSweepServiceName)) { shopifySide = side; shopifyConnector = connector }
-    }
-    if (omsSide == null || shopifySide == null) return
-
-    // The manifest sidecar is OPTIONAL context (fast matching): an OMS window with zero exchange
-    // orders writes none, and the presence check must still run — Shopify exchanges that were never
-    // imported are exactly what it exists to catch.
-    File manifestFile = null
-    String omsFileLocation = normalize(omsSide.extractResult?.fileLocation)
-    if (omsFileLocation != null) {
-        manifestFile = resolveLocationFile(omsFileLocation.replaceAll(/(?i)\.json$/, "") + ".exchange-manifest.json")
-    }
-    File diffFile = resolveOutputFile(serviceResult)
-    if (diffFile == null || !diffFile.isFile()) return
-
-    Closure omsPairLookupService = (Closure) buildFencedLookup(omsConnector,
-            normalize(omsConnector.pairLookupServiceName), omsSide.source, "externalIds")
-    String sweepServiceName = normalize(shopifyConnector.exchangeSweepServiceName)
-    String shopifyConfigId = normalize(shopifySide.source?.sourceConfigId)
-    String shopifyConfigParameterName = normalize(shopifyConnector.configParameterName) ?: "sourceConfigId"
-    if (omsPairLookupService == null || shopifyConfigId == null
-            || !SourceSystemConnectorSupport.isAllowedLookupServiceShape(sweepServiceName)) return
+    // Side identification (by declared capability, not system id), the manifest sidecar, the fenced
+    // OMS pair lookup and the Shopify sweep all live in RunVerificationSupport now, shared with the
+    // scheduled path. The window guard lives there too: presence semantics need one.
+    Map prepared = RunVerificationSupport.prepareExchangePairPass([
+            ec                 : ec,
+            diffFile           : resolveOutputFile(serviceResult),
+            sides              : [[source: file1Source, extractResult: file1Result, label: file1Label, fileSide: "FILE_1"],
+                                  [source: file2Source, extractResult: file2Result, label: file2Label, fileSide: "FILE_2"]],
+            windowStartMillis  : windowStartDate?.time,
+            windowEndMillis    : windowEndDate?.time,
+            runOwnerUserGroupId: runOwnerUserGroupId,
+            dispatcher         : { String serviceName, Map serviceParams -> runInternalService(serviceName, serviceParams) },
+    ])
+    if (prepared == null) return
 
     def exchangeStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_VERIFY) : null
     Map verification
     try {
-        verification = ExchangePairVerificationSupport.verifyExchangePairs([
-                manifestFile     : manifestFile,
-                diffFile         : diffFile,
-                nowMillis        : System.currentTimeMillis(),
-                windowStartMillis: windowStartDate.time,
-                windowEndMillis  : windowEndDate.time,
-                omsSideLabel     : omsSide.label,
-                omsFileSide      : omsSide.fileSide,
-                shopifySweep     : { long sweepStartMillis, long sweepEndMillis ->
-                    Map out = (Map) runInternalService(sweepServiceName, [(shopifyConfigParameterName): shopifyConfigId,
-                            windowStartMillis: sweepStartMillis, windowEndMillis: sweepEndMillis])
-                    [ok: out?.ok, exchanges: out?.exchanges ?: [], truncated: out?.truncated == true, errors: out?.errors ?: []]
-                },
-                omsPairLookup    : { List<String> ids ->
-                    Map out = (Map) omsPairLookupService.call(ids)
-                    [ok: out?.ok, ordersByExternalId: out?.ordersByExternalId ?: [:], errors: out?.errors ?: []]
-                },
-        ])
+        verification = (Map) ((Closure) prepared.run).call()
     } catch (Throwable t) {
         verification = [performed: true, appendedCount: 0, lookupFailed: true, sweepExchangeCount: 0,
                 warnings: ["Exchange presence check failed: ${normalize(t.message) ?: t.class.simpleName}".toString()], auditNote: null] as Map
@@ -558,27 +504,13 @@ def runExchangeVerificationPass = { Map serviceResult, Object file1Source, Objec
         verification.lookupFailed = true
         ec.message.clearErrors()
     }
-    long appended = ((verification.appendedCount ?: 0) as long)
-    if (appended > 0L) {
-        serviceResult.differenceCount = ((serviceResult.differenceCount ?: 0) as long) + appended
-        String missingCountKey = "FILE_1" == omsSide.fileSide ? "missingInFile1Count" : "missingInFile2Count"
-        serviceResult[missingCountKey] = ((serviceResult[missingCountKey] ?: 0) as long) + appended
-        if (serviceResult.missingObjectDifferenceCount != null) {
-            serviceResult.missingObjectDifferenceCount = (serviceResult.missingObjectDifferenceCount as long) + appended
-        }
-    }
-    List exchangeNotes = []
-    if (verification.auditNote) exchangeNotes.add(verification.auditNote)
-    exchangeNotes.addAll((verification.warnings ?: []) as List)
-    if (exchangeNotes) serviceResult.processingWarnings = ((serviceResult.processingWarnings ?: []) as List) + exchangeNotes
+    RunVerificationSupport.applyExchangeOutcome(serviceResult, verification, (String) prepared.omsFileSide)
     RunObservability.endStep(ec, exchangeStep,
             verification.lookupFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
             [recordCount : verification.sweepExchangeCount ?: 0,
              errorMessage: verification.lookupFailed && verification.warnings ? verification.warnings.first().toString() : null,
-             metricsJson : JsonOutput.toJson([verifiedSystems: [omsSide.label, shopifySide.label].findAll { it },
-                     sweepExchangeCount: verification.sweepExchangeCount ?: 0,
-                     matchedCount: verification.matchedCount ?: 0, missingCount: appended, inTransitCount: verification.inTransitCount ?: 0,
-                     pendingCount: verification.pendingCount ?: 0, deferredLookupCount: verification.deferredLookupCount ?: 0])])
+             metricsJson : JsonOutput.toJson(RunVerificationSupport.exchangePairMetrics(
+                     verification, (String) prepared.omsLabel, (String) prepared.shopifyLabel))])
 }
 
 def runVerificationPass = { Map serviceResult, Object file1Source, Object file2Source, String file1Label, String file2Label,
@@ -655,74 +587,35 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
                                           Map file1Result, Map file2Result,
                                           String file1Label, String file2Label, String runOwnerUserGroupId ->
     if (serviceResult.ruleExecutionFailed == true) return
-    List sides = [[source: file1Source, extractResult: file1Result, label: file1Label],
-                  [source: file2Source, extractResult: file2Result, label: file2Label]]
-    Map omsReturnsSide = sides.find { Map side ->
-        normalize(resolveConnectorFor(side.source)?.systemEnumId) == ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS
-    }
-    Map shopifyReturnsSide = sides.find { Map side ->
-        normalize(resolveConnectorFor(side.source)?.systemEnumId) == ReconciliationSavedRunSupport.SYSTEM_SHOPIFY_RETURN_REFS
-    }
-    if (omsReturnsSide == null || shopifyReturnsSide == null) return
+    // Side identification, the OMS extract sidecar and the cancelled-order lookup all live in
+    // RunVerificationSupport now, shared with the scheduled path. Keeping them here is what let the
+    // two entry points run different verification for the same run; the only things that stay local
+    // are this script's observability handles and its count fold.
+    Map prepared = RunVerificationSupport.prepareReturnPresencePass([
+            ec                 : ec,
+            diffFile           : resolveOutputFile(serviceResult),
+            sides              : [[source: file1Source, extractResult: file1Result, label: file1Label],
+                                  [source: file2Source, extractResult: file2Result, label: file2Label]],
+            file1Label         : file1Label,
+            file2Label         : file2Label,
+            // May be null for a saved run with no window (e.g. two static files) — the filter
+            // degrades to grace-only behaviour then.
+            windowStartMillis  : windowStartDate?.time,
+            runOwnerUserGroupId: runOwnerUserGroupId,
+            dispatcher         : { String serviceName, Map serviceParams -> runInternalService(serviceName, serviceParams) },
+    ])
+    if (prepared == null) return
 
-    File diffFile = resolveOutputFile(serviceResult)
-    if (diffFile == null || !diffFile.isFile()) return
-
-    String omsReturnsFileLocation = normalize(omsReturnsSide.extractResult?.fileLocation)
-    File omsReturnsExtractFile = omsReturnsFileLocation == null ? null : resolveLocationFile(omsReturnsFileLocation)
-
-    // Cancellation-refund suppression (2026-08-18): the OMS API is what gets called, so the connector
-    // and the config id both come from the OMS side — even though every row being suppressed is a
-    // Shopify event. buildFencedLookup applies the same lookup#* shape fence the other two verify
-    // stages use; here its return value is used as the FENCE VERDICT (null = no service declared,
-    // wrong service shape, or no config id) rather than as the closure actually dispatched.
-    Map<String, Object> omsConnector = resolveConnectorFor(omsReturnsSide.source)
-    String orderStateLookupServiceName = normalize(omsConnector?.orderStateLookupServiceName)
-    def orderStateFenceVerdict = buildFencedLookup(omsConnector, orderStateLookupServiceName,
-            omsReturnsSide.source, "externalIds")
-    // buildFencedLookup does not pass companyUserGroupId, so on its own it would fall back to the
-    // session's active tenant — and a scheduled run's session tenant is not guaranteed to be the run
-    // owner's (the 2026-07-31 scheduled-automation failure). Wrap it rather than changing the shared
-    // helper, which the exchange pair stage also uses. A null runOwnerUserGroupId is dropped by
-    // runInternalService's own null filtering, degrading to exactly the old session-tenant behaviour.
-    Closure cancelledOrderLookup = orderStateFenceVerdict == null ? null : { List<String> ids ->
-        Map out = (Map) runInternalService(orderStateLookupServiceName, [
-                (normalize(omsConnector.configParameterName) ?: "sourceConfigId"): normalize(omsReturnsSide.source?.sourceConfigId),
-                externalIds       : ids,
-                companyUserGroupId: runOwnerUserGroupId,
-        ])
-        [ok: out?.ok, ordersByExternalId: out?.ordersByExternalId ?: [:], errors: out?.errors ?: []]
-    }
-
+    long missingInFile1 = RunVerificationSupport.missingCount(serviceResult, "missingInFile1Count")
+    long missingInFile2 = RunVerificationSupport.missingCount(serviceResult, "missingInFile2Count")
     def returnsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_VERIFY) : null
     Map returnsVerification
     boolean checkFailed = false
     try {
-        returnsVerification = ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
-                diffFile         : diffFile,
-                file1Label       : file1Label,
-                file2Label       : file2Label,
-                omsSideLabel     : omsReturnsSide.label,
-                shopifySideLabel : shopifyReturnsSide.label,
-                nowMillis        : System.currentTimeMillis(),
-                // The run's reporting window start, so the filter can gate the missing-in-OMS
-                // direction against events the Shopify extractor only emitted because of its own
-                // lookback widening (RQ-23). windowStartDate is already resolved above (same variable
-                // runExchangeVerificationPass reads at :543) and may be null for a saved run with no
-                // window (e.g. two static files) — the filter degrades to grace-only behaviour then.
-                windowStartMillis: windowStartDate?.time,
-                // OMS extract for the superseded-sibling rule. Resolved the same way the exchange
-                // pass resolves its manifest sidecar. Null (no location, or an unreadable file) simply
-                // disables that one rule — the set comes back empty and nothing is suppressed.
-                omsExtractFile   : omsReturnsExtractFile,
-                // Null when the OMS_RETURNS connector declares no orderStateLookupServiceName, which
-                // disables cancellation-refund suppression without affecting grace/window grading.
-                cancelledOrderLookup: cancelledOrderLookup,
-        ])
+        returnsVerification = (Map) ((Closure) prepared.run).call()
     } catch (Throwable t) {
         checkFailed = true
-        returnsVerification = [performed: false, rewritten: false, pendingCount: 0, preWindowSuppressedCount: 0,
-                removedCount: 0, cancelledRefundSuppressedCount: 0, siblingReturnSuppressedCount: 0, auditNote: null,
+        returnsVerification = [performed: false, rewritten: false, removedCount: 0,
                 warnings: ["Return presence check failed: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map
     }
     if (ec.message.hasError()) {
@@ -730,35 +623,15 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
         ec.message.clearErrors()
     }
     // The filter REMOVES rows from the diff file it already found (grace/window suppression), the
-    // mirror image of the old append — so counts move DOWN here, exactly like runVerificationPass's
-    // own handling of MissingDiffVerificationSupport's rewritten/removedCount above.
-    if (returnsVerification.rewritten) {
-        long removed = ((returnsVerification.removedCount ?: 0) as long)
-        long removedMissingInFile1 = ((returnsVerification.removedMissingInFile1 ?: 0) as long)
-        long removedMissingInFile2 = ((returnsVerification.removedMissingInFile2 ?: 0) as long)
-        serviceResult.differenceCount = Math.max(0L, ((serviceResult.differenceCount ?: 0) as long) - removed)
-        serviceResult.missingInFile1Count = Math.max(0L, ((serviceResult.missingInFile1Count ?: 0) as long) - removedMissingInFile1)
-        serviceResult.missingInFile2Count = Math.max(0L, ((serviceResult.missingInFile2Count ?: 0) as long) - removedMissingInFile2)
-        if (serviceResult.missingObjectDifferenceCount != null) {
-            serviceResult.missingObjectDifferenceCount = Math.max(0L,
-                    (serviceResult.missingObjectDifferenceCount as long) - removed)
-        }
-    }
-    List returnsNotes = []
-    if (returnsVerification.auditNote) returnsNotes.add(returnsVerification.auditNote)
-    returnsNotes.addAll((returnsVerification.warnings ?: []) as List)
-    if (returnsNotes) serviceResult.processingWarnings = ((serviceResult.processingWarnings ?: []) as List) + returnsNotes
+    // mirror image of the old append — so counts move DOWN here, which is exactly what
+    // applyVerificationOutcome's clamped subtraction does for the missing-diff pass.
+    RunVerificationSupport.applyVerificationOutcome(serviceResult, returnsVerification, missingInFile1, missingInFile2)
     RunObservability.endStep(ec, returnsStep,
             checkFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
             [recordCount : (returnsVerification.removedCount ?: 0),
              errorMessage: checkFailed && returnsVerification.warnings ? returnsVerification.warnings.first().toString() : null,
-             metricsJson : JsonOutput.toJson([verifiedSystems: [omsReturnsSide.label, shopifyReturnsSide.label].findAll { it },
-                     performed: returnsVerification.performed == true,
-                     pendingCount: returnsVerification.pendingCount ?: 0,
-                     preWindowSuppressedCount: returnsVerification.preWindowSuppressedCount ?: 0,
-                     cancelledRefundSuppressedCount: returnsVerification.cancelledRefundSuppressedCount ?: 0,
-                     siblingReturnSuppressedCount: returnsVerification.siblingReturnSuppressedCount ?: 0,
-                     removedCount: returnsVerification.removedCount ?: 0])])
+             metricsJson : JsonOutput.toJson(RunVerificationSupport.returnPresenceMetrics(
+                     returnsVerification, (String) prepared.omsLabel, (String) prepared.shopifyLabel))])
 }
 
 try {
@@ -970,7 +843,8 @@ try {
                                     runVerificationPass(serviceResult, file1Source, file2Source, file1Label, file2Label,
                                             savedRun.companyUserGroupId as String)
                                     runExchangeVerificationPass(serviceResult, file1Source, file2Source,
-                                            (Map) file1Result, (Map) file2Result, file1Label, file2Label)
+                                            (Map) file1Result, (Map) file2Result, file1Label, file2Label,
+                                            savedRun.companyUserGroupId as String)
                                     runReturnPresenceVerificationPass(serviceResult, file1Source, file2Source,
                                             (Map) file1Result, (Map) file2Result,
                                             file1Label, file2Label, savedRun.companyUserGroupId as String)

@@ -13,6 +13,7 @@ import darpan.facade.reconciliation.RunObservability
 import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.reconciliation.core.ReconciliationServices
 import darpan.reconciliation.notification.TenantNotificationSupport
+import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import org.apache.spark.sql.Dataset
 import org.moqui.impl.service.ScheduledJobRunner
@@ -401,7 +402,13 @@ class AutomationExecutionSupport {
                 // BEFORE the result artifact is built or any count is persisted or notified.
                 // Runs by default; a no-op only if VERIFY_MISSING_DIFFS_PROPERTY is explicitly "false".
                 verifyMissingDiffsIfEnabled(ec, automation, file1Source, file2Source, reconcileResult,
-                        mintedRunResultId, stepCtx)
+                        mintedRunResultId, stepCtx, executionParams)
+                // Second and third verification passes, in the same order the interactive path runs
+                // them. Each is a no-op unless this run's connector pair is the one it applies to.
+                verifyExchangePairsIfEnabled(ec, automation, file1Source, file2Source, file1Result, file2Result,
+                        reconcileResult, mintedRunResultId, stepCtx, window, executionParams)
+                verifyReturnPresenceIfEnabled(ec, automation, file1Source, file2Source, file1Result, file2Result,
+                        reconcileResult, mintedRunResultId, stepCtx, window, executionParams)
                 ensureAutomationResultArtifact(ec, automation, file1Source, file2Source, reconcileResult, window, executionParams)
                 String resultDataManagerPath = normalizeDataManagerPath(ec,
                         reconcileResult.resultDataManagerPath ?: reconcileResult.diffLocation ?: reconcileResult.diffFileName)
@@ -452,7 +459,7 @@ class AutomationExecutionSupport {
                         lastUpdatedDate           : completedTimestamp,
                 ]
                 updateAutomationExecution(ec, execution, successFields)
-                TenantNotificationSupport.notifyRunCompleted(ec, [
+                notifyRunCompletedWithStage(ec, mintedRunResultId, stepCtx, [
                         reconciliationRunResultId: reconciliationRunResultId,
                         runName                  : normalize(readField(automation, "automationName")),
                         savedRunId               : normalize(readField(automation, "savedRunId")),
@@ -907,6 +914,12 @@ class AutomationExecutionSupport {
     /**
      * Read live, not cached in a static, so the kill switch can be flipped without a restart.
      *
+     * <p>NAMED for the missing-diff pass, but since 2026-08-27 it gates ALL THREE verification
+     * passes on this path (missing-diff, exchange-pair, return-presence). One switch, because the
+     * question an operator actually asks is "is this instance verifying its scheduled runs?" — a
+     * per-pass switch would recreate, as configuration, the very split this work removed. Renaming
+     * it would silently disarm the kill switch on any deployment already setting the old name.</p>
+     *
      * <p>No per-automation allow-list. The canary one existed only to roll this out while the
      * default was off, and it deletes with the flip by design. Keeping it would have left a
      * supported way to run most automations unverified while the switch still read "on" — which is
@@ -930,7 +943,8 @@ class AutomationExecutionSupport {
      */
     protected static boolean verifyMissingDiffsIfEnabled(def ec, def automation, def file1Source, def file2Source,
                                                          Map<String, Object> reconcileResult,
-                                                         String runResultId, Map stepCtx) {
+                                                         String runResultId, Map stepCtx,
+                                                         Map<String, Object> executionParams = null) {
         // Both guards run before anything touches ec, so a disabled or empty pass costs nothing.
         if (!isMissingDiffVerificationEnabled()) return false
         if (!RunVerificationSupport.shouldVerifyMissingDiffs(reconcileResult)) return false
@@ -948,6 +962,14 @@ class AutomationExecutionSupport {
                     (serviceParams ?: [:]).findAll { entry -> entry.value != null } as Map<String, Object>)
         }
 
+        // The SAME defaults the extractor resolved for this execution. An API source keeps no config
+        // id of its own (see RunVerificationSupport.resolveSourceConfigId), so without these the
+        // lookup resolves nothing, no side is rechecked, and the pass reports "nothing to verify" on
+        // exactly the OMS/Shopify runs it exists for.
+        Map<String, Object> runConfigDefaults =
+                executionParams?.get("sourceExtractorConfigDefaults") instanceof Map ?
+                        (Map<String, Object>) executionParams.get("sourceExtractorConfigDefaults") : null
+
         Map<String, Closure> sideLookups = [:]
         Map<String, Integer> sideMaxLookupIds = [:]
         String file1Label = normalize(reconcileResult.file1Label) ?: "file1"
@@ -961,7 +983,8 @@ class AutomationExecutionSupport {
         try {
             [[missingInFile1, file1Source, file1Label], [missingInFile2, file2Source, file2Label]].each { List side ->
                 if (((long) side[0]) <= 0L) return
-                Closure lookup = RunVerificationSupport.buildVerificationLookup(ec, side[1], runOwnerUserGroupId, dispatcher)
+                Closure lookup = RunVerificationSupport.buildVerificationLookup(ec, side[1], runOwnerUserGroupId,
+                        dispatcher, runConfigDefaults)
                 if (lookup == null) return
                 sideLookups.put((String) side[2], lookup)
                 Integer cap = RunVerificationSupport.buildVerificationLookupCap(ec, side[1])
@@ -1003,6 +1026,217 @@ class AutomationExecutionSupport {
                 [recordCount : verification.checkedCount ?: 0,
                  errorMessage: verification.lookupFailed && verification.warnings ? verification.warnings.first().toString() : null])
         return true
+    }
+
+    /**
+     * The return-presence pass on the scheduled path — the grace/window-edge gate, cancellation-refund
+     * suppression and superseded-sibling suppression that an OMS_RETURNS/SHOPIFY_RETURN_REFS run needs.
+     *
+     * <p>Interactive-only until 2026-08-27. A scheduled returns run therefore published raw compare
+     * counts where an interactive rerun of the same window published corrected ones — the same class
+     * of split as the missing-diff pass, on the runs where it matters most.</p>
+     *
+     * <p>Every resolution decision lives in {@code RunVerificationSupport.prepareReturnPresencePass},
+     * shared with {@code runSavedRunDiff.groovy}, so the two entry points cannot drift apart again.
+     * What stays here is observability and the count fold, both of which the interactive path also
+     * keeps locally. Returns whether the pass actually ran. Best-effort throughout: nothing here may
+     * fail a run that has already produced a complete compare.</p>
+     */
+    protected static boolean verifyReturnPresenceIfEnabled(def ec, def automation, def file1Source, def file2Source,
+                                                           Map file1Result, Map file2Result,
+                                                           Map<String, Object> reconcileResult,
+                                                           String runResultId, Map stepCtx,
+                                                           Map<String, Object> window = null,
+                                                           Map<String, Object> executionParams = null) {
+        if (!isMissingDiffVerificationEnabled()) return false
+        if (reconcileResult?.get("ruleExecutionFailed") == true) return false
+
+        String file1Label = normalize(reconcileResult?.file1Label) ?: "file1"
+        String file2Label = normalize(reconcileResult?.file2Label) ?: "file2"
+        // The RUN OWNER's tenant, never the session's — the scheduler authenticates as anonymous _NA_.
+        String runOwnerUserGroupId = normalize(readField(automation, "companyUserGroupId"))
+        Closure dispatcher = { String serviceName, Map serviceParams ->
+            return dispatchInternalService(ec, serviceName,
+                    (serviceParams ?: [:]).findAll { entry -> entry.value != null } as Map<String, Object>)
+        }
+        Map<String, Object> runConfigDefaults =
+                executionParams?.get("sourceExtractorConfigDefaults") instanceof Map ?
+                        (Map<String, Object>) executionParams.get("sourceExtractorConfigDefaults") : null
+
+        Map prepared
+        try {
+            prepared = RunVerificationSupport.prepareReturnPresencePass([
+                    ec                 : ec,
+                    diffFile           : resolveDiffFile(ec, reconcileResult),
+                    sides              : [[source: file1Source, extractResult: file1Result, label: file1Label],
+                                          [source: file2Source, extractResult: file2Result, label: file2Label]],
+                    file1Label         : file1Label,
+                    file2Label         : file2Label,
+                    windowStartMillis  : readWindowStartMillis(window),
+                    runOwnerUserGroupId: runOwnerUserGroupId,
+                    dispatcher         : dispatcher,
+                    runConfigDefaults  : runConfigDefaults,
+            ])
+        } catch (Throwable t) {
+            // Preparation reads the connector registry and both source rows. A shape this code cannot
+            // read must degrade to an unverified run with a visible warning, never a failed one — the
+            // compare has already finished (see verifyMissingDiffsIfEnabled's own note on the
+            // EntityException that fell out of every scheduled run when verification defaulted on).
+            RunVerificationSupport.applyVerificationOutcome(reconcileResult,
+                    [performed: false, rewritten: false,
+                     warnings : ["Return presence check could not be prepared: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map,
+                    RunVerificationSupport.missingCount(reconcileResult, "missingInFile1Count"),
+                    RunVerificationSupport.missingCount(reconcileResult, "missingInFile2Count"))
+            if (ec?.message?.hasError()) ec.message.clearErrors()
+            return false
+        }
+        if (prepared == null) return false
+
+        long missingInFile1 = RunVerificationSupport.missingCount(reconcileResult, "missingInFile1Count")
+        long missingInFile2 = RunVerificationSupport.missingCount(reconcileResult, "missingInFile2Count")
+        def returnsStep = runResultId ?
+                RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_VERIFY) : null
+        boolean checkFailed = false
+        Map verification
+        try {
+            verification = (Map) ((Closure) prepared.run).call()
+        } catch (Throwable t) {
+            checkFailed = true
+            verification = [performed: false, rewritten: false, removedCount: 0,
+                            warnings: ["Return presence check failed: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map
+        }
+        if (ec.message.hasError()) {
+            verification.warnings = ((verification.warnings ?: []) as List) + ((ec.message.getErrors() ?: []) as List)
+            ec.message.clearErrors()
+        }
+        RunVerificationSupport.applyVerificationOutcome(reconcileResult, verification, missingInFile1, missingInFile2)
+        RunObservability.endStep(ec, returnsStep,
+                checkFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
+                [recordCount : (verification.removedCount ?: 0),
+                 errorMessage: checkFailed && verification.warnings ? verification.warnings.first().toString() : null,
+                 metricsJson : JsonOutput.toJson(RunVerificationSupport.returnPresenceMetrics(
+                         verification, (String) prepared.omsLabel, (String) prepared.shopifyLabel))])
+        return true
+    }
+
+    /**
+     * The exchange-pair pass on the scheduled path: Shopify exchange orders that never reached OMS.
+     *
+     * <p>Same prepare/observe/fold shape as {@link #verifyReturnPresenceIfEnabled}, over
+     * {@code RunVerificationSupport.prepareExchangePairPass}. This pass APPENDS rows the compare never
+     * found, so its fold moves counts up rather than down.</p>
+     */
+    protected static boolean verifyExchangePairsIfEnabled(def ec, def automation, def file1Source, def file2Source,
+                                                          Map file1Result, Map file2Result,
+                                                          Map<String, Object> reconcileResult,
+                                                          String runResultId, Map stepCtx,
+                                                          Map<String, Object> window = null,
+                                                          Map<String, Object> executionParams = null) {
+        if (!isMissingDiffVerificationEnabled()) return false
+        if (reconcileResult?.get("ruleExecutionFailed") == true) return false
+
+        String file1Label = normalize(reconcileResult?.file1Label) ?: "file1"
+        String file2Label = normalize(reconcileResult?.file2Label) ?: "file2"
+        String runOwnerUserGroupId = normalize(readField(automation, "companyUserGroupId"))
+        Closure dispatcher = { String serviceName, Map serviceParams ->
+            return dispatchInternalService(ec, serviceName,
+                    (serviceParams ?: [:]).findAll { entry -> entry.value != null } as Map<String, Object>)
+        }
+        Map<String, Object> runConfigDefaults =
+                executionParams?.get("sourceExtractorConfigDefaults") instanceof Map ?
+                        (Map<String, Object>) executionParams.get("sourceExtractorConfigDefaults") : null
+
+        Map prepared
+        try {
+            prepared = RunVerificationSupport.prepareExchangePairPass([
+                    ec                 : ec,
+                    diffFile           : resolveDiffFile(ec, reconcileResult),
+                    sides              : [[source: file1Source, extractResult: file1Result, label: file1Label,
+                                           fileSide: FILE_SIDE_1],
+                                          [source: file2Source, extractResult: file2Result, label: file2Label,
+                                           fileSide: FILE_SIDE_2]],
+                    windowStartMillis  : readWindowStartMillis(window),
+                    windowEndMillis    : readWindowEndMillis(window),
+                    runOwnerUserGroupId: runOwnerUserGroupId,
+                    dispatcher         : dispatcher,
+                    runConfigDefaults  : runConfigDefaults,
+            ])
+        } catch (Throwable t) {
+            RunVerificationSupport.applyExchangeOutcome(reconcileResult,
+                    [appendedCount: 0,
+                     warnings     : ["Exchange presence check could not be prepared: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map,
+                    null)
+            if (ec?.message?.hasError()) ec.message.clearErrors()
+            return false
+        }
+        if (prepared == null) return false
+
+        def exchangeStep = runResultId ?
+                RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_VERIFY) : null
+        Map verification
+        try {
+            verification = (Map) ((Closure) prepared.run).call()
+        } catch (Throwable t) {
+            verification = [performed: true, appendedCount: 0, lookupFailed: true, sweepExchangeCount: 0,
+                            warnings: ["Exchange presence check failed: ${normalize(t.message) ?: t.class.simpleName}".toString()],
+                            auditNote: null] as Map
+        }
+        if (ec.message.hasError()) {
+            verification.warnings = ((verification.warnings ?: []) as List) + ((ec.message.getErrors() ?: []) as List)
+            verification.lookupFailed = true
+            ec.message.clearErrors()
+        }
+        RunVerificationSupport.applyExchangeOutcome(reconcileResult, verification, (String) prepared.omsFileSide)
+        RunObservability.endStep(ec, exchangeStep,
+                verification.lookupFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
+                [recordCount : verification.sweepExchangeCount ?: 0,
+                 errorMessage: verification.lookupFailed && verification.warnings ? verification.warnings.first().toString() : null,
+                 metricsJson : JsonOutput.toJson(RunVerificationSupport.exchangePairMetrics(
+                         verification, (String) prepared.omsLabel, (String) prepared.shopifyLabel))])
+        return true
+    }
+
+    /**
+     * Notify a completed scheduled run, inside its own STAGE_NOTIFY step.
+     *
+     * <p>Both run paths notify, but only the interactive one opened a NOTIFY step, so a scheduled
+     * run's alert was invisible on the timeline and "did the alert fire?" was unanswerable from the
+     * UI. Mirrors {@code runSavedRunDiff.groovy}'s notify stage, best-effort included: a notification
+     * failure is recorded and logged, never allowed to change the outcome of a run whose results are
+     * already written.</p>
+     */
+    protected static void notifyRunCompletedWithStage(def ec, String runResultId, Map stepCtx,
+                                                      Map<String, Object> payload) {
+        def notifyStep = runResultId ?
+                RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_NOTIFY) : null
+        try {
+            TenantNotificationSupport.notifyRunCompleted(ec, payload)
+            RunObservability.endStep(ec, notifyStep, RunObservability.STATUS_SUCCESS, [:])
+        } catch (Throwable notifyError) {
+            RunObservability.endStep(ec, notifyStep, RunObservability.STATUS_FAILED,
+                    [errorMessage: notifyError.message ?: notifyError.toString()])
+            logger.warn("execute#Automation notify stage failed (best-effort, run outcome preserved): " +
+                    "${notifyError.message ?: notifyError}", notifyError)
+        }
+    }
+
+    /** The run's reporting-window end as epoch millis; null means this run has no window. */
+    protected static Long readWindowEndMillis(Map<String, Object> window) {
+        Object end = window?.get("childWindowEndDate") ?: window?.get("windowEndDate")
+        if (end instanceof java.util.Date) return ((java.util.Date) end).time
+        if (end instanceof Number) return ((Number) end).longValue()
+        return null
+    }
+
+    /**
+     * The run's reporting-window start as epoch millis, for the window-start gate. Null degrades the
+     * pass to grace-only behaviour, exactly as it does for a saved run with no window.
+     */
+    protected static Long readWindowStartMillis(Map<String, Object> window) {
+        Object start = window?.get("childWindowStartDate") ?: window?.get("windowStartDate")
+        if (start instanceof java.util.Date) return ((java.util.Date) start).time
+        if (start instanceof Number) return ((Number) start).longValue()
+        return null
     }
 
     /** The diff document the compare just wrote, which the verification pass rewrites in place. */

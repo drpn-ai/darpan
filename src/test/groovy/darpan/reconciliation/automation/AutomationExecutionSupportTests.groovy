@@ -3144,8 +3144,13 @@ class AutomationExecutionSupportTests {
         // The stage rows themselves must exist and be closed — the live view reads these, not the
         // currentStage stamp, so a run that only moved currentStage would still show nothing.
         List steps = ec.entity.createdValues("darpan.reconciliation.ReconciliationRunStep")
+        // NOTIFY joined this list on 2026-08-27. Both paths always notified, but only the interactive
+        // one opened a stage for it, so a scheduled run's alert was invisible on the timeline. The
+        // verification stages are absent here only because this fixture's sources resolve no
+        // connector pair that any pass applies to -- they are exercised in
+        // AutomationExecutionServiceSmokeTests against real seeded connectors.
         assertEquals(
-                ["RESOLVE", "EXTRACT_FILE1", "EXTRACT_FILE2", "COMPARE", "WRITE_OUTPUT"],
+                ["RESOLVE", "EXTRACT_FILE1", "EXTRACT_FILE2", "COMPARE", "WRITE_OUTPUT", "NOTIFY"],
                 steps.collect { it.stageCode },
                 "expected one persisted run-step row per completed phase")
         assertTrue(

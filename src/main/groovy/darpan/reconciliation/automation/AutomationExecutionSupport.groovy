@@ -945,87 +945,38 @@ class AutomationExecutionSupport {
                                                          Map<String, Object> reconcileResult,
                                                          String runResultId, Map stepCtx,
                                                          Map<String, Object> executionParams = null) {
-        // Both guards run before anything touches ec, so a disabled or empty pass costs nothing.
-        if (!isMissingDiffVerificationEnabled()) return false
-        if (!RunVerificationSupport.shouldVerifyMissingDiffs(reconcileResult)) return false
-
-        long missingInFile1 = RunVerificationSupport.missingCount(reconcileResult, "missingInFile1Count")
-        long missingInFile2 = RunVerificationSupport.missingCount(reconcileResult, "missingInFile2Count")
-        // The RUN OWNER's tenant, never the session's: the scheduler authenticates as anonymous _NA_,
-        // which belongs to no tenant, so a session-derived value would resolve the wrong source config
-        // (the 2026-07-31 scheduled-automation failure).
-        String runOwnerUserGroupId = normalize(readField(automation, "companyUserGroupId"))
-        // Routed through the single audited dispatch seam rather than opening its own
-        // disableAuthz site (DisableAuthzRatchetTest pins the count exactly).
-        Closure dispatcher = { String serviceName, Map serviceParams ->
-            return dispatchInternalService(ec, serviceName,
-                    (serviceParams ?: [:]).findAll { entry -> entry.value != null } as Map<String, Object>)
-        }
-
-        // The SAME defaults the extractor resolved for this execution. An API source keeps no config
-        // id of its own (see RunVerificationSupport.resolveSourceConfigId), so without these the
-        // lookup resolves nothing, no side is rechecked, and the pass reports "nothing to verify" on
-        // exactly the OMS/Shopify runs it exists for.
-        Map<String, Object> runConfigDefaults =
-                executionParams?.get("sourceExtractorConfigDefaults") instanceof Map ?
-                        (Map<String, Object>) executionParams.get("sourceExtractorConfigDefaults") : null
-
-        Map<String, Closure> sideLookups = [:]
-        Map<String, Integer> sideMaxLookupIds = [:]
-        String file1Label = normalize(reconcileResult.file1Label) ?: "file1"
-        String file2Label = normalize(reconcileResult.file2Label) ?: "file2"
-        // PREPARING the lookups is inside the guard, not just running them. Building one reads the
-        // connector registry and the source row, and a source shape this code cannot read must
-        // degrade to an unverified run with a visible warning — never a failed one. That is not
-        // hypothetical: resolveConnector threw an EntityException out of every scheduled run the
-        // moment verification defaulted on, because it read a field ReconciliationAutomationSource
-        // does not declare. The compare had already finished; failing the run discarded it.
-        try {
-            [[missingInFile1, file1Source, file1Label], [missingInFile2, file2Source, file2Label]].each { List side ->
-                if (((long) side[0]) <= 0L) return
-                Closure lookup = RunVerificationSupport.buildVerificationLookup(ec, side[1], runOwnerUserGroupId,
-                        dispatcher, runConfigDefaults)
-                if (lookup == null) return
-                sideLookups.put((String) side[2], lookup)
-                Integer cap = RunVerificationSupport.buildVerificationLookupCap(ec, side[1])
-                if (cap != null) sideMaxLookupIds.put((String) side[2], cap)
-            }
-        } catch (Throwable t) {
-            RunVerificationSupport.applyVerificationOutcome(reconcileResult,
-                    [performed: false, rewritten: false, lookupFailed: true,
-                     warnings: ["Verification could not be prepared, so this run's differences are unverified: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map,
-                    missingInFile1, missingInFile2)
-            if (ec?.message?.hasError()) ec.message.clearErrors()
-            return false
-        }
-        if (!sideLookups) return false
-
-        File diffFile = resolveDiffFile(ec, reconcileResult)
-        if (diffFile == null || !diffFile.isFile()) return false
-
-        def verifyStep = runResultId ? RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_VERIFY) : null
-        Map verification
-        try {
-            verification = MissingDiffVerificationSupport.verifyMissingDiffs([
-                    diffFile: diffFile, file1Label: file1Label, file2Label: file2Label,
-                    sideLookups: sideLookups, sideMaxLookupIds: sideMaxLookupIds])
-        } catch (Throwable t) {
-            verification = [performed: true, rewritten: false, checkedCount: 0, removedCount: 0, lookupFailed: true,
-                            warnings: ["Verification pass failed: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map
-        }
-        // Best-effort after a complete compare: demote any service-level error the lookup raised
-        // (auth config, transport) to a warning so it cannot fail an otherwise finished run.
-        if (ec.message.hasError()) {
-            verification.warnings = ((verification.warnings ?: []) as List) + ((ec.message.getErrors() ?: []) as List)
-            verification.lookupFailed = true
-            ec.message.clearErrors()
-        }
-        RunVerificationSupport.applyVerificationOutcome(reconcileResult, verification, missingInFile1, missingInFile2)
-        RunObservability.endStep(ec, verifyStep,
-                verification.lookupFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
-                [recordCount : verification.checkedCount ?: 0,
-                 errorMessage: verification.lookupFailed && verification.warnings ? verification.warnings.first().toString() : null])
-        return true
+        // ONE implementation, called identically by runSavedRunDiff.groovy. What is left here is the
+        // scheduled path's own vocabulary -- its kill switch, its tenant anchor, its dispatch seam,
+        // and the config defaults its extractor resolved -- and nothing about how the pass decides,
+        // runs, folds counts, or reports. Copying that block was what let a triggered run and a
+        // manual run of the same window publish different numbers for a whole release.
+        return RunVerificationSupport.runMissingDiffPass([
+                ec                 : ec,
+                runResultId        : runResultId,
+                stepCtx            : stepCtx,
+                enabled            : isMissingDiffVerificationEnabled(),
+                serviceResult      : reconcileResult,
+                diffFile           : { resolveDiffFile(ec, reconcileResult) },
+                file1Source        : file1Source,
+                file2Source        : file2Source,
+                file1Label         : normalize(reconcileResult?.file1Label),
+                file2Label         : normalize(reconcileResult?.file2Label),
+                // The RUN OWNER's tenant, never the session's: the scheduler authenticates as
+                // anonymous _NA_, which belongs to no tenant, so a session-derived value would
+                // resolve the wrong source config (the 2026-07-31 scheduled-automation failure).
+                runOwnerUserGroupId: normalize(readField(automation, "companyUserGroupId")),
+                // Routed through the single audited dispatch seam rather than opening its own
+                // disableAuthz site (DisableAuthzRatchetTest pins the count exactly).
+                dispatcher         : { String serviceName, Map serviceParams ->
+                    return dispatchInternalService(ec, serviceName,
+                            (serviceParams ?: [:]).findAll { entry -> entry.value != null } as Map<String, Object>)
+                },
+                // The SAME defaults the extractor resolved for this execution. An API source keeps no
+                // config id of its own (see RunVerificationSupport.resolveSourceConfigId), so without
+                // these the lookup resolves nothing on exactly the OMS/Shopify runs it exists for.
+                runConfigDefaults  : executionParams?.get("sourceExtractorConfigDefaults") instanceof Map ?
+                        (Map<String, Object>) executionParams.get("sourceExtractorConfigDefaults") : null,
+        ])
     }
 
     /**

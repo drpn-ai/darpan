@@ -1199,6 +1199,49 @@ class AutomationExecutionServiceSmokeTests {
         assertNotNull(verifyStep, "the scheduled path must record its VERIFY stage on the real source shape too")
     }
 
+    @Test
+    void aScheduledRunThatCannotVerifySaysSoOnItsTimeline() {
+        // The 2026-08-27 production shape, exactly: real automation source rows carrying no config id
+        // of their own, and no run defaults to fall back on. The pass cannot build a lookup, so it
+        // does not run — and until now that produced NO VERIFY row at all, which on a run reporting
+        // 403 unverified differences was indistinguishable from the kill switch being off. The run
+        // must now carry the reason itself instead of costing a source-reading session to guess.
+        seedReturnsAutomation("AUTO_RET_NO_CONFIG", [:])
+        File diffFile = writeMissingDiffDocument(["9001", "9002"])
+        String runId = RunObservability.beginRun(ec, [
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID, savedRunId: "DARPAN_TEST_COMPARE_RS"])
+        Map<String, Object> reconcileResult = [
+                differenceCount: 2L, missingInFile1Count: 0L, missingInFile2Count: 2L,
+                missingObjectDifferenceCount: 2L,
+                file1Label: "SHOPIFY", file2Label: "OMS",
+                diffLocation: diffFile.absolutePath,
+        ]
+        def automation = ec.entity.find("darpan.reconciliation.ReconciliationAutomation")
+                .condition("automationId", "AUTO_RET_NO_CONFIG").disableAuthz().useCache(false).one()
+
+        boolean ran
+        try {
+            ran = AutomationExecutionSupport.verifyMissingDiffsIfEnabled(ec, automation,
+                    loadReturnsSource("AUTO_RET_NO_CONFIG", AutomationExecutionSupport.FILE_SIDE_1),
+                    loadReturnsSource("AUTO_RET_NO_CONFIG", AutomationExecutionSupport.FILE_SIDE_2),
+                    reconcileResult, runId, [:], null)
+        } finally {
+            diffFile.delete()
+        }
+
+        assertFalse(ran, "no config id resolves anywhere, so the pass cannot run")
+        def verifyStep = ec.entity.find(RunObservability.RUN_STEP_ENTITY)
+                .condition("reconciliationRunResultId", runId)
+                .condition("stageCode", RunObservability.STAGE_VERIFY)
+                .disableAuthz().useCache(false).one()
+        assertNotNull(verifyStep, "a run that could not verify must still record the stage, saying why")
+        assertEquals(RunObservability.STATUS_NO_DATA, verifyStep.statusEnumId,
+                "nothing failed in the run itself — the pass had nothing it could check")
+        String reason = verifyStep.errorMessage as String
+        assertTrue(reason?.contains("omsRestSourceConfigId"),
+                "the reason must name the config parameter that would not resolve, got: ${reason}")
+    }
+
     // --- pass parity: every verification pass the interactive path runs, the scheduled one runs too
 
     @Test

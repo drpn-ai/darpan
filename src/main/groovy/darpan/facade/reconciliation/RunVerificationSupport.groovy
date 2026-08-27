@@ -1,7 +1,9 @@
 package darpan.facade.reconciliation
 
+import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
+import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 
 import static darpan.common.ValueSupport.hasField
@@ -22,13 +24,23 @@ import static darpan.common.ValueSupport.readOptionalString
  * {@code darpan/reconciliation/automation/} returns 0). On gorjana automation 100616 that meant a
  * scheduled run reporting ~532 differences where the verified interactive rerun reported 2.</p>
  *
- * <p><b>This class deliberately contains no behaviour change.</b> It is the seam that lets step 3
- * call verification from the automation path without copying the closures a fourth time into a file
- * pair already kept in sync by hand-written "mirrors runSavedRunDiff" comments.</p>
+ * <p><b>As of 2026-08-27 the missing-diff pass is not just resolved here but RUN here</b>
+ * ({@link #runMissingDiffPass}), STAGE_VERIFY step and all. Leaving observability with each caller
+ * meant each kept its own open/run/fold/close block, and those blocks were where the two paths
+ * diverged in the first place: a triggered run and a manual run of the same window published
+ * different counts for a whole release. An automation is the thing that FIRES a run — after the
+ * trigger it must execute the same process. The two entry points now supply only what is genuinely
+ * theirs: the run id, the step context, the dispatch seam, the tenant anchor, and (scheduled only)
+ * the kill switch and the config defaults its extractor resolved.</p>
  *
- * <p>Observability (opening/closing the STAGE_VERIFY step) stays with the caller: the two entry
- * points mint their run rows differently, and folding that in here would couple this seam to one of
- * them.</p>
+ * <p>The other two passes ({@link #prepareReturnPresencePass}, {@link #prepareExchangePairPass})
+ * still hand a prepared pass back to the caller, which keeps its own step handling. Same shape,
+ * same divergence risk — they are the next ones to move.</p>
+ *
+ * <p><b>A pass that declines now says why</b> ({@link #recordVerificationSkipped}). Every gate in
+ * front of it used to return before the step was opened, so "no VERIFY row" meant equally: switched
+ * off, no config id, no readable diff, or nothing to check. That ambiguity shipped inert
+ * verification through v1.5.0 and cost a day on the 2026-08-27 gorjana report.</p>
  */
 class RunVerificationSupport {
 
@@ -93,6 +105,207 @@ class RunVerificationSupport {
         return serviceResult
     }
 
+    // --- the missing-diff pass, as ONE implementation both entry points call --------------------
+
+    /** Verification is switched off for this deployment. Gates every pass, so it is reported once. */
+    static final String SKIP_DISABLED = "VERIFICATION_DISABLED"
+    /** The compare's diff document could not be resolved to a readable file. */
+    static final String SKIP_NO_DIFF_FILE = "DIFF_ARTIFACT_UNREADABLE"
+    /** Neither side could be point-checked; the detail names each side and why. */
+    static final String SKIP_NO_LOOKUP = "NO_POINT_LOOKUP"
+
+    // Named from the one place that owns it, not restated: two copies of a property name drift, and
+    // a skip reason naming a switch that no longer exists is worse than no reason at all.
+    private static final String KILL_SWITCH_PROPERTY = AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY
+
+    /**
+     * Resolve the missing-diff pass for a run: either a runnable pass, or the reason there is none.
+     *
+     * <p>args: {@code ec}, {@code enabled} (defaults true — the interactive path has no kill switch),
+     * {@code serviceResult}, {@code diffFile}, {@code file1Source}/{@code file2Source},
+     * {@code file1Label}/{@code file2Label}, {@code runOwnerUserGroupId}, {@code dispatcher},
+     * {@code runConfigDefaults}.</p>
+     *
+     * <p>Returns {@code [applies: true, run: Closure, verifiedLabels: List, missingInFile1,
+     * missingInFile2]}, or {@code [applies: false, skipReason, skipDetail]}. A null {@code skipReason}
+     * means there was nothing to verify in the first place (no missing rows, or a rule-execution
+     * failure whose partial diffs are preserved deliberately) — that is not a skip and must not be
+     * reported as one, or every clean run carries an "unverified" note.</p>
+     */
+    static Map<String, Object> prepareMissingDiffPass(Map args) {
+        Map serviceResult = (Map) args?.get("serviceResult")
+        // Nothing-to-check is decided BEFORE the switch: a run with no missing rows is not
+        // "unverified" just because verification happens to be off.
+        if (!shouldVerifyMissingDiffs(serviceResult)) return [applies: false] as Map<String, Object>
+
+        boolean enabled = args?.get("enabled") == null ? true : (args.get("enabled") as boolean)
+        if (!enabled) {
+            return skipped(SKIP_DISABLED,
+                    "verification is switched off on this deployment (${KILL_SWITCH_PROPERTY}=false)")
+        }
+
+        // Resolved LAZILY, after the two guards above: both callers resolve it through the execution
+        // context, and a disabled or empty pass must still cost nothing and touch no ec — several
+        // unit tests call this with a null one precisely to prove that.
+        File diffFile
+        try {
+            Object diffFileArg = args.get("diffFile")
+            diffFile = diffFileArg instanceof Closure ? (File) ((Closure) diffFileArg).call() : (File) diffFileArg
+        } catch (Throwable t) {
+            return skipped(SKIP_NO_DIFF_FILE,
+                    "the compare's diff document could not be located: ${normalize(t.message) ?: t.class.simpleName}".toString())
+        }
+        if (diffFile == null || !diffFile.isFile()) {
+            return skipped(SKIP_NO_DIFF_FILE, "the compare's diff document could not be read back")
+        }
+
+        def ec = args.get("ec")
+        Closure dispatcher = (Closure) args.get("dispatcher")
+        Map<String, Object> runConfigDefaults = args.get("runConfigDefaults") instanceof Map ?
+                (Map<String, Object>) args.get("runConfigDefaults") : null
+        String runOwnerUserGroupId = normalize(args.get("runOwnerUserGroupId"))
+        String file1Label = normalize(args.get("file1Label")) ?: normalize(serviceResult.get("file1Label")) ?: "file1"
+        String file2Label = normalize(args.get("file2Label")) ?: normalize(serviceResult.get("file2Label")) ?: "file2"
+
+        long missingInFile1 = missingCount(serviceResult, "missingInFile1Count")
+        long missingInFile2 = missingCount(serviceResult, "missingInFile2Count")
+        Map<String, Closure> sideLookups = [:]
+        Map<String, Integer> sideMaxLookupIds = [:]
+        List<String> blockers = []
+        // A side with nothing missing needs no lookup and is not a blocker — only the sides this run
+        // actually has rows to recheck on can explain why nothing was rechecked.
+        [[missingInFile1, args.get("file1Source"), file1Label],
+         [missingInFile2, args.get("file2Source"), file2Label]].each { List side ->
+            if (((long) side[0]) <= 0L) return
+            Map<String, Object> resolved = resolveSideLookup(ec, side[1], runOwnerUserGroupId, dispatcher, runConfigDefaults)
+            Closure lookup = (Closure) resolved.get("lookup")
+            if (lookup == null) {
+                if (resolved.get("applicable") == true) blockers.add("${side[2]}: ${resolved.get('reason')}".toString())
+                return
+            }
+            sideLookups.put((String) side[2], lookup)
+            Integer cap = buildVerificationLookupCap(ec, side[1])
+            if (cap != null) sideMaxLookupIds.put((String) side[2], cap)
+        }
+        // No lookups AND no blocker means verification never applied to this run — a diff between
+        // two uploaded files has no source of record to recheck against. Silent, or every such run
+        // would carry an "unverified" note and the report would stop meaning anything.
+        if (!sideLookups) {
+            return blockers ? skipped(SKIP_NO_LOOKUP, blockers.join("; ")) : ([applies: false] as Map<String, Object>)
+        }
+
+        return [applies       : true,
+                verifiedLabels: sideLookups.keySet() as List,
+                missingInFile1: missingInFile1,
+                missingInFile2: missingInFile2,
+                run           : {
+                    return MissingDiffVerificationSupport.verifyMissingDiffs([
+                            diffFile        : diffFile, file1Label: file1Label, file2Label: file2Label,
+                            sideLookups     : sideLookups,
+                            sideMaxLookupIds: sideMaxLookupIds])
+                }] as Map<String, Object>
+    }
+
+    /**
+     * Run the missing-diff pass for a run, observability and all. Returns whether it ran.
+     *
+     * <p>This is the whole VERIFY phase for that pass — decide, open the step, run, fold the counts,
+     * close the step, or record WHY it was skipped — so a triggered run and a manual one execute the
+     * same process rather than two hand-synced copies of it. Before this the two entry points each
+     * carried their own copy of the open/run/fold/close block, and they diverged: the scheduled one
+     * ran no verification at all until 2026-08-27, then ran it inert.</p>
+     *
+     * <p>Best-effort throughout: nothing here may fail a run that already produced a complete
+     * compare. A lookup that raises is demoted to a warning on a FAILED step, and a pass that cannot
+     * even be prepared leaves the counts untouched and says so.</p>
+     */
+    static boolean runMissingDiffPass(Map args) {
+        def ec = args?.get("ec")
+        Map serviceResult = (Map) args?.get("serviceResult")
+        String runResultId = normalize(args?.get("runResultId"))
+        Map stepCtx = (args?.get("stepCtx") ?: [:]) as Map
+
+        Map<String, Object> prepared
+        try {
+            prepared = prepareMissingDiffPass(args)
+        } catch (Throwable t) {
+            // Preparing reads the connector registry and the source row; a shape this code cannot
+            // read must degrade to an unverified run with a visible reason, never a failed one.
+            prepared = skipped(SKIP_NO_LOOKUP, "it could not be prepared: ${normalize(t.message) ?: t.class.simpleName}".toString())
+            if (ec?.message?.hasError()) ec.message.clearErrors()
+        }
+        if (prepared.get("applies") != true) {
+            recordVerificationSkipped(ec, runResultId, stepCtx, serviceResult,
+                    (String) prepared.get("skipReason"), (String) prepared.get("skipDetail"))
+            return false
+        }
+
+        long missingInFile1 = ((prepared.get("missingInFile1") ?: 0L) as Number).longValue()
+        long missingInFile2 = ((prepared.get("missingInFile2") ?: 0L) as Number).longValue()
+        def verifyStep = runResultId ? RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_VERIFY) : null
+        Map verification
+        try {
+            verification = (Map) ((Closure) prepared.get("run")).call()
+        } catch (Throwable t) {
+            verification = [performed: true, rewritten: false, checkedCount: 0, removedCount: 0, lookupFailed: true,
+                            warnings : ["Verification pass failed: ${normalize(t.message) ?: t.class.simpleName}".toString()]] as Map
+        }
+        // The lookup dispatch is best-effort after a complete compare: demote any service-level error
+        // it raised (auth config, transport) to a warning so it cannot fail the run.
+        if (ec?.message?.hasError()) {
+            verification.warnings = ((verification.warnings ?: []) as List) + ((ec.message.getErrors() ?: []) as List)
+            verification.lookupFailed = true
+            ec.message.clearErrors()
+        }
+        applyVerificationOutcome(serviceResult, verification, missingInFile1, missingInFile2)
+        // verifiedSystems names the sides this pass actually rechecked — several passes share the
+        // VERIFY stage code, so without it a run that ran two of them shows two identical rows.
+        RunObservability.endStep(ec, verifyStep,
+                verification.lookupFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
+                [recordCount : verification.checkedCount ?: 0,
+                 errorMessage: verification.lookupFailed && verification.warnings ? verification.warnings.first().toString() : null,
+                 metricsJson : JsonOutput.toJson([verifiedSystems: prepared.get("verifiedLabels"),
+                                                  checkedCount   : verification.checkedCount ?: 0,
+                                                  removedCount   : verification.removedCount ?: 0])])
+        return true
+    }
+
+    /**
+     * Record that a run's differences went unverified, and why — on the timeline AND on the result.
+     *
+     * <p>"Count the run steps" is how these runs are read, so a run that skipped verification has to
+     * say so as a row rather than as a missing row. The step is NO_DATA, not FAILED: nothing broke in
+     * the run itself, and a red step on every run of a deployment that has deliberately switched the
+     * pass off would train operators to ignore the colour.</p>
+     *
+     * <p>A null {@code skipReason} means there was nothing to verify, which is not a skip.</p>
+     */
+    static void recordVerificationSkipped(def ec, String runResultId, Map stepCtx, Map serviceResult,
+                                          String skipReason, String skipDetail) {
+        if (skipReason == null) return
+        // endStep truncates errorMessage at 255 characters, so the sentence leads with the fact and
+        // carries the detail behind it — a truncated reason still says the run went unverified.
+        String sentence = "Differences were not verified: ${skipDetail ?: skipReason}".toString()
+        try {
+            if (runResultId) {
+                def step = RunObservability.beginStep(ec, runResultId, (stepCtx ?: [:]) as Map, RunObservability.STAGE_VERIFY)
+                RunObservability.endStep(ec, step, RunObservability.STATUS_NO_DATA,
+                        [recordCount : 0, errorMessage: sentence,
+                         metricsJson : JsonOutput.toJson([skipReason: skipReason])])
+            }
+        } catch (Throwable ignored) {
+            // Reporting a skip must never be the thing that fails a run.
+        }
+        if (serviceResult != null) {
+            serviceResult.put("processingWarnings",
+                    ((serviceResult.get("processingWarnings") ?: []) as List) + [sentence])
+        }
+    }
+
+    private static Map<String, Object> skipped(String reason, String detail) {
+        return [applies: false, skipReason: reason, skipDetail: detail] as Map<String, Object>
+    }
+
     /**
      * The connector backing a run source: by systemEnumId first, falling back to the declared
      * config type when the row's systemEnumId resolves to a connector expecting a different one.
@@ -131,12 +344,40 @@ class RunVerificationSupport {
      */
     static Closure buildVerificationLookup(def ec, Object source, String runOwnerUserGroupId, Closure dispatcher,
                                           Map<String, Object> runConfigDefaults = null) {
-        if (source == null || dispatcher == null) return null
+        return (Closure) resolveSideLookup(ec, source, runOwnerUserGroupId, dispatcher, runConfigDefaults).get("lookup")
+    }
+
+    /**
+     * One side's point-lookup, or the reason there is none — {@code [lookup: Closure]} or
+     * {@code [reason: String]}, never both.
+     *
+     * <p>The reason is the whole point. {@link #buildVerificationLookup} answers null for six
+     * different situations, and a null lookup means the pass silently rechecks nothing, so on a live
+     * run "no VERIFY step" was indistinguishable between the switch being off, a connector with no
+     * lookup service, and a config id that would not resolve. That ambiguity cost two days on the
+     * 2026-08-27 gorjana report and hid inert verification for the whole of v1.5.0. Every early
+     * return here now says which one it was, in words an operator can act on.</p>
+     */
+    static Map<String, Object> resolveSideLookup(def ec, Object source, String runOwnerUserGroupId,
+                                                 Closure dispatcher, Map<String, Object> runConfigDefaults = null) {
+        if (source == null) return [reason: "no source is configured on that side"] as Map<String, Object>
+        if (dispatcher == null) return [reason: "no service dispatcher was supplied to the pass"] as Map<String, Object>
+        String systemEnumId = readOptionalString(source, "systemEnumId") ?: "that source"
         Map<String, Object> connector = resolveConnector(ec, source)
-        String lookupServiceName = connector == null ? null : normalize(connector.lookupServiceName)
-        if (lookupServiceName == null) return null
+        if (connector == null) return [reason: "no connector is registered for ${systemEnumId}".toString()] as Map<String, Object>
+        String lookupServiceName = normalize(connector.lookupServiceName)
+        if (lookupServiceName == null) {
+            // NOT applicable rather than blocked: this source has no point-lookup by design (two
+            // uploaded CSVs, NetSuite), so nothing failed to happen and there is nothing to report.
+            return [reason: "the ${systemEnumId} connector declares no point-lookup service".toString()] as Map<String, Object>
+        }
+        // From here on the side COULD have been rechecked, so every remaining exit is a real blocker
+        // an operator can act on, and is reported on the run.
+        Map<String, Object> blocked = [applicable: true] as Map<String, Object>
         // Narrower sibling of the extractor fence: the lookup slot may only dispatch lookup#* services.
-        if (!SourceSystemConnectorSupport.isAllowedLookupServiceShape(lookupServiceName)) return null
+        if (!SourceSystemConnectorSupport.isAllowedLookupServiceShape(lookupServiceName)) {
+            return blocked + [reason: "${systemEnumId}'s lookup service is not an allowed lookup# shape".toString()]
+        }
         // Same two shapes as resolveConnector. A saved-run Map carries a generic sourceConfigId; an
         // automation source row does not — it carries the id under the connector's OWN parameter name
         // (omsRestSourceConfigId, shopifyAuthConfigId, databaseSourceQueryId...), which is exactly
@@ -145,14 +386,16 @@ class RunVerificationSupport {
         // rechecked nothing.
         String configParameterName = normalize(connector.configParameterName) ?: "sourceConfigId"
         String configId = resolveSourceConfigId(source, connector, runConfigDefaults)
-        if (configId == null) return null
+        if (configId == null) {
+            return blocked + [reason: "no ${configParameterName} could be resolved for ${systemEnumId}".toString()]
+        }
         // Blank means the canonical order lookups' "orderIds". The returns pair rechecks refund/return
         // ids, which must not be sent under an order-id name — Moqui would silently drop the parameter.
         String idsParameterName = normalize(connector.lookupIdsParameterName) ?: "orderIds"
-        return { List<String> ids ->
+        return [lookup: { List<String> ids ->
             dispatcher.call(lookupServiceName, [(configParameterName): configId, (idsParameterName): ids,
                                                 companyUserGroupId   : runOwnerUserGroupId])
-        }
+        }] as Map<String, Object>
     }
 
     /**

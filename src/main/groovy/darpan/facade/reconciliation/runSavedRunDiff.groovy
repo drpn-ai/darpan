@@ -3,7 +3,6 @@ import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
-import darpan.facade.reconciliation.MissingDiffVerificationSupport
 import darpan.facade.reconciliation.ReconciliationApiWindowSupport
 import darpan.facade.reconciliation.ReconciliationOutputSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
@@ -446,26 +445,6 @@ def writeRuleSetOutput = { Map serviceResult, Map savedRun, String file1Label, S
     return output
 }
 
-// Verification pass (bulk-export index skew): a source whose connector declares a lookupServiceName
-// can point-check ids the compare reported missing in that side against its primary datastore (e.g.
-// Shopify nodes(ids:) vs the search-index-backed orders(query:) bulk export). Rows the source of
-// record confirms present are false positives and are removed from the written artifact — with an
-// audit note in processingWarnings — before counts are persisted. Strictly best-effort: nothing in
-// this pass may fail the run; worst case the differences stay exactly as compare reported them.
-def buildVerificationLookup = { Object source, String runOwnerUserGroupId ->
-    // Delegates to RunVerificationSupport so the scheduled path can build the identical lookup
-    // (design 2026-08-26-reconciliation-pipeline-unification, step 2). runInternalService is passed
-    // as the dispatch seam because the two entry points invoke services differently.
-    return RunVerificationSupport.buildVerificationLookup(ec, source, runOwnerUserGroupId, runInternalService)
-}
-
-// The per-side ceiling on point lookups, as this side's connector declares it. Null means the
-// verification pass applies its own shared default. Resolved separately from the lookup closure so an
-// unreadable/blank cap can never stop a usable lookup from being built.
-def buildVerificationLookupCap = { Object source ->
-    return RunVerificationSupport.buildVerificationLookupCap(ec, source)
-}
-
 // Exchange pair verify stage (spec 2026-07-30): the OMS-side extract may have written an
 // exchange-manifest sidecar (excluded exchange orders). When one side's connector declares
 // pairLookupServiceName and the other declares exchangeStateLookupServiceName, each manifest
@@ -513,60 +492,29 @@ def runExchangeVerificationPass = { Map serviceResult, Object file1Source, Objec
                      verification, (String) prepared.omsLabel, (String) prepared.shopifyLabel))])
 }
 
+// The missing-diff pass. Every decision, the STAGE_VERIFY step, the count fold and the skip report
+// live in RunVerificationSupport, called identically by AutomationExecutionSupport — an automation
+// is the thing that FIRES a run, and after the trigger it must execute the same process. What stays
+// here is this script's own dispatch seam and observability handles.
+//
+// No kill switch on this path: `…automation.verifyMissingDiffs` was introduced to give operators a
+// way to stop a slow scheduled pass, and a manual run has always verified unconditionally. Wiring it
+// in here would silently change what the Run button does on any deployment already setting it.
 def runVerificationPass = { Map serviceResult, Object file1Source, Object file2Source, String file1Label, String file2Label,
                             String runOwnerUserGroupId ->
-    // Rule execution failure preserves partial diffs for investigation — never rewrite those.
-    if (!RunVerificationSupport.shouldVerifyMissingDiffs(serviceResult)) return
-    long missingInFile1 = RunVerificationSupport.missingCount(serviceResult, "missingInFile1Count")
-    long missingInFile2 = RunVerificationSupport.missingCount(serviceResult, "missingInFile2Count")
-    Map<String, Closure> sideLookups = [:]
-    Map<String, Integer> sideMaxLookupIds = [:]
-    if (missingInFile1 > 0L) {
-        Closure lookup = (Closure) buildVerificationLookup(file1Source, runOwnerUserGroupId)
-        if (lookup != null) {
-            sideLookups[file1Label] = lookup
-            Integer cap = (Integer) buildVerificationLookupCap(file1Source)
-            if (cap != null) sideMaxLookupIds[file1Label] = cap
-        }
-    }
-    if (missingInFile2 > 0L) {
-        Closure lookup = (Closure) buildVerificationLookup(file2Source, runOwnerUserGroupId)
-        if (lookup != null) {
-            sideLookups[file2Label] = lookup
-            Integer cap = (Integer) buildVerificationLookupCap(file2Source)
-            if (cap != null) sideMaxLookupIds[file2Label] = cap
-        }
-    }
-    if (!sideLookups) return
-    File diffFile = resolveOutputFile(serviceResult)
-    if (diffFile == null || !diffFile.isFile()) return
-
-    def verifyStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_VERIFY) : null
-    Map verification
-    try {
-        verification = MissingDiffVerificationSupport.verifyMissingDiffs([
-                diffFile: diffFile, file1Label: file1Label, file2Label: file2Label, sideLookups: sideLookups,
-                sideMaxLookupIds: sideMaxLookupIds])
-    } catch (Throwable t) {
-        verification = [performed: true, rewritten: false, checkedCount: 0, removedCount: 0, lookupFailed: true,
-                warnings: ["Verification pass failed: ${normalize(t.message) ?: t.class.simpleName}".toString()], auditNote: null] as Map
-    }
-    // The lookup dispatch is best-effort after a complete compare: demote any service-level errors
-    // it raised (auth config, transport) to warnings so they cannot fail the run.
-    if (ec.message.hasError()) {
-        verification.warnings = ((verification.warnings ?: []) as List) + ((ec.message.getErrors() ?: []) as List)
-        verification.lookupFailed = true
-        ec.message.clearErrors()
-    }
-    RunVerificationSupport.applyVerificationOutcome(serviceResult, verification, missingInFile1, missingInFile2)
-    // verifiedSystems names the sides this pass actually rechecked -- several passes share the
-    // VERIFY stage code, so without it a run that ran two of them shows two identical timeline rows.
-    RunObservability.endStep(ec, verifyStep,
-            verification.lookupFailed ? RunObservability.STATUS_FAILED : RunObservability.STATUS_SUCCESS,
-            [recordCount : verification.checkedCount ?: 0,
-             errorMessage: verification.lookupFailed && verification.warnings ? verification.warnings.first().toString() : null,
-             metricsJson : JsonOutput.toJson([verifiedSystems: sideLookups.keySet() as List,
-                     checkedCount: verification.checkedCount ?: 0, removedCount: verification.removedCount ?: 0])])
+    RunVerificationSupport.runMissingDiffPass([
+            ec                 : ec,
+            runResultId        : obsRunId,
+            stepCtx            : obsCtx,
+            serviceResult      : serviceResult,
+            diffFile           : { resolveOutputFile(serviceResult) },
+            file1Source        : file1Source,
+            file2Source        : file2Source,
+            file1Label         : file1Label,
+            file2Label         : file2Label,
+            runOwnerUserGroupId: runOwnerUserGroupId,
+            dispatcher         : { String serviceName, Map serviceParams -> runInternalService(serviceName, serviceParams) },
+    ])
 }
 
 // Return presence verify stage (DAR-BE-018; reduced 2026-08-18 — returns-refund-grain-alignment plan,

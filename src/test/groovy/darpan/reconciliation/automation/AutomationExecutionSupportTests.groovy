@@ -3730,13 +3730,13 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
-    void aDisabledVerificationTouchesNothingAtAll() {
+    void aDisabledVerificationMovesNoCountButSaysWhyItDidNotRun() {
         try {
             System.setProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY, "false")
             Map<String, Object> reconcileResult = [differenceCount: 532L, missingInFile1Count: 500L,
                                                    missingInFile2Count: 32L]
 
-            // Every collaborator is null on purpose: with the switch off this must return before it
+            // Every collaborator is null on purpose: with the switch off this must decide before it
             // can touch the execution context, so a null ec proves no work was attempted.
             boolean ran = AutomationExecutionSupport.verifyMissingDiffsIfEnabled(
                     null, null, null, null, reconcileResult, null, null)
@@ -3744,7 +3744,13 @@ class AutomationExecutionSupportTests {
             assertFalse(ran)
             assertEquals(532L, reconcileResult.differenceCount, "a disabled pass must not move any count")
             assertEquals(500L, reconcileResult.missingInFile1Count)
-            assertNull(reconcileResult.processingWarnings, "a disabled pass must not annotate the result")
+            // CHANGED 2026-08-27: silence here is what made the production report unreadable — 403
+            // unverified differences and no VERIFY row, which could equally have meant the switch was
+            // off or the pass was broken. A disabled pass still touches no count; it now says so.
+            List warnings = (reconcileResult.processingWarnings ?: []) as List
+            assertEquals(1, warnings.size(), "a disabled pass must state that the counts are unverified")
+            assertTrue(((String) warnings.first()).contains(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY),
+                    "the reason must name the switch an operator would flip, got: ${warnings.first()}")
         } finally {
             System.clearProperty(AutomationExecutionSupport.VERIFY_MISSING_DIFFS_PROPERTY)
         }

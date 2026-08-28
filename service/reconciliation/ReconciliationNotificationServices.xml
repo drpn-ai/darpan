@@ -54,10 +54,16 @@
                  into this same list. Counting those as warnings headlined every exchange-enabled run
                  "WITH ISSUES" (reported from prod 2026-08-05, Gorjana API Order Sync: 0 differences,
                  0 missing, 0 pending — still flagged). Split them so the header reacts only to real
-                 warnings; the notes are still shown, under their own line. -->
+                 warnings. -->
             <set field="partitionedWarnings" from="darpan.reconciliation.notification.TenantNotificationSupport.partitionAuditNotes(processingWarnings)"/>
             <set field="warningList" from="partitionedWarnings.warnings"/>
-            <set field="auditNoteList" from="partitionedWarnings.auditNotes"/>
+            <!-- partitionedWarnings.auditNotes is deliberately NOT read. The split still has to
+                 happen — it is what keeps an always-emitted audit sentence out of warningList, and
+                 so out of the "finished, but not cleanly" header — but the notes themselves are no
+                 longer rendered here (2026-08-28). They restated what the *Details* block already
+                 reports as structured counts, and on a returns run that came to six sentences of
+                 prose after the numbers. The stored artifact keeps every sentence verbatim for the
+                 run-result page's audit trail. -->
             <set field="runFailed" from="((statusEnumId)?.toString()?.trim()) == 'AUT_STAT_FAILED'"/>
             <set field="noOutput" from="runFailed &amp;&amp; noOutputProduced == true"/>
             <!-- A no-output failure keeps its original header verbatim: zeros there are not "no
@@ -97,11 +103,6 @@
             </if>
             <if condition="warningList">
                 <set field="ignoreLine" from="lines.add('Warnings (' + warningList.size() + '): ' + warningList.take(3).join('; ') + (warningList.size() > 3 ? ' …' : ''))"/>
-            </if>
-            <!-- Audit notes last and unlabelled-by-count: they are the run showing its work, not a
-                 queue of things to action. -->
-            <if condition="auditNoteList">
-                <set field="ignoreLine" from="lines.add('Notes: ' + auditNoteList.join(' '))"/>
             </if>
             <set field="payload" from="[text: lines.join('\n')]"/>
         </actions>

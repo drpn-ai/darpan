@@ -137,9 +137,13 @@ class TenantNotificationServiceSmokeTests {
         assertTrue(text.contains("API Order Sync — ${RunNotificationVoice.CLEAN_HEADLINES.first()}"), text)
         assertFalse(text.contains("*Details*"), "three zeros is noise on a clean run: ${text}")
         assertFalse(text.contains("Warnings ("), text)
-        // The audit trail itself is not dropped — it moves to its own line.
-        assertTrue(text.contains("Notes: Exchange presence check: 116 Shopify exchange(s) in window"), text)
-        assertTrue(text.contains("7 in transit (return not yet closed)."), text)
+        // The audit sentences stay OUT of the chat body entirely (2026-08-28). They were a second
+        // rendering of what *Details* already says, in prose, and on a returns run they ran to six
+        // sentences. The artifact keeps them verbatim for the run-result page; what must survive
+        // here is that they did not turn a clean run into a warned one, which the two assertions
+        // above pin.
+        assertFalse(text.contains("Notes:"), text)
+        assertFalse(text.contains("Exchange presence check"), text)
     }
 
     /**
@@ -254,8 +258,10 @@ class TenantNotificationServiceSmokeTests {
         // Exactly the two real failures — the two audit sentences are excluded from the count.
         assertTrue(text.contains("Warnings (2): Exchange presence check skipped: manifest unreadable (boom).; " +
                 "Shopify exchange sweep failed: connection reset"), text)
-        assertTrue(text.contains("Notes: Exchange presence check: 10 Shopify exchange(s) in window"), text)
-        assertTrue(text.contains("Verification pass: 3 of 5"), text)
+        // Audit sentences are classified out of the warning count (asserted above) and then not
+        // rendered at all — the counts an operator acts on are in *Details*.
+        assertFalse(text.contains("Notes:"), text)
+        assertFalse(text.contains("Verification pass:"), text)
     }
 
     /** A run whose only processingWarnings are real still reports no Notes line at all. */

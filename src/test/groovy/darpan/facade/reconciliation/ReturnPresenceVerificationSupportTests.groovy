@@ -787,6 +787,30 @@ class ReturnPresenceVerificationSupportTests {
         assertTrue(read.contains("order1") && read.contains("order900"))
     }
 
+    // --- REASON TALLIES MUST SUM TO THE ROWS ACTUALLY REMOVED (2026-08-28) --------------------
+    // The audit note's per-reason counts are what an operator adds up, so they have to reconcile with
+    // removedCount. They did not. A refund whose line never shipped AND whose order turns out to be
+    // cancelled is ONE row, and it takes two paths: the cancelled-item branch removes it inline
+    // (line 336) while it is ALREADY sitting in candidateRowIdsByOrderId (line 316, collected before
+    // that branch runs). Pass 1.5 then re-adds the same id to a Set -- a no-op -- but increments
+    // cancelledRefundCount by rowIds.size() unconditionally. Live 2026-08-28 on a returns run:
+    // 37 + 15 + 2 = 54 reasons reported against 48 rows removed, an excess of exactly the overlap.
+
+    @Test
+    void doesNotReportOneRemovedRowUnderTwoSuppressionReasons() {
+        File diff = writeDiffDocument([missingInOmsRefundWithFulfilment("955076870275", OLD, Boolean.FALSE)])
+
+        Map result = verifyWithLookup(diff,
+                lookupReturning([(DEFAULT_ORDER_ID): [[statusId: "ORDER_CANCELLED"]]]))
+
+        assertEquals(1, result.removedCount)
+        int reasonTotal = (result.pendingCount as int) + (result.preWindowSuppressedCount as int) +
+                (result.cancelledRefundSuppressedCount as int) + (result.siblingReturnSuppressedCount as int) +
+                (result.cancelledItemSuppressedCount as int)
+        assertEquals(result.removedCount, reasonTotal,
+                "every removed row must be reported under exactly one reason; note said: ${result.auditNote}")
+    }
+
     // --- CANCELLED-ITEM SUPPRESSION (2026-08-21): a refund whose lines never shipped cannot be a
     // return. Measured 22/25 on unmatched refunds and 0/8 on matched ones.
 

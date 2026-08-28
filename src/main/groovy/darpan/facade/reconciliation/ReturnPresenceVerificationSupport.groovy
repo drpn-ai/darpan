@@ -400,8 +400,18 @@ class ReturnPresenceVerificationSupport {
                         if (!containsCancelledOrder(group)) return
                         Set<String> rowIds = candidateRowIdsByOrderId.get(normalize(orderIdKey))
                         if (!rowIds) return
-                        removeIdsByToken.computeIfAbsent(omsToken) { new LinkedHashSet<String>() }.addAll(rowIds)
-                        cancelledRefundCount += rowIds.size()
+                        // Count only what this pass actually ADDS. A candidate is collected above
+                        // (the orderCancelledAt key was absent) BEFORE the cancelled-item and
+                        // superseded-sibling branches get their turn, so a row can already be in the
+                        // removal set by the time its order comes back cancelled here. addAll is then
+                        // a no-op on the Set while an unconditional += counted the same row a second
+                        // time. The note's per-reason tallies are read as a breakdown of removedCount
+                        // — a live returns run reported 37 + 15 + 2 = 54 reasons against 48 rows
+                        // removed — so they must never exceed it.
+                        Set<String> omsRemovals = removeIdsByToken.computeIfAbsent(omsToken) { new LinkedHashSet<String>() }
+                        int alreadyRemoved = omsRemovals.size()
+                        omsRemovals.addAll(rowIds)
+                        cancelledRefundCount += omsRemovals.size() - alreadyRemoved
                     }
                 }
             }

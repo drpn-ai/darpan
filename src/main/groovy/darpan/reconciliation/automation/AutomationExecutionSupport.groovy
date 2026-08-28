@@ -398,8 +398,19 @@ class AutomationExecutionSupport {
                 RunObservability.checkpointCancel(ec, mintedRunResultId)
                 autoPersistedSources = (reconcileResult.persistedSources ?: []) as List
                 requireReconcileOutput(ec, reconcileResult)
-                // Verification rewrites the diff document and adjusts the summary, so it must run
-                // BEFORE the result artifact is built or any count is persisted or notified.
+                // The diff document has to EXIST before verification, because every pass reads it off
+                // disk and rewrites it in place. This call is what sets reconcileResult.diffLocation:
+                // reconcile#RuleSetCompareScope declares no diffLocation/diffFileName out-parameter and
+                // hands back only Spark Datasets, so while this sat BELOW the passes, resolveDiffFile
+                // returned null on every scheduled run and all three skipped -- the missing-diff pass
+                // loudly (DIFF_ARTIFACT_UNREADABLE), the other two in silence. Same shape as the
+                // sourceConfigId gap fixed in d40082d, one layer further out.
+                //
+                // Verification still runs BEFORE any count is persisted or anyone is notified, which is
+                // what the previous ordering was actually protecting; the summary written here is
+                // corrected in place by each pass, exactly as it is on the interactive path
+                // (runSavedRunDiff.groovy writes at writeDiffDatasetOutput, then verifies).
+                ensureAutomationResultArtifact(ec, automation, file1Source, file2Source, reconcileResult, window, executionParams)
                 // Runs by default; a no-op only if VERIFY_MISSING_DIFFS_PROPERTY is explicitly "false".
                 verifyMissingDiffsIfEnabled(ec, automation, file1Source, file2Source, reconcileResult,
                         mintedRunResultId, stepCtx, executionParams)
@@ -409,7 +420,6 @@ class AutomationExecutionSupport {
                         reconcileResult, mintedRunResultId, stepCtx, window, executionParams)
                 verifyReturnPresenceIfEnabled(ec, automation, file1Source, file2Source, file1Result, file2Result,
                         reconcileResult, mintedRunResultId, stepCtx, window, executionParams)
-                ensureAutomationResultArtifact(ec, automation, file1Source, file2Source, reconcileResult, window, executionParams)
                 String resultDataManagerPath = normalizeDataManagerPath(ec,
                         reconcileResult.resultDataManagerPath ?: reconcileResult.diffLocation ?: reconcileResult.diffFileName)
                 openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_WRITE_OUTPUT)

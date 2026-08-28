@@ -39,6 +39,9 @@ class AutomationExecutionServiceSmokeTests {
     // UserGroup and an unseeded id fails the entity create outright.
     private static final String OTHER_TENANT_USER_GROUP_ID = "GORJANA"
     private static final String FILTER_TEST_MAPPING_ID = "AUTO_FILTER_TEST_MAPPING"
+    // A SECOND automation for the end-to-end verification test, so its execution row cannot
+    // collide with the .one() lookups the AUTO_API_ARTIFACT tests make against theirs.
+    private static final String VERIFY_DIFF_AUTOMATION_ID = "AUTO_API_VERIFY_DIFF"
 
     private ExecutionContext ec
     private int filterFixtureCounter = 0
@@ -511,9 +514,9 @@ class AutomationExecutionServiceSmokeTests {
         ec.message.clearErrors()
     }
 
-    private void seedApiAutomation() {
-        upsertEntityValue("darpan.reconciliation.ReconciliationAutomation", [automationId: "AUTO_API_ARTIFACT"], [
-                automationId            : "AUTO_API_ARTIFACT",
+    private void seedApiAutomation(String automationId = "AUTO_API_ARTIFACT") {
+        upsertEntityValue("darpan.reconciliation.ReconciliationAutomation", [automationId: automationId], [
+                automationId            : automationId,
                 automationName          : "API Automation Artifact Smoke",
                 companyUserGroupId      : TEST_COMPANY_USER_GROUP_ID,
                 createdByUserId         : TEST_USER_ID,
@@ -530,10 +533,10 @@ class AutomationExecutionServiceSmokeTests {
                 lastUpdatedDate         : ec.user.nowTimestamp,
         ])
         upsertEntityValue("darpan.reconciliation.ReconciliationAutomationSource", [
-                automationId: "AUTO_API_ARTIFACT",
+                automationId: automationId,
                 fileSide    : AutomationExecutionSupport.FILE_SIDE_1,
         ], [
-                automationId         : "AUTO_API_ARTIFACT",
+                automationId         : automationId,
                 fileSide             : AutomationExecutionSupport.FILE_SIDE_1,
                 companyUserGroupId   : TEST_COMPANY_USER_GROUP_ID,
                 createdByUserId      : TEST_USER_ID,
@@ -544,10 +547,10 @@ class AutomationExecutionServiceSmokeTests {
                 lastUpdatedDate      : ec.user.nowTimestamp,
         ])
         upsertEntityValue("darpan.reconciliation.ReconciliationAutomationSource", [
-                automationId: "AUTO_API_ARTIFACT",
+                automationId: automationId,
                 fileSide    : AutomationExecutionSupport.FILE_SIDE_2,
         ], [
-                automationId         : "AUTO_API_ARTIFACT",
+                automationId         : automationId,
                 fileSide             : AutomationExecutionSupport.FILE_SIDE_2,
                 companyUserGroupId   : TEST_COMPANY_USER_GROUP_ID,
                 createdByUserId      : TEST_USER_ID,
@@ -1046,6 +1049,80 @@ class AutomationExecutionServiceSmokeTests {
                 .parameters(parameters)
                 .disableAuthz()
                 .call()
+    }
+
+
+    // --- verification reads a diff document that EXISTS by then (2026-08-28) -------------------
+    // Every test below hands verifyMissingDiffsIfEnabled a hand-built reconcileResult carrying
+    // `diffLocation` -- a key reconcile#RuleSetCompareScope does not declare as an out-parameter and
+    // therefore never returns. So they prove the pass runs when given a file, and nothing about
+    // whether this path ever gives it one. It did not: ensureAutomationResultArtifact, which is what
+    // sets diffLocation, ran AFTER all three passes, so resolveDiffFile returned null on every
+    // scheduled run and each one reported DIFF_ARTIFACT_UNREADABLE. Same hollow-fixture shape as the
+    // sourceConfigId gap fixed in d40082d, one layer further out. This test drives the REAL
+    // orchestration instead.
+
+    @Test
+    void aScheduledRunVerifiesAgainstTheDiffDocumentItsOwnCompareProduced() {
+        seedApiAutomation(VERIFY_DIFF_AUTOMATION_ID)
+        AutomationExecutionSupport.setSourceExtractor { def ignoredEc, def ignoredAutomation, def source,
+                Map<String, Object> ignoredWindow, Map<String, Object> ignoredParams ->
+            String fileSide = source.get("fileSide")
+            String location = fileSide == AutomationExecutionSupport.FILE_SIDE_1 ?
+                    "component://darpan/data/test/test-orders-1.json" :
+                    "component://darpan/data/test/test-orders-2.json"
+            return [
+                    dataAvailable : true,
+                    fileLocation  : location,
+                    fileName      : "${fileSide}.json".toString(),
+                    fileTypeEnumId: "DftJson",
+                    recordCount   : 3,
+            ]
+        }
+
+        Map<String, Object> result = AutomationExecutionSupport.executeAutomation(ec, [
+                automationId     : VERIFY_DIFF_AUTOMATION_ID,
+                scheduledFireTime: Timestamp.valueOf("2026-05-01 10:00:00"),
+                sparkMaster      : "local[1]",
+                sparkAppName     : "AutomationExecutionServiceSmokeTests",
+        ])
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals(1, result.executedCount)
+
+        def execution = ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution")
+                .condition("automationId", VERIFY_DIFF_AUTOMATION_ID)
+                .disableAuthz()
+                .useCache(false)
+                .one()
+        assertNotNull(execution)
+        String runResultId = execution.reconciliationRunResultId as String
+        assertNotNull(runResultId, "the run must have been observed for its VERIFY step to be readable")
+
+        // A PRECONDITION, not decoration. prepareMissingDiffPass returns "nothing to verify" before
+        // it ever looks for the file, so on a fixture with no missing rows the assertion below would
+        // pass without the gate under test being reached at all.
+        File outputFile = DataManagerSupport.resolveDataManagerFile(ec, execution.resultDataManagerPath, false)
+        assertNotNull(outputFile)
+        Map<String, Object> outputDocument = (Map<String, Object>) JSON_SLURPER.parseText(outputFile.getText("UTF-8"))
+        Map summary = (Map) outputDocument.summary
+        long missingRows = (((summary?.onlyInFile1Count ?: 0) as Number).longValue() +
+                ((summary?.onlyInFile2Count ?: 0) as Number).longValue())
+        assertTrue(missingRows > 0L,
+                "fixture must produce missing rows or the diff-document gate is never reached; summary was ${summary}")
+
+        List verifySteps = ec.entity.find(RunObservability.RUN_STEP_ENTITY)
+                .condition("reconciliationRunResultId", runResultId)
+                .condition("stageCode", RunObservability.STAGE_VERIFY)
+                .disableAuthz()
+                .useCache(false)
+                .list()
+        def unreadable = verifySteps.find { def step ->
+            ((step.metricsJson ?: "") as String).contains(RunVerificationSupport.SKIP_NO_DIFF_FILE)
+        }
+        assertNull(unreadable,
+                "the compare's diff document must be on disk before verification reads it; step said: " +
+                        "${unreadable?.errorMessage}")
     }
 
     // --- verification on the SCHEDULED path (design step 4) ------------------------------------

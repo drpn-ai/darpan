@@ -57,6 +57,9 @@
                                         "$ref": "#/components/schemas/GetAdminSessionInfoRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetScheduleBoardRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/CreateTenantRequest"
                                     },
                                     {
@@ -368,6 +371,7 @@
                                         "admin.MigrationAdminServices.run#PendingMigrations": "#/components/schemas/RunPendingMigrationsRequest",
                                         "admin.MigrationAdminServices.set#MigrationEnabled": "#/components/schemas/SetMigrationEnabledRequest",
                                         "admin.ObserveAdminServices.get#AdminSessionInfo": "#/components/schemas/GetAdminSessionInfoRequest",
+                                        "admin.ScheduleAdminServices.get#ScheduleBoard": "#/components/schemas/GetScheduleBoardRequest",
                                         "admin.TenantAdminServices.create#Tenant": "#/components/schemas/CreateTenantRequest",
                                         "admin.TenantAdminServices.deactivate#Tenant": "#/components/schemas/DeactivateTenantRequest",
                                         "admin.TenantAdminServices.get#TenantDetail": "#/components/schemas/GetTenantDetailRequest",
@@ -515,6 +519,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetAdminSessionInfoResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetScheduleBoardResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/CreateTenantResponse"
@@ -2011,6 +2018,125 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/GetAdminSessionInfoResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetScheduleBoardParams": {
+                "type": "object",
+                "properties": {
+                    "horizonHours": {
+                        "type": "integer",
+                        "description": "How far forward to project. Defaults to 24 hours."
+                    }
+                },
+                "description": "Every tenant's scheduled automations on one instance-wide timeline, ordered by the\n            moment the scheduler will actually submit them, for deployment and load management.\n\n            Only the first fire per automation is authoritative \u2014 it is the stored nextScheduledFireTime\n            the scanner owns. Later entries are projected from scheduleExpr and assume the automation is\n            not paused, edited, or deferred by the concurrency cap before it gets there.\n\n            Fire times are absolute instants; submitsAt snaps each one up to the next\n            scan_ReconciliationAutomations_5m tick (\"0 0/5 * * * ?\"), because nothing is submitted\n            between ticks. concurrentAtTick counts the fires sharing a tick, to be read against\n            inFlightCap (darpan.reconciliation.automation.maxConcurrentExecutions)."
+            },
+            "GetScheduleBoardResult": {
+                "type": "object",
+                "properties": {
+                    "scheduleBoard": {
+                        "type": "object",
+                        "properties": {
+                            "generatedAt": {
+                                "oneOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "number"
+                                    }
+                                ],
+                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                            },
+                            "horizonHours": {
+                                "type": "integer"
+                            },
+                            "inFlightCap": {
+                                "type": "integer",
+                                "description": "Global cap on executions in flight at once, not a per-tenant cap."
+                            },
+                            "inFlight": {
+                                "type": "array",
+                                "items": {
+                                    
+                                },
+                                "description": "Executions started but not finished, oldest first."
+                            },
+                            "fires": {
+                                "type": "array",
+                                "items": {
+                                    
+                                },
+                                "description": "Projected submissions across the horizon, earliest first."
+                            },
+                            "paused": {
+                                "type": "array",
+                                "items": {
+                                    
+                                },
+                                "description": "Inactive automations \u2014 listed for inventory, never projected."
+                            }
+                        }
+                    }
+                }
+            },
+            "GetScheduleBoardRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.ScheduleAdminServices.get#ScheduleBoard",
+                "x-darpan-method": "admin.ScheduleAdminServices.get#ScheduleBoard",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.ScheduleAdminServices.get#ScheduleBoard"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetScheduleBoardParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetScheduleBoardResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.ScheduleAdminServices.get#ScheduleBoard. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetScheduleBoardResult"
                     }
                 },
                 "required": [
@@ -16862,6 +16988,7 @@
         "admin.MigrationAdminServices.run#PendingMigrations": "RunPendingMigrations",
         "admin.MigrationAdminServices.set#MigrationEnabled": "SetMigrationEnabled",
         "admin.ObserveAdminServices.get#AdminSessionInfo": "GetAdminSessionInfo",
+        "admin.ScheduleAdminServices.get#ScheduleBoard": "GetScheduleBoard",
         "admin.TenantAdminServices.create#Tenant": "CreateTenant",
         "admin.TenantAdminServices.deactivate#Tenant": "DeactivateTenant",
         "admin.TenantAdminServices.get#TenantDetail": "GetTenantDetail",

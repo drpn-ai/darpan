@@ -9,6 +9,7 @@ admin.MigrationAdminServices.run#Migration
 admin.MigrationAdminServices.run#PendingMigrations
 admin.MigrationAdminServices.set#MigrationEnabled
 admin.ObserveAdminServices.get#AdminSessionInfo
+admin.ScheduleAdminServices.get#ScheduleBoard
 admin.TenantAdminServices.create#Tenant
 admin.TenantAdminServices.deactivate#Tenant
 admin.TenantAdminServices.get#TenantDetail

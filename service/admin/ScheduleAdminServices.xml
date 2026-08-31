@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="get" noun="ScheduleBoard" allow-remote="true" authz-action="view">
+        <description>Every tenant's scheduled automations on one instance-wide timeline, ordered by the
+            moment the scheduler will actually submit them, for deployment and load management.
+
+            Only the first fire per automation is authoritative — it is the stored nextScheduledFireTime
+            the scanner owns. Later entries are projected from scheduleExpr and assume the automation is
+            not paused, edited, or deferred by the concurrency cap before it gets there.
+
+            Fire times are absolute instants; submitsAt snaps each one up to the next
+            scan_ReconciliationAutomations_5m tick ("0 0/5 * * * ?"), because nothing is submitted
+            between ticks. concurrentAtTick counts the fires sharing a tick, to be read against
+            inFlightCap (darpan.reconciliation.automation.maxConcurrentExecutions).</description>
+        <in-parameters>
+            <parameter name="horizonHours" type="Integer" default-value="24">
+                <description>How far forward to project. Defaults to 24 hours.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="scheduleBoard" type="Map">
+                <parameter name="generatedAt" type="Timestamp"/>
+                <parameter name="horizonHours" type="Integer"/>
+                <parameter name="inFlightCap" type="Integer">
+                    <description>Global cap on executions in flight at once, not a per-tenant cap.</description>
+                </parameter>
+                <parameter name="inFlight" type="List">
+                    <description>Executions started but not finished, oldest first.</description>
+                </parameter>
+                <parameter name="fires" type="List">
+                    <description>Projected submissions across the horizon, earliest first.</description>
+                </parameter>
+                <parameter name="paused" type="List">
+                    <description>Inactive automations — listed for inventory, never projected.</description>
+                </parameter>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="scheduleBoard" from="darpan.admin.AdminScheduleSupport.getScheduleBoard(ec, horizonHours, ec.user.nowTimestamp)"/>
+        </actions>
+    </service>
+</services>

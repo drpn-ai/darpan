@@ -153,18 +153,23 @@
                 return's own creation date — a refund row carries the refund's createdAt, a return row
                 carries the return's — never the order's creation date. Windowing filters on this field, not
                 on any order-level date."/>
-    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].returnWorkflowStatus"
-            label="Return workflow status" fieldType="string" sequenceNum="5"
-            description="ADDED 2026-08-27, RENAMED the same day from returnStatus — see the retirement
-                entry in SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS. Holds a Shopify
-                ReturnStatus: REQUESTED, OPEN, CLOSED, DECLINED, CANCELED. It is NOT Shopify's
-                Order.returnStatus, a different field holding an OrderReturnStatus (IN_PROGRESS,
-                INSPECTION_COMPLETE, NO_RETURN, RETURN_FAILED, RETURN_REQUESTED, RETURNED) that
-                aggregates a whole order for display; under the old name an operator excluded on
-                IN_PROGRESS and matched nothing. Present on RETURN rows only: a REFUND row has no
-                return status, so a rule on this field can never match one. Because a refunded return
-                is represented by its refund's row alone, this field only ever describes an UNREFUNDED
-                return — excluding OPEN excludes unrefunded OPEN returns. Exclude REQUESTED,OPEN to
-                drop in-progress returns that have no OMS counterpart yet."/>
+
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].orderReturnStatus"
+            label="Order return status" fieldType="string" sequenceNum="5"
+            description="ADDED 2026-09-01 (DAR-BE-026), replacing the withdrawn returnWorkflowStatus pill —
+                see the retirement entry in SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS. This is
+                the endpoint's ONLY return-status field. Holds Shopify's own Order.returnStatus, an
+                OrderReturnStatus: IN_PROGRESS, INSPECTION_COMPLETE, NO_RETURN, RETURN_FAILED,
+                RETURN_REQUESTED, RETURNED. Those are the values to type, and they are the ones Shopify
+                itself shows: the admin renders IN_PROGRESS as 'Return in progress' and the order search
+                spells it return_status:in_progress. The withdrawn field held a per-return ReturnStatus
+                instead, whose in-progress value is spelled OPEN — a word on no surface an operator could
+                see — so excluding IN_PROGRESS matched nothing and reported a zero count, which reads
+                exactly like an undeployed feature. Present on EVERY row, refund and return alike, because
+                it describes the whole ORDER: excluding IN_PROGRESS therefore drops an in-progress order's
+                refund rows as well as its return, which is deliberate — the per-return field it replaced
+                could never reach a refund row at all. Key always present, null when Shopify reports
+                nothing, so a consumer can tell 'extract predates the field' from 'Shopify said nothing'.
+                Exclude IN_PROGRESS to drop orders whose return has not finished yet."/>
 
 </entity-facade-xml>

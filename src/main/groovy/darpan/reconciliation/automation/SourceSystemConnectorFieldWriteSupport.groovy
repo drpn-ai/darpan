@@ -55,6 +55,15 @@ class SourceSystemConnectorFieldWriteSupport {
                      "RETURN_REQUESTED, RETURNED), while this pill selects Return.status (ReturnStatus — " +
                      "REQUESTED, OPEN, CLOSED, DECLINED, CANCELED). An operator on prod read the docs " +
                      "the old name pointed at, excluded on IN_PROGRESS, and dropped nothing"],
+            [systemEnumId: "SHOPIFY_RETURN_REFS", fieldPath: "\$.records[*].returnWorkflowStatus",
+             reason: "WITHDRAWN 2026-09-01 (DAR-BE-026), five days after it shipped. It held " +
+                     "Return.status, whose in-progress value is spelled OPEN — a word on no surface " +
+                     "an operator can see, since Shopify admin says 'Return in progress', the order " +
+                     "search says return_status:in_progress, and the rules board renders a pill's " +
+                     "label and path but never its description. Replaced by " +
+                     "\$.records[*].orderReturnStatus, which holds Shopify's own Order.returnStatus " +
+                     "(IN_PROGRESS, ...) so the exclusion works as operators type it, and which lands " +
+                     "on refund rows too — the per-return field could never reach one"],
     ].asImmutable()
 
     /**

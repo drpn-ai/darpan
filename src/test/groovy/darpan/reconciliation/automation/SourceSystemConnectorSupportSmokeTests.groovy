@@ -246,20 +246,26 @@ class SourceSystemConnectorSupportSmokeTests {
     }
 
     @Test
-    void theBoardOffersAReturnWorkflowStatusPillForShopifyReturnRefs() {
-        // RENAMED 2026-08-27, hours after it first shipped, because the old name collided with a real
-        // Shopify field that carries DIFFERENT values. Order.returnStatus is an OrderReturnStatus
-        // (IN_PROGRESS, INSPECTION_COMPLETE, NO_RETURN, RETURN_FAILED, RETURN_REQUESTED, RETURNED);
-        // this pill selects Return.status, a ReturnStatus (REQUESTED, OPEN, CLOSED, DECLINED,
-        // CANCELED). An operator on prod read Shopify's docs for the aggregate, excluded on
-        // IN_PROGRESS and dropped nothing — and because a rule matching nothing reports
-        // excludedCount 0, it was indistinguishable from an undeployed feature.
+    void theBoardOffersExactlyOneReturnStatusPillForShopifyReturnRefsAndItIsTheOrderLevelOne() {
+        // 2026-09-01 (DAR-BE-026): this endpoint has now carried a status pill under three names, and
+        // only the third survives. $.records[*].returnStatus (2026-08-27) was named after Shopify's
+        // ORDER-level field but held Return.status; $.records[*].returnWorkflowStatus renamed it hours
+        // later to stop that collision, which made the NAME honest but left the real failure in place —
+        // its in-progress value is spelled OPEN, and no surface an operator can see says OPEN. Shopify's
+        // admin says "Return in progress" and its order search says return_status:in_progress.
+        // $.records[*].orderReturnStatus holds Order.returnStatus itself, so IN_PROGRESS works as typed.
+        //
+        // Asserting the other two are ABSENT is the load-bearing half: a pill naming a field the extract
+        // no longer emits is a permanent silent no-op for any rule drawn on it.
         ReconciliationSmokeTestSupport.loadSeedData(ec,
                 "component://darpan/data/SourceSystemConnectorFieldSeedData.xml")
-        assertTrue(pillPaths("SHOPIFY_RETURN_REFS").contains('$.records[*].returnWorkflowStatus'),
-                "returnWorkflowStatus must be offerable as an exclusion pill: ${pillPaths("SHOPIFY_RETURN_REFS")}")
-        assertFalse(pillPaths("SHOPIFY_RETURN_REFS").contains('$.records[*].returnStatus'),
-                "the colliding name must not still be on offer: ${pillPaths("SHOPIFY_RETURN_REFS")}")
+        Collection<String> paths = pillPaths("SHOPIFY_RETURN_REFS")
+        assertTrue(paths.contains('$.records[*].orderReturnStatus'),
+                "orderReturnStatus must be offerable as an exclusion pill: ${paths}")
+        assertFalse(paths.contains('$.records[*].returnWorkflowStatus'),
+                "the withdrawn per-return pill must not still be on offer: ${paths}")
+        assertFalse(paths.contains('$.records[*].returnStatus'),
+                "the original colliding name must not come back either: ${paths}")
     }
 
     @Test
@@ -271,18 +277,24 @@ class SourceSystemConnectorSupportSmokeTests {
         assertTrue(SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS.any { Map<String, String> row ->
             row.systemEnumId == "SHOPIFY_RETURN_REFS" && row.fieldPath == '$.records[*].returnStatus'
         }, "the old returnStatus pill must be declared retired: ${SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS}")
+        // WITHDRAWN 2026-09-01 (DAR-BE-026): the rename's own product is now retired too, for the same
+        // structural reason — a database that loaded 1.5.1 holds the row and no seed load will remove it.
+        assertTrue(SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS.any { Map<String, String> row ->
+            row.systemEnumId == "SHOPIFY_RETURN_REFS" && row.fieldPath == '$.records[*].returnWorkflowStatus'
+        }, "the withdrawn returnWorkflowStatus pill must be declared retired: ${SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS}")
     }
 
     @Test
-    void theShopifyReturnRefsKeepFieldsBaseNamesTheRenamedField() {
+    void theShopifyReturnRefsKeepFieldsBaseNamesOnlyTheOrderLevelStatusField() {
         // keepFieldsBase is documentation-only on this row (the service declares no keep-fields
-        // parameter), but it is what a reader consults for the record shape — leaving the old name
-        // would re-teach exactly the mistake the rename fixes.
+        // parameter), but it is what a reader consults for the record shape — leaving a withdrawn name
+        // would re-teach exactly the mistake this change fixes.
         Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY_RETURN_REFS")
         assertNotNull(connector, "SHOPIFY_RETURN_REFS connector row should resolve")
         List<String> keepFields = ((String) connector.keepFieldsBase).split(",").collect { it.trim() }
-        assertTrue(keepFields.contains("returnWorkflowStatus"), "keepFieldsBase should name the new key: ${keepFields}")
-        assertFalse(keepFields.contains("returnStatus"), "keepFieldsBase should drop the old key: ${keepFields}")
+        assertTrue(keepFields.contains("orderReturnStatus"), "keepFieldsBase should name the surviving key: ${keepFields}")
+        assertFalse(keepFields.contains("returnWorkflowStatus"), "keepFieldsBase should drop the withdrawn key: ${keepFields}")
+        assertFalse(keepFields.contains("returnStatus"), "keepFieldsBase should not name the original key either: ${keepFields}")
     }
 
     @Test
@@ -609,8 +621,22 @@ class SourceSystemConnectorSupportSmokeTests {
                          label: "Order name", fieldType: "string", isPrimaryIdCandidate: "Y",
                          sequenceNum: 2, description: "withdrawn"]).createOrUpdate()
 
+        // An environment that loaded the 2026-08-27 seed still has the withdrawn per-return status
+        // pill. A seed load is createOrUpdate and never deletes, so only the retirement migration can
+        // remove it — without this it would sit on the board forever naming a field the extract no
+        // longer emits, which is a permanent silent no-op for any rule using it.
+        ec.entity.makeValue("darpan.reconciliation.SourceSystemConnectorField")
+                .setAll([systemEnumId: "SHOPIFY_RETURN_REFS", fieldPath: "\$.records[*].returnWorkflowStatus",
+                         label: "Return workflow status", fieldType: "string",
+                         sequenceNum: 5, description: "withdrawn 2026-09-01"]).createOrUpdate()
+
         ec.service.sync().name("facade.SourceEndpointFacadeServices.migrate#RetiredConnectorFields")
                 .disableAuthz().call()
+
+        assertEquals(0L, ec.entity.find("darpan.reconciliation.SourceSystemConnectorField")
+                .condition("systemEnumId", "SHOPIFY_RETURN_REFS")
+                .condition("fieldPath", "\$.records[*].returnWorkflowStatus")
+                .useCache(false).count())
 
         assertEquals(0L, ec.entity.find("darpan.reconciliation.SourceSystemConnectorField")
                 .condition("systemEnumId", "SHOPIFY_RETURN_REFS")
@@ -623,6 +649,9 @@ class SourceSystemConnectorSupportSmokeTests {
         // 5, not 4: returnWorkflowStatus was seeded 2026-08-27 for return-status exclusion. The COUNT is
         // incidental to what this test guards — that the retirement swept only the withdrawn row —
         // so it tracks the seed file and is expected to move whenever a pill is legitimately added.
+        // Still 5 on 2026-09-01 (DAR-BE-026): orderReturnStatus was seeded and returnWorkflowStatus
+        // was withdrawn in the same change, so the count nets out. The endpoint now offers exactly
+        // ONE status pill, holding Shopify's order-level Order.returnStatus.
         assertEquals(5L, ec.entity.find("darpan.reconciliation.SourceSystemConnectorField")
                 .condition("systemEnumId", "SHOPIFY_RETURN_REFS").useCache(false).count())
     }

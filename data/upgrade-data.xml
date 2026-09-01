@@ -1,73 +1,75 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Release-scoped upgrade data for Darpan 1.5.1.
-Assembled from the generic seed files under runtime/component/darpan/data/ over the range
-v1.5.0..v1.5.1, then hand-ordered. Load with: ./gradlew loadDarpanUpgradeData
+Release-scoped upgrade data for the NEXT Darpan release (unreleased).
+Assembled from the generic seed files under runtime/component/darpan/data/ since v1.5.1, then
+hand-ordered. Load with: ./gradlew loadDarpanUpgradeData
 
-This is a HOTFIX pack and it is a DELTA, not a cumulative file. It carries only what changed after
-1.5.0. An environment that has not yet loaded 1.5.0 must load data/releases/1.5.0/upgrade-data.xml
-FIRST — this file restates a row that release creates, and will fail on a missing parent otherwise.
-prod, UAT and sm-darpan all completed 1.5.0's load and migrations on 2026-08-27, so for them this
-file is the only one outstanding.
+REBUILT, NOT APPENDED. This file previously held 1.5.1's pack; that pack is frozen at
+data/releases/1.5.1/upgrade-data.xml and must not be edited. This is a DELTA carrying only what
+changed after 1.5.1. An environment that has not yet loaded 1.5.1 must load
+data/releases/1.5.1/upgrade-data.xml FIRST — this file restates a row that pack also restates, and
+ordering the two the other way leaves the 1.5.1 values in place.
 
 ORDERING: SourceSystemConnector before SourceSystemConnectorField. Moqui's entity-facade loader
 inserts rows in DOCUMENT ORDER — it does not topologically sort — so a child ahead of its parent
-fails with a raw *_ibfk_* constraint error that points nowhere near this file. The Enumeration
-SHOPIFY_RETURN_REFS and the connector row it parents both shipped in 1.5.0, so no Enumeration row is
-needed here. release_preflight.py sorts alphabetically and WILL break the one chain that remains if
-this file is regenerated. Re-order by hand afterwards.
+fails with a raw *_ibfk_* constraint error that points nowhere near this file. release_preflight.py
+sorts alphabetically and WILL break that chain if this file is regenerated. Re-order by hand after.
 
 OPERATOR IMPACT: 2 records.
 
   - SourceSystemConnector SHOPIFY_RETURN_REFS is restated (create-or-update by primary key, so it
-    changes only the named columns) with filterParameterName="sourceFilters" and a keepFieldsBase
-    widened by returnWorkflowStatus. Until this loads, the rules board hides the exclusion control on
-    Shopify return references entirely, and any return-status rule an operator manages to configure
-    is inert.
+    changes only the named columns) with keepFieldsBase swapping the withdrawn returnWorkflowStatus
+    for orderReturnStatus. filterParameterName is unchanged from 1.5.1 and is restated only because
+    create-or-update writes whole rows.
 
-  - SourceSystemConnectorField $.records[*].returnWorkflowStatus is new: the "Return workflow status"
-    pill on the rules board for that connector.
+  - SourceSystemConnectorField $.records[*].orderReturnStatus is new: the "Order return status" pill,
+    and after this load the endpoint's ONLY return-status pill.
 
-Both records need shopify-darpan v0.6.1 or later deployed alongside. That is the component that
-emits returnWorkflowStatus on return rows; against v0.6.0 the pill appears but selects a field the
-extract does not contain, so every rule on it matches nothing — silently, with no error anywhere.
+WHAT THIS CHANGES FOR OPERATORS, and why it is worth the churn so soon after 1.5.1. 1.5.1 shipped a
+pill whose values no operator could discover. It held Shopify's Return.status, whose in-progress
+value is spelled OPEN — a word that appears on no surface an operator can reach, because the rules
+board renders a pill's label and field path but never its description, and SourceSystemConnectorField
+has no allowed-values column at all. Meanwhile Shopify's own admin shows "Return in progress" and its
+order search spells it return_status:in_progress. So the natural rule, exclude IN_PROGRESS, matched
+nothing and reported a zero count — which reads exactly like a feature that was never deployed.
+This pack replaces it with Order.returnStatus, whose values ARE the ones Shopify shows operators:
+IN_PROGRESS, INSPECTION_COMPLETE, NO_RETURN, RETURN_FAILED, RETURN_REQUESTED, RETURNED.
 
-ONE MANUAL STEP THIS TIME — the pill was RENAMED on 2026-08-27, hours after it first shipped, from
-$.records[*].returnStatus to $.records[*].returnWorkflowStatus. Shopify's own Order.returnStatus is
-a DIFFERENT field holding a DIFFERENT enum (OrderReturnStatus: IN_PROGRESS, INSPECTION_COMPLETE,
-NO_RETURN, RETURN_FAILED, RETURN_REQUESTED, RETURNED); this pill selects Return.status (ReturnStatus:
-REQUESTED, OPEN, CLOSED, DECLINED, CANCELED). An operator on production read the docs the old name
-pointed at, excluded on IN_PROGRESS, and dropped nothing.
+Being an order-wide aggregate, it also lands on REFUND rows, which the withdrawn per-return field
+could never reach. Excluding IN_PROGRESS therefore drops an in-progress order's refund rows as well
+as its return. That is deliberate, and it is a real behaviour change: if OMS holds such a refund, it
+will now report as missing-in-Shopify.
 
-A seed load is createOrUpdate and never deletes, so loading this file INSERTS the new pill but leaves
-the old one behind, and the board would offer both — one of which no longer exists on the extract, so
-a rule on it silently matches nothing forever. The old PK is declared in
-SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS, which the RETIRED_FIELDS migration deletes —
-but that migration is ALREADY APPLIED on every environment that ran 1.5.0's migrations, and
-run#PendingMigrations skips anything already applied. It must therefore be re-run explicitly ONCE per
-environment, after this file loads:
+Both records need the matching shopify-darpan build deployed alongside — the component that emits
+orderReturnStatus. Against an older build the pill appears but selects a field the extract does not
+contain, so every rule on it matches nothing, silently, with no error anywhere.
+
+ONE MANUAL STEP, and skipping it leaves a pill that can never match. A seed load is createOrUpdate and
+never deletes, so this file INSERTS the new pill but leaves the withdrawn
+$.records[*].returnWorkflowStatus behind (and, on an environment that loaded the few-hour-old original,
+$.records[*].returnStatus as well). The board would offer a status pill that no longer exists on the
+extract. Both PKs are declared in SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS, which the
+RETIRED_FIELDS migration deletes — but that migration is ALREADY APPLIED on every environment that ran
+1.5.0's migrations, and run#PendingMigrations skips anything already applied. It must therefore be
+re-run explicitly ONCE per environment, after this file loads:
 
     admin.MigrationAdminServices.run#Migration  migrationId=RETIRED_FIELDS  force=true
 
 (the Migrations screen's per-migration run with force set does the same). It is idempotent — a second
-run deletes nothing. Skip it and the stale "Return status" pill stays on the rules board.
+run deletes nothing. Running it on an environment that never held the stale rows is a safe no-op and
+is the recommended default, because telling the cases apart from outside the database is not worth the
+operator's time.
 
-Any exclusion rule already saved against the OLD path keeps its stored expression and will match
-nothing after the rename; re-add it on the new pill, with values REQUESTED,OPEN.
-
-An environment that never loaded the few-hour-old original does not have the stale row and the forced
-re-run is a no-op there. Running it anyway is safe and is the recommended default, because telling
-the two cases apart from outside the database is not worth the operator's time.
+Any exclusion rule already saved against returnWorkflowStatus keeps its stored expression and will
+match nothing after this load. Re-add it on the new pill, with value IN_PROGRESS — note the value
+changes too, not just the field: REQUESTED,OPEN becomes IN_PROGRESS.
 -->
 <entity-facade-xml type="darpan-seed">
 
-    <!-- Shopify per-EVENT (refund or return) records for returns reconciliation. Restated from
-         1.5.0 to add filterParameterName and widen keepFieldsBase. filterParameterName ADDED
-         2026-08-27: this connector now carries tenant exclusion rules, so the rules board offers the
-         control and the getter applies them client-side (Shopify's search syntax has no knowledge of
-         tenant rules). The canonical SHOPIFY orders row still declares none and still means what it
-         said. Every other column below is unchanged from 1.5.0 and is restated only because
-         create-or-update writes whole rows. -->
+    <!-- Shopify per-EVENT (refund or return) records for returns reconciliation. Restated from 1.5.1
+         to swap the withdrawn returnWorkflowStatus out of keepFieldsBase for orderReturnStatus. Every
+         other column below is unchanged and is restated only because create-or-update writes whole
+         rows. -->
     <darpan.reconciliation.SourceSystemConnector
             systemEnumId="SHOPIFY_RETURN_REFS"
             extractServiceName="reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrderReturnRefs"
@@ -81,7 +83,7 @@ the two cases apart from outside the database is not worth the operator's time.
             systemAliases="SHOPIFY_RETURN_REFS,SHOPIFY_RETURNS,DAR_SYS_SHOPIFY_RETURN_REFS"
             preserveWindowInstants="N"
             filterParameterName="sourceFilters"
-            keepFieldsBase="refundOrReturnId,refundOrReturnType,orderId,createdAt,orderCancelledAt,refundLineEverFulfilled,returnWorkflowStatus"
+            keepFieldsBase="refundOrReturnId,refundOrReturnType,orderId,createdAt,orderCancelledAt,refundLineEverFulfilled,orderReturnStatus"
             lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyRefundOrReturnIds"
             lookupIdsParameterName="refundOrReturnIds"
             lookupMaxIds="10000"
@@ -89,18 +91,22 @@ the two cases apart from outside the database is not worth the operator's time.
 
     <!-- The rules-board pill the connector change exists for. FKs the SourceSystemConnector
          immediately above by systemEnumId. -->
-    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].returnWorkflowStatus"
-            label="Return workflow status" fieldType="string" sequenceNum="5"
-            description="ADDED 2026-08-27, RENAMED the same day from returnStatus — see the retirement
-                entry in SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS. Holds a Shopify
-                ReturnStatus: REQUESTED, OPEN, CLOSED, DECLINED, CANCELED. It is NOT Shopify's
-                Order.returnStatus, a different field holding an OrderReturnStatus (IN_PROGRESS,
-                INSPECTION_COMPLETE, NO_RETURN, RETURN_FAILED, RETURN_REQUESTED, RETURNED) that
-                aggregates a whole order for display; under the old name an operator excluded on
-                IN_PROGRESS and matched nothing. Present on RETURN rows only: a REFUND row has no
-                return status, so a rule on this field can never match one. Because a refunded return
-                is represented by its refund's row alone, this field only ever describes an UNREFUNDED
-                return — excluding OPEN excludes unrefunded OPEN returns. Exclude REQUESTED,OPEN to
-                drop in-progress returns that have no OMS counterpart yet."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].orderReturnStatus"
+            label="Order return status" fieldType="string" sequenceNum="5"
+            description="ADDED 2026-09-01 (DAR-BE-026), replacing the withdrawn returnWorkflowStatus pill —
+                see the retirement entry in SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS. This is
+                the endpoint's ONLY return-status field. Holds Shopify's own Order.returnStatus, an
+                OrderReturnStatus: IN_PROGRESS, INSPECTION_COMPLETE, NO_RETURN, RETURN_FAILED,
+                RETURN_REQUESTED, RETURNED. Those are the values to type, and they are the ones Shopify
+                itself shows: the admin renders IN_PROGRESS as 'Return in progress' and the order search
+                spells it return_status:in_progress. The withdrawn field held a per-return ReturnStatus
+                instead, whose in-progress value is spelled OPEN — a word on no surface an operator could
+                see — so excluding IN_PROGRESS matched nothing and reported a zero count, which reads
+                exactly like an undeployed feature. Present on EVERY row, refund and return alike, because
+                it describes the whole ORDER: excluding IN_PROGRESS therefore drops an in-progress order's
+                refund rows as well as its return, which is deliberate — the per-return field it replaced
+                could never reach a refund row at all. Key always present, null when Shopify reports
+                nothing, so a consumer can tell 'extract predates the field' from 'Shopify said nothing'.
+                Exclude IN_PROGRESS to drop orders whose return has not finished yet."/>
 
 </entity-facade-xml>

@@ -247,6 +247,17 @@
                      edit, then Google Chat. An edit that does not mention the provider must never
                      silently re-point a Slack space at the Google Chat validator. -->
                 <set field="chatProviderToSave" from="darpan.reconciliation.notification.TenantNotificationSupport.resolveChatProvider(((chatProviderEnumId)?.toString()?.trim()) ?: ((existingSpace?.chatProviderEnumId)?.toString()?.trim()))"/>
+                <!-- IMMUTABLE AFTER CREATE. The provider decides which credential the row carries and
+                     which address shape is valid for it, so switching it is a different destination
+                     wearing the same id: the Slack coordinates and the webhook that made the space
+                     work are both wrong for the product it now claims. The UI omits the card on edit,
+                     but this service is reachable over RPC, so the refusal has to live here.
+                     Both sides go through resolveChatProvider so a row persisted with a null provider
+                     (the catalog-missing case below) reads as Google Chat on both and does not trip. -->
+                <set field="existingProvider" from="existingSpace != null ? darpan.reconciliation.notification.TenantNotificationSupport.resolveChatProvider(existingSpace.chatProviderEnumId) : null"/>
+                <if condition="existingProvider != null &amp;&amp; chatProviderToSave != existingProvider">
+                    <message error="true">'${spaceNameValue ?: existingSpace.spaceName}' posts to ${darpan.facade.settings.ChatSpaceFacadeSupport.providerLabel(ec, existingProvider)} and cannot be switched to ${darpan.facade.settings.ChatSpaceFacadeSupport.providerLabel(ec, chatProviderToSave)}. Add a new chat space instead.</message>
+                </if>
                 <set field="providerError" from="darpan.facade.settings.ChatSpaceFacadeSupport.validateChatProvider(ec, chatProviderToSave)"/>
                 <if condition="providerError"><message error="true">${providerError}</message></if>
                 <!-- Slack bot coordinates. When present they REPLACE the webhook requirement: the

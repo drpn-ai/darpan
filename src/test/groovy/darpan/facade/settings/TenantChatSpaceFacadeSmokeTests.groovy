@@ -148,6 +148,53 @@ class TenantChatSpaceFacadeSmokeTests {
         assertEquals(1, again.keptSpaceCount as Integer)
     }
 
+    /**
+     * The provider decides which credential a space carries and which address shape is valid for it,
+     * so changing it on an existing row is a different destination wearing the same id. Hiding the
+     * card in the UI is not the guard — this service is reachable over RPC, so the refusal lives here.
+     */
+    @Test
+    void refusesAProviderChangeOnAnExistingSpace() {
+        def created = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace",
+                [spaceName: "Provider locked", webhookUrl: WEBHOOK, chatProviderEnumId: "CHAT_PROV_GOOGLE"])
+        assertTrue(created.ok as boolean)
+        String chatSpaceId = created.chatSpace.chatSpaceId
+
+        def switched = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace",
+                [chatSpaceId: chatSpaceId, spaceName: "Provider locked",
+                 chatProviderEnumId: "CHAT_PROV_SLACK",
+                 webhookUrl: "https://hooks.slack.com/services/T00000000/B00000000/placeholderplaceholder"])
+        assertFalse(switched.ok as boolean)
+
+        // The row must be untouched, not merely un-acknowledged: a refusal that still wrote would
+        // leave a Slack-labelled space holding a chat.googleapis.com URL.
+        // Asserted on the RESOLVED provider, not the stored column. resolvePersistableProvider writes
+        // null when the provider catalog is absent (as it is here) to avoid the TCSPACE_PROVIDER FK,
+        // and null reads back as Google Chat — so the raw column would make this test pass or fail on
+        // whether seed data happened to be loaded rather than on the behaviour under test.
+        def after = ec.entity.find("darpan.reconciliation.TenantChatSpace")
+                .condition("chatSpaceId", chatSpaceId).disableAuthz().useCache(false).one()
+        assertEquals("CHAT_PROV_GOOGLE",
+                darpan.reconciliation.notification.TenantNotificationSupport
+                        .resolveChatProvider(after.chatProviderEnumId))
+        assertEquals(WEBHOOK, after.webhookUrl as String)
+    }
+
+    /** Re-sending the provider a space already has is an ordinary edit, not a change. */
+    @Test
+    void allowsAnEditThatRepeatsTheExistingProvider() {
+        def created = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace",
+                [spaceName: "Provider repeated", webhookUrl: WEBHOOK, chatProviderEnumId: "CHAT_PROV_GOOGLE"])
+        assertTrue(created.ok as boolean)
+
+        String movedWebhook = "https://chat.googleapis.com/v1/spaces/MOVED5678/messages?key=k2&token=t2"
+        def edited = callFacade("facade.SettingsFacadeServices.save#TenantChatSpace",
+                [chatSpaceId: created.chatSpace.chatSpaceId, spaceName: "Provider repeated",
+                 chatProviderEnumId: "CHAT_PROV_GOOGLE", webhookUrl: movedWebhook])
+        assertTrue(edited.ok as boolean)
+        assertEquals(movedWebhook, edited.chatSpace.webhookUrl as String)
+    }
+
     private Map<String, Object> callFacade(String serviceName, Map<String, Object> parameters) {
         return (Map<String, Object>) ec.service.sync()
                 .name(serviceName)

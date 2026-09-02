@@ -167,11 +167,44 @@
 
     <entity entity-name="TenantNotificationSetting" package="darpan.reconciliation" use="configuration">
         <description>Tenant-level notification settings for reconciliation run completion events.
-            RETIRED 2026-07-29 — replaced by TenantChatSpace; kept one release for migration, remove after v1.2.0.</description>
+            RETIRED 2026-07-29 — replaced by TenantChatSpace. Nothing writes this entity any more; the only
+            production reader left is migrate#TenantNotificationSettings, registered as migration
+            TENANT_NOTIF_SETTINGS.
+
+            The old "kept one release for migration, remove after v1.2.0" note was still here at 1.5.1 and is
+            corrected rather than deleted, because the deadline passing is the useful fact: the migration has
+            been reported Applied on prod (2026-08-19, DAR-BE-013) and on prod/UAT/sm-darpan with the v1.5.0
+            load (2026-08-27), so the entity is genuinely past its purpose. It is still here because dropping
+            it is not one edit — it needs the migration and its registry row, the SecuritySeedData
+            ArtifactGroupMember and EntityFilter, DarpanEntityConstants.TENANT_NOTIFICATION_SETTING (already
+            dead — declared, referenced nowhere), and the CryptRotationSmokeTests assertion to go together,
+            plus a decision about environments restored from pre-migration backups. That is its own backlog
+            item, not a tidy-up to fold into an unrelated change.
+
+            Until then, read the googleChatWebhookUrl description below BEFORE touching its encrypt
+            attribute — it is load-bearing for a reason a security sweep will not guess.</description>
         <field name="companyUserGroupId" type="id" is-pk="true" not-null="true"/>
         <field name="createdByUserId" type="id"/>
         <field name="googleChatWebhookUrl" type="text-very-long" encrypt="true">
-            <description>Google Chat incoming webhook URL. Treat as a secret and never return raw in facade responses.</description>
+            <description>Google Chat incoming webhook URL, written when this entity was the live
+                single-webhook store. encrypt="true" IS DELIBERATELY RETAINED and is NOT the pre-2026-08-14
+                posture surviving by oversight — the 2026-08-14 decision that stripped encryption from
+                TenantChatSpace does not reach here, because on a retired write-nothing column the attribute
+                is no longer a security posture, it is the DECODER for rows already on disk.
+
+                What depends on it: migrate#TenantNotificationSettings reads this column and writes the value
+                into TenantChatSpace.googleChatWebhookUrl, which is clear text. Moqui decrypts on read, so
+                that copy is the decryption bridge. Drop the attribute and the migration copies base64
+                ciphertext into a clear-text column and reports success — a silently corrupted webhook that
+                only surfaces as undelivered notifications. CryptRotationSupport.findEncryptedEntityFields
+                also stops seeing the column, so a key rotation would leave it on the old key.
+
+                PROVEN HOLLOW, so nobody re-checks it the way it was already checked (2026-09-02): removing
+                the attribute and running TenantNotificationMigrationSmokeTests PASSES. That test writes and
+                reads the row inside one configuration, so it round-trips plaintext-to-plaintext and cannot
+                see this class of break at all. The only guard that fires is
+                CryptRotationSmokeTests.discoversEncryptedFieldsFromLiveEntityDefinitions, which is why its
+                assertion on this entity now carries a message instead of failing bare.</description>
         </field>
         <field name="isActive" type="text-indicator" default="'Y'"/>
         <field name="createdDate" type="date-time"/>

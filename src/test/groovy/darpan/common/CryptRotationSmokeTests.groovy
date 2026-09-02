@@ -49,7 +49,20 @@ class CryptRotationSmokeTests {
         Map<String, List<String>> fields = CryptRotationSupport.findEncryptedEntityFields(ec)
         assertTrue(fields.containsKey("darpan.reconciliation.SftpServer"), fields.keySet().toString())
         assertTrue(fields["darpan.reconciliation.SftpServer"].contains("password"))
-        assertTrue(fields.containsKey("darpan.reconciliation.TenantNotificationSetting"))
+        // Doubles as the ONLY tripwire on TenantNotificationSetting.googleChatWebhookUrl's encrypt="true",
+        // which is why it names the field and says what breaks rather than failing bare. That entity is
+        // retired and written by nothing, so the attribute reads like leftover posture a security sweep
+        // should clear -- it is not. It is the decoder for rows already on disk, and
+        // migrate#TenantNotificationSettings copies through it into a CLEAR-TEXT column, so dropping it
+        // makes that migration write base64 ciphertext and report success.
+        // Do not reach for TenantNotificationMigrationSmokeTests to cover this instead: measured
+        // 2026-09-02, it PASSES with the attribute removed, because it writes and reads the row inside one
+        // configuration and never sees a value encrypted under the old setting.
+        assertTrue(fields.containsKey("darpan.reconciliation.TenantNotificationSetting"),
+                "TenantNotificationSetting lost its encrypted field -- if encrypt=\"true\" was just removed " +
+                "from googleChatWebhookUrl, read that field's description before going further: the retired " +
+                "entity still holds encrypted rows and migrate#TenantNotificationSettings decrypts through " +
+                "it. Discovered: " + fields.keySet().toString())
         // every discovered entity belongs to a Darpan package
         fields.keySet().each { String entityName ->
             assertTrue(CryptRotationSupport.DARPAN_ENTITY_PREFIXES.any { entityName.startsWith(it) }, entityName)

@@ -842,9 +842,19 @@ class SourceSystemConnectorSupportSmokeTests {
         // were missing-in-Shopify in the 2026-08-18 prod run (67%), because Shopify's updated_at is not
         // reliably bumped and the extract's net is therefore never complete. At the shared default a
         // two-day window would switch the pass off exactly when the false positives peak.
+        //
+        // RESIZED 10000 -> 50000 (DAR-BE-036). 10000 was sized as "~11x observed DAILY volume", and a
+        // window-scaled quantity measured in days has a cliff measured in days: gorjana's first
+        // full-MONTH run (result 101073, 2026-09-02) produced 17,172 and skipped the pass entirely.
+        // The sizing basis is now the WINDOW an operator may legitimately ask for — 50000 is ~3x that
+        // measured month, so a quarter-long backfill still verifies. This number is only an API-spend
+        // bound now: since partial-credit chunking landed, an oversized set degrades to a partial
+        // answer instead of losing the whole pass, so it no longer has to protect correctness.
         Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY_RETURN_REFS")
         assertNotNull(connector, "SHOPIFY_RETURN_REFS connector row should resolve")
-        assertEquals(10000, connector.lookupMaxIds)
+        assertEquals(50000, connector.lookupMaxIds)
+        assertTrue((connector.lookupMaxIds as int) > 17172,
+                "must clear the measured 30-day gorjana volume that skipped the pass on 2026-09-02")
         assertTrue((connector.lookupMaxIds as int) > MissingDiffVerificationSupport.DEFAULT_MAX_LOOKUP_IDS,
                 "the point of the per-connector slot is to exceed the shared default")
     }

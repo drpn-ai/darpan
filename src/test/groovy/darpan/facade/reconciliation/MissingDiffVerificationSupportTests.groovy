@@ -366,4 +366,46 @@ class MissingDiffVerificationSupportTests {
         assertEquals(0, dispatchCalls)
         assertTrue(((List) result.warnings).any { it.toString().contains("cap") })
     }
+
+    @Test
+    void idsStrandedByAFailedChunkAreNotCountedAsConfirmedMissing() {
+        // DAR-BE-036: partial credit means a lookup can now answer for SOME ids. The ones it could
+        // not reach are UNKNOWN. Folding them into confirmedMissing would report a blind spot as
+        // evidence of absence — the exact failure the pending-return probe caught in August.
+        File file = writeDiffDocument([
+                missingRow("1001", FILE1, FILE2),
+                missingRow("1002", FILE1, FILE2),
+                missingRow("1003", FILE1, FILE2),
+        ], [
+                totalDifferences            : 3,
+                onlyInFile1Count            : 3,
+                onlyInFile2Count            : 0,
+                missingObjectDifferenceCount: 3,
+                ruleDifferenceCount         : 0,
+        ])
+        Map result = MissingDiffVerificationSupport.verifyMissingDiffs([
+                diffFile   : file,
+                file1Label : FILE1,
+                file2Label : FILE2,
+                sideLookups: [(FILE2): { List<String> ids ->
+                    return [ok           : true,
+                            foundIds     : ["1001"],
+                            missingIds   : ["1002"],
+                            unresolvedIds: ["1003"],
+                            errors       : ["Shopify GraphQL request failed with HTTP 429."]]
+                }],
+        ])
+
+        assertTrue((Boolean) result.performed)
+        assertEquals(1, result.removedCount)
+        assertEquals(1, result.confirmedMissingCount, "1003 was never answered for and must not count as missing")
+        assertEquals(1, result.unresolvedCount)
+
+        List warnings = (List) result.warnings
+        assertTrue(warnings.any { it.toString().contains("1 ") && it.toString().contains("could not be checked") },
+                "the operator must be told part of the side went unchecked: ${warnings}")
+
+        Map document = parseDocument(file)
+        assertEquals(["1002", "1003"], ((List) document.differences).collect { it.primaryId })
+    }
 }

@@ -40,6 +40,12 @@ class MissingDiffVerificationSupport {
      *  note, not as a run issue. This pass's real warnings open with "Verification lookup for …". */
     static final String AUDIT_NOTE_PREFIX = "Verification pass: "
 
+    /** Joins a lookup result's errors for a warning, matching the failure branch's phrasing. */
+    private static String lookupErrorsOf(Map lookupResult) {
+        List errors = lookupResult?.errors instanceof List ? (List) lookupResult.errors : []
+        return errors ? errors.join("; ") : ""
+    }
+
     private static final String DIFFERENCES_HEADER = "\"differences\":["
     private static final String SUMMARY_PREFIX = "\"summary\":"
     private static final String PROCESSING_WARNINGS_PREFIX = "\"processingWarnings\":"
@@ -56,7 +62,7 @@ class MissingDiffVerificationSupport {
      *                  connector declares. A side over ITS OWN cap contributes nothing and must never
      *                  disable a sibling side that is under its.
      *
-     * returns [performed, rewritten, checkedCount, removedCount, confirmedMissingCount,
+     * returns [performed, rewritten, checkedCount, removedCount, confirmedMissingCount, unresolvedCount,
      *          removedMissingInFile1, removedMissingInFile2, warnings, auditNote]
      */
     static Map<String, Object> verifyMissingDiffs(Map<String, Object> args) {
@@ -73,7 +79,7 @@ class MissingDiffVerificationSupport {
         }
         List<String> warnings = []
         Map<String, Object> inert = [performed: false, rewritten: false, checkedCount: 0, removedCount: 0,
-                confirmedMissingCount: 0, removedMissingInFile1: 0, removedMissingInFile2: 0,
+                confirmedMissingCount: 0, unresolvedCount: 0, removedMissingInFile1: 0, removedMissingInFile2: 0,
                 lookupFailed: false, warnings: warnings, auditNote: null] as Map<String, Object>
 
         Map<String, Map<String, Object>> sidesByToken = new LinkedHashMap<>()
@@ -120,6 +126,7 @@ class MissingDiffVerificationSupport {
         boolean lookupFailed = false
         int checkedCount = 0
         int confirmedMissingCount = 0
+        int unresolvedCount = 0
         Map<String, Set<String>> removeIdsByToken = [:]
         Map<String, Integer> removedCountByToken = [:]
         List<String> auditSentences = []
@@ -154,12 +161,28 @@ class MissingDiffVerificationSupport {
                 String value = id?.toString()?.trim()
                 if (value) found.add(value)
             }
+            // DAR-BE-036: a lookup may now answer for only SOME of the ids it was handed — one
+            // chunk can fail while its siblings succeed. Ids it never reached are UNKNOWN, and folding
+            // them into confirmedMissing would report a blind spot as evidence of absence, which is
+            // precisely the failure the pending-return probe caught in August. A lookup that does not
+            // report unresolvedIds strands nothing, so this stays inert for every other side.
+            Set<String> unresolved = new LinkedHashSet<String>()
+            (lookupResult.unresolvedIds instanceof List ? (List) lookupResult.unresolvedIds : []).each { Object id ->
+                String value = id?.toString()?.trim()
+                if (value && ids.contains(value)) unresolved.add(value)
+            }
             Set<String> removable = ids.findAll { found.contains(it) } as Set<String>
-            confirmedMissingCount += (ids.size() - removable.size())
+            unresolved.removeAll(removable)
+            int confirmedMissingHere = ids.size() - removable.size() - unresolved.size()
+            confirmedMissingCount += confirmedMissingHere
+            unresolvedCount += unresolved.size()
+            if (unresolved) {
+                warnings.add("Verification lookup for ${side.label} could not be checked for ${unresolved.size()} of ${ids.size()} missing difference(s); those are left as reported. ${lookupErrorsOf(lookupResult)}".toString().trim())
+            }
             if (removable) {
                 removeIdsByToken.put(token, removable)
                 removedCountByToken.put(token, removable.size())
-                auditSentences.add("${AUDIT_NOTE_PREFIX}${removable.size()} of ${ids.size()} 'missing in ${side.label}' difference(s) confirmed present in ${side.label} by point lookup (bulk-export index gap) and removed; ${ids.size() - removable.size()} confirmed missing.".toString())
+                auditSentences.add("${AUDIT_NOTE_PREFIX}${removable.size()} of ${ids.size()} 'missing in ${side.label}' difference(s) confirmed present in ${side.label} by point lookup (bulk-export index gap) and removed; ${confirmedMissingHere} confirmed missing${unresolved ? ", ${unresolved.size()} unchecked" : ""}.".toString())
             }
         }
 
@@ -169,7 +192,8 @@ class MissingDiffVerificationSupport {
         String auditNote = auditSentences ? auditSentences.join(" ") : null
         if (!removedCount) {
             return [performed: performed, rewritten: false, checkedCount: checkedCount, removedCount: 0,
-                    confirmedMissingCount: confirmedMissingCount, removedMissingInFile1: 0, removedMissingInFile2: 0,
+                    confirmedMissingCount: confirmedMissingCount, unresolvedCount: unresolvedCount,
+                    removedMissingInFile1: 0, removedMissingInFile2: 0,
                     lookupFailed: lookupFailed, warnings: warnings, auditNote: auditNote] as Map<String, Object>
         }
 
@@ -232,7 +256,8 @@ class MissingDiffVerificationSupport {
         replaceFile(tempFile, diffFile)
 
         return [performed: true, rewritten: true, checkedCount: checkedCount, removedCount: removedCount,
-                confirmedMissingCount: confirmedMissingCount, removedMissingInFile1: removedMissingInFile1,
+                confirmedMissingCount: confirmedMissingCount, unresolvedCount: unresolvedCount,
+                removedMissingInFile1: removedMissingInFile1,
                 removedMissingInFile2: removedMissingInFile2, lookupFailed: lookupFailed,
                 warnings: warnings, auditNote: auditNote] as Map<String, Object>
     }

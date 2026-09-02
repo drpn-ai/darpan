@@ -86,7 +86,7 @@ changes too, not just the field: REQUESTED,OPEN becomes IN_PROGRESS.
             keepFieldsBase="refundOrReturnId,refundOrReturnType,orderId,createdAt,orderCancelledAt,refundLineEverFulfilled,orderReturnStatus"
             lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyRefundOrReturnIds"
             lookupIdsParameterName="refundOrReturnIds"
-            lookupMaxIds="10000"
+            lookupMaxIds="50000"
             enabled="Y"/>
 
     <!-- The rules-board pill the connector change exists for. FKs the SourceSystemConnector

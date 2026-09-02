@@ -209,7 +209,7 @@
             keepFieldsBase="refundOrReturnId,refundOrReturnType,orderId,createdAt,orderCancelledAt,refundLineEverFulfilled,orderReturnStatus"
             lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyRefundOrReturnIds"
             lookupIdsParameterName="refundOrReturnIds"
-            lookupMaxIds="10000"
+            lookupMaxIds="50000"
             enabled="Y"/>
 
     <!-- Database sources. Both sides of a run may be AUT_SRC_DB, which is how two OFBiz instances

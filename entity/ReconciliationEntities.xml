@@ -60,6 +60,15 @@
                 runs and for runs created before this column existed.</description>
         </field>
         <field name="windowEndDate" type="date-time"/>
+        <field name="windowTimeZone" type="text-short">
+            <description>The zone the window above was anchored in, recorded beside it because two
+                instants alone cannot say which calendar day they cover. Without it the run result
+                screen resolves that day in whatever zone the VIEWER happens to be in, so two people
+                read different days for one run. Deliberately nullable with no default: file-mode
+                runs have no window, and runs created before this column existed genuinely do not
+                know their zone — defaulting them to UTC would state something untrue, so the screen
+                answers "not recorded" for those instead.</description>
+        </field>
         <field name="file1Name" type="text-medium"/>
         <field name="file1DataManagerPath" type="text-long"/>
         <field name="file2Name" type="text-medium"/>

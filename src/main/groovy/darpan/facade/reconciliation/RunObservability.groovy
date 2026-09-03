@@ -72,7 +72,7 @@ class RunObservability {
                     if (runId) run.set("reconciliationRunResultId", runId)
                     ["savedRunId", "savedRunType", "reconciliationRunId", "reconciliationMappingId",
                      "ruleSetId", "compareScopeId", "companyUserGroupId", "createdByUserId",
-                     "windowStartDate", "windowEndDate",
+                     "windowStartDate", "windowEndDate", "windowTimeZone",
                      "file1Name", "file2Name", "reconciliationType"].each { String k ->
                         if (ctx.get(k) != null) run.set(k, ctx.get(k))
                     }

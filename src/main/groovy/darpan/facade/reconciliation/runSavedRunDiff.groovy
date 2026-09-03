@@ -74,6 +74,10 @@ Timestamp requestedWindowStartDateValue = null
 Timestamp requestedWindowEndDateValue = null
 Timestamp windowStartDateValue = null
 Timestamp windowEndDateValue = null
+// The zone the window was anchored in. normalizeCalendarWindow has always returned it and the
+// caller has always dropped it, which is why a finished run could not say which calendar day its
+// window covered — the screen had to guess with the viewer's zone.
+String windowTimeZoneValue = null
 
 try {
     requestedWindowStartDateValue = toTimestampValue(windowStartDate)
@@ -90,6 +94,7 @@ try {
         )
         windowStartDateValue = (Timestamp) normalizedApiWindow.windowStartDate
         windowEndDateValue = (Timestamp) normalizedApiWindow.windowEndDate
+        windowTimeZoneValue = normalizedApiWindow.timeZone?.toString()?.trim() ?: null
     }
 } catch (IllegalArgumentException e) {
     ec.message.addError(e.message)
@@ -119,6 +124,7 @@ String obsRunId = ec.message.hasError() ? null : RunObservability.beginRun(ec, [
         // execution row. Null for file-mode runs, which beginRun skips.
         windowStartDate   : windowStartDateValue,
         windowEndDate     : windowEndDateValue,
+        windowTimeZone    : windowTimeZoneValue,
 ])
 Map<String, Object> obsCtx = [companyUserGroupId: TenantAccessSupport.currentActiveTenantUserGroupId(ec)]
 boolean obsTerminalWritten = false

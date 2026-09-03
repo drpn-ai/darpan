@@ -325,7 +325,62 @@ class ReconciliationOutputSupportTests {
 
         assertNotNull(sourceDetails)
         assertEquals("API", sourceDetails.mode)
-        assertEquals([start: "2026-08-19 00:00:00.0", end: "2026-08-20 00:00:00.0"], sourceDetails.dateRange)
+        // Instants, not Timestamp.toString(). The old rendering was in the JVM's default zone and
+        // marked nowhere, so the browser read "2026-08-19 00:00:00.0" as the VIEWER's local time in a
+        // zone that had nothing to do with the run. Expected values are derived from the same
+        // Timestamps rather than hardcoded, so this asserts the format instead of the test JVM's zone.
+        assertEquals(
+                [start: Timestamp.valueOf("2026-08-19 00:00:00").toInstant().toString(),
+                 end  : Timestamp.valueOf("2026-08-20 00:00:00").toInstant().toString()],
+                sourceDetails.dateRange)
+    }
+
+    @Test
+    void sourceDetailsCarryTheZoneTheWindowWasAnchoredIn() {
+        // Two instants cannot say which calendar day they cover. Without the zone the screen resolves
+        // that day in whatever zone the viewer is in, so two people read different days for one run.
+        Map<String, Object> runResult = [
+                reconciliationRunResultId: "RUN_RESULT_ZONED",
+                file1DataManagerPath     : "runtime://datamanager/reconciliation-runs/RS/20260820/file1-api/RS_file1.json",
+                file1Name                : "RS_file1.json",
+                windowStartDate          : Timestamp.valueOf("2026-08-19 00:00:00"),
+                windowEndDate            : Timestamp.valueOf("2026-08-20 00:00:00"),
+                windowTimeZone           : "America/Los_Angeles",
+        ]
+        def ec = new Expando(
+                resource: new FakeResource(),
+                entity  : new FakeEntity([
+                        "darpan.reconciliation.ReconciliationRunResult"          : [runResult],
+                        "darpan.reconciliation.ReconciliationAutomationExecution": [],
+                ])
+        )
+
+        Map<String, Object> sourceDetails = OutputDescriptorSupport.buildRunResultSourceDetails(ec, runResult, [:])
+
+        assertEquals("America/Los_Angeles", ((Map) sourceDetails.dateRange).timeZone)
+    }
+
+    @Test
+    void aRunOlderThanTheColumnStillAnswersWithNoZoneRatherThanAGuess() {
+        // Defaulting these to UTC would state something untrue about a window nobody recorded.
+        Map<String, Object> runResult = [
+                reconciliationRunResultId: "RUN_RESULT_LEGACY",
+                file1DataManagerPath     : "runtime://datamanager/reconciliation-runs/RS/20260820/file1-api/RS_file1.json",
+                file1Name                : "RS_file1.json",
+                windowStartDate          : Timestamp.valueOf("2026-08-19 00:00:00"),
+                windowEndDate            : Timestamp.valueOf("2026-08-20 00:00:00"),
+        ]
+        def ec = new Expando(
+                resource: new FakeResource(),
+                entity  : new FakeEntity([
+                        "darpan.reconciliation.ReconciliationRunResult"          : [runResult],
+                        "darpan.reconciliation.ReconciliationAutomationExecution": [],
+                ])
+        )
+
+        Map<String, Object> sourceDetails = OutputDescriptorSupport.buildRunResultSourceDetails(ec, runResult, [:])
+
+        assertNull(((Map) sourceDetails.dateRange).timeZone)
     }
 
     @Test

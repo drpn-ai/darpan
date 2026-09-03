@@ -126,9 +126,20 @@ class OutputDescriptorSupport {
         // manually started run has no execution row at all. Artifact headers stay last, and
         // readArtifactMetadataHeader never reads past its bounded prefix.
         Map<String, Object> dateRange = firstDateRange(metadata) ?: dateRangeFromRunResult(runResult) ?:
-                dateRangeFromExecution(automationExecution) ?:
+                dateRangeFromExecution(ec, automationExecution) ?:
                 firstDateRange(readArtifactMetadataHeader(ec, runResult.file1DataManagerPath)) ?:
                 firstDateRange(readArtifactMetadataHeader(ec, runResult.file2DataManagerPath))
+
+        // The zone is filled into whichever branch won. Artifact and diff-document metadata carry the
+        // instants but have never carried the zone they were anchored in, and without it the screen
+        // resolves the covered calendar day in the VIEWER's zone -- so two people read different days
+        // for one run. Runs older than the column still answer nothing, which the UI reports as not
+        // recorded rather than guessing.
+        if (dateRange && !dateRange.timeZone) {
+            String anchoredZone = normalize(runResult.windowTimeZone) ?:
+                    automationWindowTimeZone(ec, normalize(automationExecution?.automationId))
+            if (anchoredZone) dateRange = (dateRange + [timeZone: anchoredZone]) as Map<String, Object>
+        }
 
         List<Map<String, Object>> files = [
                 sourceFileDescriptor(ec, runResult, "file1", normalize(metadata.file1Label ?: metadata.json1Label)),
@@ -284,18 +295,56 @@ class OutputDescriptorSupport {
      * before that column existed read null here and fall through to the older sources, so no
      * backfill is needed.
      */
-    protected static Map<String, Object> dateRangeFromRunResult(def runResult) {
-        if (runResult == null) return null
-        String start = normalize(runResult.windowStartDate)
-        String end = normalize(runResult.windowEndDate)
-        return start || end ? [start: start, end: end].findAll { entry -> entry.value } as Map<String, Object> : null
+    /**
+     * A window boundary as an unambiguous instant.
+     *
+     * normalize() is Timestamp.toString(), which renders in the JVM's default zone and marks it
+     * nowhere -- so "2026-09-01 17:00:00.0" reached the browser and was read as the VIEWER's local
+     * time, in a zone that had nothing to do with the run. An ISO instant carries its own offset
+     * and cannot be misread.
+     */
+    protected static String isoInstant(Object value) {
+        if (value instanceof Timestamp) return ((Timestamp) value).toInstant().toString()
+        return normalize(value)
     }
 
-    protected static Map<String, Object> dateRangeFromExecution(def execution) {
+    protected static Map<String, Object> dateRangeFromRunResult(def runResult) {
+        if (runResult == null) return null
+        String start = isoInstant(runResult.windowStartDate)
+        String end = isoInstant(runResult.windowEndDate)
+        // The zone the window was anchored in. Null on runs that predate the column, which the UI
+        // reports as not recorded rather than guessing.
+        String timeZone = normalize(runResult.windowTimeZone)
+        return start || end
+                ? [start: start, end: end, timeZone: timeZone].findAll { entry -> entry.value } as Map<String, Object>
+                : null
+    }
+
+    protected static Map<String, Object> dateRangeFromExecution(def ec, def execution) {
         if (execution == null) return null
-        String start = normalize(execution.childWindowStartDate ?: execution.windowStartDate)
-        String end = normalize(execution.childWindowEndDate ?: execution.windowEndDate)
-        return start || end ? [start: start, end: end].findAll { entry -> entry.value } as Map<String, Object> : null
+        String start = isoInstant(execution.childWindowStartDate ?: execution.windowStartDate)
+        String end = isoInstant(execution.childWindowEndDate ?: execution.windowEndDate)
+        // An execution row has no zone of its own; the automation that produced it does, and that is
+        // the zone its windows were anchored in.
+        String timeZone = automationWindowTimeZone(ec, normalize(execution.automationId))
+        return start || end
+                ? [start: start, end: end, timeZone: timeZone].findAll { entry -> entry.value } as Map<String, Object>
+                : null
+    }
+
+    protected static String automationWindowTimeZone(def ec, String automationId) {
+        if (ec == null || !automationId) return null
+        try {
+            // Tenant-gated rather than a bare disableAuthz: a zone is small, but it is still one
+            // tenant's configuration, and the ratchet test exists to stop exactly this shortcut.
+            def automation = TenantScopedFinder.findTenantScopedByIdQuiet(
+                    ec, "darpan.reconciliation.ReconciliationAutomation", "automationId", automationId)
+            return automation == null ? null : normalize(automation.windowTimeZone)
+        } catch (Throwable ignored) {
+            // Naming the zone is a nicety on a descriptor path; failing to read it must never take
+            // the run result screen down with it.
+            return null
+        }
     }
 
     static Map<String, Object> buildGeneratedOutputDescriptor(String fileName, Map<String, Object> diffDocument,

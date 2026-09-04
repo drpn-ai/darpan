@@ -30,9 +30,16 @@ class RunObservabilityCoreTest {
         // the verification passes recheck it, so the artifact WRITE_OUTPUT finalizes -- and the run
         // row it persists -- is the verified one. A timeline that wrote before verifying read as if
         // the results were settled while they were still being corrected.
+        // One code per verification pass, in the order they execute. They shared a single VERIFY
+        // code until a run that performed two of them showed two byte-identical timeline rows.
+        assertEquals(5, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY_MISSING))
+        assertEquals(6, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY_EXCHANGE))
+        assertEquals(7, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY_RETURNS))
+        assertEquals(8, RunObservability.stageSequenceOf(RunObservability.STAGE_WRITE_OUTPUT))
+        assertEquals(9, RunObservability.stageSequenceOf(RunObservability.STAGE_NOTIFY))
+        // Runs recorded before the split stored the retired code; it keeps a sequence so their
+        // stored rows still sort into the same slot rather than collapsing to 0.
         assertEquals(5, RunObservability.stageSequenceOf(RunObservability.STAGE_VERIFY))
-        assertEquals(6, RunObservability.stageSequenceOf(RunObservability.STAGE_WRITE_OUTPUT))
-        assertEquals(7, RunObservability.stageSequenceOf(RunObservability.STAGE_NOTIFY))
         assertEquals(0, RunObservability.stageSequenceOf("UNKNOWN_STAGE"))
     }
 }

@@ -1056,7 +1056,7 @@ class AutomationExecutionSupport {
         long missingInFile1 = RunVerificationSupport.missingCount(reconcileResult, "missingInFile1Count")
         long missingInFile2 = RunVerificationSupport.missingCount(reconcileResult, "missingInFile2Count")
         def returnsStep = runResultId ?
-                RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_VERIFY) : null
+                RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_VERIFY_RETURNS) : null
         boolean checkFailed = false
         Map verification
         try {
@@ -1133,7 +1133,7 @@ class AutomationExecutionSupport {
         if (prepared == null) return false
 
         def exchangeStep = runResultId ?
-                RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_VERIFY) : null
+                RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_VERIFY_EXCHANGE) : null
         Map verification
         try {
             verification = (Map) ((Closure) prepared.run).call()

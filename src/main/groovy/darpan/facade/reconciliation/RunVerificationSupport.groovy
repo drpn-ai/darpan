@@ -20,12 +20,12 @@ import static darpan.common.ValueSupport.readOptionalString
  * {@code 2026-08-26-reconciliation-pipeline-unification}, step 2). Those closures are bound to a
  * Moqui script's own scope, so nothing outside that one script could ever call them — which is why
  * the scheduled path reimplemented the pipeline around them rather than reusing it, and why the
- * scheduled path ended up with no verification at all ({@code grep -c STAGE_VERIFY} over
+ * scheduled path ended up with no verification at all ({@code grep -c STAGE_VERIFY_MISSING} over
  * {@code darpan/reconciliation/automation/} returns 0). On gorjana automation 100616 that meant a
  * scheduled run reporting ~532 differences where the verified interactive rerun reported 2.</p>
  *
  * <p><b>As of 2026-08-27 the missing-diff pass is not just resolved here but RUN here</b>
- * ({@link #runMissingDiffPass}), STAGE_VERIFY step and all. Leaving observability with each caller
+ * ({@link #runMissingDiffPass}), STAGE_VERIFY_MISSING step and all. Leaving observability with each caller
  * meant each kept its own open/run/fold/close block, and those blocks were where the two paths
  * diverged in the first place: a triggered run and a manual run of the same window published
  * different counts for a whole release. An automation is the thing that FIRES a run — after the
@@ -242,7 +242,7 @@ class RunVerificationSupport {
 
         long missingInFile1 = ((prepared.get("missingInFile1") ?: 0L) as Number).longValue()
         long missingInFile2 = ((prepared.get("missingInFile2") ?: 0L) as Number).longValue()
-        def verifyStep = runResultId ? RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_VERIFY) : null
+        def verifyStep = runResultId ? RunObservability.beginStep(ec, runResultId, stepCtx, RunObservability.STAGE_VERIFY_MISSING) : null
         Map verification
         try {
             verification = (Map) ((Closure) prepared.get("run")).call()
@@ -288,7 +288,7 @@ class RunVerificationSupport {
         String sentence = "Differences were not verified: ${skipDetail ?: skipReason}".toString()
         try {
             if (runResultId) {
-                def step = RunObservability.beginStep(ec, runResultId, (stepCtx ?: [:]) as Map, RunObservability.STAGE_VERIFY)
+                def step = RunObservability.beginStep(ec, runResultId, (stepCtx ?: [:]) as Map, RunObservability.STAGE_VERIFY_MISSING)
                 RunObservability.endStep(ec, step, RunObservability.STATUS_NO_DATA,
                         [recordCount : 0, errorMessage: sentence,
                          metricsJson : JsonOutput.toJson([skipReason: skipReason])])
@@ -497,7 +497,7 @@ class RunVerificationSupport {
      * {@code dispatcher}, {@code runConfigDefaults}.</p>
      *
      * <p>Returns {@code [omsLabel, shopifyLabel, run]}, where {@code run} is a no-arg closure that
-     * executes the pass and returns its verification map. Split that way so the STAGE_VERIFY step
+     * executes the pass and returns its verification map. Split that way so the verify step
      * opens only once the caller knows the pass applies — a run that is not a returns pair must leave
      * no VERIFY row claiming it was checked — while every resolution decision stays here, shared.</p>
      */
@@ -560,7 +560,7 @@ class RunVerificationSupport {
      * unbounded range.</p>
      *
      * <p>Returns {@code [omsLabel, shopifyLabel, omsFileSide, run]}, the same prepare/run split
-     * {@link #prepareReturnPresencePass} uses so the caller opens STAGE_VERIFY only once it knows the
+     * {@link #prepareReturnPresencePass} uses so the caller opens its verify step only once it knows the
      * pass applies.</p>
      */
     static Map prepareExchangePairPass(Map args) {
@@ -669,7 +669,7 @@ class RunVerificationSupport {
         return serviceResult
     }
 
-    /** The STAGE_VERIFY metrics body for an exchange-pair pass, shared by both entry points. */
+    /** The STAGE_VERIFY_EXCHANGE metrics body for an exchange-pair pass, shared by both entry points. */
     static Map<String, Object> exchangePairMetrics(Map verification, String omsLabel, String shopifyLabel) {
         Map result = verification ?: [:]
         return [verifiedSystems    : [omsLabel, shopifyLabel].findAll { it },
@@ -713,9 +713,9 @@ class RunVerificationSupport {
     }
 
     /**
-     * The STAGE_VERIFY metrics body for a return-presence pass. Shared so the two entry points cannot
-     * publish differently-shaped timeline metrics for the same pass — several passes share the stage
-     * code and are told apart only by what they record here.
+     * The STAGE_VERIFY_RETURNS metrics body for a return-presence pass. Shared so the two entry points
+     * cannot publish differently-shaped timeline metrics for the same pass — the stage code now says
+     * WHICH pass ran, and what is recorded here says on which systems it ran.
      */
     static Map<String, Object> returnPresenceMetrics(Map verification, String omsLabel, String shopifyLabel) {
         Map result = verification ?: [:]

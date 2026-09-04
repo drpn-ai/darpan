@@ -1113,7 +1113,7 @@ class AutomationExecutionServiceSmokeTests {
 
         List verifySteps = ec.entity.find(RunObservability.RUN_STEP_ENTITY)
                 .condition("reconciliationRunResultId", runResultId)
-                .condition("stageCode", RunObservability.STAGE_VERIFY)
+                .condition("stageCode", RunObservability.STAGE_VERIFY_MISSING)
                 .disableAuthz()
                 .useCache(false)
                 .list()
@@ -1161,7 +1161,7 @@ class AutomationExecutionServiceSmokeTests {
         // which is exactly the confusion this whole change exists to remove.
         def verifyStep = ec.entity.find(RunObservability.RUN_STEP_ENTITY)
                 .condition("reconciliationRunResultId", runId)
-                .condition("stageCode", RunObservability.STAGE_VERIFY)
+                .condition("stageCode", RunObservability.STAGE_VERIFY_MISSING)
                 .disableAuthz().useCache(false).one()
         assertNotNull(verifyStep, "the scheduled path must record its VERIFY stage like the interactive one does")
         assertNotEquals(RunObservability.STATUS_RUNNING, verifyStep.statusEnumId,
@@ -1271,7 +1271,7 @@ class AutomationExecutionServiceSmokeTests {
         assertTrue(ran, "with real automation source rows and the run's config defaults, the pass must execute")
         def verifyStep = ec.entity.find(RunObservability.RUN_STEP_ENTITY)
                 .condition("reconciliationRunResultId", runId)
-                .condition("stageCode", RunObservability.STAGE_VERIFY)
+                .condition("stageCode", RunObservability.STAGE_VERIFY_MISSING)
                 .disableAuthz().useCache(false).one()
         assertNotNull(verifyStep, "the scheduled path must record its VERIFY stage on the real source shape too")
     }
@@ -1309,7 +1309,7 @@ class AutomationExecutionServiceSmokeTests {
         assertFalse(ran, "no config id resolves anywhere, so the pass cannot run")
         def verifyStep = ec.entity.find(RunObservability.RUN_STEP_ENTITY)
                 .condition("reconciliationRunResultId", runId)
-                .condition("stageCode", RunObservability.STAGE_VERIFY)
+                .condition("stageCode", RunObservability.STAGE_VERIFY_MISSING)
                 .disableAuthz().useCache(false).one()
         assertNotNull(verifyStep, "a run that could not verify must still record the stage, saying why")
         assertEquals(RunObservability.STATUS_NO_DATA, verifyStep.statusEnumId,
@@ -1354,7 +1354,7 @@ class AutomationExecutionServiceSmokeTests {
         assertTrue(ran, "an OMS_RETURNS/SHOPIFY_RETURN_REFS pair must run the return-presence pass on the scheduled path")
         def verifyStep = ec.entity.find(RunObservability.RUN_STEP_ENTITY)
                 .condition("reconciliationRunResultId", runId)
-                .condition("stageCode", RunObservability.STAGE_VERIFY)
+                .condition("stageCode", RunObservability.STAGE_VERIFY_RETURNS)
                 .disableAuthz().useCache(false).one()
         assertNotNull(verifyStep, "the pass must record its own VERIFY step, or it is invisible on the timeline")
     }
@@ -1418,7 +1418,7 @@ class AutomationExecutionServiceSmokeTests {
         assertTrue(ran, "an OMS/SHOPIFY orders pair with a window must run the exchange pair pass here too")
         assertNotNull(ec.entity.find(RunObservability.RUN_STEP_ENTITY)
                 .condition("reconciliationRunResultId", runId)
-                .condition("stageCode", RunObservability.STAGE_VERIFY)
+                .condition("stageCode", RunObservability.STAGE_VERIFY_EXCHANGE)
                 .disableAuthz().useCache(false).one(),
                 "the exchange pass must record its own VERIFY step")
     }
@@ -1452,7 +1452,7 @@ class AutomationExecutionServiceSmokeTests {
         assertFalse(ran, "without a window the exchange pass must not run")
         assertNull(ec.entity.find(RunObservability.RUN_STEP_ENTITY)
                 .condition("reconciliationRunResultId", runId)
-                .condition("stageCode", RunObservability.STAGE_VERIFY)
+                .condition("stageCode", RunObservability.STAGE_VERIFY_EXCHANGE)
                 .disableAuthz().useCache(false).one(),
                 "a pass that did not apply must leave no VERIFY step behind")
     }
@@ -1476,7 +1476,7 @@ class AutomationExecutionServiceSmokeTests {
         assertFalse(ran, "an orders pair has no returns connector on either side, so the pass must not run")
         assertNull(ec.entity.find(RunObservability.RUN_STEP_ENTITY)
                 .condition("reconciliationRunResultId", runId)
-                .condition("stageCode", RunObservability.STAGE_VERIFY)
+                .condition("stageCode", RunObservability.STAGE_VERIFY_RETURNS)
                 .disableAuthz().useCache(false).one(),
                 "a pass that did not apply must leave no VERIFY step behind")
     }

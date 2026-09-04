@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 /**
  * A run that does not verify its differences must SAY SO, and say why.
  *
- * <p>Every gate in front of the missing-diff pass used to return before the STAGE_VERIFY step was
+ * <p>Every gate in front of the missing-diff pass used to return before the STAGE_VERIFY_MISSING step was
  * opened — the kill switch, an unresolvable config id, a missing diff artifact — so all of them
  * looked identical from the outside: no VERIFY row at all. That is what let v1.5.0 ship a scheduled
  * pass that never ran (indistinguishable from the switch being off), and what made the 2026-08-27
@@ -155,7 +155,7 @@ class VerificationSkipReasonTests {
                 enabled: false, serviceResult: serviceResult])
 
         assertFalse(ran, "the pass did not run")
-        FakeVal step = ec.store.find { it.v.stageCode == RunObservability.STAGE_VERIFY }
+        FakeVal step = ec.store.find { it.v.stageCode == RunObservability.STAGE_VERIFY_MISSING }
         assertNotNull(step, "a run that skipped verification must still record a VERIFY step")
         assertEquals(RunObservability.STATUS_NO_DATA, step.v.statusEnumId)
         assertTrue(((String) step.v.errorMessage).toLowerCase().contains("not verified"),

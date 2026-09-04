@@ -476,7 +476,7 @@ def runExchangeVerificationPass = { Map serviceResult, Object file1Source, Objec
     ])
     if (prepared == null) return
 
-    def exchangeStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_VERIFY) : null
+    def exchangeStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_VERIFY_EXCHANGE) : null
     Map verification
     try {
         verification = (Map) ((Closure) prepared.run).call()
@@ -498,7 +498,7 @@ def runExchangeVerificationPass = { Map serviceResult, Object file1Source, Objec
                      verification, (String) prepared.omsLabel, (String) prepared.shopifyLabel))])
 }
 
-// The missing-diff pass. Every decision, the STAGE_VERIFY step, the count fold and the skip report
+// The missing-diff pass. Every decision, the STAGE_VERIFY_MISSING step, the count fold and the skip report
 // live in RunVerificationSupport, called identically by AutomationExecutionSupport — an automation
 // is the thing that FIRES a run, and after the trigger it must execute the same process. What stays
 // here is this script's own dispatch seam and observability handles.
@@ -526,7 +526,7 @@ def runVerificationPass = { Map serviceResult, Object file1Source, Object file2S
 // Return presence verify stage (DAR-BE-018; reduced 2026-08-18 — returns-refund-grain-alignment plan,
 // Task 3): resolve each side's connector, gate on the pair of returns connectors' resolved
 // systemEnumIds (never on hardcoded source names, so an orders reconciliation never enters this path
-// and no existing saved run changes behaviour), open a STAGE_VERIFY step, call the file-facing filter,
+// and no existing saved run changes behaviour), open a STAGE_VERIFY_RETURNS step, call the file-facing filter,
 // complete the step. Once the Shopify/OMS grains matched (Task 1), the generic ruleset compare already
 // found the real missing-in-Shopify / missing-in-OMS rows via an ordinary join — this stage no longer
 // re-derives presence itself. It now only GRADES rows the compare already reported missing, converting
@@ -562,7 +562,7 @@ def runReturnPresenceVerificationPass = { Map serviceResult, Object file1Source,
 
     long missingInFile1 = RunVerificationSupport.missingCount(serviceResult, "missingInFile1Count")
     long missingInFile2 = RunVerificationSupport.missingCount(serviceResult, "missingInFile2Count")
-    def returnsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_VERIFY) : null
+    def returnsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_VERIFY_RETURNS) : null
     Map returnsVerification
     boolean checkFailed = false
     try {

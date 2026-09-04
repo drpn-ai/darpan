@@ -40,20 +40,32 @@ class RunObservability {
      *  straight from the Dataset and are never all in memory), the verification passes correct it,
      *  and only then are the results the operator downloads settled. */
     static final String STAGE_WRITE_OUTPUT  = "WRITE_OUTPUT"
-    /** Verification passes: point-lookup rechecks of the compared output against lookup-capable
-     *  sources. Each one records the systems it rechecked in its own metricsJson, because several
-     *  passes share this stage code and would otherwise be indistinguishable on the timeline. */
+    /** RETIRED as a stage a run can enter: the three verification passes below each own a code now.
+     *  Kept, with the sequence the first of them uses, so rows recorded before the split still sort
+     *  into their original slot and still resolve to a label instead of a raw code. */
     static final String STAGE_VERIFY        = "VERIFY"
+    /** Point-lookup recheck of missing-in-side diffs against lookup-capable sources. */
+    static final String STAGE_VERIFY_MISSING  = "VERIFY_MISSING"
+    /** Exchange-pair verification: sweeps one system's exchanges and pair-looks-up the other. */
+    static final String STAGE_VERIFY_EXCHANGE = "VERIFY_EXCHANGE"
+    /** Return-presence grading of both missing directions (window edges, cancelled-order refunds). */
+    static final String STAGE_VERIFY_RETURNS  = "VERIFY_RETURNS"
     static final String STAGE_NOTIFY        = "NOTIFY"
 
+    /** One code per verification pass, numbered in execution order. They shared a single VERIFY code
+     *  until a run that performed two of them rendered two byte-identical timeline rows; the systems
+     *  each pass rechecked still ride along in its own metricsJson. */
     static final Map<String, Integer> STAGE_SEQUENCE = [
-            (STAGE_RESOLVE)      : 1,
-            (STAGE_EXTRACT_FILE1): 2,
-            (STAGE_EXTRACT_FILE2): 3,
-            (STAGE_COMPARE)      : 4,
-            (STAGE_VERIFY)       : 5,
-            (STAGE_WRITE_OUTPUT) : 6,
-            (STAGE_NOTIFY)       : 7,
+            (STAGE_RESOLVE)         : 1,
+            (STAGE_EXTRACT_FILE1)   : 2,
+            (STAGE_EXTRACT_FILE2)   : 3,
+            (STAGE_COMPARE)         : 4,
+            (STAGE_VERIFY)          : 5,
+            (STAGE_VERIFY_MISSING)  : 5,
+            (STAGE_VERIFY_EXCHANGE) : 6,
+            (STAGE_VERIFY_RETURNS)  : 7,
+            (STAGE_WRITE_OUTPUT)    : 8,
+            (STAGE_NOTIFY)          : 9,
     ]
 
     static boolean isTerminalStatus(String status) { TERMINAL_STATUSES.contains(status) }

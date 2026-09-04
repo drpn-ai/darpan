@@ -50,10 +50,20 @@ class RunPathParityGateTest {
      * The stage vocabulary of a reconciliation run. Both paths must draw from exactly this set — a
      * stage added to one orchestrator alone is the drift this gate exists to stop, and a stage added
      * to both is a deliberate contract change that updates this list in the same commit.
+     *
+     * <p>STAGE_VERIFY_MISSING is deliberately absent: the missing-diff pass opens its own step inside
+     * {@code RunVerificationSupport}, the shared seam both orchestrators call, so neither orchestrator
+     * file opens it. It belongs to the run's stage vocabulary, not to this set, which only ever
+     * describes what the two orchestrators open directly.</p>
+     *
+     * <p>The retired STAGE_VERIFY is absent too. The three passes shared it until a run performing
+     * two of them rendered two byte-identical timeline rows; each owns a code now, and the retired
+     * one survives only so rows recorded before the split still resolve to a label.</p>
      */
     private static final Set<String> CANONICAL_STAGES = [
             "STAGE_RESOLVE", "STAGE_EXTRACT_FILE1", "STAGE_EXTRACT_FILE2",
-            "STAGE_COMPARE", "STAGE_VERIFY", "STAGE_WRITE_OUTPUT", "STAGE_NOTIFY",
+            "STAGE_COMPARE", "STAGE_VERIFY_EXCHANGE", "STAGE_VERIFY_RETURNS",
+            "STAGE_WRITE_OUTPUT", "STAGE_NOTIFY",
     ].toSet()
 
     /**
@@ -113,11 +123,12 @@ class RunPathParityGateTest {
 
     @Test
     void bothRunPathsOwnTheSameNumberOfVerifyStepSites() {
-        // Several passes share the VERIFY stage code, so the COUNT is what says both paths run the
-        // same number of them. Equal counts, not a fixed number: the number may fall as passes move
-        // behind the shared seam, but it may never fall on one side alone.
-        int manual = countOf(MANUAL_PATH, STAGE_SITE) { String stage -> stage == "STAGE_VERIFY" }
-        int scheduled = countOf(SCHEDULED_PATH, STAGE_SITE) { String stage -> stage == "STAGE_VERIFY" }
+        // Counts every verify stage, not one named code: the passes each own a code now, and a gate
+        // pinned to a single name goes hollow the moment another one is added. Equal counts, not a
+        // fixed number — the number may fall as passes move behind the shared seam, but it may
+        // never fall on one side alone.
+        int manual = countOf(MANUAL_PATH, STAGE_SITE) { String stage -> stage.startsWith("STAGE_VERIFY") }
+        int scheduled = countOf(SCHEDULED_PATH, STAGE_SITE) { String stage -> stage.startsWith("STAGE_VERIFY") }
 
         assertEquals(manual, scheduled,
                 "The two paths open a different number of VERIFY steps (manual ${manual}, scheduled " +

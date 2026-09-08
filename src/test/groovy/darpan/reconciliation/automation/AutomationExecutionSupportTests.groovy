@@ -75,6 +75,71 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
+    void previousWeekWindowStraddlingAMonthBoundaryStaysOneWindow() {
+        // DAR-BE-042: roughly once a month the previous-week span crosses the 1st. The calendar-month
+        // cut used to apply to EVERY window regardless of length, so that week became two child windows
+        // -> two executions, two run-result rows and two notifications from a single weekly fire, each
+        // covering only part of the week. 2026-09-07 is a real occurrence (2026-08-31 -> 2026-09-07).
+        Map automation = [
+                relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_WEEK,
+                windowTimeZone          : "UTC",
+        ]
+
+        List<Map<String, Object>> windows = AutomationExecutionSupport.resolveWindows(automation, [
+                scheduledFireTime: timestamp("2026-09-07T06:00:00Z"),
+        ])
+
+        assertEquals(1, windows.size())
+        assertEquals(timestamp("2026-08-31T00:00:00Z"), windows[0].childWindowStartDate)
+        assertEquals(timestamp("2026-09-07T00:00:00Z"), windows[0].childWindowEndDate)
+    }
+
+    @Test
+    void aRelativeWindowLongerThanSplitWindowDaysStillSplitsOnMonthBoundaries() {
+        // Guard for the guard above: the DAR-BE-042 fix must not disable chunking for the long windows
+        // it exists to serve. 6 weeks back from 2026-09-07 is 42 days (> the 28-day splitWindowDays
+        // default) and touches three calendar months.
+        Map automation = [
+                relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_LAST_WEEKS,
+                relativeWindowCount     : 6,
+                windowTimeZone          : "UTC",
+        ]
+
+        List<Map<String, Object>> windows = AutomationExecutionSupport.resolveWindows(automation, [
+                scheduledFireTime: timestamp("2026-09-07T06:00:00Z"),
+        ])
+
+        assertEquals(3, windows.size())
+        assertEquals(timestamp("2026-07-27T00:00:00Z"), windows[0].childWindowStartDate)
+        assertEquals(timestamp("2026-08-01T00:00:00Z"), windows[0].childWindowEndDate)
+        assertEquals(timestamp("2026-08-01T00:00:00Z"), windows[1].childWindowStartDate)
+        assertEquals(timestamp("2026-09-01T00:00:00Z"), windows[1].childWindowEndDate)
+        assertEquals(timestamp("2026-09-01T00:00:00Z"), windows[2].childWindowStartDate)
+        assertEquals(timestamp("2026-09-07T00:00:00Z"), windows[2].childWindowEndDate)
+    }
+
+    @Test
+    void aConfiguredSplitWindowDaysBelowTheSpanRestoresMonthSplitting() {
+        // The gate reads the automation's own splitWindowDays rather than a hardcoded 28: the same
+        // week that stays whole above splits here because this automation asked for 3-day chunking.
+        Map automation = [
+                relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_WEEK,
+                windowTimeZone          : "UTC",
+                splitWindowDays         : 3,
+        ]
+
+        List<Map<String, Object>> windows = AutomationExecutionSupport.resolveWindows(automation, [
+                scheduledFireTime: timestamp("2026-09-07T06:00:00Z"),
+        ])
+
+        assertEquals(2, windows.size())
+        assertEquals(timestamp("2026-08-31T00:00:00Z"), windows[0].childWindowStartDate)
+        assertEquals(timestamp("2026-09-01T00:00:00Z"), windows[0].childWindowEndDate)
+        assertEquals(timestamp("2026-09-01T00:00:00Z"), windows[1].childWindowStartDate)
+        assertEquals(timestamp("2026-09-07T00:00:00Z"), windows[1].childWindowEndDate)
+    }
+
+    @Test
     void lastNDaysUsesBoundedCalendarDaysBeforeScheduledFire() {
         Map automation = [
                 relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_LAST_DAYS,

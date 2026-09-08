@@ -68,6 +68,14 @@ class AutomationExecutionSupport {
     static final int MAX_WINDOW_SPAN_DAYS =
             (System.getProperty("darpan.reconciliation.automation.maxWindowSpanDays") ?: "3660").isInteger() ?
                     Math.max(1, (System.getProperty("darpan.reconciliation.automation.maxWindowSpanDays") ?: "3660").toInteger()) : 3660
+    /**
+     * Fallback for {@code ReconciliationAutomation.splitWindowDays} when the row carries no usable
+     * value, kept equal to that field's entity default (entity/ReconciliationEntities.xml). A window
+     * longer than this is chunked on calendar-month boundaries; a shorter one runs as a single child
+     * window (DAR-BE-042). Plain Maps in tests and rows written before the column existed have no
+     * default, so the constant has to state it rather than rely on the schema.
+     */
+    static final int DEFAULT_SPLIT_WINDOW_DAYS = 28
     static final String AUTOMATION_INPUT_API_RANGE = "AUT_IN_API_RANGE"
     static final String AUTOMATION_INPUT_SFTP_FILES = "AUT_IN_SFTP_FILES"
     static final String AUTOMATION_SOURCE_API = "AUT_SRC_API"
@@ -1387,7 +1395,30 @@ class AutomationExecutionSupport {
 
         Timestamp parentStart = Timestamp.from(windowStart.toInstant())
         Timestamp parentEnd = Timestamp.from(windowEnd.toInstant())
-        return splitOnCalendarMonthBoundaries(windowStart, windowEnd, zone).withIndex().collect { Map<String, ZonedDateTime> segment, int index ->
+
+        // DAR-BE-042: chunk on calendar months only when the window is long enough to need chunking.
+        // This cut used to apply to EVERY window regardless of length. A 7-day previous-week span that
+        // happened to straddle the 1st therefore became two child windows, and because
+        // findOrCreateExecution keys on the CHILD bounds those are two DISTINCT executions rather than a
+        // duplicate — so one weekly fire produced two execution rows, two run-result rows and two
+        // notifications, each reconciling only part of the week. It bit roughly once a month (the week
+        // containing the 1st) and never bit the daily automations, whose one-day window cannot contain a
+        // month start.
+        //
+        // The threshold is the automation's own `splitWindowDays` (entity default 28). That field was
+        // already created, updated, persisted and published through the facade and the API contract, but
+        // NOTHING read it — so operators could set a chunk size that did nothing while an unconfigurable
+        // month rule ran instead. Reading it here makes the documented knob the one that decides.
+        // A null or non-positive value falls back to the entity default rather than meaning "split
+        // everything", which is the behaviour this fix exists to remove.
+        Integer configuredSplitWindowDays = normalizeInt(readField(automation, "splitWindowDays"))
+        int splitWindowDays = (configuredSplitWindowDays != null && configuredSplitWindowDays > 0) ?
+                configuredSplitWindowDays : DEFAULT_SPLIT_WINDOW_DAYS
+        List<Map<String, ZonedDateTime>> windowSegments = __spanDays > splitWindowDays ?
+                splitOnCalendarMonthBoundaries(windowStart, windowEnd, zone) :
+                [[start: windowStart, end: windowEnd] as Map<String, ZonedDateTime>]
+
+        return windowSegments.withIndex().collect { Map<String, ZonedDateTime> segment, int index ->
             [
                     sequenceNum         : index + 1,
                     windowStartDate     : parentStart,

@@ -765,6 +765,85 @@
         </relationship>
     </entity>
 
+    <entity entity-name="NsSuiteQlSourceQuery" package="darpan.reconciliation" use="configuration">
+        <description>One extractable NetSuite dataset: the record type a side enumerates plus the
+            column-to-record-field mapping its SuiteQL extract projects through (DAR-BE-044).
+
+            This is the DatabaseSourceQuery shape, for the same reason. Before it, the record type and
+            the projection were constants in NsSuiteQlOrderSupport, so every new NetSuite pair needed
+            its own systemEnumId, connector row and extract service - deepening the endpoint-as-system
+            overload DAR-BE-024 exists to retire. One connector row plus a per-side query row means the
+            within-NetSuite pairs are configuration, not code.
+
+            Unlike DatabaseSourceQuery this does NOT hold raw query text. SuiteQL bounds are
+            interpolated as text rather than bound as parameters, and ORDER BY id is what makes offset
+            paging safe; a free-form SELECT would put both in operator hands. The query is therefore
+            assembled from validated parts.</description>
+        <field name="nsSuiteQlSourceQueryId" type="id" is-pk="true"/>
+        <field name="nsAuthConfigId" type="id" cannot-be-null="true"/>
+        <field name="companyUserGroupId" type="id"/>
+        <field name="description" type="text-medium"/>
+        <field name="recordType" type="text-short" cannot-be-null="true">
+            <description>NetSuite record type this side enumerates, applied as the `type = '...'`
+                predicate. SalesOrd is the OMS order-presence pair; the within-NetSuite pairs name
+                other types, which is the whole reason this is configuration.</description>
+        </field>
+        <field name="fromTable" type="text-short" default="'transaction'">
+            <description>SuiteQL table the record type lives in. Every transaction type lives in
+                `transaction`; an entity-type pair names its own.</description>
+        </field>
+        <field name="dateColumn" type="text-short" default="'trandate'">
+            <description>DATE-granular column the half-open window is applied to.</description>
+        </field>
+        <field name="joinKeyFieldName" type="text-short">
+            <description>Which mapped RECORD field is this side's join key. Its source column is also
+                what originFieldName reads to decide a record's origin.</description>
+        </field>
+        <field name="originFieldName" type="text-short">
+            <description>Optional record field carrying HOTWAX or NETSUITE_NATIVE, derived from whether
+                the join key's source column was populated on the row. Written on EVERY record when
+                set, because an exclusion rule cannot match a field that is absent - which is what
+                makes "exclude orders keyed directly into NetSuite" expressible as a rule.</description>
+        </field>
+        <field name="isActive" type="text-indicator" default="'Y'"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="lastUpdatedDate" type="date-time"/>
+
+        <relationship type="one" related="darpan.reconciliation.NsAuthConfig" fk-name="NSSQLQRY_AUTH">
+            <key-map field-name="nsAuthConfigId"/>
+        </relationship>
+        <relationship type="one" title="Company" related="moqui.security.UserGroup" fk-name="NSSQLQRY_COMPANY">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="NsSuiteQlSourceQueryField" package="darpan.reconciliation" use="configuration">
+        <description>One column of a NsSuiteQlSourceQuery: the SuiteQL expression selected, and the
+            reconciliation record field it lands on.
+
+            The SELECT list IS this set, so a column cannot be fetched without being projected or
+            projected without being fetched. That is deliberate: when the two were separate constants
+            they could drift, and a column dropped from one but not the other fails as a silently
+            null record field rather than as an error.</description>
+        <field name="nsSuiteQlSourceQueryId" type="id" is-pk="true"/>
+        <field name="recordFieldName" type="text-short" is-pk="true"/>
+        <field name="sourceColumn" type="text-medium" cannot-be-null="true">
+            <description>SuiteQL column, or an expression that carries its own alias. trandate must be
+                selected as TO_CHAR(trandate, 'YYYY-MM-DD') AS trandate: NetSuite otherwise renders it
+                in the ACCOUNT's display format, which a live run returned as "8/14/2026" - not a
+                contract, and unparseable back (8/9/2026 is genuinely ambiguous).</description>
+        </field>
+        <field name="sourceColumnAlias" type="text-short">
+            <description>Key this column comes back under on the row. Blank means sourceColumn is a
+                bare column and is its own key.</description>
+        </field>
+        <field name="sequenceNum" type="number-integer"/>
+
+        <relationship type="one" related="darpan.reconciliation.NsSuiteQlSourceQuery" fk-name="NSSQLFLD_QRY">
+            <key-map field-name="nsSuiteQlSourceQueryId"/>
+        </relationship>
+    </entity>
+
     <entity entity-name="NsRestletConfig" package="darpan.reconciliation" use="configuration">
         <description>NetSuite Restlet endpoint settings for inventory reconciliation.</description>
         <field name="nsRestletConfigId" type="id" is-pk="true"/>

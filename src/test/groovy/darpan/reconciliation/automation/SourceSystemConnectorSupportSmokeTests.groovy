@@ -859,6 +859,71 @@ class SourceSystemConnectorSupportSmokeTests {
                 "the point of the per-connector slot is to exceed the shared default")
     }
 
+    // ------------------------------------------- DAR-BE-032 NetSuite, generalized by DAR-BE-044
+
+    @Test
+    void netSuiteSuiteQlResolvesAsOneRowForEveryNetSuitePair() {
+        Map<String, Object> c = SourceSystemConnectorSupport.resolve(ec, "NETSUITE_SUITEQL")
+        assertNotNull(c, "NETSUITE_SUITEQL connector row should resolve")
+        assertEquals("NETSUITE_SUITEQL", c.systemEnumId)
+        assertEquals("reconciliation.NetSuiteOrderExtractionServices.extract#NetSuiteOrders",
+                c.extractServiceName)
+        assertEquals("NETSUITE_SUITEQL", c.expectedSourceConfigType)
+        // The config is the per-side QUERY, not the credential. That indirection is the whole of
+        // DAR-BE-044: the query says which NetSuite population a side enumerates and how its columns
+        // map, so a second NetSuite pair needs a second query row rather than a second connector.
+        assertEquals("nsSuiteQlSourceQueryId", c.configParameterName)
+        assertEquals("darpan.reconciliation.NsSuiteQlSourceQuery", c.configEntityName)
+        assertEquals("windowStart", c.dateFromParameterName)
+        assertEquals("windowEnd", c.dateToParameterName)
+        assertFalse((boolean) c.preserveWindowInstants)
+    }
+
+    @Test
+    void theOriginalNetSuiteOrdersIdStillResolvesThroughAnAlias() {
+        // DAR-BE-032 shipped the id NETSUITE_ORDERS in its notes, probes and draft configuration.
+        // Generalizing the row must not strand those: resolve() scans systemAliases, and the alias is
+        // what keeps an existing reference pointing somewhere real instead of silently returning null.
+        Map<String, Object> viaLegacyId = SourceSystemConnectorSupport.resolve(ec, "NETSUITE_ORDERS")
+        assertNotNull(viaLegacyId, "the pre-DAR-BE-044 id must still resolve")
+        assertEquals("NETSUITE_SUITEQL", viaLegacyId.systemEnumId)
+    }
+
+    @Test
+    void netSuiteSuiteQlDoesNotShadowTheHollowNetSuiteRow() {
+        // Both resolvers take the FIRST enabled match on systemEnumId / expectedSourceConfigType, so a
+        // NetSuite row that reused either attribute would silently capture dispatch aimed at the
+        // original NETSUITE row. The hollow row must keep meaning exactly what it meant: resolvable,
+        // and still declaring no extractor.
+        Map<String, Object> hollow = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(ec, "NETSUITE_AUTH")
+        assertNotNull(hollow, "the original NETSUITE row must still resolve")
+        assertEquals("NETSUITE", hollow.systemEnumId)
+        assertNull(hollow.extractServiceName, "the hollow NETSUITE row must still declare no extractor")
+
+        Map<String, Object> suiteQl = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(ec, "NETSUITE_SUITEQL")
+        assertNotNull(suiteQl, "NETSUITE_SUITEQL must resolve to the SuiteQL row")
+        assertEquals("NETSUITE_SUITEQL", suiteQl.systemEnumId)
+    }
+
+    @Test
+    void netSuiteSuiteQlLeavesProjectionToTheQueryAndKeepsExclusionsOnTheRow() {
+        // The DATABASE precedent, and for its stated reason: "projection is the SELECT list, where a
+        // SQL author expects it". A keepFieldsBase on this row would have to be one field list shared
+        // by every NetSuite pair, which cannot be right for more than one of them — so the registry
+        // declares none and the query's field mapping IS the projection.
+        Map<String, Object> c = SourceSystemConnectorSupport.resolve(ec, "NETSUITE_SUITEQL")
+        assertNotNull(c)
+        assertNull(c.keepFieldsParameterName,
+                "projection moved to the query mapping; a registry-wide field list cannot serve every pair")
+        assertNull(c.keepFieldsBase)
+        // Exclusion rules stay on the row: they run client-side because SuiteQL has no knowledge of
+        // tenant rules, and the OMS pair needs them for orders keyed directly into NetSuite.
+        assertEquals("sourceFilters", c.filterParameterName)
+        // No verification pass: SuiteQL enumerates a window completely in one pass, so there is no
+        // bulk-export index skew for a recheck to correct.
+        assertNull(c.lookupServiceName)
+    }
+
     @Test
     void theOrdersLookupKeepsTheConservativeSharedDefault() {
         // The orders pair's bulk export IS expected to be near-complete, so a gap past the default

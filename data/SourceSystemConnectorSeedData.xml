@@ -212,6 +212,62 @@
             lookupMaxIds="50000"
             enabled="Y"/>
 
+    <!-- NetSuite via SuiteQL over REST Web Services. ONE row for every NetSuite pair, not one per
+         endpoint (DAR-BE-032, generalized by DAR-BE-044). NEW CAPABILITY: Darpan did not reconcile
+         against NetSuite before this row, so nothing is migrated and no existing rule set changes
+         behaviour.
+
+         WHY ONE ROW. SourceSystemConnector's PK is systemEnumId alone, so a row is an ENDPOINT and
+         "system" has quietly become the endpoint dimension - OMS, OMS_TRANSFER_ORDERS,
+         OMS_RECON_ORDERS and OMS_RETURNS are four ids for one HotWax OMS. Four more within-NetSuite
+         pairs on that pattern would mean four more enums, connector rows and extract services, each
+         deepening the overload DAR-BE-024 exists to retire. DATABASE is the counter-pattern already
+         in this file: one row, both sides using it, differentiated per side by the query config. This
+         follows it - the record type, table, window column and projection live in
+         NsSuiteQlSourceQuery, so a new NetSuite pair is configuration rather than code.
+
+         Its own systemEnumId AND its own expectedSourceConfigType are still both required. The hollow
+         NETSUITE row above stays exactly as it was - it is what the saved-run path resolves for a
+         NETSUITE_AUTH source, and both resolvers take the FIRST enabled match on those attributes, so
+         reusing either would silently capture dispatch aimed at that row
+         (SourceSystemConnectorSupportSmokeTests ratchets this in both directions).
+
+         TRANSPORT - SuiteQL, not a RESTlet, measured against a live account 2026-09-02: 1000 rows per
+         page (the documented ceiling, honoured), ~880 rows/sec, so a 161k-order month enumerates in
+         about three minutes. A RESTlet would need a SuiteScript record, a deployment and a role grant
+         inside the CLIENT's production NetSuite, and buys nothing for a presence check. The credential
+         is unchanged: NsAuthConfig.scope already defaults to "restlets rest_webservices".
+
+         configEntityName is NsSuiteQlSourceQuery, which carries its own nsAuthConfigId: the account
+         host is derived from that auth profile's tokenUrl, so the account id is never configured twice
+         and the request URL stays inside the OutboundHttpPolicy allow-list by construction.
+
+         NO keepFieldsParameterName/keepFieldsBase, for the same reason DATABASE has none: the
+         projection is the query's field mapping, where the person defining the dataset expects it. A
+         single keepFieldsBase on this row could not be right for more than one pair anyway.
+
+         filterParameterName is required, not optional: for the OMS pair, orders keyed in directly in
+         NetSuite carry no custbody_hc_order_id (~0.3% of a sampled month) and are excluded by rule
+         rather than reported as differences.
+
+         No lookupServiceName: SuiteQL enumerates the window completely in one pass, so there is no
+         bulk-export index skew for a verification pass to correct. -->
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="NETSUITE_SUITEQL"
+            extractServiceName="reconciliation.NetSuiteOrderExtractionServices.extract#NetSuiteOrders"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="NETSUITE_SUITEQL"
+            configParameterName="nsSuiteQlSourceQueryId"
+            configEntityName="darpan.reconciliation.NsSuiteQlSourceQuery"
+            endpointLabel="SuiteQL"
+            sendUrlTemplate="https://{account}.suitetalk.api.netsuite.com/services/rest/query/v1/suiteql"
+            remoteSendServiceName="reconciliation.NetSuiteOrderExtractionServices.extract#NetSuiteOrders"
+            systemAliases="NETSUITE_SUITEQL,NETSUITE_ORDERS,NETSUITE_SALES_ORDERS,DAR_SYS_NETSUITE_SUITEQL"
+            preserveWindowInstants="N"
+            filterParameterName="sourceFilters"
+            enabled="Y"/>
+
     <!-- Database sources. Both sides of a run may be AUT_SRC_DB, which is how two OFBiz instances
          are compared: same schema, a different SELECT per side. No sendUrlTemplate/remoteId - those
          are HTTP-shaped and do not route. No keepFieldsParameterName - projection is the SELECT list,

@@ -78,4 +78,27 @@
             description="Shopify Order Return References"
             sequenceNum="9"
             parentEnumId="SHOPIFY"/>
+
+    <!-- DAR-BE-050. The two endpoints of the order-line UNIT presence pair. They are endpoints,
+         not systems: both sit under their parent system in the source picker, exactly like
+         OMS_TRANSFER_ORDERS does. Both rows are REQUIRED before either extractor can run -
+         requireUsableOmsConfig / requireUsableAuthConfig resolve the endpoint through
+         SourceEndpointAccessSupport.isEndpointEnabled, which treats a MISSING enablement row as
+         enabled but an endpoint absent from this enum list as DISABLED. So no per-config backfill
+         is owed, but without these rows every extract fails with "not enabled for ...". -->
+    <moqui.basic.Enumeration
+            enumId="SHOPIFY_ORDER_LINE_UNITS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="SHOPIFY_ORDER_LINE_UNITS"
+            description="Shopify Order Line Units"
+            sequenceNum="10"
+            parentEnumId="SHOPIFY"/>
+
+    <moqui.basic.Enumeration
+            enumId="OMS_ORDER_LINE_UNITS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_ORDER_LINE_UNITS"
+            description="HotWax Order Line Units"
+            sequenceNum="11"
+            parentEnumId="OMS"/>
 </entity-facade-xml>

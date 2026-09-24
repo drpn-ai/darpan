@@ -70,6 +70,63 @@
          (resolveByExtractServiceName, resolveByExpectedSourceConfigType) take the first enabled match on
          those attributes — two rows sharing either one would resolve ambiguously and silently.
          No pairLookupServiceName: exchange pair verification is a sales-order concern. -->
+    <!-- DAR-BE-050. The order-line UNIT presence pair. Two things below look wrong and are not.
+
+         (1) NO lookupServiceName on either row. A diff here means "this unit is absent". A
+             point-existence verify pass looks up the ORDER, would find it present, and would clear
+             a real finding as a FALSE POSITIVE - silently deleting exactly what this pair exists
+             to surface.
+
+         (2) The OMS row keeps the EXCHANGE exclusion (extract#HotWaxOmsOrderLineUnits passes
+             applyExchangeExclusion: true). It looks like an order-grain artefact - two OMS orders
+             colliding on one compare_id - and therefore looks safe to invert at item grain. It is
+             not. Measured against gorjana production: an OMS EXC- order's externalId names the
+             ORIGINAL Shopify order (15 of 15 resolved), and Shopify adds the exchange line to that
+             original's lineItems (12 of 12, by set difference). That original may be MONTHS old, so
+             a creation-windowed Shopify sweep never includes it while OMS lands a new EXC- order
+             inside the window. Inverting the exclusion makes every exchange a false
+             missing-in-Shopify, roughly 1 order in 9. Exchange-line presence is DAR-BE-004.
+
+         expectedSourceConfigType is distinct on both rows for the reason the transfer-orders
+         comment below gives: both connector resolvers take the FIRST enabled match, so reusing
+         HOTWAX_OMS_REST or SHOPIFY_AUTH here would resolve ambiguously and silently. Both run
+         against the same underlying config row as their parent endpoint. -->
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="SHOPIFY_ORDER_LINE_UNITS"
+            extractServiceName="reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrderLineUnits"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="SHOPIFY_ORDER_LINE_UNITS_API"
+            configParameterName="shopifyAuthConfigId"
+            configEntityName="darpan.shopify.ShopifyAuthConfig"
+            remoteId="SHOPIFY_REMOTE"
+            endpointLabel="Admin GraphQL Order Line Units"
+            sendUrlTemplate="https://{shop}.myshopify.com/admin/api/{apiVersion}/graphql.json"
+            remoteSendServiceName="facade.ShopifyFacadeServices.execute#ShopifyGraphql"
+            systemAliases="SHOPIFY_ORDER_LINE_UNITS,DAR_SYS_SHOPIFY_LINE_UNITS"
+            preserveWindowInstants="Y"
+            healthCheckServiceName="facade.ShopifyFacadeServices.probe#ShopifyAuthConnection"
+            enabled="Y"/>
+
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_ORDER_LINE_UNITS"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrderLineUnits"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_REST_LINE_UNITS"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Orders API (Order Line Units)"
+            sendUrlTemplate="{baseUrl}/rest/s1/oms/orders"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrderLineUnits"
+            systemAliases="OMS_ORDER_LINE_UNITS,HOTWAX_ORDER_LINE_UNITS,DAR_SYS_OMS_LINE_UNITS"
+            preserveWindowInstants="N"
+            filterParameterName="sourceFilters"
+            windowFieldName="orderDate"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            enabled="Y"/>
+
     <darpan.reconciliation.SourceSystemConnector
             systemEnumId="OMS_TRANSFER_ORDERS"
             extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsTransferOrders"

@@ -216,6 +216,62 @@ class ReconciliationSmokeTestSupport {
                 primaryIdExpression : "node.id",
                 idValueNormalizer   : "SHOPIFY_GID_TAIL"
         ])
+        // DAR-BE-049: a RuleSet whose ONE compare scope is single-sided, so resolveRuleSetRun can be
+        // exercised against a saved run that legitimately has no second side. Kept separate from
+        // DARPAN_TEST_COMPARE_RS because a saved run requires exactly one compare scope per RuleSet.
+        upsertEntity(ec, "darpan.rule.RuleSet", [ruleSetId: "DARPAN_TEST_EVALUATE_RS"], [
+                ruleSetId     : "DARPAN_TEST_EVALUATE_RS",
+                ruleSetName   : "Darpan Test Evaluate RuleSet",
+                description   : "Smoke-test RuleSet for a single-sided evaluate run.",
+                version       : "1.0",
+                explosionPath : "data.orders.edges",
+                primaryKeyPath: "node.id",
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID,
+                createdByUserId: TEST_COMPANY_USER_ID
+        ])
+        upsertEntity(ec, "darpan.rule.RuleSetCompareScope", [compareScopeId: "DARPAN_TEST_EVALUATE_ONLY_SCOPE"], [
+                compareScopeId: "DARPAN_TEST_EVALUATE_ONLY_SCOPE",
+                ruleSetId     : "DARPAN_TEST_EVALUATE_RS",
+                objectType    : "ORDER",
+                scopeMode     : "EVALUATE",
+                description   : "Orders with no fulfillment."
+        ])
+        upsertEntity(ec, "darpan.rule.RuleSetCompareSource", [compareScopeId: "DARPAN_TEST_EVALUATE_ONLY_SCOPE", fileSide: "FILE_1"], [
+                compareScopeId      : "DARPAN_TEST_EVALUATE_ONLY_SCOPE",
+                fileSide            : "FILE_1",
+                systemEnumId        : "SHOPIFY",
+                fileTypeEnumId      : "DftJson",
+                recordRootExpression: "data.orders.edges",
+                primaryIdExpression : "node.id|SHOPIFY_GID_TAIL"
+        ])
+
+        // The complement of the fixture above: a COMPARE scope with only FILE_1, which must still be
+        // REFUSED. Without it, "one source resolves" would pass for the wrong reason.
+        upsertEntity(ec, "darpan.rule.RuleSet", [ruleSetId: "DARPAN_TEST_ONE_SIDED_COMPARE_RS"], [
+                ruleSetId     : "DARPAN_TEST_ONE_SIDED_COMPARE_RS",
+                ruleSetName   : "Darpan Test One-Sided Compare RuleSet",
+                description   : "Smoke-test RuleSet for a COMPARE scope missing its second side.",
+                version       : "1.0",
+                explosionPath : "data.orders.edges",
+                primaryKeyPath: "node.id",
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID,
+                createdByUserId: TEST_COMPANY_USER_ID
+        ])
+        upsertEntity(ec, "darpan.rule.RuleSetCompareScope", [compareScopeId: "DARPAN_TEST_ONE_SIDED_COMPARE_SCOPE"], [
+                compareScopeId: "DARPAN_TEST_ONE_SIDED_COMPARE_SCOPE",
+                ruleSetId     : "DARPAN_TEST_ONE_SIDED_COMPARE_RS",
+                objectType    : "ORDER",
+                description   : "A compare scope missing its second side."
+        ])
+        upsertEntity(ec, "darpan.rule.RuleSetCompareSource", [compareScopeId: "DARPAN_TEST_ONE_SIDED_COMPARE_SCOPE", fileSide: "FILE_1"], [
+                compareScopeId      : "DARPAN_TEST_ONE_SIDED_COMPARE_SCOPE",
+                fileSide            : "FILE_1",
+                systemEnumId        : "SHOPIFY",
+                fileTypeEnumId      : "DftJson",
+                recordRootExpression: "data.orders.edges",
+                primaryIdExpression : "node.id|SHOPIFY_GID_TAIL"
+        ])
+
         // DAR-BE-049: a single-sided EVALUATE scope. ONE source and deliberately no FILE_2 — the shape
         // an exception check has, where the predicate already ran in the extractor.
         upsertEntity(ec, "darpan.rule.RuleSetCompareScope", [compareScopeId: "DARPAN_TEST_ORDER_EVALUATE_SCOPE"], [

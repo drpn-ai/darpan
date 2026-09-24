@@ -4,6 +4,7 @@ import darpan.common.DarpanEntityConstants
 import darpan.reconciliation.automation.SourceEndpointAccessSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.core.CompareIdExpressionSupport
+import darpan.reconciliation.core.RuleSetCompareScopeAdapter
 import darpan.reconciliation.source.SourceFilterSupport
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.PaginationSupport
@@ -523,8 +524,8 @@ class ReconciliationSavedRunSupport {
                 "transitively tenant-owned; compareScopeId pre-gated via the active-tenant RuleSet above")
                 .condition("compareScopeId", compareScope.compareScopeId)
         List sources = sourceFinder.useCache(false).list() ?: []
-        if (sources.size() != 2) {
-            return [savedRun: null, error: "RuleSet ${savedRunId} compare scope '${compareScopeLabel}' must define exactly two file-side sources."]
+        if (!sources) {
+            return [savedRun: null, error: "RuleSet ${savedRunId} compare scope '${compareScopeLabel}' defines no file-side sources."]
         }
 
         Map<String, Object> sourceBySide = [:]
@@ -538,8 +539,15 @@ class ReconciliationSavedRunSupport {
             }
             sourceBySide[fileSide] = source
         }
-        if (!sourceBySide[FILE_SIDE_1] || !sourceBySide[FILE_SIDE_2]) {
-            return [savedRun: null, error: "RuleSet ${savedRunId} compare scope '${compareScopeLabel}' must define FILE_1 and FILE_2."]
+        // HOW MANY SIDES A SCOPE LEGALLY HAS IS THE SCOPE'S OWN RULE, and it already exists as a pure,
+        // unit-tested static (DAR-BE-049). Reusing it rather than re-asserting "exactly two" here is the
+        // point: a second copy of the rule is how the adapter and this resolver would come to disagree
+        // about whether an EVALUATE scope is valid, and only one of them gates the Run button.
+        try {
+            RuleSetCompareScopeAdapter.resolveActiveSides(
+                    normalize(compareScope.scopeMode), sourceBySide.keySet(), compareScopeLabel)
+        } catch (IllegalArgumentException e) {
+            return [savedRun: null, error: "RuleSet ${savedRunId} ${e.message}"]
         }
 
         List<Map<String, Object>> systemOptions = buildRuleSetSystemOptions(ec, sourceBySide)

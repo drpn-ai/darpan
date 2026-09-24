@@ -13,6 +13,8 @@ import org.moqui.context.ExecutionContext
 import java.nio.file.Path
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertIterableEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
@@ -198,6 +200,37 @@ class RuleSetCompareScopeServiceSmokeTests {
         // the location is an input, not a declaration. This pins that it does not error and does not
         // quietly become a comparison.
         assertFalse(ec.message.hasError())
+    }
+
+    @Test
+    void aSavedRunResolvesWithOneSourceWhenItsScopeIsEvaluate() {
+        // The Run button's resolver used to hardcode "exactly two file-side sources". It now defers to
+        // the SAME pure rule the adapter uses, so the two cannot come to disagree about whether an
+        // EVALUATE scope is runnable — which would be a gate the adapter allows and the UI refuses.
+        Map<String, Object> resolved = darpan.facade.reconciliation.ReconciliationSavedRunSupport
+                .resolveRuleSetRun(ec, "DARPAN_TEST_EVALUATE_RS")
+
+        assertNull(resolved.error, resolved.error as String)
+        assertNotNull(resolved.savedRun)
+        assertEquals("DARPAN_TEST_EVALUATE_ONLY_SCOPE", ((Map) resolved.savedRun).compareScopeId)
+        Map sourceBySide = (Map) resolved.sourceBySide
+        assertEquals(1, sourceBySide.size())
+        assertNotNull(sourceBySide["FILE_1"])
+        assertNull(sourceBySide["FILE_2"])
+        // The response row still carries both default-system keys; the second is simply absent.
+        assertNull(((Map) resolved.savedRun).defaultFile2SystemEnumId)
+    }
+
+    @Test
+    void aSavedRunStillRefusesOneSourceWhenItsScopeIsCompare() {
+        // The complement, and the reason the count check could be removed rather than merely relaxed:
+        // a two-sided scope missing a side must still be refused, and now it is refused by the shared
+        // rule instead of a local "!= 2".
+        Map<String, Object> resolved = darpan.facade.reconciliation.ReconciliationSavedRunSupport
+                .resolveRuleSetRun(ec, "DARPAN_TEST_ONE_SIDED_COMPARE_RS")
+
+        assertNull(resolved.savedRun)
+        assertTrue((resolved.error as String).contains("must define both FILE_1 and FILE_2"), resolved.error as String)
     }
 
     @Test

@@ -823,6 +823,11 @@ class ReconciliationServices {
     static Dataset buildMissingDiffRows(Dataset presentDataDf, Dataset missingIdDf, String diffType,
                                         String presentLabel, String missingLabel, String note) { return CompareDatasetSupport.buildMissingDiffRows(presentDataDf, missingIdDf, diffType, presentLabel, missingLabel, note) }
 
+    /** DAR-BE-049: single-sided EVALUATE findings, in buildMissingDiffRows' exact row shape. */
+    static Dataset buildEvaluationFindingRows(Dataset dataDf, String diffType, String sourceLabel, String note) {
+        return CompareDatasetSupport.buildEvaluationFindingRows(dataDf, diffType, sourceLabel, note)
+    }
+
     static List<Row> findDuplicateCompareIdRows(Dataset dataDf, int sampleLimit = 5) { return CompareDatasetSupport.findDuplicateCompareIdRows(dataDf, sampleLimit) }
 
     static Dataset collapseDuplicateCompareIds(Dataset dataDf) { return CompareDatasetSupport.collapseDuplicateCompareIds(dataDf) }

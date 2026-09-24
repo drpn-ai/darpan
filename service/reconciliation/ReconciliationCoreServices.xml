@@ -85,7 +85,11 @@
             <parameter name="ruleSetId" required="true"/>
             <parameter name="compareScopeId" required="true"/>
             <parameter name="file1Location" required="true"/>
-            <parameter name="file2Location" required="true"/>
+            <!-- NOT required since DAR-BE-049: an EVALUATE scope has no second side, and a declarative
+                 required="true" cannot be conditional on the scope's mode. The requirement moved into
+                 the adapter, which checks a location per ACTIVE side and so still fails loudly for a
+                 COMPARE scope — with a better message than a null-location ingest produced. -->
+            <parameter name="file2Location"/>
             <parameter name="file1Name"/>
             <parameter name="file2Name"/>
             <parameter name="file1FileTypeEnumId"/>
@@ -243,6 +247,104 @@
                 <set field="validationErrors" from="prepared.validationErrors ?: []"/>
                 <set field="processingWarnings" from="prepared.processingWarnings ?: []"/>
                 <set field="persistedSources" from="(prepared.persistedSources ?: []) + [missingDiffDfValue, matchedPairDfValue].findAll { it != null }"/>
+            </if>
+        </actions>
+    </service>
+
+    <service verb="evaluate" noun="RuleSetCompareScope" transaction="ignore">
+        <description>Single-sided compare stage for an EVALUATE scope (DAR-BE-049): emits one finding row
+            per row the source produced, in the exact shape reconcile#RuleSetCompareScopeBaseDiff emits
+            missing-object rows, so writeDiffDatasetOutput and everything that reads its document need no
+            change.
+
+            THE PREDICATE BELONGS TO THE EXTRACTOR, not to this service. "Which orders never shipped" is
+            one query against one system; there is no second side to diff and nothing here filters. That
+            is the whole point of the mode — see RuleSetCompareScope.scopeMode.
+
+            No rules run. A richer form (rules evaluated against a single dataset) is expressible in this
+            same shape and is deliberately not built yet.</description>
+        <in-parameters>
+            <parameter name="ruleSetId" required="true"/>
+            <parameter name="compareScopeId" required="true"/>
+            <parameter name="file1Location" required="true"/>
+            <parameter name="file1Name"/>
+            <parameter name="file1FileTypeEnumId"/>
+            <parameter name="file1SchemaFileName"/>
+            <parameter name="file1Label"/>
+            <parameter name="hasHeader" type="Boolean" default-value="true"/>
+            <parameter name="findingType" default-value="FINDING">
+                <description>Row `type` on every emitted finding. Nothing downstream switches on it, so
+                    it is a label for the operator rather than a discriminator.</description>
+            </parameter>
+            <parameter name="sparkMaster" default-value="local[*]"/>
+            <parameter name="sparkAppName" default-value="RuleSetCompareScopeEvaluate"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ruleSetId"/>
+            <parameter name="compareScopeId"/>
+            <parameter name="compareScopeDescription"/>
+            <parameter name="objectType"/>
+            <parameter name="scopeMode"/>
+            <parameter name="file1Type"/>
+            <parameter name="file1Label"/>
+            <!-- differenceCount is the finding count. missingInFile1Count/missingInFile2Count are
+                 deliberately ABSENT rather than zero: a single-sided run never evaluated whether
+                 anything was missing from a second system, and reporting 0 would assert that it did. -->
+            <parameter name="differenceCount" type="Long"/>
+            <parameter name="diffDf" type="org.apache.spark.sql.Dataset"/>
+            <parameter name="validationErrors" type="List"/>
+            <parameter name="processingWarnings" type="List"/>
+            <parameter name="persistedSources" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="ruleSetIdInput" from="ruleSetId"/>
+            <set field="compareScopeIdInput" from="compareScopeId"/>
+            <set field="file1LabelInput" from="file1Label"/>
+            <set field="ruleSetId" from="null"/>
+            <set field="compareScopeId" from="null"/>
+            <set field="file1Label" from="null"/>
+
+            <!-- No file2* anything. prepare#RuleSetCompareScope resolves the side count from the
+                 scope's own scopeMode, so passing a file2Location here would be the error case the
+                 adapter raises rather than something this service has to police. -->
+            <service-call name="reconciliation.ReconciliationCoreServices.prepare#RuleSetCompareScope"
+                    in-map="[ruleSetId:ruleSetIdInput, compareScopeId:compareScopeIdInput,
+                    file1Location:file1Location, file1Name:file1Name,
+                    file1FileTypeEnumId:file1FileTypeEnumId, file1SchemaFileName:file1SchemaFileName,
+                    file1Label:file1LabelInput, hasHeader:hasHeader,
+                    sparkMaster:sparkMaster, sparkAppName:sparkAppName]"
+                    out-map="prepared"/>
+
+            <if condition="!ec.message.hasError() &amp;&amp; prepared">
+                <set field="file1LabelValue" from="darpan.reconciliation.core.ReconciliationServices.normalize(prepared.file1Label) ?: 'File 1'"/>
+                <set field="compareScopeDescriptionValue" from="darpan.reconciliation.core.ReconciliationServices.normalize(prepared.compareScopeDescription)"/>
+                <!-- DEFENCE IN DEPTH, and currently unreachable: this service declares no
+                     file2Location to forward, so prepare already rejects a COMPARE scope on its missing
+                     second location. Kept because it is the check that stays correct if this contract
+                     ever grows a file2Location, and because a silent zero-finding run on a two-sided
+                     scope would read as "nothing wrong" — the worst outcome available here. -->
+                <if condition="prepared.scopeMode != 'EVALUATE'">
+                    <return error="true" message="Compare scope '${compareScopeDescriptionValue}' is ${prepared.scopeMode ?: 'COMPARE'}, not EVALUATE; use reconcile#RuleSetCompareScope to diff two sources"/>
+                </if>
+                <set field="findingTypeValue" from="darpan.reconciliation.core.ReconciliationServices.normalize(findingType) ?: 'FINDING'"/>
+                <!-- Materialize once: the caller counts it and then streams it to the output document. -->
+                <set field="diffDfValue" from="darpan.reconciliation.core.ReconciliationServices.persistAndMaterialize(
+                        darpan.reconciliation.core.ReconciliationServices.buildEvaluationFindingRows(
+                        prepared.file1DataDf, findingTypeValue, file1LabelValue, compareScopeDescriptionValue))"/>
+                <set field="differenceCountValue" from="darpan.reconciliation.core.ReconciliationServices.countDataset(diffDfValue)"/>
+
+                <set field="ruleSetId" from="prepared.ruleSetId"/>
+                <set field="compareScopeId" from="darpan.reconciliation.core.ReconciliationServices.normalize(prepared.compareScopeId)"/>
+                <set field="compareScopeDescription" from="compareScopeDescriptionValue"/>
+                <set field="objectType" from="darpan.reconciliation.core.ReconciliationServices.normalize(prepared.objectType)"/>
+                <set field="scopeMode" from="prepared.scopeMode"/>
+                <set field="file1Type" from="prepared.file1Type"/>
+                <set field="file1Label" from="file1LabelValue"/>
+                <set field="differenceCount" from="differenceCountValue"/>
+                <set field="diffDf" from="diffDfValue"/>
+                <set field="validationErrors" from="prepared.validationErrors ?: []"/>
+                <set field="processingWarnings" from="prepared.processingWarnings ?: []"/>
+                <set field="persistedSources" from="(prepared.persistedSources ?: []) + [diffDfValue].findAll { it != null }"/>
             </if>
         </actions>
     </service>

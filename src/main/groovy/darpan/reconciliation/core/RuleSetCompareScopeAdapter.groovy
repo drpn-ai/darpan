@@ -93,7 +93,11 @@ class RuleSetCompareScopeAdapter {
 
         if (!ruleSetId) throw new IllegalArgumentException("ruleSetId is required")
         if (!compareScopeId) throw new IllegalArgumentException("compareScopeId is required")
-        if (!sideInputBySide.FILE_1.fileLocation || !sideInputBySide.FILE_2.fileLocation) throw new IllegalArgumentException("file1Location and file2Location are required")
+        // FILE_1 is required in EVERY mode, so it is still checked here — before the scope is loaded,
+        // which is the cheapest place to fail. FILE_2 cannot be checked yet: whether it is required at
+        // all depends on the scope's scopeMode, which is not known until the scope row is read. That
+        // check moved to the per-active-side loop below (DAR-BE-049).
+        if (!sideInputBySide.FILE_1.fileLocation) throw new IllegalArgumentException("file1Location is required")
 
         // RuleSetCompareScope has no companyUserGroupId — gate via parent RuleSet (directly-owned).
         // findTenantScopedChildren gates the RuleSet and returns a pre-scoped finder for its compare scopes.
@@ -128,6 +132,16 @@ class RuleSetCompareScopeAdapter {
         List<String> activeSides = resolveActiveSides(
                 ReconciliationServices.normalize(compareScope.scopeMode), sourceBySide.keySet(), compareScopeLabel)
         boolean singleSided = activeSides.size() == 1
+
+        // file2Location cannot be declared required on the service any more (an EVALUATE scope has no
+        // second side and a declarative requirement cannot be conditional), so it is enforced here,
+        // per ACTIVE side, where the count is finally known.
+        activeSides.each { String fileSide ->
+            if (!((Map<String, Object>) sideInputBySide[fileSide])?.get("fileLocation")) {
+                throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' needs a " +
+                        "${SIDE_PREFIX_BY_SIDE[fileSide]}Location for its ${fileSide} source")
+            }
+        }
 
         Map<String, Object> sideConfigBySide = activeSides.collectEntries { String fileSide ->
             Map<String, Object> sideInput = (Map<String, Object>) sideInputBySide[fileSide]
@@ -223,7 +237,15 @@ class RuleSetCompareScopeAdapter {
         Map<String, Object> preparedIngestBySide = activeSides.collectEntries { String fileSide ->
             Map<String, Object> plan = (Map<String, Object>) sidePlanBySide[fileSide]
             Map<String, Object> ingest = (Map<String, Object>) ingestBySide[fileSide]
-            if (allowDuplicateCompareIds == Boolean.TRUE) {
+            if (singleSided) {
+                // EVALUATE NEVER JOINS ON compare_id — there is no other side to join to, so the id is
+                // a row identifier and uniqueness is not a correctness property here. Both existing
+                // branches would be wrong: validate would throw on an exception report that
+                // legitimately has two failing rows for one order, and collapse would DROP one of them
+                // (the [[DAR-BE-046]] behaviour) and under-report the very findings this scope exists
+                // to surface. So duplicates pass through untouched.
+                [(fileSide): ingest]
+            } else if (allowDuplicateCompareIds == Boolean.TRUE) {
                 [(fileSide): collapseDuplicateCompareIdsForBaseDiffOnly(ingest, compareScopeLabel, fileSide, (String) plan.label, processingWarnings)]
             } else {
                 ReconciliationServices.validateUniqueCompareIds((Dataset) ingest.dataDf, compareScopeLabel, fileSide, (String) plan.label)

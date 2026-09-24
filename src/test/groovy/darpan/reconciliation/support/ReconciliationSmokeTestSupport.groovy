@@ -216,6 +216,23 @@ class ReconciliationSmokeTestSupport {
                 primaryIdExpression : "node.id",
                 idValueNormalizer   : "SHOPIFY_GID_TAIL"
         ])
+        // DAR-BE-049: a single-sided EVALUATE scope. ONE source and deliberately no FILE_2 — the shape
+        // an exception check has, where the predicate already ran in the extractor.
+        upsertEntity(ec, "darpan.rule.RuleSetCompareScope", [compareScopeId: "DARPAN_TEST_ORDER_EVALUATE_SCOPE"], [
+                compareScopeId: "DARPAN_TEST_ORDER_EVALUATE_SCOPE",
+                ruleSetId     : "DARPAN_TEST_COMPARE_RS",
+                objectType    : "ORDER",
+                scopeMode     : "EVALUATE",
+                description   : "Smoke-test single-sided evaluate scope for exception findings."
+        ])
+        upsertEntity(ec, "darpan.rule.RuleSetCompareSource", [compareScopeId: "DARPAN_TEST_ORDER_EVALUATE_SCOPE", fileSide: "FILE_1"], [
+                compareScopeId      : "DARPAN_TEST_ORDER_EVALUATE_SCOPE",
+                fileSide            : "FILE_1",
+                systemEnumId        : "SHOPIFY",
+                fileTypeEnumId      : "DftJson",
+                recordRootExpression: "data.orders.edges",
+                primaryIdExpression : "node.id|SHOPIFY_GID_TAIL"
+        ])
         upsertEntity(ec, "darpan.rule.RuleSetCompareSource", [compareScopeId: "DARPAN_TEST_ORDER_CSV_SCOPE", fileSide: "FILE_1"], [
                 compareScopeId      : "DARPAN_TEST_ORDER_CSV_SCOPE",
                 fileSide            : "FILE_1",

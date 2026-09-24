@@ -58,6 +58,39 @@ class CompareDatasetSupport {
                 )
     }
 
+    /** Default row type for an EVALUATE scope's findings; see buildEvaluationFindingRows. */
+    static final String EVALUATION_FINDING_TYPE = "FINDING"
+
+    /**
+     * Findings from a single-sided EVALUATE compare scope (DAR-BE-049).
+     *
+     * An evaluate scope has no second side, so its findings cannot come from buildMissingDiffRows —
+     * there is no missing-id frame to join against. The PREDICATE ALREADY RAN IN THE EXTRACTOR, so
+     * every row it emitted is a finding and none are filtered here.
+     *
+     * THE SCHEMA IS DELIBERATELY IDENTICAL to buildMissingDiffRows above, column for column and type
+     * for type. Everything downstream — writeDiffDatasetOutput, the differences UI, runResultDiffDetails,
+     * and the verification passes that re-read the document — is written against that shape, and none
+     * of them switch on the row type, so a drifted schema would render as blanks with nothing to warn
+     * on. EvaluationFindingRowsTests asserts the parity against the real builder rather than a copied
+     * column list.
+     *
+     * `missingIn` is EMPTY rather than null on purpose: nothing is missing on an evaluate run, but a
+     * lit(null) would be a NullType column, breaking both the schema parity and any union with diff
+     * rows.
+     */
+    static Dataset buildEvaluationFindingRows(Dataset dataDf, String diffType, String sourceLabel, String note) {
+        if (dataDf == null) return null
+        return dataDf.select(
+                lit(diffType ?: EVALUATION_FINDING_TYPE).alias("type"),
+                col("compare_id").alias("id"),
+                lit(sourceLabel ?: "").alias("presentIn"),
+                lit("").alias("missingIn"),
+                to_json(col("data")).alias("data"),
+                lit(note ?: "").alias("note")
+        )
+    }
+
     static List<Row> findDuplicateCompareIdRows(Dataset dataDf, int sampleLimit = 5) {
         if (dataDf == null) return []
 

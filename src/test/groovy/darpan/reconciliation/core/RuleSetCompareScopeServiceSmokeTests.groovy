@@ -118,6 +118,109 @@ class RuleSetCompareScopeServiceSmokeTests {
         )
     }
 
+    // ---------------------------------------------------------------- DAR-BE-049: single-sided evaluate
+
+    @Test
+    void evaluateStageEmitsOneFindingPerSourceRowForASingleSidedScope() {
+        Map<String, Object> result = ec.service.sync()
+                .name("reconciliation.ReconciliationCoreServices.evaluate#RuleSetCompareScope")
+                .parameters([
+                        ruleSetId     : "DARPAN_TEST_COMPARE_RS",
+                        compareScopeId: "DARPAN_TEST_ORDER_EVALUATE_SCOPE",
+                        file1Location : "component://darpan/data/test/test-orders-1.json",
+                        findingType   : "NO_FULFILLMENT",
+                        sparkMaster   : "local[1]",
+                        sparkAppName  : "RuleSetCompareScopeServiceSmokeTests"
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError())
+        assertEquals("EVALUATE", result.scopeMode)
+        // The extractor owns the predicate, so every row it produced is a finding: 3 in, 3 out.
+        assertEquals(3L, result.differenceCount)
+
+        List<String> ids = ((Dataset) result.diffDf).collectAsList()
+                .collect { row -> row.getAs("id") as String }
+                .sort()
+        assertIterableEquals(["6470622019715", "6470622478467", "6470624575619"], ids)
+
+        def first = ((Dataset) result.diffDf).orderBy("id").first()
+        assertEquals("NO_FULFILLMENT", first.getAs("type"))
+        // presentIn names where the row lives; nothing is missing on an evaluate run.
+        assertEquals("", first.getAs("missingIn"))
+        assertEquals("Smoke-test single-sided evaluate scope for exception findings.", first.getAs("note"))
+        assertTrue(((String) first.getAs("data")).contains("6470622019715"))
+    }
+
+    @Test
+    void evaluateStageDoesNotRunAgainstATwoSidedCompareScope() {
+        // What matters is that it CANNOT silently succeed: a zero-finding "success" on a two-sided
+        // scope would read as "nothing wrong". It is refused twice over — prepare rejects the missing
+        // second location first (evaluate# declares no file2Location to forward), and the service's own
+        // scopeMode guard stands behind that. This asserts the outcome rather than which of the two
+        // fired, because the order is an implementation detail and the message would pin the wrong one.
+        ec.service.sync()
+                .name("reconciliation.ReconciliationCoreServices.evaluate#RuleSetCompareScope")
+                .parameters([
+                        ruleSetId     : "DARPAN_TEST_COMPARE_RS",
+                        compareScopeId: "DARPAN_TEST_ORDER_JSON_SCOPE",
+                        file1Location : "component://darpan/data/test/test-orders-1.json",
+                        sparkMaster   : "local[1]",
+                        sparkAppName  : "RuleSetCompareScopeServiceSmokeTests"
+                ])
+                .disableAuthz()
+                .call()
+
+        assertTrue(ec.message.hasError())
+        assertFalse(ec.message.errorsString.isEmpty())
+    }
+
+    @Test
+    void prepareIgnoresAStrayFile2LocationOnAnEvaluateScope() {
+        // The scope's own SOURCE ROWS decide the side count; a location is an input, not a
+        // declaration. So a caller passing file2Location to a single-sided scope is ignored rather
+        // than quietly turning the run into a comparison.
+        ec.service.sync()
+                .name("reconciliation.ReconciliationCoreServices.prepare#RuleSetCompareScope")
+                .parameters([
+                        ruleSetId     : "DARPAN_TEST_COMPARE_RS",
+                        compareScopeId: "DARPAN_TEST_ORDER_EVALUATE_SCOPE",
+                        file1Location : "component://darpan/data/test/test-orders-1.json",
+                        file2Location : "component://darpan/data/test/test-orders-2.json",
+                        sparkMaster   : "local[1]",
+                        sparkAppName  : "RuleSetCompareScopeServiceSmokeTests"
+                ])
+                .disableAuthz()
+                .call()
+
+        // A stray file2Location is IGNORED, because the scope's own sources decide the side count —
+        // the location is an input, not a declaration. This pins that it does not error and does not
+        // quietly become a comparison.
+        assertFalse(ec.message.hasError())
+    }
+
+    @Test
+    void prepareStillRequiresASecondLocationForATwoSidedScope() {
+        // REGRESSION GUARD for DAR-BE-049: file2Location used to be required="true" on the service.
+        // Relaxing it so evaluate# can call prepare moved this safety into the adapter, so pin it —
+        // otherwise a COMPARE run silently ingests nothing on its second side.
+        ec.service.sync()
+                .name("reconciliation.ReconciliationCoreServices.prepare#RuleSetCompareScope")
+                .parameters([
+                        ruleSetId     : "DARPAN_TEST_COMPARE_RS",
+                        compareScopeId: "DARPAN_TEST_ORDER_JSON_SCOPE",
+                        file1Location : "component://darpan/data/test/test-orders-1.json",
+                        sparkMaster   : "local[1]",
+                        sparkAppName  : "RuleSetCompareScopeServiceSmokeTests"
+                ])
+                .disableAuthz()
+                .call()
+
+        assertTrue(ec.message.hasError())
+        assertTrue(ec.message.errorsString.contains("file2Location"), ec.message.errorsString)
+    }
+
     @Test
     void baseDiffStageReturnsMissingDiffsAndMatchedPairsWithCorrectDirectionality() {
         Map<String, Object> result = ec.service.sync()

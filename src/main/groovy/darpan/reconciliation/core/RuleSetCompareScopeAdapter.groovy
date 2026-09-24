@@ -13,9 +13,57 @@ class RuleSetCompareScopeAdapter {
     private static final Logger logger = LoggerFactory.getLogger(RuleSetCompareScopeAdapter.class)
     private static final List<String> FILE_SIDES = ["FILE_1", "FILE_2"].asImmutable()
     private static final Map<String, String> SIDE_PREFIX_BY_SIDE = [FILE_1: "file1", FILE_2: "file2"].asImmutable()
+
+    /** A scope that diffs two sources. Every scope that existed before DAR-BE-049 is one of these. */
+    static final String SCOPE_MODE_COMPARE = "COMPARE"
+    /** A scope that evaluates ONE source, whose emitted rows ARE its findings (DAR-BE-049). */
+    static final String SCOPE_MODE_EVALUATE = "EVALUATE"
+    private static final List<String> SCOPE_MODES = [SCOPE_MODE_COMPARE, SCOPE_MODE_EVALUATE].asImmutable()
     private static final Map<String, String> SIDE_FALLBACK_LABEL_BY_SIDE = [FILE_1: "File 1", FILE_2: "File 2"].asImmutable()
     private static final Set<String> SUPPORTED_FILE_TYPES = ["CSV", "JSON"] as Set
     private static final int MAX_COMPOSITE_KEY_FIELDS = 5
+
+    /**
+     * How many sides this scope legally has, given its mode (DAR-BE-049).
+     *
+     * The engine was two-sided by construction: FILE_SIDES was a constant and a scope missing either
+     * side threw. That is correct for a comparison and wrong for an exception check — "which rows fail
+     * a predicate" has ONE source, and its findings are its rows. So the mode decides the side count
+     * rather than a constant doing it.
+     *
+     * Pure and package-visible so the arithmetic is pinned by a fast unit test rather than only by a
+     * booted smoke test; see RuleSetCompareScopeModeTests.
+     */
+    static List<String> resolveActiveSides(String scopeMode, Collection<String> presentSides, String compareScopeLabel) {
+        // A stored null MUST mean COMPARE. Every scope configured before this field existed has no
+        // value, and defaulting the other way would silently convert every live reconciliation into a
+        // one-sided evaluate the moment the column was added.
+        String mode = ReconciliationServices.normalize(scopeMode)?.toUpperCase() ?: SCOPE_MODE_COMPARE
+        if (!(mode in SCOPE_MODES)) {
+            // Deliberately NOT falling back to COMPARE: a typo'd mode would then run a different
+            // reconciliation than the one configured and report success.
+            throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' has unsupported " +
+                    "scopeMode ${scopeMode}. Supported values: ${SCOPE_MODES.join(', ')}")
+        }
+        Set<String> present = ((presentSides ?: []) as Collection<String>)
+                .findAll { it }.collect { it.trim().toUpperCase() }.toSet()
+
+        if (mode == SCOPE_MODE_EVALUATE) {
+            if (!present.contains("FILE_1")) {
+                throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' is ${SCOPE_MODE_EVALUATE} " +
+                        "and must define a FILE_1 source; the single-source plumbing is keyed on FILE_1")
+            }
+            if (present.contains("FILE_2")) {
+                throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' is ${SCOPE_MODE_EVALUATE}, " +
+                        "which takes one source, but a FILE_2 source is defined. Use ${SCOPE_MODE_COMPARE} to diff two sources.")
+            }
+            return ["FILE_1"].asImmutable()
+        }
+        if (FILE_SIDES.any { String fileSide -> !present.contains(fileSide) }) {
+            throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' must define both FILE_1 and FILE_2 sources")
+        }
+        return FILE_SIDES
+    }
 
     static Map<String, Object> prepareRuleSetCompareScope(ExecutionContext ec) {
         Map<String, Object> context = (Map<String, Object>) ec.contextStack
@@ -77,11 +125,11 @@ class RuleSetCompareScopeAdapter {
             def source = sources.find { source -> ReconciliationServices.normalize(source.fileSide)?.toUpperCase() == unsupportedFileSide }
             throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' has unsupported fileSide ${source?.fileSide}. Supported values: FILE_1, FILE_2")
         }
-        if (FILE_SIDES.any { String fileSide -> !sourceBySide[fileSide] }) {
-            throw new IllegalArgumentException("Compare scope '${compareScopeLabel}' must define both FILE_1 and FILE_2 sources")
-        }
+        List<String> activeSides = resolveActiveSides(
+                ReconciliationServices.normalize(compareScope.scopeMode), sourceBySide.keySet(), compareScopeLabel)
+        boolean singleSided = activeSides.size() == 1
 
-        Map<String, Object> sideConfigBySide = FILE_SIDES.collectEntries { String fileSide ->
+        Map<String, Object> sideConfigBySide = activeSides.collectEntries { String fileSide ->
             Map<String, Object> sideInput = (Map<String, Object>) sideInputBySide[fileSide]
             def source = sourceBySide[fileSide]
             [(fileSide): [
@@ -107,7 +155,7 @@ class RuleSetCompareScopeAdapter {
                         .list()
                         .collectEntries { enumValue -> [(ReconciliationServices.normalize(enumValue.enumId)): enumValue] } :
                 [:]
-        Map<String, Object> sidePlanBySide = FILE_SIDES.collectEntries { String fileSide ->
+        Map<String, Object> sidePlanBySide = activeSides.collectEntries { String fileSide ->
             Map<String, Object> sideInput = (Map<String, Object>) sideInputBySide[fileSide]
             Map<String, Object> sideConfig = (Map<String, Object>) sideConfigBySide[fileSide]
             String safeName = (String) sideInput.fileName ?:
@@ -130,20 +178,25 @@ class RuleSetCompareScopeAdapter {
             ]]
         }
         Map<String, Object> file1Plan = (Map<String, Object>) sidePlanBySide.FILE_1
+        // Null on an EVALUATE scope. Every read of it below is guarded rather than branched, so the
+        // COMPARE path executes exactly the statements it did before this change.
         Map<String, Object> file2Plan = (Map<String, Object>) sidePlanBySide.FILE_2
         Map<String, Object> file1Config = (Map<String, Object>) file1Plan.config
-        Map<String, Object> file2Config = (Map<String, Object>) file2Plan.config
+        Map<String, Object> file2Config = (Map<String, Object>) file2Plan?.config
         List<Map<String, Object>> file1IdSpecs = (List<Map<String, Object>>) file1Plan.idSpecs
-        List<Map<String, Object>> file2IdSpecs = (List<Map<String, Object>>) file2Plan.idSpecs
+        List<Map<String, Object>> file2IdSpecs = (List<Map<String, Object>>) file2Plan?.idSpecs
         // Defense in depth: the facade-level create#RuleSetRun/save#RuleSetRun guard already rejects
         // mismatched cross-side composite key-field counts at request time, but this adapter is the
         // single choke point every extraction path (including ones that predate or bypass that facade
         // guard) funnels through before ingest — re-check here so a stored scope with skewed counts
         // fails loudly instead of silently mis-composing compare_id joins.
-        assertMatchingIdSpecCounts(file1IdSpecs, file2IdSpecs)
+        // Single-sided by definition has no cross-side key count to match; the guard below would
+        // otherwise compare the one side against null and report skew that does not exist.
+        if (!singleSided) assertMatchingIdSpecCounts(file1IdSpecs, file2IdSpecs)
 
-        logger.info("Preparing compare scope extraction: ruleSet={} compareScope={} objectType={} file1Type={} file2Type={}",
-                ruleSetId, compareScopeId, compareScope.objectType, file1Plan.fileType, file2Plan.fileType)
+        logger.info("Preparing compare scope extraction: ruleSet={} compareScope={} objectType={} mode={} file1Type={} file2Type={}",
+                ruleSetId, compareScopeId, compareScope.objectType,
+                singleSided ? SCOPE_MODE_EVALUATE : SCOPE_MODE_COMPARE, file1Plan.fileType, file2Plan?.fileType)
 
         SparkSession spark = SparkSession.builder()
                 .appName(sparkAppName)
@@ -159,7 +212,7 @@ class RuleSetCompareScopeAdapter {
         spark.conf().set("spark.sql.shuffle.partitions",
                 (System.getProperty("darpan.reconciliation.spark.shufflePartitions") ?: "16"))
 
-        Map<String, Object> ingestBySide = FILE_SIDES.collectEntries { String fileSide ->
+        Map<String, Object> ingestBySide = activeSides.collectEntries { String fileSide ->
             Map<String, Object> plan = (Map<String, Object>) sidePlanBySide[fileSide]
             Map<String, Object> config = (Map<String, Object>) plan.config
             [(fileSide): ReconciliationServices.ingestFile(
@@ -167,7 +220,7 @@ class RuleSetCompareScopeAdapter {
                     hasHeader != null ? hasHeader : true, (String) plan.label, validationErrors,
                     (String) config.schemaFileName)]
         }
-        Map<String, Object> preparedIngestBySide = FILE_SIDES.collectEntries { String fileSide ->
+        Map<String, Object> preparedIngestBySide = activeSides.collectEntries { String fileSide ->
             Map<String, Object> plan = (Map<String, Object>) sidePlanBySide[fileSide]
             Map<String, Object> ingest = (Map<String, Object>) ingestBySide[fileSide]
             if (allowDuplicateCompareIds == Boolean.TRUE) {
@@ -187,27 +240,28 @@ class RuleSetCompareScopeAdapter {
         // disk once so those actions reuse them. They are returned in `persistedSources` so the
         // outermost owner (reconcileGenericFiles) can unpersist them in a finally — no block leak.
         Dataset file1IdDf = ((Dataset) ingest1.idDf)?.persist(StorageLevel.DISK_ONLY())
-        Dataset file2IdDf = ((Dataset) ingest2.idDf)?.persist(StorageLevel.DISK_ONLY())
+        Dataset file2IdDf = ((Dataset) ingest2?.idDf)?.persist(StorageLevel.DISK_ONLY())
         Dataset file1DataDf = ((Dataset) ingest1.dataDf)?.persist(StorageLevel.DISK_ONLY())
-        Dataset file2DataDf = ((Dataset) ingest2.dataDf)?.persist(StorageLevel.DISK_ONLY())
+        Dataset file2DataDf = ((Dataset) ingest2?.dataDf)?.persist(StorageLevel.DISK_ONLY())
 
         return [
                 ruleSetId        : ruleSetId,
                 compareScopeId   : compareScopeId,
                 compareScopeDescription: compareScopeLabel,
                 objectType       : ReconciliationServices.normalize(compareScope.objectType),
+                scopeMode        : singleSided ? SCOPE_MODE_EVALUATE : SCOPE_MODE_COMPARE,
                 file1Type        : file1Plan.fileType,
-                file2Type        : file2Plan.fileType,
+                file2Type        : file2Plan?.fileType,
                 file1SystemEnumId: file1Config.systemEnumId,
-                file2SystemEnumId: file2Config.systemEnumId,
+                file2SystemEnumId: file2Config?.systemEnumId,
                 file1SchemaFileName: file1Config.schemaFileName,
-                file2SchemaFileName: file2Config.schemaFileName,
+                file2SchemaFileName: file2Config?.schemaFileName,
                 file1IdExpression: file1IdSpecs.collect { it.idExpr }.join(' + '),
-                file2IdExpression: file2IdSpecs.collect { it.idExpr }.join(' + '),
+                file2IdExpression: file2IdSpecs ? file2IdSpecs.collect { it.idExpr }.join(' + ') : null,
                 file1IdNormalizer: file1IdSpecs.collect { it.idNormalizer }.findAll { it }.join(', ') ?: null,
-                file2IdNormalizer: file2IdSpecs.collect { it.idNormalizer }.findAll { it }.join(', ') ?: null,
+                file2IdNormalizer: file2IdSpecs ? (file2IdSpecs.collect { it.idNormalizer }.findAll { it }.join(', ') ?: null) : null,
                 file1Label       : file1Plan.label,
-                file2Label       : file2Plan.label,
+                file2Label       : file2Plan?.label,
                 file1IdDf        : file1IdDf,
                 file2IdDf        : file2IdDf,
                 file1DataDf      : file1DataDf,

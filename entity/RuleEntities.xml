@@ -65,6 +65,16 @@
         <field name="compareScopeId" type="id" is-pk="true"/>
         <field name="ruleSetId" type="id" not-null="true"/>
         <field name="objectType" type="text-short"/>
+        <field name="scopeMode" type="text-short">
+            <description>COMPARE (default) diffs two sources; EVALUATE takes ONE source whose emitted
+                rows ARE its findings, for exception checks like "which orders never shipped" where the
+                predicate belongs to the extractor rather than to a cross-side diff (DAR-BE-049).
+
+                DELIBERATELY NULLABLE WITH NO DEFAULT ATTRIBUTE. Every scope configured before this
+                field existed stores nothing, and resolveActiveSides reads a null as COMPARE, so adding
+                the column needs NO upgrade data and cannot reclassify a live reconciliation. A stored
+                value that is neither mode throws rather than falling back.</description>
+        </field>
         <field name="description" type="text-medium"/>
         <field name="companyUserGroupId" type="id">
             <description>Denormalized owning-tenant stamp copied from the parent RuleSet (defense-in-depth;

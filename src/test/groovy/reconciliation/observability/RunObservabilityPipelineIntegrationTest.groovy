@@ -35,6 +35,9 @@ class RunObservabilityPipelineIntegrationTest {
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AutomationSeedData.xml")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/SourceSystemConnectorSeedData.xml")
         ReconciliationSmokeTestSupport.seedBaseCompareRuleSet(ec)
+        // DAR-BE-049: brings DARPAN_TEST_EVALUATE_RS, a RuleSet whose single compare scope is
+        // single-sided, so the evaluate fork can be driven through the real facade service.
+        ReconciliationSmokeTestSupport.seedCompareScopeFixtures(ec)
     }
 
     @AfterAll
@@ -47,6 +50,60 @@ class RunObservabilityPipelineIntegrationTest {
         ec.message.clearErrors()
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
         ec.message.clearErrors()
+    }
+
+    @Test
+    void singleSidedEvaluateRunProducesFindingsAndNeverStagesASecondSide() {
+        // END TO END through the real facade service, which is the only thing that proves the EVALUATE
+        // fork is REACHABLE. Every earlier slice was green while the Run button still refused this run:
+        // the engine accepted one side, then the resolver refused it, then the upload guard demanded a
+        // second file. A passing unit test could not have caught any of those.
+        String ordersJson = '[{"data":{"orders":{"edges":[' +
+                '{"node":{"id":"gid://shopify/Order/1001"}},' +
+                '{"node":{"id":"gid://shopify/Order/1002"}}' +
+                ']}}}]'
+
+        Map<String, Object> runResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.run#SavedRunDiff")
+                .parameters([
+                        savedRunId: "DARPAN_TEST_EVALUATE_RS",
+                        file1Name : "orders.json",
+                        file1Text : ordersJson,
+                        // NO file2Name / file2Text at all — that is the point.
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        Map result = (Map) runResult.runResult
+        assertNotNull(result, "a single-sided run must return a runResult")
+        assertEquals("EVALUATE", result.scopeMode)
+        // The extractor owns the predicate, so both source rows are findings.
+        assertEquals(2L, (result.differenceCount as Number)?.longValue())
+        assertNotNull(result.resultDataManagerPath, "the findings document must be written")
+
+        String runId = result.reconciliationRunResultId as String
+        assertTrue(runId != null && !runId.isEmpty())
+
+        def run = ec.entity.find(RunObservability.RUN_RESULT_ENTITY)
+                .condition("reconciliationRunResultId", runId)
+                .disableAuthz().useCache(false).one()
+        assertNotNull(run)
+        assertTrue(RunObservability.isTerminalStatus(run.statusEnumId as String),
+                "run must end terminal, was ${run.statusEnumId}")
+
+        List<String> stageCodes = (ec.entity.find(RunObservability.RUN_STEP_ENTITY)
+                .condition("reconciliationRunResultId", runId)
+                .orderBy("stageSequence").disableAuthz().useCache(false).list() as List)
+                .collect { def step -> step.stageCode as String }
+
+        assertTrue(stageCodes.contains(RunObservability.STAGE_EXTRACT_FILE1), "expected EXTRACT_FILE1, got ${stageCodes}")
+        assertTrue(stageCodes.contains(RunObservability.STAGE_COMPARE), "expected COMPARE, got ${stageCodes}")
+        // THE ASSERTION THAT MATTERS MOST: no second side was staged. A fork that fell through to the
+        // two-sided path would still produce findings and a terminal status — this is what tells them
+        // apart, and it is why the timeline is asserted rather than just the counts.
+        assertFalse(stageCodes.contains(RunObservability.STAGE_EXTRACT_FILE2),
+                "a single-sided run must not open EXTRACT_FILE2, got ${stageCodes}")
     }
 
     @Test

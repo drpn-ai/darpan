@@ -11,6 +11,7 @@ import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.facade.reconciliation.RunObservability
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.core.ReconciliationServices
+import darpan.reconciliation.core.RuleSetCompareScopeAdapter
 import darpan.reconciliation.notification.TenantNotificationSupport
 import groovy.json.JsonOutput
 import org.slf4j.LoggerFactory
@@ -565,6 +566,13 @@ try {
             boolean file1UsesApiSource = isApiSource(file1Source)
             boolean file2UsesApiSource = isApiSource(file2Source)
             boolean hasApiInput = file1UsesApiSource || file2UsesApiSource
+            // DAR-BE-049: a single-sided EVALUATE scope has no second side at all, so every guard below
+            // that reasons about a PAIR has to know that before it fires. The mode is read from the scope
+            // resolveRuleSetRun already validated, and that resolver defers to the same pure rule the
+            // compare engine uses — so this cannot allow a run the engine would then refuse.
+            boolean evaluateMode = RuleSetCompareScopeAdapter.SCOPE_MODE_EVALUATE ==
+                    (normalize(resolvedRuleSetRun.compareScope?.scopeMode)?.toUpperCase()
+                            ?: RuleSetCompareScopeAdapter.SCOPE_MODE_COMPARE)
 
             String defaultFile1SystemEnumId = normalize(file1Source?.systemEnumId)
             String defaultFile2SystemEnumId = normalize(file2Source?.systemEnumId)
@@ -575,7 +583,9 @@ try {
             // same source is still a self-comparison. Mirrors the create#/save#RuleSetRun rule.
             String file1SourceConfigIdForPairing = normalize(file1Source?.sourceConfigId) ?: ""
             String file2SourceConfigIdForPairing = normalize(file2Source?.sourceConfigId) ?: ""
-            if (resolvedFile1SystemEnumId == resolvedFile2SystemEnumId
+            // Self-comparison is meaningless for a single source: with no FILE_2 both halves of this
+            // test read empty, so it passes today only by accident. Gating it states the intent.
+            if (!evaluateMode && resolvedFile1SystemEnumId == resolvedFile2SystemEnumId
                     && file1SourceConfigIdForPairing == file2SourceConfigIdForPairing) {
                 ec.message.addError("file1 and file2 are the same source — use a different system or a different source config.")
             }
@@ -587,10 +597,12 @@ try {
                     ec.message.addError("windowStartDate must be before windowEndDate.")
                 }
                 if (!file1UsesApiSource) requireUploadInput("file1", inputFile1Name, file1TextValue)
-                if (!file2UsesApiSource) requireUploadInput("file2", inputFile2Name, file2TextValue)
+                // Demanding a second upload is what made an EVALUATE run unreachable even once the
+                // engine and the resolver both accepted one source.
+                if (!evaluateMode && !file2UsesApiSource) requireUploadInput("file2", inputFile2Name, file2TextValue)
             } else if (!ec.message.hasError()) {
                 requireUploadInput("file1", inputFile1Name, file1TextValue)
-                requireUploadInput("file2", inputFile2Name, file2TextValue)
+                if (!evaluateMode) requireUploadInput("file2", inputFile2Name, file2TextValue)
             }
 
             if (!ec.message.hasError()) {
@@ -600,7 +612,137 @@ try {
                 String file1Label = enumLabel(resolvedFile1SystemEnumId)
                 String file2Label = enumLabel(resolvedFile2SystemEnumId)
 
-                if (hasApiInput) {
+                if (evaluateMode) {
+                    // ONE EARLY FORK rather than mode-awareness threaded through the two-sided flow: an
+                    // evaluate run diverges here, before any of it, so the COMPARE path below executes
+                    // exactly the statements it did before this branch existed. No verification pass runs
+                    // — every one of the three compares two sides.
+                    if (file1UsesApiSource) tenantApiWindow = resolveTenantApiWindow()
+                    if (!ec.message.hasError()) {
+                        Map artifactContext = buildRunArtifactContext(savedRun.savedRunId as String)
+                        Map file1Result = [:]
+                        String reconciliationRunResultId = persistRunResult([
+                            reconciliationRunResultId: obsRunId,
+                            savedRunId          : savedRun.savedRunId,
+                            savedRunType        : savedRun.runType ?: ReconciliationSavedRunSupport.RUN_TYPE_RULESET,
+                            ruleSetId           : savedRun.ruleSetId,
+                            compareScopeId      : savedRun.compareScopeId,
+                            companyUserGroupId  : savedRun.companyUserGroupId,
+                            file1Name           : file1UsesApiSource ? null : inputFile1Name,
+                            createdDate         : ec.user.nowTimestamp,
+                            startedDate         : ec.user.nowTimestamp,
+                        ])
+                        List evaluatePersistedSources = []
+                        try {
+                            RunObservability.checkpointCancel(ec, obsRunId)
+                            obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_EXTRACT_FILE1) : null
+                            obsStage = RunObservability.STAGE_EXTRACT_FILE1
+                            file1Result = file1UsesApiSource ?
+                                    extractApiSource(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, artifactContext,
+                                            [reconciliationRunResultId: obsRunId, progressStageCode: RunObservability.STAGE_EXTRACT_FILE1]) :
+                                    stageTextInput(file1Source, ReconciliationSavedRunSupport.FILE_SIDE_1, inputFile1Name, file1TextValue, artifactContext)
+                            if (!ec.message.hasError()) {
+                                RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS, [recordCount: file1Result.recordCount])
+                                RunObservability.recordSourceArtifact(ec, obsRunId, "file1", file1Result.fileName, file1Result.dataManagerPath)
+                                obsStep = null
+                                obsNoData = file1Result.recordCount == 0
+                            }
+                            if (!ec.message.hasError()) {
+                                RunObservability.checkpointCancel(ec, obsRunId)
+                                obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_COMPARE) : null
+                                obsStage = RunObservability.STAGE_COMPARE
+                                Map serviceResult = runInternalService("reconciliation.ReconciliationCoreServices.evaluate#RuleSetCompareScope", [
+                                    ruleSetId          : savedRun.ruleSetId,
+                                    compareScopeId     : savedRun.compareScopeId,
+                                    file1Location      : file1Result.fileLocation,
+                                    file1Name          : file1Result.fileName,
+                                    file1FileTypeEnumId: file1Result.fileTypeEnumId,
+                                    file1SchemaFileName: file1Result.schemaFileName,
+                                    file1Label         : file1Label,
+                                    hasHeader          : hasHeaderValue,
+                                    sparkMaster        : sparkMaster,
+                                    sparkAppName       : sparkAppName ?: "SavedRunEvaluate"
+                                ])
+                                evaluatePersistedSources = (serviceResult.persistedSources ?: []) as List
+                                if (!ec.message.hasError()) {
+                                    // Same writer as a diff: the finding rows carry buildMissingDiffRows'
+                                    // exact schema, so the document and everything reading it are unchanged.
+                                    // file2Label is null because there is no second system to name.
+                                    writeRuleSetOutput(serviceResult, savedRun, file1Label, null, artifactContext)
+                                    RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS,
+                                            [recordCount: serviceResult.differenceCount])
+                                    obsStep = null
+                                    obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_WRITE_OUTPUT) : null
+                                    obsStage = RunObservability.STAGE_WRITE_OUTPUT
+                                    String resultDataManagerPath = serviceResult.diffLocation ?
+                                            (DataManagerSupport.relativeDataManagerPath(ec, new File(serviceResult.diffLocation as String)) ?: serviceResult.diffFileName) :
+                                            serviceResult.diffFileName
+                                    // onlyInFile1Count / onlyInFile2Count are deliberately ABSENT, not zero:
+                                    // this run never evaluated whether anything was missing from a second
+                                    // system, and a 0 would assert that it did.
+                                    reconciliationRunResultId = persistRunResult([
+                                        reconciliationRunResultId: reconciliationRunResultId,
+                                        savedRunId               : savedRun.savedRunId,
+                                        savedRunType             : savedRun.runType ?: ReconciliationSavedRunSupport.RUN_TYPE_RULESET,
+                                        ruleSetId                : savedRun.ruleSetId,
+                                        compareScopeId           : savedRun.compareScopeId,
+                                        companyUserGroupId       : savedRun.companyUserGroupId,
+                                        file1Name                : file1Result.fileName,
+                                        file1DataManagerPath     : file1Result.dataManagerPath,
+                                        resultDataManagerPath    : resultDataManagerPath,
+                                        completedDate            : ec.user.nowTimestamp,
+                                        reconciliationType       : serviceResult.objectType,
+                                        differenceCount          : serviceResult.differenceCount,
+                                    ])
+                                    RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS,
+                                            [recordCount: serviceResult.differenceCount])
+                                    obsStep = null
+                                    serviceResult.reconciliationRunResultId = reconciliationRunResultId
+                                    serviceResult.diffFileName = resultDataManagerPath
+                                    runResult = [
+                                        savedRunId               : savedRun.savedRunId,
+                                        runName                  : savedRun.runName,
+                                        runType                  : savedRun.runType,
+                                        reconciliationMappingId  : null,
+                                        companyUserGroupId       : savedRun.companyUserGroupId,
+                                        reconciliationRunResultId: reconciliationRunResultId,
+                                        resultDataManagerPath    : resultDataManagerPath,
+                                        differenceCount          : serviceResult.differenceCount,
+                                        ruleSetId                : savedRun.ruleSetId,
+                                        compareScopeId           : savedRun.compareScopeId,
+                                        compareScopeDescription  : savedRun.compareScopeDescription,
+                                        scopeMode                : serviceResult.scopeMode,
+                                        file1Name                : file1Result.fileName,
+                                        file1SystemEnumId        : resolvedFile1SystemEnumId,
+                                        file1SystemLabel         : file1Label,
+                                        validationErrors         : (serviceResult.validationErrors ?: []) as List,
+                                        processingWarnings       : (serviceResult.processingWarnings ?: []) as List,
+                                        statusEnumId             : ReconciliationOutputSupport.STATUS_SUCCEEDED,
+                                        generatedOutput          : buildGeneratedOutputDescriptor(serviceResult),
+                                    ]
+                                }
+                            }
+                        } catch (Throwable t) {
+                            persistRunResult([
+                                reconciliationRunResultId: reconciliationRunResultId,
+                                file1Name                : file1Result.fileName,
+                                file1DataManagerPath     : file1Result.dataManagerPath,
+                                completedDate            : ec.user.nowTimestamp,
+                            ])
+                            throw t
+                        } finally {
+                            darpan.reconciliation.core.ReconciliationServices.unpersistDatasets(evaluatePersistedSources)
+                            if (reconciliationRunResultId && ec.message.hasError() && !runResult?.reconciliationRunResultId) {
+                                persistRunResult([
+                                    reconciliationRunResultId: reconciliationRunResultId,
+                                    file1Name                : file1Result.fileName,
+                                    file1DataManagerPath     : file1Result.dataManagerPath,
+                                    completedDate            : ec.user.nowTimestamp,
+                                ])
+                            }
+                        }
+                    }
+                } else if (hasApiInput) {
                     tenantApiWindow = resolveTenantApiWindow()
                     if (!ec.message.hasError()) {
                         Map artifactContext = buildRunArtifactContext(savedRun.savedRunId as String)

@@ -180,7 +180,8 @@ class SourceEndpointAccessSupportTests {
     void catalogComesFromRegistryFilteredByConfigEntity() {
         List<Map<String, Object>> endpoints = SourceEndpointAccessSupport.listEndpointsForConfig(ec,
                 SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID)
-        assertEquals(["OMS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_TRANSFER_ORDERS"],
+        // DAR-BE-050 added OMS_ORDER_LINE_UNITS.
+        assertEquals(["OMS", "OMS_ORDER_LINE_UNITS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_TRANSFER_ORDERS"],
                 endpoints.collect { it.systemEnumId }.sort())
         assertEquals("Reconciliation Returns API",
                 endpoints.find { it.systemEnumId == "OMS_RETURNS" }.endpointLabel)
@@ -190,7 +191,9 @@ class SourceEndpointAccessSupportTests {
     void catalogDoesNotLeakAcrossConfigTypes() {
         List<Map<String, Object>> endpoints = SourceEndpointAccessSupport.listEndpointsForConfig(ec,
                 SharedConfigAccessSupport.CONFIG_TYPE_SHOPIFY_AUTH, "endpoint-access-test-shopify")
-        assertEquals(["SHOPIFY", "SHOPIFY_RETURN_REFS"],
+        // DAR-BE-050 added SHOPIFY_ORDER_LINE_UNITS. Still no OMS endpoint here, which is what
+        // this test is actually about: the catalog must not leak across config types.
+        assertEquals(["SHOPIFY", "SHOPIFY_ORDER_LINE_UNITS", "SHOPIFY_RETURN_REFS"],
                 endpoints.collect { it.systemEnumId }.sort())
     }
 

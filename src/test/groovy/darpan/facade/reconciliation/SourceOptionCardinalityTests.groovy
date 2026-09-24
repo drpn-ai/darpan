@@ -87,7 +87,10 @@ class SourceOptionCardinalityTests {
         List<Map<String, Object>> options = AutomationFacadeSupport.listSourceConfigOptions(ec)
                 .findAll { it.sourceConfigId == CONFIG_ID }
 
-        assertEquals(["OMS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_TRANSFER_ORDERS"],
+        // DAR-BE-050 added OMS_ORDER_LINE_UNITS. The list is spelled out rather than counted on
+        // purpose: this test exists to make a new endpoint VISIBLE, so one must be added here
+        // deliberately rather than absorbed by a size() assertion that would never notice.
+        assertEquals(["OMS", "OMS_ORDER_LINE_UNITS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_TRANSFER_ORDERS"],
                 options.collect { it.systemEnumId }.sort())
     }
 
@@ -104,7 +107,7 @@ class SourceOptionCardinalityTests {
     void aDisabledEndpointIsNotOffered() {
         // @TestInstance(PER_CLASS) shares this fixture's ec/DB across every test method with no
         // guaranteed execution order, so a write here must not leak into a sibling test (in
-        // particular oneConfigYieldsOneOptionPerEnabledEndpoint, which expects all four endpoints
+        // particular oneConfigYieldsOneOptionPerEnabledEndpoint, which expects all five endpoints
         // still enabled) — delete the access row again once this test has made its point.
         try {
             ec.entity.makeValue(SourceEndpointAccessSupport.ENTITY_NAME)

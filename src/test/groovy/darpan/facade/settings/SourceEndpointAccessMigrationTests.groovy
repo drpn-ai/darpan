@@ -103,8 +103,12 @@ class SourceEndpointAccessMigrationTests {
     @Test
     void closedConfigIsDisabledOnEveryEndpoint() {
         runMigration()
-        assertEquals(4L, accessRowCount("mig-closed"))
-        ["OMS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_TRANSFER_ORDERS"].each { String systemEnumId ->
+        // DAR-BE-050 added OMS_ORDER_LINE_UNITS, so a closed config now needs FIVE disable rows.
+        // The endpoint is added to the iterated list as well as the count: the count alone would
+        // pass while leaving the new endpoint unverified, which is the half-fix this test exists
+        // to prevent - a legacy-closed config silently open on the newest endpoint.
+        assertEquals(5L, accessRowCount("mig-closed"))
+        ["OMS", "OMS_ORDER_LINE_UNITS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_TRANSFER_ORDERS"].each { String systemEnumId ->
             assertFalse(SourceEndpointAccessSupport.isEndpointEnabled(ec,
                     SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, "mig-closed", systemEnumId),
                     "${systemEnumId} must be disabled for a canReadOrders='N' config")
@@ -115,7 +119,7 @@ class SourceEndpointAccessMigrationTests {
     void reRunningWritesNoDuplicates() {
         runMigration()
         runMigration()
-        assertEquals(4L, accessRowCount("mig-closed"))
+        assertEquals(5L, accessRowCount("mig-closed"))
     }
 
     @Test
@@ -126,8 +130,9 @@ class SourceEndpointAccessMigrationTests {
         // whichever type happens to be checked first) would leave a legacy-closed Shopify config fully
         // open after migration.
         runMigration()
-        assertEquals(2L, accessRowCount("mig-shopify-null"))
-        ["SHOPIFY", "SHOPIFY_RETURN_REFS"].each { String systemEnumId ->
+        // DAR-BE-050 added SHOPIFY_ORDER_LINE_UNITS: three Shopify endpoints now.
+        assertEquals(3L, accessRowCount("mig-shopify-null"))
+        ["SHOPIFY", "SHOPIFY_ORDER_LINE_UNITS", "SHOPIFY_RETURN_REFS"].each { String systemEnumId ->
             assertFalse(SourceEndpointAccessSupport.isEndpointEnabled(ec,
                     SharedConfigAccessSupport.CONFIG_TYPE_SHOPIFY_AUTH, "mig-shopify-null", systemEnumId),
                     "${systemEnumId} must be disabled — a NULL canReadOrders must resolve to Shopify's own 'N' default")

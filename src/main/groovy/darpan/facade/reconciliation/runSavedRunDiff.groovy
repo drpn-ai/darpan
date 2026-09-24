@@ -6,6 +6,7 @@ import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.ReconciliationApiWindowSupport
 import darpan.facade.reconciliation.ReconciliationOutputSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
+import darpan.facade.reconciliation.RunExtractSupport
 import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.facade.reconciliation.RunObservability
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
@@ -140,9 +141,7 @@ def requireUploadInput = { String filePrefix, String inputName, String inputText
     if (!inputName) ec.message.addError("${filePrefix}Name is required")
     if (!inputText) ec.message.addError("${filePrefix}Text is required")
 }
-def sideToken = { String fileSide ->
-    fileSide == ReconciliationSavedRunSupport.FILE_SIDE_1 ? "file1" : "file2"
-}
+def sideToken = { String fileSide -> RunExtractSupport.sideToken(fileSide) }
 def isApiSource = { Object source ->
     // Both AUT_SRC_API and AUT_SRC_DB are extracted (non-upload) sources: extractApiSource below
     // dispatches through the SourceSystemConnector registry keyed by systemEnumId/sourceConfigType,
@@ -279,32 +278,16 @@ def buildRunArtifactContext = { String runId ->
     }
     return [runToken: runToken, location: runArtifactLocation]
 }
+// EXTRACT step lifted to RunExtractSupport (pipeline-unification step 5a) so something other than
+// this script can stage a source. These stay as closures purely so the ~10 call sites below are
+// untouched; every body is now a one-line delegate.
 def sourceResultForLocation = { Object source, String fileSide, String fileNameValue, String location, Integer recordCount = null ->
-    def locationRef = ec.resource.getLocationReference(location)
-    File locationFile = locationRef?.getFile()
-    return [
-            fileLocation   : locationFile?.getAbsolutePath() ?: location,
-            dataManagerPath: DataManagerSupport.relativeDataManagerPath(ec, locationFile),
-            fileName       : fileNameValue,
-            fileTypeEnumId : normalize(source?.fileTypeEnumId) ?: "DftJson",
-            schemaFileName : normalize(source?.schemaFileName),
-            recordCount    : recordCount,
-            fileSide       : fileSide,
-    ].findAll { entry -> entry.value != null } as Map<String, Object>
+    RunExtractSupport.sourceResultForLocation(ec, source, fileSide, fileNameValue, location, recordCount as Integer)
 }
 def stageTextInput = { Object source, String fileSide, String inputName, String inputText, Map artifactContext ->
-    String token = sideToken(fileSide)
-    String safeName = ReconciliationOutputSupport.sanitizeUploadFileName(inputName, token)
-    String location = DataManagerSupport.childLocation(
-            artifactContext.location as String,
-            DataManagerSupport.runArtifactFileName(artifactContext.runToken, token, safeName)
-    )
-    DataManagerSupport.writeText(ec, location, inputText)
-    return sourceResultForLocation(source, fileSide, safeName, location, null)
+    RunExtractSupport.stageTextInput(ec, source, fileSide, inputName, inputText, artifactContext)
 }
-def formatApiWindow = { Timestamp timestamp ->
-    timestamp?.toInstant()?.toString()
-}
+def formatApiWindow = { Timestamp timestamp -> RunExtractSupport.formatApiWindow(timestamp) }
 Map<String, Object> tenantApiWindow = null
 def resolveTenantApiWindow = {
     ReconciliationApiWindowSupport.preserveExactWindow(
@@ -318,101 +301,8 @@ def resolveTenantApiWindow = {
 // the same resolver the automation path uses, so connector dispatch lives in one place and
 // onboarding a new source needs no edit here.
 def extractApiSource = { Object source, String fileSide, Map artifactContext, Map progressContext = null ->
-    String label = sourceLabel(source, fileSide)
-    String sourceConfigType = normalize(source?.sourceConfigType)
-    Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, normalize(source?.systemEnumId))
-    if (connector == null || normalize(connector.expectedSourceConfigType) != sourceConfigType) {
-        connector = SourceSystemConnectorSupport.resolveByExpectedSourceConfigType(ec, sourceConfigType)
-    }
-    String extractServiceName = connector == null ? null : normalize(connector.extractServiceName)
-    // A connector without an extractServiceName (e.g. NETSUITE) does not support interactive
-    // extraction — same outcome as no connector at all.
-    if (extractServiceName == null) {
-        ec.message.addError("${label} API source type '${sourceConfigType ?: "unknown"}' is not supported for manual saved-run execution.")
-        return [:]
-    }
-    // Same defense-in-depth fence as the automation sink: a registry row cannot point the
-    // authz-relaxed dispatch at an arbitrary internal service.
-    if (!SourceSystemConnectorSupport.isAllowedExtractorServiceShape(extractServiceName)) {
-        ec.message.addError("${label} connector for '${sourceConfigType}' has an invalid extract service configuration.")
-        return [:]
-    }
-    String configId = normalize(source?.sourceConfigId)
-    if (!configId) {
-        ec.message.addError("${label} API source requires a ${connector.endpointLabel ?: sourceConfigType} config.")
-        return [:]
-    }
-
-    Map<String, Object> sourceApiWindow = tenantApiWindow ?: resolveTenantApiWindow()
-    if (ec.message.hasError()) return [:]
-    Timestamp sourceWindowStartDate = (Timestamp) sourceApiWindow.windowStartDate
-    Timestamp sourceWindowEndDate = (Timestamp) sourceApiWindow.windowEndDate
-
-    String token = sideToken(fileSide)
-    String fileNameValue = ReconciliationOutputSupport.sanitizeUploadFileName("${label}-orders-api.json", "${token}-api.json")
-    Map<String, Object> extractParams = [
-            (normalize(connector.configParameterName) ?: "sourceConfigId"): configId,
-            (normalize(connector.dateFromParameterName) ?: "windowStart") : formatApiWindow(sourceWindowStartDate),
-            (normalize(connector.dateToParameterName) ?: "windowEnd")     : formatApiWindow(sourceWindowEndDate),
-            outputLocation: DataManagerSupport.childLocation(artifactContext.location as String, "${token}-api"),
-            fileName      : DataManagerSupport.runArtifactFileName(artifactContext.runToken, token, fileNameValue),
-    ] as Map<String, Object>
-    if (connector.preserveWindowInstants) extractParams.preserveWindowInstants = true
-
-    // Config over code, mirrors AutomationExecutionSupport.applyWindowFieldParameter: the connector
-    // names the record date field its extract window filters on. Blank leaves the parameter unset so
-    // the extractor keeps its own default (orderDate). Without this, an interactive run and a
-    // scheduled automation of the same saved run would query different date fields the moment
-    // windowFieldName is set to anything other than that default (e.g. lastUpdatedTxStamp).
-    String windowFieldName = normalize(connector.windowFieldName)
-    if (windowFieldName) extractParams.windowFieldName = windowFieldName
-
-    // Registry-driven record projection: when the connector declares a keep-fields parameter, pass
-    // the fields reconciliation actually needs so the extractor trims records before writing
-    // (99k-order OMS windows drop from ~1.4 GB to tens of MB). Projection is disabled (full records
-    // sent) when any rule's field path on this side can't be reduced to a top-level record field,
-    // including raw-DRL/presence-only rules with no structured path on either side — see
-    // resolveExtractKeepFields.
-    String keepFieldsParameterName = normalize(connector.keepFieldsParameterName)
-    if (keepFieldsParameterName) {
-        List<String> keepFields = ReconciliationSavedRunSupport.resolveExtractKeepFields(ec, source, connector.keepFieldsBase)
-        if (keepFields) extractParams[keepFieldsParameterName] = keepFields
-    }
-
-    // Registry-driven record exclusion: when the connector declares a filter parameter, hand it the
-    // source's configured rules so unwanted records are dropped inside the getter, before they reach
-    // the extract file. Connectors that declare no parameter never receive filters.
-    String filterParameterName = normalize(connector.filterParameterName)
-    if (filterParameterName) {
-        List<Map<String, Object>> excludeFilters = ReconciliationSavedRunSupport.resolveExtractExcludeFilters(ec, source)
-        if (excludeFilters) extractParams[filterParameterName] = excludeFilters
-    }
-
-    // Live extract progress: the extractor heartbeats a running record count onto this stage's
-    // step so the live view can show the count climbing during a multi-minute paged extract. The
-    // count is the progress and needs no denominator; expectedRecordCount is optional and only
-    // adds a percent, which only the second side can have (it divides against the first side's
-    // finished count for the same window). Gating the whole thing on a denominator is what left
-    // the first extract reporting nothing at all.
-    if (progressContext?.reconciliationRunResultId) {
-        extractParams.reconciliationRunResultId = progressContext.reconciliationRunResultId
-        extractParams.progressStageCode = progressContext.progressStageCode
-        if (progressContext?.expectedRecordCount) {
-            extractParams.expectedRecordCount = progressContext.expectedRecordCount
-        }
-    }
-
-    Map extraction = runInternalService(extractServiceName, extractParams)
-    ((List) (extraction.errors ?: [])).each { Object error -> ec.message.addError("${label}: ${error}") }
-    if (ec.message.hasError()) return [:]
-
-    String extractedLocation = normalize(extraction.fileLocation)
-    if (!extractedLocation) {
-        ec.message.addError("${label} API did not return an output file for the selected time period.")
-        return [:]
-    }
-    return sourceResultForLocation(source, fileSide, normalize(extraction.fileName) ?: fileNameValue,
-            extractedLocation, normalizeInt(extraction.recordCount, null))
+    RunExtractSupport.extractApiSource(ec, source, fileSide, sourceLabel(source, fileSide), artifactContext,
+            (tenantApiWindow ?: resolveTenantApiWindow()), progressContext, runInternalService)
 }
 def writeRuleSetOutput = { Map serviceResult, Map savedRun, String file1Label, String file2Label, Map artifactContext ->
     Map output = ReconciliationServices.writeDiffDatasetOutput(

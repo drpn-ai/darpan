@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-050 — the order-line UNIT presence reconciliation, wired for the GORJANA tenant.
+
+  NOT seed data. This is TENANT configuration and it names a specific tenant and two specific
+  source configs, so it must never be folded into a seed or upgrade-data set that every install
+  loads. Load it explicitly, per install:
+
+      ec.entity.makeDataLoader().location("component://darpan/data/OrderLineUnitRuleSetData.xml").load()
+
+  WHAT IT COMPARES: one record per ORDER LINE UNIT on each side. Shopify sells a line with
+  quantity N; OMS explodes that line into N single-unit OrderItems. The compare key therefore
+  carries a unit ordinal, because the compare core is a left_anti join followed by .distinct() -
+  set semantics - so a LINE-grain key matches whether OMS holds three units or one, and the pair
+  would report clean on exactly the shortfall it exists to find. See the design doc D1.
+
+  KEY FIELD ORDER IS LOAD-BEARING. The three RuleSetCompareSourceKeyField rows per side are
+  composed positionally with concat_ws, so the same three fields in a different order on one side
+  produce a key that matches nothing and report the entire window as different. FILE_1 and FILE_2
+  must stay in lockstep.
+
+  KNOWN FALSE-POSITIVE FLOOR, measured on the first live run (2026-09-23, gorjana): about 0.4% of
+  units. The OMS extractor excludes exchange orders by design, but Shopify adds an exchange line to
+  the ORIGINAL order - so a same-day exchange shows up as a false missing-in-OMS. On that run 20 of
+  22 reported differences were this, and 2 were a genuine order-sync gap. Excluding is still right
+  by roughly 30x (including exchanges would have cost ~595 false missing-in-Shopify instead), but
+  whoever reads a run must be told the floor exists. Suppressing Shopify lines that OMS holds in an
+  EXC- order is the clean fix and belongs with DAR-BE-004.
+-->
+<entity-facade-xml type="darpan-tenant-config">
+
+    <darpan.rule.RuleSet
+            ruleSetId="GORJANA_ORDER_LINE_UNITS_RS"
+            ruleSetName="Order line units - Shopify vs HotWax"
+            description="Every unit of every Shopify order line must be present in HotWax OMS. One record per unit; the compare key carries a unit ordinal so a short import is visible."
+            version="1.0"
+            companyUserGroupId="GORJANA"/>
+
+    <darpan.rule.RuleSetCompareScope
+            compareScopeId="GORJANA_ORDER_LINE_UNITS_SCOPE"
+            ruleSetId="GORJANA_ORDER_LINE_UNITS_RS"
+            objectType="ORDER_LINE_UNIT"
+            scopeMode="COMPARE"
+            description="Shopify order line units against HotWax OMS order line units, keyed (shopifyOrderId, shopifyLineId, unitOrdinal)."
+            companyUserGroupId="GORJANA"/>
+
+    <!--
+      sourceConfigType is what the connector resolver matches on (resolveByExpectedSourceConfigType,
+      first enabled match), so these two values must equal the expectedSourceConfigType on the
+      SHOPIFY_ORDER_LINE_UNITS / OMS_ORDER_LINE_UNITS connector rows in
+      SourceSystemConnectorSeedData.xml. They are deliberately distinct from SHOPIFY_AUTH and
+      HOTWAX_OMS_REST: reusing those would resolve to the ORDER-grain connectors, silently.
+
+      recordRootExpression is `records` because both extractors write {metadata: {...}, records: [...]}.
+
+      primaryIdExpression is UNUSED while the key-field rows below exist - they replace it. It is
+      set to shopifyLineId rather than left blank so the degraded behaviour is a defined one: delete
+      the key-field rows and this pair silently drops to LINE presence, which still finds a line OMS
+      never received but can no longer see a quantity shortfall. That is a real downgrade, not a
+      crash, which is exactly why it is written down here.
+    -->
+    <darpan.rule.RuleSetCompareSource
+            compareScopeId="GORJANA_ORDER_LINE_UNITS_SCOPE"
+            fileSide="FILE_1"
+            systemEnumId="SHOPIFY_ORDER_LINE_UNITS"
+            sourceTypeEnumId="AUT_SRC_API"
+            fileTypeEnumId="DftJson"
+            recordRootExpression="records"
+            primaryIdExpression="shopifyLineId"
+            sourceConfigId="gorjana_prod"
+            sourceConfigType="SHOPIFY_ORDER_LINE_UNITS_API"
+            companyUserGroupId="GORJANA"/>
+
+    <darpan.rule.RuleSetCompareSource
+            compareScopeId="GORJANA_ORDER_LINE_UNITS_SCOPE"
+            fileSide="FILE_2"
+            systemEnumId="OMS_ORDER_LINE_UNITS"
+            sourceTypeEnumId="AUT_SRC_API"
+            fileTypeEnumId="DftJson"
+            recordRootExpression="records"
+            primaryIdExpression="shopifyLineId"
+            sourceConfigId="gorjana_prod"
+            sourceConfigType="HOTWAX_OMS_REST_LINE_UNITS"
+            companyUserGroupId="GORJANA"/>
+
+    <!-- FILE_1 composite key: Shopify side. Same three fields, same order, as FILE_2. -->
+    <darpan.rule.RuleSetCompareSourceKeyField
+            compareScopeId="GORJANA_ORDER_LINE_UNITS_SCOPE" fileSide="FILE_1"
+            sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField
+            compareScopeId="GORJANA_ORDER_LINE_UNITS_SCOPE" fileSide="FILE_1"
+            sequenceNum="2" fieldExpression="shopifyLineId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField
+            compareScopeId="GORJANA_ORDER_LINE_UNITS_SCOPE" fileSide="FILE_1"
+            sequenceNum="3" fieldExpression="unitOrdinal" companyUserGroupId="GORJANA"/>
+
+    <!-- FILE_2 composite key: OMS side. The OMS extractor emits these three field NAMES verbatim
+         (OmsOrderLineUnitSupport.flattenOrderToUnits), which is why both sides can share them. -->
+    <darpan.rule.RuleSetCompareSourceKeyField
+            compareScopeId="GORJANA_ORDER_LINE_UNITS_SCOPE" fileSide="FILE_2"
+            sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField
+            compareScopeId="GORJANA_ORDER_LINE_UNITS_SCOPE" fileSide="FILE_2"
+            sequenceNum="2" fieldExpression="shopifyLineId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField
+            compareScopeId="GORJANA_ORDER_LINE_UNITS_SCOPE" fileSide="FILE_2"
+            sequenceNum="3" fieldExpression="unitOrdinal" companyUserGroupId="GORJANA"/>
+
+</entity-facade-xml>

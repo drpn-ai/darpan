@@ -795,6 +795,37 @@
         <field name="dateColumn" type="text-short" default="'trandate'">
             <description>DATE-granular column the half-open window is applied to.</description>
         </field>
+        <field name="queryTemplate" type="text-short">
+            <description>Which vetted query SHAPE this side extracts with (DAR-BE-053). Blank means
+                RECORDS — a plain windowed select, byte-identical to what shipped for DAR-BE-032/044, so
+                every pre-existing row keeps its proven query.
+
+                LINKED_CHILD_ABSENT selects parent rows with NO linked child of absentChildRecordType
+                ("orders that never shipped"). LINKED_CHILD_PRESENT_ABSENT adds a required
+                presentChildRecordType ("shipped but never billed"). Linkage reads nexttransactionlink,
+                because `createdfrom` is NOT a column on the SuiteQL transaction table.
+
+                The shapes live in code rather than here on purpose: the window bounds are interpolated
+                as TEXT and ORDER BY id is what makes offset paging safe, so a free-form SELECT would put
+                both in operator hands. An unrecognized value throws rather than defaulting.</description>
+        </field>
+        <field name="absentChildRecordType" type="text-short">
+            <description>Record type whose ABSENCE is the finding. Required by both linked-child
+                templates, refused by RECORDS. Validated as a plain identifier.</description>
+        </field>
+        <field name="presentChildRecordType" type="text-short">
+            <description>Record type that must be PRESENT alongside the absent one. Required by
+                LINKED_CHILD_PRESENT_ABSENT and refused by every other template — rejected rather than
+                ignored, because silently dropping it is how an operator comes to believe a filter is
+                applied that is not.</description>
+        </field>
+        <field name="requireFulfillableOpenLine" type="text-indicator">
+            <description>Y adds a line-level gate: the parent must have at least one transactionline that
+                is fulfillable and not closed. This is the difference between 97 findings and 5 on a
+                measured gorjana day — service and non-inventory orders can never have a fulfillment, and
+                closed lines were closed deliberately. It cannot be a sourceFilters exclusion because it
+                reads the LINE, and a filter can only match a field the extractor already emitted.</description>
+        </field>
         <field name="joinKeyFieldName" type="text-short">
             <description>Which mapped RECORD field is this side's join key. Its source column is also
                 what originFieldName reads to decide a record's origin.</description>

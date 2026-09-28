@@ -18,10 +18,27 @@ import static darpan.common.ValueSupport.normalize
  * and containsExchangeOrderAssociation) so configured and built-in exclusions behave identically:
  * field names are trimmed and case-SENSITIVE, values are trimmed and case-INSENSITIVE, and a record
  * that lacks the field is kept — "exclude these values" cannot match an absent value.
+ *
+ * Include rules invert only the value test, never the field-name or case rules: under INCLUDE_IN a
+ * record with no usable value for the field is REJECTED, because "only these values" cannot be
+ * satisfied by silence.
  */
 class SourceFilterSupport {
 
     static final String OPERATOR_EXCLUDE_IN = "EXCLUDE_IN"
+    static final String OPERATOR_INCLUDE_IN = "INCLUDE_IN"
+
+    /** Rejected because the record carried a value this rule does not allow. */
+    static final String REASON_VALUE = "VALUE"
+    /**
+     * Rejected because the record carried no usable value for the field — the key is missing, or
+     * present and blank. INCLUDE_IN only: "only these values" cannot be satisfied by no value.
+     * Counted separately from REASON_VALUE so an include rule that silently removes a whole row
+     * class (Darpan has row-class-scoped keys, e.g. refundLineEverFulfilled on REFUND rows only)
+     * is visible in extract metadata instead of hiding inside the rule's excluded count.
+     */
+    static final String REASON_FIELD_ABSENT = "FIELD_ABSENT"
+
     static final int MAX_RULES_PER_SOURCE = 20
     static final int MAX_VALUES_PER_RULE = 200
 
@@ -35,40 +52,51 @@ class SourceFilterSupport {
     static List<Map<String, Object>> parseRules(Object rawRules) {
         if (rawRules == null) return Collections.emptyList()
         if (!(rawRules instanceof Collection)) {
-            throw new IllegalArgumentException("Source exclusion filters must be a list.")
+            throw new IllegalArgumentException("Source filters must be a list.")
         }
         Collection rawList = (Collection) rawRules
         if (rawList.isEmpty()) return Collections.emptyList()
         if (rawList.size() > MAX_RULES_PER_SOURCE) {
             throw new IllegalArgumentException(
-                    "A source may define at most ${MAX_RULES_PER_SOURCE} exclusion filters; got ${rawList.size()}.".toString())
+                    "A source may define at most ${MAX_RULES_PER_SOURCE} filters; got ${rawList.size()}.".toString())
         }
 
         List<Map<String, Object>> parsed = new ArrayList<>(rawList.size())
+        // One field may carry several rules, but they must agree on direction: "only A" together
+        // with "not B" on one field is either a contradiction or an intersection nobody typed on
+        // purpose. The board cannot produce this state (one filter per field), so this guards
+        // direct API callers and rows written before the guard existed.
+        Map<String, String> operatorByField = new LinkedHashMap<>()
         int position = 0
         for (Object raw : rawList) {
             position++
             if (!(raw instanceof Map)) {
-                throw new IllegalArgumentException("Source exclusion filter ${position} is not a rule object.".toString())
+                throw new IllegalArgumentException("Source filter ${position} is not a rule object.".toString())
             }
             Map row = (Map) raw
             Integer sequenceNum = parseSequenceNum(row.get("sequenceNum"), position)
             String fieldExpression = normalize(row.get("fieldExpression"))
             if (!fieldExpression) {
-                throw new IllegalArgumentException("Source exclusion filter ${sequenceNum} has no field to test.".toString())
+                throw new IllegalArgumentException("Source filter ${sequenceNum} has no field to test.".toString())
             }
             String operator = (normalize(row.get("operator")) ?: OPERATOR_EXCLUDE_IN).toUpperCase(Locale.ROOT)
-            if (operator != OPERATOR_EXCLUDE_IN) {
+            if (operator != OPERATOR_EXCLUDE_IN && operator != OPERATOR_INCLUDE_IN) {
                 throw new IllegalArgumentException(
-                        "Source exclusion filter ${sequenceNum} uses unsupported operator '${operator}'.".toString())
+                        "Source filter ${sequenceNum} uses unsupported operator '${operator}'.".toString())
+            }
+            String priorOperator = operatorByField.put(fieldExpression, operator)
+            if (priorOperator != null && priorOperator != operator) {
+                throw new IllegalArgumentException(
+                        ("Source filter ${sequenceNum} tests field '${fieldExpression}' with ${operator}, " +
+                                "but another filter already tests it with ${priorOperator}.").toString())
             }
             List<String> values = splitValues(row.containsKey("filterValues") ? row.get("filterValues") : row.get("values"))
             if (!values) {
-                throw new IllegalArgumentException("Source exclusion filter ${sequenceNum} has no values to exclude.".toString())
+                throw new IllegalArgumentException("Source filter ${sequenceNum} has no values.".toString())
             }
             if (values.size() > MAX_VALUES_PER_RULE) {
                 throw new IllegalArgumentException(
-                        "Source exclusion filter ${sequenceNum} lists ${values.size()} values; the maximum is ${MAX_VALUES_PER_RULE}.".toString())
+                        "Source filter ${sequenceNum} lists ${values.size()} values; the maximum is ${MAX_VALUES_PER_RULE}.".toString())
             }
             Set<String> matchValues = new LinkedHashSet<>()
             values.each { String value -> matchValues.add(value.toUpperCase(Locale.ROOT)) }
@@ -83,6 +111,40 @@ class SourceFilterSupport {
             parsed.add(Collections.unmodifiableMap(rule))
         }
         return Collections.unmodifiableList(parsed)
+    }
+
+    /**
+     * Test one record against every rule in order and report the first rejection.
+     *
+     * Returns null to KEEP the record, or [rule: <rule>, reason: REASON_*] naming the rule that
+     * rejected it. The first rejecting rule wins and owns the count, exactly as the exclude-only
+     * predecessor did, so adding an include rule never re-attributes an existing rule's tally.
+     *
+     * Direction, by operator:
+     *   EXCLUDE_IN — reject when the record's value is listed. No value, no rejection.
+     *   INCLUDE_IN — reject when the record's value is NOT listed, and reject when there is no
+     *                usable value at all. "Only these values" is not satisfied by silence.
+     */
+    static Map<String, Object> evaluate(Object record, List<Map<String, Object>> rules) {
+        if (!rules || !(record instanceof Map)) return null
+        Map row = (Map) record
+        for (Map<String, Object> rule : rules) {
+            String fieldExpression = (String) rule.get("fieldExpression")
+            // Same top-level, trimmed, case-sensitive key scan as OmsRestSourceSupport.isSalesOrder.
+            Object rawValue = row.find { key, ignored -> normalize(key) == fieldExpression }?.value
+            String candidate = normalize(rawValue)
+            boolean includeMode = OPERATOR_INCLUDE_IN == rule.get("operator")
+            if (!candidate) {
+                // normalize() answers null for a missing key and "" for a blank one; both are falsy
+                // here, and that conflation is right in both modes. No usable value cannot be in an
+                // allowlist, and cannot match a denylist entry either.
+                if (includeMode) return [rule: rule, reason: REASON_FIELD_ABSENT]
+                continue
+            }
+            boolean listed = ((Set<String>) rule.get("matchValues")).contains(candidate.toUpperCase(Locale.ROOT))
+            if (includeMode ? !listed : listed) return [rule: rule, reason: REASON_VALUE]
+        }
+        return null
     }
 
     /** The first rule that excludes this record, or null when the record should be kept. */
@@ -126,7 +188,7 @@ class SourceFilterSupport {
             String fieldName = CompareIdExpressionSupport.topLevelRecordField(stored)
             if (!fieldName) {
                 throw new IllegalArgumentException(
-                        ("Source exclusion filter ${row.get('sequenceNum')} names field expression " +
+                        ("Source filter ${row.get('sequenceNum')} names field expression " +
                                 "'${stored}', which does not resolve to a record field.").toString())
             }
             // A plain mutable copy, matching the shape these loaders returned before: the rows travel
@@ -170,7 +232,7 @@ class SourceFilterSupport {
         try {
             return Integer.parseInt(text)
         } catch (NumberFormatException ignored) {
-            throw new IllegalArgumentException("Source exclusion filter ${position} has a non-numeric sequence number.".toString())
+            throw new IllegalArgumentException("Source filter ${position} has a non-numeric sequence number.".toString())
         }
     }
 }

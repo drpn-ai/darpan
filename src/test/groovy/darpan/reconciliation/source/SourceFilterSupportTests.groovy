@@ -134,15 +134,18 @@ class SourceFilterSupportTests {
 
     @Test
     void unknownOperatorIsRejectedRatherThanIgnored() {
+        // Was INCLUDE_IN until DAR-BE-054, which is now a supported operator. Swapped for one that
+        // is genuinely unsupported rather than deleted: the point of the test is that an operator
+        // Darpan cannot honour fails loudly instead of being ignored into a silent no-op.
         IllegalArgumentException error = assertThrows(IllegalArgumentException) {
             SourceFilterSupport.parseRules([[
                     sequenceNum    : 1,
                     fieldExpression: "salesChannelEnumId",
-                    operator       : "INCLUDE_IN",
+                    operator       : "STARTS_WITH",
                     filterValues   : "POS_SALES_CHANNEL",
             ]])
         }
-        assertTrue(error.message.contains("INCLUDE_IN"))
+        assertTrue(error.message.contains("STARTS_WITH"))
     }
 
     @Test
@@ -225,4 +228,113 @@ class SourceFilterSupportTests {
             SourceFilterSupport.toRecordFieldRules([[sequenceNum: 1, fieldExpression: '$[*]', filterValues: "X"]])
         }
     }
+
+    // ---- INCLUDE_IN (DAR-BE-054) ----
+
+    private static List<Map<String, Object>> statusRule(String operator, String... values) {
+        return SourceFilterSupport.parseRules([[
+                sequenceNum    : 1,
+                fieldExpression: "status",
+                operator       : operator,
+                filterValues   : values.join(","),
+        ]])
+    }
+
+    @Test
+    void includeModeKeepsAListedValueAndDropsAnUnlistedOne() {
+        List<Map<String, Object>> rules = statusRule("INCLUDE_IN", "A", "B", "G")
+
+        assertNull(SourceFilterSupport.evaluate([status: "A"], rules))
+        assertNull(SourceFilterSupport.evaluate([status: "g"], rules))
+
+        Map<String, Object> verdict = SourceFilterSupport.evaluate([status: "X"], rules)
+        assertNotNull(verdict)
+        assertEquals("VALUE", verdict.get("reason"))
+        assertEquals(1, ((Map) verdict.get("rule")).get("sequenceNum"))
+    }
+
+    @Test
+    void includeModeDropsARecordThatHasNoSuchFieldAndSaysWhy() {
+        Map<String, Object> verdict = SourceFilterSupport.evaluate([orderId: "M1"], statusRule("INCLUDE_IN", "A"))
+        assertNotNull(verdict)
+        assertEquals("FIELD_ABSENT", verdict.get("reason"))
+    }
+
+    @Test
+    void aBlankValueCountsAsAbsentInBothModes() {
+        // normalize() trims to "", which is falsy in Groovy, so a present-but-blank field carries
+        // no usable value. It cannot be in an allowlist, and cannot match a denylist entry either.
+        assertEquals("FIELD_ABSENT",
+                SourceFilterSupport.evaluate([status: "   "], statusRule("INCLUDE_IN", "A")).get("reason"))
+        assertEquals("FIELD_ABSENT",
+                SourceFilterSupport.evaluate([status: null], statusRule("INCLUDE_IN", "A")).get("reason"))
+        assertNull(SourceFilterSupport.evaluate([status: "   "], statusRule("EXCLUDE_IN", "A")))
+    }
+
+    @Test
+    void excludeModeVerdictsAreUnchangedInMeaning() {
+        List<Map<String, Object>> rules = statusRule("EXCLUDE_IN", "A")
+
+        Map<String, Object> verdict = SourceFilterSupport.evaluate([status: "A"], rules)
+        assertNotNull(verdict)
+        assertEquals("VALUE", verdict.get("reason"))
+        assertNull(SourceFilterSupport.evaluate([status: "B"], rules))
+        assertNull(SourceFilterSupport.evaluate([orderId: "M1"], rules))
+    }
+
+    @Test
+    void theFirstRejectingRuleWinsAcrossMixedModes() {
+        List<Map<String, Object>> rules = SourceFilterSupport.parseRules([
+                [sequenceNum: 1, fieldExpression: "origin", operator: "EXCLUDE_IN", filterValues: "NATIVE"],
+                [sequenceNum: 2, fieldExpression: "status", operator: "INCLUDE_IN", filterValues: "A"],
+        ])
+
+        // Rejected by both rules; rule 1 owns it because it is first.
+        assertEquals(1, ((Map) SourceFilterSupport.evaluate([origin: "NATIVE", status: "X"], rules)
+                .get("rule")).get("sequenceNum"))
+
+        // Passes rule 1, rejected by rule 2.
+        assertEquals(2, ((Map) SourceFilterSupport.evaluate([origin: "EDI", status: "X"], rules)
+                .get("rule")).get("sequenceNum"))
+
+        assertNull(SourceFilterSupport.evaluate([origin: "EDI", status: "A"], rules))
+    }
+
+    @Test
+    void aNonMapRecordIsKeptInEitherMode() {
+        assertNull(SourceFilterSupport.evaluate("not a record", statusRule("INCLUDE_IN", "A")))
+        assertNull(SourceFilterSupport.evaluate(null, statusRule("INCLUDE_IN", "A")))
+    }
+
+    @Test
+    void includeOperatorIsAcceptedCaseInsensitivelyUnderAnyLocale() {
+        Locale previous = Locale.getDefault()
+        try {
+            // tr_TR upper-cases "include_in" to "INCLUDE_\u0130N" unless Locale.ROOT is used.
+            Locale.setDefault(new Locale("tr", "TR"))
+            assertEquals("INCLUDE_IN", statusRule("include_in", "A")[0].operator)
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
+
+    @Test
+    void twoOperatorsOnOneFieldAreRejected() {
+        IllegalArgumentException thrown = assertThrows(IllegalArgumentException) {
+            SourceFilterSupport.parseRules([
+                    [sequenceNum: 1, fieldExpression: "status", operator: "INCLUDE_IN", filterValues: "A"],
+                    [sequenceNum: 2, fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: "B"],
+            ])
+        }
+        assertTrue(thrown.message.contains("status"))
+    }
+
+    @Test
+    void twoRulesOnOneFieldWithTheSameOperatorStayLegal() {
+        assertEquals(2, SourceFilterSupport.parseRules([
+                [sequenceNum: 1, fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: "A"],
+                [sequenceNum: 2, fieldExpression: "status", operator: "EXCLUDE_IN", filterValues: "B"],
+        ]).size())
+    }
+
 }

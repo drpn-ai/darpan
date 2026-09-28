@@ -45,7 +45,7 @@ class AutomationRuntimeSupport {
     /**
      * Configured exclusion rules for one automation source side, ordered by sequenceNum, in GETTER
      * shape — {@code fieldExpression} reduced from the stored operator-facing JSONPath to the
-     * top-level record key SourceFilterSupport.firstMatchingRule tests. The snapshot rows are copied
+     * top-level record key SourceFilterSupport.evaluate tests. The snapshot rows are copied
      * verbatim from the rule set, so they carry the same board-written expression the interactive
      * path stores, and skipping this reduction would make every scheduled exclusion a silent no-op
      * (the interactive equivalent is ReconciliationSavedRunSupport.resolveExtractExcludeFilters).

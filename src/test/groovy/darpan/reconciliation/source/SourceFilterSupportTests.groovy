@@ -23,8 +23,8 @@ class SourceFilterSupportTests {
     void noRulesMeansNoFiltering() {
         assertEquals([], SourceFilterSupport.parseRules(null))
         assertEquals([], SourceFilterSupport.parseRules([]))
-        assertNull(SourceFilterSupport.firstMatchingRule([salesChannelEnumId: "POS_SALES_CHANNEL"], []))
-        assertNull(SourceFilterSupport.firstMatchingRule([salesChannelEnumId: "POS_SALES_CHANNEL"], null))
+        assertNull(SourceFilterSupport.evaluate([salesChannelEnumId: "POS_SALES_CHANNEL"], []))
+        assertNull(SourceFilterSupport.evaluate([salesChannelEnumId: "POS_SALES_CHANNEL"], null))
     }
 
     @Test
@@ -55,8 +55,8 @@ class SourceFilterSupportTests {
     void matchesConfiguredValueCaseInsensitively() {
         List<Map<String, Object>> rules = channelRule("POS_SALES_CHANNEL")
 
-        assertNotNull(SourceFilterSupport.firstMatchingRule([salesChannelEnumId: "pos_sales_channel"], rules))
-        assertNotNull(SourceFilterSupport.firstMatchingRule([salesChannelEnumId: " POS_SALES_CHANNEL "], rules))
+        assertNotNull(SourceFilterSupport.evaluate([salesChannelEnumId: "pos_sales_channel"], rules))
+        assertNotNull(SourceFilterSupport.evaluate([salesChannelEnumId: " POS_SALES_CHANNEL "], rules))
     }
 
     @Test
@@ -64,36 +64,36 @@ class SourceFilterSupportTests {
         List<Map<String, Object>> rules = channelRule("POS_SALES_CHANNEL")
 
         // Mirrors OmsRestSourceSupport.isSalesOrder: normalize(key) == fieldName (trim, no case fold).
-        assertNull(SourceFilterSupport.firstMatchingRule([SALESCHANNELENUMID: "POS_SALES_CHANNEL"], rules))
-        assertNotNull(SourceFilterSupport.firstMatchingRule([" salesChannelEnumId ": "POS_SALES_CHANNEL"], rules))
+        assertNull(SourceFilterSupport.evaluate([SALESCHANNELENUMID: "POS_SALES_CHANNEL"], rules))
+        assertNotNull(SourceFilterSupport.evaluate([" salesChannelEnumId ": "POS_SALES_CHANNEL"], rules))
     }
 
     @Test
     void recordMissingTheFieldIsKept() {
         List<Map<String, Object>> rules = channelRule("POS_SALES_CHANNEL")
 
-        assertNull(SourceFilterSupport.firstMatchingRule([orderId: "10001"], rules))
-        assertNull(SourceFilterSupport.firstMatchingRule([salesChannelEnumId: null], rules))
-        assertNull(SourceFilterSupport.firstMatchingRule([salesChannelEnumId: "  "], rules))
+        assertNull(SourceFilterSupport.evaluate([orderId: "10001"], rules))
+        assertNull(SourceFilterSupport.evaluate([salesChannelEnumId: null], rules))
+        assertNull(SourceFilterSupport.evaluate([salesChannelEnumId: "  "], rules))
     }
 
     @Test
     void nonMapRecordNeverMatches() {
-        assertNull(SourceFilterSupport.firstMatchingRule("not-a-record", channelRule("POS_SALES_CHANNEL")))
-        assertNull(SourceFilterSupport.firstMatchingRule(null, channelRule("POS_SALES_CHANNEL")))
+        assertNull(SourceFilterSupport.evaluate("not-a-record", channelRule("POS_SALES_CHANNEL")))
+        assertNull(SourceFilterSupport.evaluate(null, channelRule("POS_SALES_CHANNEL")))
     }
 
     @Test
-    void firstMatchingRuleWinsSoACountIsAttributedOnce() {
+    void firstRejectingRuleWinsSoACountIsAttributedOnce() {
         List<Map<String, Object>> rules = SourceFilterSupport.parseRules([
                 [sequenceNum: 1, fieldExpression: "salesChannelEnumId", filterValues: "POS_SALES_CHANNEL"],
                 [sequenceNum: 2, fieldExpression: "statusId", filterValues: "ORDER_CANCELLED"],
         ])
 
-        Map<String, Object> matched = SourceFilterSupport.firstMatchingRule(
+        Map<String, Object> verdict = SourceFilterSupport.evaluate(
                 [salesChannelEnumId: "POS_SALES_CHANNEL", statusId: "ORDER_CANCELLED"], rules)
 
-        assertEquals(1, matched.sequenceNum)
+        assertEquals(1, ((Map) verdict.get("rule")).sequenceNum)
     }
 
     @Test
@@ -103,10 +103,10 @@ class SourceFilterSupportTests {
                 [sequenceNum: 2, fieldExpression: "statusId", filterValues: "ORDER_CANCELLED"],
         ])
 
-        Map<String, Object> matched = SourceFilterSupport.firstMatchingRule(
+        Map<String, Object> verdict = SourceFilterSupport.evaluate(
                 [salesChannelEnumId: "WEB_SALES_CHANNEL", statusId: "ORDER_CANCELLED"], rules)
 
-        assertEquals(2, matched.sequenceNum)
+        assertEquals(2, ((Map) verdict.get("rule")).sequenceNum)
     }
 
     @Test
@@ -198,7 +198,7 @@ class SourceFilterSupportTests {
 
     @Test
     void storedJsonPathExpressionsAreReducedToTheRecordKeyTheGetterTests() {
-        // FINAL-REVIEW CRITICAL 1a: the board stores the field pill's JSONPath; firstMatchingRule
+        // FINAL-REVIEW CRITICAL 1a: the board stores the field pill's JSONPath; evaluate
         // scans top-level record keys. Everything feeding a getter runs through here first.
         List<Map<String, Object>> reduced = SourceFilterSupport.toRecordFieldRules([
                 [sequenceNum: 1, fieldExpression: '$.records[*].salesChannelEnumId',
@@ -213,7 +213,7 @@ class SourceFilterSupportTests {
         assertEquals(["POS_SALES_CHANNEL", "ORDER_CANCELLED"], reduced*.filterValues)
 
         List<Map<String, Object>> parsed = SourceFilterSupport.parseRules(reduced)
-        assertNotNull(SourceFilterSupport.firstMatchingRule([salesChannelEnumId: "POS_SALES_CHANNEL"], parsed))
+        assertNotNull(SourceFilterSupport.evaluate([salesChannelEnumId: "POS_SALES_CHANNEL"], parsed))
     }
 
     @Test

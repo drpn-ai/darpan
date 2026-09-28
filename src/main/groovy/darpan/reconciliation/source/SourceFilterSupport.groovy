@@ -147,27 +147,12 @@ class SourceFilterSupport {
         return null
     }
 
-    /** The first rule that excludes this record, or null when the record should be kept. */
-    static Map<String, Object> firstMatchingRule(Object record, List<Map<String, Object>> rules) {
-        if (!rules || !(record instanceof Map)) return null
-        Map row = (Map) record
-        for (Map<String, Object> rule : rules) {
-            String fieldExpression = (String) rule.get("fieldExpression")
-            // Same top-level, trimmed, case-sensitive key scan as OmsRestSourceSupport.isSalesOrder.
-            Object rawValue = row.find { key, ignored -> normalize(key) == fieldExpression }?.value
-            String candidate = normalize(rawValue)
-            if (!candidate) continue
-            if (((Set<String>) rule.get("matchValues")).contains(candidate.toUpperCase(Locale.ROOT))) return rule
-        }
-        return null
-    }
-
     /**
-     * Translate stored rules into the shape {@link #firstMatchingRule} actually tests.
+     * Translate stored rules into the shape {@link #evaluate} actually tests.
      *
      * {@code fieldExpression} is STORED as the operator-facing expression the rules board writes — a
      * JSONPath such as {@code $.records[*].salesChannelEnumId} — exactly like its sibling
-     * {@code RuleSetCompareSourceKeyField.fieldExpression}. {@link #firstMatchingRule} scans TOP-LEVEL
+     * {@code RuleSetCompareSourceKeyField.fieldExpression}. {@link #evaluate} scans TOP-LEVEL
      * RECORD KEYS, so handing it the stored form matches nothing at all: no rows dropped,
      * {@code excludedCount} 0, and no error — the silent no-op this feature exists to remove. Every
      * path that feeds rules to a getter must run them through here first.

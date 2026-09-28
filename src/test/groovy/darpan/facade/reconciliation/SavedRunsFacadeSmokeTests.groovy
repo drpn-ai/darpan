@@ -1803,7 +1803,7 @@ end'''
     @Test
     void aBoardConfiguredJsonPathExclusionActuallyExcludesARawRecord() {
         // FINAL-REVIEW CRITICAL 1a. The rules board writes fieldExpression as the field pill's own
-        // JSONPath ('$.records[*].salesChannelEnumId'); SourceFilterSupport.firstMatchingRule scans
+        // JSONPath ('$.records[*].salesChannelEnumId'); SourceFilterSupport.evaluate scans
         // TOP-LEVEL RECORD KEYS. Before the fix these never met: the rule loaded fine, reported
         // excludedCount 0, raised no error, and excluded nothing. Every assertion below is on the real
         // save -> store -> dispatch -> match path, so it fails the moment that translation is dropped.
@@ -1836,9 +1836,9 @@ end'''
         // End to end: those dispatched rules, run through the getter's own parse + match, drop a raw
         // OMS-shaped record and keep one carrying a different channel.
         List<Map<String, Object>> parsed = SourceFilterSupport.parseRules(dispatched)
-        assertNotNull(SourceFilterSupport.firstMatchingRule(
+        assertNotNull(SourceFilterSupport.evaluate(
                 [orderId: "O-1", salesChannelEnumId: "POS_SALES_CHANNEL"], parsed))
-        assertNull(SourceFilterSupport.firstMatchingRule(
+        assertNull(SourceFilterSupport.evaluate(
                 [orderId: "O-2", salesChannelEnumId: "WEB_SALES_CHANNEL"], parsed))
     }
 

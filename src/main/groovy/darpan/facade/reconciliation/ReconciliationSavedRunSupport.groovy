@@ -760,7 +760,7 @@ class ReconciliationSavedRunSupport {
 
     /**
      * The same rules in GETTER shape: {@code fieldExpression} reduced from the stored JSONPath to the
-     * top-level record key SourceFilterSupport.firstMatchingRule actually tests. Without this step the
+     * top-level record key SourceFilterSupport.evaluate actually tests. Without this step the
      * board's {@code $.records[*].salesChannelEnumId} never matches a raw record key and every
      * configured exclusion is a silent no-op. Mirrors what resolveExtractKeepFields already does for
      * the sibling key-field expressions a hundred lines above.

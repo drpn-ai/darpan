@@ -2962,7 +2962,7 @@ class AutomationExecutionSupportTests {
 
     @Test
     void automationSourceFiltersAreReturnedInSequenceOrder() {
-        // Fix round 1: SourceFilterSupport.firstMatchingRule returns the FIRST matching rule in list
+        // Fix round 1: SourceFilterSupport.evaluate returns the FIRST rejecting rule in list
         // order, and that rule owns the excluded count (ReconciliationEntities.xml:381-382 on
         // ReconciliationAutomationSourceFilter.sequenceNum). Seed the rows through the fake OUT of
         // sequence order (sequenceNum 2 before 1) — a loader that lost its .orderBy("sequenceNum") call
@@ -3013,9 +3013,9 @@ class AutomationExecutionSupportTests {
 
         assertEquals("salesChannelEnumId", filters[0].fieldExpression)
         List<Map<String, Object>> parsed = SourceFilterSupport.parseRules(filters)
-        assertNotNull(SourceFilterSupport.firstMatchingRule(
+        assertNotNull(SourceFilterSupport.evaluate(
                 [orderId: "O-1", salesChannelEnumId: "POS_SALES_CHANNEL"], parsed))
-        assertNull(SourceFilterSupport.firstMatchingRule(
+        assertNull(SourceFilterSupport.evaluate(
                 [orderId: "O-2", salesChannelEnumId: "WEB_SALES_CHANNEL"], parsed))
     }
 
@@ -3524,7 +3524,7 @@ class AutomationExecutionSupportTests {
 
         // Task 6 (automation exclusion filters), fix round 1: loadAutomationSourceFilters chains
         // .orderBy("sequenceNum") on every extractor dispatch — the ordering is load-bearing (the first
-        // matching rule in SourceFilterSupport.firstMatchingRule owns the excluded count). list() below
+        // rejecting rule in SourceFilterSupport.evaluate owns the excluded count). list() below
         // sorts by this field ONLY when orderBy() was actually called, so a dropped/typo'd .orderBy(...)
         // call in production code changes the returned order and fails automationSourceFiltersAreReturnedInSequenceOrder.
         FakeFind orderBy(String fieldName) {

@@ -1857,6 +1857,75 @@ end'''
     }
 
     @Test
+    void anIncludeFilterRoundTripsSaveLoadDispatchAndMatch() {
+        // DAR-BE-054. Same real save -> store -> load -> dispatch -> match path the EXCLUDE_IN
+        // round-trip above walks, so the include direction is proven end to end rather than at the
+        // static. The operator is the only thing that differs, which is the point: nothing else in
+        // the path needed to change to carry it.
+        String savedRunId = createRuleSetRun()
+        saveRuleSetWithFilters(savedRunId, [
+                [fieldExpression: '$.records[*].statusId', operator: "INCLUDE_IN",
+                 values         : ["ORDER_APPROVED", "ORDER_COMPLETED"]],
+        ])
+
+        List rows = findFilterRows(savedRunId, "FILE_2")
+        assertEquals(1, rows.size())
+        assertEquals("INCLUDE_IN", rows[0].operator)
+        assertEquals("ORDER_APPROVED,ORDER_COMPLETED", rows[0].filterValues)
+
+        String compareScopeId = ReconciliationSavedRunSupport.resolveRuleSetRun(ec, savedRunId).compareScope?.compareScopeId as String
+        def source = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition("compareScopeId", compareScopeId).condition("fileSide", "FILE_2")
+                .disableAuthz().useCache(false).one()
+
+        List<Map<String, Object>> loaded = ReconciliationSavedRunSupport.buildExcludeFilterResponse(ec, source)
+        assertEquals(1, loaded.size())
+        assertEquals("INCLUDE_IN", loaded[0].operator)
+        assertEquals(["ORDER_APPROVED", "ORDER_COMPLETED"], loaded[0].values)
+
+        List<Map<String, Object>> dispatched = ReconciliationSavedRunSupport.resolveExtractExcludeFilters(ec, source)
+        assertEquals(1, dispatched.size())
+        assertEquals("statusId", dispatched[0].fieldExpression)
+        assertEquals("INCLUDE_IN", dispatched[0].operator)
+
+        // End to end through the getter's own parse + evaluate: a listed value survives, an
+        // unlisted one is rejected on its value, and a record with no statusId at all is rejected
+        // for want of the field — the asymmetry that only exists in the include direction.
+        List<Map<String, Object>> parsed = SourceFilterSupport.parseRules(dispatched)
+        assertNull(SourceFilterSupport.evaluate([orderId: "O-1", statusId: "ORDER_APPROVED"], parsed))
+        assertEquals("VALUE",
+                SourceFilterSupport.evaluate([orderId: "O-2", statusId: "ORDER_CANCELLED"], parsed).get("reason"))
+        assertEquals("FIELD_ABSENT",
+                SourceFilterSupport.evaluate([orderId: "O-3"], parsed).get("reason"))
+    }
+
+    @Test
+    void savingTwoOperatorsOnOneFieldIsRejected() {
+        // The board cannot produce this state — it stores one filter per field — so this guards the
+        // service contract against a direct API caller, and it is rejected at SAVE rather than
+        // becoming an intersection nobody typed on purpose.
+        String savedRunId = createRuleSetRun()
+        Map<String, Object> result = trySaveRuleSetWithFilters(savedRunId, [
+                [fieldExpression: '$.records[*].statusId', operator: "INCLUDE_IN", values: ["ORDER_APPROVED"]],
+                [fieldExpression: '$.records[*].statusId', operator: "EXCLUDE_IN", values: ["ORDER_CANCELLED"]],
+        ])
+
+        assertTrue((result.errorMessage as String).contains("already tests it with"),
+                "expected a mixed-operator rejection, got: ${result.errorMessage}")
+        assertEquals(0, findFilterRows(savedRunId, "FILE_2").size())
+    }
+
+    @Test
+    void aFilterSavedWithNoOperatorStillStoresAsExclude() {
+        // Every rule set saved before DAR-BE-054 submitted no operator at all. The column default
+        // and the parse default must keep agreeing, or those rule sets change direction on upgrade.
+        String savedRunId = createRuleSetRun()
+        saveRuleSetWithFilters(savedRunId, [[fieldExpression: '$.records[*].statusId', values: ["ORDER_CANCELLED"]]])
+
+        assertEquals("EXCLUDE_IN", findFilterRows(savedRunId, "FILE_2")[0].operator)
+    }
+
+    @Test
     void sourceWithNoExcludeFilterRowsReturnsAnEmptyList() {
         String compareScopeId = createCompareScopeWithSource("FILE_1")
 

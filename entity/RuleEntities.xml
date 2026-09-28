@@ -229,10 +229,14 @@
                 Matched trimmed and case-sensitively, the same way the built-in orderTypeId filter matches.</description>
         </field>
         <field name="operator" type="text-short" not-null="true" default="'EXCLUDE_IN'">
-            <description>Only EXCLUDE_IN is supported. The column exists so a future operator is data, not schema.</description>
+            <description>EXCLUDE_IN drops records whose fieldExpression value is listed in filterValues.
+                INCLUDE_IN keeps only records whose value is listed, and drops records carrying no usable
+                value for the field at all. Several rules may share a field, but they must agree on
+                direction; mixing operators on one field is rejected at save.</description>
         </field>
         <field name="filterValues" type="text-long" not-null="true">
-            <description>Comma-separated exact values to exclude, matched trimmed and case-insensitively.
+            <description>Comma-separated exact values this rule tests, matched trimmed and case-insensitively.
+                The operator decides whether they are excluded or are the only ones kept.
                 Values containing commas are unsupported; enum ids never contain one.</description>
         </field>
         <field name="companyUserGroupId" type="id">

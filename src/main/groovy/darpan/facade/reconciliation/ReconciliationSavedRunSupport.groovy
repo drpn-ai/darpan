@@ -780,31 +780,31 @@ class ReconciliationSavedRunSupport {
     static List<Map<String, Object>> validateExcludeFilterPayload(Object rawFilters, String sourceLabel) {
         if (rawFilters == null) return []
         if (!(rawFilters instanceof Collection)) {
-            throw new IllegalArgumentException("${sourceLabel} exclusion filters must be a list.".toString())
+            throw new IllegalArgumentException("${sourceLabel} filters must be a list.".toString())
         }
         Collection rawList = (Collection) rawFilters
         if (rawList.size() > SourceFilterSupport.MAX_RULES_PER_SOURCE) {
             throw new IllegalArgumentException(
-                    "${sourceLabel} defines ${rawList.size()} exclusion filters; the maximum is ${SourceFilterSupport.MAX_RULES_PER_SOURCE}.".toString())
+                    "${sourceLabel} defines ${rawList.size()} filters; the maximum is ${SourceFilterSupport.MAX_RULES_PER_SOURCE}.".toString())
         }
         List<Map<String, Object>> rows = []
         int position = 0
         for (Object raw : rawList) {
             position++
             if (!(raw instanceof Map)) {
-                throw new IllegalArgumentException("${sourceLabel} exclusion filter ${position} is not a rule.".toString())
+                throw new IllegalArgumentException("${sourceLabel} filter ${position} is not a rule.".toString())
             }
             Map row = (Map) raw
             String fieldExpression = normalize(row.get("fieldExpression"))
             if (!fieldExpression) {
-                throw new IllegalArgumentException("${sourceLabel} exclusion filter ${position} needs a field.".toString())
+                throw new IllegalArgumentException("${sourceLabel} filter ${position} needs a field.".toString())
             }
             // Reject at SAVE what the getter would have to reject mid-run: the stored expression is
             // reduced to a top-level record key at dispatch (SourceFilterSupport.toRecordFieldRules),
             // and one that reduces to nothing could only ever match nothing.
             if (!topLevelRecordField(fieldExpression)) {
                 throw new IllegalArgumentException(
-                        "${sourceLabel} exclusion filter ${position} names field '${fieldExpression}', which does not resolve to a record field.".toString())
+                        "${sourceLabel} filter ${position} names field '${fieldExpression}', which does not resolve to a record field.".toString())
             }
             // Locale.ROOT, not the default locale: on a tr_TR JVM "exclude_in" upper-cases to
             // "EXCLUDE_İN" and the parseRules gate below rejects a rule the operator entered
@@ -814,15 +814,15 @@ class ReconciliationSavedRunSupport {
                     row.containsKey("values") ? row.get("values") : row.get("filterValues"))
             if (!values) {
                 throw new IllegalArgumentException(
-                        "${sourceLabel} exclusion filter ${position} needs at least one value to exclude.".toString())
+                        "${sourceLabel} filter ${position} needs at least one value.".toString())
             }
             if (values.size() > SourceFilterSupport.MAX_VALUES_PER_RULE) {
                 throw new IllegalArgumentException(
-                        "${sourceLabel} exclusion filter ${position} lists ${values.size()} values; the maximum is ${SourceFilterSupport.MAX_VALUES_PER_RULE}.".toString())
+                        "${sourceLabel} filter ${position} lists ${values.size()} values; the maximum is ${SourceFilterSupport.MAX_VALUES_PER_RULE}.".toString())
             }
             if (values.any { String value -> value.contains(",") }) {
                 throw new IllegalArgumentException(
-                        "${sourceLabel} exclusion filter ${position} contains a comma inside a value, which is not supported.".toString())
+                        "${sourceLabel} filter ${position} contains a comma inside a value, which is not supported.".toString())
             }
             rows.add([fieldExpression: fieldExpression, operator: operator, filterValues: values.join(",")] as Map<String, Object>)
         }

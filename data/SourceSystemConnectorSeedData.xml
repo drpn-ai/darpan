@@ -322,6 +322,7 @@
             remoteSendServiceName="reconciliation.NetSuiteOrderExtractionServices.extract#NetSuiteOrders"
             systemAliases="NETSUITE_SUITEQL,NETSUITE_ORDERS,NETSUITE_SALES_ORDERS,DAR_SYS_NETSUITE_SUITEQL"
             preserveWindowInstants="N"
+            windowDateOnly="Y"
             filterParameterName="sourceFilters"
             enabled="Y"/>
 

@@ -103,6 +103,65 @@ class SavedRunsFacadeSmokeTests {
     }
 
     @Test
+    void savedRunCarriesScopeModeSoASingleSidedRunIsDistinguishableFromABrokenTwoSidedOne() {
+        // darpan-ui cannot tell "single-sided by design" from "two-sided, FILE_2 row missing" by
+        // counting system options - both are one. Without scopeMode on the wire buildRuleSetDraft
+        // returned null for a valid EVALUATE run, and that null is what sent the settings gear into
+        // the mapping editor, where it asked for a ReconciliationMapping that never existed.
+        Map<String, Object> createResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#CsvRun")
+                .parameters([
+                        runName           : "Scope Mode Probe",
+                        file1SystemEnumId : "OMS",
+                        file2SystemEnumId : "SHOPIFY",
+                        file1CompareColumn: "order_id",
+                        file2CompareColumn: "order_id",
+                ])
+                .disableAuthz()
+                .call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+
+        String ruleSetId = createResult.savedRun.ruleSetId
+        String compareScopeId = createResult.savedRun.compareScopeId
+        ruleSetRunFixturesToCleanUp.add([ruleSetId: ruleSetId, compareScopeId: compareScopeId])
+
+        // A scope created without an explicit mode reads as COMPARE rather than as null, so the UI
+        // never has to treat "absent" as a third state.
+        assertEquals("COMPARE", createResult.savedRun.scopeMode)
+        assertEquals("COMPARE", findSavedRunRow(ruleSetId)?.scopeMode)
+
+        // Turn it into a genuine single-sided run: EVALUATE *and* one source. Flipping only the mode
+        // is not a shortcut - RuleSetCompareScopeAdapter.resolveActiveSides rejects an EVALUATE scope
+        // that still carries a FILE_2, resolveRuleSetRun then returns no savedRun at all, and the run
+        // vanishes from the list rather than appearing with the wrong mode. That refusal is correct,
+        // and it is why this test has to build the real shape.
+        ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition("compareScopeId", compareScopeId).condition("fileSide", "FILE_2")
+                .useCache(false).one()?.delete()
+        def scope = ec.entity.find("darpan.rule.RuleSetCompareScope")
+                .condition("compareScopeId", compareScopeId).useCache(false).one()
+        scope.scopeMode = "EVALUATE"
+        scope.update()
+
+        Map<String, Object> singleSided = findSavedRunRow(ruleSetId)
+        assertNotNull(singleSided, "a valid EVALUATE run must still be listed")
+        assertEquals("EVALUATE", singleSided.scopeMode)
+        // One source on the wire is exactly the shape darpan-ui cannot read without scopeMode.
+        assertEquals(1, ((List) singleSided.systemOptions).size())
+    }
+
+    private Map<String, Object> findSavedRunRow(String ruleSetId) {
+        Map<String, Object> listResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.list#SavedRuns")
+                .parameters([pageIndex: 0, pageSize: 200, query: ""])
+                .disableAuthz()
+                .call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        return ((List<Map<String, Object>>) (listResult.savedRuns ?: []))
+                .find { Map<String, Object> row -> row.ruleSetId == ruleSetId }
+    }
+
+    @Test
     void csvRunCanBeCreatedListedAndExecutedThroughTheSavedRunFacade() {
         Map<String, Object> createResult = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.create#CsvRun")

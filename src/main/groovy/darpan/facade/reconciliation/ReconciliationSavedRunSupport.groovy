@@ -465,6 +465,9 @@ class ReconciliationSavedRunSupport {
                 reconciliationMappingId : mapping.reconciliationMappingId,
                 ruleSetId               : null,
                 compareScopeId          : null,
+                // A mapping run is two-sided by construction - RunsSettingsWorkflowPage refuses any
+                // mapping that does not have exactly two members - so it is never EVALUATE.
+                scopeMode               : RuleSetCompareScopeAdapter.SCOPE_MODE_COMPARE,
                 requiresSystemSelection : systemIds.size() != 2,
                 defaultFile1SystemEnumId: systemIds.size() >= 2 ? systemIds[0] : null,
                 defaultFile2SystemEnumId: systemIds.size() >= 2 ? systemIds[1] : null,
@@ -575,6 +578,11 @@ class ReconciliationSavedRunSupport {
                 ruleSetId               : ruleSet.ruleSetId,
                 compareScopeId          : compareScope.compareScopeId,
                 compareScopeDescription : compareScopeDisplayName(compareScope.compareScopeId, compareScope.description),
+                // COMPARE or EVALUATE, defaulted the same way RuleSetCompareScopeAdapter defaults it
+                // so a legacy row with a null column reads as COMPARE on the wire rather than as
+                // "unknown". darpan-ui reads this to tell a single-sided run from a two-sided one
+                // whose FILE_2 has gone missing - the two are indistinguishable by source count.
+                scopeMode               : normalize(compareScope.scopeMode) ?: RuleSetCompareScopeAdapter.SCOPE_MODE_COMPARE,
                 requiresSystemSelection : false,
                 defaultFile1SystemEnumId: canonicalSystemEnumId(sourceBySide[FILE_SIDE_1]?.systemEnumId),
                 defaultFile2SystemEnumId: canonicalSystemEnumId(sourceBySide[FILE_SIDE_2]?.systemEnumId),

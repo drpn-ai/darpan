@@ -832,6 +832,80 @@
                 closed lines were closed deliberately. It cannot be a sourceFilters exclusion because it
                 reads the LINE, and a filter can only match a field the extractor already emitted.</description>
         </field>
+        <field name="requireOverdueShipDate" type="text-indicator" default="'N'">
+            <description>Y adds "and the promised ship date has passed". shipdate is the date NetSuite
+                itself committed to, which beats trandate-plus-a-guessed-lag: it is the business's own
+                promise rather than our estimate of one. A null shipdate is NOT overdue — an order
+                nobody promised a date for cannot be late.</description>
+        </field>
+        <field name="pendingStates" type="text-short">
+            <description>Statuses that legitimately have no child yet (measured: B carries 0
+                fulfilments and 0 invoices on every sampled day). A finding only once past the
+                promised ship date — without that clause a recent window reports the whole order
+                book, 1042 on one measured day.</description>
+        </field>
+        <field name="statesExpectingShipment" type="text-short">
+            <description>Statuses whose meaning implies a fulfillment exists. A missing one is a
+                contradiction today, not in two weeks, so this branch carries no date test.</description>
+        </field>
+        <field name="overdueExcludedShipMethods" type="text-medium">
+            <description>Shipping methods the OVERDUE branch skips — an order collected in store has
+                no ship deadline to miss. Comma separated method names as NetSuite records them
+                ("Store Pickup").
+
+                Configuration rather than a derived flag, unlike the fulfillable line gate: nothing in
+                NetSuite marks a method as non-shipping, and which ones mean "collected" is a business
+                fact. Measured on gorjana 2026-08-01: 1 of 4 overdue findings was Store Pickup, and it
+                carried a shipdate like any other, so no structural test excludes it.
+
+                Applies to that branch only. A collected order is still fulfilled and still invoiced,
+                so excluding it from those expectations would hide real failures.</description>
+        </field>
+        <field name="statesExpectingInvoice" type="text-short">
+            <description>Statuses whose meaning implies an invoice exists. Measured on gorjana: G is
+                invoiced in 100% of 8,882 orders across two days, so it unambiguously means Billed.
+
+                A status named in NONE of these four lists is never reported — which is how a closed
+                or cancelled order (H: neither child in 39 of 55) stays out with no exclusion
+                rule.</description>
+        </field>
+        <field name="disallowedStates" type="text-short">
+            <description>Statuses that are a finding on their own terms, with no chain lookup: the
+                business says no order should rest here at all. "Nothing should sit in Pending
+                Billing" is true whether or not an invoice exists, which is what separates this from
+                statesExpectingInvoice — that list asks whether the chain agrees with the status,
+                this one disputes the status itself.
+
+                Where a status appears here AND in a chain list, the chain reason wins the label: it
+                names something to go fix, where this one only says where the order is sitting.</description>
+        </field>
+        <field name="requireParentRecordType" type="text-short">
+            <description>Narrows the check to records PRODUCED BY a transaction of this type, reading
+                nexttransactionlink backwards: nextdoc is the record under test, previousdoc is its
+                parent. Every other linkage setting here looks at children.
+
+                A scope qualifier, not an expectation — it says which records the check is about
+                ("invoices that came from a sales order"), where the state lists say what is wrong
+                with them. It therefore ANDs with the whole branch disjunction, not one arm of it.
+
+                Measured on gorjana 2026-09-01: 279 open invoices, 272 with a SalesOrd parent. The
+                seven it removes are standalone invoices the rule was never about.</description>
+        </field>
+        <field name="amountColumn" type="text-short">
+            <description>Numeric column read by the minAmount floor, e.g. foreignamountunpaid on a
+                CustInvc. Required together with minAmount — either alone is refused, because a
+                half-configured gate silently filters nothing and reports success.</description>
+        </field>
+        <field name="minAmount" type="number-decimal">
+            <description>Records whose amountColumn is below this are not reported. A floor rather
+                than an expectation: below it the record is not worth an operator's attention.
+
+                Measured on gorjana 2026-09-01: 257 of 272 open invoices owed under $1, so a $1
+                floor is the difference between a 15-row report and a 272-row one. Sub-dollar
+                balances are rounding residue, not unpaid invoices.
+
+                NULL is excluded, explicitly rather than by three-valued logic.</description>
+        </field>
         <field name="joinKeyFieldName" type="text-short">
             <description>Which mapped RECORD field is this side's join key. Its source column is also
                 what originFieldName reads to decide a record's origin.</description>
@@ -942,6 +1016,18 @@
         <field name="remoteSendServiceName" type="text-medium"/>
         <field name="systemAliases" type="text-medium"/>
         <field name="preserveWindowInstants" type="text-indicator" default="'N'"/>
+        <field name="windowDateOnly" type="text-indicator" default="'N'">
+            <description>Y when this source filters on a DATE column rather than an instant (SuiteQL's
+                TO_DATE, for example). Dispatch then sends the window bounds as yyyy-MM-dd, resolved in
+                the zone the window was anchored in, instead of an ISO instant.
+
+                It exists because an instant does not carry a calendar day on its own. The window
+                reaching an extractor is midnight-in-the-window's-zone; anything that re-derives a day
+                from it in a DIFFERENT zone shifts it. That is DAR-BE-057: a run picked for Aug 1 from
+                a UTC+5:30 browser queried 2026-07-31 and reported its findings under "Aug 1, 2026" —
+                the right count for a day nobody asked for. Sending the day itself removes the second
+                conversion rather than trying to make both agree.</description>
+        </field>
         <field name="keepFieldsParameterName" type="text-short">
             <description>Optional extract-service parameter that carries the record projection (keep-fields)
                 list. When set, dispatch computes the fields reconciliation needs for the side (join-key

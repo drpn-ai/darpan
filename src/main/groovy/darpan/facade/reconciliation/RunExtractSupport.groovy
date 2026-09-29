@@ -120,12 +120,20 @@ class RunExtractSupport {
                                                   Timestamp windowStartDate, Timestamp windowEndDate,
                                                   String fileNameValue, List<String> keepFields,
                                                   List<Map<String, Object>> excludeFilters,
-                                                  Map<String, Object> progressContext) {
+                                                  Map<String, Object> progressContext,
+                                                  Object windowTimeZone = null) {
         String token = sideToken(fileSide)
+        // A DATE-granular source is sent the calendar day, not an instant (DAR-BE-057). The bounds
+        // arriving here are midnight-in-the-window's-zone, so the day is recovered in THAT zone —
+        // recovering it anywhere else is the whole bug, and UTC is not a safe default for it.
+        boolean dateOnly = connector?.windowDateOnly == true
+        Closure<String> windowBound = { Timestamp bound ->
+            dateOnly ? ReconciliationApiWindowSupport.calendarDateIn(bound, windowTimeZone) : formatApiWindow(bound)
+        }
         Map<String, Object> extractParams = [
                 (normalize(connector?.configParameterName) ?: "sourceConfigId"): configId,
-                (normalize(connector?.dateFromParameterName) ?: "windowStart") : formatApiWindow(windowStartDate),
-                (normalize(connector?.dateToParameterName) ?: "windowEnd")     : formatApiWindow(windowEndDate),
+                (normalize(connector?.dateFromParameterName) ?: "windowStart") : windowBound(windowStartDate),
+                (normalize(connector?.dateToParameterName) ?: "windowEnd")     : windowBound(windowEndDate),
                 outputLocation: DataManagerSupport.childLocation(artifactContext?.location as String, "${token}-api"),
                 fileName      : DataManagerSupport.runArtifactFileName(artifactContext?.runToken, token, fileNameValue),
         ] as Map<String, Object>
@@ -213,7 +221,10 @@ class RunExtractSupport {
 
         Map<String, Object> extractParams = buildExtractParams(connector, fileSide, configId, artifactContext,
                 (Timestamp) apiWindow?.windowStartDate, (Timestamp) apiWindow?.windowEndDate,
-                fileNameValue, keepFields, excludeFilters, progressContext)
+                fileNameValue, keepFields, excludeFilters, progressContext,
+                // The zone the window was anchored in. preserveExactWindow and normalizeCalendarWindow
+                // have both always returned it on this map; only a date-granular connector reads it.
+                apiWindow?.timeZone)
 
         Map extraction = (serviceCaller.call(extractServiceName, extractParams) ?: [:]) as Map
         ((List) (extraction.errors ?: [])).each { Object error -> ec.message.addError("${label}: ${error}") }

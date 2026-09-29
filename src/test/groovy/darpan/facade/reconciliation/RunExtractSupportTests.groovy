@@ -31,7 +31,68 @@ class RunExtractSupportTests {
                 "shopify-orders-api.json",
                 (List<String>) overrides.get("keepFields"),
                 (List<Map<String, Object>>) overrides.get("excludeFilters"),
-                (Map<String, Object>) overrides.get("progressContext"))
+                (Map<String, Object>) overrides.get("progressContext"),
+                overrides.get("windowTimeZone"))
+    }
+
+    // ------------------------------------------------- DATE-GRANULAR WINDOW (DAR-BE-057)
+
+    /** "Midnight on this calendar day, in this zone" — the shape normalizeCalendarWindow produces. */
+    private static Timestamp dayStartIn(String isoDate, String zone) {
+        return Timestamp.from(java.time.LocalDate.parse(isoDate)
+                .atStartOfDay(java.time.ZoneId.of(zone)).toInstant())
+    }
+
+    /**
+     * A source that filters on a DATE column cannot be handed an instant. The window reaching the
+     * extractor is already anchored as midnight-in-the-window's-zone, so recovering the calendar day
+     * means reading it back IN THAT SAME ZONE. Read in any other zone the day moves, which is how a
+     * run picked for Aug 1 from IST queried 2026-07-31 and reported its 15 findings under "Aug 1".
+     */
+    @Test
+    void dateOnlyConnectorReceivesTheCalendarDayNotAnInstant() {
+        Map<String, Object> p = RunExtractSupport.buildExtractParams(
+                [windowDateOnly: true], "FILE_1", "CFG1", ARTIFACT,
+                dayStartIn("2026-08-01", "Asia/Kolkata"), dayStartIn("2026-09-01", "Asia/Kolkata"),
+                "ns-orders.json", null, null, null, "Asia/Kolkata")
+
+        assertEquals("2026-08-01", p.windowStart)
+        assertEquals("2026-09-01", p.windowEnd)
+    }
+
+    /**
+     * The invariant, and the reason the zone must travel with the window rather than be assumed: a day
+     * anchored in ANY zone comes back as that same day when read in the zone it was anchored in. The
+     * old path read every one of them in UTC, so only UTC tenants got the day they asked for.
+     */
+    @Test
+    void theCalendarDaySurvivesEveryAnchoringZone() {
+        ["Asia/Kolkata", "America/Los_Angeles", "UTC", "Pacific/Auckland"].each { String zone ->
+            Map<String, Object> p = RunExtractSupport.buildExtractParams(
+                    [windowDateOnly: true], "FILE_1", "CFG1", ARTIFACT,
+                    dayStartIn("2026-08-01", zone), dayStartIn("2026-08-02", zone),
+                    "ns-orders.json", null, null, null, zone)
+
+            assertEquals("2026-08-01", p.windowStart, "start moved for ${zone}")
+            assertEquals("2026-08-02", p.windowEnd, "end moved for ${zone}")
+        }
+    }
+
+    /** Unflagged connectors keep the ISO instant, byte for byte. */
+    @Test
+    void instantConnectorsAreUntouchedByTheDateOnlyBranch() {
+        Map<String, Object> p = params([:], [windowTimeZone: "Asia/Kolkata"])
+
+        assertEquals(RunExtractSupport.formatApiWindow(FROM), p.windowStart)
+        assertEquals(RunExtractSupport.formatApiWindow(THRU), p.windowEnd)
+    }
+
+    /** "N" is a non-empty String and therefore truthy in Groovy; the flag must be read as a Boolean. */
+    @Test
+    void dateOnlyFalseIsNotMistakenForTrue() {
+        Map<String, Object> p = params([windowDateOnly: false], [windowTimeZone: "Asia/Kolkata"])
+
+        assertEquals(RunExtractSupport.formatApiWindow(FROM), p.windowStart)
     }
 
     // ---------------------------------------------------------------- parameter NAMES

@@ -7183,6 +7183,9 @@
                             "compareScopeId": {
                                 "type": "string"
                             },
+                            "scopeMode": {
+                                "type": "string"
+                            },
                             "requiresSystemSelection": {
                                 "type": "boolean"
                             },
@@ -7686,6 +7689,9 @@
                                 "type": "string"
                             },
                             "compareScopeId": {
+                                "type": "string"
+                            },
+                            "scopeMode": {
                                 "type": "string"
                             },
                             "requiresSystemSelection": {
@@ -10294,6 +10300,9 @@
                                 "compareScopeId": {
                                     "type": "string"
                                 },
+                                "scopeMode": {
+                                    "type": "string"
+                                },
                                 "requiresSystemSelection": {
                                     "type": "boolean"
                                 },
@@ -12434,6 +12443,9 @@
                             "compareScopeId": {
                                 "type": "string"
                             },
+                            "scopeMode": {
+                                "type": "string"
+                            },
                             "requiresSystemSelection": {
                                 "type": "boolean"
                             },
@@ -12751,6 +12763,9 @@
                                 "type": "string"
                             },
                             "compareScopeId": {
+                                "type": "string"
+                            },
+                            "scopeMode": {
                                 "type": "string"
                             },
                             "requiresSystemSelection": {

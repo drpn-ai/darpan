@@ -190,6 +190,10 @@ class SourceSystemConnectorSupport {
                 remoteSendServiceName      : readString(record, "remoteSendServiceName"),
                 systemAliases              : readString(record, "systemAliases"),
                 preserveWindowInstants     : normalizeBool(readField(record, "preserveWindowInstants"), false),
+                // Normalised to a real Boolean here, like its neighbour: "N" is a non-empty String and
+                // therefore truthy in Groovy, so a raw read would turn every connector into a
+                // date-only one.
+                windowDateOnly             : normalizeBool(readField(record, "windowDateOnly"), false),
                 keepFieldsParameterName    : readString(record, "keepFieldsParameterName"),
                 keepFieldsBase             : readString(record, "keepFieldsBase"),
                 windowFieldName            : readString(record, "windowFieldName"),

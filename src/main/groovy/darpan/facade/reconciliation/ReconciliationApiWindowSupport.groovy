@@ -77,6 +77,22 @@ class ReconciliationApiWindowSupport {
         ]
     }
 
+    /**
+     * The calendar day an already-anchored window bound falls on, read in the zone it was anchored in.
+     *
+     * <p>This is the inverse of what normalizeCalendarWindow does on the way in, and it has to use the
+     * SAME zone or it is not an inverse at all. DAR-BE-057: the bound for "Aug 1" anchored in IST is
+     * 2026-07-31T18:30Z, and every reader that truncated it in UTC got July 31 — the right number of
+     * findings for the wrong day, reported under the right heading.
+     *
+     * <p>A null zone falls back to the tenant default rather than to UTC. UTC looks neutral and is not:
+     * it is simply one more zone that disagrees with most tenants.
+     */
+    static String calendarDateIn(Timestamp bound, Object rawTimeZone) {
+        if (bound == null) return null
+        return bound.toInstant().atZone(resolveZoneId(rawTimeZone)).toLocalDate().toString()
+    }
+
     private static ZoneId resolveZoneId(Object rawTimeZone) {
         String timeZone = normalize(rawTimeZone) ?: TenantAccessSupport.DEFAULT_TIME_ZONE
         try {

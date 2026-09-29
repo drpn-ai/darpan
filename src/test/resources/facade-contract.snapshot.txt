@@ -591,6 +591,7 @@ SERVICE create CsvRun
     savedRun.runName : String
     savedRun.runType : String
     savedRun.savedRunId : String
+    savedRun.scopeMode : String
     savedRun.systemOptions : List
 
 SERVICE create Mapping
@@ -686,6 +687,7 @@ SERVICE create RuleSetRun
     savedRun.runName : String
     savedRun.runType : String
     savedRun.savedRunId : String
+    savedRun.scopeMode : String
     savedRun.systemOptions : List
 
 SERVICE delete Automation
@@ -1143,6 +1145,7 @@ SERVICE list SavedRuns
     savedRuns.runName : String
     savedRuns.runType : String
     savedRuns.savedRunId : String
+    savedRuns.scopeMode : String
     savedRuns.systemOptions : List
 
 SERVICE pause Automation
@@ -1484,6 +1487,7 @@ SERVICE save RuleSetRun
     savedRun.runName : String
     savedRun.runType : String
     savedRun.savedRunId : String
+    savedRun.scopeMode : String
     savedRun.systemOptions : List
 
 SERVICE save SavedRunName
@@ -1513,6 +1517,7 @@ SERVICE save SavedRunName
     savedRun.runName : String
     savedRun.runType : String
     savedRun.savedRunId : String
+    savedRun.scopeMode : String
     savedRun.systemOptions : List
 
 SERVICE subscribe RunNotification

@@ -71,6 +71,7 @@
                 <parameter name="runType"/>
                 <parameter name="ruleSetId"/>
                 <parameter name="compareScopeId"/>
+                <parameter name="scopeMode"/>
                 <parameter name="requiresSystemSelection" type="Boolean"/>
                 <parameter name="defaultFile1SystemEnumId"/>
                 <parameter name="defaultFile2SystemEnumId"/>
@@ -495,6 +496,7 @@
                 <parameter name="runType"/>
                 <parameter name="ruleSetId"/>
                 <parameter name="compareScopeId"/>
+                <parameter name="scopeMode"/>
                 <parameter name="requiresSystemSelection" type="Boolean"/>
                 <parameter name="defaultFile1SystemEnumId"/>
                 <parameter name="defaultFile2SystemEnumId"/>
@@ -763,6 +765,7 @@
                 <parameter name="runType"/>
                 <parameter name="ruleSetId"/>
                 <parameter name="compareScopeId"/>
+                <parameter name="scopeMode"/>
                 <parameter name="requiresSystemSelection" type="Boolean"/>
                 <parameter name="defaultFile1SystemEnumId"/>
                 <parameter name="defaultFile2SystemEnumId"/>
@@ -1284,6 +1287,7 @@
                 <parameter name="reconciliationMappingId"/>
                 <parameter name="ruleSetId"/>
                 <parameter name="compareScopeId"/>
+                <parameter name="scopeMode"/>
                 <parameter name="requiresSystemSelection" type="Boolean"/>
                 <parameter name="defaultFile1SystemEnumId"/>
                 <parameter name="defaultFile2SystemEnumId"/>
@@ -1375,6 +1379,7 @@
                 <parameter name="reconciliationMappingId"/>
                 <parameter name="ruleSetId"/>
                 <parameter name="compareScopeId"/>
+                <parameter name="scopeMode"/>
                 <parameter name="requiresSystemSelection" type="Boolean"/>
                 <parameter name="defaultFile1SystemEnumId"/>
                 <parameter name="defaultFile2SystemEnumId"/>

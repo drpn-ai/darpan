@@ -1,5 +1,7 @@
 package darpan.reconciliation.automation
 
+import darpan.facade.reconciliation.ReconciliationApiWindowSupport
+
 import darpan.common.DarpanEntityConstants
 import darpan.common.TransactionDetachSupport
 import darpan.facade.common.DataManagerSupport
@@ -1712,6 +1714,19 @@ class AutomationExecutionSupport {
                 (normalize(connector?.dateFromParameterName) ?: "fromDate")
         String dateToParameterName = normalize(readField(source, "dateToParameterName")) ?:
                 (normalize(connector?.dateToParameterName) ?: "toDate")
+        // DAR-BE-057, the scheduled half. A DATE-granular source is sent the calendar day rather than
+        // the instant, read in the automation's own windowTimeZone — the zone its window was built in.
+        // The interactive path does the same thing in RunExtractSupport.buildExtractParams; both are
+        // one branch because the divergence between these two dispatchers is already documented debt
+        // and this is not the place to widen it.
+        if (connector?.windowDateOnly == true) {
+            Object zone = readField(automation, "windowTimeZone")
+            serviceParams[dateFromParameterName] = ReconciliationApiWindowSupport
+                    .calendarDateIn((java.sql.Timestamp) window.childWindowStartDate, zone)
+            serviceParams[dateToParameterName] = ReconciliationApiWindowSupport
+                    .calendarDateIn((java.sql.Timestamp) window.childWindowEndDate, zone)
+            return serviceParams
+        }
         serviceParams[dateFromParameterName] = window.childWindowStartDate
         serviceParams[dateToParameterName] = window.childWindowEndDate
         return serviceParams

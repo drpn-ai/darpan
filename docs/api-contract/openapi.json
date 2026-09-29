@@ -171,6 +171,15 @@
                                         "$ref": "#/components/schemas/ValidateJsonTextAgainstSchemaRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetNsSuiteQlSourceQueryRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ListNsSuiteQlSourceQueriesRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveNsSuiteQlSourceQueryRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/CancelReconciliationRunRequest"
                                     },
                                     {
@@ -409,6 +418,9 @@
                                         "facade.JsonSchemaFacadeServices.save#JsonSchemaText": "#/components/schemas/SaveJsonSchemaTextRequest",
                                         "facade.JsonSchemaFacadeServices.save#RefinedSchema": "#/components/schemas/SaveRefinedSchemaRequest",
                                         "facade.JsonSchemaFacadeServices.validate#JsonTextAgainstSchema": "#/components/schemas/ValidateJsonTextAgainstSchemaRequest",
+                                        "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery": "#/components/schemas/GetNsSuiteQlSourceQueryRequest",
+                                        "facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries": "#/components/schemas/ListNsSuiteQlSourceQueriesRequest",
+                                        "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery": "#/components/schemas/SaveNsSuiteQlSourceQueryRequest",
                                         "facade.ReconciliationFacadeServices.cancel#ReconciliationRun": "#/components/schemas/CancelReconciliationRunRequest",
                                         "facade.ReconciliationFacadeServices.create#CsvRun": "#/components/schemas/CreateCsvRunRequest",
                                         "facade.ReconciliationFacadeServices.create#Mapping": "#/components/schemas/CreateMappingRequest",
@@ -633,6 +645,15 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/ValidateJsonTextAgainstSchemaResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetNsSuiteQlSourceQueryResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ListNsSuiteQlSourceQueriesResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveNsSuiteQlSourceQueryResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/CancelReconciliationRunResponse"
@@ -7009,6 +7030,405 @@
                     "result"
                 ]
             },
+            "GetNsSuiteQlSourceQueryParams": {
+                "type": "object",
+                "properties": {
+                    "nsSuiteQlSourceQueryId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "nsSuiteQlSourceQueryId"
+                ],
+                "description": "One check definition with its full column projection, for editing."
+            },
+            "GetNsSuiteQlSourceQueryResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "query": {
+                        "type": "object"
+                    }
+                }
+            },
+            "GetNsSuiteQlSourceQueryRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery",
+                "x-darpan-method": "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetNsSuiteQlSourceQueryParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetNsSuiteQlSourceQueryResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetNsSuiteQlSourceQueryResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ListNsSuiteQlSourceQueriesParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "Every NetSuite SuiteQL check definition the active tenant can see."
+            },
+            "ListNsSuiteQlSourceQueriesResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "queries": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "query": {
+                                    "type": "object",
+                                    "properties": {
+                                        "nsSuiteQlSourceQueryId": {
+                                            "type": "string"
+                                        },
+                                        "nsAuthConfigId": {
+                                            "type": "string"
+                                        },
+                                        "description": {
+                                            "type": "string"
+                                        },
+                                        "recordType": {
+                                            "type": "string"
+                                        },
+                                        "queryTemplate": {
+                                            "type": "string"
+                                        },
+                                        "isActive": {
+                                            "type": "string"
+                                        },
+                                        "fieldCount": {
+                                            "type": "integer"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "ListNsSuiteQlSourceQueriesRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries",
+                "x-darpan-method": "facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ListNsSuiteQlSourceQueriesParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ListNsSuiteQlSourceQueriesResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ListNsSuiteQlSourceQueriesResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SaveNsSuiteQlSourceQueryParams": {
+                "type": "object",
+                "properties": {
+                    "nsSuiteQlSourceQueryId": {
+                        "type": "string"
+                    },
+                    "nsAuthConfigId": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "recordType": {
+                        "type": "string"
+                    },
+                    "fromTable": {
+                        "type": "string"
+                    },
+                    "dateColumn": {
+                        "type": "string"
+                    },
+                    "queryTemplate": {
+                        "type": "string"
+                    },
+                    "absentChildRecordType": {
+                        "type": "string"
+                    },
+                    "presentChildRecordType": {
+                        "type": "string"
+                    },
+                    "requireFulfillableOpenLine": {
+                        "type": "boolean"
+                    },
+                    "requireOverdueShipDate": {
+                        "type": "boolean"
+                    },
+                    "pendingStates": {
+                        "type": "string"
+                    },
+                    "statesExpectingShipment": {
+                        "type": "string"
+                    },
+                    "statesExpectingInvoice": {
+                        "type": "string"
+                    },
+                    "disallowedStates": {
+                        "type": "string"
+                    },
+                    "overdueExcludedShipMethods": {
+                        "type": "string"
+                    },
+                    "requireParentRecordType": {
+                        "type": "string"
+                    },
+                    "amountColumn": {
+                        "type": "string"
+                    },
+                    "minAmount": {
+                        "type": "string"
+                    },
+                    "joinKeyFieldName": {
+                        "type": "string"
+                    },
+                    "originFieldName": {
+                        "type": "string"
+                    },
+                    "isActive": {
+                        "type": "boolean"
+                    },
+                    "fields": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "field": {
+                                    "type": "object",
+                                    "properties": {
+                                        "recordFieldName": {
+                                            "type": "string"
+                                        },
+                                        "sourceColumn": {
+                                            "type": "string"
+                                        },
+                                        "sequenceNum": {
+                                            "type": "integer"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "required": [
+                    "nsSuiteQlSourceQueryId",
+                    "nsAuthConfigId",
+                    "recordType",
+                    "fields"
+                ],
+                "description": "Create or update a NetSuite SuiteQL check definition and its column projection.\n\n            Rejects anything the extractor would reject, by running the extractor's own\n            normalizeSpec over the submitted values before writing a row."
+            },
+            "SaveNsSuiteQlSourceQueryResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "savedQuery": {
+                        "type": "object"
+                    }
+                }
+            },
+            "SaveNsSuiteQlSourceQueryRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery",
+                "x-darpan-method": "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveNsSuiteQlSourceQueryParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveNsSuiteQlSourceQueryResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveNsSuiteQlSourceQueryResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "CancelReconciliationRunParams": {
                 "type": "object",
                 "properties": {
@@ -7482,6 +7902,9 @@
                     "description": {
                         "type": "string"
                     },
+                    "scopeMode": {
+                        "type": "string"
+                    },
                     "file1SystemEnumId": {
                         "type": "string"
                     },
@@ -7641,8 +8064,7 @@
                 },
                 "required": [
                     "runName",
-                    "file1SystemEnumId",
-                    "file2SystemEnumId"
+                    "file1SystemEnumId"
                 ],
                 "description": "Create a tenant-scoped saved run backed by one RuleSet compare scope and zero or more initial rules."
             },
@@ -17041,6 +17463,9 @@
         "facade.JsonSchemaFacadeServices.save#JsonSchemaText": "SaveJsonSchemaText",
         "facade.JsonSchemaFacadeServices.save#RefinedSchema": "SaveRefinedSchema",
         "facade.JsonSchemaFacadeServices.validate#JsonTextAgainstSchema": "ValidateJsonTextAgainstSchema",
+        "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery": "GetNsSuiteQlSourceQuery",
+        "facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries": "ListNsSuiteQlSourceQueries",
+        "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery": "SaveNsSuiteQlSourceQuery",
         "facade.ReconciliationFacadeServices.cancel#ReconciliationRun": "CancelReconciliationRun",
         "facade.ReconciliationFacadeServices.create#CsvRun": "CreateCsvRun",
         "facade.ReconciliationFacadeServices.create#Mapping": "CreateMapping",

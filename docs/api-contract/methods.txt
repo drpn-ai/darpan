@@ -47,6 +47,9 @@ facade.JsonSchemaFacadeServices.list#JsonSchemas
 facade.JsonSchemaFacadeServices.save#JsonSchemaText
 facade.JsonSchemaFacadeServices.save#RefinedSchema
 facade.JsonSchemaFacadeServices.validate#JsonTextAgainstSchema
+facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery
+facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries
+facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery
 facade.ReconciliationFacadeServices.cancel#ReconciliationRun
 facade.ReconciliationFacadeServices.create#CsvRun
 facade.ReconciliationFacadeServices.create#Mapping

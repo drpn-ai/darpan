@@ -44,6 +44,9 @@ class AutomationFacadeSupport {
     static final String SOURCE_CONFIG_TYPE_SHOPIFY_AUTH = ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_SHOPIFY_AUTH
     static final String SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST = ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST
     static final String SOURCE_CONFIG_TYPE_NETSUITE_AUTH = ReconciliationSavedRunSupport.SOURCE_CONFIG_TYPE_NETSUITE_AUTH
+    /** Matches SourceSystemConnector.expectedSourceConfigType on the NETSUITE_SUITEQL row. */
+    static final String SOURCE_CONFIG_TYPE_NETSUITE_SUITEQL = "NETSUITE_SUITEQL"
+    static final String NETSUITE_SUITEQL_SYSTEM_ENUM_ID = "NETSUITE_SUITEQL"
     static final String HOTWAX_ORDERS_REMOTE_ID = ReconciliationSavedRunSupport.HOTWAX_ORDERS_REMOTE_ID
     static final String HOTWAX_ORDERS_ENDPOINT_LABEL = ReconciliationSavedRunSupport.HOTWAX_ORDERS_ENDPOINT_LABEL
     static final String SHOPIFY_ORDERS_REMOTE_ID = ReconciliationSavedRunSupport.SHOPIFY_ORDERS_REMOTE_ID
@@ -1324,7 +1327,8 @@ class AutomationFacadeSupport {
     }
 
     static List<Map<String, Object>> listSourceConfigOptions(def ec) {
-        return listRegistrySourceConfigOptions(ec) + listNsAuthConfigOptions(ec)
+        return listRegistrySourceConfigOptions(ec) + listNsAuthConfigOptions(ec) +
+                listNsSuiteQlQueryOptions(ec)
     }
 
     /**
@@ -1391,6 +1395,47 @@ class AutomationFacadeSupport {
                     systemEnumId    : NETSUITE_SYSTEM_ENUM_ID,
                     systemLabel     : enumLabel(ec, NETSUITE_SYSTEM_ENUM_ID),
                     label           : label,
+            ].findAll { it.value != null } as Map<String, Object>
+        } as List<Map<String, Object>>
+    }
+
+    /**
+     * DAR-BE-058: NetSuite SuiteQL check definitions, so a run can be built over one from the
+     * wizard instead of only from a data load.
+     *
+     * <p>A dedicated builder rather than a CONFIG_TYPE_REGISTRY entry, following the NS_AUTH /
+     * NS_RESTLET precedent above. Registering the type would enrol these rows in cross-tenant
+     * config SHARING, which needs a DarpanSharedConfigType enumeration row and implies a
+     * borrowing model these do not have: a check is a question about one tenant's data, cheap to
+     * recreate, and it already points at an NsAuthConfig that IS shareable. The credential is the
+     * thing worth sharing; the question is not.</p>
+     *
+     * <p>Date parameter names come off the connector rather than being repeated here, so a run
+     * built through the wizard gets the same windowing as one built by a data load — including
+     * windowDateOnly, without which a custom date range runs the previous day (DAR-BE-057).</p>
+     */
+    protected static List<Map<String, Object>> listNsSuiteQlQueryOptions(def ec) {
+        String activeTenantUserGroupId = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+        if (!activeTenantUserGroupId) return []
+        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, NETSUITE_SUITEQL_SYSTEM_ENUM_ID)
+        if (connector == null) return []
+
+        List rows = TenantScopedFinder.findTenantScoped(ec, "darpan.reconciliation.NsSuiteQlSourceQuery")
+                .useCache(false).list()
+                .findAll { normalize(readString(it, "isActive")) != "N" }
+        return rows.collect { item ->
+            String configId = readString(item, "nsSuiteQlSourceQueryId")
+            String label = readString(item, "description") ?: configId
+            [
+                    sourceConfigId       : configId,
+                    sourceConfigType     : SOURCE_CONFIG_TYPE_NETSUITE_SUITEQL,
+                    nsSuiteQlSourceQueryId: configId,
+                    description          : readString(item, "description"),
+                    systemEnumId         : NETSUITE_SUITEQL_SYSTEM_ENUM_ID,
+                    systemLabel          : enumLabel(ec, NETSUITE_SUITEQL_SYSTEM_ENUM_ID),
+                    dateFromParameterName: connector.dateFromParameterName,
+                    dateToParameterName  : connector.dateToParameterName,
+                    label                : label,
             ].findAll { it.value != null } as Map<String, Object>
         } as List<Map<String, Object>>
     }

@@ -654,7 +654,7 @@ SERVICE create RuleSetRun
     file2SourceConfigId : String
     file2SourceConfigType : String
     file2SourceTypeEnumId : String
-    file2SystemEnumId : String [required]
+    file2SystemEnumId : String
     file2SystemMessageRemoteId : String
     rules : List
     rules.enabled : String
@@ -666,6 +666,7 @@ SERVICE create RuleSetRun
     rules.sequenceNum : Integer
     rules.severity : String
     runName : String [required]
+    scopeMode : String
   OUT:
     errors : List
     errors.error : String

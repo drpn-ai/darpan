@@ -7,6 +7,10 @@
         <in-parameters>
             <parameter name="runName" required="true"/>
             <parameter name="description"/>
+            <!-- DAR-BE-058: EVALUATE builds a SINGLE-SIDED run — one source, every record it returns
+                 is a finding. DAR-BE-049 shipped the scope and the surfaces that read it, but nothing
+                 that could CREATE one, so a NetSuite chain check could be seeded and not built. -->
+            <parameter name="scopeMode" default-value="COMPARE"/>
             <parameter name="file1SystemEnumId" required="true"/>
             <parameter name="file1SourceTypeEnumId"/>
             <parameter name="file1SystemMessageRemoteId"/>
@@ -18,7 +22,9 @@
             <parameter name="file1RecordRootExpression"/>
             <parameter name="file1PrimaryIdExpression"/>
             <parameter name="file1PrimaryIdExpressions" type="List"/>
-            <parameter name="file2SystemEnumId" required="true"/>
+            <!-- Not required at the schema level: a single-sided run has no second side. Enforced
+                 for COMPARE in the actions below, so the error names the mode rather than the field. -->
+            <parameter name="file2SystemEnumId"/>
             <parameter name="file2SourceTypeEnumId"/>
             <parameter name="file2SystemMessageRemoteId"/>
             <parameter name="file2NsRestletConfigId"/>
@@ -153,6 +159,14 @@
             <set field="file1PrimaryIdExpressionValue" from="((file1PrimaryIdExpression)?.toString()?.trim())"/>
             <set field="file1PrimaryIdExpressionsValue" from="((file1PrimaryIdExpressions instanceof List) ? ((List) file1PrimaryIdExpressions).collect { ((it)?.toString()?.trim()) }.findAll { it } : [])"/>
             <set field="file2SystemEnumIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file2SystemEnumId)"/>
+            <set field="scopeModeValue" from="((scopeMode)?.toString()?.trim())?.toUpperCase() ?: 'COMPARE'"/>
+            <if condition="!['COMPARE', 'EVALUATE'].contains(scopeModeValue)">
+                <message error="true">Scope mode must be COMPARE or EVALUATE.</message>
+            </if>
+            <set field="isSingleSidedRun" from="scopeModeValue == 'EVALUATE'"/>
+            <if condition="!isSingleSidedRun &amp;&amp; !file2SystemEnumIdValue">
+                <message error="true">A comparison run needs a second system. Choose single-sided if this run has one source.</message>
+            </if>
             <set field="file2SourceTypeEnumIdValue" from="((file2SourceTypeEnumId)?.toString()?.trim())"/>
             <set field="file2UsesApiSource" from="file2SourceTypeEnumIdValue == darpan.facade.reconciliation.ReconciliationSavedRunSupport.SOURCE_TYPE_API"/>
             <!-- See file1UsesConnectorSource comment above. -->
@@ -390,7 +404,7 @@
                 <!-- companyUserGroupId: denormalized tenant stamp from the parent RuleSet (defense-in-depth). -->
                 <service-call name="create#darpan.rule.RuleSetCompareScope"
                         disable-authz="true"
-                        in-map="[compareScopeId: compareScopeIdValue, ruleSetId: ruleSetIdValue, companyUserGroupId: ruleSetValue.companyUserGroupId, description: descriptionValue ?: 'Compare scope for ' + runNameValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                        in-map="[compareScopeId: compareScopeIdValue, ruleSetId: ruleSetIdValue, companyUserGroupId: ruleSetValue.companyUserGroupId, description: descriptionValue ?: 'Compare scope for ' + runNameValue, scopeMode: scopeModeValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
                 <service-call name="create#darpan.rule.RuleSetCompareSource"
                         disable-authz="true"
                         in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_1', companyUserGroupId: ruleSetValue.companyUserGroupId, systemEnumId: file1SystemEnumIdValue, sourceTypeEnumId: file1SourceTypeEnumIdValue, systemMessageRemoteId: file1SystemMessageRemoteIdValue, nsRestletConfigId: file1NsRestletConfigIdValue, sourceConfigId: file1UsesConnectorSource ? file1SourceConfigIdValue : null, sourceConfigType: file1UsesConnectorSource ? file1SourceConfigTypeValue : null, fileTypeEnumId: file1FileTypeEnumIdValue, schemaFileName: file1UsesConnectorSource ? null : file1SchemaFileNameValue, recordRootExpression: file1UsesConnectorSource ? null : file1RecordRootExpressionValue, primaryIdExpression: resolvedFile1PrimaryIdExpressionsValue.size() &gt; 1 ? null : (resolvedFile1PrimaryIdExpressionsValue.isEmpty() ? resolvedFile1PrimaryIdExpressionValue : resolvedFile1PrimaryIdExpressionsValue[0]), createdDate: nowTs, lastUpdatedDate: nowTs]"/>
@@ -418,29 +432,35 @@
                                      filterValues: file1FilterRow.filterValues, companyUserGroupId: ruleSetValue.companyUserGroupId,
                                      createdDate: nowTs, lastUpdatedDate: nowTs]"/>
                 </iterate>
-                <service-call name="create#darpan.rule.RuleSetCompareSource"
-                        disable-authz="true"
-                        in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', companyUserGroupId: ruleSetValue.companyUserGroupId, systemEnumId: file2SystemEnumIdValue, sourceTypeEnumId: file2SourceTypeEnumIdValue, systemMessageRemoteId: file2SystemMessageRemoteIdValue, nsRestletConfigId: file2NsRestletConfigIdValue, sourceConfigId: file2UsesConnectorSource ? file2SourceConfigIdValue : null, sourceConfigType: file2UsesConnectorSource ? file2SourceConfigTypeValue : null, fileTypeEnumId: file2FileTypeEnumIdValue, schemaFileName: file2UsesConnectorSource ? null : file2SchemaFileNameValue, recordRootExpression: file2UsesConnectorSource ? null : file2RecordRootExpressionValue, primaryIdExpression: resolvedFile2PrimaryIdExpressionsValue.size() &gt; 1 ? null : (resolvedFile2PrimaryIdExpressionsValue.isEmpty() ? resolvedFile2PrimaryIdExpressionValue : resolvedFile2PrimaryIdExpressionsValue[0]), createdDate: nowTs, lastUpdatedDate: nowTs]"/>
-                <if condition="resolvedFile2PrimaryIdExpressionsValue.size() &gt; 1">
-                    <set field="file2KeyFieldSequence" from="0"/>
-                    <iterate list="resolvedFile2PrimaryIdExpressionsValue" entry="file2KeyFieldExpression">
-                        <set field="file2KeyFieldSequence" from="file2KeyFieldSequence + 1"/>
-                        <service-call name="create#darpan.rule.RuleSetCompareSourceKeyField"
-                                disable-authz="true"
-                                in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', sequenceNum: file2KeyFieldSequence, fieldExpression: file2KeyFieldExpression, companyUserGroupId: ruleSetValue.companyUserGroupId, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                <!-- A single-sided run has no FILE_2: no source row, no key fields, no exclusion
+                     filters. An empty one would be worse than absent — every surface that asks
+                     "is this two-sided" reads whether a second source EXISTS, so a blank row
+                     would render the run as a comparison against nothing. -->
+                <if condition="!isSingleSidedRun">
+                    <service-call name="create#darpan.rule.RuleSetCompareSource"
+                            disable-authz="true"
+                            in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', companyUserGroupId: ruleSetValue.companyUserGroupId, systemEnumId: file2SystemEnumIdValue, sourceTypeEnumId: file2SourceTypeEnumIdValue, systemMessageRemoteId: file2SystemMessageRemoteIdValue, nsRestletConfigId: file2NsRestletConfigIdValue, sourceConfigId: file2UsesConnectorSource ? file2SourceConfigIdValue : null, sourceConfigType: file2UsesConnectorSource ? file2SourceConfigTypeValue : null, fileTypeEnumId: file2FileTypeEnumIdValue, schemaFileName: file2UsesConnectorSource ? null : file2SchemaFileNameValue, recordRootExpression: file2UsesConnectorSource ? null : file2RecordRootExpressionValue, primaryIdExpression: resolvedFile2PrimaryIdExpressionsValue.size() &gt; 1 ? null : (resolvedFile2PrimaryIdExpressionsValue.isEmpty() ? resolvedFile2PrimaryIdExpressionValue : resolvedFile2PrimaryIdExpressionsValue[0]), createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                    <if condition="resolvedFile2PrimaryIdExpressionsValue.size() &gt; 1">
+                        <set field="file2KeyFieldSequence" from="0"/>
+                        <iterate list="resolvedFile2PrimaryIdExpressionsValue" entry="file2KeyFieldExpression">
+                            <set field="file2KeyFieldSequence" from="file2KeyFieldSequence + 1"/>
+                            <service-call name="create#darpan.rule.RuleSetCompareSourceKeyField"
+                                    disable-authz="true"
+                                    in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', sequenceNum: file2KeyFieldSequence, fieldExpression: file2KeyFieldExpression, companyUserGroupId: ruleSetValue.companyUserGroupId, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
+                        </iterate>
+                    </if>
+                    <!-- See the FILE_1 exclusion-filter comment above. -->
+                    <set field="file2FilterRows" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.validateExcludeFilterPayload(file2ExcludeFilters, 'Source 2')"/>
+                    <set field="file2FilterSequence" from="0"/>
+                    <iterate list="file2FilterRows" entry="file2FilterRow">
+                        <set field="file2FilterSequence" from="file2FilterSequence + 1"/>
+                        <service-call name="create#darpan.rule.RuleSetCompareSourceFilter" disable-authz="true"
+                                in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', sequenceNum: file2FilterSequence,
+                                         fieldExpression: file2FilterRow.fieldExpression, operator: file2FilterRow.operator,
+                                         filterValues: file2FilterRow.filterValues, companyUserGroupId: ruleSetValue.companyUserGroupId,
+                                         createdDate: nowTs, lastUpdatedDate: nowTs]"/>
                     </iterate>
                 </if>
-                <!-- See the FILE_1 exclusion-filter comment above. -->
-                <set field="file2FilterRows" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.validateExcludeFilterPayload(file2ExcludeFilters, 'Source 2')"/>
-                <set field="file2FilterSequence" from="0"/>
-                <iterate list="file2FilterRows" entry="file2FilterRow">
-                    <set field="file2FilterSequence" from="file2FilterSequence + 1"/>
-                    <service-call name="create#darpan.rule.RuleSetCompareSourceFilter" disable-authz="true"
-                            in-map="[compareScopeId: compareScopeIdValue, fileSide: 'FILE_2', sequenceNum: file2FilterSequence,
-                                     fieldExpression: file2FilterRow.fieldExpression, operator: file2FilterRow.operator,
-                                     filterValues: file2FilterRow.filterValues, companyUserGroupId: ruleSetValue.companyUserGroupId,
-                                     createdDate: nowTs, lastUpdatedDate: nowTs]"/>
-                </iterate>
             </if>
 
             <if condition="!ec.message.hasError() &amp;&amp; !ruleEntries.isEmpty()">

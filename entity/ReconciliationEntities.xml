@@ -787,6 +787,16 @@
             assembled from validated parts.</description>
         <field name="nsSuiteQlSourceQueryId" type="id" is-pk="true"/>
         <field name="nsAuthConfigId" type="id" cannot-be-null="true"/>
+        <field name="createdByUserId" type="id">
+            <description>Stamped by TenantAccessSupport.assignTenantOwnershipOnCreate, which writes
+                this alongside companyUserGroupId and is the shared ownership path every
+                tenant-scoped config row goes through (NsAuthConfig carries the same pair).
+
+                Absent until DAR-BE-058 because nothing created these rows except a data load, and
+                a loader has no user. The moment the SPA could create one, the helper raised
+                "field name createdByUserId is not valid" — an EntityValue refuses an undeclared
+                field rather than ignoring it, unlike a Map.</description>
+        </field>
         <field name="companyUserGroupId" type="id"/>
         <field name="description" type="text-medium"/>
         <field name="recordType" type="text-short" cannot-be-null="true">

@@ -188,13 +188,13 @@
             <if condition="!file1SystemEnumIdValue">
                 <message error="true">file1SystemEnumId is required</message>
             </if>
-            <if condition="!file2SystemEnumIdValue">
+            <if condition="!isSingleSidedRun &amp;&amp; !file2SystemEnumIdValue">
                 <message error="true">file2SystemEnumId is required</message>
             </if>
             <if condition="!file1PrimaryIdExpressionValue &amp;&amp; file1PrimaryIdExpressionsValue.isEmpty()">
                 <message error="true">file1PrimaryIdExpression is required</message>
             </if>
-            <if condition="!file2PrimaryIdExpressionValue &amp;&amp; file2PrimaryIdExpressionsValue.isEmpty()">
+            <if condition="!isSingleSidedRun &amp;&amp; !file2PrimaryIdExpressionValue &amp;&amp; file2PrimaryIdExpressionsValue.isEmpty()">
                 <message error="true">file2PrimaryIdExpression is required</message>
             </if>
             <if condition="file1PrimaryIdExpressionsValue.size() &gt; 5">
@@ -217,10 +217,10 @@
             <if condition="file2SourceTypeEnumIdValue &amp;&amp; !file2UsesConnectorSource">
                 <message error="true">file2SourceTypeEnumId '${file2SourceTypeEnumIdValue}' is not supported</message>
             </if>
-            <if condition="file1UsesApiSource &amp;&amp; !file1SystemMessageRemoteIdValue &amp;&amp; !file1NsRestletConfigIdValue">
+            <if condition="file1UsesApiSource &amp;&amp; !file1SystemMessageRemoteIdValue &amp;&amp; !file1NsRestletConfigIdValue &amp;&amp; !file1SourceConfigIdValue">
                 <message error="true">file1 API source requires an endpoint</message>
             </if>
-            <if condition="file2UsesApiSource &amp;&amp; !file2SystemMessageRemoteIdValue &amp;&amp; !file2NsRestletConfigIdValue">
+            <if condition="file2UsesApiSource &amp;&amp; !file2SystemMessageRemoteIdValue &amp;&amp; !file2NsRestletConfigIdValue &amp;&amp; !file2SourceConfigIdValue">
                 <message error="true">file2 API source requires an endpoint</message>
             </if>
             <if condition="file1UsesApiSource &amp;&amp; file1SystemMessageRemoteIdValue &amp;&amp; file1NsRestletConfigIdValue">
@@ -267,7 +267,7 @@
                 <if condition="file1System == null">
                     <message error="true">file1SystemEnumId '${file1SystemEnumIdValue}' is not valid</message>
                 </if>
-                <if condition="file2System == null">
+                <if condition="!isSingleSidedRun &amp;&amp; file2System == null">
                     <message error="true">file2SystemEnumId '${file2SystemEnumIdValue}' is not valid</message>
                 </if>
                 <if condition="!file1UsesConnectorSource &amp;&amp; file1FileType == null">

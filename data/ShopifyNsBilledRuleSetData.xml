@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-063 — Shopify fulfilled -> NetSuite billed, for the GORJANA tenant.
+  Spec: docs/superpowers/specs/2026-09-30-layered-diagnosis-design.md, Part 2 (Phase 1 tree: every node
+  reads only the run's own two sides; OMS and NetSuite-line drills are Phase 2).
+
+  NOT seed data — tenant configuration. Load per install AFTER DarpanSystemSourceSeedData.xml,
+  SourceSystemConnectorSeedData.xml (SHOPIFY must carry filterParameterName), ConclusionCatalogSeedData.xml,
+  GorjanaConclusionRulesData.xml (it declares the reused CONC_* enums), and
+  tools/netsuite-chain-config/gorjana-shopify-ns-billed-queries.xml (sourceConfigId names that row):
+      ec.entity.makeDataLoader().location("component://darpan/data/ShopifyNsBilledRuleSetData.xml").load()
+  The loader does NOT throw on a referential failure — assert the rows exist afterwards.
+
+  Windows must be at least 3 days old and TenantSetting.timeZone must be set (DAR-BE-062 prod-owed):
+  Shopify's fulfilment status is current state, not dated, so a fresher window reports in-flight billing.
+
+  Tree order is load-bearing: siblings are tried in sequenceNum order and the first match wins, so a
+  CAUSE (not paid in Shopify) is placed before the SYMPTOM it produces (pending billing in NetSuite).
+  Sequence numbers are unique per SCOPE, so each branch is spaced by 100.
+
+  P0 decisions (2026-09-30, see the phase-1 plan): amounts compare Shopify totalPriceSet against
+  NetSuite's own foreigntotal; gorjana's digital gift cards are web orders with requiresShipping=false
+  (SKU-less, and Shopify's isGiftCard is NOT set on them).
+-->
+<entity-facade-xml type="darpan-tenant-config">
+    <moqui.basic.Enumeration enumId="CONC_NOT_PAID_IN_SHOPIFY" enumTypeId="DarpanConclusion" enumCode="CONC_NOT_PAID_IN_SHOPIFY" description="Not paid in Shopify"/>
+    <moqui.basic.Enumeration enumId="CONC_DRAFT_NOT_IN_NS" enumTypeId="DarpanConclusion" enumCode="CONC_DRAFT_NOT_IN_NS" description="Draft order never reached NetSuite"/>
+    <moqui.basic.Enumeration enumId="CONC_NS_PENDING_BILLING" enumTypeId="DarpanConclusion" enumCode="CONC_NS_PENDING_BILLING" description="Pending billing in NetSuite"/>
+    <moqui.basic.Enumeration enumId="CONC_NS_NOT_FULLY_SHIPPED" enumTypeId="DarpanConclusion" enumCode="CONC_NS_NOT_FULLY_SHIPPED" description="Not fully shipped in NetSuite"/>
+    <moqui.basic.Enumeration enumId="CONC_NS_CLOSED_UNBILLED" enumTypeId="DarpanConclusion" enumCode="CONC_NS_CLOSED_UNBILLED" description="Closed in NetSuite without billing"/>
+    <moqui.basic.Enumeration enumId="CONC_NS_CANCELLED" enumTypeId="DarpanConclusion" enumCode="CONC_NS_CANCELLED" description="Cancelled in NetSuite"/>
+    <moqui.basic.Enumeration enumId="CONC_NS_PENDING_APPROVAL" enumTypeId="DarpanConclusion" enumCode="CONC_NS_PENDING_APPROVAL" description="Pending approval in NetSuite"/>
+    <moqui.basic.Enumeration enumId="CONC_SHOPIFY_CANCELLED" enumTypeId="DarpanConclusion" enumCode="CONC_SHOPIFY_CANCELLED" description="Cancelled in Shopify"/>
+    <moqui.basic.Enumeration enumId="CONC_SHOPIFY_PARTIAL" enumTypeId="DarpanConclusion" enumCode="CONC_SHOPIFY_PARTIAL" description="Partially fulfilled in Shopify"/>
+    <moqui.basic.Enumeration enumId="CONC_SHOPIFY_RESTOCKED" enumTypeId="DarpanConclusion" enumCode="CONC_SHOPIFY_RESTOCKED" description="Restocked in Shopify"/>
+    <moqui.basic.Enumeration enumId="CONC_SHOPIFY_OPEN" enumTypeId="DarpanConclusion" enumCode="CONC_SHOPIFY_OPEN" description="Still open in Shopify"/>
+    <moqui.basic.Enumeration enumId="CONC_OUTSIDE_SHOPIFY_WINDOW" enumTypeId="DarpanConclusion" enumCode="CONC_OUTSIDE_SHOPIFY_WINDOW" description="Outside this Shopify window"/>
+    <moqui.basic.Enumeration enumId="CONC_REFUNDED_AFTER_BILLING" enumTypeId="DarpanConclusion" enumCode="CONC_REFUNDED_AFTER_BILLING" description="Refunded in Shopify after billing"/>
+
+    <darpan.rule.RuleSet ruleSetId="GORJANA_SHOPIFY_NS_BILLED_RS" ruleSetName="Fulfilled in Shopify, billed in NetSuite"
+            description="Every order Shopify fulfilled must be billed (status G) in NetSuite, for the same amount; and every billed NetSuite order must be fulfilled in Shopify. Keyed on the Shopify order id HotWax writes on the NetSuite header."
+            version="1.0" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" ruleSetId="GORJANA_SHOPIFY_NS_BILLED_RS"
+            objectType="ORDER" scopeMode="COMPARE" description="Every order Shopify fulfilled must be billed (status G) in NetSuite, for the same amount; and every billed NetSuite order must be fulfilled in Shopify."
+            companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="legacyResourceId"
+            sourceConfigId="gorjana_prod" sourceConfigType="SHOPIFY_AUTH" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="legacyResourceId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="displayFulfillmentStatus" operator="INCLUDE_IN" filterValues="FULFILLED" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyOrderId"
+            sourceConfigId="NS_SO_SHOPIFY_IDS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="orderOrigin" operator="INCLUDE_IN" filterValues="HOTWAX" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" fileSide="FILE_2" sequenceNum="2" fieldExpression="status" operator="INCLUDE_IN" filterValues="G" companyUserGroupId="GORJANA"/>
+
+    <!-- Amounts: a structured FIELD_COMPARISON whose ruleLogic is EXACTLY FieldComparisonRuleLogicGenerator's
+         output for this expression (ShopifyNsBilledRuleSetDataTests pins it). Mismatches count in
+         ruleDifferenceCount, NOT differenceCount. -->
+    <darpan.rule.Rule ruleId="GORJANA_SNB_AMOUNT" ruleSetId="GORJANA_SHOPIFY_NS_BILLED_RS" sequenceNum="10"
+            ruleText="totalPriceSet.shopMoney.amount = total" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN"
+            companyUserGroupId="GORJANA">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"totalPriceSet.shopMoney.amount","file2FieldPath":"total","operator":"=","preActions":[{"fieldSide":"file1","action":"STRING_TO_NUMBER"},{"fieldSide":"file2","action":"STRING_TO_NUMBER"}]}</expression>
+        <ruleLogic><![CDATA[rule "GORJANA_SNB_AMOUNT"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) ((Map) ((Map) $m.get("file1")).get("totalPriceSet")).get("shopMoney")).get("amount"), java.util.Arrays.asList("STRING_TO_NUMBER")), reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get("file2")).get("total"), java.util.Arrays.asList("STRING_TO_NUMBER")), "="))
+then
+    Object _file1Value = reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) ((Map) ((Map) $m.get("file1")).get("totalPriceSet")).get("shopMoney")).get("amount"), java.util.Arrays.asList("STRING_TO_NUMBER"));
+    Object _file2Value = reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get("file2")).get("total"), java.util.Arrays.asList("STRING_TO_NUMBER"));
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "amount = total",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: amount = total"
+    );
+end]]></ruleLogic>
+    </darpan.rule.Rule>
+
+    <!-- ============ Shopify fulfilled, NetSuite not billed (MISSING_FROM_FILE_2) ============ -->
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="100" conclusionEnumId="CONC_NOT_PAID_IN_SHOPIFY" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="100" conditionSeq="1" subject="FILE_1" fieldExpression="displayFinancialStatus" operator="NOT_IN" conditionValues="PAID,PARTIALLY_REFUNDED,REFUNDED" checkLabel="Shopify has not been paid" companyUserGroupId="GORJANA"/>
+
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="200" conclusionEnumId="CONC_NEVER_REACHED_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="200" conditionSeq="1" subject="FILE_2" presence="ABSENT" checkLabel="NetSuite has no order" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="210" parentSequenceNum="200" conclusionEnumId="CONC_GIFT_CARD_NOT_IN_NS"
+            questionText="Should gift-card-only orders reach NetSuite?" suggestedFilterJson="{&quot;fileSide&quot;:&quot;FILE_1&quot;,&quot;fieldExpression&quot;:&quot;requiresShipping&quot;,&quot;operator&quot;:&quot;EXCLUDE_IN&quot;,&quot;values&quot;:[&quot;false&quot;]}" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="210" conditionSeq="1" subject="FILE_1" fieldExpression="requiresShipping" operator="IN" conditionValues="false" checkLabel="Nothing to ship" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="210" conditionSeq="2" subject="FILE_1" fieldExpression="sourceName" operator="NOT_IN" conditionValues="pos" checkLabel="Sold online" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="220" parentSequenceNum="200" conclusionEnumId="CONC_POS_NOT_IN_NS"
+            questionText="Should POS orders reach NetSuite?" suggestedFilterJson="{&quot;fileSide&quot;:&quot;FILE_1&quot;,&quot;fieldExpression&quot;:&quot;sourceName&quot;,&quot;operator&quot;:&quot;EXCLUDE_IN&quot;,&quot;values&quot;:[&quot;pos&quot;]}" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="220" conditionSeq="1" subject="FILE_1" fieldExpression="sourceName" operator="IN" conditionValues="pos" checkLabel="Sold at a store" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="230" parentSequenceNum="200" conclusionEnumId="CONC_DRAFT_NOT_IN_NS"
+            questionText="Should draft orders reach NetSuite?" suggestedFilterJson="{&quot;fileSide&quot;:&quot;FILE_1&quot;,&quot;fieldExpression&quot;:&quot;sourceName&quot;,&quot;operator&quot;:&quot;EXCLUDE_IN&quot;,&quot;values&quot;:[&quot;shopify_draft_order&quot;]}" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="230" conditionSeq="1" subject="FILE_1" fieldExpression="sourceName" operator="IN" conditionValues="shopify_draft_order" checkLabel="Created as a draft" companyUserGroupId="GORJANA"/>
+
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="300" conclusionEnumId="CONC_NS_PENDING_BILLING" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="300" conditionSeq="1" subject="FILE_2" presence="EXCLUDED" fieldExpression="status" operator="IN" conditionValues="F" checkLabel="NetSuite holds it in Pending Billing" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="400" conclusionEnumId="CONC_NS_NOT_FULLY_SHIPPED" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="400" conditionSeq="1" subject="FILE_2" presence="EXCLUDED" fieldExpression="status" operator="IN" conditionValues="B,D,E" checkLabel="NetSuite has not shipped all of it" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="500" conclusionEnumId="CONC_NS_CLOSED_UNBILLED" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="500" conditionSeq="1" subject="FILE_2" presence="EXCLUDED" fieldExpression="status" operator="IN" conditionValues="H" checkLabel="NetSuite closed it unbilled" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="600" conclusionEnumId="CONC_NS_CANCELLED" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="600" conditionSeq="1" subject="FILE_2" presence="EXCLUDED" fieldExpression="status" operator="IN" conditionValues="C" checkLabel="NetSuite cancelled it" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="700" conclusionEnumId="CONC_NS_PENDING_APPROVAL" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="700" conditionSeq="1" subject="FILE_2" presence="EXCLUDED" fieldExpression="status" operator="IN" conditionValues="A" checkLabel="NetSuite has not approved it" companyUserGroupId="GORJANA"/>
+
+    <!-- ============ NetSuite billed, Shopify not fulfilled (MISSING_FROM_FILE_1) ============ -->
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="1100" conclusionEnumId="CONC_SHOPIFY_CANCELLED" appliesToBucket="MISSING_FROM_FILE_1" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="1100" conditionSeq="1" subject="FILE_1" presence="EXCLUDED" fieldExpression="cancelledAt" operator="NOT_BLANK" checkLabel="Shopify cancelled it" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="1200" conclusionEnumId="CONC_SHOPIFY_PARTIAL" appliesToBucket="MISSING_FROM_FILE_1" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="1200" conditionSeq="1" subject="FILE_1" presence="EXCLUDED" fieldExpression="displayFulfillmentStatus" operator="IN" conditionValues="PARTIALLY_FULFILLED" checkLabel="Shopify fulfilled part of it" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="1300" conclusionEnumId="CONC_SHOPIFY_RESTOCKED" appliesToBucket="MISSING_FROM_FILE_1" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="1300" conditionSeq="1" subject="FILE_1" presence="EXCLUDED" fieldExpression="displayFulfillmentStatus" operator="IN" conditionValues="RESTOCKED" checkLabel="Shopify restocked it" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="1400" conclusionEnumId="CONC_SHOPIFY_OPEN" appliesToBucket="MISSING_FROM_FILE_1" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="1400" conditionSeq="1" subject="FILE_1" presence="EXCLUDED" checkLabel="Shopify has not fulfilled it" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="1500" conclusionEnumId="CONC_OUTSIDE_SHOPIFY_WINDOW" appliesToBucket="MISSING_FROM_FILE_1" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="1500" conditionSeq="1" subject="FILE_1" presence="ABSENT" checkLabel="Shopify has no order in this window" companyUserGroupId="GORJANA"/>
+
+    <!-- ============ Amounts differ (RULE) ============
+         Kept although amounts compare the ORIGINAL Shopify total: P0 found refunded orders among the
+         mismatches (NetSuite's own total fell after the refund). -->
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="2100" conclusionEnumId="CONC_REFUNDED_AFTER_BILLING" appliesToBucket="RULE" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="2100" conditionSeq="1" subject="FILE_1" fieldExpression="displayFinancialStatus" operator="IN" conditionValues="PARTIALLY_REFUNDED,REFUNDED" checkLabel="Shopify refunded some of it" companyUserGroupId="GORJANA"/>
+</entity-facade-xml>

@@ -72,8 +72,9 @@ class RuleEngineSupport {
      * fireAllRules with a wall-clock budget. Returns [fired, halted, elapsedMillis]; when
      * {@code halted} is true the evaluation was cut off mid-run and results are incomplete —
      * callers must surface an error, never partial output.
+     * Also the conclusion engine's budget (DAR-BE-063): one watchdog for every Drools session.
      */
-    protected static Map<String, Object> fireAllRulesBounded(KieSession session, String ruleSetId,
+    static Map<String, Object> fireAllRulesBounded(KieSession session, String ruleSetId,
             long budgetMillis = MAX_RULE_EVAL_MILLIS) {
         java.util.concurrent.atomic.AtomicBoolean halted = new java.util.concurrent.atomic.AtomicBoolean(false)
         java.util.concurrent.ScheduledFuture<?> watchdog = EVAL_WATCHDOG.schedule({

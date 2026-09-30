@@ -1288,6 +1288,9 @@
             <parameter name="query"/>
             <parameter name="pageIndex" type="Integer" default-value="0"/>
             <parameter name="pageSize" type="Integer" default-value="20"/>
+            <!-- DAR-BE-061. Archived runs are excluded unless this is set; the Show archived view
+                 is the only way back, so it is the one caller that asks for them. -->
+            <parameter name="includeArchived" type="Boolean" default-value="false"/>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -1312,6 +1315,7 @@
                 <parameter name="compareScopeId"/>
                 <parameter name="scopeMode"/>
                 <parameter name="isActive" type="Boolean"/>
+                <parameter name="isArchived" type="Boolean"/>
                 <parameter name="requiresSystemSelection" type="Boolean"/>
                 <parameter name="defaultFile1SystemEnumId"/>
                 <parameter name="defaultFile2SystemEnumId"/>
@@ -1373,7 +1377,7 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="savedRunResult" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.listSavedRuns(ec, query, pageIndex, pageSize)"/>
+            <set field="savedRunResult" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.listSavedRuns(ec, query, pageIndex, pageSize, includeArchived)"/>
             <set field="ok" from="savedRunResult.ok"/>
             <set field="messages" from="savedRunResult.messages"/>
             <set field="errors" from="savedRunResult.errors"/>
@@ -2496,6 +2500,94 @@
         </actions>
     </service>
 
+    <service verb="archive" noun="SavedRun" allow-remote="true" authenticate="true">
+        <description>Archived one tenant-scoped saved run by setting RuleSet.isArchived to Y.
+
+            DAR-BE-061: the trash can. It leaves Home and the runs list and stops running, so pressing a trash can feels like the run went away.
+
+            Nothing is deleted. A run owns its results, diff documents and automation executions —
+            the record of what was reconciled and when.</description>
+        <in-parameters>
+            <parameter name="savedRunId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="savedRunId"/>
+            <parameter name="isArchived" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="savedRunIdValue" from="((savedRunId)?.toString()?.trim())"/>
+            <if condition="!savedRunIdValue">
+                <message error="true">savedRunId is required</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ruleSetRecord" from="ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', savedRunIdValue).disableAuthz().useCache(false).one()"/>
+                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, ruleSetRecord)">
+                    <message error="true">Saved run '${savedRunIdValue}' was not found.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreSetFlag" from="ruleSetRecord.set('isArchived', 'Y')"/>
+                <set field="ignoreUpdatedDate" from="ruleSetRecord.set('lastUpdatedDate', ec.user.nowTimestamp)"/>
+                <set field="ignoreUpdate" from="ruleSetRecord.update()"/>
+                <set field="isArchived" from="true"/>
+                <message>Archived run ${savedRunIdValue}.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="restore" noun="SavedRun" allow-remote="true" authenticate="true">
+        <description>Restored one tenant-scoped saved run by setting RuleSet.isArchived to N.
+
+            DAR-BE-061: the trash can. Brings a run back from Show archived, with its history intact.
+
+            Nothing is deleted. A run owns its results, diff documents and automation executions —
+            the record of what was reconciled and when.</description>
+        <in-parameters>
+            <parameter name="savedRunId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="savedRunId"/>
+            <parameter name="isArchived" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="savedRunIdValue" from="((savedRunId)?.toString()?.trim())"/>
+            <if condition="!savedRunIdValue">
+                <message error="true">savedRunId is required</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ruleSetRecord" from="ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', savedRunIdValue).disableAuthz().useCache(false).one()"/>
+                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, ruleSetRecord)">
+                    <message error="true">Saved run '${savedRunIdValue}' was not found.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreSetFlag" from="ruleSetRecord.set('isArchived', 'N')"/>
+                <set field="ignoreUpdatedDate" from="ruleSetRecord.set('lastUpdatedDate', ec.user.nowTimestamp)"/>
+                <set field="ignoreUpdate" from="ruleSetRecord.update()"/>
+                <set field="isArchived" from="false"/>
+                <message>Restored run ${savedRunIdValue}.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
     <service verb="disable" noun="SavedRun" allow-remote="true" authenticate="true">
         <description>Disabled one tenant-scoped saved run by setting RuleSet.isActive to N.
 
@@ -2587,6 +2679,98 @@
                 <set field="ignoreUpdate" from="ruleSetRecord.update()"/>
                 <set field="isActive" from="true"/>
                 <message>Enabled run ${savedRunIdValue}.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="archive" noun="Automation" allow-remote="true" authenticate="true">
+        <description>Archived one tenant-scoped automation by setting isArchived to Y.
+
+            DAR-BE-061. What the trash can on the automation dashboard does: the automation leaves the list and stops firing, so it feels removed.
+
+            NOT the same switch as pause. isActive is pause — a paused automation stays on the
+            list, visibly not running, because pausing is something you undo on Monday. Archiving
+            takes it off the list. Overloading isActive for both would have made pausing an
+            automation delete it from view.</description>
+        <in-parameters>
+            <parameter name="automationId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="automationId"/>
+            <parameter name="isArchived" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="automationIdValue" from="((automationId)?.toString()?.trim())"/>
+            <if condition="!automationIdValue">
+                <message error="true">automationId is required</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for automation changes.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="automationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', automationIdValue).disableAuthz().useCache(false).one()"/>
+                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, automationRecord)">
+                    <message error="true">Automation '${automationIdValue}' was not found.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreSetFlag" from="automationRecord.set('isArchived', 'Y')"/>
+                <set field="ignoreUpdatedDate" from="automationRecord.set('lastUpdatedDate', ec.user.nowTimestamp)"/>
+                <set field="ignoreUpdate" from="automationRecord.update()"/>
+                <set field="isArchived" from="true"/>
+                <message>Archived automation ${automationIdValue}.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="restore" noun="Automation" allow-remote="true" authenticate="true">
+        <description>Restored one tenant-scoped automation by setting isArchived to N.
+
+            DAR-BE-061. Brings an automation back from Show archived, with its execution history intact.
+
+            NOT the same switch as pause. isActive is pause — a paused automation stays on the
+            list, visibly not running, because pausing is something you undo on Monday. Archiving
+            takes it off the list. Overloading isActive for both would have made pausing an
+            automation delete it from view.</description>
+        <in-parameters>
+            <parameter name="automationId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="automationId"/>
+            <parameter name="isArchived" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="automationIdValue" from="((automationId)?.toString()?.trim())"/>
+            <if condition="!automationIdValue">
+                <message error="true">automationId is required</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for automation changes.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="automationRecord" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('automationId', automationIdValue).disableAuthz().useCache(false).one()"/>
+                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, automationRecord)">
+                    <message error="true">Automation '${automationIdValue}' was not found.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreSetFlag" from="automationRecord.set('isArchived', 'N')"/>
+                <set field="ignoreUpdatedDate" from="automationRecord.set('lastUpdatedDate', ec.user.nowTimestamp)"/>
+                <set field="ignoreUpdate" from="automationRecord.update()"/>
+                <set field="isArchived" from="false"/>
+                <message>Restored automation ${automationIdValue}.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

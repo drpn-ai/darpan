@@ -34,6 +34,19 @@
                 that only hides a run from a list while it keeps firing nightly is worse than no
                 flag, because the operator believes it is off.</description>
         </field>
+        <field name="isArchived" type="text-indicator" default="'N'">
+            <description>DAR-BE-061. The trash. Y or N (absent reads as N, so nothing that
+                predates this field arrives already binned).
+
+                DISTINCT FROM isActive, deliberately. isActive answers "does this run"; isArchived
+                answers "is this still on the shelf". A disabled run stays listed — it is a run you
+                have stopped for now. An archived one disappears from Home and the runs list,
+                because the operator pressed a trash can and should feel that it went away.
+
+                Nothing is deleted. A run owns its results, its diff documents and its automation
+                executions — the record of what was reconciled and when — so the bin is a flag, and
+                Show archived brings it back intact.</description>
+        </field>
         <!-- Audit H12.6 — ruleSetName had no uniqueness within a tenant. -->
         <index name="RULESET_TENANT_NAME" unique="true">
             <index-field name="companyUserGroupId"/>

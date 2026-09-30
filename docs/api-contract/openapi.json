@@ -180,6 +180,12 @@
                                         "$ref": "#/components/schemas/SaveNsSuiteQlSourceQueryRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/ArchiveAutomationRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ArchiveSavedRunRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/CancelReconciliationRunRequest"
                                     },
                                     {
@@ -244,6 +250,12 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/ReprocessAutomationExecutionRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RestoreAutomationRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RestoreSavedRunRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/ResumeAutomationRequest"
@@ -427,6 +439,8 @@
                                         "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery": "#/components/schemas/GetNsSuiteQlSourceQueryRequest",
                                         "facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries": "#/components/schemas/ListNsSuiteQlSourceQueriesRequest",
                                         "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery": "#/components/schemas/SaveNsSuiteQlSourceQueryRequest",
+                                        "facade.ReconciliationFacadeServices.archive#Automation": "#/components/schemas/ArchiveAutomationRequest",
+                                        "facade.ReconciliationFacadeServices.archive#SavedRun": "#/components/schemas/ArchiveSavedRunRequest",
                                         "facade.ReconciliationFacadeServices.cancel#ReconciliationRun": "#/components/schemas/CancelReconciliationRunRequest",
                                         "facade.ReconciliationFacadeServices.create#CsvRun": "#/components/schemas/CreateCsvRunRequest",
                                         "facade.ReconciliationFacadeServices.create#Mapping": "#/components/schemas/CreateMappingRequest",
@@ -449,6 +463,8 @@
                                         "facade.ReconciliationFacadeServices.list#SavedRuns": "#/components/schemas/ListSavedRunsRequest",
                                         "facade.ReconciliationFacadeServices.pause#Automation": "#/components/schemas/PauseAutomationRequest",
                                         "facade.ReconciliationFacadeServices.reprocess#AutomationExecution": "#/components/schemas/ReprocessAutomationExecutionRequest",
+                                        "facade.ReconciliationFacadeServices.restore#Automation": "#/components/schemas/RestoreAutomationRequest",
+                                        "facade.ReconciliationFacadeServices.restore#SavedRun": "#/components/schemas/RestoreSavedRunRequest",
                                         "facade.ReconciliationFacadeServices.resume#Automation": "#/components/schemas/ResumeAutomationRequest",
                                         "facade.ReconciliationFacadeServices.run#AutomationNow": "#/components/schemas/RunAutomationNowRequest",
                                         "facade.ReconciliationFacadeServices.run#GenericDiff": "#/components/schemas/RunGenericDiffRequest",
@@ -664,6 +680,12 @@
                                             "$ref": "#/components/schemas/SaveNsSuiteQlSourceQueryResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/ArchiveAutomationResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ArchiveSavedRunResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/CancelReconciliationRunResponse"
                                         },
                                         {
@@ -728,6 +750,12 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/ReprocessAutomationExecutionResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RestoreAutomationResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RestoreSavedRunResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ResumeAutomationResponse"
@@ -7443,6 +7471,202 @@
                     "result"
                 ]
             },
+            "ArchiveAutomationParams": {
+                "type": "object",
+                "properties": {
+                    "automationId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "automationId"
+                ],
+                "description": "Archived one tenant-scoped automation by setting isArchived to Y.\n\n            DAR-BE-061. What the trash can on the automation dashboard does: the automation leaves the list and stops firing, so it feels removed.\n\n            NOT the same switch as pause. isActive is pause \u2014 a paused automation stays on the\n            list, visibly not running, because pausing is something you undo on Monday. Archiving\n            takes it off the list. Overloading isActive for both would have made pausing an\n            automation delete it from view."
+            },
+            "ArchiveAutomationResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "automationId": {
+                        "type": "string"
+                    },
+                    "isArchived": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "ArchiveAutomationRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.archive#Automation",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.archive#Automation",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.archive#Automation"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ArchiveAutomationParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ArchiveAutomationResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.archive#Automation. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ArchiveAutomationResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ArchiveSavedRunParams": {
+                "type": "object",
+                "properties": {
+                    "savedRunId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "savedRunId"
+                ],
+                "description": "Archived one tenant-scoped saved run by setting RuleSet.isArchived to Y.\n\n            DAR-BE-061: the trash can. It leaves Home and the runs list and stops running, so pressing a trash can feels like the run went away.\n\n            Nothing is deleted. A run owns its results, diff documents and automation executions \u2014\n            the record of what was reconciled and when."
+            },
+            "ArchiveSavedRunResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "savedRunId": {
+                        "type": "string"
+                    },
+                    "isArchived": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "ArchiveSavedRunRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.archive#SavedRun",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.archive#SavedRun",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.archive#SavedRun"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ArchiveSavedRunParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ArchiveSavedRunResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.archive#SavedRun. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ArchiveSavedRunResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "CancelReconciliationRunParams": {
                 "type": "object",
                 "properties": {
@@ -10861,6 +11085,9 @@
                     },
                     "pageSize": {
                         "type": "integer"
+                    },
+                    "includeArchived": {
+                        "type": "boolean"
                     }
                 },
                 "description": "List saved runs across legacy mappings and RuleSet-backed CSV runs."
@@ -10942,6 +11169,9 @@
                                     "type": "string"
                                 },
                                 "isActive": {
+                                    "type": "boolean"
+                                },
+                                "isArchived": {
                                     "type": "boolean"
                                 },
                                 "requiresSystemSelection": {
@@ -11393,6 +11623,202 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/ReprocessAutomationExecutionResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RestoreAutomationParams": {
+                "type": "object",
+                "properties": {
+                    "automationId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "automationId"
+                ],
+                "description": "Restored one tenant-scoped automation by setting isArchived to N.\n\n            DAR-BE-061. Brings an automation back from Show archived, with its execution history intact.\n\n            NOT the same switch as pause. isActive is pause \u2014 a paused automation stays on the\n            list, visibly not running, because pausing is something you undo on Monday. Archiving\n            takes it off the list. Overloading isActive for both would have made pausing an\n            automation delete it from view."
+            },
+            "RestoreAutomationResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "automationId": {
+                        "type": "string"
+                    },
+                    "isArchived": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "RestoreAutomationRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.restore#Automation",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.restore#Automation",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.restore#Automation"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RestoreAutomationParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RestoreAutomationResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.restore#Automation. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RestoreAutomationResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RestoreSavedRunParams": {
+                "type": "object",
+                "properties": {
+                    "savedRunId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "savedRunId"
+                ],
+                "description": "Restored one tenant-scoped saved run by setting RuleSet.isArchived to N.\n\n            DAR-BE-061: the trash can. Brings a run back from Show archived, with its history intact.\n\n            Nothing is deleted. A run owns its results, diff documents and automation executions \u2014\n            the record of what was reconciled and when."
+            },
+            "RestoreSavedRunResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "savedRunId": {
+                        "type": "string"
+                    },
+                    "isArchived": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "RestoreSavedRunRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.restore#SavedRun",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.restore#SavedRun",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.restore#SavedRun"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RestoreSavedRunParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RestoreSavedRunResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.restore#SavedRun. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RestoreSavedRunResult"
                     }
                 },
                 "required": [
@@ -17691,6 +18117,8 @@
         "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery": "GetNsSuiteQlSourceQuery",
         "facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries": "ListNsSuiteQlSourceQueries",
         "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery": "SaveNsSuiteQlSourceQuery",
+        "facade.ReconciliationFacadeServices.archive#Automation": "ArchiveAutomation",
+        "facade.ReconciliationFacadeServices.archive#SavedRun": "ArchiveSavedRun",
         "facade.ReconciliationFacadeServices.cancel#ReconciliationRun": "CancelReconciliationRun",
         "facade.ReconciliationFacadeServices.create#CsvRun": "CreateCsvRun",
         "facade.ReconciliationFacadeServices.create#Mapping": "CreateMapping",
@@ -17713,6 +18141,8 @@
         "facade.ReconciliationFacadeServices.list#SavedRuns": "ListSavedRuns",
         "facade.ReconciliationFacadeServices.pause#Automation": "PauseAutomation",
         "facade.ReconciliationFacadeServices.reprocess#AutomationExecution": "ReprocessAutomationExecution",
+        "facade.ReconciliationFacadeServices.restore#Automation": "RestoreAutomation",
+        "facade.ReconciliationFacadeServices.restore#SavedRun": "RestoreSavedRun",
         "facade.ReconciliationFacadeServices.resume#Automation": "ResumeAutomation",
         "facade.ReconciliationFacadeServices.run#AutomationNow": "RunAutomationNow",
         "facade.ReconciliationFacadeServices.run#GenericDiff": "RunGenericDiff",

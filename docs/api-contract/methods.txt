@@ -50,6 +50,8 @@ facade.JsonSchemaFacadeServices.validate#JsonTextAgainstSchema
 facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery
 facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries
 facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery
+facade.ReconciliationFacadeServices.archive#Automation
+facade.ReconciliationFacadeServices.archive#SavedRun
 facade.ReconciliationFacadeServices.cancel#ReconciliationRun
 facade.ReconciliationFacadeServices.create#CsvRun
 facade.ReconciliationFacadeServices.create#Mapping
@@ -72,6 +74,8 @@ facade.ReconciliationFacadeServices.list#Mappings
 facade.ReconciliationFacadeServices.list#SavedRuns
 facade.ReconciliationFacadeServices.pause#Automation
 facade.ReconciliationFacadeServices.reprocess#AutomationExecution
+facade.ReconciliationFacadeServices.restore#Automation
+facade.ReconciliationFacadeServices.restore#SavedRun
 facade.ReconciliationFacadeServices.resume#Automation
 facade.ReconciliationFacadeServices.run#AutomationNow
 facade.ReconciliationFacadeServices.run#GenericDiff

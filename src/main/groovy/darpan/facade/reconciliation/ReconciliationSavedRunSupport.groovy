@@ -68,7 +68,42 @@ class ReconciliationSavedRunSupport {
      *
      * @return true when the run may proceed; adds the operator-facing error and returns false otherwise
      */
+    /**
+     * DAR-BE-061. Whether a run is in the bin. Absent reads as NOT archived — nothing that
+     * predates the field arrives already binned.
+     */
+    private static boolean asBoolean(Object value, boolean fallback) {
+        if (value == null) return fallback
+        if (value instanceof Boolean) return (Boolean) value
+        String text = value.toString().trim()
+        if (!text) return fallback
+        return text.equalsIgnoreCase("true") || text.equalsIgnoreCase("Y")
+    }
+
+    static boolean isRunArchived(def ruleSet) {
+        if (ruleSet == null) return false
+        return "Y".equalsIgnoreCase(normalize(readFieldValue(ruleSet, "isArchived")) ?: "N")
+    }
+
+    /**
+     * The gate, applied at BOTH execution entry points rather than at one.
+     *
+     * <p>A manual run and a scheduled automation reach the pipeline by different routes
+     * (an automation is a second pipeline implementation, not a scheduler), so a single check
+     * would leave the other path running. A disabled run that still fires nightly is worse than
+     * no disable at all, because the operator believes it is off.</p>
+     *
+     * <p>Archived and disabled both stop a run, and they say DIFFERENT things when they do.
+     * "Disabled" invites you to enable it; "archived" tells you where it went, because the
+     * operator who binned it will not think to look for a disable switch.</p>
+     *
+     * @return true when the run may proceed; adds the operator-facing error and returns false otherwise
+     */
     static boolean requireRunEnabled(def ec, def ruleSet, String runLabel) {
+        if (isRunArchived(ruleSet)) {
+            ec?.message?.addError("Run '${runLabel}' is archived. Restore it from Show archived before running it.")
+            return false
+        }
         if (isRunEnabled(ruleSet)) return true
         ec?.message?.addError("Run '${runLabel}' is disabled. Enable it before running it.")
         return false
@@ -420,12 +455,22 @@ class ReconciliationSavedRunSupport {
         return (Map<String, Object>) resolveRuleSetRun(ec, savedRunId).savedRun
     }
 
-    static Map<String, Object> listSavedRuns(def ec, Object query, Object pageIndex, Object pageSize) {
+    static Map<String, Object> listSavedRuns(def ec, Object query, Object pageIndex, Object pageSize,
+            Object includeArchived = null) {
         int page = boundedInt(pageIndex, 0, 0, Integer.MAX_VALUE)
         int size = boundedInt(pageSize, 20, 1, 200)
         String search = normalizeLower(query)
 
         List<Map<String, Object>> rows = collectSavedRunRows(ec)
+        // DAR-BE-061. Archived runs are OUT by default — that absence is the whole point of the
+        // trash can. Opt in with includeArchived to build the Show archived view, which is the
+        // only way back and therefore has to exist wherever this filter is applied.
+        //
+        // Filtered here rather than in the finder so the archived rows are still BUILT: the count
+        // below, and the Show archived view, both need them.
+        if (!asBoolean(includeArchived, false)) {
+            rows = rows.findAll { Map<String, Object> row -> row.isArchived != true }
+        }
         if (search) rows = rows.findAll { Map<String, Object> row -> savedRunMatches(row, search) }
 
         Map<String, Object> pagination = PaginationSupport.pagination(page, size, rows.size())
@@ -505,6 +550,7 @@ class ReconciliationSavedRunSupport {
                 // Legacy mapping runs carry no isActive column, so they read as enabled. Disabling
                 // them is a separate change; claiming a flag that does not exist would be worse.
                 isActive                : true,
+                isArchived              : false,
                 reconciliationMappingId : mapping.reconciliationMappingId,
                 ruleSetId               : null,
                 compareScopeId          : null,
@@ -620,6 +666,7 @@ class ReconciliationSavedRunSupport {
                 // DAR-BE-060. Carried on the row rather than gated inside the resolver: a disabled
                 // run must still be readable and editable, or it could never be turned back on.
                 isActive                : isRunEnabled(ruleSet),
+                isArchived              : isRunArchived(ruleSet),
                 reconciliationMappingId : null,
                 ruleSetId               : ruleSet.ruleSetId,
                 compareScopeId          : compareScope.compareScopeId,

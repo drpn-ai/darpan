@@ -445,6 +445,18 @@
         <field name="chatSpaceId" type="id">
             <description>Optional TenantChatSpace this automation posts run-completion notifications to; null = no notifications.</description>
         </field>
+        <field name="isArchived" type="text-indicator" default="'N'">
+            <description>DAR-BE-061. The trash, and NOT the same thing as isActive.
+
+                isActive is PAUSE: a paused automation stays on the list, visibly not running,
+                because pausing is something you undo on Monday. isArchived is the bin: it leaves
+                the list entirely. Overloading isActive for both would have made pausing an
+                automation delete it from view, which is why the two are separate fields rather
+                than one.
+
+                Absent reads as N. Archived automations never fire and are excluded from the
+                scheduler scan alongside the paused ones.</description>
+        </field>
         <field name="isActive" type="text-indicator" default="'Y'"/>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>

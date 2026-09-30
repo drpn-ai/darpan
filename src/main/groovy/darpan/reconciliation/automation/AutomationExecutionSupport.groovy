@@ -253,6 +253,10 @@ class AutomationExecutionSupport {
                         "DAR-BE-060 disabled-run gate on the scheduled path; a scheduled context may have no " +
                         "ambient tenant, and a scoped read that finds nothing would let a disabled run fire")
                     .condition("ruleSetId", ruleSetId).useCache(false).one()
+            if (ruleSet != null && ReconciliationSavedRunSupport.isRunArchived(ruleSet)) {
+                throw new IllegalStateException("Automation ${automationId} points at run ${ruleSetId}, " +
+                        "which is archived. Restore the run before this automation can fire.")
+            }
             if (ruleSet != null && !ReconciliationSavedRunSupport.isRunEnabled(ruleSet)) {
                 throw new IllegalStateException("Automation ${automationId} points at run ${ruleSetId}, " +
                         "which is disabled. Enable the run before this automation can fire.")

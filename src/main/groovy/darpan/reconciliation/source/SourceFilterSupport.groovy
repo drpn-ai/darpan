@@ -1,5 +1,6 @@
 package darpan.reconciliation.source
 
+import darpan.reconciliation.conclusion.ExcludedRecordsSidecar
 import darpan.reconciliation.core.CompareIdExpressionSupport
 
 import java.util.Locale
@@ -111,6 +112,43 @@ class SourceFilterSupport {
             parsed.add(Collections.unmodifiableMap(rule))
         }
         return Collections.unmodifiableList(parsed)
+    }
+
+    /**
+     * DAR-BE-063 §1.5. Applies parsed rules to each record, keeps the survivors, collects the dropped
+     * records into the excluded sidecar collector, and reports EVERY rule — a zero-count rule included,
+     * because a missing entry reads as "not applied" and the conclude pass would then call the whole
+     * side UNKNOWN. No rules: the same list back and no report, so an unconfigured connector's output
+     * is byte-identical to the build before filters existed.
+     */
+    static Map applyToRecords(List records, List<Map<String, Object>> parsedRules) {
+        if (!parsedRules) return [records: records, configuredExclusions: null]
+        List<Map> kept = []
+        Map excludedCollector = ExcludedRecordsSidecar.newCollector()
+        Map<String, Integer> exclusionCounts = [:]
+        Map<String, Integer> fieldAbsentCounts = [:]
+        for (Object raw : (records ?: [])) {
+            Map record = (Map) raw
+            Map<String, Object> verdict = evaluate(record, parsedRules)
+            if (verdict == null) {
+                kept.add(record)
+                continue
+            }
+            ExcludedRecordsSidecar.collect(excludedCollector, record, (Map) verdict.get("rule"))
+            String key = String.valueOf(((Map) verdict.get("rule")).get("sequenceNum"))
+            Map<String, Integer> bucket = REASON_FIELD_ABSENT == verdict.get("reason") ? fieldAbsentCounts : exclusionCounts
+            bucket.put(key, (bucket.get(key) ?: 0) + 1)
+        }
+        List<Map<String, Object>> configuredExclusions = parsedRules.collect { Map<String, Object> rule ->
+            String key = String.valueOf(rule.get("sequenceNum"))
+            return [sequenceNum     : rule.get("sequenceNum"),
+                    fieldExpression : rule.get("fieldExpression"),
+                    operator        : rule.get("operator"),
+                    values          : new ArrayList<String>((List) rule.get("values")),
+                    excludedCount   : exclusionCounts.get(key) ?: 0,
+                    fieldAbsentCount: fieldAbsentCounts.get(key) ?: 0] as Map<String, Object>
+        }
+        return [records: kept, configuredExclusions: configuredExclusions, excludedCollector: excludedCollector]
     }
 
     /**

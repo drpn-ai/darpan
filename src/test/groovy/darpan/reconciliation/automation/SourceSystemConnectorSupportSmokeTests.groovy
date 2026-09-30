@@ -228,10 +228,12 @@ class SourceSystemConnectorSupportSmokeTests {
     }
 
     @Test
-    void shopifyConnectorDeclaresNoFilterParameterUntilItOptsIn() {
+    void shopifyConnectorOptsIntoSourceFilters() {
+        // Opted in 2026-09-30 (DAR-BE-063): the Shopify fulfilled -> NetSuite billed run keeps only
+        // FULFILLED orders, and the order extract now filters per order and writes the excluded sidecar.
         Map<String, Object> shopify = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY")
         assertNotNull(shopify, "SHOPIFY connector row should resolve")
-        assertNull(shopify.filterParameterName)
+        assertEquals("sourceFilters", shopify.filterParameterName)
     }
 
     @Test
@@ -239,7 +241,7 @@ class SourceSystemConnectorSupportSmokeTests {
         // Opted in 2026-08-27 for return-status exclusion. Without filterParameterName the rules board
         // hides the exclusion control (AutomationFacadeSupport.supportsExcludeFiltersForSystem ->
         // RuleSetBoard.supportsExclusions) and a configured rule would never dispatch. The canonical
-        // SHOPIFY connector is unaffected and keeps its opt-out — see the sibling test above.
+        // SHOPIFY connector opted in separately on 2026-09-30 (DAR-BE-063) — see the sibling test above.
         Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY_RETURN_REFS")
         assertNotNull(connector, "SHOPIFY_RETURN_REFS connector row should resolve")
         assertEquals("sourceFilters", connector.filterParameterName)

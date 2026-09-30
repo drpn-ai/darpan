@@ -52,6 +52,8 @@
             exchangeStateLookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderExchangeState"
             exchangeSweepServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyExchangeSweep"
             healthCheckServiceName="facade.ShopifyFacadeServices.probe#ShopifyAuthConnection"
+            filterParameterName="sourceFilters"
+            evidenceFieldsJson='{"system":"Shopify","state":"displayFulfillmentStatus","stateLabels":{"FULFILLED":"Fulfilled","UNFULFILLED":"Unfulfilled","PARTIALLY_FULFILLED":"Partially fulfilled","RESTOCKED":"Restocked","ON_HOLD":"On hold","IN_PROGRESS":"In progress","SCHEDULED":"Scheduled","PENDING_FULFILLMENT":"Pending fulfillment","OPEN":"Open"},"facts":["name","displayFinancialStatus","sourceName"]}'
             enabled="Y"/>
 
     <!-- NETSUITE has no automation extractor; this row exists so the saved-run path resolves its

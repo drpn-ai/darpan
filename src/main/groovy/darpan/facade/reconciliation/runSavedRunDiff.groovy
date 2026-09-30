@@ -558,6 +558,12 @@ try {
             ec.message.addError(resolvedRuleSetRun.error as String)
         } else if (resolvedRuleSetRun.savedRun == null) {
             ec.message.addError("Saved run '${savedRunIdValue}' was not found.")
+        } else if (!ReconciliationSavedRunSupport.requireRunEnabled(ec,
+                (Map<String, Object>) resolvedRuleSetRun.savedRun,
+                ((Map<String, Object>) resolvedRuleSetRun.savedRun).runName as String)) {
+            // DAR-BE-060, MANUAL path. The scheduled path is gated separately in
+            // AutomationExecutionSupport — they reach the pipeline by different routes, so one
+            // check would leave the other running and the operator would believe it was off.
         } else {
             Map<String, Object> savedRun = (Map<String, Object>) resolvedRuleSetRun.savedRun
             Map<String, Object> sourceBySide = (Map<String, Object>) resolvedRuleSetRun.sourceBySide

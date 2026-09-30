@@ -57,6 +57,8 @@ facade.ReconciliationFacadeServices.create#RuleSetRun
 facade.ReconciliationFacadeServices.delete#Automation
 facade.ReconciliationFacadeServices.delete#GeneratedOutput
 facade.ReconciliationFacadeServices.delete#SavedRun
+facade.ReconciliationFacadeServices.disable#SavedRun
+facade.ReconciliationFacadeServices.enable#SavedRun
 facade.ReconciliationFacadeServices.get#Automation
 facade.ReconciliationFacadeServices.get#GeneratedOutput
 facade.ReconciliationFacadeServices.get#GeneratedOutputDifferences

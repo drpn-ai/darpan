@@ -201,6 +201,12 @@
                                         "$ref": "#/components/schemas/DeleteSavedRunRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/DisableSavedRunRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/EnableSavedRunRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetAutomationRequest"
                                     },
                                     {
@@ -428,6 +434,8 @@
                                         "facade.ReconciliationFacadeServices.delete#Automation": "#/components/schemas/DeleteAutomationRequest",
                                         "facade.ReconciliationFacadeServices.delete#GeneratedOutput": "#/components/schemas/DeleteGeneratedOutputRequest",
                                         "facade.ReconciliationFacadeServices.delete#SavedRun": "#/components/schemas/DeleteSavedRunRequest",
+                                        "facade.ReconciliationFacadeServices.disable#SavedRun": "#/components/schemas/DisableSavedRunRequest",
+                                        "facade.ReconciliationFacadeServices.enable#SavedRun": "#/components/schemas/EnableSavedRunRequest",
                                         "facade.ReconciliationFacadeServices.get#Automation": "#/components/schemas/GetAutomationRequest",
                                         "facade.ReconciliationFacadeServices.get#GeneratedOutput": "#/components/schemas/GetGeneratedOutputRequest",
                                         "facade.ReconciliationFacadeServices.get#GeneratedOutputDifferences": "#/components/schemas/GetGeneratedOutputDifferencesRequest",
@@ -675,6 +683,12 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/DeleteSavedRunResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/DisableSavedRunResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/EnableSavedRunResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetAutomationResponse"
@@ -7606,6 +7620,9 @@
                             "scopeMode": {
                                 "type": "string"
                             },
+                            "isActive": {
+                                "type": "boolean"
+                            },
                             "requiresSystemSelection": {
                                 "type": "boolean"
                             },
@@ -8115,6 +8132,9 @@
                             },
                             "scopeMode": {
                                 "type": "string"
+                            },
+                            "isActive": {
+                                "type": "boolean"
                             },
                             "requiresSystemSelection": {
                                 "type": "boolean"
@@ -8686,6 +8706,202 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/DeleteSavedRunResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "DisableSavedRunParams": {
+                "type": "object",
+                "properties": {
+                    "savedRunId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "savedRunId"
+                ],
+                "description": "Disabled one tenant-scoped saved run by setting RuleSet.isActive to N.\n\n            DAR-BE-060: runs are retired by disabling, never by deleting. A run owns its results,\n            diff documents and automation executions \u2014 deleting it to tidy a list would delete the\n            record of what was reconciled and when.\n\n            A disabled run stays readable and editable, or it could never be turned back on. What\n            it cannot do is RUN, on either path: the manual runner and the automation executor are\n            gated separately."
+            },
+            "DisableSavedRunResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "savedRunId": {
+                        "type": "string"
+                    },
+                    "isActive": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "DisableSavedRunRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.disable#SavedRun",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.disable#SavedRun",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.disable#SavedRun"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DisableSavedRunParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DisableSavedRunResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.disable#SavedRun. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DisableSavedRunResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "EnableSavedRunParams": {
+                "type": "object",
+                "properties": {
+                    "savedRunId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "savedRunId"
+                ],
+                "description": "Enabled one tenant-scoped saved run by setting RuleSet.isActive to Y.\n\n            DAR-BE-060: runs are retired by disabling, never by deleting. A run owns its results,\n            diff documents and automation executions \u2014 deleting it to tidy a list would delete the\n            record of what was reconciled and when.\n\n            A disabled run stays readable and editable, or it could never be turned back on. What\n            it cannot do is RUN, on either path: the manual runner and the automation executor are\n            gated separately."
+            },
+            "EnableSavedRunResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "savedRunId": {
+                        "type": "string"
+                    },
+                    "isActive": {
+                        "type": "boolean"
+                    }
+                }
+            },
+            "EnableSavedRunRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.enable#SavedRun",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.enable#SavedRun",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.enable#SavedRun"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/EnableSavedRunParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "EnableSavedRunResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.enable#SavedRun. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/EnableSavedRunResult"
                     }
                 },
                 "required": [
@@ -10724,6 +10940,9 @@
                                 },
                                 "scopeMode": {
                                     "type": "string"
+                                },
+                                "isActive": {
+                                    "type": "boolean"
                                 },
                                 "requiresSystemSelection": {
                                     "type": "boolean"
@@ -12868,6 +13087,9 @@
                             "scopeMode": {
                                 "type": "string"
                             },
+                            "isActive": {
+                                "type": "boolean"
+                            },
                             "requiresSystemSelection": {
                                 "type": "boolean"
                             },
@@ -13189,6 +13411,9 @@
                             },
                             "scopeMode": {
                                 "type": "string"
+                            },
+                            "isActive": {
+                                "type": "boolean"
                             },
                             "requiresSystemSelection": {
                                 "type": "boolean"
@@ -17473,6 +17698,8 @@
         "facade.ReconciliationFacadeServices.delete#Automation": "DeleteAutomation",
         "facade.ReconciliationFacadeServices.delete#GeneratedOutput": "DeleteGeneratedOutput",
         "facade.ReconciliationFacadeServices.delete#SavedRun": "DeleteSavedRun",
+        "facade.ReconciliationFacadeServices.disable#SavedRun": "DisableSavedRun",
+        "facade.ReconciliationFacadeServices.enable#SavedRun": "EnableSavedRun",
         "facade.ReconciliationFacadeServices.get#Automation": "GetAutomation",
         "facade.ReconciliationFacadeServices.get#GeneratedOutput": "GetGeneratedOutput",
         "facade.ReconciliationFacadeServices.get#GeneratedOutputDifferences": "GetGeneratedOutputDifferences",

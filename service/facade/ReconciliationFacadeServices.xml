@@ -78,6 +78,7 @@
                 <parameter name="ruleSetId"/>
                 <parameter name="compareScopeId"/>
                 <parameter name="scopeMode"/>
+                <parameter name="isActive" type="Boolean"/>
                 <parameter name="requiresSystemSelection" type="Boolean"/>
                 <parameter name="defaultFile1SystemEnumId"/>
                 <parameter name="defaultFile2SystemEnumId"/>
@@ -517,6 +518,7 @@
                 <parameter name="ruleSetId"/>
                 <parameter name="compareScopeId"/>
                 <parameter name="scopeMode"/>
+                <parameter name="isActive" type="Boolean"/>
                 <parameter name="requiresSystemSelection" type="Boolean"/>
                 <parameter name="defaultFile1SystemEnumId"/>
                 <parameter name="defaultFile2SystemEnumId"/>
@@ -786,6 +788,7 @@
                 <parameter name="ruleSetId"/>
                 <parameter name="compareScopeId"/>
                 <parameter name="scopeMode"/>
+                <parameter name="isActive" type="Boolean"/>
                 <parameter name="requiresSystemSelection" type="Boolean"/>
                 <parameter name="defaultFile1SystemEnumId"/>
                 <parameter name="defaultFile2SystemEnumId"/>
@@ -1308,6 +1311,7 @@
                 <parameter name="ruleSetId"/>
                 <parameter name="compareScopeId"/>
                 <parameter name="scopeMode"/>
+                <parameter name="isActive" type="Boolean"/>
                 <parameter name="requiresSystemSelection" type="Boolean"/>
                 <parameter name="defaultFile1SystemEnumId"/>
                 <parameter name="defaultFile2SystemEnumId"/>
@@ -1400,6 +1404,7 @@
                 <parameter name="ruleSetId"/>
                 <parameter name="compareScopeId"/>
                 <parameter name="scopeMode"/>
+                <parameter name="isActive" type="Boolean"/>
                 <parameter name="requiresSystemSelection" type="Boolean"/>
                 <parameter name="defaultFile1SystemEnumId"/>
                 <parameter name="defaultFile2SystemEnumId"/>
@@ -2484,6 +2489,104 @@
                 <set field="deleted" from="true"/>
                 <set field="deletedAutomationId" from="automationIdValue"/>
                 <message>Deleted automation ${automationIdValue}.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="disable" noun="SavedRun" allow-remote="true" authenticate="true">
+        <description>Disabled one tenant-scoped saved run by setting RuleSet.isActive to N.
+
+            DAR-BE-060: runs are retired by disabling, never by deleting. A run owns its results,
+            diff documents and automation executions — deleting it to tidy a list would delete the
+            record of what was reconciled and when.
+
+            A disabled run stays readable and editable, or it could never be turned back on. What
+            it cannot do is RUN, on either path: the manual runner and the automation executor are
+            gated separately.</description>
+        <in-parameters>
+            <parameter name="savedRunId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="savedRunId"/>
+            <parameter name="isActive" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="savedRunIdValue" from="((savedRunId)?.toString()?.trim())"/>
+            <if condition="!savedRunIdValue">
+                <message error="true">savedRunId is required</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ruleSetRecord" from="ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', savedRunIdValue).disableAuthz().useCache(false).one()"/>
+                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, ruleSetRecord)">
+                    <!-- One message for "no such run" and "not yours", matching every sibling here:
+                         a more specific one is a cross-tenant existence oracle. -->
+                    <message error="true">Saved run '${savedRunIdValue}' was not found.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreSetFlag" from="ruleSetRecord.set('isActive', 'N')"/>
+                <set field="ignoreUpdatedDate" from="ruleSetRecord.set('lastUpdatedDate', ec.user.nowTimestamp)"/>
+                <set field="ignoreUpdate" from="ruleSetRecord.update()"/>
+                <set field="isActive" from="false"/>
+                <message>Disabled run ${savedRunIdValue}.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="enable" noun="SavedRun" allow-remote="true" authenticate="true">
+        <description>Enabled one tenant-scoped saved run by setting RuleSet.isActive to Y.
+
+            DAR-BE-060: runs are retired by disabling, never by deleting. A run owns its results,
+            diff documents and automation executions — deleting it to tidy a list would delete the
+            record of what was reconciled and when.
+
+            A disabled run stays readable and editable, or it could never be turned back on. What
+            it cannot do is RUN, on either path: the manual runner and the automation executor are
+            gated separately.</description>
+        <in-parameters>
+            <parameter name="savedRunId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="savedRunId"/>
+            <parameter name="isActive" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="savedRunIdValue" from="((savedRunId)?.toString()?.trim())"/>
+            <if condition="!savedRunIdValue">
+                <message error="true">savedRunId is required</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ruleSetRecord" from="ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', savedRunIdValue).disableAuthz().useCache(false).one()"/>
+                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, ruleSetRecord)">
+                    <!-- One message for "no such run" and "not yours", matching every sibling here:
+                         a more specific one is a cross-tenant existence oracle. -->
+                    <message error="true">Saved run '${savedRunIdValue}' was not found.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreSetFlag" from="ruleSetRecord.set('isActive', 'Y')"/>
+                <set field="ignoreUpdatedDate" from="ruleSetRecord.set('lastUpdatedDate', ec.user.nowTimestamp)"/>
+                <set field="ignoreUpdate" from="ruleSetRecord.update()"/>
+                <set field="isActive" from="true"/>
+                <message>Enabled run ${savedRunIdValue}.</message>
             </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

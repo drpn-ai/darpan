@@ -236,6 +236,29 @@ class AutomationExecutionSupport {
         String automationId = normalize(readField(automation, "automationId"))
         String inputModeEnumId = normalize(readField(automation, "inputModeEnumId"))
 
+        // DAR-BE-060, SCHEDULED path. Gated here as well as in runSavedRunDiff because an
+        // automation is a second pipeline implementation rather than a scheduler in front of the
+        // first — a disable applied only to the manual path would leave this one firing nightly
+        // while the UI showed the run as off. Pausing the AUTOMATION is a separate switch; this
+        // one is the RUN it points at, and disabling the run must stop every way of starting it.
+        String ruleSetId = normalize(readField(automation, "ruleSetId")) ?: normalize(readField(automation, "savedRunId"))
+        if (ruleSetId) {
+            // findGlobalUnscoped, not a bare disableAuthz: the DisableAuthzRatchetTest floor is
+            // there precisely so a new unscoped read has to say why. This one is deliberate —
+            // a SCHEDULED execution may carry no ambient tenant (an anonymous _NA_ context has
+            // none), and a tenant-scoped read would then find nothing and let a disabled run
+            // fire. The automation row already resolved its tenant; this only reads a flag off
+            // the run it points at and never returns the row to a caller.
+            def ruleSet = darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, "darpan.rule.RuleSet",
+                        "DAR-BE-060 disabled-run gate on the scheduled path; a scheduled context may have no " +
+                        "ambient tenant, and a scoped read that finds nothing would let a disabled run fire")
+                    .condition("ruleSetId", ruleSetId).useCache(false).one()
+            if (ruleSet != null && !ReconciliationSavedRunSupport.isRunEnabled(ruleSet)) {
+                throw new IllegalStateException("Automation ${automationId} points at run ${ruleSetId}, " +
+                        "which is disabled. Enable the run before this automation can fire.")
+            }
+        }
+
         if (inputModeEnumId == AUTOMATION_INPUT_SFTP_FILES) {
             return SftpAutomationSupport.runSftpFileAutomation(ec, normalizeSftpExecutionParams(input))
         }

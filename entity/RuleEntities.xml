@@ -23,6 +23,17 @@
         <relationship type="one" related="moqui.security.UserAccount" fk-name="RULESET_CREATED_BY">
             <key-map field-name="createdByUserId" related-field-name="userId"/>
         </relationship>
+        <field name="isActive" type="text-indicator" default="'Y'">
+            <description>DAR-BE-060. Y or N (absent reads as Y, so every run that predates this
+                field stays enabled). A disabled run is retired, not removed: its results, diff
+                documents and automation executions are the record of what was reconciled and
+                when, and deleting the run to tidy a list would delete that evidence.
+
+                DISABLED MEANS IT DOES NOT RUN, on BOTH paths. A manual execution and a scheduled
+                automation reach the pipeline separately, so the gate is applied at each — a flag
+                that only hides a run from a list while it keeps firing nightly is worse than no
+                flag, because the operator believes it is off.</description>
+        </field>
         <!-- Audit H12.6 — ruleSetName had no uniqueness within a tenant. -->
         <index name="RULESET_TENANT_NAME" unique="true">
             <index-field name="companyUserGroupId"/>

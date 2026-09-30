@@ -45,6 +45,46 @@ class ReconciliationSavedRunSupport {
         return darpan.common.TransactionDetachSupport.runDetachedFromCallerTransaction(ec, work)
     }
 
+    /**
+     * DAR-BE-060. Whether a run is retired.
+     *
+     * <p>Absent reads as ENABLED, which is the only safe default: every RuleSet written before
+     * the column existed has a null here, and treating null as disabled would silently switch
+     * off every run in the system on deploy.</p>
+     */
+    static boolean isRunEnabled(def ruleSet) {
+        if (ruleSet == null) return false
+        String flag = normalize(readFieldValue(ruleSet, "isActive"))
+        return flag == null || !flag.equalsIgnoreCase("N")
+    }
+
+    /**
+     * The gate, applied at BOTH execution entry points rather than at one.
+     *
+     * <p>A manual run and a scheduled automation reach the pipeline by different routes
+     * (an automation is a second pipeline implementation, not a scheduler), so a single check
+     * would leave the other path running. A disabled run that still fires nightly is worse than
+     * no disable at all, because the operator believes it is off.</p>
+     *
+     * @return true when the run may proceed; adds the operator-facing error and returns false otherwise
+     */
+    static boolean requireRunEnabled(def ec, def ruleSet, String runLabel) {
+        if (isRunEnabled(ruleSet)) return true
+        ec?.message?.addError("Run '${runLabel}' is disabled. Enable it before running it.")
+        return false
+    }
+
+    private static String readFieldValue(def record, String field) {
+        if (record == null) return null
+        // A Map answers null for an absent key; an EntityValue RAISES on an undeclared field, and
+        // this helper is called with both.
+        try {
+            return record instanceof Map ? (record.get(field)?.toString()) : (record."${field}"?.toString())
+        } catch (Exception ignored) {
+            return null
+        }
+    }
+
     static final String RUN_TYPE_MAPPING = "mapping"
     static final String RUN_TYPE_RULESET = "ruleset"
     static final String FILE_SIDE_1 = "FILE_1"
@@ -462,6 +502,9 @@ class ReconciliationSavedRunSupport {
                 companyUserGroupId      : mapping.companyUserGroupId,
                 companyLabel            : TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, mapping.companyUserGroupId),
                 runType                 : RUN_TYPE_MAPPING,
+                // Legacy mapping runs carry no isActive column, so they read as enabled. Disabling
+                // them is a separate change; claiming a flag that does not exist would be worse.
+                isActive                : true,
                 reconciliationMappingId : mapping.reconciliationMappingId,
                 ruleSetId               : null,
                 compareScopeId          : null,
@@ -574,6 +617,9 @@ class ReconciliationSavedRunSupport {
                 companyUserGroupId      : normalize(ruleSet.companyUserGroupId),
                 companyLabel            : TenantAccessSupport.resolveTenantLabelForUserGroupId(ec, ruleSet.companyUserGroupId),
                 runType                 : RUN_TYPE_RULESET,
+                // DAR-BE-060. Carried on the row rather than gated inside the resolver: a disabled
+                // run must still be readable and editable, or it could never be turned back on.
+                isActive                : isRunEnabled(ruleSet),
                 reconciliationMappingId : null,
                 ruleSetId               : ruleSet.ruleSetId,
                 compareScopeId          : compareScope.compareScopeId,

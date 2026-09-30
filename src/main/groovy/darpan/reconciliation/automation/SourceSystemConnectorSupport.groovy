@@ -200,6 +200,7 @@ class SourceSystemConnectorSupport {
                 supportsStateExtract       : "Y".equalsIgnoreCase(readString(record, "supportsStateExtract")),
                 statusParameterName        : readString(record, "statusParameterName"),
                 filterParameterName        : readString(record, "filterParameterName"),
+                evidenceFieldsJson         : readString(record, "evidenceFieldsJson"),
                 lookupServiceName          : readString(record, "lookupServiceName"),
                 lookupIdsParameterName     : readString(record, "lookupIdsParameterName"),
                 lookupMaxIds               : normalizeInt(readField(record, "lookupMaxIds"), null),

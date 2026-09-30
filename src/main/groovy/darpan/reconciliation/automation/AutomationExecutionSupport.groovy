@@ -11,6 +11,7 @@ import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
 import darpan.facade.reconciliation.MissingDiffVerificationSupport
+import darpan.facade.reconciliation.RunConclusionStep
 import darpan.facade.reconciliation.RunObservability
 import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.reconciliation.core.ReconciliationServices
@@ -457,6 +458,9 @@ class AutomationExecutionSupport {
                         reconcileResult, mintedRunResultId, stepCtx, window, executionParams)
                 verifyReturnPresenceIfEnabled(ec, automation, file1Source, file2Source, file1Result, file2Result,
                         reconcileResult, mintedRunResultId, stepCtx, window, executionParams)
+                // DAR-UI-044: the same conclude seam the interactive path calls.
+                concludeIfConfigured(ec, automation, file1Source, file2Source, file1Result, file2Result,
+                        reconcileResult, mintedRunResultId, stepCtx)
                 String resultDataManagerPath = normalizeDataManagerPath(ec,
                         reconcileResult.resultDataManagerPath ?: reconcileResult.diffLocation ?: reconcileResult.diffFileName)
                 openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_WRITE_OUTPUT)
@@ -1238,6 +1242,24 @@ class AutomationExecutionSupport {
     }
 
     /** The diff document the compare just wrote, which the verification pass rewrites in place. */
+    /**
+     * DAR-UI-044: names each verified finding via the shared RunConclusionStep seam. Guarded end to end,
+     * including resolving the diff file: a conclusion is never allowed to fail a run whose compare
+     * succeeded, so anything that goes wrong here is a skipped stage, not a failed run.
+     */
+    protected static void concludeIfConfigured(def ec, def automation, def file1Source, def file2Source,
+                                               Map file1Result, Map file2Result, Map<String, Object> reconcileResult,
+                                               String runResultId, Map stepCtx) {
+        try {
+            RunConclusionStep.runIfConfigured([ec: ec,
+                    compareScopeId: normalize(reconcileResult?.compareScopeId) ?: normalize(readField(automation, "compareScopeId")),
+                    diffFile: resolveDiffFile(ec, reconcileResult), file1Source: file1Source, file2Source: file2Source,
+                    file1Result: file1Result, file2Result: file2Result, runResultId: runResultId, stepCtx: stepCtx])
+        } catch (Throwable ignored) {
+            if (ec?.message?.hasError()) ec.message.clearErrors()
+        }
+    }
+
     protected static File resolveDiffFile(def ec, Map<String, Object> reconcileResult) {
         String location = normalize(reconcileResult?.diffLocation)
         if (location) {

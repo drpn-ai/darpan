@@ -860,6 +860,7 @@ SERVICE get GeneratedOutputDifferences
   allow-remote: true
   IN:
     buckets : String
+    conclusionCode : String
     fileName : String [required]
     includeFacets : Boolean
     pageIndex : Integer
@@ -868,6 +869,7 @@ SERVICE get GeneratedOutputDifferences
     search : String
   OUT:
     bucketCounts : Map
+    conclusionCounts : Map
     differences : List
     errors : List
     errors.error : String

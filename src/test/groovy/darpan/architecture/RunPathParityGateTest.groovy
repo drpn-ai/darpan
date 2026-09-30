@@ -75,6 +75,9 @@ class RunPathParityGateTest {
             "RunVerificationSupport.runMissingDiffPass",
             "RunVerificationSupport.prepareExchangePairPass",
             "RunVerificationSupport.prepareReturnPresencePass",
+            // DAR-UI-044: conclusions are written on the scheduled path too, or an automation's result
+            // page silently shows the legacy view while the same run from the UI shows conclusions.
+            "RunConclusionStep.runIfConfigured",
     ]
 
     /**

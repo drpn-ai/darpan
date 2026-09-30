@@ -298,7 +298,8 @@ class ReconciliationOutputSupport {
      */
     static Map<String, Object> getGeneratedOutputDifferences(def ec, Object fileName, Object pageIndex,
                                                              Object pageSize, Object buckets, Object ruleFilterKey,
-                                                             Object search, Object includeFacets) {
+                                                             Object search, Object includeFacets,
+                                                             Object conclusionCode = null) {
         String fileNameValue = normalize(fileName)
         Map<String, Object> result = null
 
@@ -339,7 +340,7 @@ class ReconciliationOutputSupport {
 
                 Map<String, Object> page = DiffDetailClassifier.buildDifferencesPage(
                         document, file1Label, file2Label, bucketList, ruleKey, searchValue,
-                        requestedPageIndex, requestedPageSize, wantFacets)
+                        requestedPageIndex, requestedPageSize, wantFacets, normalize(conclusionCode))
                 Map<String, Object> summary = DiffDetailClassifier.buildEffectiveSummary(document, file1Label, file2Label)
 
                 Map<String, Object> outputFile = [

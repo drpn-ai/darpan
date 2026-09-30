@@ -50,6 +50,9 @@ class RunObservability {
     static final String STAGE_VERIFY_EXCHANGE = "VERIFY_EXCHANGE"
     /** Return-presence grading of both missing directions (window edges, cancelled-order refunds). */
     static final String STAGE_VERIFY_RETURNS  = "VERIFY_RETURNS"
+    /** DAR-UI-044: names every VERIFIED finding by the scope's conclusion rules. Only runs with rules
+     *  open it; RunConclusionStep is the shared seam both orchestrators call. */
+    static final String STAGE_CONCLUDE      = "CONCLUDE"
     static final String STAGE_NOTIFY        = "NOTIFY"
 
     /** One code per verification pass, numbered in execution order. They shared a single VERIFY code
@@ -64,8 +67,9 @@ class RunObservability {
             (STAGE_VERIFY_MISSING)  : 5,
             (STAGE_VERIFY_EXCHANGE) : 6,
             (STAGE_VERIFY_RETURNS)  : 7,
-            (STAGE_WRITE_OUTPUT)    : 8,
-            (STAGE_NOTIFY)          : 9,
+            (STAGE_CONCLUDE)        : 8,
+            (STAGE_WRITE_OUTPUT)    : 9,
+            (STAGE_NOTIFY)          : 10,
     ]
 
     static boolean isTerminalStatus(String status) { TERMINAL_STATUSES.contains(status) }

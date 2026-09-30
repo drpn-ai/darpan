@@ -6,6 +6,7 @@ import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.ReconciliationApiWindowSupport
 import darpan.facade.reconciliation.ReconciliationOutputSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
+import darpan.facade.reconciliation.RunConclusionStep
 import darpan.facade.reconciliation.RunExtractSupport
 import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.facade.reconciliation.RunObservability
@@ -678,6 +679,9 @@ try {
                                     RunObservability.endStep(ec, obsStep, RunObservability.STATUS_SUCCESS,
                                             [recordCount: serviceResult.differenceCount])
                                     obsStep = null
+                                    RunConclusionStep.runIfConfigured([ec: ec, compareScopeId: savedRun.compareScopeId,
+                                            diffFile: resolveOutputFile(serviceResult), file1Source: file1Source, file2Source: null,
+                                            file1Result: file1Result, file2Result: null, runResultId: obsRunId, stepCtx: obsCtx])
                                     obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_WRITE_OUTPUT) : null
                                     obsStage = RunObservability.STAGE_WRITE_OUTPUT
                                     String resultDataManagerPath = serviceResult.diffLocation ?
@@ -840,6 +844,10 @@ try {
                                     runReturnPresenceVerificationPass(serviceResult, file1Source, file2Source,
                                             (Map) file1Result, (Map) file2Result,
                                             file1Label, file2Label, savedRun.companyUserGroupId as String)
+                                    // DAR-UI-044: name each VERIFIED finding. No rules on the scope: no step, no change.
+                                    RunConclusionStep.runIfConfigured([ec: ec, compareScopeId: savedRun.compareScopeId,
+                                            diffFile: resolveOutputFile(serviceResult), file1Source: file1Source, file2Source: file2Source,
+                                            file1Result: file1Result, file2Result: file2Result, runResultId: obsRunId, stepCtx: obsCtx])
                                     obsStep = obsRunId ? RunObservability.beginStep(ec, obsRunId, obsCtx, RunObservability.STAGE_WRITE_OUTPUT) : null
                                     obsStage = RunObservability.STAGE_WRITE_OUTPUT
                                     String resultDataManagerPath = serviceResult.diffLocation ?

@@ -156,6 +156,8 @@ class DiffDetailClassifier {
                 ruleFilterKey: ruleDescriptor.ruleFilterKey,
                 ruleId       : ruleDescriptor.ruleId,
                 ruleLabel    : ruleDescriptor.ruleLabel,
+                // DAR-UI-044: the conclusion the run drew, or null on a run without conclusion rules.
+                conclusionCode: (record.get('conclusion') instanceof Map) ? normalizeText(((Map) record.get('conclusion')).get('code')) : null,
         ]
     }
 
@@ -166,6 +168,16 @@ class DiffDetailClassifier {
         rows.each { Map row ->
             String bucket = (String) row.bucket
             if (counts.containsKey(bucket)) counts.put(bucket, counts.get(bucket) + 1)
+        }
+        return counts
+    }
+
+    /** Whole-document count per conclusion code (DAR-UI-044); empty on a run without conclusions. */
+    static Map<String, Integer> buildConclusionCounts(List<Map> rows) {
+        Map<String, Integer> counts = new LinkedHashMap<>()
+        rows.each { Map row ->
+            String code = (String) row.conclusionCode
+            if (code) counts.put(code, (counts.get(code) ?: 0) + 1)
         }
         return counts
     }
@@ -248,7 +260,7 @@ class DiffDetailClassifier {
                 onlyInFile2Count            : onlyInFile2Count,
                 ruleDifferenceCount         : fileSummary.get('ruleDifferenceCount'),
                 missingObjectDifferenceCount: fileSummary.get('missingObjectDifferenceCount'),
-        ]
+        ] + ((fileSummary.get('conclusions') instanceof Map) ? [conclusions: fileSummary.get('conclusions')] : [:])
     }
 
     // --- paging (mirror activeBucket/activeRule/filtered chain + useListPagination) ---
@@ -272,7 +284,7 @@ class DiffDetailClassifier {
      */
     static Map buildDifferencesPage(Map document, String file1Label, String file2Label,
                                     List<String> requestedBuckets, String ruleFilterKey, String search,
-                                    int pageIndex, int pageSize, boolean includeFacets) {
+                                    int pageIndex, int pageSize, boolean includeFacets, String conclusionCode = null) {
         List rawDifferences = (document?.get('differences') instanceof List) ? (List) document.get('differences') : []
 
         List<Map> classified = new ArrayList<>(rawDifferences.size())
@@ -289,7 +301,9 @@ class DiffDetailClassifier {
         String normalizedSearch = (search == null) ? '' : search.trim().toLowerCase()
         String effectiveRuleKey = normalizeText(ruleFilterKey) ?: ALL_RULE_FILTER_KEY
 
+        String wantedConclusion = normalizeText(conclusionCode)
         List<Map> filtered = classified.findAll { Map row ->
+            if (wantedConclusion && row.conclusionCode != wantedConclusion) return false
             if (!activeBuckets.contains(row.bucket)) return false
             if (effectiveRuleKey != ALL_RULE_FILTER_KEY && row.ruleFilterKey != effectiveRuleKey) return false
             if (normalizedSearch && !((String) row.recordId).toLowerCase().contains(normalizedSearch)) return false
@@ -316,6 +330,7 @@ class DiffDetailClassifier {
         if (includeFacets) {
             result.put('bucketCounts', buildBucketCounts(classified))
             result.put('ruleOptions', buildRuleOptions(classified))
+            result.put('conclusionCounts', buildConclusionCounts(classified))
         }
         return result
     }

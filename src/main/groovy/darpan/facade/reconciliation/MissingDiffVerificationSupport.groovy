@@ -46,9 +46,10 @@ class MissingDiffVerificationSupport {
         return errors ? errors.join("; ") : ""
     }
 
-    private static final String DIFFERENCES_HEADER = "\"differences\":["
-    private static final String SUMMARY_PREFIX = "\"summary\":"
-    private static final String PROCESSING_WARNINGS_PREFIX = "\"processingWarnings\":"
+    // The document's line shapes live in DiffDocumentStreamSupport, shared with the conclude pass.
+    private static final String DIFFERENCES_HEADER = DiffDocumentStreamSupport.DIFFERENCES_HEADER
+    private static final String SUMMARY_PREFIX = DiffDocumentStreamSupport.SUMMARY_PREFIX
+    private static final String PROCESSING_WARNINGS_PREFIX = DiffDocumentStreamSupport.PROCESSING_WARNINGS_PREFIX
 
     /**
      * args:
@@ -262,21 +263,12 @@ class MissingDiffVerificationSupport {
                 warnings: warnings, auditNote: auditNote] as Map<String, Object>
     }
 
-    /** A row line ends with "," (more rows follow) or "]" (last row); the closing "}" line ends the region. */
     private static String stripRowLine(String line) {
-        String trimmed = line.trim()
-        if (trimmed == "}" || trimmed == "]" || trimmed.isEmpty()) return null
-        if (trimmed.endsWith(",") || trimmed.endsWith("]")) return trimmed.substring(0, trimmed.length() - 1)
-        return trimmed
+        return DiffDocumentStreamSupport.stripRowLine(line)
     }
 
     private static Map parseRowQuietly(JsonSlurper slurper, String rowJson) {
-        try {
-            Object parsed = slurper.parseText(rowJson)
-            return parsed instanceof Map ? (Map) parsed : null
-        } catch (Exception ignored) {
-            return null
-        }
+        return DiffDocumentStreamSupport.parseRowQuietly(slurper, rowJson)
     }
 
     /** Ruleset diff rows carry the record id in primaryId; generic diff rows in id. */
@@ -308,13 +300,7 @@ class MissingDiffVerificationSupport {
     }
 
     private static Object headerFragment(JsonSlurper slurper, String line, String prefix) {
-        String fragment = line.substring(prefix.length()).trim()
-        if (fragment.endsWith(",")) fragment = fragment.substring(0, fragment.length() - 1)
-        try {
-            return slurper.parseText(fragment)
-        } catch (Exception ignored) {
-            return null
-        }
+        return DiffDocumentStreamSupport.headerFragment(slurper, line, prefix)
     }
 
     private static void decrement(Map summary, String key, int by) {
@@ -323,12 +309,6 @@ class MissingDiffVerificationSupport {
     }
 
     private static void replaceFile(File source, File target) {
-        Path sourcePath = source.toPath()
-        Path targetPath = target.toPath()
-        try {
-            Files.move(sourcePath, targetPath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-        } catch (AtomicMoveNotSupportedException ignored) {
-            Files.move(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING)
-        }
+        DiffDocumentStreamSupport.replaceFile(source, target)
     }
 }

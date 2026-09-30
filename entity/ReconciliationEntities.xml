@@ -1135,6 +1135,11 @@
                 test#SourceConnection facade service — never by a run. Blank disables diagnostics
                 for this connector, which is reported as unavailable rather than as an error.</description>
         </field>
+        <field name="evidenceFieldsJson" type="text-very-long">
+            <description>DAR-UI-044 evidence projection for this connector's records:
+                {"system":"HotWax","state":"statusId","stateLabels":{"ITEM_COMPLETED":"Completed"},"facts":["facilityId","orderItemSeqId"]}.
+                Absent = the expanded row shows the record id only.</description>
+        </field>
         <field name="enabled" type="text-indicator" default="'Y'"/>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>

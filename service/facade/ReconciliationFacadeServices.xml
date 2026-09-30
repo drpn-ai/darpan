@@ -3459,6 +3459,9 @@
             <parameter name="search">
                 <description>Optional record-id substring filter (case-insensitive).</description>
             </parameter>
+            <parameter name="conclusionCode">
+                <description>DAR-UI-044: only differences the run concluded as this code. Empty means all.</description>
+            </parameter>
             <parameter name="includeFacets" type="Boolean" default-value="true">
                 <description>Skip bucket counts + rule options for pure page navigation.</description>
             </parameter>
@@ -3470,6 +3473,9 @@
             <parameter name="metadata" type="Map"/>
             <parameter name="summary" type="Map"/>
             <parameter name="bucketCounts" type="Map"/>
+            <parameter name="conclusionCounts" type="Map">
+                <description>DAR-UI-044: whole-document count per conclusion code, ignoring the conclusion filter. Empty for a run without conclusions.</description>
+            </parameter>
             <parameter name="ruleOptions" type="List"/>
             <parameter name="differences" type="List"/>
             <parameter name="pageIndex" type="Integer"/>
@@ -3480,13 +3486,14 @@
             <parameter name="outputFile" type="Map"/>
         </out-parameters>
         <actions>
-            <set field="differencesResult" from="darpan.facade.reconciliation.ReconciliationOutputSupport.getGeneratedOutputDifferences(ec, fileName, pageIndex, pageSize, buckets, ruleFilterKey, search, includeFacets)"/>
+            <set field="differencesResult" from="darpan.facade.reconciliation.ReconciliationOutputSupport.getGeneratedOutputDifferences(ec, fileName, pageIndex, pageSize, buckets, ruleFilterKey, search, includeFacets, conclusionCode)"/>
             <set field="ok" from="differencesResult.ok"/>
             <set field="messages" from="differencesResult.messages"/>
             <set field="errors" from="differencesResult.errors"/>
             <set field="metadata" from="differencesResult.metadata"/>
             <set field="summary" from="differencesResult.summary"/>
             <set field="bucketCounts" from="differencesResult.bucketCounts"/>
+            <set field="conclusionCounts" from="differencesResult.conclusionCounts"/>
             <set field="ruleOptions" from="differencesResult.ruleOptions"/>
             <set field="differences" from="differencesResult.differences"/>
             <set field="pageIndex" from="differencesResult.pageIndex"/>

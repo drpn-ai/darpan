@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-UI-044. The conclusion vocabulary's type and its one universal member. Tenant-specific
+     conclusions live in tenant config files beside the rules that reach them. -->
+<entity-facade-xml type="seed">
+    <moqui.basic.EnumerationType enumTypeId="DarpanConclusion" description="Run result conclusion"/>
+    <moqui.basic.Enumeration enumId="UNEXPLAINED" enumTypeId="DarpanConclusion" enumCode="UNEXPLAINED"
+            description="Unexplained" sequenceNum="999"/>
+</entity-facade-xml>

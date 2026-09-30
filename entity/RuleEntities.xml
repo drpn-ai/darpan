@@ -282,4 +282,70 @@
         </index>
     </entity>
 
+    <entity entity-name="RuleSetConclusionRule" package="darpan.rule" use="configuration">
+        <description>DAR-UI-044. One named conclusion a compare scope can reach about a finding. Rules are
+            evaluated in sequenceNum order and the FIRST whose conditions all hold wins; no match is
+            UNEXPLAINED. The page renders "How Darpan concluded" from the winning rule's conditions, so an
+            explanation can never claim what the rule did not test.</description>
+        <field name="compareScopeId" type="id" is-pk="true" not-null="true"/>
+        <field name="sequenceNum" type="number-integer" is-pk="true" not-null="true"/>
+        <field name="conclusionEnumId" type="id" not-null="true">
+            <description>Enumeration of type DarpanConclusion; its description is the label.</description>
+        </field>
+        <field name="appliesToBucket" type="text-short">
+            <description>MISSING_FROM_FILE_1, MISSING_FROM_FILE_2 or FINDING (single-sided). Blank = any.</description>
+        </field>
+        <field name="questionText" type="text-medium">
+            <description>Optional open question shown under "Needs a decision". Terse page copy.</description>
+        </field>
+        <field name="suggestedFilterJson" type="text-long">
+            <description>With questionText: {fileSide, fieldExpression, operator, values} the rules board opens pre-filled.</description>
+        </field>
+        <field name="companyUserGroupId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="lastUpdatedDate" type="date-time"/>
+        <relationship type="one" related="darpan.rule.RuleSetCompareScope" fk-name="RSCONC_SCOPE">
+            <key-map field-name="compareScopeId"/>
+        </relationship>
+        <relationship type="one" title="Conclusion" related="moqui.basic.Enumeration" fk-name="RSCONC_ENUM">
+            <key-map field-name="conclusionEnumId" related="enumId"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="RSCONC_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <index name="RSCONC_TENANT"><index-field name="companyUserGroupId"/></index>
+    </entity>
+
+    <entity entity-name="RuleSetConclusionCondition" package="darpan.rule" use="configuration">
+        <description>DAR-UI-044. One condition of a conclusion rule; all of a rule's conditions must hold.</description>
+        <field name="compareScopeId" type="id" is-pk="true" not-null="true"/>
+        <field name="sequenceNum" type="number-integer" is-pk="true" not-null="true"/>
+        <field name="conditionSeq" type="number-integer" is-pk="true" not-null="true"/>
+        <field name="subject" type="text-short" not-null="true">
+            <description>FILE_1 or FILE_2: which side's record the condition reads.</description>
+        </field>
+        <field name="presence" type="text-short" default="'ANY'">
+            <description>KEPT (in the extract), EXCLUDED (screened out by a source filter, read from the
+                sidecar), ABSENT (neither), or ANY.</description>
+        </field>
+        <field name="keyScope" type="text-short" default="'FULL'">
+            <description>FULL matches the whole composite key; FIRST_FIELD matches the first key field only
+                (e.g. the order, when the key is order + NetSuite id).</description>
+        </field>
+        <field name="fieldExpression" type="text-medium"/>
+        <field name="operator" type="text-short">
+            <description>IN, NOT_IN, GT_ZERO, BLANK, NOT_BLANK. Blank with a blank fieldExpression = presence only.</description>
+        </field>
+        <field name="conditionValues" type="text-long"/>
+        <field name="checkLabel" type="text-medium" not-null="true"/>
+        <field name="companyUserGroupId" type="id"/>
+        <relationship type="one" related="darpan.rule.RuleSetConclusionRule" fk-name="RSCONCC_RULE">
+            <key-map field-name="compareScopeId"/><key-map field-name="sequenceNum"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="RSCONCC_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <index name="RSCONCC_TENANT"><index-field name="companyUserGroupId"/></index>
+    </entity>
+
 </entities>

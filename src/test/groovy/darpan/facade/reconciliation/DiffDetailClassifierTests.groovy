@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -219,5 +220,37 @@ class DiffDetailClassifierTests {
         assertEquals("R1", row.recordId)
         assertTrue(row.containsKey("record"))
         assertEquals('{"x":1}', ((Map) row.record).get("data"))
+    }
+
+    // DAR-UI-044: conclusion filter and facet. Facets ignore the conclusion filter, so every tile keeps
+    // its whole-document count while one of them is selected.
+    @Test
+    void conclusionFilterAndFacet() {
+        Map document = [differences: [
+                [primaryId: "1", missingIn: F2, presentIn: F1, conclusion: [code: "A"]],
+                [primaryId: "2", missingIn: F2, presentIn: F1, conclusion: [code: "B"]],
+                [primaryId: "3", missingIn: F2, presentIn: F1, conclusion: [code: "A"]]]]
+        Map page = DiffDetailClassifier.buildDifferencesPage(document, F1, F2, null, "all", null, 0, 50, true, "A")
+        assertEquals(["1", "3"], ((List<Map>) page.differences)*.recordId)
+        assertEquals([A: 2, B: 1], page.conclusionCounts)
+        assertEquals("A", ((List<Map>) page.differences)[0].conclusionCode)
+    }
+
+    @Test
+    void legacyRowsHaveNoConclusionAndAnEmptyFacet() {
+        Map document = [differences: [[primaryId: "1", missingIn: F2, presentIn: F1]]]
+        Map page = DiffDetailClassifier.buildDifferencesPage(document, F1, F2, null, "all", null, 0, 50, true, null)
+        assertEquals([:], page.conclusionCounts)
+        assertNull(((List<Map>) page.differences)[0].conclusionCode)
+    }
+
+    @Test
+    void theEffectiveSummaryCarriesTheConclusions() {
+        Map conclusions = [enabled: true, counts: [[code: "A", label: "A", count: 1]]]
+        Map summary = DiffDetailClassifier.buildEffectiveSummary(
+                [summary: [totalDifferences: 1, conclusions: conclusions], differences: []], F1, F2)
+        assertEquals(conclusions, summary.conclusions)
+        assertFalse(DiffDetailClassifier.buildEffectiveSummary([summary: [:], differences: []], F1, F2).containsKey("conclusions"),
+                "a legacy document must not gain an empty conclusions block")
     }
 }

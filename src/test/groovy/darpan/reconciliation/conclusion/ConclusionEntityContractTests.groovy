@@ -72,4 +72,15 @@ class ConclusionEntityContractTests {
         assertTrue(data.contains('enumTypeId="DarpanConclusion"'))
         assertTrue(data.contains('enumId="UNEXPLAINED"'))
     }
+
+    @Test
+    void aRuleCanNameItsParentAndAConditionItsQuantifier() {
+        String xml = read("entity/RuleEntities.xml")
+        String rule = entityBlock(xml, "RuleSetConclusionRule")
+        assertTrue(rule.contains('<field name="parentSequenceNum" type="number-integer"'), "DAR-BE-063 tree parent")
+        assertTrue(rule.contains('RULE (both present'), "appliesToBucket documents the RULE bucket the conclude pass emits")
+        String condition = entityBlock(xml, "RuleSetConclusionCondition")
+        assertTrue(condition.contains('<field name="quantifier" type="text-short" default="\'ALL\'"'),
+                "ALL default keeps every DAR-UI-044 row's meaning")
+    }
 }

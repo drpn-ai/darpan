@@ -289,11 +289,19 @@
             explanation can never claim what the rule did not test.</description>
         <field name="compareScopeId" type="id" is-pk="true" not-null="true"/>
         <field name="sequenceNum" type="number-integer" is-pk="true" not-null="true"/>
+        <field name="parentSequenceNum" type="number-integer">
+            <description>DAR-BE-063. The sequenceNum of this rule's parent in the same compare scope; blank =
+                a root. A finding is tried against a node's children only after it reached that node, and
+                keeps the node's conclusion when no child matches. At most three levels; a cycle or a
+                missing parent refuses the whole tree at compile time. No FK: the parent is validated when
+                the tree compiles, so load order inside a data file does not matter.</description>
+        </field>
         <field name="conclusionEnumId" type="id" not-null="true">
             <description>Enumeration of type DarpanConclusion; its description is the label.</description>
         </field>
         <field name="appliesToBucket" type="text-short">
-            <description>MISSING_FROM_FILE_1, MISSING_FROM_FILE_2 or FINDING (single-sided). Blank = any.</description>
+            <description>MISSING_FROM_FILE_1, MISSING_FROM_FILE_2, RULE (both present, a value rule
+                differed) or FINDING (single-sided). Blank = any. Read on roots only.</description>
         </field>
         <field name="questionText" type="text-medium">
             <description>Optional open question shown under "Needs a decision". Terse page copy.</description>
@@ -332,7 +340,14 @@
             <description>FULL matches the whole composite key; FIRST_FIELD matches the first key field only
                 (e.g. the order, when the key is order + NetSuite id).</description>
         </field>
-        <field name="fieldExpression" type="text-medium"/>
+        <field name="quantifier" type="text-short" default="'ALL'">
+            <description>DAR-BE-063. ALL: the condition must hold for every value the fieldExpression yields,
+                across every record under the key. ANY: for at least one (e.g. one backordered line).</description>
+        </field>
+        <field name="fieldExpression" type="text-medium">
+            <description>A record field. A dotted path walks nested maps and fans out across lists
+                (paymentPreferences.paymentMethodTypeId); a path yielding nothing reads as blank.</description>
+        </field>
         <field name="operator" type="text-short">
             <description>IN, NOT_IN, GT_ZERO, BLANK, NOT_BLANK. Blank with a blank fieldExpression = presence only.</description>
         </field>

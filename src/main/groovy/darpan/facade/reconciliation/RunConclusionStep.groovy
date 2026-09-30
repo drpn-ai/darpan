@@ -78,7 +78,7 @@ class RunConclusionStep {
         }
     }
 
-    /** Entity rows to the ConclusionRuleEvaluator shape, in sequence order. Pure, so it is tested alone. */
+    /** Entity rows to the ConclusionTreeEngine node shape, in sequence order. Pure, so it is tested alone. */
     static List<Map> buildRules(List<Map> ruleRows, List<Map> conditionRows, Map<String, String> labelsByEnum) {
         Map<Object, List<Map>> conditionsBySeq = [:]
         (conditionRows ?: []).sort { ((it.conditionSeq ?: 0) as int) }.each { Map row ->
@@ -87,6 +87,7 @@ class RunConclusionStep {
                     subject        : normalize(row.subject),
                     presence       : normalize(row.presence) ?: "ANY",
                     keyScope       : normalize(row.keyScope) ?: "FULL",
+                    quantifier     : normalize(row.quantifier) ?: "ALL",
                     fieldExpression: normalize(row.fieldExpression),
                     operator       : normalize(row.operator),
                     conditionValues: (normalize(row.conditionValues) ?: "").split(",").collect { it.trim() }.findAll { it },
@@ -95,12 +96,14 @@ class RunConclusionStep {
         }
         return (ruleRows ?: []).sort { ((it.sequenceNum ?: 0) as int) }.collect { Map row ->
             String code = normalize(row.conclusionEnumId)
-            return [conclusionEnumId: code,
-                    label           : labelsByEnum?.get(code) ?: code,
-                    appliesToBucket : normalize(row.appliesToBucket),
-                    questionText    : normalize(row.questionText),
-                    suggestedFilter : parseJson(row.suggestedFilterJson),
-                    conditions      : conditionsBySeq.get(row.sequenceNum as int) ?: []]
+            return [sequenceNum      : row.sequenceNum as int,
+                    parentSequenceNum: normalize(row.parentSequenceNum) ? (row.parentSequenceNum as int) : null,
+                    conclusionEnumId : code,
+                    label            : labelsByEnum?.get(code) ?: code,
+                    appliesToBucket  : normalize(row.appliesToBucket),
+                    questionText     : normalize(row.questionText),
+                    suggestedFilter  : parseJson(row.suggestedFilterJson),
+                    conditions       : conditionsBySeq.get(row.sequenceNum as int) ?: []]
         }
     }
 

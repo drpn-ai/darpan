@@ -73,4 +73,23 @@ class RunConclusionStepTests {
         assertTrue(RunConclusionStep.keySpec(["id"], null, null, '$.records[*]').keyReliable as boolean)
         assertFalse(RunConclusionStep.keySpec([], null, null, "records").keyReliable as boolean)
     }
+
+    @Test
+    void buildRulesCarriesTheTreeAndTheQuantifier() {
+        List<Map> rules = RunConclusionStep.buildRules(
+                [[sequenceNum: 10, conclusionEnumId: "P"], [sequenceNum: 11, parentSequenceNum: 10, conclusionEnumId: "C"]],
+                [[sequenceNum: 11, conditionSeq: 1, subject: "FILE_1", quantifier: "ANY", checkLabel: "x"]],
+                [:])
+        assertEquals([10, 11], rules*.sequenceNum)
+        assertNull(rules[0].parentSequenceNum)
+        assertEquals(10, rules[1].parentSequenceNum)
+        assertEquals("ANY", rules[1].conditions[0].quantifier)
+    }
+
+    @Test
+    void aConditionWithNoQuantifierIsAll() {
+        List<Map> rules = RunConclusionStep.buildRules([[sequenceNum: 10, conclusionEnumId: "P"]],
+                [[sequenceNum: 10, conditionSeq: 1, subject: "FILE_1", checkLabel: "x"]], [:])
+        assertEquals("ALL", rules[0].conditions[0].quantifier)
+    }
 }

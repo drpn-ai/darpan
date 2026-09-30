@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-UI-044 — the gorjana v1 conclusion catalogue for the tri-system runs (A-open, B, C; see
+  darpan/data/TriSystemOrderRunsRuleSetData.xml). Each rule names what a finding IS, from conditions
+  on both sides' records; the first rule whose conditions all hold wins, and a finding no rule names
+  is Unexplained. "How Darpan concluded" on the result page is rendered FROM these conditions, so a
+  check label must describe exactly what its condition tests.
+
+  NOT seed data — tenant configuration. Load per install AFTER ConclusionCatalogSeedData.xml (the enum
+  type) and TriSystemOrderRunsRuleSetData.xml (the scopes):
+
+      ec.entity.makeDataLoader().location("component://darpan/data/GorjanaConclusionRulesData.xml").load()
+
+  Order is load-bearing. On the order scope the gift-card and POS rules come BEFORE the plain "Never
+  reached NetSuite", so a gift-card order is named as such rather than as the general case.
+
+  Run D (NS_PENDING_BILLING) has no rules here: its scope id is generated when
+  tools/netsuite-chain-config/upload-gorjana-checks.py creates the run.
+-->
+<entity-facade-xml type="darpan-tenant-config">
+    <moqui.basic.Enumeration enumId="CONC_NS_BACKORDERED" enumTypeId="DarpanConclusion" enumCode="CONC_NS_BACKORDERED" description="Backordered in NetSuite"/>
+    <moqui.basic.Enumeration enumId="CONC_NEVER_REACHED_NS" enumTypeId="DarpanConclusion" enumCode="CONC_NEVER_REACHED_NS" description="Never reached NetSuite"/>
+    <moqui.basic.Enumeration enumId="CONC_SHIPPED_NOT_COMPLETED" enumTypeId="DarpanConclusion" enumCode="CONC_SHIPPED_NOT_COMPLETED" description="Shipped, not completed in HotWax"/>
+    <moqui.basic.Enumeration enumId="CONC_GIFT_CARD_NOT_IN_NS" enumTypeId="DarpanConclusion" enumCode="CONC_GIFT_CARD_NOT_IN_NS" description="Gift card never reached NetSuite"/>
+    <moqui.basic.Enumeration enumId="CONC_POS_NOT_IN_NS" enumTypeId="DarpanConclusion" enumCode="CONC_POS_NOT_IN_NS" description="POS order never reached NetSuite"/>
+    <moqui.basic.Enumeration enumId="CONC_NS_ID_MISSING" enumTypeId="DarpanConclusion" enumCode="CONC_NS_ID_MISSING" description="NetSuite id missing in HotWax"/>
+    <moqui.basic.Enumeration enumId="CONC_PARKED_IN_HOTWAX" enumTypeId="DarpanConclusion" enumCode="CONC_PARKED_IN_HOTWAX" description="Parked in HotWax"/>
+    <moqui.basic.Enumeration enumId="CONC_CANCEL_NOT_IN_SHOPIFY" enumTypeId="DarpanConclusion" enumCode="CONC_CANCEL_NOT_IN_SHOPIFY" description="Cancel not synced to Shopify"/>
+
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="10" conclusionEnumId="CONC_NS_BACKORDERED" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="EXCLUDED" keyScope="FULL" checkLabel="NetSuite has the line" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_2" presence="ANY" keyScope="FULL" fieldExpression="quantityBackordered" operator="GT_ZERO" checkLabel="Nothing shipped, on backorder" companyUserGroupId="GORJANA"/>
+
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="20" conclusionEnumId="CONC_NEVER_REACHED_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="20" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FIRST_FIELD" checkLabel="NetSuite has no line for the order" companyUserGroupId="GORJANA"/>
+
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="30" conclusionEnumId="CONC_SHIPPED_NOT_COMPLETED" appliesToBucket="MISSING_FROM_FILE_1" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="30" conditionSeq="1" subject="FILE_2" presence="KEPT" keyScope="FULL" fieldExpression="quantityShipped" operator="GT_ZERO" checkLabel="NetSuite shipped the line" companyUserGroupId="GORJANA"/>
+
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" sequenceNum="10" conclusionEnumId="CONC_GIFT_CARD_NOT_IN_NS" appliesToBucket="MISSING_FROM_FILE_2"
+            questionText="Should gift-card-only orders reach NetSuite?" suggestedFilterJson="{&quot;fileSide&quot;:&quot;FILE_1&quot;,&quot;fieldExpression&quot;:&quot;facilityId&quot;,&quot;operator&quot;:&quot;EXCLUDE_IN&quot;,&quot;values&quot;:[&quot;_NA_&quot;]}" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FIRST_FIELD" checkLabel="NetSuite has no order" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="facilityId" operator="IN" conditionValues="_NA_" checkLabel="Nothing to ship" companyUserGroupId="GORJANA"/>
+
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" sequenceNum="20" conclusionEnumId="CONC_POS_NOT_IN_NS" appliesToBucket="MISSING_FROM_FILE_2"
+            questionText="Should POS orders reach NetSuite?" suggestedFilterJson="{&quot;fileSide&quot;:&quot;FILE_1&quot;,&quot;fieldExpression&quot;:&quot;salesChannelEnumId&quot;,&quot;operator&quot;:&quot;EXCLUDE_IN&quot;,&quot;values&quot;:[&quot;POS_SALES_CHANNEL&quot;]}" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" sequenceNum="20" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FIRST_FIELD" checkLabel="NetSuite has no order" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" sequenceNum="20" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="salesChannelEnumId" operator="IN" conditionValues="POS_SALES_CHANNEL" checkLabel="POS order" companyUserGroupId="GORJANA"/>
+
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" sequenceNum="30" conclusionEnumId="CONC_NS_ID_MISSING" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" sequenceNum="30" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="netsuiteOrderId" operator="IN" conditionValues="NONE" checkLabel="HotWax holds no NetSuite id" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" sequenceNum="30" conditionSeq="2" subject="FILE_2" presence="KEPT" keyScope="FIRST_FIELD" checkLabel="NetSuite has the order" companyUserGroupId="GORJANA"/>
+
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" sequenceNum="40" conclusionEnumId="CONC_NEVER_REACHED_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" sequenceNum="40" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FIRST_FIELD" checkLabel="NetSuite has no order" companyUserGroupId="GORJANA"/>
+
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" sequenceNum="50" conclusionEnumId="CONC_NS_ID_MISSING" appliesToBucket="MISSING_FROM_FILE_1" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" sequenceNum="50" conditionSeq="1" subject="FILE_1" presence="KEPT" keyScope="FIRST_FIELD" fieldExpression="netsuiteOrderId" operator="IN" conditionValues="NONE" checkLabel="HotWax holds no NetSuite id" companyUserGroupId="GORJANA"/>
+
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_LINE_OPEN_SCOPE" sequenceNum="10" conclusionEnumId="CONC_PARKED_IN_HOTWAX" appliesToBucket="MISSING_FROM_FILE_1" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_LINE_OPEN_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="KEPT" keyScope="FULL" fieldExpression="facilityId" operator="IN" conditionValues="UNF_HOLD_PARKING" checkLabel="Held in unfillable parking" companyUserGroupId="GORJANA"/>
+
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_LINE_OPEN_SCOPE" sequenceNum="20" conclusionEnumId="CONC_CANCEL_NOT_IN_SHOPIFY" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_LINE_OPEN_SCOPE" sequenceNum="20" conditionSeq="1" subject="FILE_2" presence="EXCLUDED" keyScope="FULL" fieldExpression="unitState" operator="IN" conditionValues="CANCELLED" checkLabel="Cancelled in HotWax" companyUserGroupId="GORJANA"/>
+
+</entity-facade-xml>

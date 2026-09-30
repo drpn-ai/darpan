@@ -9,7 +9,18 @@ import static org.junit.jupiter.api.Assertions.assertNull
  * DAR-UI-044. First full match wins; no match is UNEXPLAINED; a check reports the value the condition
  * SAW, never text from the rule; an UNKNOWN presence (sidecar missing or truncated) never matches.
  */
-class ConclusionRuleEvaluatorTests {
+class ConclusionTreeEngineFlatTests {
+
+    /** The DAR-UI-044 evaluator's contract, now served by the engine: same inputs, same answers. */
+    static Map evaluate(List rules, String bucket, Map sides) {
+        ConclusionTreeEngine engine = ConclusionTreeEngine.compile((List<Map>) rules)
+        try {
+            return engine.conclude([[bucket: bucket, sides: sides]])[0]
+        } finally {
+            engine.close()
+        }
+    }
+
 
     static Map rule(String code, String label, List conds, Map extra = [:]) {
         return [conclusionEnumId: code, label: label, appliesToBucket: null, questionText: null,
@@ -30,7 +41,7 @@ class ConclusionRuleEvaluatorTests {
 
     @Test
     void firstFullMatchWinsAndChecksShowWhatWasSeen() {
-        Map c = ConclusionRuleEvaluator.evaluate(RULES, "MISSING_FROM_FILE_2", [
+        Map c = evaluate(RULES, "MISSING_FROM_FILE_2", [
                 FILE_1: [presence: "KEPT", record: [omsOrderId: "M1"]],
                 FILE_2: [presence: "EXCLUDED", record: [quantityBackordered: "1"], firstFieldPresence: "KEPT", firstFieldRecord: [:]]])
         assertEquals("CONC_NS_BACKORDERED", c.code)
@@ -42,7 +53,7 @@ class ConclusionRuleEvaluatorTests {
 
     @Test
     void aPartialMatchFallsThroughToTheNextRuleOrUnexplained() {
-        Map c = ConclusionRuleEvaluator.evaluate(RULES, "MISSING_FROM_FILE_2", [
+        Map c = evaluate(RULES, "MISSING_FROM_FILE_2", [
                 FILE_1: [presence: "KEPT", record: [:]],
                 FILE_2: [presence: "EXCLUDED", record: [quantityBackordered: "0"], firstFieldPresence: "EXCLUDED", firstFieldRecord: [:]]])
         assertEquals("UNEXPLAINED", c.code)
@@ -52,7 +63,7 @@ class ConclusionRuleEvaluatorTests {
 
     @Test
     void firstFieldScopeReadsTheOrderLevelPresence() {
-        Map c = ConclusionRuleEvaluator.evaluate(RULES, "MISSING_FROM_FILE_2", [
+        Map c = evaluate(RULES, "MISSING_FROM_FILE_2", [
                 FILE_1: [presence: "KEPT", record: [:]],
                 FILE_2: [presence: "ABSENT", record: null, firstFieldPresence: "ABSENT", firstFieldRecord: null]])
         assertEquals("CONC_NEVER_REACHED_NS", c.code)
@@ -61,7 +72,7 @@ class ConclusionRuleEvaluatorTests {
 
     @Test
     void unknownPresenceNeverMatches() {
-        Map c = ConclusionRuleEvaluator.evaluate(RULES, "MISSING_FROM_FILE_2", [
+        Map c = evaluate(RULES, "MISSING_FROM_FILE_2", [
                 FILE_1: [presence: "KEPT", record: [:]],
                 FILE_2: [presence: "UNKNOWN", record: null, firstFieldPresence: "UNKNOWN", firstFieldRecord: null]])
         assertEquals("UNEXPLAINED", c.code, "a missing/truncated sidecar must not become 'Not found'")
@@ -70,8 +81,8 @@ class ConclusionRuleEvaluatorTests {
     @Test
     void bucketGateIsHonoured() {
         List r = [rule("X", "X", [], [appliesToBucket: "MISSING_FROM_FILE_1"])]
-        assertEquals("UNEXPLAINED", ConclusionRuleEvaluator.evaluate(r, "MISSING_FROM_FILE_2", [FILE_1: [:], FILE_2: [:]]).code)
-        assertEquals("X", ConclusionRuleEvaluator.evaluate(r, "MISSING_FROM_FILE_1", [FILE_1: [:], FILE_2: [:]]).code)
+        assertEquals("UNEXPLAINED", evaluate(r, "MISSING_FROM_FILE_2", [FILE_1: [:], FILE_2: [:]]).code)
+        assertEquals("X", evaluate(r, "MISSING_FROM_FILE_1", [FILE_1: [:], FILE_2: [:]]).code)
     }
 
     @Test
@@ -81,7 +92,7 @@ class ConclusionRuleEvaluatorTests {
                 cond(subject: "FILE_1", fieldExpression: "salesChannelEnumId", operator: "IN",
                         conditionValues: ["pos_sales_channel"], checkLabel: "POS order")],
                 [questionText: "Should POS orders reach NetSuite?", suggestedFilter: filter])]
-        Map c = ConclusionRuleEvaluator.evaluate(r, "MISSING_FROM_FILE_2",
+        Map c = evaluate(r, "MISSING_FROM_FILE_2",
                 [FILE_1: [presence: "KEPT", record: [salesChannelEnumId: "POS_SALES_CHANNEL"]], FILE_2: [:]])
         assertEquals("POS", c.code)
         assertEquals("Should POS orders reach NetSuite?", c.question.text)
@@ -94,16 +105,16 @@ class ConclusionRuleEvaluatorTests {
                 cond(subject: "FILE_1", fieldExpression: "status", operator: "NOT_IN", conditionValues: ["G"], checkLabel: "Not billed"),
                 cond(subject: "FILE_1", fieldExpression: "shipDate", operator: "BLANK", checkLabel: "No ship date"),
                 cond(subject: "FILE_1", fieldExpression: "tranId", operator: "NOT_BLANK", checkLabel: "Has a number")])]
-        assertEquals("N", ConclusionRuleEvaluator.evaluate(r, "FINDING",
+        assertEquals("N", evaluate(r, "FINDING",
                 [FILE_1: [presence: "KEPT", record: [status: "F", shipDate: "", tranId: "SO1"]]]).code)
-        assertEquals("UNEXPLAINED", ConclusionRuleEvaluator.evaluate(r, "FINDING",
+        assertEquals("UNEXPLAINED", evaluate(r, "FINDING",
                 [FILE_1: [presence: "KEPT", record: [status: "G", shipDate: "", tranId: "SO1"]]]).code)
     }
 
     @Test
     void gtZeroRefusesNonNumbers() {
         List r = [rule("G", "G", [cond(subject: "FILE_1", fieldExpression: "q", operator: "GT_ZERO", checkLabel: "q")])]
-        assertEquals("UNEXPLAINED", ConclusionRuleEvaluator.evaluate(r, "FINDING", [FILE_1: [presence: "KEPT", record: [q: "abc"]]]).code)
-        assertEquals("G", ConclusionRuleEvaluator.evaluate(r, "FINDING", [FILE_1: [presence: "KEPT", record: [q: "2.0"]]]).code)
+        assertEquals("UNEXPLAINED", evaluate(r, "FINDING", [FILE_1: [presence: "KEPT", record: [q: "abc"]]]).code)
+        assertEquals("G", evaluate(r, "FINDING", [FILE_1: [presence: "KEPT", record: [q: "2.0"]]]).code)
     }
 }

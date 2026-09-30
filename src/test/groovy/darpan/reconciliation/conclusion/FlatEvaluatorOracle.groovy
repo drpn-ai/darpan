@@ -1,6 +1,9 @@
 package darpan.reconciliation.conclusion
 
 /**
+ * DAR-BE-063 TEST ORACLE: DAR-UI-044's flat evaluator, frozen, so ConclusionEngineParityTests can prove
+ * the Drools engine concludes every flat catalogue identically. Not product code.
+ *
  * DAR-UI-044. Decides a finding's conclusion from ordered rules. Pure: no Moqui, no I/O.
  *
  * Rules are tried in order and the FIRST whose conditions all hold wins; no match is UNEXPLAINED. The
@@ -11,7 +14,7 @@ package darpan.reconciliation.conclusion
  * or UNKNOWN (its sidecar was missing or truncated, so absence cannot be told from exclusion). UNKNOWN
  * satisfies no presence condition: "Not found" is a claim, and an unknown is not evidence for it.
  */
-class ConclusionRuleEvaluator {
+class FlatEvaluatorOracle {
 
     static final String UNEXPLAINED = "UNEXPLAINED"
     static final String UNEXPLAINED_LABEL = "Unexplained"

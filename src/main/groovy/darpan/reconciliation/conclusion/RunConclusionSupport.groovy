@@ -18,6 +18,9 @@ import groovy.json.JsonSlurper
  * over {@link #maxIndexedExtractBytes} is not indexed at all and its side reads UNKNOWN; of a parsed
  * extract only records whose key a finding needs are kept in memory. A side whose key this pass cannot
  * rebuild the way the compare built it (spec.keyReliable false) is UNKNOWN for the same reason.
+ *
+ * Conclusions come from ConclusionTreeEngine (DAR-BE-063): a rule tree fired by Drools; a flat catalogue
+ * is a tree of roots and concludes exactly as the DAR-UI-044 evaluator did.
  */
 class RunConclusionSupport {
 
@@ -30,6 +33,17 @@ class RunConclusionSupport {
     static Map concludeRun(Map args) {
         List<Map> rules = (List<Map>) (args.rules ?: [])
         if (!rules) return [ran: false]
+        // Compiled BEFORE the document is touched: a tree that does not compile throws here, and
+        // RunConclusionStep ends the step FAILED with the document exactly as the compare wrote it.
+        ConclusionTreeEngine engine = ConclusionTreeEngine.compile(rules)
+        try {
+            return concludeWith(engine, rules, args)
+        } finally {
+            engine.close()
+        }
+    }
+
+    private static Map concludeWith(ConclusionTreeEngine engine, List<Map> rules, Map args) {
         File diffFile = (File) args.diffFile
         String file1Label = (String) args.file1Label
         String file2Label = (String) args.file2Label
@@ -65,8 +79,8 @@ class RunConclusionSupport {
                 labels.put(code, rule.get("label")?.toString() ?: code)
             }
         }
-        counts.put(ConclusionRuleEvaluator.UNEXPLAINED, 0)
-        labels.put(ConclusionRuleEvaluator.UNEXPLAINED, ConclusionRuleEvaluator.UNEXPLAINED_LABEL)
+        counts.put(ConclusionTreeSupport.UNEXPLAINED, 0)
+        labels.put(ConclusionTreeSupport.UNEXPLAINED, ConclusionTreeSupport.UNEXPLAINED_LABEL)
 
         JsonSlurper slurper = new JsonSlurper()
         DiffDocumentStreamSupport.rewriteDocument(diffFile, TMP_SUFFIX, { Map row ->
@@ -88,7 +102,7 @@ class RunConclusionSupport {
                     sides.put(side, lookup((Map) index.get(side), key))
                 }
             }
-            Map conclusion = ConclusionRuleEvaluator.evaluate(rules, bucket, sides)
+            Map conclusion = engine.conclude([[bucket: bucket, sides: sides]])[0]
             String code = conclusion.code?.toString()
             if (!counts.containsKey(code)) {
                 counts.put(code, 0)
@@ -106,7 +120,8 @@ class RunConclusionSupport {
                                        label   : conclusion.label,
                                        systems : systems,
                                        checks  : conclusion.checks,
-                                       question: conclusion.question]]
+                                       question: conclusion.question,
+                                       path    : conclusion.path]]
         }, { Map summary ->
             return summary + [conclusions: [enabled: true,
                                             counts : counts.collect { String code, Integer count ->

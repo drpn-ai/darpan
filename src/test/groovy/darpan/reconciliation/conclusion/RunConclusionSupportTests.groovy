@@ -257,4 +257,29 @@ class RunConclusionSupportTests {
             RunConclusionSupport.maxIndexedExtractBytes = saved
         }
     }
+
+    @Test
+    void anUncompilableTreeFailsTheStepNotTheRun() {
+        // DAR-BE-063. A tree whose parents form a cycle must refuse to conclude — concludeRun throws, and
+        // RunConclusionStep (which catches every Throwable) ends the step FAILED. The contract here is only
+        // that it THROWS before touching the document, rather than writing conclusions from a broken tree.
+        List cyclic = [
+                [sequenceNum: 10, parentSequenceNum: 20, conclusionEnumId: "A", label: "A", appliesToBucket: null, conditions: []],
+                [sequenceNum: 20, parentSequenceNum: 10, conclusionEnumId: "B", label: "B", appliesToBucket: null, conditions: []],
+        ]
+        File doc = writeDiffDocument([missingRow("M1${SEP}01", FILE1, FILE2)])
+        String before = doc.text
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException) {
+            RunConclusionSupport.concludeRun(args(doc, cyclic))
+        }
+        assertEquals(before, doc.text, "the document is untouched when the tree does not compile")
+    }
+
+    @Test
+    void everyConcludedRowCarriesItsPath() {
+        File doc = writeDiffDocument([missingRow("M1${SEP}01", FILE1, FILE2)])
+        RunConclusionSupport.concludeRun(args(doc, NEVER_REACHED_RULES))
+        Map row = (Map) ((List) parse(doc).differences)[0]
+        assertEquals(["CONC_NEVER_REACHED_NS"], ((List) ((Map) row.conclusion).path)*.code)
+    }
 }

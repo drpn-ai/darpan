@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Tri-system order runs for the GORJANA tenant: one run per hop of Shopify -> HotWax OMS -> NetSuite.
+  Spec: docs/superpowers/specs/2026-09-30-tri-system-order-runs-design.md (runs A-open, A-cancel, B, C;
+  run D is NS_PENDING_BILLING in tools/netsuite-chain-config and needs nothing here).
+
+  NOT seed data - tenant configuration, same rules as OrderLineUnitRuleSetData.xml. Load per install,
+  AFTER DarpanSystemSourceSeedData.xml (systemEnumId is an FK to Enumeration) and, for B and C, after
+  tools/netsuite-chain-config/gorjana-tri-system-queries.xml (sourceConfigId names those query rows):
+
+      ec.entity.makeDataLoader().location("component://darpan/data/TriSystemOrderRunsRuleSetData.xml").load()
+
+  The loader does NOT throw on a referential failure - it rolls the file back and still returns a
+  count - so assert the rows exist afterwards.
+
+  STATE KEYS (A-open, A-cancel, C). The key carries stateOrdinal, not unitOrdinal: each side emits
+  1..k per (order, line, unitState) and the INCLUDE_IN unitState filter keeps one state, so the
+  anti-join compares per-state unit COUNTS. unitOrdinal would compare arbitrary unit positions.
+
+  KEY FIELD ORDER IS LOAD-BEARING on every scope: the key is a positional concat_ws, so FILE_1 and
+  FILE_2 must list their fields in the same meaning-order.
+-->
+<entity-facade-xml type="darpan-tenant-config">
+
+    <!-- ================================================================ Open units - Shopify vs HotWax -->
+    <darpan.rule.RuleSet ruleSetId="GORJANA_LINE_OPEN_RS" ruleSetName="Open units - Shopify vs HotWax"
+            description="Units still to be fulfilled must agree: Shopify unfulfilledQuantity against HotWax CREATED/APPROVED items. A unit HotWax still holds open (parked, or APPROVED at a store) after Shopify fulfilled it is a finding, and so is the reverse."
+            version="1.0" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_LINE_OPEN_SCOPE" ruleSetId="GORJANA_LINE_OPEN_RS"
+            objectType="ORDER_LINE_UNIT" scopeMode="COMPARE" description="Units still to be fulfilled must agree: Shopify unfulfilledQuantity against HotWax CREATED/APPROVED items. A unit HotWax still holds open (parked, or APPROVED at a store) after Shopify fulfilled it is a finding, and so is the reverse."
+            companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_LINE_OPEN_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY_ORDER_LINE_UNITS" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyLineId"
+            sourceConfigId="gorjana_prod" sourceConfigType="SHOPIFY_ORDER_LINE_UNITS_API" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_LINE_OPEN_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_LINE_OPEN_SCOPE" fileSide="FILE_1" sequenceNum="2" fieldExpression="shopifyLineId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_LINE_OPEN_SCOPE" fileSide="FILE_1" sequenceNum="3" fieldExpression="stateOrdinal" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="GORJANA_LINE_OPEN_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="unitState" operator="INCLUDE_IN" filterValues="OPEN" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_LINE_OPEN_SCOPE" fileSide="FILE_2"
+            systemEnumId="OMS_ORDER_LINE_UNITS" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyLineId"
+            sourceConfigId="gorjana_prod" sourceConfigType="HOTWAX_OMS_REST_LINE_UNITS" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_LINE_OPEN_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_LINE_OPEN_SCOPE" fileSide="FILE_2" sequenceNum="2" fieldExpression="shopifyLineId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_LINE_OPEN_SCOPE" fileSide="FILE_2" sequenceNum="3" fieldExpression="stateOrdinal" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="GORJANA_LINE_OPEN_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="unitState" operator="INCLUDE_IN" filterValues="OPEN" companyUserGroupId="GORJANA"/>
+
+    <!-- ================================================================ Cancelled units - HotWax vs Shopify -->
+    <darpan.rule.RuleSet ruleSetId="GORJANA_LINE_CANCEL_RS" ruleSetName="Cancelled units - HotWax vs Shopify"
+            description="Every unit HotWax cancelled must be removed from the Shopify order. Shopify side limited to orders with no return, because a return also removes units."
+            version="1.0" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_LINE_CANCEL_SCOPE" ruleSetId="GORJANA_LINE_CANCEL_RS"
+            objectType="ORDER_LINE_UNIT" scopeMode="COMPARE" description="Every unit HotWax cancelled must be removed from the Shopify order. Shopify side limited to orders with no return, because a return also removes units."
+            companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_LINE_CANCEL_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY_ORDER_LINE_UNITS" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyLineId"
+            sourceConfigId="gorjana_prod" sourceConfigType="SHOPIFY_ORDER_LINE_UNITS_API" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_LINE_CANCEL_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_LINE_CANCEL_SCOPE" fileSide="FILE_1" sequenceNum="2" fieldExpression="shopifyLineId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_LINE_CANCEL_SCOPE" fileSide="FILE_1" sequenceNum="3" fieldExpression="stateOrdinal" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="GORJANA_LINE_CANCEL_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="unitState" operator="INCLUDE_IN" filterValues="REMOVED" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="GORJANA_LINE_CANCEL_SCOPE" fileSide="FILE_1" sequenceNum="2" fieldExpression="orderReturnStatus" operator="INCLUDE_IN" filterValues="NO_RETURN" companyUserGroupId="GORJANA"/>
+    <!-- POS refunds create no Return object, so a POS return reads NO_RETURN and would count as
+         "removed in Shopify, never cancelled in OMS" (11 of 23 such units on the first live run).
+         Excluded on both sides so the run means the same population: Shopify sourceName, OMS channel. -->
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="GORJANA_LINE_CANCEL_SCOPE" fileSide="FILE_1" sequenceNum="3" fieldExpression="orderSourceName" operator="EXCLUDE_IN" filterValues="pos" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_LINE_CANCEL_SCOPE" fileSide="FILE_2"
+            systemEnumId="OMS_ORDER_LINE_UNITS" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyLineId"
+            sourceConfigId="gorjana_prod" sourceConfigType="HOTWAX_OMS_REST_LINE_UNITS" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_LINE_CANCEL_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_LINE_CANCEL_SCOPE" fileSide="FILE_2" sequenceNum="2" fieldExpression="shopifyLineId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_LINE_CANCEL_SCOPE" fileSide="FILE_2" sequenceNum="3" fieldExpression="stateOrdinal" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="GORJANA_LINE_CANCEL_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="unitState" operator="INCLUDE_IN" filterValues="CANCELLED" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="GORJANA_LINE_CANCEL_SCOPE" fileSide="FILE_2" sequenceNum="2" fieldExpression="salesChannelEnumId" operator="EXCLUDE_IN" filterValues="POS_SALES_CHANNEL" companyUserGroupId="GORJANA"/>
+
+    <!-- ================================================================ Order sync - HotWax vs NetSuite -->
+    <darpan.rule.RuleSet ruleSetId="GORJANA_OMS_NS_ORDER_RS" ruleSetName="Order sync - HotWax vs NetSuite"
+            description="Every HotWax order must exist in NetSuite, and HotWax must hold that order's NetSuite internal id. Keyed (OMS order id, NetSuite internal id); an OMS order with no stored id keys as NONE."
+            version="1.0" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" ruleSetId="GORJANA_OMS_NS_ORDER_RS"
+            objectType="ORDER" scopeMode="COMPARE" description="Every HotWax order must exist in NetSuite, and HotWax must hold that order's NetSuite internal id. Keyed (OMS order id, NetSuite internal id); an OMS order with no stored id keys as NONE."
+            companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" fileSide="FILE_1"
+            systemEnumId="OMS_ORDER_ITEMS" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="omsOrderId"
+            sourceConfigId="gorjana_prod" sourceConfigType="HOTWAX_OMS_REST_ORDER_ITEMS" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="omsOrderId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" fileSide="FILE_1" sequenceNum="2" fieldExpression="netsuiteOrderId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="orderId"
+            sourceConfigId="NS_SO_HC_IDS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="orderId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" fileSide="FILE_2" sequenceNum="2" fieldExpression="internalId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="GORJANA_OMS_NS_ORDER_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="orderOrigin" operator="INCLUDE_IN" filterValues="HOTWAX" companyUserGroupId="GORJANA"/>
+
+    <!-- ================================================================ Line fulfilment - HotWax vs NetSuite -->
+    <darpan.rule.RuleSet ruleSetId="GORJANA_OMS_NS_LINE_RS" ruleSetName="Line fulfilment - HotWax vs NetSuite"
+            description="Every item HotWax completed must be shipped on its NetSuite sales order line, and every shipped NetSuite line must be completed in HotWax. Keyed (OMS order id, OMS order item seq id)."
+            version="1.0" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" ruleSetId="GORJANA_OMS_NS_LINE_RS"
+            objectType="ORDER_LINE_UNIT" scopeMode="COMPARE" description="Every item HotWax completed must be shipped on its NetSuite sales order line, and every shipped NetSuite line must be completed in HotWax. Keyed (OMS order id, OMS order item seq id)."
+            companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" fileSide="FILE_1"
+            systemEnumId="OMS_ORDER_ITEMS" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="omsOrderId"
+            sourceConfigId="gorjana_prod" sourceConfigType="HOTWAX_OMS_REST_ORDER_ITEMS" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="omsOrderId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" fileSide="FILE_1" sequenceNum="2" fieldExpression="orderItemSeqId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="unitState" operator="INCLUDE_IN" filterValues="COMPLETED" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="orderId"
+            sourceConfigId="NS_SO_SHIPPED_LINES" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="orderId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" fileSide="FILE_2" sequenceNum="2" fieldExpression="orderLineId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="quantityShipped" operator="EXCLUDE_IN" filterValues="0" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" fileSide="FILE_2" sequenceNum="2" fieldExpression="itemType" operator="EXCLUDE_IN" filterValues="Discount" companyUserGroupId="GORJANA"/>
+
+</entity-facade-xml>

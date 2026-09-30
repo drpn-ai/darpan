@@ -102,6 +102,14 @@
             sequenceNum="11"
             parentEnumId="OMS"/>
 
+    <moqui.basic.Enumeration
+            enumId="OMS_ORDER_ITEMS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_ORDER_ITEMS"
+            description="HotWax Order Items"
+            sequenceNum="13"
+            parentEnumId="OMS"/>
+
     <!-- DAR-BE-053: the NETSUITE_SUITEQL connector shipped in DAR-BE-044 with no matching system enum,
          so RuleSetCompareSource.systemEnumId could not reference it at all — its FK to Enumeration
          rejected every row (23506). No compare source could be created against the connector, which is

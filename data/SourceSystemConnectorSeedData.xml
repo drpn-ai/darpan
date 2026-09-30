@@ -105,7 +105,9 @@
             remoteSendServiceName="facade.ShopifyFacadeServices.execute#ShopifyGraphql"
             systemAliases="SHOPIFY_ORDER_LINE_UNITS,DAR_SYS_SHOPIFY_LINE_UNITS"
             preserveWindowInstants="Y"
+            filterParameterName="sourceFilters"
             healthCheckServiceName="facade.ShopifyFacadeServices.probe#ShopifyAuthConnection"
+            evidenceFieldsJson='{"system":"Shopify","state":"unitState","stateLabels":{"OPEN":"Open","FULFILLED":"Fulfilled","REMOVED":"Removed"},"facts":["shopifyOrderName","sku"]}'
             enabled="Y"/>
 
     <darpan.reconciliation.SourceSystemConnector
@@ -125,6 +127,35 @@
             filterParameterName="sourceFilters"
             windowFieldName="orderDate"
             healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            evidenceFieldsJson='{"system":"HotWax","state":"statusId","stateLabels":{"ITEM_COMPLETED":"Completed","ITEM_APPROVED":"Approved","ITEM_CREATED":"Created","ITEM_CANCELLED":"Cancelled"},"facts":["facilityId","orderItemSeqId","omsOrderId"]}'
+            enabled="Y"/>
+
+    <!-- OMS_ORDER_ITEMS (tri-system spec D4): the same single-unit flattener as OMS_ORDER_LINE_UNITS,
+         for pairing HotWax against NETSUITE rather than Shopify. Two differences, both deliberate:
+         the exchange exclusion is OFF (an EXC- order is a real OMS order that syncs to NetSuite the
+         same day; the exclusion exists only for Shopify's creation-window asymmetry), and items with
+         no Shopify line id are KEPT (NetSuite keys on orderId + orderItemSeqId, not on Shopify ids).
+         A connector rather than a filter because the exclusion is extract behaviour, and changing
+         OMS_ORDER_LINE_UNITS would change the shipped DAR-BE-050 pair. Distinct
+         expectedSourceConfigType for the first-enabled-match reason given above. -->
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_ORDER_ITEMS"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrderItems"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_REST_ORDER_ITEMS"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Orders API (Order Items)"
+            sendUrlTemplate="{baseUrl}/rest/s1/oms/orders"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrderItems"
+            systemAliases="OMS_ORDER_ITEMS,HOTWAX_ORDER_ITEMS,DAR_SYS_OMS_ORDER_ITEMS"
+            preserveWindowInstants="N"
+            filterParameterName="sourceFilters"
+            windowFieldName="orderDate"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            evidenceFieldsJson='{"system":"HotWax","state":"statusId","stateLabels":{"ITEM_COMPLETED":"Completed","ITEM_APPROVED":"Approved","ITEM_CREATED":"Created","ITEM_CANCELLED":"Cancelled"},"facts":["facilityId","orderItemSeqId","omsOrderId"]}'
             enabled="Y"/>
 
     <darpan.reconciliation.SourceSystemConnector
@@ -324,6 +355,7 @@
             preserveWindowInstants="N"
             windowDateOnly="Y"
             filterParameterName="sourceFilters"
+            evidenceFieldsJson='{"system":"NetSuite","state":"status","stateLabels":{"A":"Pending Approval","B":"Pending Fulfillment","C":"Cancelled","D":"Partially Fulfilled","E":"Pending Billing/Partially Fulfilled","F":"Pending Billing","G":"Billed","H":"Closed"},"facts":["orderLineId","quantityShipped","quantityBackordered","tranId"]}'
             enabled="Y"/>
 
     <!-- Database sources. Both sides of a run may be AUT_SRC_DB, which is how two OFBiz instances

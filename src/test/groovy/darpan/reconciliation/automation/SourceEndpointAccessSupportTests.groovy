@@ -180,8 +180,8 @@ class SourceEndpointAccessSupportTests {
     void catalogComesFromRegistryFilteredByConfigEntity() {
         List<Map<String, Object>> endpoints = SourceEndpointAccessSupport.listEndpointsForConfig(ec,
                 SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, CONFIG_ID)
-        // DAR-BE-050 added OMS_ORDER_LINE_UNITS.
-        assertEquals(["OMS", "OMS_ORDER_LINE_UNITS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_TRANSFER_ORDERS"],
+        // DAR-BE-050 added OMS_ORDER_LINE_UNITS; the tri-system runs (DAR-BE-062) added OMS_ORDER_ITEMS.
+        assertEquals(["OMS", "OMS_ORDER_ITEMS", "OMS_ORDER_LINE_UNITS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_TRANSFER_ORDERS"],
                 endpoints.collect { it.systemEnumId }.sort())
         assertEquals("Reconciliation Returns API",
                 endpoints.find { it.systemEnumId == "OMS_RETURNS" }.endpointLabel)

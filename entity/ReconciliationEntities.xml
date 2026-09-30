@@ -938,6 +938,12 @@
                 set, because an exclusion rule cannot match a field that is absent - which is what
                 makes "exclude orders keyed directly into NetSuite" expressible as a rule.</description>
         </field>
+        <field name="lineKeyColumn" type="text-short">
+            <description>SALES_LINES only: the transactionline column that names the line on the other
+                side of the pair - for gorjana custcol_hc_order_line_id, the OMS orderItemSeqId HotWax
+                writes on each item line. Refused on every other template. Identifier-checked before it
+                reaches the query, like every other configured fragment.</description>
+        </field>
         <field name="isActive" type="text-indicator" default="'Y'"/>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>

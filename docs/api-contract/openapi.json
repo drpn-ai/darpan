@@ -7170,13 +7170,35 @@
             "ListNsSuiteQlSourceQueriesParams": {
                 "type": "object",
                 "properties": {
-                    
+                    "pageIndex": {
+                        "type": "integer"
+                    },
+                    "pageSize": {
+                        "type": "integer"
+                    }
                 },
-                "description": "Every NetSuite SuiteQL check definition the active tenant can see."
+                "description": "NetSuite SuiteQL check definitions the active tenant can see, paged.\n\n            Paged like every other settings list so the shared list component can render it \u2014\n            the composable every settings page uses requires a pagination block, and a list\n            service that returns everything is the one that cannot be shown."
             },
             "ListNsSuiteQlSourceQueriesResult": {
                 "type": "object",
                 "properties": {
+                    "pagination": {
+                        "type": "object",
+                        "properties": {
+                            "pageIndex": {
+                                "type": "integer"
+                            },
+                            "pageSize": {
+                                "type": "integer"
+                            },
+                            "totalCount": {
+                                "type": "integer"
+                            },
+                            "pageCount": {
+                                "type": "integer"
+                            }
+                        }
+                    },
                     "ok": {
                         "type": "boolean"
                     },
@@ -7204,6 +7226,9 @@
                                             "type": "string"
                                         },
                                         "nsAuthConfigId": {
+                                            "type": "string"
+                                        },
+                                        "companyUserGroupId": {
                                             "type": "string"
                                         },
                                         "description": {
@@ -7352,6 +7377,9 @@
                         "type": "string"
                     },
                     "originFieldName": {
+                        "type": "string"
+                    },
+                    "lineKeyColumn": {
                         "type": "string"
                     },
                     "isActive": {
@@ -9423,6 +9451,10 @@
                         "type": "string",
                         "description": "Optional record-id substring filter (case-insensitive)."
                     },
+                    "conclusionCode": {
+                        "type": "string",
+                        "description": "DAR-UI-044: only differences the run concluded as this code. Empty means all."
+                    },
                     "includeFacets": {
                         "type": "boolean",
                         "description": "Skip bucket counts + rule options for pure page navigation."
@@ -9459,6 +9491,10 @@
                     },
                     "bucketCounts": {
                         "type": "object"
+                    },
+                    "conclusionCounts": {
+                        "type": "object",
+                        "description": "DAR-UI-044: whole-document count per conclusion code, ignoring the conclusion filter. Empty for a run without conclusions."
                     },
                     "ruleOptions": {
                         "type": "array",

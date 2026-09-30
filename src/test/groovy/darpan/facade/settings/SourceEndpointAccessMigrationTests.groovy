@@ -103,12 +103,13 @@ class SourceEndpointAccessMigrationTests {
     @Test
     void closedConfigIsDisabledOnEveryEndpoint() {
         runMigration()
-        // DAR-BE-050 added OMS_ORDER_LINE_UNITS, so a closed config now needs FIVE disable rows.
+        // DAR-BE-050 added OMS_ORDER_LINE_UNITS and DAR-BE-062 OMS_ORDER_ITEMS, so a closed config now
+        // needs SIX disable rows.
         // The endpoint is added to the iterated list as well as the count: the count alone would
         // pass while leaving the new endpoint unverified, which is the half-fix this test exists
         // to prevent - a legacy-closed config silently open on the newest endpoint.
-        assertEquals(5L, accessRowCount("mig-closed"))
-        ["OMS", "OMS_ORDER_LINE_UNITS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_TRANSFER_ORDERS"].each { String systemEnumId ->
+        assertEquals(6L, accessRowCount("mig-closed"))
+        ["OMS", "OMS_ORDER_ITEMS", "OMS_ORDER_LINE_UNITS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_TRANSFER_ORDERS"].each { String systemEnumId ->
             assertFalse(SourceEndpointAccessSupport.isEndpointEnabled(ec,
                     SharedConfigAccessSupport.CONFIG_TYPE_HOTWAX_OMS, "mig-closed", systemEnumId),
                     "${systemEnumId} must be disabled for a canReadOrders='N' config")
@@ -119,7 +120,7 @@ class SourceEndpointAccessMigrationTests {
     void reRunningWritesNoDuplicates() {
         runMigration()
         runMigration()
-        assertEquals(5L, accessRowCount("mig-closed"))
+        assertEquals(6L, accessRowCount("mig-closed"))
     }
 
     @Test

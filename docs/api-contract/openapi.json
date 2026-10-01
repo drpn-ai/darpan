@@ -225,6 +225,12 @@
                                         "$ref": "#/components/schemas/GetMappingRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetReconciliationRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetReconciliationExecutionRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetReconciliationRunStatusRequest"
                                     },
                                     {
@@ -267,6 +273,9 @@
                                         "$ref": "#/components/schemas/RunGenericDiffRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/RunReconciliationRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/RunSavedRunDiffRequest"
                                     },
                                     {
@@ -280,6 +289,12 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveMappingRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveReconciliationRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveReconciliationQuestionRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveRuleSetRunRequest"
@@ -454,6 +469,8 @@
                                         "facade.ReconciliationFacadeServices.get#GeneratedOutput": "#/components/schemas/GetGeneratedOutputRequest",
                                         "facade.ReconciliationFacadeServices.get#GeneratedOutputDifferences": "#/components/schemas/GetGeneratedOutputDifferencesRequest",
                                         "facade.ReconciliationFacadeServices.get#Mapping": "#/components/schemas/GetMappingRequest",
+                                        "facade.ReconciliationFacadeServices.get#Reconciliation": "#/components/schemas/GetReconciliationRequest",
+                                        "facade.ReconciliationFacadeServices.get#ReconciliationExecution": "#/components/schemas/GetReconciliationExecutionRequest",
                                         "facade.ReconciliationFacadeServices.get#ReconciliationRunStatus": "#/components/schemas/GetReconciliationRunStatusRequest",
                                         "facade.ReconciliationFacadeServices.list#AutomationExecutions": "#/components/schemas/ListAutomationExecutionsRequest",
                                         "facade.ReconciliationFacadeServices.list#AutomationSourceOptions": "#/components/schemas/ListAutomationSourceOptionsRequest",
@@ -468,11 +485,14 @@
                                         "facade.ReconciliationFacadeServices.resume#Automation": "#/components/schemas/ResumeAutomationRequest",
                                         "facade.ReconciliationFacadeServices.run#AutomationNow": "#/components/schemas/RunAutomationNowRequest",
                                         "facade.ReconciliationFacadeServices.run#GenericDiff": "#/components/schemas/RunGenericDiffRequest",
+                                        "facade.ReconciliationFacadeServices.run#Reconciliation": "#/components/schemas/RunReconciliationRequest",
                                         "facade.ReconciliationFacadeServices.run#SavedRunDiff": "#/components/schemas/RunSavedRunDiffRequest",
                                         "facade.ReconciliationFacadeServices.save#Automation": "#/components/schemas/SaveAutomationRequest",
                                         "facade.ReconciliationFacadeServices.save#DashboardPinnedMappings": "#/components/schemas/SaveDashboardPinnedMappingsRequest",
                                         "facade.ReconciliationFacadeServices.save#DashboardPinnedSavedRuns": "#/components/schemas/SaveDashboardPinnedSavedRunsRequest",
                                         "facade.ReconciliationFacadeServices.save#Mapping": "#/components/schemas/SaveMappingRequest",
+                                        "facade.ReconciliationFacadeServices.save#Reconciliation": "#/components/schemas/SaveReconciliationRequest",
+                                        "facade.ReconciliationFacadeServices.save#ReconciliationQuestion": "#/components/schemas/SaveReconciliationQuestionRequest",
                                         "facade.ReconciliationFacadeServices.save#RuleSetRun": "#/components/schemas/SaveRuleSetRunRequest",
                                         "facade.ReconciliationFacadeServices.save#SavedRunName": "#/components/schemas/SaveSavedRunNameRequest",
                                         "facade.ReconciliationFacadeServices.subscribe#RunNotification": "#/components/schemas/SubscribeRunNotificationRequest",
@@ -725,6 +745,12 @@
                                             "$ref": "#/components/schemas/GetMappingResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/GetReconciliationResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetReconciliationExecutionResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/GetReconciliationRunStatusResponse"
                                         },
                                         {
@@ -767,6 +793,9 @@
                                             "$ref": "#/components/schemas/RunGenericDiffResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/RunReconciliationResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/RunSavedRunDiffResponse"
                                         },
                                         {
@@ -780,6 +809,12 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveMappingResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveReconciliationResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveReconciliationQuestionResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveRuleSetRunResponse"
@@ -9723,6 +9758,207 @@
                     "result"
                 ]
             },
+            "GetReconciliationParams": {
+                "type": "object",
+                "properties": {
+                    "reconciliationId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "reconciliationId"
+                ],
+                "description": "DAR-UI-048. A run and its questions, in the active tenant."
+            },
+            "GetReconciliationResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "reconciliation": {
+                        "type": "object"
+                    },
+                    "questions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    }
+                }
+            },
+            "GetReconciliationRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.get#Reconciliation",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.get#Reconciliation",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.get#Reconciliation"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetReconciliationParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetReconciliationResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.get#Reconciliation. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetReconciliationResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetReconciliationExecutionParams": {
+                "type": "object",
+                "properties": {
+                    "reconciliationExecutionId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "reconciliationExecutionId"
+                ],
+                "description": "DAR-UI-048. Every question's result row from one press of Run, in the active tenant."
+            },
+            "GetReconciliationExecutionResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    }
+                }
+            },
+            "GetReconciliationExecutionRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.get#ReconciliationExecution",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.get#ReconciliationExecution",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.get#ReconciliationExecution"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetReconciliationExecutionParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetReconciliationExecutionResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.get#ReconciliationExecution. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetReconciliationExecutionResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "GetReconciliationRunStatusParams": {
                 "type": "object",
                 "properties": {
@@ -12369,6 +12605,129 @@
                     "result"
                 ]
             },
+            "RunReconciliationParams": {
+                "type": "object",
+                "properties": {
+                    "reconciliationId": {
+                        "type": "string"
+                    },
+                    "windowStartDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                    },
+                    "windowEndDate": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                    },
+                    "windowStartLocalDate": {
+                        "type": "string"
+                    },
+                    "windowEndLocalDate": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "reconciliationId"
+                ],
+                "description": "DAR-UI-048. Start a run's flowchart. Returns at once with the execution id; the walk\n            runs in the background and get#ReconciliationExecution follows it."
+            },
+            "RunReconciliationResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "reconciliationExecutionId": {
+                        "type": "string"
+                    }
+                }
+            },
+            "RunReconciliationRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.run#Reconciliation",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.run#Reconciliation",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.run#Reconciliation"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RunReconciliationParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RunReconciliationResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.run#Reconciliation. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RunReconciliationResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "RunSavedRunDiffParams": {
                 "type": "object",
                 "properties": {
@@ -13317,6 +13676,236 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/SaveMappingResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SaveReconciliationParams": {
+                "type": "object",
+                "properties": {
+                    "reconciliationId": {
+                        "type": "string"
+                    },
+                    "reconciliationName": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "defaultTimeWindow": {
+                        "type": "string"
+                    },
+                    "isActive": {
+                        "type": "string"
+                    },
+                    "isArchived": {
+                        "type": "string"
+                    }
+                },
+                "description": "DAR-UI-048. Create or update a run: the container of a flowchart of questions."
+            },
+            "SaveReconciliationResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "reconciliation": {
+                        "type": "object"
+                    }
+                }
+            },
+            "SaveReconciliationRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.save#Reconciliation",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.save#Reconciliation",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.save#Reconciliation"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveReconciliationParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveReconciliationResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.save#Reconciliation. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveReconciliationResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SaveReconciliationQuestionParams": {
+                "type": "object",
+                "properties": {
+                    "reconciliationId": {
+                        "type": "string"
+                    },
+                    "reconciliationRunId": {
+                        "type": "string"
+                    },
+                    "ruleSetId": {
+                        "type": "string"
+                    },
+                    "runName": {
+                        "type": "string"
+                    },
+                    "questionRole": {
+                        "type": "string"
+                    },
+                    "parentReconciliationRunId": {
+                        "type": "string"
+                    },
+                    "parentBranch": {
+                        "type": "string"
+                    },
+                    "noOutcomeLabel": {
+                        "type": "string"
+                    },
+                    "runSequence": {
+                        "type": "integer"
+                    },
+                    "isActive": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "reconciliationId",
+                    "ruleSetId"
+                ],
+                "description": "DAR-UI-048. Create or update one question of a run's flowchart. Every tree rule is\n            enforced here (RunFlowchartTree), not only in the UI."
+            },
+            "SaveReconciliationQuestionResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "question": {
+                        "type": "object"
+                    }
+                }
+            },
+            "SaveReconciliationQuestionRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.save#ReconciliationQuestion",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.save#ReconciliationQuestion",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.save#ReconciliationQuestion"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveReconciliationQuestionParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveReconciliationQuestionResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.save#ReconciliationQuestion. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveReconciliationQuestionResult"
                     }
                 },
                 "required": [
@@ -18168,6 +18757,8 @@
         "facade.ReconciliationFacadeServices.get#GeneratedOutput": "GetGeneratedOutput",
         "facade.ReconciliationFacadeServices.get#GeneratedOutputDifferences": "GetGeneratedOutputDifferences",
         "facade.ReconciliationFacadeServices.get#Mapping": "GetMapping",
+        "facade.ReconciliationFacadeServices.get#Reconciliation": "GetReconciliation",
+        "facade.ReconciliationFacadeServices.get#ReconciliationExecution": "GetReconciliationExecution",
         "facade.ReconciliationFacadeServices.get#ReconciliationRunStatus": "GetReconciliationRunStatus",
         "facade.ReconciliationFacadeServices.list#AutomationExecutions": "ListAutomationExecutions",
         "facade.ReconciliationFacadeServices.list#AutomationSourceOptions": "ListAutomationSourceOptions",
@@ -18182,11 +18773,14 @@
         "facade.ReconciliationFacadeServices.resume#Automation": "ResumeAutomation",
         "facade.ReconciliationFacadeServices.run#AutomationNow": "RunAutomationNow",
         "facade.ReconciliationFacadeServices.run#GenericDiff": "RunGenericDiff",
+        "facade.ReconciliationFacadeServices.run#Reconciliation": "RunReconciliation",
         "facade.ReconciliationFacadeServices.run#SavedRunDiff": "RunSavedRunDiff",
         "facade.ReconciliationFacadeServices.save#Automation": "SaveAutomation",
         "facade.ReconciliationFacadeServices.save#DashboardPinnedMappings": "SaveDashboardPinnedMappings",
         "facade.ReconciliationFacadeServices.save#DashboardPinnedSavedRuns": "SaveDashboardPinnedSavedRuns",
         "facade.ReconciliationFacadeServices.save#Mapping": "SaveMapping",
+        "facade.ReconciliationFacadeServices.save#Reconciliation": "SaveReconciliation",
+        "facade.ReconciliationFacadeServices.save#ReconciliationQuestion": "SaveReconciliationQuestion",
         "facade.ReconciliationFacadeServices.save#RuleSetRun": "SaveRuleSetRun",
         "facade.ReconciliationFacadeServices.save#SavedRunName": "SaveSavedRunName",
         "facade.ReconciliationFacadeServices.subscribe#RunNotification": "SubscribeRunNotification",

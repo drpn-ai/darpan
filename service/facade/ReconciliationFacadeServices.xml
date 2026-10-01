@@ -1991,6 +1991,132 @@
         </out-parameters>
     </service>
 
+    <service verb="save" noun="Reconciliation" allow-remote="true" authenticate="true">
+        <description>DAR-UI-048. Create or update a run: the container of a flowchart of questions.</description>
+        <in-parameters>
+            <parameter name="reconciliationId"/>
+            <parameter name="reconciliationName"/>
+            <parameter name="description"/>
+            <parameter name="defaultTimeWindow"/>
+            <parameter name="isActive"/>
+            <parameter name="isArchived"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="reconciliation" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="darpan.reconciliation.flowchart.RunFlowchartSupport.saveReconciliation(ec, context)"/>
+            <set field="reconciliation" from="saved?.reconciliation"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="ReconciliationQuestion" allow-remote="true" authenticate="true">
+        <description>DAR-UI-048. Create or update one question of a run's flowchart. Every tree rule is
+            enforced here (RunFlowchartTree), not only in the UI.</description>
+        <in-parameters>
+            <parameter name="reconciliationId" required="true"/>
+            <parameter name="reconciliationRunId"/>
+            <parameter name="ruleSetId" required="true"/>
+            <parameter name="runName"/>
+            <parameter name="questionRole"/>
+            <parameter name="parentReconciliationRunId"/>
+            <parameter name="parentBranch"/>
+            <parameter name="noOutcomeLabel"/>
+            <parameter name="runSequence" type="Integer"/>
+            <parameter name="isActive"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="question" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="darpan.reconciliation.flowchart.RunFlowchartSupport.saveQuestion(ec, context)"/>
+            <set field="question" from="saved?.question"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Reconciliation" authz-action="view" allow-remote="true" authenticate="true">
+        <description>DAR-UI-048. A run and its questions, in the active tenant.</description>
+        <in-parameters><parameter name="reconciliationId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="reconciliation" type="Map"/>
+            <parameter name="questions" type="List"><parameter name="question" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="got" from="darpan.reconciliation.flowchart.RunFlowchartSupport.getReconciliation(ec, reconciliationId)"/>
+            <set field="reconciliation" from="got?.reconciliation"/>
+            <set field="questions" from="got?.questions"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="run" noun="Reconciliation" transaction="ignore" allow-remote="true" authenticate="true">
+        <description>DAR-UI-048. Start a run's flowchart. Returns at once with the execution id; the walk
+            runs in the background and get#ReconciliationExecution follows it.</description>
+        <in-parameters>
+            <parameter name="reconciliationId" required="true"/>
+            <parameter name="windowStartDate" type="Timestamp"/>
+            <parameter name="windowEndDate" type="Timestamp"/>
+            <parameter name="windowStartLocalDate"/>
+            <parameter name="windowEndLocalDate"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="reconciliationExecutionId"/>
+        </out-parameters>
+        <actions>
+            <set field="ignoreRunAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access for runs.')"/>
+            <if condition="!ec.message.hasError() &amp;&amp; darpan.reconciliation.flowchart.RunFlowchartSupport.findReconciliation(ec, reconciliationId) == null">
+                <message error="true">Run '${reconciliationId}' was not found.</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="reconciliationExecutionId" from="java.util.UUID.randomUUID().toString().replace('-', '')"/>
+                <service-call name="reconciliation.ReconciliationFlowchartServices.run#Reconciliation" async="true"
+                        in-map="[reconciliationId: reconciliationId, reconciliationExecutionId: reconciliationExecutionId,
+                        windowStartDate: windowStartDate, windowEndDate: windowEndDate,
+                        windowStartLocalDate: windowStartLocalDate, windowEndLocalDate: windowEndLocalDate]"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="ReconciliationExecution" authz-action="view" allow-remote="true" authenticate="true">
+        <description>DAR-UI-048. Every question's result row from one press of Run, in the active tenant.</description>
+        <in-parameters><parameter name="reconciliationExecutionId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="results" type="List"><parameter name="result" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="results" from="darpan.reconciliation.flowchart.RunFlowchartSupport.getExecution(ec, reconciliationExecutionId).results"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
     <service verb="list" noun="Automations" authz-action="view" allow-remote="true" authenticate="true">
         <description>List tenant-scoped reconciliation automations with dashboard-ready saved-run, source, schedule, last-execution, and permission summaries.</description>
         <in-parameters>

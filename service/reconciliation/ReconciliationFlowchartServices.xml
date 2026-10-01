@@ -83,4 +83,20 @@
             </parameter>
         </out-parameters>
     </service>
+
+    <!-- DAR-UI-048. The whole walk, for the facade's async dispatch and for automations. Internal. -->
+    <service verb="run" noun="Reconciliation" transaction="ignore">
+        <in-parameters>
+            <parameter name="reconciliationId" required="true"/>
+            <parameter name="reconciliationExecutionId"/>
+            <parameter name="windowStartDate" type="Timestamp"/>
+            <parameter name="windowEndDate" type="Timestamp"/>
+            <parameter name="windowStartLocalDate"/>
+            <parameter name="windowEndLocalDate"/>
+        </in-parameters>
+        <out-parameters><parameter name="summary" type="Map"/></out-parameters>
+        <actions>
+            <set field="summary" from="darpan.common.TransactionDetachSupport.runDetachedFromCallerTransaction(ec) { -> darpan.reconciliation.flowchart.RunFlowchartSupport.runReconciliation(ec, [reconciliationId: reconciliationId, reconciliationExecutionId: reconciliationExecutionId, windowStartDate: windowStartDate, windowEndDate: windowEndDate, windowStartLocalDate: windowStartLocalDate, windowEndLocalDate: windowEndLocalDate]) }"/>
+        </actions>
+    </service>
 </services>

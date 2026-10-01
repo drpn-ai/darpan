@@ -92,8 +92,16 @@
             <description>DAR-UI-048. The parent question's row in the same execution.</description>
         </field>
         <field name="yesCount" type="number-integer">
-            <description>DAR-UI-048. Records this question answered "yes" for. The "no" count is
-                differenceCount.</description>
+            <description>DAR-UI-048. Records this question answered "yes" for.</description>
+        </field>
+        <field name="noCount" type="number-integer">
+            <description>DAR-UI-048. Records this question answered "no" for: the count on the "no" arrow.
+                NOT differenceCount, which counts finding rows (a START's whole population, a COMPARE
+                child's FILE_2-only rows, and never value mismatches).</description>
+        </field>
+        <field name="unaskedCount" type="number-integer">
+            <description>DAR-UI-048. Parent keys this COMPARE question never saw in its FILE_1: neither
+                yes nor no, so yes + no + unasked = the parent's branch.</description>
         </field>
         <field name="reconciliationMappingId" type="id"/>
         <field name="ruleSetId" type="id"/>

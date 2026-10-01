@@ -81,4 +81,46 @@ class RunFlowchartAutomationSmokeTests {
                 .condition("reconciliationExecutionId", first.reconciliationExecutionId).disableAuthz().useCache(false).list()
         assertEquals(["AUT_STAT_FAILED", "AUT_STAT_NOT_RUN"] as Set, rows*.statusEnumId as Set)
     }
+
+    /**
+     * Final review C1: the scheduler runs with NO user. Each question must still get past the pipeline's
+     * user-based write gate (the automation has already asserted its tenant), so the first question's row
+     * exists and does not carry an access refusal.
+     */
+    @Test
+    void aScheduledWalkWithNoUserIsNotRefusedForAccess() {
+        Closure<String> ruleSet = { String label ->
+            ec.service.sync().name("facade.ReconciliationFacadeServices.create#RuleSetRun").parameters([
+                    runName: "${label} ${UUID.randomUUID()}".toString(),
+                    file1SystemEnumId: "OMS", file1FileTypeEnumId: "DftCsv", file1PrimaryIdExpression: "order_id",
+                    file2SystemEnumId: "SHOPIFY", file2FileTypeEnumId: "DftCsv", file2PrimaryIdExpression: "order_id",
+                    rules: []]).disableAuthz().call().savedRun.savedRunId as String
+        }
+        String recId = ec.service.sync().name("facade.ReconciliationFacadeServices.save#Reconciliation")
+                .parameters([reconciliationName: "Cron ${UUID.randomUUID()}".toString()]).disableAuthz().call().reconciliation.reconciliationId
+        String qA = ec.service.sync().name("facade.ReconciliationFacadeServices.save#ReconciliationQuestion")
+                .parameters([reconciliationId: recId, ruleSetId: ruleSet("Cron A")]).disableAuthz().call().question.reconciliationRunId
+        String automationId = "FC_CRON_${UUID.randomUUID().toString().substring(0, 8)}"
+        ec.artifactExecution.disableAuthz()
+        ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomation").setAll([
+                automationId: automationId, automationName: "Flowchart cron", companyUserGroupId: "KREWE",
+                inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: recId, savedRunType: "reconciliation",
+                relativeWindowTypeEnumId: "AUT_WIN_PREV_DAY", isActive: "Y"]).create()
+        ec.artifactExecution.enableAuthz()
+        ec.message.clearErrors()
+
+        ec.user.logoutUser()
+        try {
+            AutomationExecutionSupport.executeAutomation(ec, [automationId: automationId,
+                    scheduledFireTime: Timestamp.valueOf("2026-08-16 01:00:00")])
+        } finally {
+            ec.message.clearErrors()
+            if (!ec.user.internalLoginUser("TEST_CUSTOMER_USER")) ec.user.internalLoginUser("test.customer")
+            ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, "KREWE")
+        }
+        def root = ec.entity.find("darpan.reconciliation.ReconciliationRunResult").condition("reconciliationRunId", qA)
+                .disableAuthz().useCache(false).list().find()
+        assertNotNull(root, "the scheduled walk must give its first question a row")
+        assertFalse(((root.errorMessage ?: "") as String).toLowerCase().contains("access"), root.errorMessage as String)
+    }
 }

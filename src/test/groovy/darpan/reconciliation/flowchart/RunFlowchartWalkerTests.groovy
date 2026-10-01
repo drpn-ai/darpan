@@ -35,6 +35,8 @@ class RunFlowchartWalkerTests {
         return [file: f]
     }
 
+    final Map no = [:]
+
     Map walk(List<Map> qs, Map<String, Map> behaviour, List calls, List skipped, Map yes) {
         return RunFlowchartWalker.walk([
                 questions: qs, workDir: tmp.toFile(),
@@ -43,6 +45,7 @@ class RunFlowchartWalkerTests {
                     calls << [id: id, include: call.file1IncludeIdsLocation ? QuestionKeyFiles.read(new File(call.file1IncludeIdsLocation as String)) : null,
                               parent: call.parentRunResultId]
                     Map b = behaviour[id] ?: [:]
+                    if (b.throws) throw new IllegalStateException(b.throws as String)
                     if (b.file1) QuestionKeyFiles.write(new File(call.file1KeysOutLocation as String), b.file1 as List)
                     return [runResultId: "RR_${id}".toString(), statusEnumId: b.status ?: "AUT_STAT_SUCCESS",
                             resultDocument: b.containsKey("findings") ? fakeDoc(b.findings as List).file : null]
@@ -51,7 +54,7 @@ class RunFlowchartWalkerTests {
                     skipped << [id: question.reconciliationRunId, status: status, parent: parentRunResultId]
                     return "RR_SKIP_${question.reconciliationRunId}".toString()
                 },
-                recordYesCount: { String runResultId, long n -> yes[runResultId] = n },
+                recordCounts: { String runResultId, long y, long n, long u -> yes[runResultId] = y; no[runResultId] = n },
         ])
     }
 
@@ -67,6 +70,7 @@ class RunFlowchartWalkerTests {
         assertEquals(["K2"] as Set, calls[3].include)               // no of A
         assertEquals("RR_A", calls[2].parent)
         assertEquals(4L, yes["RR_S"]); assertEquals(3L, yes["RR_A"]); assertEquals(2L, yes["RR_A1"]); assertEquals(1L, yes["RR_B"])
+        assertEquals(0L, no["RR_S"]); assertEquals(1L, no["RR_A"]); assertEquals(1L, no["RR_A1"]); assertEquals(0L, no["RR_B"])
         assertEquals("AUT_STAT_SUCCESS", r.statusEnumId)
         assertEquals([], skipped)
     }
@@ -119,9 +123,71 @@ class RunFlowchartWalkerTests {
                     return [runResultId: "RR_${question.reconciliationRunId}".toString(), statusEnumId: "AUT_STAT_SUCCESS", resultDocument: null]
                 },
                 recordSkipped: { Map question, String p, String s, String reason -> events << "skip:${question.reconciliationRunId}".toString(); "X" },
-                recordYesCount: { String id, long n -> },
+                recordCounts: { String id, long y, long n, long u -> },
         ])
         // Every record call happens at that question's turn in the walk, never in a batch up front.
         assertEquals(["run:S", "run:A", "run:A1", "skip:B"], events)
+    }
+
+    @Test
+    void aThrowingQuestionFailsAloneWithItsReasonAndSiblingsStillRun() {
+        List<Map> qs = chart() + [q("C", [parentReconciliationRunId: "S", parentBranch: "YES", runSequence: 2])]
+        List calls = [], skipped = []; Map yes = [:]
+        Map r = walk(qs, [S: [file1: ["K1"], findings: ["K1"]], A: [throws: "boom: not authorized"], C: [findings: []]], calls, skipped, yes)
+        Map failedA = skipped.find { it.id == "A" }
+        assertEquals("AUT_STAT_FAILED", failedA.status)
+        assertEquals(["A1", "B"] as Set, skipped.findAll { it.status == "AUT_STAT_NOT_RUN" }*.id as Set)
+        assertTrue(calls*.id.contains("C"))
+        assertEquals("AUT_STAT_FAILED", r.statusEnumId)
+        assertEquals("AUT_STAT_FAILED", r.outcomes["A"].statusEnumId)
+    }
+
+    @Test
+    void aFailureAfterTheRowExistsFailsThatRowNotANewOne() {
+        List failures = []
+        Map r = RunFlowchartWalker.walk([
+                questions: chart(), workDir: tmp.toFile(),
+                runQuestion: { Map question, Map call ->
+                    QuestionKeyFiles.write(new File(call.file1KeysOutLocation as String), ["K1"])
+                    return [runResultId: "RR_${question.reconciliationRunId}".toString(), statusEnumId: "AUT_STAT_SUCCESS", resultDocument: null]
+                },
+                recordSkipped: { Map question, String p, String s, String reason -> "SKIP_${question.reconciliationRunId}".toString() },
+                recordFailure: { String runResultId, String reason -> failures << [id: runResultId, reason: reason] },
+                recordCounts: { String id, long y, long n, long u -> if (id == "RR_A") throw new IllegalStateException("db down") },
+        ])
+        assertEquals([[id: "RR_A", reason: "This question could not finish: db down"]], failures)
+        assertEquals("RR_A", r.outcomes["A"].runResultId)
+        assertEquals("AUT_STAT_FAILED", r.outcomes["A"].statusEnumId)
+    }
+
+    @Test
+    void theStartHookRunsBeforeEveryQuestionThatRuns() {
+        List events = []
+        RunFlowchartWalker.walk([
+                questions: chart(), workDir: tmp.toFile(),
+                onQuestionStart: { Map question -> events << "start:${question.reconciliationRunId}".toString() },
+                runQuestion: { Map question, Map call ->
+                    events << "run:${question.reconciliationRunId}".toString()
+                    QuestionKeyFiles.write(new File(call.file1KeysOutLocation as String), ["K1"])
+                    return [runResultId: "RR_${question.reconciliationRunId}".toString(), statusEnumId: "AUT_STAT_SUCCESS", resultDocument: null]
+                },
+                recordSkipped: { Map question, String p, String s, String reason -> "X" },
+                recordCounts: { String id, long y, long n, long u -> },
+        ])
+        assertEquals(["start:S", "run:S", "start:A", "run:A", "start:A1", "run:A1"], events)
+    }
+
+    @Test
+    void aRecorderThatThrowsNeverEscapesTheWalk() {
+        int calls = 0
+        Map r = RunFlowchartWalker.walk([
+                questions: chart(), workDir: tmp.toFile(),
+                runQuestion: { Map question, Map call -> throw new IllegalStateException("x") },
+                recordSkipped: { Map question, String p, String s, String reason -> calls++; throw new IllegalStateException("db down") },
+                recordCounts: { String id, long y, long n, long u -> },
+        ])
+        assertEquals("AUT_STAT_FAILED", r.statusEnumId)
+        assertEquals(["S", "A", "A1", "B"] as Set, r.outcomes.keySet())
+        assertTrue(calls >= 4)
     }
 }

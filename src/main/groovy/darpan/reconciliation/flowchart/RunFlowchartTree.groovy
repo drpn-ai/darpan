@@ -41,6 +41,13 @@ class RunFlowchartTree {
             if (parent?.questionRole == ROLE_START && branch == BRANCH_NO) {
                 errors << "The start has no 'no'; question ${id} must follow its yes.".toString()
             }
+            // Final review I5: on the same system the key can be compared by name, and a child that
+            // builds it differently could never line up with its parent's keys. Across systems the field
+            // names differ by design, so nothing is checked.
+            if (parent && q.file1System && q.file1System == parent.file1System && q.file1Key != parent.file1Key) {
+                errors << ("Question ${id} starts from the same system as ${parentId} but builds its key " +
+                        "differently (${q.file1Key} vs ${parent.file1Key}), so its records could never line up.").toString()
+            }
             if (!parentId && starts) {
                 errors << "Question ${id} must hang from the start.".toString()
             }

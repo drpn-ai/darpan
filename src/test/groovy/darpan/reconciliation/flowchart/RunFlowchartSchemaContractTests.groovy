@@ -28,7 +28,7 @@ class RunFlowchartSchemaContractTests {
                 ["companyUserGroupId", "isActive", "parentReconciliationRunId", "parentBranch",
                  "questionRole", "noOutcomeLabel"])
         assertNullableNoDefault(entity(entities, "ReconciliationRunResult"),
-                ["reconciliationExecutionId", "parentRunResultId", "yesCount"])
+                ["reconciliationExecutionId", "parentRunResultId", "yesCount", "noCount", "unaskedCount"])
     }
 
     @Test

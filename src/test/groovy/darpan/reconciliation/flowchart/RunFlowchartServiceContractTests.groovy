@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  */
 class RunFlowchartServiceContractTests {
 
-    static final List<String> WALKER_ONLY = ["file1IncludeIdsLocation", "file1KeysOutLocation"]
+    static final List<String> WALKER_ONLY = ["file1IncludeIdsLocation", "file1KeysOutLocation", "systemTenantRun"]
 
     @Test
     void walkerOnlyInputsAreNotRemoteCallable() {
@@ -27,6 +27,8 @@ class RunFlowchartServiceContractTests {
         assertFalse(question.attributes().get("allow-remote") == "true", "run#FlowchartQuestion must not be remote")
         assertEquals("component://darpan/src/main/groovy/darpan/facade/reconciliation/runSavedRunDiff.groovy",
                 question.attributes().get("location"))
+        // systemTenantRun waives the user-based write gate for the scheduler; it must exist only here.
+        assertTrue(question."in-parameters".parameter.any { it.attributes().get("name") == "systemTenantRun" })
 
         // Every service file in the component, not only the facade: a remote service anywhere that
         // declares a walker-only input would let a browser name a server file.

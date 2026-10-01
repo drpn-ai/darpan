@@ -115,7 +115,13 @@ if ((requestedFile1SystemEnumId && !requestedFile2SystemEnumId) || (!requestedFi
     ec.message.addError("file1SystemEnumId and file2SystemEnumId must be provided together when overriding saved run defaults.")
 }
 
-if (!ec.message.hasError()) {
+// DAR-UI-048 (final review C1): a scheduled flowchart walk has NO user, so the user-based write gate below
+// would refuse every question. The automation runner has already asserted the tenant (withSystemTenant), and
+// systemTenantRun is declared only on the internal, never-remote run#FlowchartQuestion, so a browser cannot
+// set it — and it is honoured only when there is no user at all and a system tenant is in force.
+boolean systemTenantRunValue = ec.context.get("systemTenantRun") == true &&
+        !TenantAccessSupport.currentUserId(ec) && TenantAccessSupport.activeSystemTenantUserGroupId()
+if (!ec.message.hasError() && !systemTenantRunValue) {
     TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for reconciliation runs.")
 }
 

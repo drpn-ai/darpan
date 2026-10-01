@@ -15,6 +15,7 @@ import java.nio.file.Path
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -99,5 +100,15 @@ class QuestionKeyFilterTests {
                 "FILE_1", out.absolutePath)
         assertEquals(2L, n)
         assertEquals(["K1", "K2"] as Set, QuestionKeyFiles.read(out))
+    }
+
+    @Test
+    void theNothingMatchedWarningIsOnlyForTwoSourceQuestions() {
+        Map keptNone = [keptNone: true, idCount: 4L]
+        // A one-source (EVALUATE) child's FILE_1 holds only failures, so matching nothing is the correct
+        // all-pass answer, not a key problem (live: "Billed, never shipped" = 0).
+        assertNull(RuleSetCompareScopeAdapter.keyMismatchWarning(true, keptNone, "Scope"))
+        assertTrue(RuleSetCompareScopeAdapter.keyMismatchWarning(false, keptNone, "Scope").contains("none of the 4 keys"))
+        assertNull(RuleSetCompareScopeAdapter.keyMismatchWarning(false, [keptNone: false, idCount: 4L], "Scope"))
     }
 }

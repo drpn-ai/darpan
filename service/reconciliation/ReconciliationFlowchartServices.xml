@@ -31,6 +31,8 @@
             <parameter name="reconciliationExecutionId"/>
             <parameter name="reconciliationRunId"/>
             <parameter name="parentRunResultId"/>
+            <!-- Final review C1: the scheduler's walk has no user; see runSavedRunDiff.groovy for when it is honoured. -->
+            <parameter name="systemTenantRun" type="Boolean"/>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>

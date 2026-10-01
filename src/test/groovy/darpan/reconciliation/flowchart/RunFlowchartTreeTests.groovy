@@ -3,6 +3,7 @@ package darpan.reconciliation.flowchart
 import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /** DAR-UI-048. Every tree rule the save service enforces, and the order the walker runs questions in. */
@@ -93,5 +94,17 @@ class RunFlowchartTreeTests {
         List<Map> qs = [q("T", [scopeMode: "COMPARE", file1Signature: "SHOPIFY|A"]),
                         q("U", [scopeMode: "COMPARE", file1Signature: "NETSUITE_SUITEQL|B"])]
         assertTrue(RunFlowchartTree.validate(qs).any { it.contains("same records") })
+    }
+
+    @Test
+    void aChildOnTheSameSystemMustBuildTheSameKey() {
+        List<Map> qs = chain()
+        qs.each { it.file1System = "NETSUITE_SUITEQL"; it.file1Key = "internalId||" }
+        assertEquals([], RunFlowchartTree.validate(qs))
+        qs.find { it.reconciliationRunId == "A" }.file1Key = "tranId||"
+        assertTrue(RunFlowchartTree.validate(qs).any { it.contains("builds its key differently") })
+        // Across systems the field names differ by design, so nothing can be compared: allowed.
+        qs.find { it.reconciliationRunId == "A" }.file1System = "SHOPIFY"
+        assertFalse(RunFlowchartTree.validate(qs).any { it.contains("builds its key differently") })
     }
 }

@@ -2084,8 +2084,14 @@
         </out-parameters>
         <actions>
             <set field="ignoreRunAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access for runs.')"/>
-            <if condition="!ec.message.hasError() &amp;&amp; darpan.reconciliation.flowchart.RunFlowchartSupport.findReconciliation(ec, reconciliationId) == null">
-                <message error="true">Run '${reconciliationId}' was not found.</message>
+            <!-- Final review I1: every question runs the pipeline, which needs WRITE access; refuse here, not
+                 question by question after an execution id was already handed back. -->
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for runs.')"/>
+            </if>
+            <!-- Final review I3: archived, switched off, no questions, no window: refused before going async. -->
+            <if condition="!ec.message.hasError()">
+                <script>darpan.reconciliation.flowchart.RunFlowchartSupport.validateRunnable(ec, reconciliationId, windowStartDate, windowEndDate)</script>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="reconciliationExecutionId" from="java.util.UUID.randomUUID().toString().replace('-', '')"/>

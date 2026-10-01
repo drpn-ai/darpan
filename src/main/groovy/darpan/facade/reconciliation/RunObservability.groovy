@@ -138,7 +138,8 @@ class RunObservability {
              "ruleSetId", "companyUserGroupId", "createdByUserId", "windowStartDate", "windowEndDate",
              "windowTimeZone"].each { String k -> if (ctx.get(k) != null) run.set(k, ctx.get(k)) }
             run.set("statusEnumId", statusEnumId)
-            run.set("errorMessage", reason)
+            run.set("errorMessage", reason != null && reason.length() > 255 ? reason.substring(0, 255) : reason)
+            if (reason != null && reason.length() > 255) run.set("errorDetail", reason)
             run.set("startedDate", now)
             run.set("completedDate", now)
             run.set("createdDate", now)
@@ -150,13 +151,15 @@ class RunObservability {
         return runId
     }
 
-    /** DAR-UI-048. The count on the "yes" arrow, written after the walker splits the question's keys. */
-    static void recordYesCount(def ec, String runResultId, long yesCount) {
+    /** DAR-UI-048. The counts on a question's arrows, written after the walker splits its keys. */
+    static void recordCounts(def ec, String runResultId, long yesCount, long noCount, long unaskedCount) {
         if (!runResultId) return
-        ec.transaction.runUseOrBegin(30, "Error recording a flowchart yes count", {
+        ec.transaction.runUseOrBegin(30, "Error recording flowchart counts", {
             def run = ec.entity.find(RUN_RESULT_ENTITY).condition("reconciliationRunResultId", runResultId).useCache(false).one()
             if (run == null) return
             run.set("yesCount", yesCount)
+            run.set("noCount", noCount)
+            run.set("unaskedCount", unaskedCount)
             run.set("lastUpdatedDate", nowSafe(ec))
             run.update()
         })

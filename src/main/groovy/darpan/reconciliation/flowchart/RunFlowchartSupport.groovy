@@ -29,11 +29,6 @@ class RunFlowchartSupport {
                 .condition("reconciliationId", reconciliationId).useCache(false).list() ?: []
         return rows.collect { def row ->
             String ruleSetId = row.get("ruleSetId") as String
-            def scope = ruleSetId ? TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareScope")
-                    .condition("ruleSetId", ruleSetId).useCache(false).list()?.find() : null
-            def file1 = scope ? TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSource")
-                    .condition("compareScopeId", scope.get("compareScopeId")).condition("fileSide", "FILE_1")
-                    .useCache(false).one() : null
             [reconciliationRunId      : row.get("reconciliationRunId"),
              parentReconciliationRunId: row.get("parentReconciliationRunId"),
              parentBranch             : row.get("parentBranch"),
@@ -42,10 +37,27 @@ class RunFlowchartSupport {
              isActive                 : row.get("isActive"),
              runName                  : row.get("runName"),
              noOutcomeLabel           : row.get("noOutcomeLabel"),
-             ruleSetId                : ruleSetId,
-             scopeMode                : (scope?.get("scopeMode") ?: RunFlowchartTree.MODE_COMPARE) as String,
-             file1Signature           : "${file1?.get('systemEnumId')}|${file1?.get('sourceConfigId')}".toString()]
+             ruleSetId                : ruleSetId] + shapeFor(ec, ruleSetId)
         } as List<Map>
+    }
+
+    /**
+     * What the tree rules need from a question's rule set: its mode, which records it starts from, and
+     * (final review I5) how it builds its FILE_1 key, so a same-system parent and child can be checked.
+     */
+    static Map shapeFor(def ec, String ruleSetId) {
+        def scope = ruleSetId ? TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareScope")
+                .condition("ruleSetId", ruleSetId).useCache(false).list()?.find() : null
+        def file1 = scope ? TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSource")
+                .condition("compareScopeId", scope.get("compareScopeId")).condition("fileSide", "FILE_1")
+                .useCache(false).one() : null
+        List keyFields = scope ? (TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSourceKeyField")
+                .condition("compareScopeId", scope.get("compareScopeId")).condition("fileSide", "FILE_1")
+                .orderBy("sequenceNum").useCache(false).list() ?: []).collect { it.get("fieldExpression") } : []
+        return [scopeMode     : (scope?.get("scopeMode") ?: RunFlowchartTree.MODE_COMPARE) as String,
+                file1Signature: "${file1?.get('systemEnumId')}|${file1?.get('sourceConfigId')}".toString(),
+                file1System   : file1?.get("systemEnumId") as String,
+                file1Key      : "${file1?.get('primaryIdExpression') ?: ''}|${file1?.get('idValueNormalizer') ?: ''}|${keyFields.join(',')}".toString()]
     }
 
     static Map saveReconciliation(def ec, Map params) {
@@ -109,14 +121,8 @@ class RunFlowchartSupport {
         return [question: value.getMap()]
     }
 
-    /** The candidate's scopeMode and FILE_1 signature come from its rule set, exactly as loadQuestions reads them. */
     private static Map loadQuestionShape(def ec, Map candidate) {
-        def scope = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareScope")
-                .condition("ruleSetId", candidate.ruleSetId).useCache(false).list()?.find()
-        def file1 = scope ? TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSource")
-                .condition("compareScopeId", scope.get("compareScopeId")).condition("fileSide", "FILE_1").useCache(false).one() : null
-        return candidate + [scopeMode     : (scope?.get("scopeMode") ?: RunFlowchartTree.MODE_COMPARE) as String,
-                            file1Signature: "${file1?.get('systemEnumId')}|${file1?.get('sourceConfigId')}".toString()]
+        return candidate + shapeFor(ec, candidate.ruleSetId as String)
     }
 
     static Map getReconciliation(def ec, String reconciliationId) {
@@ -125,6 +131,28 @@ class RunFlowchartSupport {
         return [reconciliation: reconciliation.getMap(), questions: loadQuestions(ec, reconciliationId)]
     }
 
+    /**
+     * Final review I3: everything that would make a walk impossible is refused here, BEFORE the facade goes
+     * async, where a refusal is a sentence the person sees rather than a log line.
+     */
+    static void validateRunnable(def ec, String reconciliationId, Object windowStartDate, Object windowEndDate) {
+        def reconciliation = findReconciliation(ec, reconciliationId)
+        if (reconciliation == null) { ec.message.addError("Run '${reconciliationId}' was not found."); return }
+        if (reconciliation.get("isArchived") == "Y") { ec.message.addError("Run '${reconciliationId}' is archived."); return }
+        if (reconciliation.get("isActive") == "N") { ec.message.addError("Run '${reconciliationId}' is switched off."); return }
+        if (!RunFlowchartTree.walkOrder(loadQuestions(ec, reconciliationId))) {
+            ec.message.addError("Run '${reconciliationId}' has no questions to ask."); return
+        }
+        if (windowStartDate == null || windowEndDate == null) {
+            ec.message.addError("Choose a window: windowStartDate and windowEndDate are required.")
+        }
+    }
+
+    /**
+     * Params: reconciliationId, reconciliationExecutionId?, the window fields, and optionally
+     * systemTenantRun (the scheduler: no user, tenant already asserted), onQuestionStart (Closure(Map)),
+     * questionCallExtras (Closure(Map) -> Map, smoke tests only).
+     */
     static Map runReconciliation(def ec, Map params) {
         String reconciliationId = normalize(params.reconciliationId)
         def reconciliation = findReconciliation(ec, reconciliationId)
@@ -139,33 +167,45 @@ class RunFlowchartSupport {
         String tenantId = reconciliation.get("companyUserGroupId") as String
         String userId = TenantAccessSupport.currentUserId(ec)
         Map base = [reconciliationExecutionId: executionId, windowStartDate: params.windowStartDate, windowEndDate: params.windowEndDate,
-                    windowStartLocalDate: params.windowStartLocalDate, windowEndLocalDate: params.windowEndLocalDate]
+                    windowStartLocalDate: params.windowStartLocalDate, windowEndLocalDate: params.windowEndLocalDate,
+                    systemTenantRun: params.systemTenantRun == true ? true : null]
+        List<Map> questions = loadQuestions(ec, reconciliationId)
 
         Map walked = RunFlowchartWalker.walk([
-                questions     : loadQuestions(ec, reconciliationId),
-                workDir       : workDir,
-                runQuestion   : { Map q, Map call ->
+                questions      : questions,
+                workDir        : workDir,
+                onQuestionStart: (Closure) params.onQuestionStart,
+                runQuestion    : { Map q, Map call ->
+                    // Final review I7: the active tenant is a server-side preference every tab shares. A
+                    // switch mid-walk must not run the rest of the chart in another tenant.
+                    String active = TenantAccessSupport.currentActiveTenantUserGroupId(ec)
+                    if (active != tenantId) {
+                        throw new IllegalStateException("the active tenant changed to ${active} during the run, which belongs to ${tenantId}.")
+                    }
                     Map input = (base + call + [savedRunId: q.ruleSetId, reconciliationRunId: q.reconciliationRunId] +
                             (extras ? extras.call(q) : [:])).findAll { it.value != null }
                     Map out = ec.service.sync().name(QUESTION_SERVICE).parameters(input).call() ?: [:]
                     String runResultId = ((Map) out.runResult)?.reconciliationRunResultId as String
-                    // A question that failed before or during its run leaves errors on the context; they
-                    // belong to that question's row, not to the next question.
+                    // Final review I1: a refusal before the pipeline minted a row leaves its reason only on
+                    // the context. Keep it: the walker records this question FAILED with that sentence.
+                    String why = ec.message.hasError() ? ec.message.getErrorsString()?.trim() : null
                     ec.message.clearErrors()
+                    if (!runResultId) throw new IllegalStateException(why ?: "the run was refused before it started.")
                     Map row = RunObservability.readRunRow(ec, runResultId) ?: [statusEnumId: RunObservability.STATUS_FAILED]
                     File doc = row.resultDataManagerPath ? DataManagerSupport.resolveDataManagerFile(ec, row.resultDataManagerPath, false) : null
                     return [runResultId: runResultId, statusEnumId: row.statusEnumId, resultDocument: doc?.isFile() ? doc : null]
                 },
-                recordSkipped : { Map q, String parentRunResultId, String status, String reason ->
+                recordSkipped  : { Map q, String parentRunResultId, String status, String reason ->
                     RunObservability.recordTerminalRun(ec, [savedRunId: q.ruleSetId, savedRunType: SAVED_RUN_TYPE,
                             ruleSetId: q.ruleSetId, reconciliationRunId: q.reconciliationRunId,
                             reconciliationExecutionId: executionId, parentRunResultId: parentRunResultId,
                             companyUserGroupId: tenantId, createdByUserId: userId,
                             windowStartDate: params.windowStartDate, windowEndDate: params.windowEndDate], status, reason)
                 },
-                recordYesCount: { String runResultId, long n -> RunObservability.recordYesCount(ec, runResultId, n) },
+                recordFailure  : { String runResultId, String reason -> RunObservability.failRun(ec, runResultId, null, null, reason) },
+                recordCounts   : { String runResultId, long y, long n, long u -> RunObservability.recordCounts(ec, runResultId, y, n, u) },
         ])
-        String first = RunFlowchartTree.walkOrder(loadQuestions(ec, reconciliationId)).collect {
+        String first = RunFlowchartTree.walkOrder(questions).collect {
             ((Map) walked.outcomes)[it.reconciliationRunId]?.runResultId }.find { it }
         return [reconciliationExecutionId: executionId, statusEnumId: walked.statusEnumId,
                 firstRunResultId: first, outcomes: walked.outcomes]
@@ -176,7 +216,7 @@ class RunFlowchartSupport {
                 .condition("reconciliationExecutionId", reconciliationExecutionId).orderBy("createdDate").useCache(false).list() ?: []
         return [results: rows.collect { def r ->
             ["reconciliationRunResultId", "reconciliationRunId", "parentRunResultId", "statusEnumId", "yesCount",
-             "differenceCount", "errorMessage", "resultDataManagerPath"].collectEntries { [(it): r.get(it)] }
+             "noCount", "unaskedCount", "differenceCount", "errorMessage", "resultDataManagerPath"].collectEntries { [(it): r.get(it)] }
         }]
     }
 }

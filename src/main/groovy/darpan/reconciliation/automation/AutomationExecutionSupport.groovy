@@ -260,7 +260,12 @@ class AutomationExecutionSupport {
             String error = null
             try {
                 Map summary = RunFlowchartSupport.runReconciliation(ec, [reconciliationId: reconciliationId,
-                        windowStartDate: window.childWindowStartDate, windowEndDate: window.childWindowEndDate])
+                        windowStartDate: window.childWindowStartDate, windowEndDate: window.childWindowEndDate,
+                        // Final review C1: no user on the scheduled path; the tenant is already asserted.
+                        systemTenantRun: true,
+                        // Final review I6: StuckRunReaper fails a RUNNING execution row untouched for 120
+                        // minutes; a long walk touches it before every question.
+                        onQuestionStart: { Map q -> updateAutomationExecution(ec, execution, [lastUpdatedDate: nowTimestamp(ec)]) }])
                 status = summary.statusEnumId as String
                 firstRunResultId = summary.firstRunResultId as String
             } catch (Throwable t) {

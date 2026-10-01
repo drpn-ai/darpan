@@ -243,11 +243,8 @@ class RuleSetCompareScopeAdapter {
         if (includeIdsLocation) {
             Map<String, Object> restricted = restrictSideToIdFile(ingestBySide, "FILE_1", includeIdsLocation)
             ingestBySide = (Map<String, Object>) restricted.ingestBySide
-            if (restricted.keptNone == true) {
-                processingWarnings.add(("Compare scope '${compareScopeLabel}': none of the ${restricted.idCount} keys " +
-                        "handed down from the previous question matched a record on FILE_1. The two questions " +
-                        "probably build their key differently.").toString())
-            }
+            String keyWarning = keyMismatchWarning(singleSided, restricted, compareScopeLabel)
+            if (keyWarning) processingWarnings.add(keyWarning)
         }
         String keysOutLocation = ReconciliationServices.normalize(context.get("file1KeysOutLocation"))
         if (keysOutLocation) writeSideIds(ingestBySide, "FILE_1", keysOutLocation)
@@ -348,6 +345,18 @@ class RuleSetCompareScopeAdapter {
         out.put(fileSide, copy)
         boolean keptNone = idCount > 0 && ((Dataset) copy.idDf).isEmpty()
         return [ingestBySide: out, idCount: idCount, keptNone: keptNone]
+    }
+
+    /**
+     * DAR-UI-048 (final review I5). Only a two-source question's FILE_1 is the whole window, so only there
+     * does "kept none of the handed-down keys" point at a key problem. A one-source question's FILE_1 holds
+     * just its failures, and matching none of them is the correct all-pass answer.
+     */
+    static String keyMismatchWarning(boolean singleSided, Map restricted, String compareScopeLabel) {
+        if (singleSided || restricted?.keptNone != true) return null
+        return ("Compare scope '${compareScopeLabel}': none of the ${restricted.idCount} keys handed down from " +
+                "the previous question matched a record on FILE_1. The two questions probably build their key " +
+                "differently.").toString()
     }
 
     /** DAR-UI-048. Every distinct compare_id on one side, one per line: the records a question asked about. */

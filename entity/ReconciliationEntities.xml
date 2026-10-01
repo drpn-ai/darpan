@@ -12,6 +12,17 @@
         <field name="description" type="text-medium"/>
         <field name="scheduleExpr" type="text-medium"/>
         <field name="isActive" type="text-indicator"/>
+        <field name="companyUserGroupId" type="id">
+            <description>DAR-UI-048. Owning tenant, stamped at create; the tenant boundary for the run and
+                every question under it. Nullable: rows that predate the flowchart belong to no tenant
+                and are not listed.</description>
+        </field>
+        <field name="isArchived" type="text-indicator">
+            <description>Absent reads as N, matching RuleSet.isArchived (DAR-BE-061).</description>
+        </field>
+        <field name="defaultTimeWindow" type="text-short">
+            <description>DAR-UI-048. The window a person gets when they press Run without choosing one.</description>
+        </field>
 
         <relationship type="many" related="darpan.reconciliation.ReconciliationRun" short-alias="runs">
             <key-map field-name="reconciliationId"/>
@@ -28,6 +39,27 @@
         <field name="defaultTimeWindow" type="text-short"/>
         <field name="ruleSetId" type="id"/>
         <field name="runSequence" type="number-integer"/>
+        <field name="companyUserGroupId" type="id">
+            <description>DAR-UI-048. Copied from the parent Reconciliation at save.</description>
+        </field>
+        <field name="isActive" type="text-indicator">
+            <description>Absent reads as Y. An inactive question is skipped with everything under it.</description>
+        </field>
+        <field name="parentReconciliationRunId" type="id">
+            <description>DAR-UI-048. The question this one continues from. Empty = it hangs from the top
+                of the run. The parent must belong to the same Reconciliation (enforced at save).</description>
+        </field>
+        <field name="parentBranch" type="text-short">
+            <description>DAR-UI-048. YES or NO: which answer of the parent this question asks about.
+                Required when parentReconciliationRunId is set; empty otherwise.</description>
+        </field>
+        <field name="questionRole" type="text-short">
+            <description>DAR-UI-048. START marks the population fetch: every record it returns is a "yes"
+                and it has no "no". Empty = an ordinary question. At most one START per run.</description>
+        </field>
+        <field name="noOutcomeLabel" type="text-medium">
+            <description>DAR-UI-048. The finding's name for this question's "no", e.g. "Shipped, never billed".</description>
+        </field>
 
         <relationship type="one" related="darpan.reconciliation.Reconciliation">
             <key-map field-name="reconciliationId"/>
@@ -41,6 +73,9 @@
         <relationship type="many" related="darpan.reconciliation.RunSystemInstance" short-alias="systemInstances">
             <key-map field-name="reconciliationRunId"/>
         </relationship>
+        <relationship type="one" title="Parent" related="darpan.reconciliation.ReconciliationRun">
+            <key-map field-name="parentReconciliationRunId" related-field-name="reconciliationRunId"/>
+        </relationship>
     </entity>
 
     <entity entity-name="ReconciliationRunResult" package="darpan.reconciliation" use="transactional" cache="never">
@@ -49,6 +84,17 @@
         <field name="savedRunId" type="id"/>
         <field name="savedRunType" type="text-short"/>
         <field name="reconciliationRunId" type="id"/>
+        <field name="reconciliationExecutionId" type="id">
+            <description>DAR-UI-048. Shared by every question's row from one press of Run on a flowchart.
+                Null for a single-rule run.</description>
+        </field>
+        <field name="parentRunResultId" type="id">
+            <description>DAR-UI-048. The parent question's row in the same execution.</description>
+        </field>
+        <field name="yesCount" type="number-integer">
+            <description>DAR-UI-048. Records this question answered "yes" for. The "no" count is
+                differenceCount.</description>
+        </field>
         <field name="reconciliationMappingId" type="id"/>
         <field name="ruleSetId" type="id"/>
         <field name="compareScopeId" type="id"/>

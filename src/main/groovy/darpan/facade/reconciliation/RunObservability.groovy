@@ -25,11 +25,13 @@ class RunObservability {
     static final String STATUS_NO_DATA  = "AUT_STAT_NO_DATA"
     static final String STATUS_SKIP_DUP = "AUT_STAT_SKIP_DUP"
     static final String STATUS_CANCELLED = "AUT_STAT_CANCELLED"
+    /** DAR-UI-048: a flowchart question that never ran because one above it did not finish. */
+    static final String STATUS_NOT_RUN = "AUT_STAT_NOT_RUN"
 
     static final String CANCEL_REASON = "Run cancelled by an operator."
 
     static final Set<String> ACTIVE_STATUSES   = [STATUS_PENDING, STATUS_RUNNING].toSet()
-    static final Set<String> TERMINAL_STATUSES = [STATUS_SUCCESS, STATUS_FAILED, STATUS_NO_DATA, STATUS_SKIP_DUP, STATUS_CANCELLED].toSet()
+    static final Set<String> TERMINAL_STATUSES = [STATUS_SUCCESS, STATUS_FAILED, STATUS_NO_DATA, STATUS_SKIP_DUP, STATUS_CANCELLED, STATUS_NOT_RUN].toSet()
 
     static final String STAGE_RESOLVE       = "RESOLVE"
     static final String STAGE_EXTRACT_FILE1 = "EXTRACT_FILE1"
@@ -87,6 +89,7 @@ class RunObservability {
                     run = ec.entity.makeValue(RUN_RESULT_ENTITY)
                     if (runId) run.set("reconciliationRunResultId", runId)
                     ["savedRunId", "savedRunType", "reconciliationRunId", "reconciliationMappingId",
+                     "reconciliationExecutionId", "parentRunResultId",
                      "ruleSetId", "compareScopeId", "companyUserGroupId", "createdByUserId",
                      "windowStartDate", "windowEndDate", "windowTimeZone",
                      "file1Name", "file2Name", "reconciliationType"].each { String k ->
@@ -119,6 +122,55 @@ class RunObservability {
         }
         logger.info("recon run begin savedRunId={} runId={}", norm(ctx.get("savedRunId")), runId)
         return runId
+    }
+
+    /**
+     * DAR-UI-048. A flowchart question that never runs (its parent failed, was cancelled, or handed it
+     * nothing) still gets a row, written terminal in one step so the stuck-run reaper never sees it
+     * PENDING. No steps, no notification: nothing ran.
+     */
+    static String recordTerminalRun(def ec, Map<String, Object> ctx, String statusEnumId, String reason) {
+        Timestamp now = nowSafe(ec)
+        String runId = null
+        ec.transaction.runUseOrBegin(30, "Error recording a flowchart question that did not run", {
+            def run = ec.entity.makeValue(RUN_RESULT_ENTITY)
+            ["savedRunId", "savedRunType", "reconciliationRunId", "reconciliationExecutionId", "parentRunResultId",
+             "ruleSetId", "companyUserGroupId", "createdByUserId", "windowStartDate", "windowEndDate",
+             "windowTimeZone"].each { String k -> if (ctx.get(k) != null) run.set(k, ctx.get(k)) }
+            run.set("statusEnumId", statusEnumId)
+            run.set("errorMessage", reason)
+            run.set("startedDate", now)
+            run.set("completedDate", now)
+            run.set("createdDate", now)
+            run.set("lastUpdatedDate", now)
+            run.setSequencedIdPrimary()
+            run.create()
+            runId = norm(run.get("reconciliationRunResultId"))
+        })
+        return runId
+    }
+
+    /** DAR-UI-048. The count on the "yes" arrow, written after the walker splits the question's keys. */
+    static void recordYesCount(def ec, String runResultId, long yesCount) {
+        if (!runResultId) return
+        ec.transaction.runUseOrBegin(30, "Error recording a flowchart yes count", {
+            def run = ec.entity.find(RUN_RESULT_ENTITY).condition("reconciliationRunResultId", runResultId).useCache(false).one()
+            if (run == null) return
+            run.set("yesCount", yesCount)
+            run.set("lastUpdatedDate", nowSafe(ec))
+            run.update()
+        })
+    }
+
+    /** DAR-UI-048. The four fields the walker reads back after a question's pipeline returns. */
+    static Map readRunRow(def ec, String runResultId) {
+        if (!runResultId) return null
+        def run = ec.entity.find(RUN_RESULT_ENTITY).condition("reconciliationRunResultId", runResultId).useCache(false).one()
+        if (run == null) return null
+        return [statusEnumId         : run.get("statusEnumId"),
+                resultDataManagerPath: run.get("resultDataManagerPath"),
+                differenceCount      : run.get("differenceCount"),
+                errorMessage         : run.get("errorMessage")]
     }
 
     /** Create a step row in RUNNING, advance the run's currentStage, stamp MDC stage. Returns the step value. */

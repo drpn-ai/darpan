@@ -66,6 +66,10 @@ changes too, not just the field: REQUESTED,OPEN becomes IN_PROGRESS.
 -->
 <entity-facade-xml type="darpan-seed">
 
+    <!-- DAR-UI-048: a flowchart question under a failed one ends NOT_RUN. -->
+    <moqui.basic.Enumeration enumId="AUT_STAT_NOT_RUN" enumTypeId="AutomationExecStatus" enumCode="NOT_RUN"
+            description="Not run: a question above it in the flowchart failed or was switched off" sequenceNum="9"/>
+
     <!-- Shopify per-EVENT (refund or return) records for returns reconciliation. Restated from 1.5.1
          to swap the withdrawn returnWorkflowStatus out of keepFieldsBase for orderReturnStatus. Every
          other column below is unchanged and is restated only because create-or-update writes whole

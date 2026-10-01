@@ -73,6 +73,11 @@
             enumCode="CANCELLED"
             description="Cancelled by an operator"
             sequenceNum="8"/>
+    <moqui.basic.Enumeration enumId="AUT_STAT_NOT_RUN"
+            enumTypeId="AutomationExecStatus"
+            enumCode="NOT_RUN"
+            description="Not run: a question above it in the flowchart failed or was switched off"
+            sequenceNum="9"/>
 
     <moqui.basic.EnumerationType enumTypeId="AutomationRelWindow"
             description="Automation relative date window"/>

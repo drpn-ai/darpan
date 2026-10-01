@@ -532,12 +532,14 @@ class AutomationFacadeSmokeTests {
         List<Map<String, Object>> shopifyPrimaryIdOptions = (List<Map<String, Object>>) shopifySourceOption.primaryIdOptions
         assertTrue(shopifyPrimaryIdOptions.any { it.fieldPath == "\$.records[*].id" && it.label == "Order ID" })
         assertTrue(shopifyPrimaryIdOptions.any { it.fieldPath == "\$.records[*].name" && it.label == "Order name" })
-        // Shopify declares no filterParameterName, so the UI must never offer it the exclusion mark;
-        // and it gets no wider field list (its record shape comes from a per-tenant GraphQL template).
+        // Shopify orders opted into source filters on 2026-09-30 (DAR-BE-063: the billed run keeps only
+        // FULFILLED orders and the conclusion "stop flagging" prefill needs the exclusion mark), so the UI
+        // now offers it; it still gets no wider field list (its record shape comes from a per-tenant
+        // GraphQL template).
         // Registry-driven (Task 5, Plan 2): Shopify's seed rows ARE its two primary-ID candidates, so
         // fieldOptions is byte-identical to primaryIdOptions rather than the old null-falls-back-to-
         // primaryIdOptions board behaviour.
-        assertEquals(false, shopifySourceOption.supportsExcludeFilters)
+        assertEquals(true, shopifySourceOption.supportsExcludeFilters)
         assertEquals(shopifyPrimaryIdOptions, shopifySourceOption.fieldOptions)
         assertTrue(((List<Map<String, Object>>) optionsResult.savedRuns).any { it.savedRunId == "OrderIdSchemaMap" })
 

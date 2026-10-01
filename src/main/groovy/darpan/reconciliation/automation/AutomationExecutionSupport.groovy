@@ -33,6 +33,7 @@ import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 
+import darpan.reconciliation.flowchart.RunFlowchartSupport
 import static darpan.common.ValueSupport.fileNameFromPath
 import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.normalizeInt
@@ -233,9 +234,57 @@ class AutomationExecutionSupport {
         }
     }
 
+    /**
+     * DAR-UI-048. One flowchart walk per resolved window, with the same execution-row bookkeeping
+     * (dedupe, RUNNING, terminal) as a single-rule automation. The walker owns every question's run row;
+     * the execution row points at the first one.
+     */
+    private static Map<String, Object> runReconciliationAutomation(def ec, Map<String, Object> input, def automation) {
+        String automationId = normalize(readField(automation, "automationId"))
+        String reconciliationId = normalize(readField(automation, "savedRunId"))
+        Timestamp scheduledFireTime = resolveScheduledFireTime(ec, input)
+        List<Map<String, Object>> windows = resolveWindows(automation, input + [scheduledFireTime: scheduledFireTime])
+        List<Map<String, Object>> executionResults = []
+        windows.eachWithIndex { Map<String, Object> window, int index ->
+            Map<String, Object> executionState = findOrCreateExecution(ec, automation, scheduledFireTime, window, index + 1)
+            def execution = executionState.execution
+            String automationExecutionId = normalize(readField(execution, "automationExecutionId"))
+            if (executionState.duplicate == true) {
+                executionResults << [automationExecutionId: automationExecutionId, statusEnumId: STATUS_SKIPPED_DUPLICATE]
+                return
+            }
+            Timestamp started = nowTimestamp(ec)
+            updateAutomationExecution(ec, execution, [statusEnumId: STATUS_RUNNING, startedDate: started, lastUpdatedDate: started])
+            String status
+            String firstRunResultId = null
+            String error = null
+            try {
+                Map summary = RunFlowchartSupport.runReconciliation(ec, [reconciliationId: reconciliationId,
+                        windowStartDate: window.childWindowStartDate, windowEndDate: window.childWindowEndDate])
+                status = summary.statusEnumId as String
+                firstRunResultId = summary.firstRunResultId as String
+            } catch (Throwable t) {
+                status = STATUS_FAILED
+                error = t.message ?: t.toString()
+                logger.error("Flowchart automation {} failed: {}", automationId, error)
+            }
+            Timestamp completed = nowTimestamp(ec)
+            updateAutomationExecution(ec, execution, [statusEnumId: status, completedDate: completed, lastUpdatedDate: completed,
+                    reconciliationRunResultId: firstRunResultId, errorMessage: error])
+            executionResults << [automationExecutionId: automationExecutionId, statusEnumId: status]
+        }
+        return [automationId: automationId, executionResults: executionResults]
+    }
+
     private static Map<String, Object> executeAutomationForTenant(def ec, Map<String, Object> input, def automation) {
         String automationId = normalize(readField(automation, "automationId"))
         String inputModeEnumId = normalize(readField(automation, "inputModeEnumId"))
+
+        // DAR-UI-048: a "reconciliation" automation points at a run's flowchart, not a rule set. It
+        // must branch BEFORE the DAR-BE-060 gate, which reads savedRunId as a RuleSet id.
+        if (normalize(readField(automation, "savedRunType"))?.toLowerCase() == RunFlowchartSupport.SAVED_RUN_TYPE) {
+            return runReconciliationAutomation(ec, input, automation)
+        }
 
         // DAR-BE-060, SCHEDULED path. Gated here as well as in runSavedRunDiff because an
         // automation is a second pipeline implementation rather than a scheduler in front of the

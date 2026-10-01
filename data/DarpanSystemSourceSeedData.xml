@@ -102,6 +102,16 @@
             sequenceNum="11"
             parentEnumId="OMS"/>
 
+    <!-- DAR-BE-064: the order-grain OMS presence extract over GraphQL (connector OMS_GQL). An endpoint
+         under OMS like its siblings; required for the endpoint gate and the automation-source FK. -->
+    <moqui.basic.Enumeration
+            enumId="OMS_GQL"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_GQL"
+            description="HotWax (GraphQL)"
+            sequenceNum="14"
+            parentEnumId="OMS"/>
+
     <moqui.basic.Enumeration
             enumId="OMS_ORDER_ITEMS"
             enumTypeId="DarpanSystemSource"

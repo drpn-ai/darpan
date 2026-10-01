@@ -34,6 +34,31 @@
             healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
             enabled="Y"/>
 
+    <!-- OMS_GQL (DAR-BE-064, DAR-BE-052 re-sequenced): the order-grain presence extract over GraphQL.
+         BESIDE the REST row, not replacing it: a rule set migrates by changing its sourceConfigType
+         from HOTWAX_OMS_REST to HOTWAX_OMS_GQL and reverts the same way. Same config row, same
+         credential. The REST row is disabled only after the diff gate (spec D8) passes. -->
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_GQL"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_GQL"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_GRAPHQL_API"
+            endpointLabel="GraphQL API (Orders)"
+            sendUrlTemplate="{baseUrl}/rest/s1/graphql"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders"
+            systemAliases="OMS_GQL,HOTWAX_GQL,DAR_SYS_OMS_GQL"
+            preserveWindowInstants="N"
+            keepFieldsParameterName="keepRecordFields"
+            keepFieldsBase="orderId,orderName,externalId,grandTotal,orderDate,statusId"
+            filterParameterName="sourceFilters"
+            pairLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            enabled="Y"/>
+
     <darpan.reconciliation.SourceSystemConnector
             systemEnumId="SHOPIFY"
             extractServiceName="reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders"

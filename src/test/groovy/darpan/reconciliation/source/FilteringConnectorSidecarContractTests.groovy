@@ -24,7 +24,10 @@ class FilteringConnectorSidecarContractTests {
     static final Set<String> WRITES_SIDECAR = ["OMS", "OMS_ORDER_LINE_UNITS", "OMS_ORDER_ITEMS",
                                                "SHOPIFY_ORDER_LINE_UNITS", "NETSUITE_SUITEQL", "SHOPIFY"] as Set
     /** Filter without a verified sidecar today. Conclusions on these sides read UNKNOWN when they filter. */
-    static final Set<String> NOT_YET = ["OMS_TRANSFER_ORDERS", "OMS_RECON_ORDERS", "OMS_RETURNS", "SHOPIFY_RETURN_REFS"] as Set
+    // OMS_GQL (DAR-BE-064): its script calls ExcludedRecordsSidecar.writeBeside, but at ORDER grain the shared
+    // OmsRestSourceSupport shaper never feeds the excluded collector (only the unit-grain branch collects), so
+    // the sidecar is always empty today. Same pipeline as REST OMS by construction.
+    static final Set<String> NOT_YET = ["OMS_TRANSFER_ORDERS", "OMS_RECON_ORDERS", "OMS_RETURNS", "SHOPIFY_RETURN_REFS", "OMS_GQL"] as Set
 
     private static Path componentRoot() {
         Path p = Paths.get(System.getProperty("user.dir")).toAbsolutePath()

@@ -2155,6 +2155,23 @@
         </actions>
     </service>
 
+    <service verb="list" noun="ReconciliationExecutions" authz-action="view" allow-remote="true" authenticate="true">
+        <description>DAR-UI-048. A run's past executions, newest first: one entry per press of Run.</description>
+        <in-parameters><parameter name="reconciliationId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="executions" type="List"><parameter name="execution" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="executions" from="darpan.reconciliation.flowchart.RunFlowchartSupport.listExecutions(ec, reconciliationId).executions"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
     <service verb="list" noun="Automations" authz-action="view" allow-remote="true" authenticate="true">
         <description>List tenant-scoped reconciliation automations with dashboard-ready saved-run, source, schedule, last-execution, and permission summaries.</description>
         <in-parameters>

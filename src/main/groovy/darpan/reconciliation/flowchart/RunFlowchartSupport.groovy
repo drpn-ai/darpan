@@ -239,6 +239,33 @@ class RunFlowchartSupport {
         return [deleted: true]
     }
 
+    /** DAR-UI-048 plan 3. One row per press of Run, newest first. A deleted question's rows still count. */
+    static Map listExecutions(def ec, String reconciliationId) {
+        if (findReconciliation(ec, reconciliationId) == null) { ec.message.addError("Run '${reconciliationId}' was not found."); return [:] }
+        List<String> questionIds = loadQuestions(ec, reconciliationId).collect { it.reconciliationRunId as String }
+        if (!questionIds) return [executions: []]
+        List rows = (TenantScopedFinder.findTenantScoped(ec, RUN_RESULT)
+                .condition("reconciliationRunId", "in", questionIds).orderBy("-createdDate").useCache(false).list() ?: [])
+                .findAll { it.get("reconciliationExecutionId") != null }   // EntityList.findAll casts to Boolean
+        Map<String, List> byExecution = new LinkedHashMap<String, List>()
+        rows.each { def r -> byExecution.computeIfAbsent(r.get("reconciliationExecutionId") as String) { [] } << r }
+        return [executions: byExecution.collect { String id, List group ->
+            [reconciliationExecutionId: id,
+             startedDate              : group.collect { it.get("startedDate") }.findAll { it != null }.min(),
+             windowStartDate          : group[0].get("windowStartDate"),
+             windowEndDate            : group[0].get("windowEndDate"),
+             statusEnumId             : rollupStatus(group.collect { it.get("statusEnumId") as String }),
+             questionCount            : group.size()]
+        }.take(20)]
+    }
+
+    static String rollupStatus(List<String> statuses) {
+        if (statuses.any { it in ["AUT_STAT_PENDING", "AUT_STAT_RUNNING"] }) return "AUT_STAT_RUNNING"
+        if (statuses.any { it == "AUT_STAT_CANCELLED" }) return "AUT_STAT_CANCELLED"
+        if (statuses.any { it == "AUT_STAT_FAILED" }) return "AUT_STAT_FAILED"
+        return "AUT_STAT_SUCCESS"
+    }
+
     static Map getExecution(def ec, String reconciliationExecutionId) {
         List rows = TenantScopedFinder.findTenantScoped(ec, RUN_RESULT)
                 .condition("reconciliationExecutionId", reconciliationExecutionId).orderBy("createdDate").useCache(false).list() ?: []

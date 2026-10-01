@@ -1726,6 +1726,45 @@ end'''
     }
 
     @Test
+    void createRuleSetRunSavesAnOrderedComparisonRule() {
+        // DAR-BE-065: the board offers < <= > >= on every rule, and save#Rule's default allow-html
+        // rejected the `<` in ruleText, the regenerated ruleLogic and the expression JSON alike.
+        String expression = '{"type":"FIELD_COMPARISON","file1FieldPath":"hasPaymentTransaction","file2FieldPath":"hasPaymentPreference","operator":"<="}'
+
+        Map<String, Object> createResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
+                .parameters([
+                        runName                 : "Ordered Comparison",
+                        file1SystemEnumId       : "SHOPIFY",
+                        file1FileTypeEnumId     : "DftCsv",
+                        file1PrimaryIdExpression: "order_id",
+                        file2SystemEnumId       : "OMS",
+                        file2FileTypeEnumId     : "DftCsv",
+                        file2PrimaryIdExpression: "order_id",
+                        rules                   : [
+                                [
+                                        sequenceNum: 1,
+                                        ruleText   : "hasPaymentTransaction <= hasPaymentPreference",
+                                        ruleType   : "FIELD_COMPARISON",
+                                        expression : expression,
+                                        enabled    : "Y",
+                                        severity   : "WARN",
+                                ],
+                        ],
+                ])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        String savedRunId = createResult.savedRun.savedRunId as String
+        List ruleRows = ec.entity.find("darpan.rule.Rule").condition("ruleSetId", savedRunId).useCache(false).list() ?: []
+        assertEquals(1, ruleRows.size())
+        assertEquals(expression, ruleRows[0].expression)
+        assertEquals("hasPaymentTransaction <= hasPaymentPreference", ruleRows[0].ruleText)
+        assertEquals("<=", ((List) createResult.savedRun.rules)[0].operator)
+    }
+
+    @Test
     void savedRunDeleteRemovesRuleSetChildrenAndGeneratedOutputs() {
         String noopRule = '''rule "NOOP_DELETE_RULE"
 when

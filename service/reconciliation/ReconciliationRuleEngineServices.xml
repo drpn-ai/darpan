@@ -167,10 +167,13 @@
             <parameter name="ruleSetId" required="true"/>
             <parameter name="ruleId"/>
             <parameter name="sequenceNum" type="Integer"/>
-            <parameter name="ruleText"/>
-            <parameter name="ruleLogic"/>
+            <!-- DAR-BE-065: comparisons carry < and >, which the default allow-html rejects. The DRL gate
+                 is RuleLogicValidator below (and server-side FIELD_COMPARISON regeneration), not HTML
+                 filtering; no UI surface renders these through v-html. -->
+            <parameter name="ruleText" allow-html="any"/>
+            <parameter name="ruleLogic" allow-html="any"/>
             <parameter name="ruleType"/>
-            <parameter name="expression"/>
+            <parameter name="expression" allow-html="any"/>
             <parameter name="severity"/>
             <parameter name="enabled" default-value="Y"/>
             <parameter name="validateOnSave" type="Boolean" default-value="false"/>

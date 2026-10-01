@@ -2123,6 +2123,38 @@
         </actions>
     </service>
 
+    <service verb="list" noun="Reconciliations" authz-action="view" allow-remote="true" authenticate="true">
+        <description>DAR-UI-048. The active tenant's runs (flowcharts), archived ones left out.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="reconciliations" type="List"><parameter name="reconciliation" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="reconciliations" from="darpan.reconciliation.flowchart.RunFlowchartSupport.listReconciliations(ec).reconciliations"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="delete" noun="ReconciliationQuestion" allow-remote="true" authenticate="true">
+        <description>DAR-UI-048. Remove one question. Refused while it has questions under it.</description>
+        <in-parameters><parameter name="reconciliationRunId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="deleted" from="darpan.reconciliation.flowchart.RunFlowchartSupport.deleteQuestion(ec, reconciliationRunId)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
     <service verb="list" noun="Automations" authz-action="view" allow-remote="true" authenticate="true">
         <description>List tenant-scoped reconciliation automations with dashboard-ready saved-run, source, schedule, last-execution, and permission summaries.</description>
         <in-parameters>

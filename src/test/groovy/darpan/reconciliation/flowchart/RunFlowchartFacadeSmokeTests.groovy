@@ -284,4 +284,33 @@ class RunFlowchartFacadeSmokeTests {
         ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, tenantId)
         ec.message.clearErrors()
     }
+
+    @Test
+    void runsAreListedForTheActiveTenantWithTheirQuestionCount() {
+        String recId = call("facade.ReconciliationFacadeServices.save#Reconciliation",
+                [reconciliationName: "Listed ${UUID.randomUUID()}".toString(), defaultTimeWindow: "3d"]).reconciliation.reconciliationId
+        call("facade.ReconciliationFacadeServices.save#ReconciliationQuestion", [reconciliationId: recId, ruleSetId: csvRuleSet("Listed A")])
+        List runs = call("facade.ReconciliationFacadeServices.list#Reconciliations", [:]).reconciliations as List
+        Map mine = runs.find { it.reconciliationId == recId } as Map
+        assertNotNull(mine)
+        assertEquals(1L, mine.questionCount as Long)
+        assertEquals("3d", mine.defaultTimeWindow)
+    }
+
+    @Test
+    void aQuestionWithChildrenCannotBeDeleted() {
+        String recId = call("facade.ReconciliationFacadeServices.save#Reconciliation",
+                [reconciliationName: "Delete ${UUID.randomUUID()}".toString()]).reconciliation.reconciliationId
+        String qA = call("facade.ReconciliationFacadeServices.save#ReconciliationQuestion",
+                [reconciliationId: recId, ruleSetId: csvRuleSet("Del A")]).question.reconciliationRunId
+        String qB = call("facade.ReconciliationFacadeServices.save#ReconciliationQuestion",
+                [reconciliationId: recId, ruleSetId: csvRuleSet("Del B"), parentReconciliationRunId: qA, parentBranch: "YES"]).question.reconciliationRunId
+        Map refused = call("facade.ReconciliationFacadeServices.delete#ReconciliationQuestion", [reconciliationRunId: qA])
+        assertFalse(refused.ok as boolean)
+        assertTrue((refused.errors as List).any { it.toString().contains("Remove the questions under it first") })
+        ec.message.clearErrors()
+        assertTrue(call("facade.ReconciliationFacadeServices.delete#ReconciliationQuestion", [reconciliationRunId: qB]).ok as boolean)
+        assertTrue(call("facade.ReconciliationFacadeServices.delete#ReconciliationQuestion", [reconciliationRunId: qA]).ok as boolean)
+        assertEquals(0, (call("facade.ReconciliationFacadeServices.get#Reconciliation", [reconciliationId: recId]).questions as List).size())
+    }
 }

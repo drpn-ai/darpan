@@ -211,6 +211,27 @@ class RunFlowchartSupport {
                 firstRunResultId: first, outcomes: walked.outcomes]
     }
 
+    static Map listReconciliations(def ec) {
+        List rows = TenantScopedFinder.findTenantScoped(ec, RECONCILIATION).orderBy("reconciliationName").useCache(false).list() ?: []
+        return [reconciliations: rows.findAll { it.get("isArchived") != "Y" }.collect { def r ->
+            String id = r.get("reconciliationId") as String
+            ["reconciliationId", "reconciliationName", "description", "defaultTimeWindow", "isActive", "isArchived"]
+                    .collectEntries { [(it): r.get(it)] } +
+                    [questionCount: TenantScopedFinder.findTenantScoped(ec, QUESTION).condition("reconciliationId", id).useCache(false).count()]
+        }]
+    }
+
+    static Map deleteQuestion(def ec, String reconciliationRunId) {
+        if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for runs.")) return [:]
+        def question = TenantScopedFinder.findTenantScopedByIdQuiet(ec, QUESTION, "reconciliationRunId", reconciliationRunId)
+        if (question == null) { ec.message.addError("Question '${reconciliationRunId}' was not found."); return [:] }
+        long children = TenantScopedFinder.findTenantScoped(ec, QUESTION)
+                .condition("parentReconciliationRunId", reconciliationRunId).useCache(false).count()
+        if (children > 0) { ec.message.addError("Remove the questions under it first."); return [:] }
+        question.delete()
+        return [deleted: true]
+    }
+
     static Map getExecution(def ec, String reconciliationExecutionId) {
         List rows = TenantScopedFinder.findTenantScoped(ec, RUN_RESULT)
                 .condition("reconciliationExecutionId", reconciliationExecutionId).orderBy("createdDate").useCache(false).list() ?: []

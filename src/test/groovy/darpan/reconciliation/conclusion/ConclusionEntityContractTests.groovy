@@ -83,4 +83,10 @@ class ConclusionEntityContractTests {
         assertTrue(condition.contains('<field name="quantifier" type="text-short" default="\'ALL\'"'),
                 "ALL default keeps every DAR-UI-044 row's meaning")
     }
+
+    @Test
+    void aCompareSourceCanReportDuplicateKeysAsFindings() {
+        String block = entityBlock(read("entity/RuleEntities.xml"), "RuleSetCompareSource")
+        assertTrue(block.contains('<field name="duplicateKeyHandling" type="text-short"'), "DAR-BE-063 opt-in")
+    }
 }

@@ -90,6 +90,9 @@ class DiffDetailClassifier {
 
     static boolean isMissingDiffRecord(Map record) {
         String typeToken = normalizeToken(resolveDiffType(record))
+        // DAR-BE-063: a duplicate-key row carries presentIn but nothing is missing — it is a broken
+        // "key must be unique" rule, so it falls through to the rule bucket keyed by its type.
+        if (typeToken.startsWith('duplicate_in_')) return false
         return (normalizeText(record.get('missingIn'))
                 || normalizeText(record.get('presentIn'))
                 || typeToken.startsWith('missing_in_'))

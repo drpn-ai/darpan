@@ -12,6 +12,8 @@ import org.slf4j.LoggerFactory
 class RuleSetCompareScopeAdapter {
     private static final Logger logger = LoggerFactory.getLogger(RuleSetCompareScopeAdapter.class)
     private static final List<String> FILE_SIDES = ["FILE_1", "FILE_2"].asImmutable()
+    /** DAR-BE-063: RuleSetCompareSource.duplicateKeyHandling value that reports repeated keys as findings. */
+    static final String DUPLICATE_KEY_FINDING = "FINDING"
     private static final Map<String, String> SIDE_PREFIX_BY_SIDE = [FILE_1: "file1", FILE_2: "file2"].asImmutable()
 
     /** A scope that diffs two sources. Every scope that existed before DAR-BE-049 is one of these. */
@@ -154,6 +156,7 @@ class RuleSetCompareScopeAdapter {
                     recordRootExpression: ReconciliationServices.normalize(source.recordRootExpression),
                     primaryIdExpression : ReconciliationServices.normalize(source.primaryIdExpression),
                     idValueNormalizer   : ReconciliationServices.normalize(source.idValueNormalizer),
+                    duplicateKeyHandling: ReconciliationServices.normalize(source.duplicateKeyHandling)?.toUpperCase(),
                     keyFields           : source.findRelated("keyFields", null, ["sequenceNum"], false, false) ?: []
             ]]
         }
@@ -234,6 +237,18 @@ class RuleSetCompareScopeAdapter {
                     hasHeader != null ? hasHeader : true, (String) plan.label, validationErrors,
                     (String) config.schemaFileName)]
         }
+        // DAR-BE-063: a side that opts into duplicateKeyHandling=FINDING reports its repeated keys as
+        // findings; they leave the compare on BOTH sides before validate/collapse ever sees them.
+        Map<String, Object> duplicateSplit = singleSided ? [ingestBySide: ingestBySide, duplicateDataBySide: [:], duplicateKeyCountBySide: [:]] :
+                splitDuplicateKeys(ingestBySide, activeSides.collectEntries { String fileSide ->
+                    [(fileSide): ((Map) ((Map) sidePlanBySide[fileSide]).config).duplicateKeyHandling]
+                })
+        ingestBySide = (Map<String, Object>) duplicateSplit.ingestBySide
+        ((Map<String, Long>) duplicateSplit.duplicateKeyCountBySide).each { String fileSide, Long count ->
+            if (count > 0) processingWarnings.add("Compare scope '${compareScopeLabel}' ${fileSide} " +
+                    "(${((Map) sidePlanBySide[fileSide]).label}) has ${count} key(s) on more than one record; " +
+                    "every record under them is reported as a duplicate finding and left out of the compare.".toString())
+        }
         Map<String, Object> preparedIngestBySide = activeSides.collectEntries { String fileSide ->
             Map<String, Object> plan = (Map<String, Object>) sidePlanBySide[fileSide]
             Map<String, Object> ingest = (Map<String, Object>) ingestBySide[fileSide]
@@ -265,6 +280,8 @@ class RuleSetCompareScopeAdapter {
         Dataset file2IdDf = ((Dataset) ingest2?.idDf)?.persist(StorageLevel.DISK_ONLY())
         Dataset file1DataDf = ((Dataset) ingest1.dataDf)?.persist(StorageLevel.DISK_ONLY())
         Dataset file2DataDf = ((Dataset) ingest2?.dataDf)?.persist(StorageLevel.DISK_ONLY())
+        Dataset file1DuplicateDataDf = ((Dataset) ((Map) duplicateSplit.duplicateDataBySide).FILE_1)?.persist(StorageLevel.DISK_ONLY())
+        Dataset file2DuplicateDataDf = ((Dataset) ((Map) duplicateSplit.duplicateDataBySide).FILE_2)?.persist(StorageLevel.DISK_ONLY())
 
         return [
                 ruleSetId        : ruleSetId,
@@ -288,10 +305,48 @@ class RuleSetCompareScopeAdapter {
                 file2IdDf        : file2IdDf,
                 file1DataDf      : file1DataDf,
                 file2DataDf      : file2DataDf,
-                persistedSources : [file1IdDf, file2IdDf, file1DataDf, file2DataDf].findAll { it != null },
+                file1DuplicateDataDf: file1DuplicateDataDf,
+                file2DuplicateDataDf: file2DuplicateDataDf,
+                persistedSources : [file1IdDf, file2IdDf, file1DataDf, file2DataDf, file1DuplicateDataDf, file2DuplicateDataDf].findAll { it != null },
                 validationErrors : validationErrors,
                 processingWarnings: processingWarnings
         ]
+    }
+
+    /**
+     * DAR-BE-063. For every side whose handling is FINDING: its repeated keys are found, every record
+     * under them is kept aside as that side's duplicate frame, and the union of all such keys is removed
+     * from EVERY side's data and id frames — so the other side's record for a duplicated key is not
+     * reported missing. No side opting in returns the input map itself.
+     */
+    static Map<String, Object> splitDuplicateKeys(Map<String, Object> ingestBySide, Map<String, String> handlingBySide) {
+        Map<String, Dataset> duplicateIdsBySide = [:]
+        (handlingBySide ?: [:]).each { String fileSide, String handling ->
+            Map ingest = (Map) ingestBySide?.get(fileSide)
+            if (handling == DUPLICATE_KEY_FINDING && ingest?.dataDf != null) {
+                duplicateIdsBySide.put(fileSide, CompareDatasetSupport.duplicateCompareIds((Dataset) ingest.dataDf).persist(StorageLevel.MEMORY_AND_DISK()))
+            }
+        }
+        if (duplicateIdsBySide.isEmpty()) {
+            return [ingestBySide: ingestBySide, duplicateDataBySide: [:], duplicateKeyCountBySide: [:]]
+        }
+        Dataset allDuplicateIds = duplicateIdsBySide.values().inject(null) { Dataset acc, Dataset ids ->
+            CompareDatasetSupport.unionDatasets(acc, ids)
+        }.distinct()
+        Map<String, Dataset> duplicateDataBySide = [:]
+        Map<String, Long> countBySide = [:]
+        duplicateIdsBySide.each { String fileSide, Dataset ids ->
+            Dataset dataDf = (Dataset) ((Map) ingestBySide.get(fileSide)).dataDf
+            duplicateDataBySide.put(fileSide, dataDf.join(ids, "compare_id", "inner"))
+            countBySide.put(fileSide, ids.count())
+        }
+        Map<String, Object> filtered = ingestBySide.collectEntries { String fileSide, Object raw ->
+            Map ingest = new LinkedHashMap((Map) raw)
+            ingest.dataDf = CompareDatasetSupport.excludeCompareIds((Dataset) ingest.dataDf, allDuplicateIds)
+            ingest.idDf = CompareDatasetSupport.excludeCompareIds((Dataset) ingest.idDf, allDuplicateIds)
+            [(fileSide): ingest]
+        } as Map<String, Object>
+        return [ingestBySide: filtered, duplicateDataBySide: duplicateDataBySide, duplicateKeyCountBySide: countBySide]
     }
 
     private static Map<String, Object> collapseDuplicateCompareIdsForBaseDiffOnly(Map<String, Object> ingest,

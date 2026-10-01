@@ -253,4 +253,16 @@ class DiffDetailClassifierTests {
         assertFalse(DiffDetailClassifier.buildEffectiveSummary([summary: [:], differences: []], F1, F2).containsKey("conclusions"),
                 "a legacy document must not gain an empty conclusions block")
     }
+
+    @Test
+    void aDuplicateRowIsOneRuleClassNotAMissingRecord() {
+        // DAR-BE-063: presentIn is set on a duplicate row, which isMissingDiffRecord alone would read as
+        // "missing from the other side". It is a broken "key must be unique" rule, one class per side.
+        Map row = [type: "DUPLICATE_IN_FILE_2", id: "K2", presentIn: F2, missingIn: "", message: "Duplicated in System B"]
+        assertEquals("rule", DiffDetailClassifier.resolveDiffBucket(row, F1, F2))
+        Map a = DiffDetailClassifier.classifyRow(row, 0, F1, F2)
+        Map b = DiffDetailClassifier.classifyRow(row + [id: "K9"], 7, F1, F2)
+        assertEquals(a.ruleFilterKey, b.ruleFilterKey, "every duplicate row on a side is one filter option")
+        assertEquals("duplicate_in_file_2", a.ruleFilterKey)
+    }
 }

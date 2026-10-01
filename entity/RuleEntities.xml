@@ -147,6 +147,12 @@
         <field name="idValueNormalizer" type="text-short">
             <description>Optional ID value normalizer (for example SHOPIFY_GID_TAIL) applied before compare.</description>
         </field>
+        <field name="duplicateKeyHandling" type="text-short">
+            <description>DAR-BE-063. Blank: a key on more than one record of this side fails a ruled run and is
+                collapsed to one record on a base-diff run (the long-standing behaviour). FINDING: every record
+                under a repeated key becomes a DUPLICATE_IN_FILE_n finding, and the key is left out of the
+                compare on both sides, so the other side's record is not reported missing.</description>
+        </field>
         <field name="systemMessageRemoteId" type="id">
             <description>Optional SystemMessageRemote endpoint used when the source is API-backed.</description>
         </field>

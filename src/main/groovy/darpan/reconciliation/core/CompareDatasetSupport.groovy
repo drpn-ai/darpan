@@ -137,6 +137,29 @@ class CompareDatasetSupport {
         )
     }
 
+    /** DAR-BE-063: the compare_ids that appear on more than one row (blank ids are not keys). */
+    static Dataset duplicateCompareIds(Dataset dataDf) {
+        return dataDf.filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0")
+                .groupBy("compare_id").count().filter(col("count").gt(1)).select("compare_id")
+    }
+
+    /** DAR-BE-063: df without the rows whose compare_id is in ids. */
+    static Dataset excludeCompareIds(Dataset df, Dataset ids) {
+        if (df == null || ids == null) return df
+        return df.join(ids, df.col("compare_id").equalTo(ids.col("compare_id")), "left_anti")
+    }
+
+    /**
+     * DAR-BE-063: one finding row per record under a duplicated key, in buildMissingDiffRows' exact row
+     * shape. missingIn is EMPTY (the evaluate-row precedent): nothing is missing, and the verify pass
+     * selects rows by missingIn, so it leaves these alone.
+     */
+    static Dataset buildDuplicateRows(Dataset duplicateDataDf, String diffType, String sideLabel, String note) {
+        if (duplicateDataDf == null) return null
+        return buildMissingDiffRows(duplicateDataDf, duplicateDataDf.select("compare_id").distinct(),
+                diffType, sideLabel, "", note)
+    }
+
     static Dataset unionDatasets(Dataset firstDf, Dataset secondDf) {
         if (firstDf != null && secondDf != null) return firstDf.union(secondDf)
         if (firstDf != null) return firstDf

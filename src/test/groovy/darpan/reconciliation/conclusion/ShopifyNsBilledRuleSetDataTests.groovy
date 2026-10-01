@@ -87,4 +87,14 @@ class ShopifyNsBilledRuleSetDataTests {
         assertTrue(RuleDiffSupport.violatesOperator(RuleDiffSupport.applyPreActions("84.00", pre),
                 RuleDiffSupport.applyPreActions("83.99", pre), "="))
     }
+
+    @Test
+    void theNetSuiteSideReportsDuplicateSalesOrdersAndATreeRootNamesThem() {
+        // Task 12: the first live run died on duplicate NetSuite keys; this side now reports them instead.
+        def d = doc()
+        def ns = d.'**'.find { it.name() == 'darpan.rule.RuleSetCompareSource' && it.@fileSide == 'FILE_2' }
+        assertEquals("FINDING", ns.@duplicateKeyHandling.toString())
+        def root = d.'**'.find { it.name() == 'darpan.rule.RuleSetConclusionRule' && it.@appliesToBucket == 'DUPLICATE_IN_FILE_2' }
+        assertEquals("CONC_NS_DUPLICATE_SO", root.@conclusionEnumId.toString())
+    }
 }

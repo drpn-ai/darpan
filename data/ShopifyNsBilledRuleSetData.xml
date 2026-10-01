@@ -35,6 +35,7 @@
     <moqui.basic.Enumeration enumId="CONC_SHOPIFY_RESTOCKED" enumTypeId="DarpanConclusion" enumCode="CONC_SHOPIFY_RESTOCKED" description="Restocked in Shopify"/>
     <moqui.basic.Enumeration enumId="CONC_SHOPIFY_OPEN" enumTypeId="DarpanConclusion" enumCode="CONC_SHOPIFY_OPEN" description="Still open in Shopify"/>
     <moqui.basic.Enumeration enumId="CONC_OUTSIDE_SHOPIFY_WINDOW" enumTypeId="DarpanConclusion" enumCode="CONC_OUTSIDE_SHOPIFY_WINDOW" description="Outside this Shopify window"/>
+    <moqui.basic.Enumeration enumId="CONC_NS_DUPLICATE_SO" enumTypeId="DarpanConclusion" enumCode="CONC_NS_DUPLICATE_SO" description="Duplicate sales order in NetSuite"/>
     <moqui.basic.Enumeration enumId="CONC_REFUNDED_AFTER_BILLING" enumTypeId="DarpanConclusion" enumCode="CONC_REFUNDED_AFTER_BILLING" description="Refunded in Shopify after billing"/>
 
     <darpan.rule.RuleSet ruleSetId="GORJANA_SHOPIFY_NS_BILLED_RS" ruleSetName="Fulfilled in Shopify, billed in NetSuite"
@@ -52,7 +53,7 @@
     <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" fileSide="FILE_2"
             systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
             recordRootExpression="records" primaryIdExpression="shopifyOrderId"
-            sourceConfigId="NS_SO_SHOPIFY_IDS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="GORJANA"/>
+            sourceConfigId="NS_SO_SHOPIFY_IDS" sourceConfigType="NETSUITE_SUITEQL" duplicateKeyHandling="FINDING" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetCompareSourceFilter compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="orderOrigin" operator="INCLUDE_IN" filterValues="HOTWAX" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetCompareSourceFilter compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" fileSide="FILE_2" sequenceNum="2" fieldExpression="status" operator="INCLUDE_IN" filterValues="G" companyUserGroupId="GORJANA"/>
@@ -128,4 +129,11 @@ end]]></ruleLogic>
          mismatches (NetSuite's own total fell after the refund). -->
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="2100" conclusionEnumId="CONC_REFUNDED_AFTER_BILLING" appliesToBucket="RULE" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="2100" conditionSeq="1" subject="FILE_1" fieldExpression="displayFinancialStatus" operator="IN" conditionValues="PARTIALLY_REFUNDED,REFUNDED" checkLabel="Shopify refunded some of it" companyUserGroupId="GORJANA"/>
+
+    <!-- ============ Duplicate sales orders (DUPLICATE_IN_FILE_2) — Task 12 ============
+         The NetSuite side opts into duplicateKeyHandling=FINDING: a Shopify order with more than one sales
+         order is reported here, every copy as its own row, instead of failing the run (the first live run
+         did) or collapsing into a match. Exchange / reship children can come later under this root. -->
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="3100" conclusionEnumId="CONC_NS_DUPLICATE_SO" appliesToBucket="DUPLICATE_IN_FILE_2" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_SHOPIFY_NS_BILLED_SCOPE" sequenceNum="3100" conditionSeq="1" subject="FILE_2" presence="KEPT" checkLabel="NetSuite holds more than one order for it" companyUserGroupId="GORJANA"/>
 </entity-facade-xml>

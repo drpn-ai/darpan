@@ -282,4 +282,17 @@ class RunConclusionSupportTests {
         Map row = (Map) ((List) parse(doc).differences)[0]
         assertEquals(["CONC_NEVER_REACHED_NS"], ((List) ((Map) row.conclusion).path)*.code)
     }
+
+    @Test
+    void aDuplicateRowConcludesInItsOwnBucketWithItsOwnSidePresent() {
+        List rules = [[sequenceNum: 10, conclusionEnumId: "DUP", label: "Duplicate", appliesToBucket: "DUPLICATE_IN_FILE_2",
+                       conditions: [cond(subject: "FILE_2", presence: "KEPT", checkLabel: "NetSuite holds it")]]]
+        Map row = [diffType: "DUPLICATE_IN_FILE_2", compareScopeId: "SCOPE_1", objectType: "ORDER",
+                   primaryId: "M1${SEP}01", presentIn: FILE2, missingIn: "",
+                   data: JsonOutput.toJson([orderId: "M1", orderLineId: "01"]), message: "Duplicated in ${FILE2}".toString()]
+        File doc = writeDiffDocument([row])
+        RunConclusionSupport.concludeRun(args(doc, rules))
+        Map concluded = (Map) ((Map) ((List) parse(doc).differences)[0]).conclusion
+        assertEquals("DUP", concluded.code)
+    }
 }

@@ -86,7 +86,8 @@ class RunConclusionSupport {
         DiffDocumentStreamSupport.rewriteDocument(diffFile, TMP_SUFFIX, { Map row ->
             String bucket = singleSided ? "FINDING" : bucketOf(row, file1Label, file2Label)
             String key = row.get("primaryId")?.toString()
-            String presentSide = singleSided ? "FILE_1" : (bucket == "MISSING_FROM_FILE_1" ? "FILE_2" : "FILE_1")
+            String presentSide = singleSided ? "FILE_1" :
+                    (bucket == "MISSING_FROM_FILE_1" || bucket == "DUPLICATE_IN_FILE_2" ? "FILE_2" : "FILE_1")
             Map presentRecord = parseData(slurper, row.get("data"))
 
             Map sides = [:]
@@ -132,6 +133,9 @@ class RunConclusionSupport {
     }
 
     private static String bucketOf(Map row, String file1Label, String file2Label) {
+        // DAR-BE-063: duplicate-key rows are their own bucket, named for the side that repeats the key.
+        String type = DiffDetailClassifier.resolveDiffType(row)?.toUpperCase()
+        if (type?.startsWith("DUPLICATE_IN_FILE_")) return type
         String bucket = DiffDetailClassifier.resolveDiffBucket(row, file1Label, file2Label)
         if (bucket == "file-1") return "MISSING_FROM_FILE_1"
         if (bucket == "file-2") return "MISSING_FROM_FILE_2"

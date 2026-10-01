@@ -123,6 +123,9 @@
             <parameter name="file2IdDf" type="org.apache.spark.sql.Dataset"/>
             <parameter name="file1DataDf" type="org.apache.spark.sql.Dataset"/>
             <parameter name="file2DataDf" type="org.apache.spark.sql.Dataset"/>
+            <!-- DAR-BE-063: every record under a key that repeats on a duplicateKeyHandling=FINDING side. -->
+            <parameter name="file1DuplicateDataDf" type="org.apache.spark.sql.Dataset"/>
+            <parameter name="file2DuplicateDataDf" type="org.apache.spark.sql.Dataset"/>
             <parameter name="validationErrors" type="List"/>
             <parameter name="processingWarnings" type="List"/>
         </out-parameters>
@@ -212,6 +215,9 @@
                 <set field="missingInFile1DiffDf" from="darpan.reconciliation.core.ReconciliationServices.buildMissingDiffRows(prepared.file2DataDf, idCompare.onlyInDf2, 'MISSING_IN_FILE_1', file2LabelValue, file1LabelValue, 'Present in ' + file2LabelValue + ', missing in ' + file1LabelValue)"/>
                 <set field="missingInFile2DiffDf" from="darpan.reconciliation.core.ReconciliationServices.buildMissingDiffRows(prepared.file1DataDf, idCompare.onlyInDf1, 'MISSING_IN_FILE_2', file1LabelValue, file2LabelValue, 'Present in ' + file1LabelValue + ', missing in ' + file2LabelValue)"/>
                 <set field="missingDiffDfValue" from="darpan.reconciliation.core.ReconciliationServices.unionDatasets(missingInFile1DiffDf, missingInFile2DiffDf)"/>
+                <!-- DAR-BE-063: duplicate-key findings, in the same row shape, for sides that opted in. -->
+                <set field="missingDiffDfValue" from="darpan.reconciliation.core.ReconciliationServices.unionDatasets(missingDiffDfValue, darpan.reconciliation.core.CompareDatasetSupport.buildDuplicateRows(prepared.file1DuplicateDataDf, 'DUPLICATE_IN_FILE_1', file1LabelValue, 'Duplicated in ' + file1LabelValue + ': more than one record shares this key'))"/>
+                <set field="missingDiffDfValue" from="darpan.reconciliation.core.ReconciliationServices.unionDatasets(missingDiffDfValue, darpan.reconciliation.core.CompareDatasetSupport.buildDuplicateRows(prepared.file2DuplicateDataDf, 'DUPLICATE_IN_FILE_2', file2LabelValue, 'Duplicated in ' + file2LabelValue + ': more than one record shares this key'))"/>
                 <if condition="missingDiffDfValue == null">
                     <set field="missingDiffDfValue" from="darpan.reconciliation.core.ReconciliationServices.emptyMissingDiffDataset(prepared.file1DataDf ?: prepared.file2DataDf)"/>
                 </if>

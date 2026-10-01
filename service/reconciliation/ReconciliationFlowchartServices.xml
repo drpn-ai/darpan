@@ -5,9 +5,10 @@
     <!-- DAR-UI-048. One flowchart question through the SAME script the Run button uses, so a question
          is a normal run in every respect. A second definition rather than new facade inputs: the
          walker's key-file inputs name server paths and must never be reachable from a browser, so this
-         entry point is internal (no allow-remote). Parameters are run#SavedRunDiff's, verbatim, plus the
+         entry point is internal. anonymous-all (the execute#Automation pattern) so the walker can call it
+         under any signed-in member; the script itself still enforces tenant write access. Parameters are run#SavedRunDiff's, verbatim, plus the
          walker's five. -->
-    <service verb="run" noun="FlowchartQuestion" type="script" transaction="ignore"
+    <service verb="run" noun="FlowchartQuestion" type="script" transaction="ignore" allow-remote="false" authenticate="anonymous-all"
             location="component://darpan/src/main/groovy/darpan/facade/reconciliation/runSavedRunDiff.groovy">
         <in-parameters>
             <parameter name="savedRunId" required="true"/>
@@ -85,7 +86,7 @@
     </service>
 
     <!-- DAR-UI-048. The whole walk, for the facade's async dispatch and for automations. Internal. -->
-    <service verb="run" noun="Reconciliation" transaction="ignore">
+    <service verb="run" noun="Reconciliation" transaction="ignore" allow-remote="false" authenticate="anonymous-all">
         <in-parameters>
             <parameter name="reconciliationId" required="true"/>
             <parameter name="reconciliationExecutionId"/>

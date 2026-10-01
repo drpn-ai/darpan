@@ -43,6 +43,22 @@ class RunFlowchartServiceContractTests {
         assertTrue(checked > 50, "expected to check the facade's remote services, checked ${checked}")
     }
 
+    /**
+     * Found by the live acceptance run: a signed-in member is not authorized for an internal service
+     * the walker calls, so the walk failed for real users while smoke tests (broad test authz) passed.
+     * The internal pattern here (as execute#Automation) is anonymous-all with no allow-remote: callable
+     * by trusted code under any user, never from a browser. Both halves are pinned together.
+     */
+    @Test
+    void internalWalkerServicesRunUnderAnyCallerButNeverRemotely() {
+        ["FlowchartQuestion", "Reconciliation"].each { String noun ->
+            def svc = service("service/reconciliation/ReconciliationFlowchartServices.xml", "run", noun)
+            assertNotNull(svc, "run#${noun} missing")
+            assertEquals("anonymous-all", svc.attributes().get("authenticate"), "run#${noun} must be anonymous-all")
+            assertFalse(svc.attributes().get("allow-remote") == "true", "run#${noun} must never be remote")
+        }
+    }
+
     private static def service(String path, String verb, String noun) {
         return parse(path).service.find { it.attributes().get("verb") == verb && it.attributes().get("noun") == noun }
     }

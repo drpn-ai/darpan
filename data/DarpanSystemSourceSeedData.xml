@@ -108,7 +108,7 @@
             enumId="OMS_GQL"
             enumTypeId="DarpanSystemSource"
             enumCode="HOTWAX_GQL"
-            description="HotWax (GraphQL)"
+            description="HotWax Orders (GraphQL)"
             sequenceNum="14"
             parentEnumId="OMS"/>
 

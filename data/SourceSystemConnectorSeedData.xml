@@ -46,7 +46,7 @@
             expectedSourceConfigType="HOTWAX_OMS_GQL"
             configParameterName="omsRestSourceConfigId"
             configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
-            remoteId="HOTWAX_GRAPHQL_API"
+            remoteId="HOTWAX_ORDERS_API"
             endpointLabel="GraphQL API (Orders)"
             sendUrlTemplate="{baseUrl}/rest/s1/graphql"
             remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders"

@@ -102,6 +102,10 @@
             <parameter name="allowDuplicateCompareIds" type="Boolean" default-value="false"/>
             <parameter name="sparkMaster" default-value="local[*]"/>
             <parameter name="sparkAppName" default-value="RuleSetCompareScopePreparation"/>
+                    <!-- DAR-UI-048: flowchart-only, internal. Absolute local paths: the parent's branch keys to
+                 restrict FILE_1 to, and where to write the FILE_1 keys this question asked about. -->
+            <parameter name="file1IncludeIdsLocation"/>
+            <parameter name="file1KeysOutLocation"/>
         </in-parameters>
         <out-parameters>
             <parameter name="ruleSetId"/>
@@ -151,6 +155,10 @@
             <parameter name="buildMatchedPairs" type="Boolean" default-value="true"/>
             <parameter name="sparkMaster" default-value="local[*]"/>
             <parameter name="sparkAppName" default-value="RuleSetCompareScopeBaseDiff"/>
+                    <!-- DAR-UI-048: flowchart-only, internal. Absolute local paths: the parent's branch keys to
+                 restrict FILE_1 to, and where to write the FILE_1 keys this question asked about. -->
+            <parameter name="file1IncludeIdsLocation"/>
+            <parameter name="file1KeysOutLocation"/>
         </in-parameters>
         <out-parameters>
             <parameter name="ruleSetId"/>
@@ -194,6 +202,7 @@
                     file1SchemaFileName:file1SchemaFileName, file2SchemaFileName:file2SchemaFileName,
                     file1Label:file1LabelInput, file2Label:file2LabelInput,
                     hasHeader:hasHeader, allowDuplicateCompareIds:allowDuplicateCompareIdsValue,
+                    file1IncludeIdsLocation:file1IncludeIdsLocation, file1KeysOutLocation:file1KeysOutLocation,
                     sparkMaster:sparkMaster, sparkAppName:sparkAppName]"
                     out-map="prepared"/>
 
@@ -290,6 +299,10 @@
             </parameter>
             <parameter name="sparkMaster" default-value="local[*]"/>
             <parameter name="sparkAppName" default-value="RuleSetCompareScopeEvaluate"/>
+                    <!-- DAR-UI-048: flowchart-only, internal. Absolute local paths: the parent's branch keys to
+                 restrict FILE_1 to, and where to write the FILE_1 keys this question asked about. -->
+            <parameter name="file1IncludeIdsLocation"/>
+            <parameter name="file1KeysOutLocation"/>
         </in-parameters>
         <out-parameters>
             <parameter name="ruleSetId"/>
@@ -324,6 +337,7 @@
                     file1Location:file1Location, file1Name:file1Name,
                     file1FileTypeEnumId:file1FileTypeEnumId, file1SchemaFileName:file1SchemaFileName,
                     file1Label:file1LabelInput, hasHeader:hasHeader,
+                    file1IncludeIdsLocation:file1IncludeIdsLocation, file1KeysOutLocation:file1KeysOutLocation,
                     sparkMaster:sparkMaster, sparkAppName:sparkAppName]"
                     out-map="prepared"/>
 
@@ -380,6 +394,10 @@
             <parameter name="sparkMaster" default-value="local[*]"/>
             <parameter name="sparkAppName" default-value="RuleSetCompareScope"/>
             <parameter name="ruleBatchSize" type="Integer" default-value="500"/>
+                    <!-- DAR-UI-048: flowchart-only, internal. Absolute local paths: the parent's branch keys to
+                 restrict FILE_1 to, and where to write the FILE_1 keys this question asked about. -->
+            <parameter name="file1IncludeIdsLocation"/>
+            <parameter name="file1KeysOutLocation"/>
         </in-parameters>
         <out-parameters>
             <parameter name="ruleSetId"/>
@@ -436,6 +454,7 @@
                     hasHeader:hasHeader,
                     allowDuplicateCompareIds:activeRuleCount == 0,
                     buildMatchedPairs:activeRuleCount > 0,
+                    file1IncludeIdsLocation:file1IncludeIdsLocation, file1KeysOutLocation:file1KeysOutLocation,
                     sparkMaster:sparkMaster, sparkAppName:sparkAppName]"
                     out-map="baseResult"/>
 

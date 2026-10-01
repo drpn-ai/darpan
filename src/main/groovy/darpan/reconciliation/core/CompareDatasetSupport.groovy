@@ -149,6 +149,12 @@ class CompareDatasetSupport {
         return df.join(ids, df.col("compare_id").equalTo(ids.col("compare_id")), "left_anti")
     }
 
+    /** DAR-UI-048: the rows whose compare_id is in {@code ids}; the semi-join keeps df's own columns. */
+    static Dataset keepCompareIds(Dataset df, Dataset ids) {
+        if (df == null || ids == null) return df
+        return df.join(ids, df.col("compare_id").equalTo(ids.col("compare_id")), "left_semi")
+    }
+
     /**
      * DAR-BE-063: one finding row per record under a duplicated key, in buildMissingDiffRows' exact row
      * shape. missingIn is EMPTY (the evaluate-row precedent): nothing is missing, and the verify pass

@@ -3,6 +3,7 @@ package darpan.reconciliation.core
 import darpan.common.DarpanEntityConstants
 import darpan.facade.common.TenantScopedFinder
 import org.apache.spark.sql.Dataset
+import org.apache.spark.sql.Row
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.storage.StorageLevel
 import org.moqui.context.ExecutionContext
@@ -237,6 +238,19 @@ class RuleSetCompareScopeAdapter {
                     hasHeader != null ? hasHeader : true, (String) plan.label, validationErrors,
                     (String) config.schemaFileName)]
         }
+        // DAR-UI-048: a flowchart child asks only about its parent's branch, and reports what it asked about.
+        String includeIdsLocation = ReconciliationServices.normalize(context.get("file1IncludeIdsLocation"))
+        if (includeIdsLocation) {
+            Map<String, Object> restricted = restrictSideToIdFile(ingestBySide, "FILE_1", includeIdsLocation)
+            ingestBySide = (Map<String, Object>) restricted.ingestBySide
+            if (restricted.keptNone == true) {
+                processingWarnings.add(("Compare scope '${compareScopeLabel}': none of the ${restricted.idCount} keys " +
+                        "handed down from the previous question matched a record on FILE_1. The two questions " +
+                        "probably build their key differently.").toString())
+            }
+        }
+        String keysOutLocation = ReconciliationServices.normalize(context.get("file1KeysOutLocation"))
+        if (keysOutLocation) writeSideIds(ingestBySide, "FILE_1", keysOutLocation)
         // DAR-BE-063: a side that opts into duplicateKeyHandling=FINDING reports its repeated keys as
         // findings; they leave the compare on BOTH sides before validate/collapse ever sees them.
         Map<String, Object> duplicateSplit = singleSided ? [ingestBySide: ingestBySide, duplicateDataBySide: [:], duplicateKeyCountBySide: [:], persistedFrames: []] :
@@ -312,6 +326,46 @@ class RuleSetCompareScopeAdapter {
                 validationErrors : validationErrors,
                 processingWarnings: processingWarnings
         ]
+    }
+
+    /**
+     * DAR-UI-048. A flowchart child question asks only about its parent's branch. The keys arrive as a
+     * file of compare_ids and are semi-joined here, before duplicate splitting, so a key outside the
+     * branch can neither be a finding nor a duplicate. keptNone reports a key file that matched nothing,
+     * which almost always means the two questions build their key differently.
+     */
+    static Map<String, Object> restrictSideToIdFile(Map<String, Object> ingestBySide, String fileSide, String idFileLocation) {
+        Map ingest = (Map) ingestBySide?.get(fileSide)
+        if (ingest?.dataDf == null) return [ingestBySide: ingestBySide, idCount: 0L, keptNone: false]
+        Dataset dataDf = (Dataset) ingest.dataDf
+        Dataset ids = dataDf.sparkSession().read().textFile(idFileLocation).toDF("compare_id")
+                .filter("length(trim(compare_id)) > 0").distinct()
+        long idCount = ids.count()
+        Map copy = new LinkedHashMap(ingest)
+        copy.dataDf = CompareDatasetSupport.keepCompareIds(dataDf, ids)
+        copy.idDf = CompareDatasetSupport.keepCompareIds((Dataset) ingest.idDf, ids)
+        Map<String, Object> out = new LinkedHashMap<String, Object>(ingestBySide)
+        out.put(fileSide, copy)
+        boolean keptNone = idCount > 0 && ((Dataset) copy.idDf).isEmpty()
+        return [ingestBySide: out, idCount: idCount, keptNone: keptNone]
+    }
+
+    /** DAR-UI-048. Every distinct compare_id on one side, one per line: the records a question asked about. */
+    static long writeSideIds(Map<String, Object> ingestBySide, String fileSide, String location) {
+        Map ingest = (Map) ingestBySide?.get(fileSide)
+        File target = new File(location)
+        target.parentFile?.mkdirs()
+        long written = 0
+        target.withWriter("UTF-8") { Writer w ->
+            if (ingest?.idDf != null) {
+                Iterator<Row> it = ((Dataset) ingest.idDf).select("compare_id").distinct().toLocalIterator()
+                while (it.hasNext()) {
+                    Object v = it.next().get(0)
+                    if (v != null && v.toString().trim()) { w.write(v.toString()); w.write("\n"); written++ }
+                }
+            }
+        }
+        return written
     }
 
     /**

@@ -41,6 +41,38 @@
             label="Product store" fieldType="string" sequenceNum="8"
             description="NOT in keepFieldsBase. Same reason as salesChannelEnumId."/>
 
+    <!-- OMS_GQL (DAR-BE-064): the order-grain presence extract over GraphQL. A SUBSET of OMS: only fields
+         the GraphQL order document can carry (OmsGqlQueries.HEADER_FIELDS / DERIVED_FIELDS). There is NO
+         salesChannelEnumId pill: the deployed Order type does not expose it, and a filter on it is refused
+         at extract start rather than silently excluding nothing. -->
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].orderId"
+            label="Order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
+            description="OMS order identity. In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].orderName"
+            label="Order name" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
+            description="Operator-facing order name. In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].externalId"
+            label="External ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            description="Shopify reference stored on the OMS order. In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].grandTotal"
+            label="Grand total" fieldType="string" sequenceNum="4"
+            description="In keepFieldsBase. Comparison only — not key-like."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].orderDate"
+            label="Order date" fieldType="string" sequenceNum="5"
+            description="In keepFieldsBase. Epoch millis, as on the REST connector."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].statusId"
+            label="Status" fieldType="string" sequenceNum="6"
+            description="In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].productStoreId"
+            label="Product store" fieldType="string" sequenceNum="7"
+            description="NOT in keepFieldsBase; selected in the GraphQL document only when a filter or rule reads it."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].hasPaymentPreference"
+            label="Has payment preference" fieldType="string" sequenceNum="8"
+            description="Y when the order carries at least one OrderPaymentPreference, else N. Compared against Shopify hasPaymentTransaction by the presence OPP rule (operator &lt;=)."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].paymentMethodTypeIds"
+            label="Payment methods" fieldType="string" sequenceNum="9"
+            description="Comma-joined OPP paymentMethodTypeIds from the first two OPPs (detail, not a key)."/>
+
     <!-- OMS reconciliationOrders. A strict SUBSET of OMS: the endpoint projects SERVER-side to a
          fixed set, so salesChannelEnumId and productStoreId never arrive and a rule drawn on either
          would validate, persist, and then exclude nothing. Ratchet test enforces the subset. -->
@@ -124,6 +156,8 @@
             label="Requires shipping" fieldType="Boolean" sequenceNum="6" description="false on orders with nothing to ship (gorjana's digital gift cards, POS carry-outs)."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].cancelledAt"
             label="Cancelled at" fieldType="DateTime" sequenceNum="7" description="Set on a cancelled order."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].hasPaymentTransaction"
+            label="Has payment" fieldType="String" sequenceNum="8" description="DAR-BE-064: Y when any SUCCESS SALE, CAPTURE or AUTHORIZATION transaction exists, else N."/>
 
     <!-- Shopify return references (DAR-BE-018 task 9; 2026-08-17 returns-refund-grain-alignment plan,
          Task 2, REVISION 2026-08-18). Derived from the EMITTED record shape pinned at

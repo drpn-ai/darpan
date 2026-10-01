@@ -97,4 +97,21 @@ class ShopifyNsBilledRuleSetDataTests {
         def root = d.'**'.find { it.name() == 'darpan.rule.RuleSetConclusionRule' && it.@appliesToBucket == 'DUPLICATE_IN_FILE_2' }
         assertEquals("CONC_NS_DUPLICATE_SO", root.@conclusionEnumId.toString())
     }
+
+    @Test
+    void everyShopifyFieldThisRunFiltersOrSuggestsIsOnTheRulesBoard() {
+        // Review I5: the rules board draws its fields from SourceSystemConnectorField. A filter or a
+        // "stop flagging" suggestion on a field the board does not list is invisible and cannot be edited.
+        def d = doc()
+        Set<String> needed = d.'**'.findAll { it.name() == 'darpan.rule.RuleSetCompareSourceFilter' && it.@fileSide == 'FILE_1' }
+                .collect { it.@fieldExpression.toString() } as Set
+        d.'**'.findAll { it.name() == 'darpan.rule.RuleSetConclusionRule' && it.@suggestedFilterJson.toString() }.each {
+            Map f = (Map) new groovy.json.JsonSlurper().parseText(it.@suggestedFilterJson.toString())
+            if (f.fileSide == 'FILE_1') needed << f.fieldExpression.toString()
+        }
+        def fields = new XmlSlurper().parse(componentRoot().resolve("data/SourceSystemConnectorFieldSeedData.xml").toFile())
+        Set<String> onBoard = fields.'**'.findAll { it.name() == 'darpan.reconciliation.SourceSystemConnectorField' && it.@systemEnumId == 'SHOPIFY' }
+                .collect { it.@fieldPath.toString().replaceFirst(/^\$\.records\[\*\]\./, '') } as Set
+        assertTrue(onBoard.containsAll(needed), "missing from the board: ${needed - onBoard}")
+    }
 }

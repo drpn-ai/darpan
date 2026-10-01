@@ -164,6 +164,8 @@
             <parameter name="missingInFile1Count" type="Long"/>
             <parameter name="missingInFile2Count" type="Long"/>
             <parameter name="differenceCount" type="Long"/>
+            <!-- DAR-BE-063: rows a duplicateKeyHandling=FINDING side reported; INCLUDED in differenceCount. -->
+            <parameter name="duplicateDifferenceCount" type="Long"/>
             <parameter name="matchedPairCount" type="Long"/>
             <parameter name="missingDiffDf" type="org.apache.spark.sql.Dataset"/>
             <parameter name="matchedPairDf" type="org.apache.spark.sql.Dataset"/>
@@ -211,7 +213,10 @@
                 <set field="objectTypeValue" from="darpan.reconciliation.core.ReconciliationServices.normalize(prepared.objectType)"/>
                 <set field="missingInFile1CountValue" from="((Number) idCompare.onlyInDf2Count).longValue()"/>
                 <set field="missingInFile2CountValue" from="((Number) idCompare.onlyInDf1Count).longValue()"/>
-                <set field="differenceCountValue" from="((Number) idCompare.differenceCount).longValue()"/>
+                <!-- DAR-BE-063 (review I1): duplicate findings count as differences, or a window whose only
+                     problem is a duplicated key reads "Differences: 0". -->
+                <set field="duplicateDifferenceCountValue" from="darpan.reconciliation.core.ReconciliationServices.countDataset(prepared.file1DuplicateDataDf) + darpan.reconciliation.core.ReconciliationServices.countDataset(prepared.file2DuplicateDataDf)"/>
+                <set field="differenceCountValue" from="((Number) idCompare.differenceCount).longValue() + duplicateDifferenceCountValue"/>
                 <set field="missingInFile1DiffDf" from="darpan.reconciliation.core.ReconciliationServices.buildMissingDiffRows(prepared.file2DataDf, idCompare.onlyInDf2, 'MISSING_IN_FILE_1', file2LabelValue, file1LabelValue, 'Present in ' + file2LabelValue + ', missing in ' + file1LabelValue)"/>
                 <set field="missingInFile2DiffDf" from="darpan.reconciliation.core.ReconciliationServices.buildMissingDiffRows(prepared.file1DataDf, idCompare.onlyInDf1, 'MISSING_IN_FILE_2', file1LabelValue, file2LabelValue, 'Present in ' + file1LabelValue + ', missing in ' + file2LabelValue)"/>
                 <set field="missingDiffDfValue" from="darpan.reconciliation.core.ReconciliationServices.unionDatasets(missingInFile1DiffDf, missingInFile2DiffDf)"/>
@@ -247,6 +252,7 @@
                 <set field="missingInFile1Count" from="missingInFile1CountValue"/>
                 <set field="missingInFile2Count" from="missingInFile2CountValue"/>
                 <set field="differenceCount" from="differenceCountValue"/>
+                <set field="duplicateDifferenceCount" from="duplicateDifferenceCountValue"/>
                 <set field="matchedPairCount" from="matchedPairCountValue"/>
                 <set field="missingDiffDf" from="missingDiffDfValue"/>
                 <set field="matchedPairDf" from="matchedPairDfValue"/>
@@ -388,6 +394,7 @@
             <parameter name="missingInFile2Count" type="Long"/>
             <parameter name="missingObjectDifferenceCount" type="Long"/>
             <parameter name="ruleDifferenceCount" type="Long"/>
+            <parameter name="duplicateDifferenceCount" type="Long"/>
             <parameter name="differenceCount" type="Long"/>
             <parameter name="matchedPairCount" type="Long"/>
             <parameter name="ruleCount" type="Integer"/>
@@ -458,8 +465,9 @@
                 </if>
                 <set field="diffDfValue" from="darpan.reconciliation.core.ReconciliationServices.unionByNameDatasets(normalizedMissingDiffDf, ruleDiffDfValue)"/>
                 <set field="ruleDifferenceCountValue" from="((Number) ruleDiffRows.size()).longValue()"/>
-                <set field="missingObjectDifferenceCountValue" from="((Number) baseResult.differenceCount).longValue()"/>
-                <set field="differenceCountValue" from="missingObjectDifferenceCountValue + ruleDifferenceCountValue"/>
+                <set field="duplicateDifferenceCountValue" from="((Number) (baseResult.duplicateDifferenceCount ?: 0L)).longValue()"/>
+                <set field="missingObjectDifferenceCountValue" from="((Number) baseResult.differenceCount).longValue() - duplicateDifferenceCountValue"/>
+                <set field="differenceCountValue" from="missingObjectDifferenceCountValue + ruleDifferenceCountValue + duplicateDifferenceCountValue"/>
 
                 <set field="ruleSetId" from="ruleSetIdValue"/>
                 <set field="compareScopeId" from="compareScopeIdValue"/>
@@ -472,6 +480,7 @@
                 <set field="missingInFile1Count" from="baseResult.missingInFile1Count"/>
                 <set field="missingInFile2Count" from="baseResult.missingInFile2Count"/>
                 <set field="missingObjectDifferenceCount" from="missingObjectDifferenceCountValue"/>
+                <set field="duplicateDifferenceCount" from="duplicateDifferenceCountValue"/>
                 <set field="ruleDifferenceCount" from="ruleDifferenceCountValue"/>
                 <set field="differenceCount" from="differenceCountValue"/>
                 <set field="matchedPairCount" from="baseResult.matchedPairCount"/>

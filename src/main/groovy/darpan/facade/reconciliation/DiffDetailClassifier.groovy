@@ -116,6 +116,9 @@ class DiffDetailClassifier {
 
     static String resolveRuleOptionLabel(String ruleId, int fallbackIndex) {
         String normalized = normalizeText(ruleId)
+        // DAR-BE-063 (review I2): the duplicate-key class is not a numbered rule — its type ends in a digit
+        // (DUPLICATE_IN_FILE_2) and would otherwise read "Rule 2" beside a real rule numbered 2.
+        if (normalizeToken(normalized).startsWith('duplicate_in_')) return 'Duplicates'
         def numbered = (normalized =~ /(?i)(?:^|[_\-\s])rule[_\-\s]*(\d+)$/)
         if (numbered.find()) return "Rule ${new BigInteger(numbered.group(1)).toString()}".toString()
         def trailing = (normalized =~ /(?:^|[_\-\s])(\d+)$/)

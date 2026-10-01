@@ -534,13 +534,13 @@ class AutomationFacadeSmokeTests {
         assertTrue(shopifyPrimaryIdOptions.any { it.fieldPath == "\$.records[*].name" && it.label == "Order name" })
         // Shopify orders opted into source filters on 2026-09-30 (DAR-BE-063: the billed run keeps only
         // FULFILLED orders and the conclusion "stop flagging" prefill needs the exclusion mark), so the UI
-        // now offers it; it still gets no wider field list (its record shape comes from a per-tenant
-        // GraphQL template).
-        // Registry-driven (Task 5, Plan 2): Shopify's seed rows ARE its two primary-ID candidates, so
-        // fieldOptions is byte-identical to primaryIdOptions rather than the old null-falls-back-to-
-        // primaryIdOptions board behaviour.
+        // now offers it, and its wider field list is the order fields the bulk extract always selects.
         assertEquals(true, shopifySourceOption.supportsExcludeFilters)
-        assertEquals(shopifyPrimaryIdOptions, shopifySourceOption.fieldOptions)
+        List<Map<String, Object>> shopifyFieldOptions = (List<Map<String, Object>>) shopifySourceOption.fieldOptions
+        assertEquals(shopifyPrimaryIdOptions, shopifyFieldOptions.take(shopifyPrimaryIdOptions.size()), "keys first, unchanged")
+        assertTrue(["displayFulfillmentStatus", "displayFinancialStatus", "sourceName", "requiresShipping", "cancelledAt"].every { String f ->
+            shopifyFieldOptions.any { it.fieldPath == "\$.records[*].${f}".toString() }
+        }, "the order fields a filter or a conclusion suggestion can name")
         assertTrue(((List<Map<String, Object>>) optionsResult.savedRuns).any { it.savedRunId == "OrderIdSchemaMap" })
 
         ec.message.clearErrors()

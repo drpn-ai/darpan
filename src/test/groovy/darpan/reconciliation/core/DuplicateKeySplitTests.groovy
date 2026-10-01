@@ -12,6 +12,7 @@ import org.junit.jupiter.api.TestInstance
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertSame
+import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
  * DAR-BE-063 Task 12. A side that opts into duplicateKeyHandling=FINDING reports every key that repeats
@@ -100,5 +101,16 @@ class DuplicateKeySplitTests {
             assertEquals("NetSuite", r.getAs("presentIn"))
             assertEquals("", r.getAs("missingIn"), "the verify pass selects by missingIn; an empty one is skipped")
         }
+    }
+
+    @Test
+    void everyFrameTheSplitPersistsIsHandedBackForRelease() {
+        // Review I3: a persisted frame nobody returns stays in Spark's CacheManager for the JVM's life.
+        Map split = RuleSetCompareScopeAdapter.splitDuplicateKeys(
+                [FILE_1: ingest(alpha()), FILE_2: ingest(beta())], [FILE_1: null, FILE_2: "FINDING"])
+        List<Dataset> frames = (List<Dataset>) split.persistedFrames
+        assertEquals(1, frames.size())
+        frames.each { Dataset f -> assertTrue(f.storageLevel().useDisk() || f.storageLevel().useMemory(), "it is cached") }
+        frames.each { Dataset f -> f.unpersist() }
     }
 }

@@ -61,12 +61,24 @@ class RuleEngineSupport {
             (System.getProperty("darpan.reconciliation.rule.maxEvalMillis") ?: "60000").isLong() ?
                     (System.getProperty("darpan.reconciliation.rule.maxEvalMillis") ?: "60000").toLong() : 60_000L
 
-    private static final java.util.concurrent.ScheduledExecutorService EVAL_WATCHDOG =
-            java.util.concurrent.Executors.newSingleThreadScheduledExecutor({ Runnable r ->
+    private static final java.util.concurrent.ScheduledThreadPoolExecutor EVAL_WATCHDOG =
+            new java.util.concurrent.ScheduledThreadPoolExecutor(1, { Runnable r ->
                 Thread t = new Thread(r, "darpan-rule-eval-watchdog")
                 t.daemon = true
                 return t
             } as java.util.concurrent.ThreadFactory)
+
+    static {
+        // DAR-BE-063 review I4: a cancelled watchdog leaves the queue at once. Without this a cancelled
+        // task sits there for its full budget (60s), and its closure keeps the KieSession reachable —
+        // one per fire, so a run concluding row by row held every disposed session for a minute.
+        EVAL_WATCHDOG.setRemoveOnCancelPolicy(true)
+    }
+
+    /** Watchdog tasks still queued — cancelled ones included. Test seam for the retention fix. */
+    static int pendingWatchdogTasks() {
+        return EVAL_WATCHDOG.getQueue().size()
+    }
 
     /**
      * fireAllRules with a wall-clock budget. Returns [fired, halted, elapsedMillis]; when

@@ -104,16 +104,26 @@
             description="Included in the endpoint's server-side projection, so a rule drawn on it sees a value.
                 Remove if OMS narrows the projection or ships the RQ-24 server-side channel filter."/>
 
-    <!-- Shopify orders. Deliberately only two: the record shape comes from a per-tenant GraphQL
-         request template, so any wider list would be guessed rather than derived. Both are
-         primary-ID candidates, which reproduces the old fieldOptionsForSystem null -> fall back to
-         primaryIdOptions behaviour exactly. -->
+    <!-- Shopify orders. The two primary-ID candidates, then (DAR-BE-063) the order fields the bulk
+         extract always selects (ShopifySourceCatalog ORDER_SOURCE defaultBulkSelectedFieldPaths) that a
+         filter or a conclusion's "stop flagging" suggestion can name. Derived from that fixed bulk
+         contract, not guessed: a field listed here is on every extracted record. -->
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].id"
             label="Order ID" fieldType="ID" isPrimaryIdCandidate="Y" sequenceNum="1"
             description="Shopify order GID."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].name"
             label="Order name" fieldType="String" isPrimaryIdCandidate="Y" sequenceNum="2"
             description="Shopify order name."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].displayFulfillmentStatus"
+            label="Fulfillment status" fieldType="String" sequenceNum="3" description="FULFILLED, UNFULFILLED, PARTIALLY_FULFILLED, RESTOCKED, ..."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].displayFinancialStatus"
+            label="Financial status" fieldType="String" sequenceNum="4" description="PAID, PENDING, PARTIALLY_REFUNDED, REFUNDED, ..."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].sourceName"
+            label="Source" fieldType="String" sequenceNum="5" description="web, pos, shopify_draft_order, or an app id."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].requiresShipping"
+            label="Requires shipping" fieldType="Boolean" sequenceNum="6" description="false on orders with nothing to ship (gorjana's digital gift cards, POS carry-outs)."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].cancelledAt"
+            label="Cancelled at" fieldType="DateTime" sequenceNum="7" description="Set on a cancelled order."/>
 
     <!-- Shopify return references (DAR-BE-018 task 9; 2026-08-17 returns-refund-grain-alignment plan,
          Task 2, REVISION 2026-08-18). Derived from the EMITTED record shape pinned at

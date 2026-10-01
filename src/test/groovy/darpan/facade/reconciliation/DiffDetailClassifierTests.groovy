@@ -265,4 +265,13 @@ class DiffDetailClassifierTests {
         assertEquals(a.ruleFilterKey, b.ruleFilterKey, "every duplicate row on a side is one filter option")
         assertEquals("duplicate_in_file_2", a.ruleFilterKey)
     }
+
+    @Test
+    void theDuplicateClassIsLabelledDuplicatesNotANumberedRule() {
+        // Review I2: DUPLICATE_IN_FILE_2 ends in a digit, so it read "Rule 2" beside a real rule also
+        // labelled "Rule 2". The class is not a numbered rule.
+        assertEquals("Duplicates", DiffDetailClassifier.resolveRuleOptionLabel("DUPLICATE_IN_FILE_2", 3))
+        assertEquals("Duplicates", DiffDetailClassifier.resolveRuleOptionLabel("duplicate_in_file_1", 1))
+        assertEquals("Rule 2", DiffDetailClassifier.resolveRuleOptionLabel("GORJANA_SNB_AMOUNT", 2), "other rules unchanged")
+    }
 }

@@ -605,6 +605,38 @@ class RuleSetCompareScopeServiceSmokeTests {
     }
 
     @Test
+    void aFindingSideCountsItsDuplicateRowsAsDifferences() {
+        // DAR-BE-063 review I1: a window whose only problem is a duplicated key must not read
+        // "Differences: 0". FILE_1 repeats 6470622478467; with FINDING both copies are findings.
+        def source = ec.entity.find("darpan.rule.RuleSetCompareSource")
+                .condition([compareScopeId: "DARPAN_TEST_ORDER_JSON_SCOPE", fileSide: "FILE_1"]).disableAuthz().useCache(false).one()
+        source.set("duplicateKeyHandling", "FINDING"); source.update()
+        try {
+            Map<String, Object> result = ec.service.sync()
+                    .name("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope")
+                    .parameters([
+                            ruleSetId      : "DARPAN_TEST_COMPARE_RS",
+                            compareScopeId : "DARPAN_TEST_ORDER_JSON_SCOPE",
+                            file1Location  : "component://darpan/data/test/test-orders-duplicate-file1.json",
+                            file2Location  : "component://darpan/data/test/test-orders-2.json",
+                            sparkMaster    : "local[1]",
+                            sparkAppName   : "RuleSetCompareScopeServiceSmokeTests",
+                    ])
+                    .disableAuthz()
+                    .call()
+            assertFalse(ec.message.hasError(), ec.message.getErrorsString())
+            List<Map<String, Object>> diffs = collectRows((Dataset) result.diffDf)
+            List<Map<String, Object>> duplicates = diffs.findAll { it.diffType == "DUPLICATE_IN_FILE_1" || it.type == "DUPLICATE_IN_FILE_1" }
+            assertEquals(2, duplicates.size(), "both copies of the repeated key are findings: ${diffs}")
+            assertEquals(2L, result.duplicateDifferenceCount)
+            assertEquals(3L, result.missingObjectDifferenceCount, "presence findings are unchanged")
+            assertEquals(5L, result.differenceCount, "duplicates are differences too")
+        } finally {
+            source.set("duplicateKeyHandling", null); source.update()
+        }
+    }
+
+    @Test
     void singleFieldPrimaryIdExpressionProducesIdenticalCompareIdsAfterCompositeKeySupportWasAdded() {
         Map<String, Object> prepared = ec.service.sync()
                 .name("reconciliation.ReconciliationCoreServices.prepare#RuleSetCompareScope")

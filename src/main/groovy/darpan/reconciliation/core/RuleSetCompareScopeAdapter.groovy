@@ -239,7 +239,7 @@ class RuleSetCompareScopeAdapter {
         }
         // DAR-BE-063: a side that opts into duplicateKeyHandling=FINDING reports its repeated keys as
         // findings; they leave the compare on BOTH sides before validate/collapse ever sees them.
-        Map<String, Object> duplicateSplit = singleSided ? [ingestBySide: ingestBySide, duplicateDataBySide: [:], duplicateKeyCountBySide: [:]] :
+        Map<String, Object> duplicateSplit = singleSided ? [ingestBySide: ingestBySide, duplicateDataBySide: [:], duplicateKeyCountBySide: [:], persistedFrames: []] :
                 splitDuplicateKeys(ingestBySide, activeSides.collectEntries { String fileSide ->
                     [(fileSide): ((Map) ((Map) sidePlanBySide[fileSide]).config).duplicateKeyHandling]
                 })
@@ -307,7 +307,8 @@ class RuleSetCompareScopeAdapter {
                 file2DataDf      : file2DataDf,
                 file1DuplicateDataDf: file1DuplicateDataDf,
                 file2DuplicateDataDf: file2DuplicateDataDf,
-                persistedSources : [file1IdDf, file2IdDf, file1DataDf, file2DataDf, file1DuplicateDataDf, file2DuplicateDataDf].findAll { it != null },
+                persistedSources : ([file1IdDf, file2IdDf, file1DataDf, file2DataDf, file1DuplicateDataDf, file2DuplicateDataDf] +
+                        ((List) duplicateSplit.persistedFrames)).findAll { it != null },
                 validationErrors : validationErrors,
                 processingWarnings: processingWarnings
         ]
@@ -328,7 +329,7 @@ class RuleSetCompareScopeAdapter {
             }
         }
         if (duplicateIdsBySide.isEmpty()) {
-            return [ingestBySide: ingestBySide, duplicateDataBySide: [:], duplicateKeyCountBySide: [:]]
+            return [ingestBySide: ingestBySide, duplicateDataBySide: [:], duplicateKeyCountBySide: [:], persistedFrames: []]
         }
         Dataset allDuplicateIds = duplicateIdsBySide.values().inject(null) { Dataset acc, Dataset ids ->
             CompareDatasetSupport.unionDatasets(acc, ids)
@@ -346,7 +347,10 @@ class RuleSetCompareScopeAdapter {
             ingest.idDf = CompareDatasetSupport.excludeCompareIds((Dataset) ingest.idDf, allDuplicateIds)
             [(fileSide): ingest]
         } as Map<String, Object>
-        return [ingestBySide: filtered, duplicateDataBySide: duplicateDataBySide, duplicateKeyCountBySide: countBySide]
+        // Review I3: the persisted id frames go back to the caller, whose persistedSources the outermost
+        // owner unpersists — a frame nobody returns stays cached for the JVM's life.
+        return [ingestBySide: filtered, duplicateDataBySide: duplicateDataBySide, duplicateKeyCountBySide: countBySide,
+                persistedFrames: new ArrayList<Dataset>(duplicateIdsBySide.values())]
     }
 
     private static Map<String, Object> collapseDuplicateCompareIdsForBaseDiffOnly(Map<String, Object> ingest,

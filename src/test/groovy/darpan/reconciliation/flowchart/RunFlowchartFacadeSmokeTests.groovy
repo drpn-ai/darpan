@@ -313,4 +313,27 @@ class RunFlowchartFacadeSmokeTests {
         assertTrue(call("facade.ReconciliationFacadeServices.delete#ReconciliationQuestion", [reconciliationRunId: qA]).ok as boolean)
         assertEquals(0, (call("facade.ReconciliationFacadeServices.get#Reconciliation", [reconciliationId: recId]).questions as List).size())
     }
+
+    /** Final review (plan 2) I1: a question that has run has result rows pointing at it (FK RECRES_RUN). */
+    @Test
+    void aQuestionThatHasRunCanBeDeletedAndItsResultsStay() {
+        String rsA = csvRuleSet("Ran A")
+        String recId = call("facade.ReconciliationFacadeServices.save#Reconciliation",
+                [reconciliationName: "Ran ${UUID.randomUUID()}".toString()]).reconciliation.reconciliationId
+        String qA = call("facade.ReconciliationFacadeServices.save#ReconciliationQuestion",
+                [reconciliationId: recId, ruleSetId: rsA]).question.reconciliationRunId
+        Map summary = RunFlowchartSupport.runReconciliation(ec, [reconciliationId: recId,
+                questionCallExtras: { Map q -> [file1Name: "f1.csv", file1Text: "order_id\nA100\n",
+                                               file2Name: "f2.csv", file2Text: "order_id\nA100\n", hasHeader: true] }])
+        ec.message.clearErrors()
+        Map deleted = call("facade.ReconciliationFacadeServices.delete#ReconciliationQuestion", [reconciliationRunId: qA])
+        assertTrue(deleted.ok as boolean, deleted.errors?.toString())
+        assertEquals(0, (call("facade.ReconciliationFacadeServices.get#Reconciliation", [reconciliationId: recId]).questions as List).size())
+        List results = call("facade.ReconciliationFacadeServices.get#ReconciliationExecution",
+                [reconciliationExecutionId: summary.reconciliationExecutionId]).results as List
+        assertEquals(1, results.size(), "the deleted question's past result stays")
+        Map listed = (call("facade.ReconciliationFacadeServices.list#Reconciliations", [:]).reconciliations as List)
+                .find { it.reconciliationId == recId } as Map
+        assertEquals(0L, listed.questionCount as Long)
+    }
 }

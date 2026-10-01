@@ -89,7 +89,8 @@ class RunFlowchartSupport {
             ec.message.addError("Rule '${ruleSetId}' was not found."); return [:]
         }
         String id = normalize(params.reconciliationRunId)
-        List<Map> existing = loadQuestions(ec, reconciliationId)
+        // Deleted (inactive) questions neither show nor constrain the tree.
+        List<Map> existing = loadQuestions(ec, reconciliationId).findAll { it.isActive != "N" }
         if (id && !existing.any { it.reconciliationRunId == id }) { ec.message.addError("Question '${id}' was not found."); return [:] }
 
         Map candidate = (existing.find { it.reconciliationRunId == id } ?: [:]) + [
@@ -128,7 +129,8 @@ class RunFlowchartSupport {
     static Map getReconciliation(def ec, String reconciliationId) {
         def reconciliation = findReconciliation(ec, reconciliationId)
         if (reconciliation == null) { ec.message.addError("Run '${reconciliationId}' was not found."); return [:] }
-        return [reconciliation: reconciliation.getMap(), questions: loadQuestions(ec, reconciliationId)]
+        // Inactive questions are deleted ones (soft delete); the chart never shows them.
+        return [reconciliation: reconciliation.getMap(), questions: loadQuestions(ec, reconciliationId).findAll { it.isActive != "N" }]
     }
 
     /**
@@ -217,7 +219,8 @@ class RunFlowchartSupport {
             String id = r.get("reconciliationId") as String
             ["reconciliationId", "reconciliationName", "description", "defaultTimeWindow", "isActive", "isArchived"]
                     .collectEntries { [(it): r.get(it)] } +
-                    [questionCount: TenantScopedFinder.findTenantScoped(ec, QUESTION).condition("reconciliationId", id).useCache(false).count()]
+                    [questionCount: (TenantScopedFinder.findTenantScoped(ec, QUESTION).condition("reconciliationId", id)
+                            .useCache(false).list() ?: []).count { it.get("isActive") != "N" }]
         }]
     }
 
@@ -225,10 +228,14 @@ class RunFlowchartSupport {
         if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for runs.")) return [:]
         def question = TenantScopedFinder.findTenantScopedByIdQuiet(ec, QUESTION, "reconciliationRunId", reconciliationRunId)
         if (question == null) { ec.message.addError("Question '${reconciliationRunId}' was not found."); return [:] }
-        long children = TenantScopedFinder.findTenantScoped(ec, QUESTION)
-                .condition("parentReconciliationRunId", reconciliationRunId).useCache(false).count()
+        long children = (TenantScopedFinder.findTenantScoped(ec, QUESTION)
+                .condition("parentReconciliationRunId", reconciliationRunId).useCache(false).list() ?: [])
+                .count { it.get("isActive") != "N" }
         if (children > 0) { ec.message.addError("Remove the questions under it first."); return [:] }
-        question.delete()
+        // Plan 2 final review I1: a soft delete. Every question that ever ran has result rows pointing at
+        // it (FK RECRES_RUN), and those past results must stay readable.
+        question.set("isActive", "N")
+        question.update()
         return [deleted: true]
     }
 

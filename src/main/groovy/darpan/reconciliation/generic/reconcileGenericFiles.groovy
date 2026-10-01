@@ -246,8 +246,11 @@ if (ruleSetIdValue) {
                         file2Label    : compareScopeConfig.file2Label,
                         hasHeader     : hasHeader,
                         sparkMaster   : sparkMasterToUse,
-                        sparkAppName  : sparkAppNameToUse
-                ])
+                        sparkAppName  : sparkAppNameToUse,
+                        // DAR-UI-048: a flowchart question's parent keys and key output, when the walker sent them.
+                        file1IncludeIdsLocation: normalize(ec.context.get("file1IncludeIdsLocation")),
+                        file1KeysOutLocation   : normalize(ec.context.get("file1KeysOutLocation"))
+                ].findAll { it.value != null })
                 .call()
         ruleSetPersistedSources = (reconcileResult.persistedSources ?: []) as List
 

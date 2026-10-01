@@ -64,6 +64,13 @@ def toTimestampValue = { Object rawValue ->
 }
 
 String savedRunIdValue = normalize(savedRunId)
+// DAR-UI-048: present only when the flowchart walker calls through run#FlowchartQuestion, so read them
+// from the context, never as bare binding names (the facade definition does not declare them).
+String file1IncludeIdsLocationValue = normalize(ec.context.get("file1IncludeIdsLocation"))
+String file1KeysOutLocationValue = normalize(ec.context.get("file1KeysOutLocation"))
+String reconciliationExecutionIdValue = normalize(ec.context.get("reconciliationExecutionId"))
+String reconciliationRunIdValue = normalize(ec.context.get("reconciliationRunId"))
+String parentRunResultIdValue = normalize(ec.context.get("parentRunResultId"))
 String inputFile1Name = file1Name != null ? ReconciliationOutputSupport.sanitizeUploadFileName(file1Name as String, "file1") : null
 String inputFile2Name = file2Name != null ? ReconciliationOutputSupport.sanitizeUploadFileName(file2Name as String, "file2") : null
 String file1TextValue = file1Text?.toString()
@@ -128,6 +135,9 @@ String obsRunId = ec.message.hasError() ? null : RunObservability.beginRun(ec, [
         windowStartDate   : windowStartDateValue,
         windowEndDate     : windowEndDateValue,
         windowTimeZone    : windowTimeZoneValue,
+        reconciliationExecutionId: reconciliationExecutionIdValue,
+        reconciliationRunId      : reconciliationRunIdValue,
+        parentRunResultId        : parentRunResultIdValue,
 ])
 Map<String, Object> obsCtx = [companyUserGroupId: TenantAccessSupport.currentActiveTenantUserGroupId(ec)]
 boolean obsTerminalWritten = false
@@ -661,6 +671,8 @@ try {
                                 Map serviceResult = runInternalService("reconciliation.ReconciliationCoreServices.evaluate#RuleSetCompareScope", [
                                     ruleSetId          : savedRun.ruleSetId,
                                     compareScopeId     : savedRun.compareScopeId,
+                                    file1IncludeIdsLocation: file1IncludeIdsLocationValue,
+                                    file1KeysOutLocation   : file1KeysOutLocationValue,
                                     file1Location      : file1Result.fileLocation,
                                     file1Name          : file1Result.fileName,
                                     file1FileTypeEnumId: file1Result.fileTypeEnumId,
@@ -807,6 +819,8 @@ try {
                                 Map serviceResult = runInternalService("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope", [
                                     ruleSetId          : savedRun.ruleSetId,
                                     compareScopeId     : savedRun.compareScopeId,
+                                    file1IncludeIdsLocation: file1IncludeIdsLocationValue,
+                                    file1KeysOutLocation   : file1KeysOutLocationValue,
                                     file1Location      : file1Result.fileLocation,
                                     file2Location      : file2Result.fileLocation,
                                     file1Name          : file1Result.fileName,
@@ -960,8 +974,10 @@ try {
                                         file2SystemEnumId        : resolvedFile2SystemEnumId,
                                         hasHeader                : hasHeaderValue,
                                         sparkMaster              : sparkMaster,
-                                        sparkAppName             : sparkAppName ?: "SavedRunDiff"
-                                ])
+                                        sparkAppName             : sparkAppName ?: "SavedRunDiff",
+                                        file1IncludeIdsLocation  : file1IncludeIdsLocationValue,
+                                        file1KeysOutLocation     : file1KeysOutLocationValue
+                                ].findAll { it.value != null })
                                 .call()
 
                         if (!ec.message.hasError()) {

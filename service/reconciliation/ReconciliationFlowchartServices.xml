@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- DAR-UI-048. One flowchart question through the SAME script the Run button uses, so a question
+         is a normal run in every respect. A second definition rather than new facade inputs: the
+         walker's key-file inputs name server paths and must never be reachable from a browser, so this
+         entry point is internal (no allow-remote). Parameters are run#SavedRunDiff's, verbatim, plus the
+         walker's five. -->
+    <service verb="run" noun="FlowchartQuestion" type="script" transaction="ignore"
+            location="component://darpan/src/main/groovy/darpan/facade/reconciliation/runSavedRunDiff.groovy">
+        <in-parameters>
+            <parameter name="savedRunId" required="true"/>
+            <parameter name="file1Name"/>
+            <parameter name="file1Text" allow-html="any"/>
+            <parameter name="file2Name"/>
+            <parameter name="file2Text" allow-html="any"/>
+            <parameter name="file1SystemEnumId"/>
+            <parameter name="file2SystemEnumId"/>
+            <parameter name="windowStartDate" type="Timestamp"/>
+            <parameter name="windowEndDate" type="Timestamp"/>
+            <parameter name="windowStartLocalDate"/>
+            <parameter name="windowEndLocalDate"/>
+            <parameter name="hasHeader" type="Boolean" default-value="true"/>
+            <parameter name="sparkMaster"/>
+            <parameter name="sparkAppName"/>
+            <!-- DAR-UI-048, walker-only. Absolute local paths and the flowchart's row links. -->
+            <parameter name="file1IncludeIdsLocation"/>
+            <parameter name="file1KeysOutLocation"/>
+            <parameter name="reconciliationExecutionId"/>
+            <parameter name="reconciliationRunId"/>
+            <parameter name="parentRunResultId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="runResult" type="Map">
+                <parameter name="savedRunId"/>
+                <parameter name="runName"/>
+                <parameter name="runType"/>
+                <parameter name="reconciliationMappingId"/>
+                <parameter name="reconciliationRunResultId"/>
+                <parameter name="ruleSetId"/>
+                <parameter name="compareScopeId"/>
+                <parameter name="file1Name"/>
+                <parameter name="file2Name"/>
+                <parameter name="file1SystemEnumId"/>
+                <parameter name="file1SystemLabel"/>
+                <parameter name="file2SystemEnumId"/>
+                <parameter name="file2SystemLabel"/>
+                <parameter name="validationErrors" type="List"><parameter name="validationError"/></parameter>
+                <parameter name="processingWarnings" type="List"><parameter name="processingWarning"/></parameter>
+                <parameter name="generatedOutput" type="Map">
+                    <parameter name="fileName"/>
+                    <parameter name="reconciliationRunResultId"/>
+                    <parameter name="sourceFormat"/>
+                    <parameter name="availableFormats" type="List"><parameter name="format"/></parameter>
+                    <parameter name="preferredDownloadFormat"/>
+                    <parameter name="companyUserGroupId"/>
+                    <parameter name="savedRunId"/>
+                    <parameter name="savedRunName"/>
+                    <parameter name="savedRunType"/>
+                    <parameter name="reconciliationMappingId"/>
+                    <parameter name="mappingName"/>
+                    <parameter name="ruleSetId"/>
+                    <parameter name="compareScopeId"/>
+                    <parameter name="reconciliationType"/>
+                    <parameter name="file1Label"/>
+                    <parameter name="file2Label"/>
+                    <parameter name="totalDifferences" type="Long"/>
+                    <parameter name="onlyInFile1Count" type="Long"/>
+                    <parameter name="onlyInFile2Count" type="Long"/>
+                    <parameter name="createdDate" type="Timestamp"/>
+                    <parameter name="sizeBytes" type="Long"/>
+                    <parameter name="statusEnumId"/>
+                    <parameter name="statusLabel"/>
+                    <parameter name="resultAvailable" type="Boolean"/>
+                    <parameter name="startedDate" type="Timestamp"/>
+                    <parameter name="completedDate" type="Timestamp"/>
+                    <parameter name="lastUpdatedDate" type="Timestamp"/>
+                </parameter>
+            </parameter>
+        </out-parameters>
+    </service>
+</services>

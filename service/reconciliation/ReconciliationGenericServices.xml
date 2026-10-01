@@ -53,6 +53,9 @@
 
             <parameter name="sparkMaster" default-value="local[*]"/>
             <parameter name="sparkAppName" default-value="GenericReconciliation"/>
+            <!-- DAR-UI-048: flowchart-only, internal; passed through to reconcile#RuleSetCompareScope. -->
+            <parameter name="file1IncludeIdsLocation"/>
+            <parameter name="file1KeysOutLocation"/>
         </in-parameters>
         <out-parameters>
             <parameter name="file1Type">

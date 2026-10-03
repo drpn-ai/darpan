@@ -74,6 +74,7 @@ facade.ReconciliationFacadeServices.list#AutomationSourceOptions
 facade.ReconciliationFacadeServices.list#Automations
 facade.ReconciliationFacadeServices.list#GeneratedOutputs
 facade.ReconciliationFacadeServices.list#Mappings
+facade.ReconciliationFacadeServices.list#ReconciliationExecutions
 facade.ReconciliationFacadeServices.list#Reconciliations
 facade.ReconciliationFacadeServices.list#SavedRuns
 facade.ReconciliationFacadeServices.pause#Automation

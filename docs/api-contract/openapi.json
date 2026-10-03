@@ -252,6 +252,9 @@
                                         "$ref": "#/components/schemas/ListMappingsRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/ListReconciliationExecutionsRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ListReconciliationsRequest"
                                     },
                                     {
@@ -484,6 +487,7 @@
                                         "facade.ReconciliationFacadeServices.list#Automations": "#/components/schemas/ListAutomationsRequest",
                                         "facade.ReconciliationFacadeServices.list#GeneratedOutputs": "#/components/schemas/ListGeneratedOutputsRequest",
                                         "facade.ReconciliationFacadeServices.list#Mappings": "#/components/schemas/ListMappingsRequest",
+                                        "facade.ReconciliationFacadeServices.list#ReconciliationExecutions": "#/components/schemas/ListReconciliationExecutionsRequest",
                                         "facade.ReconciliationFacadeServices.list#Reconciliations": "#/components/schemas/ListReconciliationsRequest",
                                         "facade.ReconciliationFacadeServices.list#SavedRuns": "#/components/schemas/ListSavedRunsRequest",
                                         "facade.ReconciliationFacadeServices.pause#Automation": "#/components/schemas/PauseAutomationRequest",
@@ -778,6 +782,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/ListMappingsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ListReconciliationExecutionsResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ListReconciliationsResponse"
@@ -11452,6 +11459,105 @@
                     "result"
                 ]
             },
+            "ListReconciliationExecutionsParams": {
+                "type": "object",
+                "properties": {
+                    "reconciliationId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "reconciliationId"
+                ],
+                "description": "DAR-UI-048. A run's past executions, newest first: one entry per press of Run."
+            },
+            "ListReconciliationExecutionsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "executions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    }
+                }
+            },
+            "ListReconciliationExecutionsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.list#ReconciliationExecutions",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.list#ReconciliationExecutions",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.list#ReconciliationExecutions"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ListReconciliationExecutionsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ListReconciliationExecutionsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.list#ReconciliationExecutions. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ListReconciliationExecutionsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "ListReconciliationsParams": {
                 "type": "object",
                 "properties": {
@@ -18966,6 +19072,7 @@
         "facade.ReconciliationFacadeServices.list#Automations": "ListAutomations",
         "facade.ReconciliationFacadeServices.list#GeneratedOutputs": "ListGeneratedOutputs",
         "facade.ReconciliationFacadeServices.list#Mappings": "ListMappings",
+        "facade.ReconciliationFacadeServices.list#ReconciliationExecutions": "ListReconciliationExecutions",
         "facade.ReconciliationFacadeServices.list#Reconciliations": "ListReconciliations",
         "facade.ReconciliationFacadeServices.list#SavedRuns": "ListSavedRuns",
         "facade.ReconciliationFacadeServices.pause#Automation": "PauseAutomation",

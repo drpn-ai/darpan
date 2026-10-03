@@ -148,6 +148,8 @@ class ReconciliationSavedRunSupport {
     // DAR-BE-018 returns. Own system id AND own config type — the registry resolvers take the first
     // enabled match on each, so sharing either would silently shadow a shipped row.
     static final String SYSTEM_HOTWAX_OMS_RETURNS = "OMS_RETURNS"
+    /** DAR-BE-040 fix 3: OMS returns over GraphQL — the same records as OMS_RETURNS, including pending returns. */
+    static final String SYSTEM_HOTWAX_OMS_RETURNS_GQL = "OMS_RETURNS_GQL"
     static final String SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST_RETURNS = "HOTWAX_OMS_REST_RETURNS"
     static final String HOTWAX_RETURNS_ENDPOINT_LABEL = "Reconciliation Returns API"
     static final String HOTWAX_OMS_RETURNS_EXTRACT_SERVICE = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReturns"

@@ -112,6 +112,17 @@
             sequenceNum="14"
             parentEnumId="OMS"/>
 
+    <!-- DAR-BE-040 fix 3: OMS returns over GraphQL (connector OMS_RETURNS_GQL). reconciliationReturns serves
+         refunded returns only, so pending returns were invisible to OMS_RETURNS; this endpoint carries them.
+         Required for the endpoint gate and the automation-source FK, like every endpoint under OMS. -->
+    <moqui.basic.Enumeration
+            enumId="OMS_RETURNS_GQL"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_GQL_RETURNS"
+            description="HotWax Returns (GraphQL)"
+            sequenceNum="15"
+            parentEnumId="OMS"/>
+
     <moqui.basic.Enumeration
             enumId="OMS_ORDER_ITEMS"
             enumTypeId="DarpanSystemSource"

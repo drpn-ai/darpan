@@ -6,7 +6,7 @@ record added or modified between v1.5.1 and darpan main 268d218, then hand-order
 is copied VERBATIM from its seed file and was checked equivalent to it. Load with:
 ./gradlew loadDarpanUpgradeData
 
-REBUILT, NOT APPENDED. The previous version of this file carried 3 of the 31 records owed. 1.5.1's
+REBUILT, NOT APPENDED. The previous version of this file carried 3 of the 31 records then owed. 1.5.1's
 pack is frozen at data/releases/1.5.1/upgrade-data.xml and must not be edited. This file is a DELTA
 carrying only what changed after 1.5.1. An environment that has not yet loaded 1.5.1 must load
 data/releases/1.5.1/upgrade-data.xml FIRST — this file restates a row that pack also restates, and
@@ -26,16 +26,24 @@ topologically sort, so a child ahead of its parent fails with a raw *_ibfk_* err
 near this file. release_preflight.py sorts alphabetically and WILL break this if regenerated:
   1. EnumerationType DarpanConclusion, then its UNEXPLAINED enumeration
   2. AUT_STAT_NOT_RUN (its type AutomationExecStatus shipped long ago)
-  3. the five DarpanSystemSource endpoint enums (their parents OMS / SHOPIFY / NETSUITE already exist)
-  4. the seven SourceSystemConnector rows (remotes HOTWAX_ORDERS_API / SHOPIFY_REMOTE already exist)
-  5. the sixteen SourceSystemConnectorField pills, which FK their connector by systemEnumId
+  3. the six DarpanSystemSource endpoint enums (their parents OMS / SHOPIFY / NETSUITE already exist)
+  4. the eight SourceSystemConnector rows (remotes HOTWAX_ORDERS_API / SHOPIFY_REMOTE already exist)
+  5. the twenty-five SourceSystemConnectorField pills, which FK their connector by systemEnumId
 
-OPERATOR IMPACT: 31 records.
+OPERATOR IMPACT: 42 records.
 
   - NEW ENDPOINTS, inert until configured: OMS_GQL (HotWax Orders over GraphQL, DAR-BE-064),
     OMS_ORDER_ITEMS, OMS_ORDER_LINE_UNITS, SHOPIFY_ORDER_LINE_UNITS, NETSUITE_SUITEQL — each an
     endpoint enum plus a connector row; OMS_GQL also gets its nine pills. No existing run references
     any of them.
+
+  - OMS_RETURNS_GQL (DAR-BE-040 fix 3): OMS returns over GraphQL, beside OMS_RETURNS. The REST endpoint
+    serves refunded returns only, so a returns run on OMS_RETURNS reports every pending return as missing
+    in HotWax. Records match REST field for field, and the nine pills mirror OMS_RETURNS, so moving a rule
+    set over is a source switch (HOTWAX_OMS_REST_RETURNS -> HOTWAX_OMS_GQL_RETURNS) with no rule change.
+    The endpoint gate is absent-means-enabled, so it is available on every open OMS config at once. Needs
+    the OMS GraphQL upgrade (gorjana has it since 2026-09-30); elsewhere the extract fails loudly. Slower
+    than REST, throttle-bound: 258 s against 17 s for a 6-hour gorjana window (live, 2026-10-03).
 
   - SHOPIFY (orders) is MODIFIED in two columns, and one of them changes behaviour:
       filterParameterName  (none) -> sourceFilters
@@ -135,6 +143,14 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             description="Shopify Order Line Units"
             sequenceNum="10"
             parentEnumId="SHOPIFY"/>
+
+    <moqui.basic.Enumeration
+            enumId="OMS_RETURNS_GQL"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_GQL_RETURNS"
+            description="HotWax Returns (GraphQL)"
+            sequenceNum="15"
+            parentEnumId="OMS"/>
 
     <!-- 4. Connectors. SHOPIFY and SHOPIFY_RETURN_REFS are MODIFIED rows (restated whole); the rest are new.
          Source: data/SourceSystemConnectorSeedData.xml -->
@@ -271,6 +287,30 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             evidenceFieldsJson='{"system":"Shopify","state":"displayFulfillmentStatus","stateLabels":{"FULFILLED":"Fulfilled","UNFULFILLED":"Unfulfilled","PARTIALLY_FULFILLED":"Partially fulfilled","RESTOCKED":"Restocked","ON_HOLD":"On hold","IN_PROGRESS":"In progress","SCHEDULED":"Scheduled","PENDING_FULFILLMENT":"Pending fulfillment","OPEN":"Open"},"facts":["name","displayFinancialStatus","sourceName"]}'
             enabled="Y"/>
 
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_RETURNS_GQL"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlReturns"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_GQL_RETURNS"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="GraphQL API (Returns)"
+            sendUrlTemplate="{baseUrl}/rest/s1/graphql"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlReturns"
+            systemAliases="OMS_RETURNS_GQL,HOTWAX_GQL_RETURNS,DAR_SYS_OMS_RETURNS_GQL"
+            preserveWindowInstants="N"
+            keepFieldsParameterName="keepRecordFields"
+            keepFieldsBase="returnId,shopifyReturnId,externalId,orderExternalId,statusId,entryDate,returnTotal,currencyUomId,returnChannelEnumId"
+            filterParameterName="sourceFilters"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            orderStateLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId"
+            lookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsReturnsByExternalId"
+            lookupIdsParameterName="externalIds"
+            lookupMaxIds="10000"
+            enabled="Y"/>
+
     <!-- 5. Rules-board pills. Each FKs a connector above by systemEnumId.
          Source: data/SourceSystemConnectorFieldSeedData.xml -->
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].externalId"
@@ -329,5 +369,28 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             label="Requires shipping" fieldType="Boolean" sequenceNum="6" description="false on orders with nothing to ship (gorjana's digital gift cards, POS carry-outs)."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].sourceName"
             label="Source" fieldType="String" sequenceNum="5" description="web, pos, shopify_draft_order, or an app id."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].returnId"
+            label="Return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
+            description="OMS return identity."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].shopifyReturnId"
+            label="Shopify reference" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
+            description="PREFERRED join key. The Shopify return reference: the SHOPIFY_RTN_ID identification where present, else SHOPIFY_RETURN_ID — the same pick REST makes. Populated on RETURN_REQUESTED returns that have no refund yet, which REST no longer serves at all. Matches Shopify SHOPIFY_RETURN_REFS's refundOrReturnId."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].externalId"
+            label="Shopify refund or return ID (legacy)" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            description="The Shopify refund id. BLANK on returns with no refund yet; the extract then fills it from shopifyReturnId (the same join-key fallback REST records get). Kept as a candidate so rule sets keyed on it keep resolving."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].orderExternalId"
+            label="Order external ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="4"
+            description="Order spine — the Shopify order id of the return's order, resolved through OMS orders. Absent on a return with no items, as on REST."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].statusId"
+            label="Status" fieldType="string" sequenceNum="5" description="The RETURN's status. Includes RETURN_REQUESTED, which REST never serves; RETURN_CANCELLED is excluded by the extract."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].entryDate"
+            label="Entry date" fieldType="string" sequenceNum="6" description="Epoch milliseconds, as on REST. The extract windows on it."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].returnTotal"
+            label="Return total" fieldType="string" sequenceNum="7" description="Sum of returnPrice x returnQuantity over the return's items — what REST reports."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].currencyUomId"
+            label="Currency" fieldType="string" sequenceNum="8" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].returnChannelEnumId"
+            label="Return channel" fieldType="string" sequenceNum="9"
+            description="Return channel. Exclusion rules on it run client-side, after the built-in exclusions."/>
 
 </entity-facade-xml>

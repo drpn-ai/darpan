@@ -501,6 +501,17 @@ class RunVerificationSupport {
      * opens only once the caller knows the pass applies — a run that is not a returns pair must leave
      * no VERIFY row claiming it was checked — while every resolution decision stays here, shared.</p>
      */
+    /**
+     * The OMS side of a returns pair: either transport. REST (OMS_RETURNS) and GraphQL (OMS_RETURNS_GQL,
+     * DAR-BE-040 fix 3) emit the same records, so the return-presence pass applies to both. Matching
+     * OMS_RETURNS alone skipped the whole pass on a GraphQL run — on 2026-09-02 it removed 67 false
+     * differences.
+     */
+    static boolean isOmsReturnsSystem(String systemEnumId) {
+        return systemEnumId == ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS ||
+                systemEnumId == ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS_GQL
+    }
+
     static Map prepareReturnPresencePass(Map args) {
         def ec = args?.get("ec")
         File diffFile = (File) args?.get("diffFile")
@@ -508,8 +519,7 @@ class RunVerificationSupport {
 
         List sides = (args.get("sides") ?: []) as List
         Map omsSide = (Map) sides.find { Map side ->
-            normalize(resolveConnector(ec, side?.get("source"))?.systemEnumId) ==
-                    ReconciliationSavedRunSupport.SYSTEM_HOTWAX_OMS_RETURNS
+            isOmsReturnsSystem(normalize(resolveConnector(ec, side?.get("source"))?.systemEnumId))
         }
         Map shopifySide = (Map) sides.find { Map side ->
             normalize(resolveConnector(ec, side?.get("source"))?.systemEnumId) ==

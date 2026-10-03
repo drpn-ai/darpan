@@ -27,7 +27,10 @@ class FilteringConnectorSidecarContractTests {
     // OMS_GQL (DAR-BE-064): its script calls ExcludedRecordsSidecar.writeBeside, but at ORDER grain the shared
     // OmsRestSourceSupport shaper never feeds the excluded collector (only the unit-grain branch collects), so
     // the sidecar is always empty today. Same pipeline as REST OMS by construction.
-    static final Set<String> NOT_YET = ["OMS_TRANSFER_ORDERS", "OMS_RECON_ORDERS", "OMS_RETURNS", "SHOPIFY_RETURN_REFS", "OMS_GQL"] as Set
+    // OMS_RETURNS_GQL (DAR-BE-040 fix 3): the REST returns pipeline with GraphQL pages, so the same NOT_YET as OMS_RETURNS —
+    // neither returns script writes a sidecar.
+    static final Set<String> NOT_YET = ["OMS_TRANSFER_ORDERS", "OMS_RECON_ORDERS", "OMS_RETURNS", "SHOPIFY_RETURN_REFS", "OMS_GQL",
+                                        "OMS_RETURNS_GQL"] as Set
 
     private static Path componentRoot() {
         Path p = Paths.get(System.getProperty("user.dir")).toAbsolutePath()

@@ -136,6 +136,32 @@
             description="Included in the endpoint's server-side projection, so a rule drawn on it sees a value.
                 Remove if OMS narrows the projection or ships the RQ-24 server-side channel filter."/>
 
+    <!-- OMS_RETURNS_GQL (DAR-BE-040 fix 3): the same nine fields as OMS_RETURNS, same labels, candidates and
+         order, so a rule set moves between the two connectors with no rule change. -->
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].returnId"
+            label="Return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
+            description="OMS return identity."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].shopifyReturnId"
+            label="Shopify reference" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
+            description="PREFERRED join key. The Shopify return reference: the SHOPIFY_RTN_ID identification where present, else SHOPIFY_RETURN_ID — the same pick REST makes. Populated on RETURN_REQUESTED returns that have no refund yet, which REST no longer serves at all. Matches Shopify SHOPIFY_RETURN_REFS's refundOrReturnId."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].externalId"
+            label="Shopify refund or return ID (legacy)" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            description="The Shopify refund id. BLANK on returns with no refund yet; the extract then fills it from shopifyReturnId (the same join-key fallback REST records get). Kept as a candidate so rule sets keyed on it keep resolving."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].orderExternalId"
+            label="Order external ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="4"
+            description="Order spine — the Shopify order id of the return's order, resolved through OMS orders. Absent on a return with no items, as on REST."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].statusId"
+            label="Status" fieldType="string" sequenceNum="5" description="The RETURN's status. Includes RETURN_REQUESTED, which REST never serves; RETURN_CANCELLED is excluded by the extract."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].entryDate"
+            label="Entry date" fieldType="string" sequenceNum="6" description="Epoch milliseconds, as on REST. The extract windows on it."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].returnTotal"
+            label="Return total" fieldType="string" sequenceNum="7" description="Sum of returnPrice x returnQuantity over the return's items — what REST reports."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].currencyUomId"
+            label="Currency" fieldType="string" sequenceNum="8" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].returnChannelEnumId"
+            label="Return channel" fieldType="string" sequenceNum="9"
+            description="Return channel. Exclusion rules on it run client-side, after the built-in exclusions."/>
+
     <!-- Shopify orders. The two primary-ID candidates, then (DAR-BE-063) the order fields the bulk
          extract always selects (ShopifySourceCatalog ORDER_SOURCE defaultBulkSelectedFieldPaths) that a
          filter or a conclusion's "stop flagging" suggestion can name. Derived from that fixed bulk

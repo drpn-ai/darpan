@@ -720,13 +720,30 @@ class SourceSystemConnectorSupportSmokeTests {
     }
 
     @Test
-    void onlyOmsReturnsDeclaresTheOrderStateLookupService() {
-        // A second declarer would silently double-dispatch the suppression on a run where both sides
-        // resolve one, so keep the slot single-owner until a second endpoint genuinely needs it.
+    void theOrderStateLookupIsDeclaredExactlyByTheOmsReturnsEndpoints() {
+        // DAR-BE-040 fix 3: OMS_RETURNS_GQL is the second endpoint that genuinely needs the slot — without
+        // it, cancelled-order refunds on a GraphQL returns run come back as findings. Double dispatch stays
+        // impossible: the return-presence pass picks ONE oms side and ONE shopify side per run.
         List rows = ec.entity.find(SourceSystemConnectorSupport.ENTITY_NAME)
                 .condition("orderStateLookupServiceName", org.moqui.entity.EntityCondition.IS_NOT_NULL, null)
                 .useCache(false).list()*.systemEnumId
-        assertEquals(["OMS_RETURNS"], rows.sort())
+        assertEquals(["OMS_RETURNS", "OMS_RETURNS_GQL"], rows.sort())
+    }
+
+    @Test
+    void theReturnPresencePassRecognisesEveryOmsReturnsEndpoint() {
+        // The pass found its OMS side by systemEnumId == "OMS_RETURNS" alone, so a GraphQL returns run
+        // would have skipped it entirely — and on 2026-09-02 that pass removed 67 false differences.
+        // Every endpoint that declares the order-state lookup must be one the pass treats as the OMS side.
+        List<String> declarers = ec.entity.find(SourceSystemConnectorSupport.ENTITY_NAME)
+                .condition("orderStateLookupServiceName", org.moqui.entity.EntityCondition.IS_NOT_NULL, null)
+                .useCache(false).list()*.systemEnumId
+        declarers.each { String systemEnumId ->
+            assertTrue(darpan.facade.reconciliation.RunVerificationSupport.isOmsReturnsSystem(systemEnumId),
+                    "${systemEnumId} declares the order-state lookup but the return-presence pass ignores it")
+        }
+        assertFalse(darpan.facade.reconciliation.RunVerificationSupport.isOmsReturnsSystem("OMS"))
+        assertFalse(darpan.facade.reconciliation.RunVerificationSupport.isOmsReturnsSystem("SHOPIFY_RETURN_REFS"))
     }
 
     @Test

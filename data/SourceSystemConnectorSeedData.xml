@@ -292,6 +292,40 @@
             lookupMaxIds="10000"
             enabled="Y"/>
 
+    <!-- OMS_RETURNS_GQL (DAR-BE-040 fix 3): OMS returns over GraphQL, BESIDE the REST row, not replacing it.
+         reconciliationReturns serves REFUNDED returns only — live on gorjana 2026-10-03 it returned none of
+         the 268 RETURN_REQUESTED returns since Oct 1 — so every pending return Shopify reported read as
+         missing in HotWax. extract#HotWaxOmsGqlReturns builds records to the REST record exactly (110
+         settled returns matched on every field), so this row mirrors OMS_RETURNS in everything but
+         transport: same config row and credential, projection base, filters, by-id lookup and order-state
+         lookup. A rule set migrates by switching its source to this endpoint (sourceConfigType
+         HOTWAX_OMS_REST_RETURNS -> HOTWAX_OMS_GQL_RETURNS) and reverts the same way. The REST row stays
+         enabled: an OMS without the 2026-09-30 GraphQL upgrade still needs it, and there this extract
+         fails rather than returning an empty file. -->
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_RETURNS_GQL"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlReturns"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_GQL_RETURNS"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="GraphQL API (Returns)"
+            sendUrlTemplate="{baseUrl}/rest/s1/graphql"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlReturns"
+            systemAliases="OMS_RETURNS_GQL,HOTWAX_GQL_RETURNS,DAR_SYS_OMS_RETURNS_GQL"
+            preserveWindowInstants="N"
+            keepFieldsParameterName="keepRecordFields"
+            keepFieldsBase="returnId,shopifyReturnId,externalId,orderExternalId,statusId,entryDate,returnTotal,currencyUomId,returnChannelEnumId"
+            filterParameterName="sourceFilters"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            orderStateLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId"
+            lookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsReturnsByExternalId"
+            lookupIdsParameterName="externalIds"
+            lookupMaxIds="10000"
+            enabled="Y"/>
+
     <!-- Shopify per-EVENT (refund or return) records for returns reconciliation (DAR-BE-018;
          2026-08-17 returns-refund-grain-alignment plan, Task 2, REVISION 2026-08-18). Cursor-
          paginated, not bulk — see the service description and ShopifyReturnRefsSupport.

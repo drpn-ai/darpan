@@ -87,10 +87,10 @@ class SourceOptionCardinalityTests {
         List<Map<String, Object>> options = AutomationFacadeSupport.listSourceConfigOptions(ec)
                 .findAll { it.sourceConfigId == CONFIG_ID }
 
-        // DAR-BE-050 added OMS_ORDER_LINE_UNITS, DAR-BE-062 OMS_ORDER_ITEMS, DAR-BE-064 OMS_GQL. The list is spelled out rather than counted on
+        // DAR-BE-050 added OMS_ORDER_LINE_UNITS, DAR-BE-062 OMS_ORDER_ITEMS, DAR-BE-064 OMS_GQL, DAR-BE-040 OMS_RETURNS_GQL. The list is spelled out rather than counted on
         // purpose: this test exists to make a new endpoint VISIBLE, so one must be added here
         // deliberately rather than absorbed by a size() assertion that would never notice.
-        assertEquals(["OMS", "OMS_GQL", "OMS_ORDER_ITEMS", "OMS_ORDER_LINE_UNITS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_TRANSFER_ORDERS"],
+        assertEquals(["OMS", "OMS_GQL", "OMS_ORDER_ITEMS", "OMS_ORDER_LINE_UNITS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_RETURNS_GQL", "OMS_TRANSFER_ORDERS"],
                 options.collect { it.systemEnumId }.sort())
     }
 

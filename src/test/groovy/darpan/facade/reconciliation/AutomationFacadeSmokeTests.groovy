@@ -374,7 +374,7 @@ class AutomationFacadeSmokeTests {
             }
             assertNotNull(omsSourceOption)
             assertEquals("HOTWAX_ORDERS_API", omsSourceOption.systemMessageRemoteId)
-            assertEquals("Orders API", omsSourceOption.label)
+            assertEquals("Orders", omsSourceOption.label)
             assertEquals("KREWE_OMS", omsSourceOption.sourceConfigId)
             assertEquals("HOTWAX_OMS_REST", omsSourceOption.sourceConfigType)
             assertEquals(AutomationFacadeSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE,
@@ -405,7 +405,7 @@ class AutomationFacadeSmokeTests {
             }
             assertNotNull(shopifySourceOption)
             assertEquals("SHOPIFY_REMOTE", shopifySourceOption.systemMessageRemoteId)
-            assertEquals("Admin GraphQL Orders", shopifySourceOption.label)
+            assertEquals("Orders", shopifySourceOption.label)
             assertEquals("KREWE_SHOPIFY", shopifySourceOption.sourceConfigId)
             assertEquals("SHOPIFY_AUTH", shopifySourceOption.sourceConfigType)
             assertEquals(AutomationFacadeSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE,
@@ -491,7 +491,7 @@ class AutomationFacadeSmokeTests {
         }
         assertNotNull(omsSourceOption)
         assertEquals("HOTWAX_ORDERS_API", omsSourceOption.systemMessageRemoteId)
-        assertEquals("Orders API", omsSourceOption.label)
+        assertEquals("Orders", omsSourceOption.label)
         assertEquals("KREWE_OMS", omsSourceOption.sourceConfigId)
         assertEquals("HOTWAX_OMS_REST", omsSourceOption.sourceConfigType)
         assertEquals(AutomationFacadeSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE,
@@ -517,7 +517,7 @@ class AutomationFacadeSmokeTests {
         }
         assertNotNull(shopifySourceOption)
         assertEquals("SHOPIFY", shopifySourceOption.systemEnumId)
-        assertEquals("Admin GraphQL Orders", shopifySourceOption.label)
+        assertEquals("Orders", shopifySourceOption.label)
         assertEquals("KREWE_SHOPIFY", shopifySourceOption.sourceConfigId)
         assertEquals("SHOPIFY_AUTH", shopifySourceOption.sourceConfigType)
         Map<String, Object> shopifyMetadata = (Map<String, Object>) new JsonSlurper().parseText(shopifySourceOption.safeMetadataJson as String)

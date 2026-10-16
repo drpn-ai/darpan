@@ -889,7 +889,7 @@ end'''
         Map<String, Object> file2Option = systemOptions.find { it.fileSide == "FILE_2" }
         assertEquals("AUT_SRC_API", file1Option.sourceTypeEnumId)
         assertEquals("HOTWAX_ORDERS_API", file1Option.systemMessageRemoteId)
-        assertEquals("Orders API", file1Option.systemMessageRemoteLabel)
+        assertEquals("Orders", file1Option.systemMessageRemoteLabel)
         assertEquals("KREWE_OMS", file1Option.sourceConfigId)
         assertEquals("HOTWAX_OMS_REST", file1Option.sourceConfigType)
         assertEquals("\$.records[*].orderId", file1Option.idFieldExpression)
@@ -1286,7 +1286,7 @@ end'''
         Map<String, Object> file1Option = systemOptions.find { it.fileSide == "FILE_1" }
         assertEquals("AUT_SRC_API", file1Option.sourceTypeEnumId)
         assertEquals("SHOPIFY_REMOTE", file1Option.systemMessageRemoteId)
-        assertEquals("Admin GraphQL Orders", file1Option.systemMessageRemoteLabel)
+        assertEquals("Orders", file1Option.systemMessageRemoteLabel)
         assertEquals("KREWE_SHOPIFY", file1Option.sourceConfigId)
         assertEquals("SHOPIFY_AUTH", file1Option.sourceConfigType)
 
@@ -1360,8 +1360,8 @@ end'''
 
         // Each side's OWN connector label (SourceSystemConnectorSeedData.xml), not the shared remote's
         // inherited parent description ("Admin GraphQL Orders" / "Orders API").
-        assertEquals("Shopify Return References", file1Option.systemMessageRemoteLabel)
-        assertEquals("Reconciliation Returns API", file2Option.systemMessageRemoteLabel)
+        assertEquals("Returns", file1Option.systemMessageRemoteLabel)
+        assertEquals("Refunded returns", file2Option.systemMessageRemoteLabel)
 
         // The SYSTEM the endpoint belongs to, read off the enum's parentEnumId. `label` names the
         // ENDPOINT for these two, so without this the manager page's System card has nothing to show

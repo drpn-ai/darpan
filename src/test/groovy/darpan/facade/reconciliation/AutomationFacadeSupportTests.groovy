@@ -129,8 +129,8 @@ class AutomationFacadeSupportTests {
     void reconciliationOrdersSystemLabelsItsOwnEndpoint() {
         String label = AutomationFacadeSupport.endpointLabelForSystem(
                 "OMS_RECON_ORDERS", "HOTWAX_ORDERS_API", null)
-        assertEquals("Reconciliation Orders API", label,
-                "the shared remoteId must not make this source display as the legacy Orders API")
+        assertEquals("Sales orders", label,
+                "the shared remoteId must not make this source display as the plain Orders endpoint")
     }
 
     // returnsSystemOffersTheChannelPill and returnsPillsNameOnlyTopLevelRecordKeys (DAR-BE-018 Task 6,

@@ -26,11 +26,18 @@ topologically sort, so a child ahead of its parent fails with a raw *_ibfk_* err
 near this file. release_preflight.py sorts alphabetically and WILL break this if regenerated:
   1. EnumerationType DarpanConclusion, then its UNEXPLAINED enumeration
   2. AUT_STAT_NOT_RUN (its type AutomationExecStatus shipped long ago)
-  3. the six DarpanSystemSource endpoint enums (their parents OMS / SHOPIFY / NETSUITE already exist)
-  4. the eight SourceSystemConnector rows (remotes HOTWAX_ORDERS_API / SHOPIFY_REMOTE already exist)
+  3. the ten DarpanSystemSource endpoint enums (their parents OMS / SHOPIFY / NETSUITE already exist)
+  4. the twelve SourceSystemConnector rows (remotes HOTWAX_ORDERS_API / SHOPIFY_REMOTE already exist)
   5. the forty-one SourceSystemConnectorField pills, which FK their connector by systemEnumId
 
-OPERATOR IMPACT: 58 records.
+OPERATOR IMPACT: 66 records.
+
+  - SOURCE NAMES RENAMED (DAR-BE-069), display only: endpoint names say what they return, not which API
+    serves them ("HotWax Returns (Reconciliation API)" -> "HotWax refunded returns", "HotWax Returns (GraphQL)"
+    -> "HotWax returns", "Shopify Order Return References" -> "Shopify returns", "Orders API" -> "Orders", ...).
+    Four enums (OMS_RECON_ORDERS, OMS_RETURNS, OMS_TRANSFER_ORDERS, SHOPIFY_RETURN_REFS) and four connectors (OMS,
+    OMS_RECON_ORDERS, OMS_RETURNS, OMS_TRANSFER_ORDERS) are restated for it; each differs from v1.5.1 ONLY in its
+    description / endpointLabel. Run results already written keep the name they were stamped with.
 
   - FIELD LABELS RENAMED (DAR-BE-069), display only: 31 pill labels across OMS, OMS_GQL, OMS_RECON_ORDERS,
     OMS_RETURNS, OMS_RETURNS_GQL, SHOPIFY and SHOPIFY_RETURN_REFS get short plain names ("Shopify reference" ->
@@ -127,28 +134,28 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             enumId="OMS_GQL"
             enumTypeId="DarpanSystemSource"
             enumCode="HOTWAX_GQL"
-            description="HotWax Orders (GraphQL)"
+            description="HotWax orders and payments"
             sequenceNum="14"
             parentEnumId="OMS"/>
     <moqui.basic.Enumeration
             enumId="OMS_ORDER_ITEMS"
             enumTypeId="DarpanSystemSource"
             enumCode="HOTWAX_ORDER_ITEMS"
-            description="HotWax Order Items"
+            description="HotWax order lines (NetSuite)"
             sequenceNum="13"
             parentEnumId="OMS"/>
     <moqui.basic.Enumeration
             enumId="OMS_ORDER_LINE_UNITS"
             enumTypeId="DarpanSystemSource"
             enumCode="HOTWAX_ORDER_LINE_UNITS"
-            description="HotWax Order Line Units"
+            description="HotWax order lines"
             sequenceNum="11"
             parentEnumId="OMS"/>
     <moqui.basic.Enumeration
             enumId="SHOPIFY_ORDER_LINE_UNITS"
             enumTypeId="DarpanSystemSource"
             enumCode="SHOPIFY_ORDER_LINE_UNITS"
-            description="Shopify Order Line Units"
+            description="Shopify order lines"
             sequenceNum="10"
             parentEnumId="SHOPIFY"/>
 
@@ -156,9 +163,39 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             enumId="OMS_RETURNS_GQL"
             enumTypeId="DarpanSystemSource"
             enumCode="HOTWAX_GQL_RETURNS"
-            description="HotWax Returns (GraphQL)"
+            description="HotWax returns"
             sequenceNum="15"
             parentEnumId="OMS"/>
+
+    <!-- DAR-BE-069: restated for the source-name renames (create-or-update by primary key, whole row). -->
+    <moqui.basic.Enumeration
+            enumId="OMS_RECON_ORDERS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_RECON_ORDERS"
+            description="HotWax sales orders"
+            sequenceNum="7"
+            parentEnumId="OMS"/>
+    <moqui.basic.Enumeration
+            enumId="OMS_RETURNS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_RETURNS"
+            description="HotWax refunded returns"
+            sequenceNum="8"
+            parentEnumId="OMS"/>
+    <moqui.basic.Enumeration
+            enumId="OMS_TRANSFER_ORDERS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_TRANSFER_ORDERS"
+            description="HotWax transfer orders"
+            sequenceNum="6"
+            parentEnumId="OMS"/>
+    <moqui.basic.Enumeration
+            enumId="SHOPIFY_RETURN_REFS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="SHOPIFY_RETURN_REFS"
+            description="Shopify returns"
+            sequenceNum="9"
+            parentEnumId="SHOPIFY"/>
 
     <!-- 4. Connectors. SHOPIFY and SHOPIFY_RETURN_REFS are MODIFIED rows (restated whole); the rest are new.
          Source: data/SourceSystemConnectorSeedData.xml -->
@@ -188,7 +225,7 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             configParameterName="omsRestSourceConfigId"
             configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
             remoteId="HOTWAX_ORDERS_API"
-            endpointLabel="GraphQL API (Orders)"
+            endpointLabel="Orders and payments"
             sendUrlTemplate="{baseUrl}/rest/s1/graphql"
             remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders"
             systemAliases="OMS_GQL,HOTWAX_GQL,DAR_SYS_OMS_GQL"
@@ -208,7 +245,7 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             configParameterName="omsRestSourceConfigId"
             configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
             remoteId="HOTWAX_ORDERS_API"
-            endpointLabel="Orders API (Order Items)"
+            endpointLabel="Order lines (NetSuite)"
             sendUrlTemplate="{baseUrl}/rest/s1/oms/orders"
             remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrderItems"
             systemAliases="OMS_ORDER_ITEMS,HOTWAX_ORDER_ITEMS,DAR_SYS_OMS_ORDER_ITEMS"
@@ -227,7 +264,7 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             configParameterName="omsRestSourceConfigId"
             configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
             remoteId="HOTWAX_ORDERS_API"
-            endpointLabel="Orders API (Order Line Units)"
+            endpointLabel="Order lines"
             sendUrlTemplate="{baseUrl}/rest/s1/oms/orders"
             remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrderLineUnits"
             systemAliases="OMS_ORDER_LINE_UNITS,HOTWAX_ORDER_LINE_UNITS,DAR_SYS_OMS_LINE_UNITS"
@@ -246,7 +283,7 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             configParameterName="shopifyAuthConfigId"
             configEntityName="darpan.shopify.ShopifyAuthConfig"
             remoteId="SHOPIFY_REMOTE"
-            endpointLabel="Admin GraphQL Order Line Units"
+            endpointLabel="Order lines"
             sendUrlTemplate="https://{shop}.myshopify.com/admin/api/{apiVersion}/graphql.json"
             remoteSendServiceName="facade.ShopifyFacadeServices.execute#ShopifyGraphql"
             systemAliases="SHOPIFY_ORDER_LINE_UNITS,DAR_SYS_SHOPIFY_LINE_UNITS"
@@ -264,7 +301,7 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             configParameterName="shopifyAuthConfigId"
             configEntityName="darpan.shopify.ShopifyAuthConfig"
             remoteId="SHOPIFY_REMOTE"
-            endpointLabel="Shopify Return References"
+            endpointLabel="Returns"
             systemAliases="SHOPIFY_RETURN_REFS,SHOPIFY_RETURNS,DAR_SYS_SHOPIFY_RETURN_REFS"
             preserveWindowInstants="N"
             filterParameterName="sourceFilters"
@@ -282,7 +319,7 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             configParameterName="shopifyAuthConfigId"
             configEntityName="darpan.shopify.ShopifyAuthConfig"
             remoteId="SHOPIFY_REMOTE"
-            endpointLabel="Admin GraphQL Orders"
+            endpointLabel="Orders"
             sendUrlTemplate="https://{shop}.myshopify.com/admin/api/{apiVersion}/graphql.json"
             remoteSendServiceName="facade.ShopifyFacadeServices.execute#ShopifyGraphql"
             systemAliases="SHOPIFY,DAR_SYS_SHOPIFY"
@@ -304,7 +341,7 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             configParameterName="omsRestSourceConfigId"
             configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
             remoteId="HOTWAX_ORDERS_API"
-            endpointLabel="GraphQL API (Returns)"
+            endpointLabel="Returns"
             sendUrlTemplate="{baseUrl}/rest/s1/graphql"
             remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlReturns"
             systemAliases="OMS_RETURNS_GQL,HOTWAX_GQL_RETURNS,DAR_SYS_OMS_RETURNS_GQL"
@@ -317,6 +354,92 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             lookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsReturnsByExternalId"
             lookupIdsParameterName="externalIds"
             lookupMaxIds="10000"
+            enabled="Y"/>
+
+    <!-- DAR-BE-069: restated for the source-name renames (create-or-update by primary key, whole row). -->
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_REST"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Orders"
+            sendUrlTemplate="{baseUrl}/rest/s1/oms/orders"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"
+            systemAliases="OMS,HOTWAX,DAR_SYS_OMS"
+            preserveWindowInstants="N"
+            keepFieldsParameterName="keepRecordFields"
+            keepFieldsBase="orderId,orderName,externalId,grandTotal,orderDate,statusId"
+            filterParameterName="sourceFilters"
+            pairLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            enabled="Y"/>
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_RECON_ORDERS"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_REST_RECON"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Sales orders"
+            sendUrlTemplate="{baseUrl}/rest/s1/oms/reconciliationOrders"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders"
+            systemAliases="OMS_RECON_ORDERS,HOTWAX_RECON_ORDERS,DAR_SYS_OMS_RECON"
+            preserveWindowInstants="N"
+            keepFieldsParameterName="keepRecordFields"
+            keepFieldsBase="orderId,orderName,externalId,grandTotal,orderDate,statusId"
+            filterParameterName="sourceFilters"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            enabled="Y"/>
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_RETURNS"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReturns"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_REST_RETURNS"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Refunded returns"
+            sendUrlTemplate="{baseUrl}/rest/s1/oms/reconciliationReturns"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReturns"
+            systemAliases="OMS_RETURNS,HOTWAX_RETURNS,DAR_SYS_OMS_RETURNS"
+            preserveWindowInstants="N"
+            keepFieldsParameterName="keepRecordFields"
+            keepFieldsBase="returnId,shopifyReturnId,externalId,orderExternalId,statusId,entryDate,returnTotal,currencyUomId,returnChannelEnumId"
+            filterParameterName="sourceFilters"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            orderStateLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId"
+            lookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsReturnsByExternalId"
+            lookupIdsParameterName="externalIds"
+            lookupMaxIds="10000"
+            enabled="Y"/>
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_TRANSFER_ORDERS"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsTransferOrders"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_REST_TRANSFER"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Transfer orders"
+            sendUrlTemplate="{baseUrl}/rest/s1/oms/orders"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsTransferOrders"
+            systemAliases="OMS_TRANSFER_ORDERS,HOTWAX_TRANSFER_ORDERS,DAR_SYS_OMS_TO"
+            preserveWindowInstants="N"
+            keepFieldsParameterName="keepRecordFields"
+            keepFieldsBase="orderId,orderName,orderDate,statusId,originFacilityId,grandTotal,currencyUom"
+            filterParameterName="sourceFilters"
+            windowFieldName="orderDate"
+            supportsStateExtract="Y"
+            statusParameterName="orderStatusIds"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
             enabled="Y"/>
 
     <!-- 5. Rules-board pills. Each FKs a connector above by systemEnumId.

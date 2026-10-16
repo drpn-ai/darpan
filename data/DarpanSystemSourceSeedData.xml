@@ -47,7 +47,7 @@
             enumId="OMS_TRANSFER_ORDERS"
             enumTypeId="DarpanSystemSource"
             enumCode="HOTWAX_TRANSFER_ORDERS"
-            description="HotWax Transfer Orders"
+            description="HotWax transfer orders"
             sequenceNum="6"
             parentEnumId="OMS"/>
 
@@ -55,7 +55,7 @@
             enumId="OMS_RECON_ORDERS"
             enumTypeId="DarpanSystemSource"
             enumCode="HOTWAX_RECON_ORDERS"
-            description="HotWax Orders (Reconciliation API)"
+            description="HotWax sales orders"
             sequenceNum="7"
             parentEnumId="OMS"/>
 
@@ -63,7 +63,7 @@
             enumId="OMS_RETURNS"
             enumTypeId="DarpanSystemSource"
             enumCode="HOTWAX_RETURNS"
-            description="HotWax Returns (Reconciliation API)"
+            description="HotWax refunded returns"
             sequenceNum="8"
             parentEnumId="OMS"/>
 
@@ -75,7 +75,7 @@
             enumId="SHOPIFY_RETURN_REFS"
             enumTypeId="DarpanSystemSource"
             enumCode="SHOPIFY_RETURN_REFS"
-            description="Shopify Order Return References"
+            description="Shopify returns"
             sequenceNum="9"
             parentEnumId="SHOPIFY"/>
 
@@ -90,7 +90,7 @@
             enumId="SHOPIFY_ORDER_LINE_UNITS"
             enumTypeId="DarpanSystemSource"
             enumCode="SHOPIFY_ORDER_LINE_UNITS"
-            description="Shopify Order Line Units"
+            description="Shopify order lines"
             sequenceNum="10"
             parentEnumId="SHOPIFY"/>
 
@@ -98,7 +98,7 @@
             enumId="OMS_ORDER_LINE_UNITS"
             enumTypeId="DarpanSystemSource"
             enumCode="HOTWAX_ORDER_LINE_UNITS"
-            description="HotWax Order Line Units"
+            description="HotWax order lines"
             sequenceNum="11"
             parentEnumId="OMS"/>
 
@@ -108,7 +108,7 @@
             enumId="OMS_GQL"
             enumTypeId="DarpanSystemSource"
             enumCode="HOTWAX_GQL"
-            description="HotWax Orders (GraphQL)"
+            description="HotWax orders and payments"
             sequenceNum="14"
             parentEnumId="OMS"/>
 
@@ -119,7 +119,7 @@
             enumId="OMS_RETURNS_GQL"
             enumTypeId="DarpanSystemSource"
             enumCode="HOTWAX_GQL_RETURNS"
-            description="HotWax Returns (GraphQL)"
+            description="HotWax returns"
             sequenceNum="15"
             parentEnumId="OMS"/>
 
@@ -127,7 +127,7 @@
             enumId="OMS_ORDER_ITEMS"
             enumTypeId="DarpanSystemSource"
             enumCode="HOTWAX_ORDER_ITEMS"
-            description="HotWax Order Items"
+            description="HotWax order lines (NetSuite)"
             sequenceNum="13"
             parentEnumId="OMS"/>
 

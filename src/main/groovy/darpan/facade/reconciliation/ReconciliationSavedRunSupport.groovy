@@ -135,7 +135,7 @@ class ReconciliationSavedRunSupport {
     static final String SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST = "HOTWAX_OMS_REST"
     static final String SOURCE_CONFIG_TYPE_NETSUITE_AUTH = "NETSUITE_AUTH"
     static final String HOTWAX_ORDERS_REMOTE_ID = "HOTWAX_ORDERS_API"
-    static final String HOTWAX_ORDERS_ENDPOINT_LABEL = "Orders API"
+    static final String HOTWAX_ORDERS_ENDPOINT_LABEL = "Orders"
     static final String HOTWAX_OMS_ORDERS_EXTRACT_SERVICE = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"
     // DAR-BE-018: the same OMS sales orders served by /rest/s1/oms/reconciliationOrders. A second
     // connector row rather than a repoint, so the shipped OMS path stays available as a fallback
@@ -143,7 +143,7 @@ class ReconciliationSavedRunSupport {
     // the registry resolvers take the first enabled match on each (see SourceSystemConnectorSeedData).
     static final String SYSTEM_HOTWAX_OMS_RECON = "OMS_RECON_ORDERS"
     static final String SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST_RECON = "HOTWAX_OMS_REST_RECON"
-    static final String HOTWAX_RECON_ORDERS_ENDPOINT_LABEL = "Reconciliation Orders API"
+    static final String HOTWAX_RECON_ORDERS_ENDPOINT_LABEL = "Sales orders"
     static final String HOTWAX_OMS_RECON_ORDERS_EXTRACT_SERVICE = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders"
     // DAR-BE-018 returns. Own system id AND own config type — the registry resolvers take the first
     // enabled match on each, so sharing either would silently shadow a shipped row.
@@ -151,14 +151,14 @@ class ReconciliationSavedRunSupport {
     /** DAR-BE-040 fix 3: OMS returns over GraphQL — the same records as OMS_RETURNS, including pending returns. */
     static final String SYSTEM_HOTWAX_OMS_RETURNS_GQL = "OMS_RETURNS_GQL"
     static final String SOURCE_CONFIG_TYPE_HOTWAX_OMS_REST_RETURNS = "HOTWAX_OMS_REST_RETURNS"
-    static final String HOTWAX_RETURNS_ENDPOINT_LABEL = "Reconciliation Returns API"
+    static final String HOTWAX_RETURNS_ENDPOINT_LABEL = "Refunded returns"
     static final String HOTWAX_OMS_RETURNS_EXTRACT_SERVICE = "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReturns"
     // DAR-BE-018 task 9: Shopify side of the returns-presence gate in runSavedRunDiff.groovy. Own
     // system id — the registry resolvers take the first enabled match on systemEnumId, so sharing
     // one would silently shadow a shipped row.
     static final String SYSTEM_SHOPIFY_RETURN_REFS = "SHOPIFY_RETURN_REFS"
     static final String SHOPIFY_ORDERS_REMOTE_ID = "SHOPIFY_REMOTE"
-    static final String SHOPIFY_ORDERS_ENDPOINT_LABEL = "Admin GraphQL Orders"
+    static final String SHOPIFY_ORDERS_ENDPOINT_LABEL = "Orders"
     static final String SHOPIFY_GRAPHQL_EXECUTE_SERVICE = "facade.ShopifyFacadeServices.execute#ShopifyGraphql"
     static final String SHOPIFY_ORDERS_EXTRACT_SERVICE = "reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders"
     static final String SHOPIFY_ORDER_IDS_LOOKUP_SERVICE = "reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderIds"

@@ -69,6 +69,7 @@ facade.ReconciliationFacadeServices.get#Mapping
 facade.ReconciliationFacadeServices.get#Reconciliation
 facade.ReconciliationFacadeServices.get#ReconciliationExecution
 facade.ReconciliationFacadeServices.get#ReconciliationRunStatus
+facade.ReconciliationFacadeServices.import#NetSuiteChecksAsRuns
 facade.ReconciliationFacadeServices.list#AutomationExecutions
 facade.ReconciliationFacadeServices.list#AutomationSourceOptions
 facade.ReconciliationFacadeServices.list#Automations

@@ -237,6 +237,9 @@
                                         "$ref": "#/components/schemas/GetReconciliationRunStatusRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/ImportNetSuiteChecksAsRunsRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ListAutomationExecutionsRequest"
                                     },
                                     {
@@ -482,6 +485,7 @@
                                         "facade.ReconciliationFacadeServices.get#Reconciliation": "#/components/schemas/GetReconciliationRequest",
                                         "facade.ReconciliationFacadeServices.get#ReconciliationExecution": "#/components/schemas/GetReconciliationExecutionRequest",
                                         "facade.ReconciliationFacadeServices.get#ReconciliationRunStatus": "#/components/schemas/GetReconciliationRunStatusRequest",
+                                        "facade.ReconciliationFacadeServices.import#NetSuiteChecksAsRuns": "#/components/schemas/ImportNetSuiteChecksAsRunsRequest",
                                         "facade.ReconciliationFacadeServices.list#AutomationExecutions": "#/components/schemas/ListAutomationExecutionsRequest",
                                         "facade.ReconciliationFacadeServices.list#AutomationSourceOptions": "#/components/schemas/ListAutomationSourceOptionsRequest",
                                         "facade.ReconciliationFacadeServices.list#Automations": "#/components/schemas/ListAutomationsRequest",
@@ -767,6 +771,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetReconciliationRunStatusResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ImportNetSuiteChecksAsRunsResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ListAutomationExecutionsResponse"
@@ -10330,6 +10337,106 @@
                     "result"
                 ]
             },
+            "ImportNetSuiteChecksAsRunsParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "DAR-UI-048. Turns the active tenant's NetSuite checks that are not yet in a run into runs: one\n            START per population (account, record type, and how the key is built), each check a yes question under\n            it. Safe to repeat. A check that cannot sit under a START is skipped, and messages say why."
+            },
+            "ImportNetSuiteChecksAsRunsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "runs": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    },
+                    "imported": {
+                        "type": "integer"
+                    },
+                    "skipped": {
+                        "type": "integer"
+                    }
+                }
+            },
+            "ImportNetSuiteChecksAsRunsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.import#NetSuiteChecksAsRuns",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.import#NetSuiteChecksAsRuns",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.import#NetSuiteChecksAsRuns"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ImportNetSuiteChecksAsRunsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ImportNetSuiteChecksAsRunsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.import#NetSuiteChecksAsRuns. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ImportNetSuiteChecksAsRunsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "ListAutomationExecutionsParams": {
                 "type": "object",
                 "properties": {
@@ -19067,6 +19174,7 @@
         "facade.ReconciliationFacadeServices.get#Reconciliation": "GetReconciliation",
         "facade.ReconciliationFacadeServices.get#ReconciliationExecution": "GetReconciliationExecution",
         "facade.ReconciliationFacadeServices.get#ReconciliationRunStatus": "GetReconciliationRunStatus",
+        "facade.ReconciliationFacadeServices.import#NetSuiteChecksAsRuns": "ImportNetSuiteChecksAsRuns",
         "facade.ReconciliationFacadeServices.list#AutomationExecutions": "ListAutomationExecutions",
         "facade.ReconciliationFacadeServices.list#AutomationSourceOptions": "ListAutomationSourceOptions",
         "facade.ReconciliationFacadeServices.list#Automations": "ListAutomations",

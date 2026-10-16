@@ -2172,6 +2172,29 @@
         </actions>
     </service>
 
+    <service verb="import" noun="NetSuiteChecksAsRuns" allow-remote="true" authenticate="true">
+        <description>DAR-UI-048. Turns the active tenant's NetSuite checks that are not yet in a run into runs: one
+            START per population (account, record type, and how the key is built), each check a yes question under
+            it. Safe to repeat. A check that cannot sit under a START is skipped, and messages say why.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="runs" type="List"><parameter name="run" type="Map"/></parameter>
+            <parameter name="imported" type="Integer"/>
+            <parameter name="skipped" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.reconciliation.flowchart.NetSuiteCheckImportSupport.importChecks(ec)"/>
+            <set field="runs" from="result?.runs ?: []"/>
+            <set field="imported" from="result?.imported ?: 0"/>
+            <set field="skipped" from="result?.skipped ?: 0"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
     <service verb="list" noun="Automations" authz-action="view" allow-remote="true" authenticate="true">
         <description>List tenant-scoped reconciliation automations with dashboard-ready saved-run, source, schedule, last-execution, and permission summaries.</description>
         <in-parameters>

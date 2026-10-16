@@ -28,9 +28,9 @@ near this file. release_preflight.py sorts alphabetically and WILL break this if
   2. AUT_STAT_NOT_RUN (its type AutomationExecStatus shipped long ago)
   3. the six DarpanSystemSource endpoint enums (their parents OMS / SHOPIFY / NETSUITE already exist)
   4. the eight SourceSystemConnector rows (remotes HOTWAX_ORDERS_API / SHOPIFY_REMOTE already exist)
-  5. the twenty-five SourceSystemConnectorField pills, which FK their connector by systemEnumId
+  5. the twenty-six SourceSystemConnectorField pills, which FK their connector by systemEnumId
 
-OPERATOR IMPACT: 42 records.
+OPERATOR IMPACT: 43 records.
 
   - NEW ENDPOINTS, inert until configured: OMS_GQL (HotWax Orders over GraphQL, DAR-BE-064),
     OMS_ORDER_ITEMS, OMS_ORDER_LINE_UNITS, SHOPIFY_ORDER_LINE_UNITS, NETSUITE_SUITEQL — each an
@@ -44,6 +44,8 @@ OPERATOR IMPACT: 42 records.
     The endpoint gate is absent-means-enabled, so it is available on every open OMS config at once. Needs
     the OMS GraphQL upgrade (gorjana has it since 2026-09-30); elsewhere the extract fails loudly. Slower
     than REST, throttle-bound: 258 s against 17 s for a 6-hour gorjana window (live, 2026-10-03).
+    Plus a tenth, GraphQL-only pill (DAR-BE-068): "Order product store", the return's ORIGIN order's
+    productStoreId, for include/exclude rules. Filter-only (not compared); REST has no equivalent.
 
   - SHOPIFY (orders) is MODIFIED in two columns, and one of them changes behaviour:
       filterParameterName  (none) -> sourceFilters
@@ -392,5 +394,8 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].returnChannelEnumId"
             label="Return channel" fieldType="string" sequenceNum="9"
             description="Return channel. Exclusion rules on it run client-side, after the built-in exclusions."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].orderProductStoreId"
+            label="Order product store" fieldType="string" sequenceNum="10"
+            description="DAR-BE-068: the product store of the return's ORIGIN order (Return.productStoreId is unpopulated). GraphQL only — REST's record has no order id to reach it. NOT in keepFieldsBase: filters run before projection, so the pill filters without being compared. Absent on a return with no items, so an include rule drops those."/>
 
 </entity-facade-xml>

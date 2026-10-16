@@ -137,7 +137,8 @@
                 Remove if OMS narrows the projection or ships the RQ-24 server-side channel filter."/>
 
     <!-- OMS_RETURNS_GQL (DAR-BE-040 fix 3): the same nine fields as OMS_RETURNS, same labels, candidates and
-         order, so a rule set moves between the two connectors with no rule change. -->
+         order, so a rule set moves between the two connectors with no rule change. Plus one GraphQL-only
+         filter pill (DAR-BE-068), orderProductStoreId: a rule set using it cannot move back to REST. -->
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].returnId"
             label="Return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
             description="OMS return identity."/>
@@ -161,6 +162,9 @@
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].returnChannelEnumId"
             label="Return channel" fieldType="string" sequenceNum="9"
             description="Return channel. Exclusion rules on it run client-side, after the built-in exclusions."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].orderProductStoreId"
+            label="Order product store" fieldType="string" sequenceNum="10"
+            description="DAR-BE-068: the product store of the return's ORIGIN order (Return.productStoreId is unpopulated). GraphQL only — REST's record has no order id to reach it. NOT in keepFieldsBase: filters run before projection, so the pill filters without being compared. Absent on a return with no items, so an include rule drops those."/>
 
     <!-- Shopify orders. The two primary-ID candidates, then (DAR-BE-063) the order fields the bulk
          extract always selects (ShopifySourceCatalog ORDER_SOURCE defaultBulkSelectedFieldPaths) that a

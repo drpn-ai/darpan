@@ -8,66 +8,57 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
  * DAR-UI-050. A lifecycle is a start record and its stages in order; the question tree the walker runs is
- * compiled from that list, and every ending of the tree is a named place.
+ * compiled from that list, and every place a record can stop is one question's findings, so every place opens.
  */
 class LifecycleStageCompilerTests {
 
+    static Map byKey(List<Map> qs, String key) { qs.find { it.key == key } }
+
     @Test
-    void twoStagesCompileToTheGorjanaOrderChain() {
-        List<Map> qs = LifecycleStageCompiler.compile("SalesOrd", ["ItemShip", "CustInvc"])
+    void twoStagesGiveFourPlacesEachItsOwnQuestion() {
+        List<Map> qs = LifecycleStageCompiler.compile("SalesOrd", ["CustInvc", "ItemShip"])
+        assertEquals(["start", "s0", "s1", "done", "s0.has1", "s0.not1"], qs*.key)
+        assertEquals(["START", "SalesOrd", "Sales orders"], [qs[0].questionRole, qs[0].recordType, qs[0].runName])
 
-        // START, the two stages in order, and one "did it skip ahead?" question on the first stage's "no".
-        assertEquals(["start", "s0", "s1", "s0.why1"], qs*.key)
-        Map start = qs.find { it.key == "start" }
-        assertEquals("START", start.questionRole)
-        assertEquals("SalesOrd", start.recordType)
-        assertEquals("Sales orders", start.runName)
-
-        Map ship = qs.find { it.key == "s0" }
-        assertEquals(["start", "YES", "ItemShip"], [ship.parentKey, ship.parentBranch, ship.stageRecordType])
-        assertEquals("Fulfillment", ship.runName)
-
-        Map bill = qs.find { it.key == "s1" }
-        assertEquals(["s0", "YES", "CustInvc"], [bill.parentKey, bill.parentBranch, bill.stageRecordType])
-        assertEquals("Shipped, never billed", bill.noOutcomeLabel)
-        assertEquals("Shipped and billed", bill.yesOutcomeLabel, "the last stage's yes is the complete place")
-
-        Map why = qs.find { it.key == "s0.why1" }
-        assertEquals(["s0", "NO", "CustInvc"], [why.parentKey, why.parentBranch, why.stageRecordType])
-        assertEquals("Billed, never shipped", why.yesOutcomeLabel)
-        assertEquals("Never shipped, never billed", why.noOutcomeLabel)
+        // The stages, each "is it missing?" on the previous one's yes.
+        assertEquals(["start", "YES", "CustInvc", "ABSENT", null], byKey(qs, "s0").with { [it.parentKey, it.parentBranch, it.stageRecordType, it.check, it.noOutcomeLabel] })
+        assertEquals(["s0", "YES", "ItemShip", "ABSENT", "Billed, never shipped"], byKey(qs, "s1").with { [it.parentKey, it.parentBranch, it.stageRecordType, it.check, it.noOutcomeLabel] })
+        // Complete: beside the last stage, the records that DO have it.
+        assertEquals(["s0", "YES", "ItemShip", "PRESENT", "Billed and shipped"], byKey(qs, "done").with { [it.parentKey, it.parentBranch, it.stageRecordType, it.check, it.noOutcomeLabel] })
+        // Under "never billed": skipped ahead to shipping, or stopped.
+        assertEquals(["s0", "NO", "ItemShip", "PRESENT", "Shipped, never billed"], byKey(qs, "s0.has1").with { [it.parentKey, it.parentBranch, it.stageRecordType, it.check, it.noOutcomeLabel] })
+        assertEquals(["s0", "NO", "ItemShip", "ABSENT", "Never billed, never shipped"], byKey(qs, "s0.not1").with { [it.parentKey, it.parentBranch, it.stageRecordType, it.check, it.noOutcomeLabel] })
+        assertTrue(qs.every { it.yesOutcomeLabel == null }, "every place is a question's findings, never its yes")
     }
 
     @Test
-    void everyEndingIsNamedExactlyOnce() {
+    void everyQuestionWithNothingUnderItsNoIsAPlace() {
         List<Map> qs = LifecycleStageCompiler.compile("RtnAuth", ["ItemRcpt", "CustCred", "CustRfnd"])
-        Set<String> parentsOnYes = qs.findAll { it.parentBranch == "YES" }*.parentKey as Set
-        Set<String> parentsOnNo = qs.findAll { it.parentBranch == "NO" }*.parentKey as Set
+        Set<String> continuesOnNo = qs.findAll { it.parentBranch == "NO" }*.parentKey as Set
         qs.findAll { it.questionRole != "START" }.each { Map q ->
-            boolean yesIsLeaf = !parentsOnYes.contains(q.key)
-            boolean noIsLeaf = !parentsOnNo.contains(q.key)
-            assertEquals(yesIsLeaf, q.yesOutcomeLabel != null, "${q.key}: a yes ending has a name, a yes that continues does not")
-            assertEquals(noIsLeaf, q.noOutcomeLabel != null, "${q.key}: a no ending has a name, a no that continues does not")
+            assertEquals(!continuesOnNo.contains(q.key), q.noOutcomeLabel != null,
+                    "${q.key}: a no that ends is named, a no that continues is not")
         }
-        // 3 stages: 3 on the spine, 2 + 1 skip-ahead questions, so 6 questions and 7 places.
-        assertEquals(6, qs.count { it.questionRole != "START" })
-        int places = qs.count { it.yesOutcomeLabel } + qs.count { it.noOutcomeLabel }
-        assertEquals(7, places)
-        assertTrue(qs*.noOutcomeLabel.contains("Never received, nothing after"))
-        assertTrue(qs*.yesOutcomeLabel.contains("Refunded, never received"))
+        assertEquals(10, qs.count { it.questionRole != "START" })
+        assertEquals(["Credited, never refunded", "Received, credited and refunded", "Credited, never received",
+                      "Refunded, never received", "Never received, nothing after", "Refunded, never credited", "Received, never credited"],
+                qs*.noOutcomeLabel.findAll { it })
+        // A skip-ahead that passes a missing middle stage hangs from "is that missing too?", not from the stage.
+        assertEquals(["s0.not1", "NO"], byKey(qs, "s0.has2").with { [it.parentKey, it.parentBranch] })
     }
 
     @Test
-    void oneStageIsASingleQuestion() {
+    void oneStageIsAStopAndAComplete() {
         List<Map> qs = LifecycleStageCompiler.compile("SalesOrd", ["CustInvc"])
-        assertEquals(["start", "s0"], qs*.key)
-        assertEquals("Never billed", qs[1].noOutcomeLabel)
-        assertEquals("Billed", qs[1].yesOutcomeLabel)
+        assertEquals(["start", "s0", "done"], qs*.key)
+        assertEquals(["Never billed", "Billed"], [byKey(qs, "s0").noOutcomeLabel, byKey(qs, "done").noOutcomeLabel])
+        assertEquals(["start", "start"], [byKey(qs, "s0").parentKey, byKey(qs, "done").parentKey])
     }
 
     @Test
-    void theNameIsMadeFromTheStages() {
-        assertEquals("Sales orders: shipped → billed", LifecycleStageCompiler.lifecycleName("SalesOrd", ["ItemShip", "CustInvc"]))
+    void theNameIsTheRecords() {
+        assertEquals("Sales Orders", LifecycleStageCompiler.lifecycleName("SalesOrd"))
+        assertEquals("Return Authorizations", LifecycleStageCompiler.lifecycleName("RtnAuth"))
     }
 
     @Test

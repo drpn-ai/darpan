@@ -1998,6 +1998,9 @@
             <parameter name="reconciliationName"/>
             <parameter name="description"/>
             <parameter name="defaultTimeWindow"/>
+            <parameter name="lateAfterDays" type="Integer">
+                <description>DAR-UI-050. A lifecycle built from stages: records younger than this are not judged yet.</description>
+            </parameter>
             <parameter name="isActive"/>
             <parameter name="isArchived"/>
         </in-parameters>
@@ -2055,11 +2058,27 @@
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
             <parameter name="reconciliation" type="Map"/>
             <parameter name="questions" type="List"><parameter name="question" type="Map"/></parameter>
+            <parameter name="rules" type="List"><parameter name="rule" type="Map"/>
+                <description>DAR-UI-050. A lifecycle built from stages: its rules, one per field value it leaves out.</description></parameter>
+            <parameter name="stages" type="List"><parameter name="stage" type="Map"/>
+                <description>DAR-UI-050. A lifecycle built from stages: its stages in order.</description></parameter>
+            <parameter name="exceptions" type="List"><parameter name="exception" type="Map"/>
+                <description>DAR-UI-050. A lifecycle built from stages: the records a stage is not expected of.</description></parameter>
+            <parameter name="lifecycle" type="Map"><description>DAR-UI-050. A lifecycle built from stages: the account and
+                record type its start reads, which its rule dropdowns are filled from.</description></parameter>
+            <parameter name="details" type="List"><parameter name="detail" type="Map"/>
+                <description>DAR-UI-050. A lifecycle built from stages: the custom fields its records show, [fieldId, label].</description></parameter>
         </out-parameters>
         <actions>
             <set field="got" from="darpan.reconciliation.flowchart.RunFlowchartSupport.getReconciliation(ec, reconciliationId)"/>
             <set field="reconciliation" from="got?.reconciliation"/>
             <set field="questions" from="got?.questions"/>
+            <set field="described" from="got ? darpan.reconciliation.flowchart.LifecycleRuleSupport.describe(ec, reconciliationId) : [:]"/>
+            <set field="rules" from="described?.rules"/>
+            <set field="stages" from="described?.stages"/>
+            <set field="exceptions" from="described?.exceptions"/>
+            <set field="lifecycle" from="described?.lifecycle"/>
+            <set field="details" from="described?.details"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
@@ -2186,6 +2205,13 @@
             </parameter>
             <parameter name="lateAfterDays" type="Integer"/>
             <parameter name="reconciliationName"><description>Optional; generated from the stages when empty.</description></parameter>
+            <parameter name="rules" type="List">
+                <description>Rules chosen while setting it up, as save#LifecycleRule takes them: leave out the start's
+                    records whose field has this value.</description>
+                <parameter name="rule" type="Map">
+                    <parameter name="fieldId"/><parameter name="fieldLabel"/><parameter name="value"/>
+                </parameter>
+            </parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -2197,6 +2223,149 @@
         <actions>
             <set field="result" from="darpan.reconciliation.flowchart.LifecycleSupport.saveLifecycle(ec, context)"/>
             <set field="reconciliationId" from="result?.reconciliationId"/>
+            <set field="reconciliationName" from="result?.reconciliationName"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="LifecycleRule" allow-remote="true" authenticate="true">
+        <description>DAR-UI-050. Adds a rule to a lifecycle built from stages: leave out the start's records whose field
+            has this value (NO_VALUE for "has no value"). The field joins the start's query; the rule is an EXCLUDE_IN
+            filter on the start, so a left-out record is in no place. Adding a value already there changes nothing.</description>
+        <in-parameters>
+            <parameter name="reconciliationId" required="true"/>
+            <parameter name="fieldId" required="true"><description>The NetSuite field, e.g. custbody_hc_sales_channel.</description></parameter>
+            <parameter name="fieldLabel"><description>Its name as people know it, e.g. HC Sales Channel.</description></parameter>
+            <parameter name="value" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="rules" type="List"><parameter name="rule" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.reconciliation.flowchart.LifecycleRuleSupport.saveRule(ec, context)"/>
+            <set field="rules" from="result?.rules ?: []"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="delete" noun="LifecycleRule" allow-remote="true" authenticate="true">
+        <description>DAR-UI-050. Removes one rule (one field value) from a lifecycle built from stages.</description>
+        <in-parameters>
+            <parameter name="reconciliationId" required="true"/>
+            <parameter name="fieldId" required="true"/>
+            <parameter name="value" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="rules" type="List"><parameter name="rule" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.reconciliation.flowchart.LifecycleRuleSupport.deleteRule(ec, context)"/>
+            <set field="rules" from="result?.rules ?: []"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="LifecycleStageException" allow-remote="true" authenticate="true">
+        <description>DAR-UI-050. A stage is not expected of a record whose field has this value ("Fulfillment, when Shipping
+            Method is Store Pickup"): written on every check of the lifecycle that asks about the stage, so such a record
+            counts as having it. One field per stage; adding a value already there changes nothing.</description>
+        <in-parameters>
+            <parameter name="reconciliationId" required="true"/>
+            <parameter name="stageRecordType" required="true"/>
+            <parameter name="fieldId" required="true"/>
+            <parameter name="fieldLabel"/>
+            <parameter name="value" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="exceptions" type="List"><parameter name="exception" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.reconciliation.flowchart.LifecycleRuleSupport.saveException(ec, context)"/>
+            <set field="exceptions" from="result?.exceptions ?: []"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="delete" noun="LifecycleStageException" allow-remote="true" authenticate="true">
+        <description>DAR-UI-050. Removes one stage exception (one value) from a lifecycle built from stages.</description>
+        <in-parameters>
+            <parameter name="reconciliationId" required="true"/>
+            <parameter name="stageRecordType" required="true"/>
+            <parameter name="fieldId"><description>Which field's value goes, when a stage holds exceptions on several.</description></parameter>
+            <parameter name="value" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="exceptions" type="List"><parameter name="exception" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.reconciliation.flowchart.LifecycleRuleSupport.deleteException(ec, context)"/>
+            <set field="exceptions" from="result?.exceptions ?: []"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="LifecycleDetails" allow-remote="true" authenticate="true">
+        <description>DAR-UI-050. What a lifecycle's records show beside the standard columns (order, date, status,
+            customer, total, shipping method, reference): custom body fields such as HC Order Id or eTail Order Id, in
+            order, on every one of its checks. Replaces the list.</description>
+        <in-parameters>
+            <parameter name="reconciliationId" required="true"/>
+            <parameter name="details" type="List"><parameter name="detail" type="Map"/>
+                <description>[fieldId (custbody_...), label]; an empty list leaves the standard columns only.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="details" type="List"><parameter name="detail" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.reconciliation.flowchart.LifecycleSupport.saveDetails(ec, context)"/>
+            <set field="details" from="result?.details ?: []"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="LifecycleStages" allow-remote="true" authenticate="true">
+        <description>DAR-UI-050. Changes a lifecycle's stages: their order, or which they are. The old stage questions are
+            turned off (past runs stay readable) and new ones compiled under the same start, so filters stay; stage
+            exceptions follow their stage. A name still as generated follows the new order.</description>
+        <in-parameters>
+            <parameter name="reconciliationId" required="true"/>
+            <parameter name="stageRecordTypes" type="List" required="true"><parameter name="stageRecordType"/></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="reconciliationName"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.reconciliation.flowchart.LifecycleSupport.saveStages(ec, context)"/>
             <set field="reconciliationName" from="result?.reconciliationName"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

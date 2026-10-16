@@ -76,7 +76,17 @@ class RunFlowchartSupport {
         ["reconciliationName", "description", "defaultTimeWindow", "isActive", "isArchived"].each { String k ->
             if (params.containsKey(k)) value.set(k, normalize(params.get(k)))
         }
+        if (params.get("lateAfterDays") != null) {
+            int late = params.get("lateAfterDays") as int
+            if (late < 0 || late > 90) { ec.message.addError("Late after must be between 0 and 90 days."); return [:] }
+            value.set("lateAfterDays", late)
+        }
+        boolean renamed = id && value.isFieldModified("reconciliationName")
         if (id) value.update() else value.create()
+        // A lifecycle's checks are named after it (their names head the pages its records open on), so they follow it.
+        if (renamed && value.get("buildMode") == LifecycleSupport.BUILD_MODE_STAGES) {
+            LifecycleSupport.renameRules(ec, id, value.get("reconciliationName") as String)
+        }
         return [reconciliation: value.getMap()]
     }
 

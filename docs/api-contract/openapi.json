@@ -174,6 +174,9 @@
                                         "$ref": "#/components/schemas/GetLifecycleOptionsRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetLifecycleRuleOptionsRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetNsSuiteQlSourceQueryRequest"
                                     },
                                     {
@@ -205,6 +208,12 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/DeleteGeneratedOutputRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/DeleteLifecycleRuleRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/DeleteLifecycleStageExceptionRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/DeleteReconciliationQuestionRequest"
@@ -304,6 +313,18 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveLifecycleRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveLifecycleDetailsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveLifecycleRuleRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveLifecycleStageExceptionRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveLifecycleStagesRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveMappingRequest"
@@ -470,6 +491,7 @@
                                         "facade.JsonSchemaFacadeServices.save#RefinedSchema": "#/components/schemas/SaveRefinedSchemaRequest",
                                         "facade.JsonSchemaFacadeServices.validate#JsonTextAgainstSchema": "#/components/schemas/ValidateJsonTextAgainstSchemaRequest",
                                         "facade.NetSuiteLifecycleFacadeServices.get#LifecycleOptions": "#/components/schemas/GetLifecycleOptionsRequest",
+                                        "facade.NetSuiteLifecycleFacadeServices.get#LifecycleRuleOptions": "#/components/schemas/GetLifecycleRuleOptionsRequest",
                                         "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery": "#/components/schemas/GetNsSuiteQlSourceQueryRequest",
                                         "facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries": "#/components/schemas/ListNsSuiteQlSourceQueriesRequest",
                                         "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery": "#/components/schemas/SaveNsSuiteQlSourceQueryRequest",
@@ -481,6 +503,8 @@
                                         "facade.ReconciliationFacadeServices.create#RuleSetRun": "#/components/schemas/CreateRuleSetRunRequest",
                                         "facade.ReconciliationFacadeServices.delete#Automation": "#/components/schemas/DeleteAutomationRequest",
                                         "facade.ReconciliationFacadeServices.delete#GeneratedOutput": "#/components/schemas/DeleteGeneratedOutputRequest",
+                                        "facade.ReconciliationFacadeServices.delete#LifecycleRule": "#/components/schemas/DeleteLifecycleRuleRequest",
+                                        "facade.ReconciliationFacadeServices.delete#LifecycleStageException": "#/components/schemas/DeleteLifecycleStageExceptionRequest",
                                         "facade.ReconciliationFacadeServices.delete#ReconciliationQuestion": "#/components/schemas/DeleteReconciliationQuestionRequest",
                                         "facade.ReconciliationFacadeServices.delete#SavedRun": "#/components/schemas/DeleteSavedRunRequest",
                                         "facade.ReconciliationFacadeServices.disable#SavedRun": "#/components/schemas/DisableSavedRunRequest",
@@ -514,6 +538,10 @@
                                         "facade.ReconciliationFacadeServices.save#DashboardPinnedMappings": "#/components/schemas/SaveDashboardPinnedMappingsRequest",
                                         "facade.ReconciliationFacadeServices.save#DashboardPinnedSavedRuns": "#/components/schemas/SaveDashboardPinnedSavedRunsRequest",
                                         "facade.ReconciliationFacadeServices.save#Lifecycle": "#/components/schemas/SaveLifecycleRequest",
+                                        "facade.ReconciliationFacadeServices.save#LifecycleDetails": "#/components/schemas/SaveLifecycleDetailsRequest",
+                                        "facade.ReconciliationFacadeServices.save#LifecycleRule": "#/components/schemas/SaveLifecycleRuleRequest",
+                                        "facade.ReconciliationFacadeServices.save#LifecycleStageException": "#/components/schemas/SaveLifecycleStageExceptionRequest",
+                                        "facade.ReconciliationFacadeServices.save#LifecycleStages": "#/components/schemas/SaveLifecycleStagesRequest",
                                         "facade.ReconciliationFacadeServices.save#Mapping": "#/components/schemas/SaveMappingRequest",
                                         "facade.ReconciliationFacadeServices.save#Reconciliation": "#/components/schemas/SaveReconciliationRequest",
                                         "facade.ReconciliationFacadeServices.save#ReconciliationQuestion": "#/components/schemas/SaveReconciliationQuestionRequest",
@@ -718,6 +746,9 @@
                                             "$ref": "#/components/schemas/GetLifecycleOptionsResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/GetLifecycleRuleOptionsResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/GetNsSuiteQlSourceQueryResponse"
                                         },
                                         {
@@ -749,6 +780,12 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/DeleteGeneratedOutputResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/DeleteLifecycleRuleResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/DeleteLifecycleStageExceptionResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/DeleteReconciliationQuestionResponse"
@@ -848,6 +885,18 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveLifecycleResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveLifecycleDetailsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveLifecycleRuleResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveLifecycleStageExceptionResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveLifecycleStagesResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveMappingResponse"
@@ -7268,6 +7317,124 @@
                     "result"
                 ]
             },
+            "GetLifecycleRuleOptionsParams": {
+                "type": "object",
+                "properties": {
+                    "nsAuthConfigId": {
+                        "type": "string"
+                    },
+                    "recordType": {
+                        "type": "string"
+                    },
+                    "fieldId": {
+                        "type": "string",
+                        "description": "Omit for the field list only."
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "STAGE for a stage exception: standard fields such as Shipping Method\n                are offered too, read by display name, and \"No value\" is not."
+                    }
+                },
+                "required": [
+                    "nsAuthConfigId",
+                    "recordType"
+                ],
+                "description": "DAR-UI-050. What a lifecycle rule may name: the text fields NetSuite shows on the record type, by\n            their own names, and, given one, the values it holds over the last 30 days, most common first, with an\n            empty value as NO_VALUE (\"No value\")."
+            },
+            "GetLifecycleRuleOptionsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "fields": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    },
+                    "values": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    }
+                }
+            },
+            "GetLifecycleRuleOptionsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.NetSuiteLifecycleFacadeServices.get#LifecycleRuleOptions",
+                "x-darpan-method": "facade.NetSuiteLifecycleFacadeServices.get#LifecycleRuleOptions",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.NetSuiteLifecycleFacadeServices.get#LifecycleRuleOptions"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetLifecycleRuleOptionsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetLifecycleRuleOptionsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.NetSuiteLifecycleFacadeServices.get#LifecycleRuleOptions. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetLifecycleRuleOptionsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "GetNsSuiteQlSourceQueryParams": {
                 "type": "object",
                 "properties": {
@@ -9045,6 +9212,224 @@
                     "result"
                 ]
             },
+            "DeleteLifecycleRuleParams": {
+                "type": "object",
+                "properties": {
+                    "reconciliationId": {
+                        "type": "string"
+                    },
+                    "fieldId": {
+                        "type": "string"
+                    },
+                    "value": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "reconciliationId",
+                    "fieldId",
+                    "value"
+                ],
+                "description": "DAR-UI-050. Removes one rule (one field value) from a lifecycle built from stages."
+            },
+            "DeleteLifecycleRuleResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "rules": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    }
+                }
+            },
+            "DeleteLifecycleRuleRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.delete#LifecycleRule",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.delete#LifecycleRule",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.delete#LifecycleRule"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DeleteLifecycleRuleParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DeleteLifecycleRuleResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.delete#LifecycleRule. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DeleteLifecycleRuleResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "DeleteLifecycleStageExceptionParams": {
+                "type": "object",
+                "properties": {
+                    "reconciliationId": {
+                        "type": "string"
+                    },
+                    "stageRecordType": {
+                        "type": "string"
+                    },
+                    "fieldId": {
+                        "type": "string",
+                        "description": "Which field's value goes, when a stage holds exceptions on several."
+                    },
+                    "value": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "reconciliationId",
+                    "stageRecordType",
+                    "value"
+                ],
+                "description": "DAR-UI-050. Removes one stage exception (one value) from a lifecycle built from stages."
+            },
+            "DeleteLifecycleStageExceptionResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "exceptions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    }
+                }
+            },
+            "DeleteLifecycleStageExceptionRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.delete#LifecycleStageException",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.delete#LifecycleStageException",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.delete#LifecycleStageException"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DeleteLifecycleStageExceptionParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DeleteLifecycleStageExceptionResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.delete#LifecycleStageException. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DeleteLifecycleStageExceptionResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "DeleteReconciliationQuestionParams": {
                 "type": "object",
                 "properties": {
@@ -10050,6 +10435,42 @@
                             "type": "string",
                             "description": "Moqui type Map"
                         }
+                    },
+                    "rules": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        },
+                        "description": "DAR-UI-050. A lifecycle built from stages: its rules, one per field value it leaves out."
+                    },
+                    "stages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        },
+                        "description": "DAR-UI-050. A lifecycle built from stages: its stages in order."
+                    },
+                    "exceptions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        },
+                        "description": "DAR-UI-050. A lifecycle built from stages: the records a stage is not expected of."
+                    },
+                    "lifecycle": {
+                        "type": "object",
+                        "description": "DAR-UI-050. A lifecycle built from stages: the account and\n                record type its start reads, which its rule dropdowns are filled from."
+                    },
+                    "details": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        },
+                        "description": "DAR-UI-050. A lifecycle built from stages: the custom fields its records show, [fieldId, label]."
                     }
                 }
             },
@@ -14105,6 +14526,29 @@
                     "reconciliationName": {
                         "type": "string",
                         "description": "Optional; generated from the stages when empty."
+                    },
+                    "rules": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "rule": {
+                                    "type": "object",
+                                    "properties": {
+                                        "fieldId": {
+                                            "type": "string"
+                                        },
+                                        "fieldLabel": {
+                                            "type": "string"
+                                        },
+                                        "value": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "description": "Rules chosen while setting it up, as save#LifecycleRule takes them: leave out the start's\n                    records whose field has this value."
                     }
                 },
                 "required": [
@@ -14193,6 +14637,441 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/SaveLifecycleResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SaveLifecycleDetailsParams": {
+                "type": "object",
+                "properties": {
+                    "reconciliationId": {
+                        "type": "string"
+                    },
+                    "details": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        },
+                        "description": "[fieldId (custbody_...), label]; an empty list leaves the standard columns only."
+                    }
+                },
+                "required": [
+                    "reconciliationId"
+                ],
+                "description": "DAR-UI-050. What a lifecycle's records show beside the standard columns (order, date, status,\n            customer, total, shipping method, reference): custom body fields such as HC Order Id or eTail Order Id, in\n            order, on every one of its checks. Replaces the list."
+            },
+            "SaveLifecycleDetailsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "details": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    }
+                }
+            },
+            "SaveLifecycleDetailsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.save#LifecycleDetails",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.save#LifecycleDetails",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.save#LifecycleDetails"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveLifecycleDetailsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveLifecycleDetailsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.save#LifecycleDetails. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveLifecycleDetailsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SaveLifecycleRuleParams": {
+                "type": "object",
+                "properties": {
+                    "reconciliationId": {
+                        "type": "string"
+                    },
+                    "fieldId": {
+                        "type": "string",
+                        "description": "The NetSuite field, e.g. custbody_hc_sales_channel."
+                    },
+                    "fieldLabel": {
+                        "type": "string",
+                        "description": "Its name as people know it, e.g. HC Sales Channel."
+                    },
+                    "value": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "reconciliationId",
+                    "fieldId",
+                    "value"
+                ],
+                "description": "DAR-UI-050. Adds a rule to a lifecycle built from stages: leave out the start's records whose field\n            has this value (NO_VALUE for \"has no value\"). The field joins the start's query; the rule is an EXCLUDE_IN\n            filter on the start, so a left-out record is in no place. Adding a value already there changes nothing."
+            },
+            "SaveLifecycleRuleResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "rules": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    }
+                }
+            },
+            "SaveLifecycleRuleRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.save#LifecycleRule",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.save#LifecycleRule",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.save#LifecycleRule"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveLifecycleRuleParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveLifecycleRuleResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.save#LifecycleRule. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveLifecycleRuleResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SaveLifecycleStageExceptionParams": {
+                "type": "object",
+                "properties": {
+                    "reconciliationId": {
+                        "type": "string"
+                    },
+                    "stageRecordType": {
+                        "type": "string"
+                    },
+                    "fieldId": {
+                        "type": "string"
+                    },
+                    "fieldLabel": {
+                        "type": "string"
+                    },
+                    "value": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "reconciliationId",
+                    "stageRecordType",
+                    "fieldId",
+                    "value"
+                ],
+                "description": "DAR-UI-050. A stage is not expected of a record whose field has this value (\"Fulfillment, when Shipping\n            Method is Store Pickup\"): written on every check of the lifecycle that asks about the stage, so such a record\n            counts as having it. One field per stage; adding a value already there changes nothing."
+            },
+            "SaveLifecycleStageExceptionResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "exceptions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    }
+                }
+            },
+            "SaveLifecycleStageExceptionRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.save#LifecycleStageException",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.save#LifecycleStageException",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.save#LifecycleStageException"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveLifecycleStageExceptionParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveLifecycleStageExceptionResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.save#LifecycleStageException. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveLifecycleStageExceptionResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SaveLifecycleStagesParams": {
+                "type": "object",
+                "properties": {
+                    "reconciliationId": {
+                        "type": "string"
+                    },
+                    "stageRecordTypes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "required": [
+                    "reconciliationId",
+                    "stageRecordTypes"
+                ],
+                "description": "DAR-UI-050. Changes a lifecycle's stages: their order, or which they are. The old stage questions are\n            turned off (past runs stay readable) and new ones compiled under the same start, so filters stay; stage\n            exceptions follow their stage. A name still as generated follows the new order."
+            },
+            "SaveLifecycleStagesResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "reconciliationName": {
+                        "type": "string"
+                    }
+                }
+            },
+            "SaveLifecycleStagesRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.save#LifecycleStages",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.save#LifecycleStages",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.save#LifecycleStages"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveLifecycleStagesParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveLifecycleStagesResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.save#LifecycleStages. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveLifecycleStagesResult"
                     }
                 },
                 "required": [
@@ -14361,6 +15240,10 @@
                     },
                     "defaultTimeWindow": {
                         "type": "string"
+                    },
+                    "lateAfterDays": {
+                        "type": "integer",
+                        "description": "DAR-UI-050. A lifecycle built from stages: records younger than this are not judged yet."
                     },
                     "isActive": {
                         "type": "string"
@@ -19404,6 +20287,7 @@
         "facade.JsonSchemaFacadeServices.save#RefinedSchema": "SaveRefinedSchema",
         "facade.JsonSchemaFacadeServices.validate#JsonTextAgainstSchema": "ValidateJsonTextAgainstSchema",
         "facade.NetSuiteLifecycleFacadeServices.get#LifecycleOptions": "GetLifecycleOptions",
+        "facade.NetSuiteLifecycleFacadeServices.get#LifecycleRuleOptions": "GetLifecycleRuleOptions",
         "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery": "GetNsSuiteQlSourceQuery",
         "facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries": "ListNsSuiteQlSourceQueries",
         "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery": "SaveNsSuiteQlSourceQuery",
@@ -19415,6 +20299,8 @@
         "facade.ReconciliationFacadeServices.create#RuleSetRun": "CreateRuleSetRun",
         "facade.ReconciliationFacadeServices.delete#Automation": "DeleteAutomation",
         "facade.ReconciliationFacadeServices.delete#GeneratedOutput": "DeleteGeneratedOutput",
+        "facade.ReconciliationFacadeServices.delete#LifecycleRule": "DeleteLifecycleRule",
+        "facade.ReconciliationFacadeServices.delete#LifecycleStageException": "DeleteLifecycleStageException",
         "facade.ReconciliationFacadeServices.delete#ReconciliationQuestion": "DeleteReconciliationQuestion",
         "facade.ReconciliationFacadeServices.delete#SavedRun": "DeleteSavedRun",
         "facade.ReconciliationFacadeServices.disable#SavedRun": "DisableSavedRun",
@@ -19448,6 +20334,10 @@
         "facade.ReconciliationFacadeServices.save#DashboardPinnedMappings": "SaveDashboardPinnedMappings",
         "facade.ReconciliationFacadeServices.save#DashboardPinnedSavedRuns": "SaveDashboardPinnedSavedRuns",
         "facade.ReconciliationFacadeServices.save#Lifecycle": "SaveLifecycle",
+        "facade.ReconciliationFacadeServices.save#LifecycleDetails": "SaveLifecycleDetails",
+        "facade.ReconciliationFacadeServices.save#LifecycleRule": "SaveLifecycleRule",
+        "facade.ReconciliationFacadeServices.save#LifecycleStageException": "SaveLifecycleStageException",
+        "facade.ReconciliationFacadeServices.save#LifecycleStages": "SaveLifecycleStages",
         "facade.ReconciliationFacadeServices.save#Mapping": "SaveMapping",
         "facade.ReconciliationFacadeServices.save#Reconciliation": "SaveReconciliation",
         "facade.ReconciliationFacadeServices.save#ReconciliationQuestion": "SaveReconciliationQuestion",

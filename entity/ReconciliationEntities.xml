@@ -1005,6 +1005,14 @@
                 set, because an exclusion rule cannot match a field that is absent - which is what
                 makes "exclude orders keyed directly into NetSuite" expressible as a rule.</description>
         </field>
+        <field name="waiveRules" type="text-very-long">
+            <description>DAR-UI-050. A lifecycle stage's exceptions on a link check, as JSON
+                [{"fieldId", "fieldLabel", "values"}]: a record any of them names counts as having the stage
+                ("Fulfillment is not expected when Shipping Method is Store Pickup, or for Item GFT-CP"). Absent: is the
+                child missing AND not waived. Present: has the child OR is waived. A custbody field is compared as text;
+                a standard list field (shipmethod) by its display name; item by SKU, waiving a record that holds a named
+                item and nothing else that ships.</description>
+        </field>
         <field name="lineKeyColumn" type="text-short">
             <description>SALES_LINES only: the transactionline column that names the line on the other
                 side of the pair - for gorjana custcol_hc_order_line_id, the OMS orderItemSeqId HotWax

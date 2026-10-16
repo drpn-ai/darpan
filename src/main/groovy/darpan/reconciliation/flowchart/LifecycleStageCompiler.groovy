@@ -2,14 +2,21 @@ package darpan.reconciliation.flowchart
 
 /**
  * DAR-UI-050. A lifecycle is a start record and the stages it should reach, in order. This compiles that list
- * into the question tree the walker already runs, and names every ending of the tree, so a person picks stages
- * from dropdowns and never sees a question, a branch or a rule.
+ * into the question tree the walker already runs, so a person picks stages from dropdowns and never sees a
+ * question, a branch or a rule.
  *
- * The tree: stage k+1 hangs on stage k's "yes"; on stage k's "no" hang "did it reach a later stage?" questions,
- * one per later stage, each on the previous one's "no". So every record lands in exactly one place:
- * complete, stopped before a stage, or reached a later stage having skipped an earlier one.
+ * Every place a record can stop is the records ONE question finds (its "no"), so every place opens its records
+ * on the ordinary run result page:
+ *  - stage k asks "is stage k missing?" (ABSENT) of the records that reached stage k-1;
+ *  - beside the last stage, "has it reached the last stage?" (PRESENT) finds the complete records;
+ *  - under stage k's "no", for each later stage j: "has it reached j?" (PRESENT) finds those that skipped ahead
+ *    to j, and "is j missing too?" (ABSENT) carries the rest on, or, at the last stage, finds those that stopped.
+ * So every record lands in exactly one place, and every place has a name.
  */
 class LifecycleStageCompiler {
+
+    static final String ABSENT = "ABSENT"
+    static final String PRESENT = "PRESENT"
 
     /** NetSuite transaction types a lifecycle may use, in plain words. The keys double as the SuiteQL whitelist. */
     static final Map<String, Map<String, String>> RECORD_TYPES = [
@@ -30,9 +37,9 @@ class LifecycleStageCompiler {
     }
 
     /**
-     * Ordered question specs: key, parentKey, parentBranch, questionRole, recordType (START) or
-     * stageRecordType, runName, and the names of the endings: noOutcomeLabel / yesOutcomeLabel, set only
-     * where that branch has no question under it.
+     * Ordered question specs: key, parentKey, parentBranch, questionRole, recordType (START) or stageRecordType
+     * with check (ABSENT / PRESENT), runName, and noOutcomeLabel where the question's records are a place.
+     * Order matters: a stage comes before the questions beside it, so the first YES child is always the next stage.
      */
     static List<Map> compile(String startRecordType, List<String> stages) {
         Map<String, String> start = words(startRecordType)
@@ -45,28 +52,33 @@ class LifecycleStageCompiler {
                           recordType: startRecordType, runName: start.plural]]
         int n = stages.size()
         for (int k = 0; k < n; k++) {
+            String parent = k == 0 ? "start" : "s${k - 1}".toString()
             boolean last = k == n - 1
-            out << [key: "s${k}".toString(), parentKey: k == 0 ? "start" : "s${k - 1}".toString(), parentBranch: "YES",
-                    stageRecordType: stages[k], runName: s[k].name,
-                    yesOutcomeLabel: last ? completeName(s) : null,
-                    noOutcomeLabel: last ? stoppedName(s, k) : null]
+            out << [key: "s${k}".toString(), parentKey: parent, parentBranch: "YES", stageRecordType: stages[k], check: ABSENT,
+                    runName: s[k].name, noOutcomeLabel: last ? stoppedName(s, k) : null]
+            if (last) {
+                out << [key: "done", parentKey: parent, parentBranch: "YES", stageRecordType: stages[k], check: PRESENT,
+                        runName: s[k].name, noOutcomeLabel: completeName(s)]
+            }
         }
-        for (int k = 0; k < n; k++) {
-            if (k == n - 1) continue
-            // On stage k's "no": did the record reach stage j anyway? yes = skipped stage k; no = ask the next one.
+        for (int k = 0; k < n - 1; k++) {
+            String parent = "s${k}".toString()
             for (int j = k + 1; j < n; j++) {
                 boolean lastAsk = j == n - 1
-                out << [key: "s${k}.why${j}".toString(), parentKey: j == k + 1 ? "s${k}".toString() : "s${k}.why${j - 1}".toString(),
-                        parentBranch: "NO", stageRecordType: stages[j], runName: s[j].name,
-                        yesOutcomeLabel: "${s[j].past}, ${s[k].neg}".toString(),
-                        noOutcomeLabel: lastAsk ? stoppedName(s, k) : null]
+                out << [key: "s${k}.has${j}".toString(), parentKey: parent, parentBranch: "NO", stageRecordType: stages[j],
+                        check: PRESENT, runName: s[j].name, noOutcomeLabel: "${s[j].past}, ${s[k].neg}".toString()]
+                String missing = "s${k}.not${j}".toString()
+                out << [key: missing, parentKey: parent, parentBranch: "NO", stageRecordType: stages[j],
+                        check: ABSENT, runName: s[j].name, noOutcomeLabel: lastAsk ? stoppedName(s, k) : null]
+                parent = missing
             }
         }
         return out
     }
 
-    static String lifecycleName(String startRecordType, List<String> stages) {
-        return "${words(startRecordType).plural}: ${stages.collect { words(it).past.toLowerCase() }.join(' → ')}".toString()
+    /** A lifecycle is named for its records ("Sales Orders"); its stages and their order are on its page. */
+    static String lifecycleName(String startRecordType) {
+        return words(startRecordType).plural.split(' ').collect { it.capitalize() }.join(' ')
     }
 
     private static String completeName(List<Map<String, String>> s) {

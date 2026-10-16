@@ -273,6 +273,10 @@
                 The operator decides whether they are excluded or are the only ones kept.
                 Values containing commas are unsupported; enum ids never contain one.</description>
         </field>
+        <field name="fieldLabel" type="text-medium">
+            <description>DAR-UI-050. The field's name as people know it ("HC Sales Channel"), shown in a lifecycle's
+                rules. fieldExpression stays the record field the filter reads.</description>
+        </field>
         <field name="companyUserGroupId" type="id">
             <description>Denormalized owning-tenant stamp copied from the parent RuleSet (defense-in-depth;
                 the parent RuleSet stays the authoritative tenant boundary).</description>

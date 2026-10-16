@@ -62,23 +62,34 @@ class LifecycleSaveSmokeTests {
     void theOrderChainIsBuiltFromRecordTypesAlone() {
         Map out = save([lateAfterDays: 2])
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())
-        assertTrue((out.reconciliationName as String).startsWith("Sales orders: shipped → billed"), out.reconciliationName as String)
+        assertTrue((out.reconciliationName as String).startsWith("Sales Orders"), out.reconciliationName as String)
 
         Map got = call("facade.ReconciliationFacadeServices.get#Reconciliation", [reconciliationId: out.reconciliationId])
         assertEquals("STAGES", got.reconciliation.buildMode)
         assertEquals(2L, got.reconciliation.lateAfterDays as Long)
         List<Map> qs = got.questions as List<Map>
-        assertEquals(4, qs.size())
+        assertEquals(6, qs.size())
         Map start = qs.find { it.questionRole == "START" }
-        Map ship = qs.find { it.parentReconciliationRunId == start.reconciliationRunId }
-        Map bill = qs.find { it.parentReconciliationRunId == ship.reconciliationRunId && it.parentBranch == "YES" }
-        Map why = qs.find { it.parentReconciliationRunId == ship.reconciliationRunId && it.parentBranch == "NO" }
-        assertEquals(["Sales orders", "Fulfillment", "Invoice", "Invoice"], [start, ship, bill, why]*.runName)
-        assertEquals("Shipped, never billed", bill.noOutcomeLabel)
-        assertEquals("Shipped and billed", bill.yesOutcomeLabel)
-        assertEquals("Billed, never shipped", why.yesOutcomeLabel)
-        assertEquals("Never shipped, never billed", why.noOutcomeLabel)
-        assertEquals(4, (qs*.ruleSetId as Set).size(), "every question has its own rule")
+        Map ship = qs.find { it.parentReconciliationRunId == start.reconciliationRunId && it.noOutcomeLabel == null }
+        Map bill = qs.find { it.parentReconciliationRunId == ship.reconciliationRunId && it.parentBranch == "YES" && it.noOutcomeLabel == "Shipped, never billed" }
+        Map done = qs.find { it.parentReconciliationRunId == ship.reconciliationRunId && it.parentBranch == "YES" && it.noOutcomeLabel == "Shipped and billed" }
+        Map skip = qs.find { it.parentReconciliationRunId == ship.reconciliationRunId && it.parentBranch == "NO" && it.noOutcomeLabel == "Billed, never shipped" }
+        Map stop = qs.find { it.parentReconciliationRunId == ship.reconciliationRunId && it.parentBranch == "NO" && it.noOutcomeLabel == "Never shipped, never billed" }
+        assertEquals(["Sales orders", "Fulfillment", "Invoice", "Invoice", "Invoice", "Invoice"], [start, ship, bill, done, skip, stop]*.runName)
+        assertTrue([bill, done, skip, stop].every { it != null }, "every place is one question's findings")
+        assertEquals(6, (qs*.ruleSetId as Set).size(), "every question has its own rule")
+        // A question's records are what it finds, so its rule is named after them: that name heads the records page.
+        String name = out.reconciliationName as String
+        Map<String, String> ruleNames = [:]
+        ec.artifactExecution.disableAuthz()
+        try {
+            qs.each { Map q -> ruleNames[q.reconciliationRunId as String] = ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", q.ruleSetId).one().ruleSetName }
+        } finally {
+            ec.artifactExecution.enableAuthz()
+        }
+        assertEquals(["${name} · Sales orders", "${name} · Never shipped", "${name} · Shipped, never billed", "${name} · Shipped and billed",
+                      "${name} · Billed, never shipped", "${name} · Never shipped, never billed"]*.toString(),
+                [start, ship, bill, done, skip, stop].collect { ruleNames[it.reconciliationRunId as String] })
 
         // The queries: one keys-only population, one "is it missing?" per stage, shared by questions asking it.
         ec.artifactExecution.disableAuthz()
@@ -89,9 +100,22 @@ class LifecycleSaveSmokeTests {
             assertEquals(["RECORDS", "SalesOrd", null, "LC_AUTH"],
                     [startQuery.queryTemplate, startQuery.recordType, startQuery.absentChildRecordType, startQuery.nsAuthConfigId])
             assertEquals("EVALUATE", startSource.scopeMode)
-            List queries = ec.entity.find("darpan.reconciliation.NsSuiteQlSourceQuery").condition("nsAuthConfigId", "LC_AUTH")
-                    .condition("absentChildRecordType", "CustInvc").list()
-            assertEquals(1, queries.size(), "bill and the skip-ahead question share one invoice query")
+            // The walker's compare reads these off the source; create#RuleSetRun leaves them empty for a connector.
+            assertEquals(["DftJson", "records", "internalId"], [source.fileTypeEnumId, source.recordRootExpression, source.primaryIdExpression])
+            def startRuleSet = ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", start.ruleSetId).one()
+            assertEquals(["records", "internalId"], [startRuleSet.explosionPath, startRuleSet.primaryKeyPath])
+            def doneScope = ec.entity.find("darpan.rule.RuleSetCompareScope").condition("ruleSetId", done.ruleSetId).one()
+            def doneSource = ec.entity.find("darpan.rule.RuleSetCompareSource").condition("compareScopeId", doneScope.compareScopeId).one()
+            def doneQuery = ec.entity.find("darpan.reconciliation.NsSuiteQlSourceQuery").condition("nsSuiteQlSourceQueryId", doneSource.sourceConfigId).one()
+            assertEquals(["LINKED_CHILD_PRESENT", "CustInvc", null], [doneQuery.queryTemplate, doneQuery.presentChildRecordType, doneQuery.absentChildRecordType])
+            Closure<String> queryOf = { Map q ->
+                def sc = ec.entity.find("darpan.rule.RuleSetCompareScope").condition("ruleSetId", q.ruleSetId).one()
+                ec.entity.find("darpan.rule.RuleSetCompareSource").condition("compareScopeId", sc.compareScopeId).one().sourceConfigId as String
+            }
+            // "No invoice?" is asked by bill and stop, "has an invoice?" by done and skip: one query each.
+            assertEquals(queryOf(bill), queryOf(stop))
+            assertEquals(queryOf(done), queryOf(skip))
+            assertTrue(queryOf(bill) != queryOf(done))
         } finally {
             ec.artifactExecution.enableAuthz()
         }

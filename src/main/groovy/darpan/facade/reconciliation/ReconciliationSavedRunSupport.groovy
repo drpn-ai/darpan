@@ -473,6 +473,8 @@ class ReconciliationSavedRunSupport {
         if (!asBoolean(includeArchived, false)) {
             rows = rows.findAll { Map<String, Object> row -> row.isArchived != true }
         }
+        // DAR-UI-050. A rule a lifecycle made for one of its stages is part of that lifecycle, not a run of its own.
+        rows = rows.findAll { Map<String, Object> row -> !row.ownerReconciliationId }
         if (search) rows = rows.findAll { Map<String, Object> row -> savedRunMatches(row, search) }
 
         Map<String, Object> pagination = PaginationSupport.pagination(page, size, rows.size())
@@ -669,6 +671,7 @@ class ReconciliationSavedRunSupport {
                 // run must still be readable and editable, or it could never be turned back on.
                 isActive                : isRunEnabled(ruleSet),
                 isArchived              : isRunArchived(ruleSet),
+                ownerReconciliationId   : normalize(readFieldValue(ruleSet, "ownerReconciliationId")),
                 reconciliationMappingId : null,
                 ruleSetId               : ruleSet.ruleSetId,
                 compareScopeId          : compareScope.compareScopeId,

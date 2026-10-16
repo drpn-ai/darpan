@@ -23,6 +23,15 @@
         <field name="defaultTimeWindow" type="text-short">
             <description>DAR-UI-048. The window a person gets when they press Run without choosing one.</description>
         </field>
+        <field name="buildMode" type="text-short">
+            <description>DAR-UI-050. STAGES = built by the lifecycle builder from a start record and its stages;
+                the questions are compiled from that list and the run page shows where records stopped.
+                Empty = a chart built question by question.</description>
+        </field>
+        <field name="lateAfterDays" type="number-integer">
+            <description>DAR-UI-050. Records younger than this are not judged yet: a run's window ends this many
+                days before the day it is asked for. Empty or 0 = judged at once.</description>
+        </field>
 
         <relationship type="many" related="darpan.reconciliation.ReconciliationRun" short-alias="runs">
             <key-map field-name="reconciliationId"/>
@@ -59,6 +68,10 @@
         </field>
         <field name="noOutcomeLabel" type="text-medium">
             <description>DAR-UI-048. The finding's name for this question's "no", e.g. "Shipped, never billed".</description>
+        </field>
+        <field name="yesOutcomeLabel" type="text-medium">
+            <description>DAR-UI-050. The place's name for this question's "yes" when nothing hangs on it, e.g.
+                "Billed, never shipped" on a skip-ahead question, or "Shipped and billed" on the last stage.</description>
         </field>
 
         <relationship type="one" related="darpan.reconciliation.Reconciliation">

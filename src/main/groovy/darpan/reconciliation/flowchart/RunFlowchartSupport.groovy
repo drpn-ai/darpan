@@ -37,6 +37,7 @@ class RunFlowchartSupport {
              isActive                 : row.get("isActive"),
              runName                  : row.get("runName"),
              noOutcomeLabel           : row.get("noOutcomeLabel"),
+             yesOutcomeLabel          : row.get("yesOutcomeLabel"),
              ruleSetId                : ruleSetId] + shapeFor(ec, ruleSetId)
         } as List<Map>
     }

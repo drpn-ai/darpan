@@ -171,6 +171,9 @@
                                         "$ref": "#/components/schemas/ValidateJsonTextAgainstSchemaRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetLifecycleOptionsRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetNsSuiteQlSourceQueryRequest"
                                     },
                                     {
@@ -298,6 +301,9 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveDashboardPinnedSavedRunsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveLifecycleRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveMappingRequest"
@@ -463,6 +469,7 @@
                                         "facade.JsonSchemaFacadeServices.save#JsonSchemaText": "#/components/schemas/SaveJsonSchemaTextRequest",
                                         "facade.JsonSchemaFacadeServices.save#RefinedSchema": "#/components/schemas/SaveRefinedSchemaRequest",
                                         "facade.JsonSchemaFacadeServices.validate#JsonTextAgainstSchema": "#/components/schemas/ValidateJsonTextAgainstSchemaRequest",
+                                        "facade.NetSuiteLifecycleFacadeServices.get#LifecycleOptions": "#/components/schemas/GetLifecycleOptionsRequest",
                                         "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery": "#/components/schemas/GetNsSuiteQlSourceQueryRequest",
                                         "facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries": "#/components/schemas/ListNsSuiteQlSourceQueriesRequest",
                                         "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery": "#/components/schemas/SaveNsSuiteQlSourceQueryRequest",
@@ -506,6 +513,7 @@
                                         "facade.ReconciliationFacadeServices.save#Automation": "#/components/schemas/SaveAutomationRequest",
                                         "facade.ReconciliationFacadeServices.save#DashboardPinnedMappings": "#/components/schemas/SaveDashboardPinnedMappingsRequest",
                                         "facade.ReconciliationFacadeServices.save#DashboardPinnedSavedRuns": "#/components/schemas/SaveDashboardPinnedSavedRunsRequest",
+                                        "facade.ReconciliationFacadeServices.save#Lifecycle": "#/components/schemas/SaveLifecycleRequest",
                                         "facade.ReconciliationFacadeServices.save#Mapping": "#/components/schemas/SaveMappingRequest",
                                         "facade.ReconciliationFacadeServices.save#Reconciliation": "#/components/schemas/SaveReconciliationRequest",
                                         "facade.ReconciliationFacadeServices.save#ReconciliationQuestion": "#/components/schemas/SaveReconciliationQuestionRequest",
@@ -707,6 +715,9 @@
                                             "$ref": "#/components/schemas/ValidateJsonTextAgainstSchemaResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/GetLifecycleOptionsResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/GetNsSuiteQlSourceQueryResponse"
                                         },
                                         {
@@ -834,6 +845,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveDashboardPinnedSavedRunsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveLifecycleResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveMappingResponse"
@@ -7128,6 +7142,125 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/ValidateJsonTextAgainstSchemaResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetLifecycleOptionsParams": {
+                "type": "object",
+                "properties": {
+                    "nsAuthConfigId": {
+                        "type": "string"
+                    },
+                    "recordType": {
+                        "type": "string",
+                        "description": "Omit for the record-type counts only."
+                    }
+                },
+                "required": [
+                    "nsAuthConfigId"
+                ],
+                "description": "What the lifecycle builder may offer for one NetSuite account: record types with records in the\n            last 30 days, and, given a record type, what follows it in NetSuite's link table over a settled week,\n            with how many reached each follower, how soon, and the share done by each of a few days."
+            },
+            "GetLifecycleOptionsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "recordTypes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    },
+                    "stages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    },
+                    "sampleSize": {
+                        "type": "integer"
+                    },
+                    "sampleFrom": {
+                        "type": "string"
+                    },
+                    "sampleThru": {
+                        "type": "string"
+                    }
+                }
+            },
+            "GetLifecycleOptionsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.NetSuiteLifecycleFacadeServices.get#LifecycleOptions",
+                "x-darpan-method": "facade.NetSuiteLifecycleFacadeServices.get#LifecycleOptions",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.NetSuiteLifecycleFacadeServices.get#LifecycleOptions"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetLifecycleOptionsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetLifecycleOptionsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.NetSuiteLifecycleFacadeServices.get#LifecycleOptions. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetLifecycleOptionsResult"
                     }
                 },
                 "required": [
@@ -13949,6 +14082,124 @@
                     "result"
                 ]
             },
+            "SaveLifecycleParams": {
+                "type": "object",
+                "properties": {
+                    "nsAuthConfigId": {
+                        "type": "string"
+                    },
+                    "recordType": {
+                        "type": "string",
+                        "description": "The start record type, e.g. SalesOrd."
+                    },
+                    "stageRecordTypes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Stages in order, e.g. [ItemShip, CustInvc]."
+                    },
+                    "lateAfterDays": {
+                        "type": "integer"
+                    },
+                    "reconciliationName": {
+                        "type": "string",
+                        "description": "Optional; generated from the stages when empty."
+                    }
+                },
+                "required": [
+                    "nsAuthConfigId",
+                    "recordType",
+                    "stageRecordTypes"
+                ],
+                "description": "DAR-UI-050. Creates a lifecycle from the builder's dropdown choices: a NetSuite account, the record\n            type it starts from, and its stages in order. Writes the start query, one \"is this stage missing?\" query per\n            stage, a rule per question, and the question tree with every ending named. The caller sends record types\n            only; no rule, query or question id crosses the wire."
+            },
+            "SaveLifecycleResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "reconciliationId": {
+                        "type": "string"
+                    },
+                    "reconciliationName": {
+                        "type": "string"
+                    }
+                }
+            },
+            "SaveLifecycleRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.save#Lifecycle",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.save#Lifecycle",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.save#Lifecycle"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveLifecycleParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveLifecycleResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.save#Lifecycle. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveLifecycleResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "SaveMappingParams": {
                 "type": "object",
                 "properties": {
@@ -19152,6 +19403,7 @@
         "facade.JsonSchemaFacadeServices.save#JsonSchemaText": "SaveJsonSchemaText",
         "facade.JsonSchemaFacadeServices.save#RefinedSchema": "SaveRefinedSchema",
         "facade.JsonSchemaFacadeServices.validate#JsonTextAgainstSchema": "ValidateJsonTextAgainstSchema",
+        "facade.NetSuiteLifecycleFacadeServices.get#LifecycleOptions": "GetLifecycleOptions",
         "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery": "GetNsSuiteQlSourceQuery",
         "facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries": "ListNsSuiteQlSourceQueries",
         "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery": "SaveNsSuiteQlSourceQuery",
@@ -19195,6 +19447,7 @@
         "facade.ReconciliationFacadeServices.save#Automation": "SaveAutomation",
         "facade.ReconciliationFacadeServices.save#DashboardPinnedMappings": "SaveDashboardPinnedMappings",
         "facade.ReconciliationFacadeServices.save#DashboardPinnedSavedRuns": "SaveDashboardPinnedSavedRuns",
+        "facade.ReconciliationFacadeServices.save#Lifecycle": "SaveLifecycle",
         "facade.ReconciliationFacadeServices.save#Mapping": "SaveMapping",
         "facade.ReconciliationFacadeServices.save#Reconciliation": "SaveReconciliation",
         "facade.ReconciliationFacadeServices.save#ReconciliationQuestion": "SaveReconciliationQuestion",

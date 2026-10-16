@@ -10,6 +10,10 @@
         <field name="explosionPath" type="text-medium"/>
         <field name="primaryKeyPath" type="text-medium"/>
         <field name="companyUserGroupId" type="id"/>
+        <field name="ownerReconciliationId" type="id">
+            <description>DAR-UI-050. Set when a lifecycle created this rule for one of its stages. Such a rule
+                belongs to that lifecycle and is left out of the saved-run list.</description>
+        </field>
         <field name="createdByUserId" type="id"/>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>

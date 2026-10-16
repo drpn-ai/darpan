@@ -2172,6 +2172,38 @@
         </actions>
     </service>
 
+    <service verb="save" noun="Lifecycle" allow-remote="true" authenticate="true">
+        <description>DAR-UI-050. Creates a lifecycle from the builder's dropdown choices: a NetSuite account, the record
+            type it starts from, and its stages in order. Writes the start query, one "is this stage missing?" query per
+            stage, a rule per question, and the question tree with every ending named. The caller sends record types
+            only; no rule, query or question id crosses the wire.</description>
+        <in-parameters>
+            <parameter name="nsAuthConfigId" required="true"/>
+            <parameter name="recordType" required="true"><description>The start record type, e.g. SalesOrd.</description></parameter>
+            <parameter name="stageRecordTypes" type="List" required="true">
+                <description>Stages in order, e.g. [ItemShip, CustInvc].</description>
+                <parameter name="stageRecordType"/>
+            </parameter>
+            <parameter name="lateAfterDays" type="Integer"/>
+            <parameter name="reconciliationName"><description>Optional; generated from the stages when empty.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="reconciliationId"/>
+            <parameter name="reconciliationName"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.reconciliation.flowchart.LifecycleSupport.saveLifecycle(ec, context)"/>
+            <set field="reconciliationId" from="result?.reconciliationId"/>
+            <set field="reconciliationName" from="result?.reconciliationName"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
     <service verb="import" noun="NetSuiteChecksAsRuns" allow-remote="true" authenticate="true">
         <description>DAR-UI-048. Turns the active tenant's NetSuite checks that are not yet in a run into runs: one
             START per population (account, record type, and how the key is built), each check a yes question under

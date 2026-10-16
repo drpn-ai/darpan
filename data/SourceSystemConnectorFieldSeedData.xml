@@ -22,23 +22,23 @@
             label="Order name" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
             description="Operator-facing order name. In keepFieldsBase."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].externalId"
-            label="External ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            label="Shopify order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
             description="Shopify reference stored on the OMS order. In keepFieldsBase."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].grandTotal"
-            label="Grand total" fieldType="string" sequenceNum="4"
+            label="Order total" fieldType="string" sequenceNum="4"
             description="In keepFieldsBase. Comparison only — not key-like."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].orderDate"
             label="Order date" fieldType="string" sequenceNum="5"
             description="In keepFieldsBase."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].statusId"
-            label="Status" fieldType="string" sequenceNum="6"
+            label="Order status" fieldType="string" sequenceNum="6"
             description="In keepFieldsBase."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].salesChannelEnumId"
             label="Sales channel" fieldType="string" sequenceNum="7"
             description="NOT in keepFieldsBase. Offered because exclusion filters run before projection on the
                 legacy endpoint, so the raw field is testable. This is a shipping exclusion use case."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].productStoreId"
-            label="Product store" fieldType="string" sequenceNum="8"
+            label="Store" fieldType="string" sequenceNum="8"
             description="NOT in keepFieldsBase. Same reason as salesChannelEnumId."/>
 
     <!-- OMS_GQL (DAR-BE-064): the order-grain presence extract over GraphQL. A SUBSET of OMS: only fields
@@ -52,22 +52,22 @@
             label="Order name" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
             description="Operator-facing order name. In keepFieldsBase."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].externalId"
-            label="External ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            label="Shopify order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
             description="Shopify reference stored on the OMS order. In keepFieldsBase."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].grandTotal"
-            label="Grand total" fieldType="string" sequenceNum="4"
+            label="Order total" fieldType="string" sequenceNum="4"
             description="In keepFieldsBase. Comparison only — not key-like."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].orderDate"
             label="Order date" fieldType="string" sequenceNum="5"
             description="In keepFieldsBase. Epoch millis, as on the REST connector."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].statusId"
-            label="Status" fieldType="string" sequenceNum="6"
+            label="Order status" fieldType="string" sequenceNum="6"
             description="In keepFieldsBase."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].productStoreId"
-            label="Product store" fieldType="string" sequenceNum="7"
+            label="Store" fieldType="string" sequenceNum="7"
             description="NOT in keepFieldsBase; selected in the GraphQL document only when a filter or rule reads it."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].hasPaymentPreference"
-            label="Has payment preference" fieldType="string" sequenceNum="8"
+            label="Has payment" fieldType="string" sequenceNum="8"
             description="Y when the order carries at least one OrderPaymentPreference, else N. Compared against Shopify hasPaymentTransaction by the presence OPP rule (operator &lt;=)."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].paymentMethodTypeIds"
             label="Payment methods" fieldType="string" sequenceNum="9"
@@ -83,14 +83,14 @@
             label="Order name" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
             description="Server-side projected."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RECON_ORDERS" fieldPath="$.records[*].externalId"
-            label="External ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            label="Shopify order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
             description="Server-side projected."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RECON_ORDERS" fieldPath="$.records[*].grandTotal"
-            label="Grand total" fieldType="string" sequenceNum="4" description="Server-side projected."/>
+            label="Order total" fieldType="string" sequenceNum="4" description="Server-side projected."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RECON_ORDERS" fieldPath="$.records[*].orderDate"
             label="Order date" fieldType="string" sequenceNum="5" description="Server-side projected."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RECON_ORDERS" fieldPath="$.records[*].statusId"
-            label="Status" fieldType="string" sequenceNum="6" description="Server-side projected."/>
+            label="Order status" fieldType="string" sequenceNum="6" description="Server-side projected."/>
 
     <!-- OMS returns (DAR-BE-018 §5). Mirrors the connector's keepFieldsBase. items[] is deliberately
          ABSENT: it is a nested array, not a top-level scalar key.
@@ -111,22 +111,22 @@
             label="Return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
             description="OMS return identity."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].shopifyReturnId"
-            label="Shopify reference" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
+            label="Shopify ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
             description="PREFERRED join key. Holds whichever Shopify id is the reference — refund or return —
                 despite the name, and unlike externalId it is populated on RETURN_REQUESTED returns that have
                 no refund yet. Matches Shopify SHOPIFY_RETURN_REFS's refundOrReturnId."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].externalId"
-            label="Shopify refund or return ID (legacy)" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            label="Shopify refund ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
             description="The original join key — a Shopify refund id or, for a small number of returns, a return
                 id instead. BLANK on returns with no refund yet, which is why shopifyReturnId above supersedes it.
                 Kept as a candidate so existing rule sets keyed on it keep resolving."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].orderExternalId"
-            label="Order external ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="4"
+            label="Shopify order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="4"
             description="Order spine — joins a return back to its order."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].statusId"
-            label="Status" fieldType="string" sequenceNum="5" description="Server-side projected."/>
+            label="Return status" fieldType="string" sequenceNum="5" description="Server-side projected."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].entryDate"
-            label="Entry date" fieldType="string" sequenceNum="6" description="Server-side projected."/>
+            label="Created" fieldType="string" sequenceNum="6" description="Server-side projected."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].returnTotal"
             label="Return total" fieldType="string" sequenceNum="7" description="Server-side projected."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].currencyUomId"
@@ -143,18 +143,18 @@
             label="Return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
             description="OMS return identity."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].shopifyReturnId"
-            label="Shopify reference" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
+            label="Shopify ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
             description="PREFERRED join key. The Shopify return reference: the SHOPIFY_RTN_ID identification where present, else SHOPIFY_RETURN_ID — the same pick REST makes. Populated on RETURN_REQUESTED returns that have no refund yet, which REST no longer serves at all. Matches Shopify SHOPIFY_RETURN_REFS's refundOrReturnId."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].externalId"
-            label="Shopify refund or return ID (legacy)" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            label="Shopify refund ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
             description="The Shopify refund id. BLANK on returns with no refund yet; the extract then fills it from shopifyReturnId (the same join-key fallback REST records get). Kept as a candidate so rule sets keyed on it keep resolving."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].orderExternalId"
-            label="Order external ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="4"
+            label="Shopify order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="4"
             description="Order spine — the Shopify order id of the return's order, resolved through OMS orders. Absent on a return with no items, as on REST."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].statusId"
-            label="Status" fieldType="string" sequenceNum="5" description="The RETURN's status. Includes RETURN_REQUESTED, which REST never serves; RETURN_CANCELLED is excluded by the extract."/>
+            label="Return status" fieldType="string" sequenceNum="5" description="The RETURN's status. Includes RETURN_REQUESTED, which REST never serves; RETURN_CANCELLED is excluded by the extract."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].entryDate"
-            label="Entry date" fieldType="string" sequenceNum="6" description="Epoch milliseconds, as on REST. The extract windows on it."/>
+            label="Created" fieldType="string" sequenceNum="6" description="Epoch milliseconds, as on REST. The extract windows on it."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].returnTotal"
             label="Return total" fieldType="string" sequenceNum="7" description="Sum of returnPrice x returnQuantity over the return's items — what REST reports."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].currencyUomId"
@@ -163,7 +163,7 @@
             label="Return channel" fieldType="string" sequenceNum="9"
             description="Return channel. Exclusion rules on it run client-side, after the built-in exclusions."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].orderProductStoreId"
-            label="Order product store" fieldType="string" sequenceNum="10"
+            label="Store" fieldType="string" sequenceNum="10"
             description="DAR-BE-068: the product store of the return's ORIGIN order (Return.productStoreId is unpopulated). GraphQL only — REST's record has no order id to reach it. NOT in keepFieldsBase: filters run before projection, so the pill filters without being compared. Absent on a return with no items, so an include rule drops those."/>
 
     <!-- Shopify orders. The two primary-ID candidates, then (DAR-BE-063) the order fields the bulk
@@ -179,13 +179,13 @@
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].displayFulfillmentStatus"
             label="Fulfillment status" fieldType="String" sequenceNum="3" description="FULFILLED, UNFULFILLED, PARTIALLY_FULFILLED, RESTOCKED, ..."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].displayFinancialStatus"
-            label="Financial status" fieldType="String" sequenceNum="4" description="PAID, PENDING, PARTIALLY_REFUNDED, REFUNDED, ..."/>
+            label="Payment status" fieldType="String" sequenceNum="4" description="PAID, PENDING, PARTIALLY_REFUNDED, REFUNDED, ..."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].sourceName"
-            label="Source" fieldType="String" sequenceNum="5" description="web, pos, shopify_draft_order, or an app id."/>
+            label="Sales channel" fieldType="String" sequenceNum="5" description="web, pos, shopify_draft_order, or an app id."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].requiresShipping"
-            label="Requires shipping" fieldType="Boolean" sequenceNum="6" description="false on orders with nothing to ship (gorjana's digital gift cards, POS carry-outs)."/>
+            label="Needs shipping" fieldType="Boolean" sequenceNum="6" description="false on orders with nothing to ship (gorjana's digital gift cards, POS carry-outs)."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].cancelledAt"
-            label="Cancelled at" fieldType="DateTime" sequenceNum="7" description="Set on a cancelled order."/>
+            label="Cancelled on" fieldType="DateTime" sequenceNum="7" description="Set on a cancelled order."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].hasPaymentTransaction"
             label="Has payment" fieldType="String" sequenceNum="8" description="DAR-BE-064: Y when any SUCCESS SALE, CAPTURE or AUTHORIZATION transaction exists, else N."/>
 
@@ -204,7 +204,7 @@
          already-loaded row, and a rename is a delete plus an insert as far as a createOrUpdate seed
          load is concerned. -->
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].refundOrReturnId"
-            label="Refund ID / Return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
+            label="Refund or return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
             description="RENAMED 2026-08-18 (was '$.records[*].eventId', labelled 'Event ID' then 'Refund or
                 Return ID'): 'event' is this extractor's internal abstraction, not a Shopify term, and it
                 surfaced verbatim on the rules board, the run summary and the diff columns. bareId-normalized
@@ -212,7 +212,7 @@
                 Matches OMS externalId whichever kind it is: the single join key for returns reconciliation,
                 with no precedence rule needed on either side."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].refundOrReturnType"
-            label="Refund or return" fieldType="string" sequenceNum="2"
+            label="Type" fieldType="string" sequenceNum="2"
             description="RENAMED 2026-08-18 (was '$.records[*].eventType'). REFUND or RETURN — identifies
                 which kind of id refundOrReturnId carries on this row. Not a join key; useful for filtering
                 or as a comparison field."/>
@@ -222,14 +222,14 @@
                 reference the OMS side stores. Unchanged by the per-refund/per-return reshape; still a
                 grouping / secondary key, not the join key."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].createdAt"
-            label="Refund or return created" fieldType="string" sequenceNum="4"
+            label="Created" fieldType="string" sequenceNum="4"
             description="RELABELLED (was 'Order created', then 'Event created'): the individual refund's or
                 return's own creation date — a refund row carries the refund's createdAt, a return row
                 carries the return's — never the order's creation date. Windowing filters on this field, not
                 on any order-level date."/>
 
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].orderReturnStatus"
-            label="Order return status" fieldType="string" sequenceNum="5"
+            label="Return status" fieldType="string" sequenceNum="5"
             description="ADDED 2026-09-01 (DAR-BE-026), replacing the withdrawn returnWorkflowStatus pill —
                 see the retirement entry in SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS. This is
                 the endpoint's ONLY return-status field. Holds Shopify's own Order.returnStatus, an

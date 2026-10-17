@@ -3,6 +3,8 @@ package darpan.reconciliation.flowchart
 import darpan.facade.common.SharedConfigAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
 
 import static darpan.common.ValueSupport.normalize
 
@@ -18,6 +20,8 @@ import static darpan.common.ValueSupport.normalize
 class LifecycleSupport {
 
     static final String BUILD_MODE_STAGES = "STAGES"
+    /** A finding a person wrote for a stage: a question of its own, asked of the records that reached the stage. */
+    static final String ROLE_FINDING = "FINDING"
     static final String QUERY = "darpan.reconciliation.NsSuiteQlSourceQuery"
     static final String QUERY_FIELD = "darpan.reconciliation.NsSuiteQlSourceQueryField"
     static final String CREATE_RULE = "facade.ReconciliationFacadeServices.create#RuleSetRun"
@@ -178,6 +182,7 @@ class LifecycleSupport {
             ec.message.addError(e.message); return [:]
         }
         List<Map> exceptions = LifecycleRuleSupport.listExceptions(ec, reconciliationId)
+        List<Map> findings = listFindings(ec, reconciliationId)
 
         questions.findAll { it.questionRole != RunFlowchartTree.ROLE_START }.each { Map q ->
             TenantScopedFinder.findTenantScopedByIdQuiet(ec, RunFlowchartSupport.QUESTION, "reconciliationRunId", q.reconciliationRunId)
@@ -194,7 +199,116 @@ class LifecycleSupport {
             LifecycleRuleSupport.saveException(ec, [reconciliationId: reconciliationId, stageRecordType: e.stageRecordType,
                     fieldId: e.fieldId, fieldLabel: e.fieldLabel, value: e.value])
         }
+        // Written findings follow their stage into the new tree.
+        findings.findAll { stages.contains(it.stageRecordType) }.each { Map f ->
+            saveFinding(ec, [reconciliationId: reconciliationId, stageRecordType: f.stageRecordType, fieldId: f.fieldId,
+                    fieldLabel: f.fieldLabel, op: f.op, value: f.value, valueLabel: f.valueLabel])
+        }
         return ec.message.hasError() ? [:] : [reconciliationName: name]
+    }
+
+    /**
+     * A finding a person writes for a stage: "reached Fulfillment, and Items Backordered is more than 0". Its records
+     * are those that really reached the stage (an excused record did not) whose field matches, a place of their own
+     * named "<stage past>, <field> is/more than <value>". It hangs on the records that reached the stage: the excused
+     * check's yes for any stage but the last, the complete records for the last.
+     */
+    static Map saveFinding(def ec, Map params) {
+        if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for runs.")) return [:]
+        String reconciliationId = normalize(params.reconciliationId)
+        def run = reconciliationId ? RunFlowchartSupport.findReconciliation(ec, reconciliationId) : null
+        if (run == null || run.get("buildMode") != BUILD_MODE_STAGES) {
+            ec.message.addError("Findings belong to a lifecycle built from stages; '${reconciliationId}' is not one."); return [:]
+        }
+        String stage = normalize(params.stageRecordType), fieldId = normalize(params.fieldId)?.toLowerCase(), value = normalize(params.value)
+        String op = (normalize(params.op) ?: "IN").toUpperCase()
+        String fieldLabel = normalize(params.fieldLabel) ?: fieldId, valueLabel = normalize(params.valueLabel) ?: value
+        if (!fieldId || !(fieldId ==~ /[a-z][a-z0-9_]{0,99}/)) { ec.message.addError("'${fieldId}' is not a field a finding can ask about."); return [:] }
+        if (!(op in ["IN", "GT"])) { ec.message.addError("A finding asks whether a field is a value or more than a number."); return [:] }
+        if (!value || value.contains("'") || value.contains(",")) { ec.message.addError("Choose a value."); return [:] }
+        if (op == "GT" && !(value ==~ /-?\d+(\.\d+)?/)) { ec.message.addError("'More than' needs a number."); return [:] }
+
+        List<String> stageTypes = LifecycleRuleSupport.stagesOf(ec, reconciliationId)*.recordType as List<String>
+        if (!stageTypes.contains(stage)) { ec.message.addError("'${stage}' is not a stage of this lifecycle."); return [:] }
+        List<Map> active = RunFlowchartSupport.loadQuestions(ec, reconciliationId).findAll { it.isActive != "N" }
+        if (!hasExcusedTrack(active, stageTypes)) {
+            saveStages(ec, [reconciliationId: reconciliationId, stageRecordTypes: stageTypes])
+            if (ec.message.hasError()) return [:]
+            active = RunFlowchartSupport.loadQuestions(ec, reconciliationId).findAll { it.isActive != "N" }
+        }
+        Map anchor = findingAnchor(active, stageTypes.indexOf(stage), stageTypes.size())
+        if (anchor == null) { ec.message.addError("This lifecycle's stages could not be read."); return [:] }
+
+        Map start = active.find { it.questionRole == RunFlowchartTree.ROLE_START }
+        def startQuery = LifecycleRuleSupport.queryForRule(ec, start.ruleSetId as String)
+        String startType = startQuery.get("recordType") as String
+        Map<String, String> w = LifecycleStageCompiler.words(stage)
+        String label = "${w.past}, ${fieldLabel} ${op == 'GT' ? 'more than' : 'is'} ${valueLabel}".toString()
+        String queryId = createQuery(ec, startQuery.get("nsAuthConfigId") as String, run.get("companyUserGroupId") as String,
+                TenantAccessSupport.currentUserId(ec), ec.user.nowTimestamp, startType, null, null, label, "RECORDS_MATCHING")
+        def query = TenantScopedFinder.findTenantScopedByIdQuiet(ec, QUERY, "nsSuiteQlSourceQueryId", queryId)
+        query.set("matchRules", JsonOutput.toJson([[fieldId: fieldId, fieldLabel: fieldLabel, op: op, values: [value], valueLabel: valueLabel]]))
+        query.update()
+        writeColumns(ec, queryId, detailsOf(ec, reconciliationId))
+        String ruleSetId = createRule(ec, uniqueRuleName(ec, "${run.get('reconciliationName')} · ${label}".toString()), queryId)
+        if (ruleSetId == null) return [:]
+        ownAndPointAtRecords(ec, ruleSetId, reconciliationId)
+        int sequence = (active.collect { (it.runSequence ?: 0) as int }.max() ?: 0) as int
+        def question = ec.entity.makeValue(RunFlowchartSupport.QUESTION)
+        question.setSequencedIdPrimary()
+        question.setAll([reconciliationId: reconciliationId, companyUserGroupId: run.get("companyUserGroupId"), ruleSetId: ruleSetId,
+                         runName: w.name, questionRole: ROLE_FINDING, parentReconciliationRunId: anchor.question.reconciliationRunId,
+                         parentBranch: anchor.branch, runSequence: sequence + 1, noOutcomeLabel: label])
+        question.create()
+        return ec.message.hasError() ? [:] : [findings: listFindings(ec, reconciliationId)]
+    }
+
+    static Map deleteFinding(def ec, Map params) {
+        if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for runs.")) return [:]
+        String reconciliationId = normalize(params.reconciliationId), questionId = normalize(params.reconciliationRunId)
+        def q = questionId ? TenantScopedFinder.findTenantScopedByIdQuiet(ec, RunFlowchartSupport.QUESTION, "reconciliationRunId", questionId) : null
+        if (q == null || q.get("reconciliationId") != reconciliationId || q.get("questionRole") != ROLE_FINDING) {
+            ec.message.addError("That finding was not found."); return [:]
+        }
+        q.set("isActive", "N"); q.update()
+        return [findings: listFindings(ec, reconciliationId)]
+    }
+
+    /** The findings people wrote, in the order written: the stage, its words, and the condition. */
+    static List<Map> listFindings(def ec, String reconciliationId) {
+        Map<String, String> typeByName = LifecycleRuleSupport.stagesOf(ec, reconciliationId).collectEntries { [(it.label): it.recordType] }
+        return RunFlowchartSupport.loadQuestions(ec, reconciliationId)
+                .findAll { it.isActive != "N" && it.questionRole == ROLE_FINDING }
+                .sort { (it.runSequence ?: 0) as int }
+                .collect { Map q ->
+                    String raw = LifecycleRuleSupport.queryForRule(ec, q.ruleSetId as String)?.get("matchRules") as String
+                    Map rule = raw ? ((new JsonSlurper().parseText(raw) as List)?.find() as Map) : null
+                    [reconciliationRunId: q.reconciliationRunId, stageRecordType: typeByName[q.runName as String], stageLabel: q.runName,
+                     label: q.noOutcomeLabel, fieldId: rule?.fieldId, fieldLabel: rule?.fieldLabel, op: rule?.op,
+                     value: (rule?.values as List)?.find(), valueLabel: rule?.valueLabel] as Map
+                }
+    }
+
+    /** Where a stage's records are the ones that reached it: [question, branch]. */
+    private static Map findingAnchor(List<Map> active, int k, int n) {
+        Closure<List<Map>> children = { String id, String branch -> active.findAll { it.parentReconciliationRunId == id && it.parentBranch == branch &&
+                it.questionRole != ROLE_FINDING }.sort { (it.runSequence ?: 0) as int } }
+        Map current = active.find { it.questionRole == RunFlowchartTree.ROLE_START }
+        Map parentOfStage = null, stageQ = null
+        for (int i = 0; i <= k && current != null; i++) {
+            Map next = children(current.reconciliationRunId as String, RunFlowchartTree.BRANCH_YES).find()
+            if (next?.questionRole == LifecycleStageCompiler.EXCUSED) { current = next; next = children(current.reconciliationRunId as String, RunFlowchartTree.BRANCH_YES).find() }
+            parentOfStage = current
+            stageQ = next
+            current = next
+        }
+        if (stageQ == null) return null
+        if (k < n - 1) {
+            Map excused = children(stageQ.reconciliationRunId as String, RunFlowchartTree.BRANCH_YES).find { it.questionRole == LifecycleStageCompiler.EXCUSED }
+            return excused ? [question: excused, branch: RunFlowchartTree.BRANCH_YES] : null
+        }
+        Map done = children(parentOfStage.reconciliationRunId as String, RunFlowchartTree.BRANCH_YES).find { it.reconciliationRunId != stageQ.reconciliationRunId && it.noOutcomeLabel }
+        return done ? [question: done, branch: RunFlowchartTree.BRANCH_NO] : null
     }
 
     /** Whether a tree has the excused track a lifecycle of more than one stage is built with since 2026-10-16. */

@@ -133,8 +133,9 @@ class LifecycleRuleSupport {
     /** The stages in order, as the spine runs: each the first question on the previous one's "yes". */
     static List<Map> stagesOf(def ec, String reconciliationId) {
         List<Map> qs = RunFlowchartSupport.loadQuestions(ec, reconciliationId).findAll { it.isActive != "N" }
-        Closure<Map> firstYes = { String id -> qs.findAll { it.parentReconciliationRunId == id && it.parentBranch == RunFlowchartTree.BRANCH_YES }
-                .min { (it.runSequence ?: 0) as int } }
+        // A written finding hangs beside the next stage; it is never one.
+        Closure<Map> firstYes = { String id -> qs.findAll { it.parentReconciliationRunId == id && it.parentBranch == RunFlowchartTree.BRANCH_YES &&
+                it.questionRole != LifecycleSupport.ROLE_FINDING }.min { (it.runSequence ?: 0) as int } }
         List<Map> out = []
         Map current = qs.find { it.questionRole == RunFlowchartTree.ROLE_START }
         while ((current = current ? firstYes(current.reconciliationRunId as String) : null) != null) {
@@ -193,6 +194,7 @@ class LifecycleRuleSupport {
         if (start == null) return [:]
         String recordType = start.query.get("recordType") as String
         return [details  : LifecycleSupport.detailsOf(ec, reconciliationId),
+                findings : LifecycleSupport.listFindings(ec, reconciliationId),
                 rules    : listRules(ec, start),
                 stages   : stagesOf(ec, reconciliationId),
                 exceptions: listExceptions(ec, reconciliationId),

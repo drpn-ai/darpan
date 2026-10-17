@@ -210,6 +210,9 @@
                                         "$ref": "#/components/schemas/DeleteGeneratedOutputRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/DeleteLifecycleFindingRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/DeleteLifecycleRuleRequest"
                                     },
                                     {
@@ -316,6 +319,9 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveLifecycleDetailsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveLifecycleFindingRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveLifecycleRuleRequest"
@@ -503,6 +509,7 @@
                                         "facade.ReconciliationFacadeServices.create#RuleSetRun": "#/components/schemas/CreateRuleSetRunRequest",
                                         "facade.ReconciliationFacadeServices.delete#Automation": "#/components/schemas/DeleteAutomationRequest",
                                         "facade.ReconciliationFacadeServices.delete#GeneratedOutput": "#/components/schemas/DeleteGeneratedOutputRequest",
+                                        "facade.ReconciliationFacadeServices.delete#LifecycleFinding": "#/components/schemas/DeleteLifecycleFindingRequest",
                                         "facade.ReconciliationFacadeServices.delete#LifecycleRule": "#/components/schemas/DeleteLifecycleRuleRequest",
                                         "facade.ReconciliationFacadeServices.delete#LifecycleStageException": "#/components/schemas/DeleteLifecycleStageExceptionRequest",
                                         "facade.ReconciliationFacadeServices.delete#ReconciliationQuestion": "#/components/schemas/DeleteReconciliationQuestionRequest",
@@ -539,6 +546,7 @@
                                         "facade.ReconciliationFacadeServices.save#DashboardPinnedSavedRuns": "#/components/schemas/SaveDashboardPinnedSavedRunsRequest",
                                         "facade.ReconciliationFacadeServices.save#Lifecycle": "#/components/schemas/SaveLifecycleRequest",
                                         "facade.ReconciliationFacadeServices.save#LifecycleDetails": "#/components/schemas/SaveLifecycleDetailsRequest",
+                                        "facade.ReconciliationFacadeServices.save#LifecycleFinding": "#/components/schemas/SaveLifecycleFindingRequest",
                                         "facade.ReconciliationFacadeServices.save#LifecycleRule": "#/components/schemas/SaveLifecycleRuleRequest",
                                         "facade.ReconciliationFacadeServices.save#LifecycleStageException": "#/components/schemas/SaveLifecycleStageExceptionRequest",
                                         "facade.ReconciliationFacadeServices.save#LifecycleStages": "#/components/schemas/SaveLifecycleStagesRequest",
@@ -782,6 +790,9 @@
                                             "$ref": "#/components/schemas/DeleteGeneratedOutputResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/DeleteLifecycleFindingResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/DeleteLifecycleRuleResponse"
                                         },
                                         {
@@ -888,6 +899,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveLifecycleDetailsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveLifecycleFindingResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveLifecycleRuleResponse"
@@ -9212,6 +9226,109 @@
                     "result"
                 ]
             },
+            "DeleteLifecycleFindingParams": {
+                "type": "object",
+                "properties": {
+                    "reconciliationId": {
+                        "type": "string"
+                    },
+                    "reconciliationRunId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "reconciliationId",
+                    "reconciliationRunId"
+                ],
+                "description": "DAR-UI-050. Removes a finding a person wrote; its past results stay readable."
+            },
+            "DeleteLifecycleFindingResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "findings": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    }
+                }
+            },
+            "DeleteLifecycleFindingRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.delete#LifecycleFinding",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.delete#LifecycleFinding",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.delete#LifecycleFinding"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DeleteLifecycleFindingParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DeleteLifecycleFindingResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.delete#LifecycleFinding. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DeleteLifecycleFindingResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "DeleteLifecycleRuleParams": {
                 "type": "object",
                 "properties": {
@@ -10471,6 +10588,14 @@
                             "description": "Moqui type Map"
                         },
                         "description": "DAR-UI-050. A lifecycle built from stages: the custom fields its records show, [fieldId, label]."
+                    },
+                    "findings": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        },
+                        "description": "DAR-UI-050. A lifecycle built from stages: the findings people wrote for its stages."
                     }
                 }
             },
@@ -14751,6 +14876,127 @@
                     "result"
                 ]
             },
+            "SaveLifecycleFindingParams": {
+                "type": "object",
+                "properties": {
+                    "reconciliationId": {
+                        "type": "string"
+                    },
+                    "stageRecordType": {
+                        "type": "string"
+                    },
+                    "fieldId": {
+                        "type": "string"
+                    },
+                    "fieldLabel": {
+                        "type": "string"
+                    },
+                    "op": {
+                        "type": "string",
+                        "description": "IN (is, the default) or GT (more than a number)."
+                    },
+                    "value": {
+                        "type": "string"
+                    },
+                    "valueLabel": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "reconciliationId",
+                    "stageRecordType",
+                    "fieldId",
+                    "value"
+                ],
+                "description": "DAR-UI-050. A finding a person writes for a stage of a lifecycle built from stages: the records\n            that reached the stage and whose field matches (\"Items Backordered more than 0\"), a place of its own."
+            },
+            "SaveLifecycleFindingResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "findings": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    }
+                }
+            },
+            "SaveLifecycleFindingRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.save#LifecycleFinding",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.save#LifecycleFinding",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.save#LifecycleFinding"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveLifecycleFindingParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveLifecycleFindingResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.save#LifecycleFinding. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveLifecycleFindingResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "SaveLifecycleRuleParams": {
                 "type": "object",
                 "properties": {
@@ -15244,6 +15490,13 @@
                     "lateAfterDays": {
                         "type": "integer",
                         "description": "DAR-UI-050. A lifecycle built from stages: records younger than this are not judged yet."
+                    },
+                    "notFindingPlaces": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "DAR-UI-050. A lifecycle built from stages: the places whose records are not findings,\n                    by their stored names. Replaces the list; an empty list makes every place a finding."
                     },
                     "isActive": {
                         "type": "string"
@@ -20299,6 +20552,7 @@
         "facade.ReconciliationFacadeServices.create#RuleSetRun": "CreateRuleSetRun",
         "facade.ReconciliationFacadeServices.delete#Automation": "DeleteAutomation",
         "facade.ReconciliationFacadeServices.delete#GeneratedOutput": "DeleteGeneratedOutput",
+        "facade.ReconciliationFacadeServices.delete#LifecycleFinding": "DeleteLifecycleFinding",
         "facade.ReconciliationFacadeServices.delete#LifecycleRule": "DeleteLifecycleRule",
         "facade.ReconciliationFacadeServices.delete#LifecycleStageException": "DeleteLifecycleStageException",
         "facade.ReconciliationFacadeServices.delete#ReconciliationQuestion": "DeleteReconciliationQuestion",
@@ -20335,6 +20589,7 @@
         "facade.ReconciliationFacadeServices.save#DashboardPinnedSavedRuns": "SaveDashboardPinnedSavedRuns",
         "facade.ReconciliationFacadeServices.save#Lifecycle": "SaveLifecycle",
         "facade.ReconciliationFacadeServices.save#LifecycleDetails": "SaveLifecycleDetails",
+        "facade.ReconciliationFacadeServices.save#LifecycleFinding": "SaveLifecycleFinding",
         "facade.ReconciliationFacadeServices.save#LifecycleRule": "SaveLifecycleRule",
         "facade.ReconciliationFacadeServices.save#LifecycleStageException": "SaveLifecycleStageException",
         "facade.ReconciliationFacadeServices.save#LifecycleStages": "SaveLifecycleStages",

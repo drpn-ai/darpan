@@ -81,6 +81,12 @@ class RunFlowchartSupport {
             if (late < 0 || late > 90) { ec.message.addError("Late after must be between 0 and 90 days."); return [:] }
             value.set("lateAfterDays", late)
         }
+        // Which places are not findings: names only (each at most a place's length), stored as JSON.
+        if (params.containsKey("notFindingPlaces")) {
+            List<String> places = ((params.get("notFindingPlaces") ?: []) as List).collect { normalize(it as String) }.findAll { it }.unique() as List<String>
+            if (places.any { it.length() > 200 } || places.size() > 50) { ec.message.addError("Those are not places of this lifecycle."); return [:] }
+            value.set("notFindingPlaces", places ? groovy.json.JsonOutput.toJson(places) : null)
+        }
         boolean renamed = id && value.isFieldModified("reconciliationName")
         if (id) value.update() else value.create()
         // A lifecycle's checks are named after it (their names head the pages its records open on), so they follow it.

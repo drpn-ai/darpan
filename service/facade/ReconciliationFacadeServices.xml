@@ -2001,6 +2001,10 @@
             <parameter name="lateAfterDays" type="Integer">
                 <description>DAR-UI-050. A lifecycle built from stages: records younger than this are not judged yet.</description>
             </parameter>
+            <parameter name="notFindingPlaces" type="List"><parameter name="place"/>
+                <description>DAR-UI-050. A lifecycle built from stages: the places whose records are not findings,
+                    by their stored names. Replaces the list; an empty list makes every place a finding.</description>
+            </parameter>
             <parameter name="isActive"/>
             <parameter name="isArchived"/>
         </in-parameters>
@@ -2068,6 +2072,8 @@
                 record type its start reads, which its rule dropdowns are filled from.</description></parameter>
             <parameter name="details" type="List"><parameter name="detail" type="Map"/>
                 <description>DAR-UI-050. A lifecycle built from stages: the custom fields its records show, [fieldId, label].</description></parameter>
+            <parameter name="findings" type="List"><parameter name="finding" type="Map"/>
+                <description>DAR-UI-050. A lifecycle built from stages: the findings people wrote for its stages.</description></parameter>
         </out-parameters>
         <actions>
             <set field="got" from="darpan.reconciliation.flowchart.RunFlowchartSupport.getReconciliation(ec, reconciliationId)"/>
@@ -2079,6 +2085,7 @@
             <set field="exceptions" from="described?.exceptions"/>
             <set field="lifecycle" from="described?.lifecycle"/>
             <set field="details" from="described?.details"/>
+            <set field="findings" from="described?.findings"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
@@ -2320,6 +2327,54 @@
         <actions>
             <set field="result" from="darpan.reconciliation.flowchart.LifecycleRuleSupport.deleteException(ec, context)"/>
             <set field="exceptions" from="result?.exceptions ?: []"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="LifecycleFinding" allow-remote="true" authenticate="true">
+        <description>DAR-UI-050. A finding a person writes for a stage of a lifecycle built from stages: the records
+            that reached the stage and whose field matches ("Items Backordered more than 0"), a place of its own.</description>
+        <in-parameters>
+            <parameter name="reconciliationId" required="true"/>
+            <parameter name="stageRecordType" required="true"/>
+            <parameter name="fieldId" required="true"/>
+            <parameter name="fieldLabel"/>
+            <parameter name="op"><description>IN (is, the default) or GT (more than a number).</description></parameter>
+            <parameter name="value" required="true"/>
+            <parameter name="valueLabel"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="findings" type="List"><parameter name="finding" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.reconciliation.flowchart.LifecycleSupport.saveFinding(ec, context)"/>
+            <set field="findings" from="result?.findings ?: []"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="delete" noun="LifecycleFinding" allow-remote="true" authenticate="true">
+        <description>DAR-UI-050. Removes a finding a person wrote; its past results stay readable.</description>
+        <in-parameters>
+            <parameter name="reconciliationId" required="true"/>
+            <parameter name="reconciliationRunId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="findings" type="List"><parameter name="finding" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.reconciliation.flowchart.LifecycleSupport.deleteFinding(ec, context)"/>
+            <set field="findings" from="result?.findings ?: []"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

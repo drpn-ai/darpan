@@ -32,6 +32,11 @@
             <description>DAR-UI-050. Records younger than this are not judged yet: a run's window ends this many
                 days before the day it is asked for. Empty or 0 = judged at once.</description>
         </field>
+        <field name="notFindingPlaces" type="text-very-long">
+            <description>DAR-UI-050. A lifecycle built from stages: the places (by their stored names, e.g.
+                "Fulfillment not expected, never billed") whose records are not findings, as a JSON list. Every other
+                place a record stops at is a finding. Empty = every place is.</description>
+        </field>
 
         <relationship type="many" related="darpan.reconciliation.ReconciliationRun" short-alias="runs">
             <key-map field-name="reconciliationId"/>
@@ -1012,6 +1017,11 @@
                 child missing AND not waived. Present: has the child OR is waived. A custbody field is compared as text;
                 a standard list field (shipmethod) by its display name; item by SKU, waiving a record that holds a named
                 item and nothing else that ships.</description>
+        </field>
+        <field name="matchRules" type="text-very-long">
+            <description>DAR-UI-050. A finding a person wrote for a lifecycle stage (queryTemplate RECORDS_MATCHING), as
+                JSON [{"fieldId", "fieldLabel", "op" (IN | GT), "values", "valueLabel"}]: the records whose fields match,
+                every condition holding.</description>
         </field>
         <field name="lineKeyColumn" type="text-short">
             <description>SALES_LINES only: the transactionline column that names the line on the other

@@ -298,6 +298,67 @@ class LifecycleRuleSmokeTests {
         assertEquals(["Fulfillment", "Invoice"], (call("facade.ReconciliationFacadeServices.get#Reconciliation", [reconciliationId: recId]).stages as List<Map>)*.label)
     }
 
+    // A person says which places are findings; the rest of the places' records are not.
+    @Test
+    void placesThatAreNotFindingsAreSavedByName() {
+        String recId = lifecycle()
+        Map out = call("facade.ReconciliationFacadeServices.save#Reconciliation", [reconciliationId: recId,
+                notFindingPlaces: ["Fulfillment not expected, never billed", "Fulfillment not expected, never billed", " "]])
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals('["Fulfillment not expected, never billed"]', (out.reconciliation as Map).notFindingPlaces)
+        Map got = call("facade.ReconciliationFacadeServices.get#Reconciliation", [reconciliationId: recId])
+        assertEquals('["Fulfillment not expected, never billed"]', (got.reconciliation as Map).notFindingPlaces)
+        out = call("facade.ReconciliationFacadeServices.save#Reconciliation", [reconciliationId: recId, notFindingPlaces: []])
+        assertEquals(null, (out.reconciliation as Map).notFindingPlaces, "an empty list makes every place a finding")
+    }
+
+    // A person writes a finding for a stage: the records that reached it and whose field matches, a place of its own.
+    @Test
+    void aWrittenFindingIsAskedOfTheRecordsThatReachedItsStage() {
+        String recId = lifecycle()   // Fulfillment, then Invoice
+        Map out = call("facade.ReconciliationFacadeServices.save#LifecycleFinding", [reconciliationId: recId, stageRecordType: "ItemShip",
+                fieldId: "itemsbackordered", fieldLabel: "Items Backordered", op: "GT", value: "0", valueLabel: "0"])
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        call("facade.ReconciliationFacadeServices.save#LifecycleFinding", [reconciliationId: recId, stageRecordType: "CustInvc",
+                fieldId: "status", fieldLabel: "Status", value: "Sales Order : Partially Fulfilled", valueLabel: "Partially Fulfilled"])
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        List<Map> findings = call("facade.ReconciliationFacadeServices.get#Reconciliation", [reconciliationId: recId]).findings as List<Map>
+        assertEquals(["Shipped, Items Backordered more than 0", "Billed, Status is Partially Fulfilled"], findings*.label)
+        assertEquals(["ItemShip", "CustInvc"], findings*.stageRecordType)
+
+        List<Map> qs = call("facade.ReconciliationFacadeServices.get#Reconciliation", [reconciliationId: recId]).questions as List<Map>
+        Map shipFinding = qs.find { it.noOutcomeLabel == "Shipped, Items Backordered more than 0" }
+        Map billFinding = qs.find { it.noOutcomeLabel == "Billed, Status is Partially Fulfilled" }
+        // Fulfillment's finding asks the records that really shipped (the excused check's yes); Invoice's, the complete ones.
+        assertEquals(["EXCUSED", "YES"], [qs.find { it.reconciliationRunId == shipFinding.parentReconciliationRunId }.questionRole, shipFinding.parentBranch])
+        assertEquals(["Shipped and billed", "NO"], [qs.find { it.reconciliationRunId == billFinding.parentReconciliationRunId }.noOutcomeLabel, billFinding.parentBranch])
+        assertEquals(["Fulfillment", "Invoice"], (call("facade.ReconciliationFacadeServices.get#Reconciliation", [reconciliationId: recId]).stages as List<Map>)*.label)
+        ec.artifactExecution.disableAuthz()
+        try {
+            def sc = ec.entity.find("darpan.rule.RuleSetCompareScope").condition("ruleSetId", shipFinding.ruleSetId).one()
+            def src = ec.entity.find("darpan.rule.RuleSetCompareSource").condition("compareScopeId", sc.compareScopeId).one()
+            def query = ec.entity.find("darpan.reconciliation.NsSuiteQlSourceQuery").condition("nsSuiteQlSourceQueryId", src.sourceConfigId).one()
+            assertEquals("RECORDS_MATCHING", query.queryTemplate)
+            assertEquals([[fieldId: "itemsbackordered", fieldLabel: "Items Backordered", op: "GT", values: ["0"], valueLabel: "0"]],
+                    new groovy.json.JsonSlurper().parseText(query.matchRules as String))
+        } finally {
+            ec.artifactExecution.enableAuthz()
+        }
+
+        // A reorder carries them over; a finding can be removed; nonsense is refused.
+        call("facade.ReconciliationFacadeServices.save#LifecycleStages", [reconciliationId: recId, stageRecordTypes: ["CustInvc", "ItemShip"]])
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        findings = call("facade.ReconciliationFacadeServices.get#Reconciliation", [reconciliationId: recId]).findings as List<Map>
+        assertEquals(["Shipped, Items Backordered more than 0", "Billed, Status is Partially Fulfilled"] as Set, findings*.label as Set)
+        Map left = call("facade.ReconciliationFacadeServices.delete#LifecycleFinding", [reconciliationId: recId,
+                reconciliationRunId: findings.find { it.stageRecordType == "ItemShip" }.reconciliationRunId])
+        assertEquals(["Billed, Status is Partially Fulfilled"], (left.findings as List<Map>)*.label)
+        call("facade.ReconciliationFacadeServices.save#LifecycleFinding", [reconciliationId: recId, stageRecordType: "ItemShip",
+                fieldId: "total", op: "GT", value: "1 OR 1=1"])
+        assertTrue(ec.message.hasError())
+        ec.message.clearErrors()
+    }
+
     // A lifecycle's checks are named after it, so renaming it renames them: their names head the pages its records open on.
     @Test
     void renamingALifecycleRenamesItsChecks() {

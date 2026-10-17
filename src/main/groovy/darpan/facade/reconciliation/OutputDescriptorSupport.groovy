@@ -146,16 +146,7 @@ class OutputDescriptorSupport {
                 sourceFileDescriptor(ec, runResult, "file2", normalize(metadata.file2Label ?: metadata.json2Label)),
         ].findAll { it != null } as List<Map<String, Object>>
 
-        if (!files && !dateRange) return null
-
-        boolean isApiMode = isApiSourceDetailsMode(metadata, dateRange) ||
-                files.any { Map<String, Object> fileDescriptor -> (fileDescriptor.filePath as String)?.contains("-api/") }
-        Map<String, Object> sourceDetails = [
-                mode : isApiMode ? "API" : "FILES",
-                files: files,
-        ]
-        if (dateRange) sourceDetails.dateRange = dateRange
-        return sourceDetails
+        return assembleSourceDetails(metadata, dateRange, files)
     }
 
     protected static Map<String, Object> buildGeneratedOutputSourceDetailsFromArtifactFolder(def ec, Object rawFileName,
@@ -177,6 +168,12 @@ class OutputDescriptorSupport {
             firstDateRange(readArtifactMetadataHeader(ec, fileDescriptor.filePath))
         }
 
+        return assembleSourceDetails(metadata, dateRange, files)
+    }
+
+    /** Null when there is nothing to describe; API mode when the window, the metadata or an api run folder says so. */
+    private static Map<String, Object> assembleSourceDetails(Map<String, Object> metadata, Map<String, Object> dateRange,
+            List<Map<String, Object>> files) {
         if (!files && !dateRange) return null
 
         boolean isApiMode = isApiSourceDetailsMode(metadata, dateRange) ||

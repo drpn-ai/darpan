@@ -29,8 +29,25 @@
         </out-parameters>
     </service>
 
+    <!-- The outcome of a file-pair reconciliation: reconcile#FilesByMapping routes to
+         reconcile#UnifiedFiles and returns what it produced, so both declare it from here. -->
+    <service verb="define" noun="FileReconciliationOutcome" type="interface">
+        <description>Out-parameters shared by reconcile#UnifiedFiles and reconcile#FilesByMapping.</description>
+        <out-parameters>
+            <parameter name="reconciliationType"/>
+            <parameter name="diffLocation"/>
+            <parameter name="diffFileName"/>
+            <parameter name="differenceCount" type="Long"/>
+            <parameter name="onlyInFile1Count" type="Long"/>
+            <parameter name="onlyInFile2Count" type="Long"/>
+            <parameter name="validationErrors" type="List"/>
+            <parameter name="processingWarnings" type="List"/>
+        </out-parameters>
+    </service>
+
     <service verb="reconcile" noun="UnifiedFiles" type="java" transaction="ignore" location="darpan.reconciliation.core.ReconciliationServices" method="reconcileUnifiedFiles">
         <description>Normalize CSV/JSON file inputs, perform reconciliation, and emit a JSON diff output.</description>
+        <implements service="reconciliation.ReconciliationCoreServices.define#FileReconciliationOutcome"/>
         <in-parameters>
             <parameter name="file1Location" required="true"/>
             <parameter name="file2Location" required="true"/>
@@ -67,16 +84,6 @@
             <parameter name="sparkMaster" default-value="local[*]"/>
             <parameter name="sparkAppName" default-value="UnifiedReconciliation"/>
         </in-parameters>
-        <out-parameters>
-            <parameter name="reconciliationType"/>
-            <parameter name="diffLocation"/>
-            <parameter name="diffFileName"/>
-            <parameter name="differenceCount" type="Long"/>
-            <parameter name="onlyInFile1Count" type="Long"/>
-            <parameter name="onlyInFile2Count" type="Long"/>
-            <parameter name="validationErrors" type="List"/>
-            <parameter name="processingWarnings" type="List"/>
-        </out-parameters>
     </service>
 
     <service verb="prepare" noun="RuleSetCompareScope" type="java" transaction="ignore" location="darpan.reconciliation.core.RuleSetCompareScopeAdapter" method="prepareRuleSetCompareScope">
@@ -520,6 +527,7 @@
 
     <service verb="reconcile" noun="FilesByMapping" type="script" transaction="ignore" location="component://darpan/src/main/groovy/darpan/reconciliation/core/reconcileFilesByMapping.groovy">
         <description>Route staged file locations through CSV/JSON/Mixed reconciliation using mapping metadata and optional overrides.</description>
+        <implements service="reconciliation.ReconciliationCoreServices.define#FileReconciliationOutcome"/>
         <in-parameters>
             <parameter name="reconciliationMappingId" required="true"/>
             <parameter name="file1Location" required="true"/>
@@ -543,14 +551,6 @@
         <out-parameters>
             <parameter name="file1Type"/>
             <parameter name="file2Type"/>
-            <parameter name="reconciliationType"/>
-            <parameter name="diffLocation"/>
-            <parameter name="diffFileName"/>
-            <parameter name="differenceCount" type="Long"/>
-            <parameter name="onlyInFile1Count" type="Long"/>
-            <parameter name="onlyInFile2Count" type="Long"/>
-            <parameter name="validationErrors" type="List"/>
-            <parameter name="processingWarnings" type="List"/>
         </out-parameters>
     </service>
 </services>

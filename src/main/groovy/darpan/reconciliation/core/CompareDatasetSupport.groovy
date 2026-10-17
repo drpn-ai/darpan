@@ -301,20 +301,12 @@ class CompareDatasetSupport {
             String arrayPath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(sharedPathInfo.arrayPath as String))
             Dataset explodedDf = rawDf.selectExpr("explode(${arrayPath}) as exploded_item")
             if (!datasetHasRows(explodedDf)) return emptyCompareIdDataset(rawDf.sparkSession())
-            List<Column> fieldCols = [pathInfos, idNormalizers].transpose().collect { List pair ->
-                Map pathInfo = (Map) pair[0]; String normalizer = (String) pair[1]
-                String fieldPath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(pathInfo.fieldPath as String))
-                applyIdNormalizer(col("exploded_item.${fieldPath}"), normalizer)
-            }
+            List<Column> fieldCols = explodedKeyFieldColumns(pathInfos, idNormalizers)
             validateNoBlankCompositeKeyFields(explodedDf, fieldCols, fieldExpressions, pathLabel)
             Dataset idDf = explodedDf.select(buildCompositeCompareIdColumn(fieldCols).alias("compare_id"))
             return idDf.filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0").distinct()
         }
-        List<Column> fieldCols = [pathInfos, idNormalizers].transpose().collect { List pair ->
-            Map pathInfo = (Map) pair[0]; String normalizer = (String) pair[1]
-            String safePath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(pathInfo.path as String))
-            applyIdNormalizer(col(safePath), normalizer)
-        }
+        List<Column> fieldCols = recordKeyFieldColumns(pathInfos, idNormalizers)
         validateNoBlankCompositeKeyFields(rawDf, fieldCols, fieldExpressions, pathLabel)
         Dataset idDf = rawDf.select(buildCompositeCompareIdColumn(fieldCols).alias("compare_id"))
         return idDf.filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0").distinct()
@@ -326,23 +318,33 @@ class CompareDatasetSupport {
              String arrayPath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(sharedPathInfo.arrayPath as String))
              Dataset explodedDf = rawDf.selectExpr("explode(${arrayPath}) as exploded_item")
              if (!datasetHasRows(explodedDf)) return emptyCompareDataDataset(rawDf.sparkSession())
-             List<Column> fieldCols = [pathInfos, idNormalizers].transpose().collect { List pair ->
-                 Map pathInfo = (Map) pair[0]; String normalizer = (String) pair[1]
-                 String fieldPath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(pathInfo.fieldPath as String))
-                 applyIdNormalizer(col("exploded_item.${fieldPath}"), normalizer)
-             }
+             List<Column> fieldCols = explodedKeyFieldColumns(pathInfos, idNormalizers)
              validateNoBlankCompositeKeyFields(explodedDf, fieldCols, fieldExpressions, pathLabel)
              Dataset dataDf = explodedDf.select(buildCompositeCompareIdColumn(fieldCols).alias("compare_id"), col("exploded_item").alias("data"))
              return dataDf.filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0")
          }
-         List<Column> fieldCols = [pathInfos, idNormalizers].transpose().collect { List pair ->
-             Map pathInfo = (Map) pair[0]; String normalizer = (String) pair[1]
-             String safePath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(pathInfo.path as String))
-             applyIdNormalizer(col(safePath), normalizer)
-         }
+         List<Column> fieldCols = recordKeyFieldColumns(pathInfos, idNormalizers)
          validateNoBlankCompositeKeyFields(rawDf, fieldCols, fieldExpressions, pathLabel)
          Dataset dataDf = rawDf.select(buildCompositeCompareIdColumn(fieldCols).alias("compare_id"), struct(col("*")).alias("data"))
          return dataDf.filter("compare_id IS NOT NULL AND length(trim(compare_id)) > 0")
+    }
+
+    /** One normalized key column per path, read from the exploded array item. */
+    private static List<Column> explodedKeyFieldColumns(List<Map> pathInfos, List<String> idNormalizers) {
+        return [pathInfos, idNormalizers].transpose().collect { List pair ->
+            Map pathInfo = (Map) pair[0]; String normalizer = (String) pair[1]
+            String fieldPath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(pathInfo.fieldPath as String))
+            applyIdNormalizer(col("exploded_item.${fieldPath}"), normalizer)
+        }
+    }
+
+    /** One normalized key column per path, read from the record root. */
+    private static List<Column> recordKeyFieldColumns(List<Map> pathInfos, List<String> idNormalizers) {
+        return [pathInfos, idNormalizers].transpose().collect { List pair ->
+            Map pathInfo = (Map) pair[0]; String normalizer = (String) pair[1]
+            String safePath = CompareIdExpressionSupport.safeSparkColumnPath(CompareIdExpressionSupport.normalizeSparkPath(pathInfo.path as String))
+            applyIdNormalizer(col(safePath), normalizer)
+        }
     }
 
     private static boolean datasetHasRows(Dataset df) {

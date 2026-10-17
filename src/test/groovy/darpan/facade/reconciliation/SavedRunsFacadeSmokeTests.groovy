@@ -585,6 +585,54 @@ class SavedRunsFacadeSmokeTests {
         assertEquals(true, stillVisibleResult.ok)
     }
 
+    /**
+     * Characterization: the paginated differences read shares getGeneratedOutput's file-name checks and
+     * its found/tenant-access checks, message for message.
+     */
+    @Test
+    void generatedOutputDifferencesValidatesTheFileAndScopesItToTheTenant() {
+        Map<String, Object> runResult = createAndRunCsvSavedRun("CSV Differences Paging Result")
+        String savedRunId = runResult.runResult.savedRunId as String
+        String outputFileName = runResult.runResult.generatedOutput.fileName as String
+
+        Closure<Map<String, Object>> differences = { Object fileName ->
+            ec.message.clearErrors()
+            return ReconciliationOutputSupport.getGeneratedOutputDifferences(ec, fileName, 0, 10, null, null, null, true)
+        }
+
+        Map<String, Object> missingName = differences("")
+        assertEquals(false, missingName.ok)
+        assertEquals(["fileName is required"], missingName.errors)
+
+        Map<String, Object> invalidName = differences("../outside.json")
+        assertEquals(false, invalidName.ok)
+        assertEquals(["fileName is invalid"], invalidName.errors)
+
+        String absentResult = "reconciliation-runs/${savedRunId}/absent-result.json".toString()
+        Map<String, Object> notFound = differences(absentResult)
+        assertEquals(false, notFound.ok)
+        assertEquals(["Generated output '${absentResult}' was not found.".toString()], notFound.errors)
+
+        Map<String, Object> found = differences(outputFileName)
+        assertEquals(true, found.ok, found.errors?.toString())
+        assertEquals(outputFileName, found.outputFile.fileName)
+        assertEquals("json", found.outputFile.sourceFormat)
+        assertTrue(found.differences instanceof List)
+        assertNotNull(found.summary)
+
+        loginAsTenantUser(
+                OUTSIDE_TENANT_USER_ID,
+                "test.gorjana.editor",
+                GORJANA,
+                TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID
+        )
+        Map<String, Object> outsideTenant = differences(outputFileName)
+        assertEquals(false, outsideTenant.ok)
+        assertEquals(["Generated output '${outputFileName}' is not available in your active tenant.".toString()], outsideTenant.errors)
+        assertNull(outsideTenant.outputFile)
+        ec.message.clearErrors()
+    }
+
     @Test
     void csvSavedRunRejectsJsonSchemaDocumentsBeforeSparkProjection() {
         Map<String, Object> createResult = ec.service.sync()

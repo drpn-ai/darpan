@@ -3,9 +3,6 @@ package darpan.facade.reconciliation
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.util.regex.Matcher
 import java.util.regex.Pattern
 
@@ -47,8 +44,8 @@ class ExchangePairVerificationSupport {
     // all-clear run is not headlined WITH ISSUES; changing the sentence means changing it here.
     static final String AUDIT_NOTE_PREFIX = "Exchange presence check: "
 
-    private static final String DIFFERENCES_HEADER = "\"differences\":["
-    private static final String PROCESSING_WARNINGS_PREFIX = "\"processingWarnings\":"
+    private static final String DIFFERENCES_HEADER = DiffDocumentStreamSupport.DIFFERENCES_HEADER
+    private static final String PROCESSING_WARNINGS_PREFIX = DiffDocumentStreamSupport.PROCESSING_WARNINGS_PREFIX
 
     static Map<String, Object> verifyExchangePairs(Map<String, Object> args) {
         List<String> warnings = []
@@ -236,8 +233,8 @@ class ExchangePairVerificationSupport {
     /**
      * Streaming append: rows live one-per-line inside "differences":[ ... ]; the last row line ends
      * with "]". Rewrites line by line to a temp file, converts the last row's "]" to ",", writes the
-     * new rows, bumps each summaryBumps key found on the summary line, and — mirroring
-     * MissingDiffVerificationSupport's PROCESSING_WARNINGS_PREFIX handling exactly — injects
+     * new rows, bumps each summaryBumps key found on the summary line, and — through the same
+     * DiffDocumentStreamSupport.appendedWarnings the missing-diff verify pass uses — injects
      * auditNote into the artifact's "processingWarnings" array in the same single pass. If the
      * document has no "processingWarnings" line (never true for writeDiffDatasetOutput's real
      * output, but true for slimmer test fixtures) nothing is injected and no such line is created.
@@ -264,7 +261,7 @@ class ExchangePairVerificationSupport {
                         }
                         if (auditNote && outLine.startsWith(PROCESSING_WARNINGS_PREFIX)) {
                             outLine = PROCESSING_WARNINGS_PREFIX +
-                                    JsonOutput.toJson(appendedWarnings(slurper, outLine, auditNote)) + ","
+                                    JsonOutput.toJson(DiffDocumentStreamSupport.appendedWarnings(slurper, outLine, auditNote)) + ","
                         }
                     }
                     if (!appended) {
@@ -294,38 +291,10 @@ class ExchangePairVerificationSupport {
                 }
                 if (!appended) throw new IllegalStateException("diff document has no differences section to append to")
             }
-            replaceFile(tempFile, diffFile)
+            DiffDocumentStreamSupport.replaceFile(tempFile, diffFile)
             committed = true
         } finally {
             if (!committed) tempFile.delete()
-        }
-    }
-
-    /** Mirrors MissingDiffVerificationSupport.appendedWarnings exactly: parse the existing
-     *  "processingWarnings" array (empty list if unparseable), append auditNote when present. */
-    private static List appendedWarnings(JsonSlurper slurper, String warningsLine, String auditNote) {
-        Object fragment = headerFragment(slurper, warningsLine, PROCESSING_WARNINGS_PREFIX)
-        List warningsList = fragment instanceof List ? new ArrayList((List) fragment) : []
-        if (auditNote) warningsList.add(auditNote)
-        return warningsList
-    }
-
-    /** Mirrors MissingDiffVerificationSupport.headerFragment exactly. */
-    private static Object headerFragment(JsonSlurper slurper, String line, String prefix) {
-        String fragment = line.substring(prefix.length()).trim()
-        if (fragment.endsWith(",")) fragment = fragment.substring(0, fragment.length() - 1)
-        try {
-            return slurper.parseText(fragment)
-        } catch (Exception ignored) {
-            return null
-        }
-    }
-
-    private static void replaceFile(File source, File target) {
-        try {
-            Files.move(source.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-        } catch (AtomicMoveNotSupportedException ignored) {
-            Files.move(source.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
         }
     }
 }

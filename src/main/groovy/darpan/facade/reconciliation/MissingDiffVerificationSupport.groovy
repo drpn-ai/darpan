@@ -1,12 +1,6 @@
 package darpan.facade.reconciliation
 
-import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
-
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.StandardCopyOption
 
 /**
  * Verification pass over a ruleset diff document: rows reported missing in a lookup-capable side
@@ -46,10 +40,8 @@ class MissingDiffVerificationSupport {
         return errors ? errors.join("; ") : ""
     }
 
-    // The document's line shapes live in DiffDocumentStreamSupport, shared with the conclude pass.
-    private static final String DIFFERENCES_HEADER = DiffDocumentStreamSupport.DIFFERENCES_HEADER
-    private static final String SUMMARY_PREFIX = DiffDocumentStreamSupport.SUMMARY_PREFIX
-    private static final String PROCESSING_WARNINGS_PREFIX = DiffDocumentStreamSupport.PROCESSING_WARNINGS_PREFIX
+    // The document's line shapes, and the read and rewrite passes over them, live in
+    // DiffDocumentStreamSupport, shared with the return-presence and conclude passes.
 
     /**
      * args:
@@ -93,28 +85,10 @@ class MissingDiffVerificationSupport {
         // Pass 1 — collect candidate ids per lookup-capable side, one row in memory at a time.
         JsonSlurper slurper = new JsonSlurper()
         Map<String, Set<String>> candidateIdsByToken = [:].withDefault { new LinkedHashSet<String>() }
-        boolean sawDifferencesHeader = false
-        diffFile.withReader("UTF-8") { Reader reader ->
-            BufferedReader lines = new BufferedReader(reader)
-            String line
-            boolean inRows = false
-            while ((line = lines.readLine()) != null) {
-                if (!inRows) {
-                    if (line.startsWith(DIFFERENCES_HEADER)) {
-                        sawDifferencesHeader = true
-                        inRows = !line.startsWith(DIFFERENCES_HEADER + "]")
-                    }
-                    continue
-                }
-                String rowJson = stripRowLine(line)
-                if (rowJson == null) break
-                if (!rowJson.contains("\"missingIn\"")) continue
-                Map row = parseRowQuietly(slurper, rowJson)
-                if (row == null) continue
-                String missingToken = DiffDetailClassifier.normalizeToken(row.get("missingIn"))
-                String rowId = rowIdOf(row)
-                if (rowId && sidesByToken.containsKey(missingToken)) candidateIdsByToken.get(missingToken).add(rowId)
-            }
+        boolean sawDifferencesHeader = DiffDocumentStreamSupport.forEachMissingRow(diffFile, slurper) { Map row ->
+            String missingToken = DiffDetailClassifier.normalizeToken(row.get("missingIn"))
+            String rowId = DiffDocumentStreamSupport.rowIdOf(row)
+            if (rowId && sidesByToken.containsKey(missingToken)) candidateIdsByToken.get(missingToken).add(rowId)
         }
         if (!sawDifferencesHeader) {
             warnings.add("Verification pass skipped: diff document has no differences section.")
@@ -199,116 +173,13 @@ class MissingDiffVerificationSupport {
         }
 
         // Pass 2 — stream-rewrite to a sibling temp file, then atomically replace the original.
-        File tempFile = new File(diffFile.getParentFile(), diffFile.getName() + ".verify-tmp")
-        diffFile.withReader("UTF-8") { Reader reader ->
-            BufferedReader lines = new BufferedReader(reader)
-            tempFile.withWriter("UTF-8") { Writer writer ->
-                String line
-                boolean inRows = false
-                boolean documentClosed = false
-                boolean firstRowWritten = false
-                while ((line = lines.readLine()) != null) {
-                    // once "]\n}" has been emitted the only remaining input line is the original
-                    // closing "}", which the row branch already wrote — skip it
-                    if (documentClosed) continue
-                    if (!inRows) {
-                        if (line.startsWith(SUMMARY_PREFIX)) {
-                            writer << SUMMARY_PREFIX + JsonOutput.toJson(adjustSummary(slurper, line,
-                                    removedCount, removedMissingInFile1, removedMissingInFile2)) + ",\n"
-                        } else if (line.startsWith(DIFFERENCES_HEADER)) {
-                            inRows = !line.startsWith(DIFFERENCES_HEADER + "]")
-                            if (inRows) writer << DIFFERENCES_HEADER
-                            else writer << line << "\n"
-                        } else if (line.startsWith(PROCESSING_WARNINGS_PREFIX)) {
-                            writer << PROCESSING_WARNINGS_PREFIX + JsonOutput.toJson(
-                                    appendedWarnings(slurper, line, auditNote)) + ",\n"
-                        } else {
-                            writer << line << "\n"
-                        }
-                        continue
-                    }
-                    String rowJson = stripRowLine(line)
-                    if (rowJson == null) {
-                        writer << "]\n}"
-                        documentClosed = true
-                        continue
-                    }
-                    boolean lastRow = line.endsWith("]")
-                    boolean removeRow = false
-                    if (rowJson.contains("\"missingIn\"")) {
-                        Map row = parseRowQuietly(slurper, rowJson)
-                        String missingToken = row == null ? null : DiffDetailClassifier.normalizeToken(row.get("missingIn"))
-                        String rowId = row == null ? null : rowIdOf(row)
-                        removeRow = rowId != null && removeIdsByToken.get(missingToken)?.contains(rowId)
-                    }
-                    if (!removeRow) {
-                        if (firstRowWritten) writer << ","
-                        writer << "\n" << rowJson
-                        firstRowWritten = true
-                    }
-                    if (lastRow) {
-                        writer << "]\n}"
-                        documentClosed = true
-                        inRows = false
-                    }
-                }
-            }
-        }
-        replaceFile(tempFile, diffFile)
+        DiffDocumentStreamSupport.removeMissingRows(diffFile, ".verify-tmp", removeIdsByToken,
+                removedCount, removedMissingInFile1, removedMissingInFile2, auditNote)
 
         return [performed: true, rewritten: true, checkedCount: checkedCount, removedCount: removedCount,
                 confirmedMissingCount: confirmedMissingCount, unresolvedCount: unresolvedCount,
                 removedMissingInFile1: removedMissingInFile1,
                 removedMissingInFile2: removedMissingInFile2, lookupFailed: lookupFailed,
                 warnings: warnings, auditNote: auditNote] as Map<String, Object>
-    }
-
-    private static String stripRowLine(String line) {
-        return DiffDocumentStreamSupport.stripRowLine(line)
-    }
-
-    private static Map parseRowQuietly(JsonSlurper slurper, String rowJson) {
-        return DiffDocumentStreamSupport.parseRowQuietly(slurper, rowJson)
-    }
-
-    /** Ruleset diff rows carry the record id in primaryId; generic diff rows in id. */
-    private static String rowIdOf(Map row) {
-        String primaryId = row.get("primaryId")?.toString()?.trim()
-        if (primaryId) return primaryId
-        String id = row.get("id")?.toString()?.trim()
-        return id ?: null
-    }
-
-    private static Map adjustSummary(JsonSlurper slurper, String summaryLine, int removedCount,
-                                     int removedMissingInFile1, int removedMissingInFile2) {
-        Map summary = headerFragment(slurper, summaryLine, SUMMARY_PREFIX) instanceof Map ?
-                (Map) headerFragment(slurper, summaryLine, SUMMARY_PREFIX) : [:]
-        decrement(summary, "totalDifferences", removedCount)
-        // onlyInFile1Count = present only in file 1 = missing in file 2, and vice versa
-        decrement(summary, "onlyInFile1Count", removedMissingInFile2)
-        decrement(summary, "onlyInFile2Count", removedMissingInFile1)
-        // removed rows are missing-object diffs by definition (ruleset summary key; absent in generic docs)
-        decrement(summary, "missingObjectDifferenceCount", removedCount)
-        return summary
-    }
-
-    private static List appendedWarnings(JsonSlurper slurper, String warningsLine, String auditNote) {
-        Object fragment = headerFragment(slurper, warningsLine, PROCESSING_WARNINGS_PREFIX)
-        List warningsList = fragment instanceof List ? new ArrayList((List) fragment) : []
-        if (auditNote) warningsList.add(auditNote)
-        return warningsList
-    }
-
-    private static Object headerFragment(JsonSlurper slurper, String line, String prefix) {
-        return DiffDocumentStreamSupport.headerFragment(slurper, line, prefix)
-    }
-
-    private static void decrement(Map summary, String key, int by) {
-        Object value = summary.get(key)
-        if (value instanceof Number && by > 0) summary.put(key, Math.max(0L, ((Number) value).longValue() - by))
-    }
-
-    private static void replaceFile(File source, File target) {
-        DiffDocumentStreamSupport.replaceFile(source, target)
     }
 }

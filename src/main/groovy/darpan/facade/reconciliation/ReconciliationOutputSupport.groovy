@@ -233,11 +233,11 @@ class ReconciliationOutputSupport {
         ]
     }
 
-    static Map<String, Object> getGeneratedOutput(def ec, Object fileName, Object format) {
-        String fileNameValue = normalize(fileName)
-        String requestedFormat = normalizeLower(format) ?: "json"
-        Map<String, Object> outputFile = null
-
+    /**
+     * The file-name checks every generated-output read starts with: present, safe to read, and a
+     * supported format. Adds the error and returns the source format ("" when unsupported).
+     */
+    private static String checkGeneratedOutputFileName(def ec, String fileNameValue) {
         if (!fileNameValue) ec.message.addError("fileName is required")
         if (!ec.message.hasError() && !OutputPathSupport.isSafeReadableArtifactPath(ec, fileNameValue)) {
             ec.message.addError("fileName is invalid")
@@ -247,6 +247,29 @@ class ReconciliationOutputSupport {
         if (!ec.message.hasError() && !sourceFormat) {
             ec.message.addError("Unsupported generated output '${fileNameValue}'.")
         }
+        return sourceFormat
+    }
+
+    /** The generated output's file when it exists and the active tenant may read it; else adds the error and returns null. */
+    private static File accessibleGeneratedOutputFile(def ec, String fileNameValue) {
+        File generatedOutputFile = OutputPathSupport.resolveGeneratedOutputArtifactFile(ec, fileNameValue)
+        if (generatedOutputFile == null || !generatedOutputFile.exists() || !generatedOutputFile.isFile()) {
+            ec.message.addError("Generated output '${fileNameValue}' was not found.")
+            return null
+        }
+        if (!canAccessGeneratedOutputFile(ec, generatedOutputFile, fileNameValue)) {
+            ec.message.addError("Generated output '${fileNameValue}' is not available in your active tenant.")
+            return null
+        }
+        return generatedOutputFile
+    }
+
+    static Map<String, Object> getGeneratedOutput(def ec, Object fileName, Object format) {
+        String fileNameValue = normalize(fileName)
+        String requestedFormat = normalizeLower(format) ?: "json"
+        Map<String, Object> outputFile = null
+
+        String sourceFormat = checkGeneratedOutputFileName(ec, fileNameValue)
 
         boolean resultFileRequest = OutputPathSupport.isSafeOutputPath(fileNameValue)
         List<String> availableFormats = resultFileRequest ? OutputPathSupport.availableFormatsForSource(sourceFormat) : [sourceFormat]
@@ -255,12 +278,8 @@ class ReconciliationOutputSupport {
         }
 
         if (!ec.message.hasError()) {
-            File generatedOutputFile = OutputPathSupport.resolveGeneratedOutputArtifactFile(ec, fileNameValue)
-            if (generatedOutputFile == null || !generatedOutputFile.exists() || !generatedOutputFile.isFile()) {
-                ec.message.addError("Generated output '${fileNameValue}' was not found.")
-            } else if (!canAccessGeneratedOutputFile(ec, generatedOutputFile, fileNameValue)) {
-                ec.message.addError("Generated output '${fileNameValue}' is not available in your active tenant.")
-            } else {
+            File generatedOutputFile = accessibleGeneratedOutputFile(ec, fileNameValue)
+            if (generatedOutputFile != null) {
                 String rawText = generatedOutputFile.getText("UTF-8")
                 String contentText = rawText
                 Map<String, Object> outputDocument = sourceFormat == "json" ? OutputDescriptorSupport.parseGeneratedOutputText(rawText) : [:]
@@ -303,15 +322,7 @@ class ReconciliationOutputSupport {
         String fileNameValue = normalize(fileName)
         Map<String, Object> result = null
 
-        if (!fileNameValue) ec.message.addError("fileName is required")
-        if (!ec.message.hasError() && !OutputPathSupport.isSafeReadableArtifactPath(ec, fileNameValue)) {
-            ec.message.addError("fileName is invalid")
-        }
-
-        String sourceFormat = OutputPathSupport.sourceFormatForFile(fileNameValue)
-        if (!ec.message.hasError() && !sourceFormat) {
-            ec.message.addError("Unsupported generated output '${fileNameValue}'.")
-        }
+        String sourceFormat = checkGeneratedOutputFileName(ec, fileNameValue)
         // Pagination only applies to the JSON diff *result* document, not raw source artifacts.
         boolean resultFileRequest = OutputPathSupport.isSafeOutputPath(fileNameValue)
         if (!ec.message.hasError() && (sourceFormat != "json" || !resultFileRequest)) {
@@ -319,12 +330,8 @@ class ReconciliationOutputSupport {
         }
 
         if (!ec.message.hasError()) {
-            File generatedOutputFile = OutputPathSupport.resolveGeneratedOutputArtifactFile(ec, fileNameValue)
-            if (generatedOutputFile == null || !generatedOutputFile.exists() || !generatedOutputFile.isFile()) {
-                ec.message.addError("Generated output '${fileNameValue}' was not found.")
-            } else if (!canAccessGeneratedOutputFile(ec, generatedOutputFile, fileNameValue)) {
-                ec.message.addError("Generated output '${fileNameValue}' is not available in your active tenant.")
-            } else {
+            File generatedOutputFile = accessibleGeneratedOutputFile(ec, fileNameValue)
+            if (generatedOutputFile != null) {
                 Map<String, Object> document = OutputDescriptorSupport.parseGeneratedOutputText(generatedOutputFile.getText("UTF-8"))
                 Map<String, Object> metadata = (document?.get("metadata") instanceof Map) ?
                         (Map<String, Object>) document.get("metadata") : [:]

@@ -1,12 +1,7 @@
 package darpan.facade.reconciliation
 
-import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.StandardCopyOption
 import java.time.Instant
 import java.util.regex.Pattern
 
@@ -155,9 +150,6 @@ class ReturnPresenceVerificationSupport {
     /** Streaming scan target — extracts reach GB scale and only this one field is needed. */
     private static final Pattern ORDER_EXTERNAL_ID = Pattern.compile('"orderExternalId"\\s*:\\s*"([^"]+)"')
 
-    private static final String DIFFERENCES_HEADER = "\"differences\":["
-    private static final String SUMMARY_PREFIX = "\"summary\":"
-    private static final String PROCESSING_WARNINGS_PREFIX = "\"processingWarnings\":"
     // All-digits form: what a JSON epoch-millis integer looks like once ValueSupport.normalize has
     // already turned it into a String (OMS entryDate is serialized this way — see the retired C3 fix
     // this class used to carry, and SourceSystemConnectorFieldSeedData's OMS_RETURNS entryDate pill).
@@ -236,129 +228,109 @@ class ReturnPresenceVerificationSupport {
         int siblingReturnCount = 0
         int cancelledItemCount = 0
         int malformedCount = 0
-        boolean sawDifferencesHeader = false
+        boolean sawDifferencesHeader = DiffDocumentStreamSupport.forEachMissingRow(diffFile, slurper) { Map row ->
+            String missingToken = DiffDetailClassifier.normalizeToken(row.get("missingIn"))
+            boolean missingInOms = missingToken && missingToken == omsToken
+            boolean missingInShopify = !missingInOms && missingToken && missingToken == shopifyToken
+            if (!missingInOms && !missingInShopify) return
 
-        diffFile.withReader("UTF-8") { Reader reader ->
-            BufferedReader lines = new BufferedReader(reader)
-            String line
-            boolean inRows = false
-            while ((line = lines.readLine()) != null) {
-                if (!inRows) {
-                    if (line.startsWith(DIFFERENCES_HEADER)) {
-                        sawDifferencesHeader = true
-                        inRows = !line.startsWith(DIFFERENCES_HEADER + "]")
-                    }
-                    continue
-                }
-                String rowJson = stripRowLine(line)
-                if (rowJson == null) break
-                if (!rowJson.contains("\"missingIn\"")) continue
-                Map row = parseRowQuietly(slurper, rowJson)
-                if (row == null) continue
-
-                String missingToken = DiffDetailClassifier.normalizeToken(row.get("missingIn"))
-                boolean missingInOms = missingToken && missingToken == omsToken
-                boolean missingInShopify = !missingInOms && missingToken && missingToken == shopifyToken
-                if (!missingInOms && !missingInShopify) continue
-
-                // The row's data column carries the record from the side that IS present — the
-                // Shopify event (createdAt) when missing-in-OMS, the OMS return (entryDate) when
-                // missing-in-Shopify. See the class doc's MECHANISM section.
-                Map data = parseEmbeddedData(slurper, row.get("data"))
-                Long ownCreatedMillis = data == null ? null
-                        : parseMillisOrNull(missingInOms ? data.get("createdAt") : data.get("entryDate"))
-                if (ownCreatedMillis == null) {
-                    // Cannot grade without a date. Conservative posture (mirrors the rest of this
-                    // pipeline's M2/lookback bias): never silently suppress a row we cannot prove is
-                    // young — leave it exactly as the generic compare reported it, but say so.
-                    malformedCount++
-                    continue
-                }
-
-                boolean remove = false
-                boolean pending = false
-                boolean preWindow = false
-                if (missingInOms && windowStartMillis != null && ownCreatedMillis < windowStartMillis) {
-                    // WINDOW-START GATE: only ever present because of the extractor's lookback; never
-                    // genuinely missing-in-OMS. Not counted as pending — it is not "recent", it is
-                    // out-of-scope for this run's reporting window entirely.
-                    remove = true
-                    preWindow = true
-                } else if (ownCreatedMillis > graceFloor) {
-                    remove = true
-                    pending = true
-                }
-                // CANCELLATION-REFUND SUPPRESSION — FIELD FIRST (2026-08-20). The Shopify return-refs
-                // extract now stamps the order's own cancelledAt onto every event row, so for any row
-                // carrying that key the answer is already in the row: decide inline, with no lookup,
-                // no chunking, no cap and no fail-closed path to get wrong.
-                //
-                // Only a row from an extract PREDATING the field (key ABSENT, not null) falls through
-                // to the Pass 1.5 point lookup — which is exactly why the extract always writes the
-                // key, null included. Saved runs replay stored artifacts, so old files keep working.
-                //
-                // Candidates for that fallback are collected, never looked up inline: the lookup is
-                // an HTTP call that must be batched, and this is the streaming pass that must not
-                // block on network I/O. Independent of the grading decision above — a row already
-                // removed as pending/pre-window needs no second reason to go.
-                boolean cancelledByField = false
-                if (missingInOms && !remove &&
-                        EVENT_TYPE_REFUND.equalsIgnoreCase(normalize(data.get("refundOrReturnType")))) {
-                    if (data.containsKey(ORDER_CANCELLED_AT_FIELD)) {
-                        if (normalize(data.get(ORDER_CANCELLED_AT_FIELD))) {
-                            remove = true
-                            cancelledByField = true
-                        }
-                    } else if (cancelledOrderLookup != null) {
-                        String orderId = normalize(data.get("orderId"))
-                        String candidateRowId = rowIdOf(row)
-                        if (orderId && candidateRowId) {
-                            candidateRowIdsByOrderId.computeIfAbsent(orderId) { new LinkedHashSet<String>() }.add(candidateRowId)
-                        }
-                    }
-                }
-                // SUPERSEDED-SIBLING SUPPRESSION: a missing-in-OMS RETURN row on an order OMS did
-                // book a return for. Shopify keeps every Return object a shopper or agent ever
-                // created on an order, including drafts that were superseded before any refund; OMS
-                // books ONE return per settled outcome, keyed on the refund. So the leftovers are
-                // Shopify bookkeeping, not gaps. RETURN ONLY — a second REFUND on an
-                // already-reconciled order is a real event and must stay visible.
-                // CANCELLED-ITEM SUPPRESSION (2026-08-21). A refund whose lines were never shipped is
-                // an item cancellation, and OMS books a cancellation rather than a return — so no
-                // counterpart can ever exist. Structural, like the order-level rule, not a
-                // correlation: an item that never shipped cannot have been returned.
-                //
-                // Strictly FALSE, never falsy. The field is tri-state and null means "we could not
-                // tell" (a truncated fulfillment view, or a refund whose line list saturated). Reading
-                // null as false would suppress on ignorance, which is the one direction that hides
-                // real differences.
-                boolean cancelledItemSuppressed = false
-                if (missingInOms && !remove &&
-                        EVENT_TYPE_REFUND.equalsIgnoreCase(normalize(data.get("refundOrReturnType"))) &&
-                        Boolean.FALSE == data.get(REFUND_LINE_EVER_FULFILLED_FIELD)) {
-                    remove = true
-                    cancelledItemSuppressed = true
-                }
-                boolean siblingSuppressed = false
-                if (missingInOms && !remove && !omsOrderIds.isEmpty() &&
-                        EVENT_TYPE_RETURN.equalsIgnoreCase(normalize(data.get("refundOrReturnType")))) {
-                    String siblingOrderId = normalize(data.get("orderId"))
-                    if (siblingOrderId && omsOrderIds.contains(siblingOrderId)) {
-                        remove = true
-                        siblingSuppressed = true
-                    }
-                }
-                if (!remove) continue
-
-                String rowId = rowIdOf(row)
-                if (!rowId) continue
-                removeIdsByToken.computeIfAbsent(missingToken) { new LinkedHashSet<String>() }.add(rowId)
-                if (pending) pendingCount++
-                else if (preWindow) preWindowCount++
-                else if (cancelledByField) cancelledByFieldCount++
-                else if (siblingSuppressed) siblingReturnCount++
-                else if (cancelledItemSuppressed) cancelledItemCount++
+            // The row's data column carries the record from the side that IS present — the
+            // Shopify event (createdAt) when missing-in-OMS, the OMS return (entryDate) when
+            // missing-in-Shopify. See the class doc's MECHANISM section.
+            Map data = parseEmbeddedData(slurper, row.get("data"))
+            Long ownCreatedMillis = data == null ? null
+                    : parseMillisOrNull(missingInOms ? data.get("createdAt") : data.get("entryDate"))
+            if (ownCreatedMillis == null) {
+                // Cannot grade without a date. Conservative posture (mirrors the rest of this
+                // pipeline's M2/lookback bias): never silently suppress a row we cannot prove is
+                // young — leave it exactly as the generic compare reported it, but say so.
+                malformedCount++
+                return
             }
+
+            boolean remove = false
+            boolean pending = false
+            boolean preWindow = false
+            if (missingInOms && windowStartMillis != null && ownCreatedMillis < windowStartMillis) {
+                // WINDOW-START GATE: only ever present because of the extractor's lookback; never
+                // genuinely missing-in-OMS. Not counted as pending — it is not "recent", it is
+                // out-of-scope for this run's reporting window entirely.
+                remove = true
+                preWindow = true
+            } else if (ownCreatedMillis > graceFloor) {
+                remove = true
+                pending = true
+            }
+            // CANCELLATION-REFUND SUPPRESSION — FIELD FIRST (2026-08-20). The Shopify return-refs
+            // extract now stamps the order's own cancelledAt onto every event row, so for any row
+            // carrying that key the answer is already in the row: decide inline, with no lookup,
+            // no chunking, no cap and no fail-closed path to get wrong.
+            //
+            // Only a row from an extract PREDATING the field (key ABSENT, not null) falls through
+            // to the Pass 1.5 point lookup — which is exactly why the extract always writes the
+            // key, null included. Saved runs replay stored artifacts, so old files keep working.
+            //
+            // Candidates for that fallback are collected, never looked up inline: the lookup is
+            // an HTTP call that must be batched, and this is the streaming pass that must not
+            // block on network I/O. Independent of the grading decision above — a row already
+            // removed as pending/pre-window needs no second reason to go.
+            boolean cancelledByField = false
+            if (missingInOms && !remove &&
+                    EVENT_TYPE_REFUND.equalsIgnoreCase(normalize(data.get("refundOrReturnType")))) {
+                if (data.containsKey(ORDER_CANCELLED_AT_FIELD)) {
+                    if (normalize(data.get(ORDER_CANCELLED_AT_FIELD))) {
+                        remove = true
+                        cancelledByField = true
+                    }
+                } else if (cancelledOrderLookup != null) {
+                    String orderId = normalize(data.get("orderId"))
+                    String candidateRowId = DiffDocumentStreamSupport.rowIdOf(row)
+                    if (orderId && candidateRowId) {
+                        candidateRowIdsByOrderId.computeIfAbsent(orderId) { new LinkedHashSet<String>() }.add(candidateRowId)
+                    }
+                }
+            }
+            // SUPERSEDED-SIBLING SUPPRESSION: a missing-in-OMS RETURN row on an order OMS did
+            // book a return for. Shopify keeps every Return object a shopper or agent ever
+            // created on an order, including drafts that were superseded before any refund; OMS
+            // books ONE return per settled outcome, keyed on the refund. So the leftovers are
+            // Shopify bookkeeping, not gaps. RETURN ONLY — a second REFUND on an
+            // already-reconciled order is a real event and must stay visible.
+            // CANCELLED-ITEM SUPPRESSION (2026-08-21). A refund whose lines were never shipped is
+            // an item cancellation, and OMS books a cancellation rather than a return — so no
+            // counterpart can ever exist. Structural, like the order-level rule, not a
+            // correlation: an item that never shipped cannot have been returned.
+            //
+            // Strictly FALSE, never falsy. The field is tri-state and null means "we could not
+            // tell" (a truncated fulfillment view, or a refund whose line list saturated). Reading
+            // null as false would suppress on ignorance, which is the one direction that hides
+            // real differences.
+            boolean cancelledItemSuppressed = false
+            if (missingInOms && !remove &&
+                    EVENT_TYPE_REFUND.equalsIgnoreCase(normalize(data.get("refundOrReturnType"))) &&
+                    Boolean.FALSE == data.get(REFUND_LINE_EVER_FULFILLED_FIELD)) {
+                remove = true
+                cancelledItemSuppressed = true
+            }
+            boolean siblingSuppressed = false
+            if (missingInOms && !remove && !omsOrderIds.isEmpty() &&
+                    EVENT_TYPE_RETURN.equalsIgnoreCase(normalize(data.get("refundOrReturnType")))) {
+                String siblingOrderId = normalize(data.get("orderId"))
+                if (siblingOrderId && omsOrderIds.contains(siblingOrderId)) {
+                    remove = true
+                    siblingSuppressed = true
+                }
+            }
+            if (!remove) return
+
+            String rowId = DiffDocumentStreamSupport.rowIdOf(row)
+            if (!rowId) return
+            removeIdsByToken.computeIfAbsent(missingToken) { new LinkedHashSet<String>() }.add(rowId)
+            if (pending) pendingCount++
+            else if (preWindow) preWindowCount++
+            else if (cancelledByField) cancelledByFieldCount++
+            else if (siblingSuppressed) siblingReturnCount++
+            else if (cancelledItemSuppressed) cancelledItemCount++
         }
         if (!sawDifferencesHeader) {
             warnings.add("Return presence check skipped: diff document has no differences section.")
@@ -429,67 +401,15 @@ class ReturnPresenceVerificationSupport {
         int removedMissingInOms = removeIdsByToken.get(omsToken)?.size() ?: 0
         int removedMissingInShopify = removeIdsByToken.get(shopifyToken)?.size() ?: 0
         // onlyInFile1Count counts records present only in file1 = missing in file2, and vice versa —
-        // same mapping MissingDiffVerificationSupport's own adjustSummary relies on.
+        // same mapping DiffDocumentStreamSupport.summaryLessRemovedMissing relies on.
         int removedMissingInFile1 = (omsToken && omsToken == file1Token ? removedMissingInOms : 0) +
                 (shopifyToken && shopifyToken == file1Token ? removedMissingInShopify : 0)
         int removedMissingInFile2 = (omsToken && omsToken == file2Token ? removedMissingInOms : 0) +
                 (shopifyToken && shopifyToken == file2Token ? removedMissingInShopify : 0)
 
         // Pass 2 — stream-rewrite to a sibling temp file, then atomically replace the original.
-        File tempFile = new File(diffFile.getParentFile(), diffFile.getName() + ".returns-verify-tmp")
-        diffFile.withReader("UTF-8") { Reader reader ->
-            BufferedReader lines = new BufferedReader(reader)
-            tempFile.withWriter("UTF-8") { Writer writer ->
-                String line
-                boolean inRows = false
-                boolean documentClosed = false
-                boolean firstRowWritten = false
-                while ((line = lines.readLine()) != null) {
-                    if (documentClosed) continue
-                    if (!inRows) {
-                        if (line.startsWith(SUMMARY_PREFIX)) {
-                            writer << SUMMARY_PREFIX + JsonOutput.toJson(adjustSummary(slurper, line,
-                                    removedCount, removedMissingInFile1, removedMissingInFile2)) + ",\n"
-                        } else if (line.startsWith(DIFFERENCES_HEADER)) {
-                            inRows = !line.startsWith(DIFFERENCES_HEADER + "]")
-                            if (inRows) writer << DIFFERENCES_HEADER
-                            else writer << line << "\n"
-                        } else if (line.startsWith(PROCESSING_WARNINGS_PREFIX)) {
-                            writer << PROCESSING_WARNINGS_PREFIX + JsonOutput.toJson(
-                                    appendedWarnings(slurper, line, auditNote)) + ",\n"
-                        } else {
-                            writer << line << "\n"
-                        }
-                        continue
-                    }
-                    String rowJson = stripRowLine(line)
-                    if (rowJson == null) {
-                        writer << "]\n}"
-                        documentClosed = true
-                        continue
-                    }
-                    boolean lastRow = line.endsWith("]")
-                    boolean removeRow = false
-                    if (rowJson.contains("\"missingIn\"")) {
-                        Map row = parseRowQuietly(slurper, rowJson)
-                        String missingToken = row == null ? null : DiffDetailClassifier.normalizeToken(row.get("missingIn"))
-                        String rowId = row == null ? null : rowIdOf(row)
-                        removeRow = rowId != null && removeIdsByToken.get(missingToken)?.contains(rowId)
-                    }
-                    if (!removeRow) {
-                        if (firstRowWritten) writer << ","
-                        writer << "\n" << rowJson
-                        firstRowWritten = true
-                    }
-                    if (lastRow) {
-                        writer << "]\n}"
-                        documentClosed = true
-                        inRows = false
-                    }
-                }
-            }
-        }
-        replaceFile(tempFile, diffFile)
+        DiffDocumentStreamSupport.removeMissingRows(diffFile, ".returns-verify-tmp", removeIdsByToken,
+                removedCount, removedMissingInFile1, removedMissingInFile2, auditNote)
 
         return [performed: true, rewritten: true, pendingCount: pendingCount, preWindowSuppressedCount: preWindowCount,
                 malformedCount: malformedCount, removedCount: removedCount,
@@ -498,23 +418,6 @@ class ReturnPresenceVerificationSupport {
                 siblingReturnSuppressedCount: siblingReturnCount,
                 cancelledItemSuppressedCount: cancelledItemCount,
                 warnings: warnings, auditNote: auditNote] as Map<String, Object>
-    }
-
-    /** A row line ends with "," (more rows follow) or "]" (last row); the closing "}" line ends the region. */
-    private static String stripRowLine(String line) {
-        String trimmed = line.trim()
-        if (trimmed == "}" || trimmed == "]" || trimmed.isEmpty()) return null
-        if (trimmed.endsWith(",") || trimmed.endsWith("]")) return trimmed.substring(0, trimmed.length() - 1)
-        return trimmed
-    }
-
-    private static Map parseRowQuietly(JsonSlurper slurper, String rowJson) {
-        try {
-            Object parsed = slurper.parseText(rowJson)
-            return parsed instanceof Map ? (Map) parsed : null
-        } catch (Exception ignored) {
-            return null
-        }
     }
 
     /**
@@ -533,14 +436,6 @@ class ReturnPresenceVerificationSupport {
         } catch (Exception ignored) {
             return null
         }
-    }
-
-    /** Ruleset diff rows carry the record id in primaryId; generic diff rows in id. */
-    private static String rowIdOf(Map row) {
-        String primaryId = row.get("primaryId")?.toString()?.trim()
-        if (primaryId) return primaryId
-        String id = row.get("id")?.toString()?.trim()
-        return id ?: null
     }
 
     /**
@@ -576,49 +471,6 @@ class ReturnPresenceVerificationSupport {
         List records = (group instanceof List) ? (List) group : (group == null ? [] : [group])
         return records.any { Object record ->
             record instanceof Map && CANCELLED_ORDER_STATUS_ID.equalsIgnoreCase(normalize(((Map) record).get("statusId")))
-        }
-    }
-
-    private static Map adjustSummary(JsonSlurper slurper, String summaryLine, int removedCount,
-                                     int removedMissingInFile1, int removedMissingInFile2) {
-        Object fragment = headerFragment(slurper, summaryLine, SUMMARY_PREFIX)
-        Map summary = fragment instanceof Map ? (Map) fragment : [:]
-        decrement(summary, "totalDifferences", removedCount)
-        decrement(summary, "onlyInFile1Count", removedMissingInFile2)
-        decrement(summary, "onlyInFile2Count", removedMissingInFile1)
-        decrement(summary, "missingObjectDifferenceCount", removedCount)
-        return summary
-    }
-
-    private static List appendedWarnings(JsonSlurper slurper, String warningsLine, String auditNote) {
-        Object fragment = headerFragment(slurper, warningsLine, PROCESSING_WARNINGS_PREFIX)
-        List warningsList = fragment instanceof List ? new ArrayList((List) fragment) : []
-        if (auditNote) warningsList.add(auditNote)
-        return warningsList
-    }
-
-    private static Object headerFragment(JsonSlurper slurper, String line, String prefix) {
-        String fragment = line.substring(prefix.length()).trim()
-        if (fragment.endsWith(",")) fragment = fragment.substring(0, fragment.length() - 1)
-        try {
-            return slurper.parseText(fragment)
-        } catch (Exception ignored) {
-            return null
-        }
-    }
-
-    private static void decrement(Map summary, String key, int by) {
-        Object value = summary.get(key)
-        if (value instanceof Number && by > 0) summary.put(key, Math.max(0L, ((Number) value).longValue() - by))
-    }
-
-    private static void replaceFile(File source, File target) {
-        Path sourcePath = source.toPath()
-        Path targetPath = target.toPath()
-        try {
-            Files.move(sourcePath, targetPath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-        } catch (AtomicMoveNotSupportedException ignored) {
-            Files.move(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING)
         }
     }
 

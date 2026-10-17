@@ -42,6 +42,58 @@ class RuleSetCompareScopeServiceSmokeTests {
         ec.message.clearErrors()
     }
 
+    /**
+     * Characterization: execute#RuleSet and execute#RuleSetMatchedPairs fire the same facts through the
+     * same bounded session and differ only in what they report afterwards.
+     */
+    @Test
+    void ruleSetFactServicesFireTheSameFactsAndReportTheirOwnShape() {
+        List<Map> facts = [
+                [primaryId: "P1", file1: [sku: "A", price: "1"], file2: [sku: "B", price: "1"]],
+                [primaryId: "P2", file1: [sku: "C", price: "1"], file2: [sku: "C", price: "1"]],
+        ]
+
+        Map<String, Object> matchedOnly = ec.service.sync()
+                .name("reconciliation.ReconciliationRuleEngineServices.execute#RuleSet")
+                .parameters([ruleSetId: "DARPAN_TEST_PRODUCT_COMPARE_RS", dataList: facts, returnAllFacts: false])
+                .disableAuthz()
+                .call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertNull(matchedOnly.error)
+        assertEquals(2, matchedOnly.ruleCount)
+        assertEquals(1, matchedOnly.firedRuleCount)
+        assertEquals([], matchedOnly.matchedResults)
+        assertEquals([], matchedOnly.results)
+        assertEquals([], matchedOnly.warnings)
+
+        Map<String, Object> allFacts = ec.service.sync()
+                .name("reconciliation.ReconciliationRuleEngineServices.execute#RuleSet")
+                .parameters([ruleSetId: "DARPAN_TEST_PRODUCT_COMPARE_RS", dataList: facts, returnAllFacts: true])
+                .disableAuthz()
+                .call()
+        assertNull(allFacts.error)
+        assertEquals(1, allFacts.firedRuleCount)
+        assertEquals(["P1", "P2"], ((List<Map>) allFacts.results)*.primaryId)
+        assertFalse(facts[0].is(((List<Map>) allFacts.results)[0]), "facts are copied, never the caller's maps")
+
+        Map<String, Object> pairs = ec.service.sync()
+                .name("reconciliation.ReconciliationRuleEngineServices.execute#RuleSetMatchedPairs")
+                .parameters([ruleSetId: "DARPAN_TEST_PRODUCT_COMPARE_RS", dataList: facts])
+                .disableAuthz()
+                .call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertNull(pairs.error)
+        assertEquals(2, pairs.ruleCount)
+        assertEquals(1, pairs.firedRuleCount)
+        assertEquals([], pairs.matchedResults)
+        assertEquals([], pairs.warnings)
+        List<Map> diffResults = (List<Map>) pairs.diffResults
+        assertEquals(1, diffResults.size())
+        assertEquals("FIELD_MISMATCH", diffResults[0].diffType)
+        assertEquals("sku", diffResults[0].field)
+        assertEquals("DARPAN_TEST_PRODUCT_SKU_MISMATCH", diffResults[0].ruleId)
+    }
+
     @Test
     void prepareCompareScopeReturnsNormalizedDatasetsForCallerPipeline() {
         Map<String, Object> prepared = ec.service.sync()

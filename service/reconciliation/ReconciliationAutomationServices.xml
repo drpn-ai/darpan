@@ -1,10 +1,43 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
+    <!-- The outcome of one SFTP poll-and-reconcile. run#SftpFileAutomation passes poll#SftpAndReconcile's
+         outcome through, so both declare it from here; a key missing from this list is dropped from the
+         poll script service's result. -->
+    <service verb="define" noun="SftpReconcileOutcome" type="interface">
+        <description>Out-parameters shared by poll#SftpAndReconcile and run#SftpFileAutomation.</description>
+        <out-parameters>
+            <parameter name="dataAvailable" type="Boolean"/>
+            <parameter name="statusMessage"/>
+
+            <parameter name="file1Source"/>
+            <parameter name="file2Source"/>
+            <parameter name="file1SelectedName"/>
+            <parameter name="file2SelectedName"/>
+            <parameter name="file1StagedLocation"/>
+            <parameter name="file2StagedLocation"/>
+
+            <parameter name="file1Type"/>
+            <parameter name="file2Type"/>
+            <parameter name="reconciliationType"/>
+
+            <parameter name="diffLocation"/>
+            <parameter name="diffFileName"/>
+            <parameter name="differenceCount" type="Integer"/>
+            <parameter name="onlyInFile1Count" type="Integer"/>
+            <parameter name="onlyInFile2Count" type="Integer"/>
+            <parameter name="validationErrors" type="List"/>
+            <parameter name="processingWarnings" type="List"/>
+            <!-- Self-review #4: surface rule build/eval failure so the SFTP automation records FAILED. -->
+            <parameter name="ruleExecutionFailed" type="Boolean"/>
+        </out-parameters>
+    </service>
+
     <service verb="poll" noun="SftpAndReconcile" type="script" transaction="ignore"
             location="component://darpan/src/main/groovy/darpan/reconciliation/automation/pollSftpAndRunReconciliation.groovy"
             allow-remote="false" authenticate="anonymous-all">
         <description>Check configured SFTP locations for available files and run reconciliation through the RuleSet compare-scope pipeline or the temporary mapping bridge.</description>
+        <implements service="reconciliation.ReconciliationAutomationServices.define#SftpReconcileOutcome"/>
         <in-parameters>
             <parameter name="ruleSetId">
                 <description>Preferred RuleSet input for the SFTP automation cutover. When present, automation routing uses the RuleSet compare-scope pipeline.</description>
@@ -78,35 +111,11 @@
             <parameter name="sparkMaster"/>
             <parameter name="sparkAppName" default-value="SftpReconciliation"/>
         </in-parameters>
-        <out-parameters>
-            <parameter name="dataAvailable" type="Boolean"/>
-            <parameter name="statusMessage"/>
-
-            <parameter name="file1Source"/>
-            <parameter name="file2Source"/>
-            <parameter name="file1SelectedName"/>
-            <parameter name="file2SelectedName"/>
-            <parameter name="file1StagedLocation"/>
-            <parameter name="file2StagedLocation"/>
-
-            <parameter name="file1Type"/>
-            <parameter name="file2Type"/>
-            <parameter name="reconciliationType"/>
-
-            <parameter name="diffLocation"/>
-            <parameter name="diffFileName"/>
-            <parameter name="differenceCount" type="Integer"/>
-            <parameter name="onlyInFile1Count" type="Integer"/>
-            <parameter name="onlyInFile2Count" type="Integer"/>
-            <parameter name="validationErrors" type="List"/>
-            <parameter name="processingWarnings" type="List"/>
-            <!-- Self-review #4: surface rule build/eval failure so the SFTP automation records FAILED. -->
-            <parameter name="ruleExecutionFailed" type="Boolean"/>
-        </out-parameters>
     </service>
 
     <service verb="run" noun="SftpFileAutomation" transaction="ignore" allow-remote="false" authenticate="anonymous-all">
         <description>Run one saved SFTP-file automation, recording execution status and delegating file access to the centralized SFTP poll-and-reconcile service.</description>
+        <implements service="reconciliation.ReconciliationAutomationServices.define#SftpReconcileOutcome"/>
         <in-parameters>
             <parameter name="automationId" required="true">
                 <description>ReconciliationAutomation row to execute. The automation must use AUT_IN_SFTP_FILES and two AUT_SRC_SFTP source rows.</description>
@@ -139,31 +148,7 @@
             <parameter name="statusEnumId"/>
             <parameter name="reconciliationRunResultId"/>
             <parameter name="resultDataManagerPath"/>
-
-            <parameter name="dataAvailable" type="Boolean"/>
-            <parameter name="statusMessage"/>
             <parameter name="pollAttemptCount" type="Integer"/>
-
-            <parameter name="file1Source"/>
-            <parameter name="file2Source"/>
-            <parameter name="file1SelectedName"/>
-            <parameter name="file2SelectedName"/>
-            <parameter name="file1StagedLocation"/>
-            <parameter name="file2StagedLocation"/>
-
-            <parameter name="file1Type"/>
-            <parameter name="file2Type"/>
-            <parameter name="reconciliationType"/>
-
-            <parameter name="diffLocation"/>
-            <parameter name="diffFileName"/>
-            <parameter name="differenceCount" type="Integer"/>
-            <parameter name="onlyInFile1Count" type="Integer"/>
-            <parameter name="onlyInFile2Count" type="Integer"/>
-            <parameter name="validationErrors" type="List"/>
-            <parameter name="processingWarnings" type="List"/>
-            <!-- Self-review #4: surface rule build/eval failure so the SFTP automation records FAILED. -->
-            <parameter name="ruleExecutionFailed" type="Boolean"/>
         </out-parameters>
         <actions>
             <set field="automationResult" from="darpan.reconciliation.automation.SftpAutomationSupport.runSftpFileAutomation(ec, context)"/>

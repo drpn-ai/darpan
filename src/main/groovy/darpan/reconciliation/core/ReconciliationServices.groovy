@@ -267,14 +267,7 @@ class ReconciliationServices {
              String diffLocation = null
              String diffFileName = null
 
-             String outputBaseLocation = outputLocation
-             def outputRef = ec.resource.getLocationReference(outputBaseLocation)
-             File outputDir = outputRef?.getFile()
-             if (outputDir == null) {
-                  String runtimePath = ec.factory.getRuntimePath()
-                  outputDir = new File(runtimePath, outputBaseLocation.replace("runtime://", ""))
-             }
-             if (!outputDir.exists()) outputDir.mkdirs()
+             File outputDir = resolveOutputDirectory(ec, outputLocation)
 
              String timestamp = ec.l10n.format(ec.user.nowTimestamp, "yyyyMMdd-HHmmss")
              String mappingSlug = reconciliationMappingName ? reconciliationMappingName.replaceAll(/[^A-Za-z0-9_-]/, "-") : null
@@ -283,13 +276,7 @@ class ReconciliationServices {
              String baseFileName = outputFileName ?: defaultBase
              if (!baseFileName.toLowerCase().endsWith(".json")) baseFileName = baseFileName + ".json"
 
-             File outputFile = new File(outputDir, baseFileName)
-             int suffix = 1
-             String nameRoot = baseFileName.indexOf(".") > 0 ? baseFileName.substring(0, baseFileName.lastIndexOf(".")) : baseFileName
-             while (outputFile.exists()) {
-                 outputFile = new File(outputDir, "${nameRoot}-${suffix}.json")
-                 suffix++
-             }
+             File outputFile = nextFreeJsonOutputFile(outputDir, baseFileName)
              baseFileName = outputFile.getName()
 
             diffLocation = outputFile.getAbsolutePath()
@@ -735,14 +722,8 @@ class ReconciliationServices {
         return "RuleSet ${ruleSetId} compare scope '${compareScopeLabel}' rule execution failed; preserved base missing-object diffs.${batchToken} Error: ${normalize(error)}"
     }
 
-    static Map<String, Object> writeDiffDatasetOutput(ExecutionContext ec, Dataset diffDf, String outputLocation,
-                                                      String outputFileName, String defaultBaseName,
-                                                      Map<String, Object> outputMetadata, Map<String, Object> outputSummary,
-                                                      List validationErrors, List processingWarnings) {
-        if (ec == null) throw new IllegalArgumentException("ec is required")
-        if (diffDf == null) throw new IllegalArgumentException("diffDf is required")
-
-        String outputBaseLocation = normalize(outputLocation) ?: "runtime://tmp/reconciliation/output"
+    /** The output folder for a location, created when missing; a runtime:// location that does not resolve falls back under the runtime path. */
+    private static File resolveOutputDirectory(ExecutionContext ec, String outputBaseLocation) {
         def outputRef = ec.resource.getLocationReference(outputBaseLocation)
         File outputDir = outputRef?.getFile()
         if (outputDir == null) {
@@ -750,11 +731,11 @@ class ReconciliationServices {
             outputDir = new File(runtimePath, outputBaseLocation.replace("runtime://", ""))
         }
         if (!outputDir.exists()) outputDir.mkdirs()
+        return outputDir
+    }
 
-        String timestamp = ec.l10n.format(ec.user.nowTimestamp, "yyyyMMdd-HHmmss")
-        String baseFileName = normalize(outputFileName) ?: normalize(defaultBaseName) ?: "diff-${timestamp}.json"
-        if (!baseFileName.toLowerCase().endsWith(".json")) baseFileName = baseFileName + ".json"
-
+    /** baseFileName in outputDir, or the first free "<root>-<n>.json" when that name is taken — never an overwrite. */
+    private static File nextFreeJsonOutputFile(File outputDir, String baseFileName) {
         File outputFile = new File(outputDir, baseFileName)
         int suffix = 1
         String nameRoot = baseFileName.indexOf(".") > 0 ? baseFileName.substring(0, baseFileName.lastIndexOf(".")) : baseFileName
@@ -762,6 +743,23 @@ class ReconciliationServices {
             outputFile = new File(outputDir, "${nameRoot}-${suffix}.json")
             suffix++
         }
+        return outputFile
+    }
+
+    static Map<String, Object> writeDiffDatasetOutput(ExecutionContext ec, Dataset diffDf, String outputLocation,
+                                                      String outputFileName, String defaultBaseName,
+                                                      Map<String, Object> outputMetadata, Map<String, Object> outputSummary,
+                                                      List validationErrors, List processingWarnings) {
+        if (ec == null) throw new IllegalArgumentException("ec is required")
+        if (diffDf == null) throw new IllegalArgumentException("diffDf is required")
+
+        File outputDir = resolveOutputDirectory(ec, normalize(outputLocation) ?: "runtime://tmp/reconciliation/output")
+
+        String timestamp = ec.l10n.format(ec.user.nowTimestamp, "yyyyMMdd-HHmmss")
+        String baseFileName = normalize(outputFileName) ?: normalize(defaultBaseName) ?: "diff-${timestamp}.json"
+        if (!baseFileName.toLowerCase().endsWith(".json")) baseFileName = baseFileName + ".json"
+
+        File outputFile = nextFreeJsonOutputFile(outputDir, baseFileName)
 
         outputFile.withWriter("UTF-8") { writer ->
             writer << "{\n"

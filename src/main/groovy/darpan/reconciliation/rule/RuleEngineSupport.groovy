@@ -218,35 +218,22 @@ class RuleEngineSupport {
             KieContainer container = compiled.container as KieContainer
             List warnings = ((compiled.warnings ?: []) as List).collect { it?.toString() }
 
-            List<Map> facts = rows.collect { Object row ->
-                if (row instanceof Map) return new LinkedHashMap((Map) row)
-                return [value: row]
-            }
+            List<Map> facts = toFacts(rows)
+            Map<String, Object> fireResult = fireFactsInNewSession(container, ruleSetId, facts)
+            if (fireResult.halted) return [error: haltedEvaluationError(ruleSetId)]
+            int fired = fireResult.fired as int
+            List matchedResults = (List) fireResult.matchedResults
+            List output = returnAllFacts ? facts : matchedResults
 
-            List matchedResults = []
-            KieSession session = container.newKieSession()
-            try {
-                session.setGlobal("results", matchedResults)
-                facts.each { Map fact -> session.insert(fact) }
-                Map<String, Object> fireResult = fireAllRulesBounded(session, ruleSetId)
-                if (fireResult.halted) {
-                    return [error: "Rule evaluation for ruleSet ${ruleSetId} exceeded ${MAX_RULE_EVAL_MILLIS}ms and was halted; results discarded as incomplete.".toString()]
-                }
-                int fired = fireResult.fired as int
-                List output = returnAllFacts ? facts : matchedResults
-
-                logger.info("Executed ruleSet={} facts={} fired={} returnAllFacts={}", ruleSetId, facts.size(), fired, returnAllFacts)
-                return [
-                        results       : output,
-                        matchedResults: matchedResults,
-                        firedRuleCount: fired,
-                        ruleCount     : compiled.ruleCount,
-                        warnings      : warnings,
-                        error         : null
-                ]
-            } finally {
-                disposeQuietly(session)
-            }
+            logger.info("Executed ruleSet={} facts={} fired={} returnAllFacts={}", ruleSetId, facts.size(), fired, returnAllFacts)
+            return [
+                    results       : output,
+                    matchedResults: matchedResults,
+                    firedRuleCount: fired,
+                    ruleCount     : compiled.ruleCount,
+                    warnings      : warnings,
+                    error         : null
+            ]
         } catch (Exception e) {
             logger.error("Rule execution failed for ruleSet={}", ruleSetId, e)
             return [error: "Rule execution failed: ${e.message}"]
@@ -259,54 +246,71 @@ class RuleEngineSupport {
             KieContainer container = compiled.container as KieContainer
             List<String> warnings = ((compiled.warnings ?: []) as List).collect { it?.toString() }.findAll { it }
 
-            List<Map> facts = rows.collect { Object row ->
-                (row instanceof Map) ? new LinkedHashMap((Map) row) : [value: row]
-            }
+            List<Map> facts = toFacts(rows)
+            Map<String, Object> fireResult = fireFactsInNewSession(container, ruleSetId, facts)
+            if (fireResult.halted) return [error: haltedEvaluationError(ruleSetId)]
+            int fired = fireResult.fired as int
+            List matchedResults = (List) fireResult.matchedResults
 
-            List matchedResults = []
-            KieSession session = container.newKieSession()
-            try {
-                session.setGlobal("results", matchedResults)
-                facts.each { Map fact -> session.insert(fact) }
-                Map<String, Object> fireResult = fireAllRulesBounded(session, ruleSetId)
-                if (fireResult.halted) {
-                    return [error: "Rule evaluation for ruleSet ${ruleSetId} exceeded ${MAX_RULE_EVAL_MILLIS}ms and was halted; results discarded as incomplete.".toString()]
-                }
-                int fired = fireResult.fired as int
-
-                List<Map> diffResults = []
-                facts.each { Map fact ->
-                    List<Map> normalizedDiffs = RuleDiffSupport.extractNormalizedDiffs(fact)
-                    if (normalizedDiffs) {
-                        diffResults.addAll(normalizedDiffs)
-                        return
-                    }
-
-                    List matchedRuleIds = (fact.get("_matchedRuleIds") instanceof List) ? (List) fact.get("_matchedRuleIds") : []
-                    if (matchedRuleIds) {
-                        String compareScopeId = normalize(fact.compareScopeId)
-                        String primaryId = normalize(fact.primaryId)
-                        warnings.add("RuleSet ${ruleSetId} matched compareScope=${compareScopeId ?: '(unknown)'} primaryId=${primaryId ?: '(unknown)'} but emitted no diff rows.")
-                    }
+            List<Map> diffResults = []
+            facts.each { Map fact ->
+                List<Map> normalizedDiffs = RuleDiffSupport.extractNormalizedDiffs(fact)
+                if (normalizedDiffs) {
+                    diffResults.addAll(normalizedDiffs)
+                    return
                 }
 
-                logger.info("Executed matched-pair rules ruleSet={} facts={} fired={} diffRows={}",
-                        ruleSetId, facts.size(), fired, diffResults.size())
-                return [
-                        diffResults   : diffResults,
-                        matchedResults: matchedResults,
-                        firedRuleCount: fired,
-                        ruleCount     : compiled.ruleCount,
-                        warnings      : warnings.unique(),
-                        error         : null
-                ]
-            } finally {
-                disposeQuietly(session)
+                List matchedRuleIds = (fact.get("_matchedRuleIds") instanceof List) ? (List) fact.get("_matchedRuleIds") : []
+                if (matchedRuleIds) {
+                    String compareScopeId = normalize(fact.compareScopeId)
+                    String primaryId = normalize(fact.primaryId)
+                    warnings.add("RuleSet ${ruleSetId} matched compareScope=${compareScopeId ?: '(unknown)'} primaryId=${primaryId ?: '(unknown)'} but emitted no diff rows.")
+                }
             }
+
+            logger.info("Executed matched-pair rules ruleSet={} facts={} fired={} diffRows={}",
+                    ruleSetId, facts.size(), fired, diffResults.size())
+            return [
+                    diffResults   : diffResults,
+                    matchedResults: matchedResults,
+                    firedRuleCount: fired,
+                    ruleCount     : compiled.ruleCount,
+                    warnings      : warnings.unique(),
+                    error         : null
+            ]
         } catch (Exception e) {
             logger.error("Matched-pair rule execution failed for ruleSet={}", ruleSetId, e)
             return [error: "Matched-pair rule execution failed: ${e.message}"]
         }
+    }
+
+    /** Each row as its own mutable fact Map; a non-Map row is wrapped as [value: row]. */
+    private static List<Map> toFacts(List rows) {
+        return rows.collect { Object row ->
+            (row instanceof Map) ? new LinkedHashMap((Map) row) : [value: row]
+        }
+    }
+
+    /**
+     * Inserts the facts into a fresh session with a "results" global, fires it under the evaluation
+     * budget and disposes it. Returns [halted, fired, matchedResults]; the facts carry whatever the
+     * rules wrote onto them.
+     */
+    private static Map<String, Object> fireFactsInNewSession(KieContainer container, String ruleSetId, List<Map> facts) {
+        List matchedResults = []
+        KieSession session = container.newKieSession()
+        try {
+            session.setGlobal("results", matchedResults)
+            facts.each { Map fact -> session.insert(fact) }
+            Map<String, Object> fireResult = fireAllRulesBounded(session, ruleSetId)
+            return [halted: fireResult.halted, fired: fireResult.fired, matchedResults: matchedResults]
+        } finally {
+            disposeQuietly(session)
+        }
+    }
+
+    private static String haltedEvaluationError(String ruleSetId) {
+        return "Rule evaluation for ruleSet ${ruleSetId} exceeded ${MAX_RULE_EVAL_MILLIS}ms and was halted; results discarded as incomplete.".toString()
     }
 
     private static Map<String, Object> getOrBuildContainer(def ec, String ruleSetId, boolean useCache = true, boolean forceRebuild = false) {

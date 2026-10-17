@@ -30,7 +30,8 @@ class LifecycleSupport {
                                                ["date", "TO_CHAR(trandate, 'YYYY-MM-DD') AS trandate"],
                                                ["status", "BUILTIN.DF(status) AS status"], ["customer", "BUILTIN.DF(entity) AS customer"],
                                                ["total", "foreigntotal"], ["shippingMethod", "BUILTIN.DF(shipmethod) AS shipmethod"],
-                                               ["reference", "otherrefnum"]]
+                                               ["reference", "otherrefnum"],
+                                               ["itemsBackordered", "LINE_SUM(quantitybackordered) AS backordered"]]
     /** A detail a person chose (a custom field) is selected under its own alias, apart from a leave-out rule's column. */
     static final String DETAIL_ALIAS = "detail"
 
@@ -104,7 +105,10 @@ class LifecycleSupport {
             String ask = "${q.check}:${stage}".toString()
             if (queryByAsk.containsKey(ask)) return
             String stageName = LifecycleStageCompiler.words(stage).name.toLowerCase()
-            queryByAsk[ask] = q.check == LifecycleStageCompiler.PRESENT
+            queryByAsk[ask] = q.check == LifecycleStageCompiler.EXCUSED
+                    ? createQuery(ec, authId, tenantId, userId, now, startType, stage, null,
+                        "${plural} with no ${stageName}, excused".toString(), "LINKED_CHILD_EXCUSED")
+                    : q.check == LifecycleStageCompiler.PRESENT
                     ? createQuery(ec, authId, tenantId, userId, now, startType, null, stage, "${plural} with a ${stageName}".toString())
                     : createQuery(ec, authId, tenantId, userId, now, startType, stage, null, "${plural} with no ${stageName}".toString())
         }
@@ -121,7 +125,7 @@ class LifecycleSupport {
             // so the rule is named after them: the start's population, or its place. A question whose findings
             // carry on to the next one finds the records missing its stage. Rule names are unique per tenant, and a
             // reorder leaves the earlier rules in place for past runs, so a taken name gains a number.
-            String found = isStart ? q.runName : (q.noOutcomeLabel ?: LifecycleStageCompiler.words(q.stageRecordType as String).neg.capitalize())
+            String found = isStart ? q.runName : (q.noOutcomeLabel ?: q.ruleLabel ?: LifecycleStageCompiler.words(q.stageRecordType as String).neg.capitalize())
             String ruleSetId = createRule(ec, uniqueRuleName(ec, "${name} · ${found}".toString()), queryId)
             if (ruleSetId == null) return false
             ownAndPointAtRecords(ec, ruleSetId, reconciliationId)
@@ -165,7 +169,8 @@ class LifecycleSupport {
         if (startQuery == null) { ec.message.addError("This lifecycle's start could not be found."); return [:] }
         String startType = startQuery.get("recordType") as String
         List<String> oldStages = LifecycleRuleSupport.stagesOf(ec, reconciliationId)*.recordType
-        if (oldStages == stages) return [reconciliationName: run.get("reconciliationName")]
+        // Unchanged, unless the tree predates the excused track (then it is rebuilt in the same order).
+        if (oldStages == stages && hasExcusedTrack(questions, stages)) return [reconciliationName: run.get("reconciliationName")]
         List<Map> plan
         try {
             plan = LifecycleStageCompiler.compile(startType, stages)
@@ -190,6 +195,11 @@ class LifecycleSupport {
                     fieldId: e.fieldId, fieldLabel: e.fieldLabel, value: e.value])
         }
         return ec.message.hasError() ? [:] : [reconciliationName: name]
+    }
+
+    /** Whether a tree has the excused track a lifecycle of more than one stage is built with since 2026-10-16. */
+    static boolean hasExcusedTrack(List<Map> questions, List<String> stages) {
+        return stages.size() < 2 || questions.any { it.isActive != "N" && it.questionRole == LifecycleStageCompiler.EXCUSED }
     }
 
     /**
@@ -291,12 +301,13 @@ class LifecycleSupport {
     }
 
     private static String createQuery(def ec, String authId, String tenantId, String userId, def now, String recordType,
-                                      String absentChildRecordType, String presentChildRecordType, String description) {
+                                      String absentChildRecordType, String presentChildRecordType, String description,
+                                      String template = null) {
         def query = ec.entity.makeValue(QUERY)
         query.setSequencedIdPrimary()
         query.setAll([nsAuthConfigId: authId, companyUserGroupId: tenantId, createdByUserId: userId, description: description,
                       recordType: recordType, fromTable: "transaction", dateColumn: "trandate",
-                      queryTemplate: absentChildRecordType ? "LINKED_CHILD_ABSENT" : presentChildRecordType ? "LINKED_CHILD_PRESENT" : "RECORDS",
+                      queryTemplate: template ?: absentChildRecordType ? "LINKED_CHILD_ABSENT" : presentChildRecordType ? "LINKED_CHILD_PRESENT" : "RECORDS",
                       absentChildRecordType: absentChildRecordType, presentChildRecordType: presentChildRecordType,
                       isActive: "Y", createdDate: now, lastUpdatedDate: now])
         query.create()

@@ -10,13 +10,18 @@ package darpan.reconciliation.flowchart
  *  - stage k asks "is stage k missing?" (ABSENT) of the records that reached stage k-1;
  *  - beside the last stage, "has it reached the last stage?" (PRESENT) finds the complete records;
  *  - under stage k's "no", for each later stage j: "has it reached j?" (PRESENT) finds those that skipped ahead
- *    to j, and "is j missing too?" (ABSENT) carries the rest on, or, at the last stage, finds those that stopped.
+ *    to j, and "is j missing too?" (ABSENT) carries the rest on, or, at the last stage, finds those that stopped;
+ *  - after stage k (not the last), "did an exception excuse it?" (EXCUSED) takes the records an exception let past
+ *    stage k without it (Store Pickup orders with no fulfillment) onto their own track, so the next stage sees only
+ *    records that reached k; on that track, "is j missing?" for each later stage finds where they stopped.
  * So every record lands in exactly one place, and every place has a name.
  */
 class LifecycleStageCompiler {
 
     static final String ABSENT = "ABSENT"
     static final String PRESENT = "PRESENT"
+    /** The question (and its role) that sets a stage's excused records apart; the spine steps over it. */
+    static final String EXCUSED = "EXCUSED"
 
     /** NetSuite transaction types a lifecycle may use, in plain words. The keys double as the SuiteQL whitelist. */
     static final Map<String, Map<String, String>> RECORD_TYPES = [
@@ -52,13 +57,27 @@ class LifecycleStageCompiler {
                           recordType: startRecordType, runName: start.plural]]
         int n = stages.size()
         for (int k = 0; k < n; k++) {
-            String parent = k == 0 ? "start" : "s${k - 1}".toString()
+            String parent = k == 0 ? "start" : "x${k - 1}".toString()
             boolean last = k == n - 1
             out << [key: "s${k}".toString(), parentKey: parent, parentBranch: "YES", stageRecordType: stages[k], check: ABSENT,
                     runName: s[k].name, noOutcomeLabel: last ? stoppedName(s, k) : null]
             if (last) {
                 out << [key: "done", parentKey: parent, parentBranch: "YES", stageRecordType: stages[k], check: PRESENT,
                         runName: s[k].name, noOutcomeLabel: completeName(s)]
+            } else {
+                out << [key: "x${k}".toString(), parentKey: "s${k}".toString(), parentBranch: "YES", questionRole: EXCUSED,
+                        stageRecordType: stages[k], check: EXCUSED, runName: s[k].name, ruleLabel: excusedName(s, k)]
+            }
+        }
+        // The excused track: a record let past stage k by an exception stops at the first later stage it is missing.
+        for (int k = 0; k < n - 1; k++) {
+            String parent = "x${k}".toString(), branch = "NO"
+            for (int j = k + 1; j < n; j++) {
+                String key = "x${k}.not${j}".toString()
+                out << [key: key, parentKey: parent, parentBranch: branch, stageRecordType: stages[j], check: ABSENT,
+                        runName: s[j].name, noOutcomeLabel: "${excusedName(s, k)}, ${s[j].neg}".toString()]
+                parent = key
+                branch = "YES"
             }
         }
         for (int k = 0; k < n - 1; k++) {
@@ -80,6 +99,9 @@ class LifecycleStageCompiler {
     static String lifecycleName(String startRecordType) {
         return words(startRecordType).plural.split(' ').collect { it.capitalize() }.join(' ')
     }
+
+    /** "Fulfillment not expected": the place a person's exceptions name in their own words on the board. */
+    static String excusedName(List<Map<String, String>> s, int k) { return "${s[k].name} not expected".toString() }
 
     private static String completeName(List<Map<String, String>> s) {
         List<String> p = s.collect { it.past.toLowerCase() }

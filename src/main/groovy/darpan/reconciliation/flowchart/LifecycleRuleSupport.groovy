@@ -96,6 +96,14 @@ class LifecycleRuleSupport {
         if (!value) { ec.message.addError("Choose a value."); return [:] }
         if (value.contains(",") || value.contains("'")) { ec.message.addError("A value with a comma or a quote cannot be used yet."); return [:] }
         if (startOf(ec, reconciliationId) == null) return [:]
+        // A tree built before excused records had their own place is rebuilt first, in the same order, so the records
+        // this exception excuses land there rather than counting as past the stage.
+        List<String> stageTypes = stagesOf(ec, reconciliationId)*.recordType as List<String>
+        List<Map> active = RunFlowchartSupport.loadQuestions(ec, reconciliationId).findAll { it.isActive != "N" }
+        if (stageTypes.contains(stage) && !LifecycleSupport.hasExcusedTrack(active, stageTypes)) {
+            LifecycleSupport.saveStages(ec, [reconciliationId: reconciliationId, stageRecordTypes: stageTypes])
+            if (ec.message.hasError()) return [:]
+        }
         List queries = stageQueries(ec, reconciliationId, stage)
         if (!queries) { ec.message.addError("'${stage}' is not a stage of this lifecycle."); return [:] }
         // A stage holds exceptions on any number of fields, each with its values; a record any of them names is waived.
@@ -130,6 +138,8 @@ class LifecycleRuleSupport {
         List<Map> out = []
         Map current = qs.find { it.questionRole == RunFlowchartTree.ROLE_START }
         while ((current = current ? firstYes(current.reconciliationRunId as String) : null) != null) {
+            // The excused check sits on the spine between two stages; it is not a stage.
+            if (current.questionRole == LifecycleStageCompiler.EXCUSED) continue
             String type = queryOf(ec, current.ruleSetId as String)?.get("absentChildRecordType") as String
             if (type) out << [recordType: type, label: LifecycleStageCompiler.RECORD_TYPES[type]?.name ?: current.runName]
         }

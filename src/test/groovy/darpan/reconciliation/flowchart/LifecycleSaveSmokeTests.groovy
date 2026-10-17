@@ -68,16 +68,20 @@ class LifecycleSaveSmokeTests {
         assertEquals("STAGES", got.reconciliation.buildMode)
         assertEquals(2L, got.reconciliation.lateAfterDays as Long)
         List<Map> qs = got.questions as List<Map>
-        assertEquals(6, qs.size())
+        assertEquals(8, qs.size())
         Map start = qs.find { it.questionRole == "START" }
         Map ship = qs.find { it.parentReconciliationRunId == start.reconciliationRunId && it.noOutcomeLabel == null }
-        Map bill = qs.find { it.parentReconciliationRunId == ship.reconciliationRunId && it.parentBranch == "YES" && it.noOutcomeLabel == "Shipped, never billed" }
-        Map done = qs.find { it.parentReconciliationRunId == ship.reconciliationRunId && it.parentBranch == "YES" && it.noOutcomeLabel == "Shipped and billed" }
+        // Between the stages, the excused check: only records that really shipped go on to billing.
+        Map excused = qs.find { it.parentReconciliationRunId == ship.reconciliationRunId && it.parentBranch == "YES" && it.questionRole == "EXCUSED" }
+        Map bill = qs.find { it.parentReconciliationRunId == excused.reconciliationRunId && it.parentBranch == "YES" && it.noOutcomeLabel == "Shipped, never billed" }
+        Map done = qs.find { it.parentReconciliationRunId == excused.reconciliationRunId && it.parentBranch == "YES" && it.noOutcomeLabel == "Shipped and billed" }
+        Map excusedStop = qs.find { it.parentReconciliationRunId == excused.reconciliationRunId && it.parentBranch == "NO" }
+        assertEquals("Fulfillment not expected, never billed", excusedStop?.noOutcomeLabel)
         Map skip = qs.find { it.parentReconciliationRunId == ship.reconciliationRunId && it.parentBranch == "NO" && it.noOutcomeLabel == "Billed, never shipped" }
         Map stop = qs.find { it.parentReconciliationRunId == ship.reconciliationRunId && it.parentBranch == "NO" && it.noOutcomeLabel == "Never shipped, never billed" }
         assertEquals(["Sales orders", "Fulfillment", "Invoice", "Invoice", "Invoice", "Invoice"], [start, ship, bill, done, skip, stop]*.runName)
         assertTrue([bill, done, skip, stop].every { it != null }, "every place is one question's findings")
-        assertEquals(6, (qs*.ruleSetId as Set).size(), "every question has its own rule")
+        assertEquals(8, (qs*.ruleSetId as Set).size(), "every question has its own rule")
         // A question's records are what it finds, so its rule is named after them: that name heads the records page.
         String name = out.reconciliationName as String
         Map<String, String> ruleNames = [:]
@@ -116,6 +120,10 @@ class LifecycleSaveSmokeTests {
             assertEquals(queryOf(bill), queryOf(stop))
             assertEquals(queryOf(done), queryOf(skip))
             assertTrue(queryOf(bill) != queryOf(done))
+            // The excused records' own place asks "no invoice?" too; the excused check has its own query.
+            assertEquals(queryOf(bill), queryOf(excusedStop))
+            def excusedQuery = ec.entity.find("darpan.reconciliation.NsSuiteQlSourceQuery").condition("nsSuiteQlSourceQueryId", queryOf(excused)).one()
+            assertEquals(["LINKED_CHILD_EXCUSED", "ItemShip"], [excusedQuery.queryTemplate, excusedQuery.absentChildRecordType])
         } finally {
             ec.artifactExecution.enableAuthz()
         }

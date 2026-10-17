@@ -239,7 +239,7 @@ class LifecycleRuleSmokeTests {
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())
         assertEquals([[fieldId: "custbody_hc_order_id", key: "hcOrderId"], [fieldId: "custbody_celigo_etail_order_id", key: "etailOrderId"]], out.details)
 
-        List<String> shown = ["internalId", "order", "date", "status", "customer", "total", "shippingMethod", "reference", "hcOrderId", "etailOrderId"]
+        List<String> shown = ["internalId", "order", "date", "status", "customer", "total", "shippingMethod", "reference", "itemsBackordered", "hcOrderId", "etailOrderId"]
         columnsOfChecks(recId).each { List<List<String>> cols -> assertEquals(shown, cols*.get(0).findAll { it != "custbody_hc_order_id" }, cols.toString()) }
         List<List<String>> start = columnsOfChecks(recId).find { cols -> cols.any { it[0] == "custbody_hc_order_id" } }
         assertNotNull(start, "the leave-out rule's column is kept")
@@ -267,6 +267,35 @@ class LifecycleRuleSmokeTests {
         List<List<List<String>>> all = columnsOfChecks(recId)
         all.each { List<List<String>> cols -> assertEquals(1, cols.count { it[0] == "status" }, cols.toString()) }
         assertTrue(all.every { cols -> cols.contains(["status", "BUILTIN.DF(status) AS status"]) }, all.toString())
+    }
+
+    // A lifecycle built before excused records had a place of their own gains one when an exception is saved, and
+    // the exception lands on the excused check too.
+    @Test
+    void anExceptionOnAnOlderTreeRebuildsItWithTheExcusedTrack() {
+        String recId = lifecycle()
+        ec.artifactExecution.disableAuthz()
+        try {
+            // The shape before: the next stage hangs from the stage itself, and there is no excused track.
+            List all = ec.entity.find("darpan.reconciliation.ReconciliationRun").condition("reconciliationId", recId).list()
+            all.findAll { it.questionRole == "EXCUSED" }.each { def x ->
+                all.findAll { it.parentReconciliationRunId == x.reconciliationRunId }.each { def child ->
+                    if (child.parentBranch == "YES") child.set("parentReconciliationRunId", x.parentReconciliationRunId)
+                    else child.set("isActive", "N")
+                    child.update()
+                }
+                x.set("isActive", "N"); x.update()
+            }
+        } finally {
+            ec.artifactExecution.enableAuthz()
+        }
+        Map out = call("facade.ReconciliationFacadeServices.save#LifecycleStageException",
+                [reconciliationId: recId, stageRecordType: "ItemShip", fieldId: "shipmethod", fieldLabel: "Shipping Method", value: "Store Pickup"])
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals([["ItemShip", "Store Pickup"]], (out.exceptions as List<Map>).collect { [it.stageRecordType, it.value] })
+        List<Map> qs = (call("facade.ReconciliationFacadeServices.get#Reconciliation", [reconciliationId: recId]).questions as List<Map>)
+        assertEquals(1, qs.count { it.questionRole == "EXCUSED" })
+        assertEquals(["Fulfillment", "Invoice"], (call("facade.ReconciliationFacadeServices.get#Reconciliation", [reconciliationId: recId]).stages as List<Map>)*.label)
     }
 
     // A lifecycle's checks are named after it, so renaming it renames them: their names head the pages its records open on.
@@ -305,7 +334,7 @@ class LifecycleRuleSmokeTests {
         assertEquals(["Invoice", "Fulfillment"], (got.stages as List<Map>)*.label)
         List<Map> qs = got.questions as List<Map>
         assertTrue(qs.every { !before.contains(it.reconciliationRunId) || it.questionRole == "START" }, "old stage questions are off")
-        assertEquals(6, qs.size(), "the same START and five new stage questions")
+        assertEquals(8, qs.size(), "the same START and seven new stage questions")
         assertTrue(qs*.noOutcomeLabel.contains("Billed, never shipped"))
         assertEquals(["Shopify Draft Order"], (got.rules as List<Map>)*.value, "filters live on the START and stay")
         assertEquals([["ItemShip", "Store Pickup"]], (got.exceptions as List<Map>).collect { [it.stageRecordType, it.value] }, "the exception follows its stage")

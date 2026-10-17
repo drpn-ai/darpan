@@ -2135,11 +2135,15 @@ class AutomationExecutionSupport {
     }
 
     protected static List loadActiveAutomations(def ec) {
-        return TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.ReconciliationAutomation",
+        List rows = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.ReconciliationAutomation",
                         "system-cron cross-tenant sweep; no active tenant in scheduler context")
                 .condition("isActive", "Y")
                 .useCache(false)
                 .list() ?: []
+        // DAR-BE-072: archiving (the trash can, DAR-BE-061) leaves isActive alone — pause and delete are separate
+        // switches — so the sweep must skip archived rows itself, or a "deleted" automation keeps firing. In Groovy
+        // rather than SQL so NULL (rows from before the column existed) still counts as not archived.
+        return rows.findAll { normalize(readField(it, "isArchived")) != "Y" }
     }
 
     protected static def requireApiSource(def automation, def source, String fileSide) {

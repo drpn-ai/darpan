@@ -1072,6 +1072,46 @@ class AutomationFacadeSmokeTests {
         }
     }
 
+    /**
+     * DAR-BE-072. The trash can archives (DAR-BE-061), and an archived automation must leave BOTH the list and the
+     * scheduler's sweep — archive#Automation leaves isActive alone, so a sweep that reads only isActive kept firing
+     * the "deleted" automation on schedule. Restore brings it back to the list.
+     */
+    @Test
+    void archivedAutomationLeavesTheListAndStopsBeingScheduled() {
+        Map<String, Object> automation = createSyncFixtureAutomation("Archive Me")
+        String automationId = automation.automationId as String
+        Closure<Boolean> listed = {
+            ec.message.clearErrors()
+            Map<String, Object> list = callFacade("facade.ReconciliationFacadeServices.list#Automations",
+                    [query: "Archive Me", pageIndex: 0, pageSize: 10])
+            return ((List<Map<String, Object>>) list.automations).any { it.automationId == automationId }
+        }
+        Closure<Boolean> swept = {
+            AutomationExecutionSupport.loadActiveAutomations(ec).any { it.automationId == automationId }
+        }
+        try {
+            assertTrue(listed(), "a new automation is listed")
+            assertTrue(swept(), "a new active automation is in the scheduler sweep")
+
+            Map<String, Object> archived = callFacade("facade.ReconciliationFacadeServices.archive#Automation",
+                    [automationId: automationId])
+            assertTrue((Boolean) archived.ok, archived.errors?.toString())
+
+            assertFalse(listed(), "an archived automation is still on the list")
+            assertFalse(swept(), "an archived automation is still scheduled")
+
+            ec.message.clearErrors()
+            Map<String, Object> restored = callFacade("facade.ReconciliationFacadeServices.restore#Automation",
+                    [automationId: automationId])
+            assertTrue((Boolean) restored.ok, restored.errors?.toString())
+            assertTrue(listed(), "a restored automation is back on the list")
+            assertTrue(swept(), "a restored active automation is scheduled again")
+        } finally {
+            deleteSyncFixtureAutomation(automationId)
+        }
+    }
+
     @Test
     void syncAutomationReplacesExclusionFiltersRatherThanMergingThem() {
         Map<String, Object> automation = createSyncFixtureAutomation("Sync Filters")

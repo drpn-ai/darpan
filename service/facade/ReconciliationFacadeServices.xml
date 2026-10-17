@@ -2512,6 +2512,9 @@
             <set field="automationRecords" from="[]"/>
             <if condition="activeTenantUserGroupId">
                 <set field="automationRecords" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('companyUserGroupId', activeTenantUserGroupId).orderBy('automationName,automationId').disableAuthz().useCache(false).list() ?: []"/>
+                <!-- DAR-BE-072: the trash can archives (DAR-BE-061); an archived automation leaves the list. Filtered here,
+                     not in SQL, so rows from before the column existed (NULL) stay listed. -->
+                <set field="automationRecords" from="automationRecords.findAll { automationRecord -> automationRecord.isArchived != 'Y' }"/>
             </if>
             <set field="automationIds" from="automationRecords.collect { automationRecord -> ((automationRecord.automationId)?.toString()?.trim()) }.findAll { it }"/>
             <set field="sourceRows" from="automationIds ? ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', 'in', automationIds).orderBy('automationId,fileSide').disableAuthz().useCache(false).list() ?: [] : []"/>

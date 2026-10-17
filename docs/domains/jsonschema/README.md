@@ -8,7 +8,7 @@ JSON schema authoring, refinement, and validation for reconciliation payloads.
 
 - Route: `runtime/component/darpan/screen/Reconciliation/JsonSchema/JsonSchemaManager.xml`
 - Services: `runtime/component/darpan/service/jsonschema/JsonSchemaServices.xml`
-- XML-backed schema CRUD/orchestration: `save#JsonSchema`, `update#JsonSchemaText`
+- XML-backed schema CRUD/orchestration: `save#JsonSchema`
 - Facade XML wrapper for darpan-ui text saves: `runtime/component/darpan/service/facade/JsonSchemaFacadeServices.xml`
 - Script-backed schema logic that remains procedural: `runtime/component/darpan/src/main/groovy/darpan/jsonschema/service/crud/saveRefinedSchema.groovy`, `runtime/component/darpan/src/main/groovy/darpan/jsonschema/service/validation/validateJsonFileAgainstSchema.groovy`
 - Shared helper: `runtime/component/darpan/src/main/groovy/darpan/jsonschema/common/JsonSchemaUtil.groovy`
@@ -16,7 +16,6 @@ JSON schema authoring, refinement, and validation for reconciliation payloads.
 ## Operational Notes
 
 - Keep schema-editor save and validation flows within `jsonschema.*` service contracts.
-- `update#JsonSchemaText` resolves the target schema by `jsonSchemaId`, `schemaName`, or legacy `filename` input so older callers remain compatible during migration.
 - Persist both `createdDate` and `lastUpdatedStamp` on `darpan.reconciliation.JsonSchema`; creation flows initialize `createdDate`, and Moqui's built-in entity update stamp owns the single `lastUpdatedStamp` column that text/refined saves refresh so darpan-ui can show the `Updated` card consistently.
 - Example: `save#JsonSchemaText` creating `schemaName=OrderPayload` writes `createdDate` from the service input map while Moqui supplies one `lastUpdatedStamp` field on the resulting `JSON_SCHEMA` insert.
 - Schema text remains the database source of truth and is also mirrored to `runtime://datamanager/schemas/json/{schemaName}.json` whenever schema text is saved, uploaded, inferred from JSON, or refined from field rows. Schema loading checks this data-manager mirror before the legacy `runtime://schemas/json/**` fallback.

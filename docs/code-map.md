@@ -12,8 +12,7 @@ This wiki lives in `runtime/component/darpan/docs/Home.md`. The Darpan component
 
 - Reconciliation compare: `service/reconciliation/ReconciliationCoreServices.xml` (Spark base
   compare, RuleSet compare-scope pipeline, mapping bridge), `ReconciliationGenericServices.xml`
-  (generic file compare + generated-output delete/purge), `ReconciliationJsonServices.xml`,
-  `ReconciliationMixedServices.xml`
+  (generic file compare + generated-output delete/purge), `ReconciliationJsonServices.xml`
 - Rule engine: `service/reconciliation/ReconciliationRuleEngineServices.xml` (compile/execute
   RuleSets, rule CRUD, rule cache) — contracts documented in
   `docs/reconciliation/rule-engine-services.md`

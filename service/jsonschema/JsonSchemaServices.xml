@@ -66,47 +66,6 @@
         </actions>
     </service>
 
-    <service verb="update" noun="JsonSchemaText" authenticate="true">
-        <description>Update an existing JSON schema in the DB.</description>
-        <in-parameters>
-            <parameter name="jsonSchemaId"/>
-            <parameter name="filename"/><!-- Deprecated -->
-            <parameter name="schemaName"/>
-            <!-- allow-html="any" because JSON Schema content commonly contains '&lt;' and '&gt;' in
-                 descriptions/regex patterns; service must remain authenticated. -->
-            <parameter name="jsonText" required="true" allow-html="any"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="jsonSchemaId"/>
-        </out-parameters>
-        <actions>
-            <set field="jsonSchemaIdValue" from="((jsonSchemaId)?.toString()?.trim())"/>
-            <set field="schemaNameValue" from="((schemaName)?.toString()?.trim())"/>
-            <set field="filenameValue" from="((filename)?.toString()?.trim())"/>
-            <set field="jsonTextValue" from="((jsonText)?.toString()?.trim())"/>
-            <set field="jsonValidationError" from="jsonschema.common.JsonSchemaUtil.validateJsonText(jsonTextValue, 'jsonText')"/>
-            <if condition="!jsonSchemaIdValue &amp;&amp; !schemaNameValue &amp;&amp; !filenameValue">
-                <message error="true">jsonSchemaId, schemaName, or filename is required</message>
-            </if>
-            <if condition="jsonValidationError">
-                <message error="true">${jsonValidationError}</message>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="existingSchema" from="jsonschema.common.JsonSchemaUtil.resolveSchemaRecord(ec, jsonSchemaIdValue, schemaNameValue, filenameValue, false)"/>
-                <if condition="!existingSchema">
-                    <message error="true">Schema not found for ID ${jsonSchemaIdValue} or Name ${schemaNameValue ?: filenameValue}</message>
-                </if>
-            </if>
-            <if condition="!ec.message.hasError()">
-                <set field="ignoreSchemaText" from="existingSchema.set('schemaText', jsonTextValue)"/>
-                <set field="ignoreLastUpdated" from="existingSchema.set('lastUpdatedStamp', ec.user.nowTimestamp)"/>
-                <set field="ignoreSchemaUpdate" from="existingSchema.update()"/>
-                <set field="schemaDataManagerLocation" from="jsonschema.common.JsonSchemaUtil.persistSchemaText(ec, existingSchema.schemaName, jsonTextValue)"/>
-                <set field="jsonSchemaId" from="existingSchema.jsonSchemaId"/>
-            </if>
-        </actions>
-    </service>
-
 
     <service verb="infer" noun="JsonSchema" type="script" authenticate="true"
             location="component://darpan/src/main/groovy/darpan/jsonschema/service/processing/inferJsonSchema.groovy">

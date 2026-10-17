@@ -1,5 +1,6 @@
 package darpan.reconciliation.conclusion
 
+import darpan.facade.reconciliation.RunConclusionStep
 import groovy.xml.XmlSlurper
 import org.junit.jupiter.api.Test
 
@@ -49,7 +50,7 @@ class GorjanaConclusionRulesDataTests {
         Set<String> scopes = load("data/TriSystemOrderRunsRuleSetData.xml").'**'
                 .findAll { it.name() == 'darpan.rule.RuleSetCompareScope' }.collect { it.@compareScopeId.toString() } as Set
 
-        assertEquals(10, rules.size(), "the v1 catalogue for runs A-open, B and C")
+        assertEquals(17, rules.size(), "the catalogue for runs A-open, B, C and C-cancel")
         Set<String> seen = []
         rules.each { rule ->
             String key = "${rule.@compareScopeId}/${rule.@sequenceNum}".toString()
@@ -74,5 +75,57 @@ class GorjanaConclusionRulesDataTests {
             String json = row.@evidenceFieldsJson.toString()
             assertTrue(json.contains('"system"') && json.contains('"state"'), "${systemEnumId} has no evidence projection")
         }
+    }
+
+    /**
+     * 2026-10-17. Done in NetSuite is BILLED and CLOSED is NetSuite's cancel, so each NetSuite line state a
+     * finding can land on has to be NAMED, in both runs: the line states a filter drops are exactly
+     * what explains the finding.
+     */
+    @Test
+    void everyNetSuiteLineStateIsNamedInTheCompletedAndCancelledRuns() {
+        // run C: HotWax completed, NetSuite not billed
+        assertEquals("CONC_COMPLETED_CLOSED_IN_NS", conclude("GORJANA_OMS_NS_LINE_SCOPE", "MISSING_FROM_FILE_2",
+                null, [presence: "EXCLUDED", record: [lineState: "CLOSED"]]))
+        assertEquals("CONC_SHIPPED_NOT_BILLED", conclude("GORJANA_OMS_NS_LINE_SCOPE", "MISSING_FROM_FILE_2",
+                null, [presence: "EXCLUDED", record: [lineState: "SHIPPED"]]))
+        assertEquals("CONC_NS_BACKORDERED", conclude("GORJANA_OMS_NS_LINE_SCOPE", "MISSING_FROM_FILE_2",
+                null, [presence: "EXCLUDED", record: [lineState: "OPEN", quantityBackordered: "1"]]))
+        // run C: NetSuite billed, HotWax not completed
+        assertEquals("CONC_BILLED_NOT_COMPLETED", conclude("GORJANA_OMS_NS_LINE_SCOPE", "MISSING_FROM_FILE_1",
+                null, [presence: "KEPT", record: [lineState: "BILLED"]]))
+
+        // run C-cancel: HotWax cancelled, NetSuite line not closed
+        assertEquals("CONC_CANCEL_NOT_IN_NS", conclude("GORJANA_OMS_NS_CANCEL_SCOPE", "MISSING_FROM_FILE_2",
+                null, [presence: "EXCLUDED", record: [lineState: "OPEN"]]))
+        ["SHIPPED", "BILLED"].each { String state ->
+            assertEquals("CONC_CANCELLED_FULFILLED_IN_NS", conclude("GORJANA_OMS_NS_CANCEL_SCOPE", "MISSING_FROM_FILE_2",
+                    null, [presence: "EXCLUDED", record: [lineState: state]]))
+        }
+        assertEquals("CONC_NEVER_REACHED_NS", conclude("GORJANA_OMS_NS_CANCEL_SCOPE", "MISSING_FROM_FILE_2",
+                null, [presence: "ABSENT", record: null]))
+        // run C-cancel: NetSuite closed, HotWax not cancelled
+        assertEquals("CONC_COMPLETED_CLOSED_IN_NS", conclude("GORJANA_OMS_NS_CANCEL_SCOPE", "MISSING_FROM_FILE_1",
+                [presence: "EXCLUDED", record: [unitState: "COMPLETED"]], null))
+        assertEquals("CONC_OPEN_CLOSED_IN_NS", conclude("GORJANA_OMS_NS_CANCEL_SCOPE", "MISSING_FROM_FILE_1",
+                [presence: "EXCLUDED", record: [unitState: "OPEN"]], null))
+    }
+
+    private static String conclude(String scope, String bucket, Map file1, Map file2) {
+        def doc = load("data/GorjanaConclusionRulesData.xml")
+        Closure<Map> rows = { String name ->
+            doc.'**'.findAll { it.name() == name && it.@compareScopeId == scope }.collect { node ->
+                Map m = new LinkedHashMap(node.attributes())
+                ["sequenceNum", "conditionSeq"].each { String k -> if (m[k] != null) m[k] = Integer.valueOf(m[k] as String) }
+                m
+            }
+        }
+        Map<String, String> labels = doc.'**'.findAll { it.name() == 'moqui.basic.Enumeration' }
+                .collectEntries { [(it.@enumId.toString()): it.@description.toString()] }
+        List<Map> rules = RunConclusionStep.buildRules(rows('darpan.rule.RuleSetConclusionRule'),
+                rows('darpan.rule.RuleSetConclusionCondition'), labels)
+        Closure<Map> side = { Map s -> s == null ? [presence: "ABSENT", record: null, firstFieldPresence: "ABSENT", firstFieldRecord: null]
+                : s + [firstFieldPresence: s.presence, firstFieldRecord: s.record] }
+        return FlatEvaluatorOracle.evaluate(rules, bucket, [FILE_1: side(file1), FILE_2: side(file2)]).code
     }
 }

@@ -220,7 +220,7 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             preserveWindowInstants="N"
             windowDateOnly="Y"
             filterParameterName="sourceFilters"
-            evidenceFieldsJson='{"system":"NetSuite","state":"status","stateLabels":{"A":"Pending Approval","B":"Pending Fulfillment","C":"Cancelled","D":"Partially Fulfilled","E":"Pending Billing/Partially Fulfilled","F":"Pending Billing","G":"Billed","H":"Closed"},"facts":["orderLineId","quantityShipped","quantityBackordered","tranId"]}'
+            evidenceFieldsJson='{"system":"NetSuite","state":"status","stateLabels":{"A":"Pending Approval","B":"Pending Fulfillment","C":"Cancelled","D":"Partially Fulfilled","E":"Pending Billing/Partially Fulfilled","F":"Pending Billing","G":"Billed","H":"Closed"},"facts":["orderLineId","lineState","quantityShipped","quantityBilled","quantityBackordered","tranId"]}'
             enabled="Y"/>
     <darpan.reconciliation.SourceSystemConnector
             systemEnumId="OMS_GQL"

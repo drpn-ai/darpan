@@ -58,8 +58,10 @@ class LifecycleSupport {
             ec.message.addError("NetSuite account '${authId}' was not found."); return [:]
         }
         List<Map> plan
+        Map<String, Map> reach
         try {
             plan = LifecycleStageCompiler.compile(startType, stages)
+            reach = stageReach(params.stageReach, stages)
         } catch (IllegalArgumentException e) {
             ec.message.addError(e.message); return [:]
         }
@@ -77,7 +79,7 @@ class LifecycleSupport {
         String reconciliationId = run.get("reconciliationId")
 
         if (!buildTree(ec, [reconciliationId: reconciliationId, name: name, authId: authId, tenantId: tenantId, userId: userId,
-                            startType: startType, plan: plan, now: now])) return [:]
+                            startType: startType, plan: plan, now: now, stageReach: reach])) return [:]
         // Rules chosen while setting it up: saved in the same transaction, so a refused rule saves nothing.
         for (Object rule : ((params.rules ?: []) as List)) {
             Map r = (Map) rule
@@ -96,6 +98,7 @@ class LifecycleSupport {
         String userId = ctx.userId, startType = ctx.startType
         List<Map> plan = (List<Map>) ctx.plan
         def now = ctx.now
+        Map<String, Map> reach = (Map<String, Map>) (ctx.stageReach ?: [:])
         // One query per distinct thing asked, shared by every question that asks it: the start's population, and
         // "is X missing?" / "has it reached X?" per stage.
         String plural = LifecycleStageCompiler.words(startType).plural
@@ -115,6 +118,11 @@ class LifecycleSupport {
                     : q.check == LifecycleStageCompiler.PRESENT
                     ? createQuery(ec, authId, tenantId, userId, now, startType, null, stage, "${plural} with a ${stageName}".toString())
                     : createQuery(ec, authId, tenantId, userId, now, startType, stage, null, "${plural} with no ${stageName}".toString())
+            // DAR-BE-073. A stage reached by a shared field says so on each query that asks about it.
+            if (reach[stage]) {
+                ec.entity.find(QUERY).condition("nsSuiteQlSourceQueryId", queryByAsk[ask]).disableAuthz().useCache(false).one()
+                        .set("stageReach", JsonOutput.toJson([[recordType: stage] + reach[stage]])).update()
+            }
         }
 
         Map<String, String> questionIdByKey = ctx.startQuestionId ? [start: ctx.startQuestionId as String] : [:]
@@ -173,8 +181,10 @@ class LifecycleSupport {
         if (startQuery == null) { ec.message.addError("This lifecycle's start could not be found."); return [:] }
         String startType = startQuery.get("recordType") as String
         List<String> oldStages = LifecycleRuleSupport.stagesOf(ec, reconciliationId)*.recordType
-        // Unchanged, unless the tree predates the excused track (then it is rebuilt in the same order).
-        if (oldStages == stages && hasExcusedTrack(questions, stages)) return [reconciliationName: run.get("reconciliationName")]
+        // Unchanged, unless the tree predates the excused track (then it is rebuilt in the same order) or a reach changes.
+        if (oldStages == stages && hasExcusedTrack(questions, stages) && params.stageReach == null) {
+            return [reconciliationName: run.get("reconciliationName")]
+        }
         List<Map> plan
         try {
             plan = LifecycleStageCompiler.compile(startType, stages)
@@ -183,6 +193,13 @@ class LifecycleSupport {
         }
         List<Map> exceptions = LifecycleRuleSupport.listExceptions(ec, reconciliationId)
         List<Map> findings = listFindings(ec, reconciliationId)
+        // A stage keeps how it is reached through a reorder, unless the save says otherwise.
+        Map<String, Map> reach
+        try {
+            reach = params.stageReach != null ? stageReach(params.stageReach, stages) : stageReachOf(ec, questions).findAll { k, v -> stages.contains(k) }
+        } catch (IllegalArgumentException e) {
+            ec.message.addError(e.message); return [:]
+        }
 
         questions.findAll { it.questionRole != RunFlowchartTree.ROLE_START }.each { Map q ->
             TenantScopedFinder.findTenantScopedByIdQuiet(ec, RunFlowchartSupport.QUESTION, "reconciliationRunId", q.reconciliationRunId)
@@ -192,7 +209,8 @@ class LifecycleSupport {
         String name = run.get("reconciliationName") as String
         if (!buildTree(ec, [reconciliationId: reconciliationId, name: name, authId: startQuery.get("nsAuthConfigId"),
                             tenantId: run.get("companyUserGroupId"), userId: TenantAccessSupport.currentUserId(ec),
-                            startType: startType, plan: plan, now: ec.user.nowTimestamp, startQuestionId: start.reconciliationRunId])) return [:]
+                            startType: startType, plan: plan, now: ec.user.nowTimestamp, startQuestionId: start.reconciliationRunId,
+                            stageReach: reach])) return [:]
         // The new stages' checks show what the lifecycle's records show.
         applyDetails(ec, reconciliationId, detailsOf(ec, reconciliationId))
         exceptions.findAll { stages.contains(it.stageRecordType) }.each { Map e ->
@@ -403,6 +421,36 @@ class LifecycleSupport {
                     sequenceNum: i + 1]).create()
         }
         kept.eachWithIndex { def f, int i -> f.set("sequenceNum", columns.size() + i + 1); f.update() }
+    }
+
+    /**
+     * DAR-BE-073. How each stage is reached when not by the link table: [{recordType, startField, stageField}] -> by record
+     * type. A stage of a returns lifecycle is "a credit memo carrying the same HC Return Id". Field ids reach SuiteQL, so
+     * they are plain ids here and checked again when the query is built.
+     */
+    static Map<String, Map> stageReach(Object raw, List<String> stages) {
+        Map<String, Map> out = [:]
+        ((raw ?: []) as List).each { Object o ->
+            Map m = (Map) o
+            String type = normalize(m.recordType), startField = normalize(m.startField), stageField = normalize(m.stageField)
+            if (!stages.contains(type)) throw new IllegalArgumentException("'${type}' is not one of this lifecycle's stages.")
+            if (!(startField ==~ /[a-z][a-z0-9_]*/) || !(stageField ==~ /[a-z][a-z0-9_]*/)) {
+                throw new IllegalArgumentException("A stage is matched on a field id, not '${startField}' / '${stageField}'.")
+            }
+            out[type] = [startField: startField, stageField: stageField]
+        }
+        return out
+    }
+
+    /** DAR-BE-073. How the lifecycle's current stages are reached, read off their queries. */
+    private static Map<String, Map> stageReachOf(def ec, List<Map> questions) {
+        Map<String, Map> out = [:]
+        questions.findAll { it.questionRole != RunFlowchartTree.ROLE_START }.each { Map q ->
+            String raw = LifecycleRuleSupport.queryForRule(ec, q.ruleSetId as String)?.get("stageReach") as String
+            if (!raw) return
+            ((List) new JsonSlurper().parseText(raw)).each { Map e -> out[e.recordType as String] = [startField: e.startField, stageField: e.stageField] }
+        }
+        return out
     }
 
     private static String uniqueRuleName(def ec, String base) {

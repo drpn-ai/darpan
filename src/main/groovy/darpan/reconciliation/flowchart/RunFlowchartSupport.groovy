@@ -4,6 +4,7 @@ import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.RunObservability
+import darpan.reconciliation.core.RunSnapshotScope
 
 import static darpan.common.ValueSupport.normalize
 
@@ -190,7 +191,8 @@ class RunFlowchartSupport {
                     systemTenantRun: params.systemTenantRun == true ? true : null]
         List<Map> questions = loadQuestions(ec, reconciliationId)
 
-        Map walked = RunFlowchartWalker.walk([
+        // DAR-BE-073: the questions share one read of their records where the connector can answer them from it.
+        Map walked = RunSnapshotScope.within(workDir) { -> RunFlowchartWalker.walk([
                 questions      : questions,
                 workDir        : workDir,
                 onQuestionStart: (Closure) params.onQuestionStart,
@@ -223,7 +225,7 @@ class RunFlowchartSupport {
                 },
                 recordFailure  : { String runResultId, String reason -> RunObservability.failRun(ec, runResultId, null, null, reason) },
                 recordCounts   : { String runResultId, long y, long n, long u -> RunObservability.recordCounts(ec, runResultId, y, n, u) },
-        ])
+        ]) }
         String first = RunFlowchartTree.walkOrder(questions).collect {
             ((Map) walked.outcomes)[it.reconciliationRunId]?.runResultId }.find { it }
         return [reconciliationExecutionId: executionId, statusEnumId: walked.statusEnumId,

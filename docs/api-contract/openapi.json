@@ -14652,6 +14652,29 @@
                         "type": "string",
                         "description": "Optional; generated from the stages when empty."
                     },
+                    "stageReach": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "reach": {
+                                    "type": "object",
+                                    "properties": {
+                                        "recordType": {
+                                            "type": "string"
+                                        },
+                                        "startField": {
+                                            "type": "string"
+                                        },
+                                        "stageField": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "description": "DAR-BE-073. Stages reached by a shared field rather than NetSuite's transaction links, e.g. a\n                    credit memo carrying the return's HC Return Id. Stages not named here are reached by link."
+                    },
                     "rules": {
                         "type": "array",
                         "items": {
@@ -15234,6 +15257,29 @@
                         "items": {
                             "type": "string"
                         }
+                    },
+                    "stageReach": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "reach": {
+                                    "type": "object",
+                                    "properties": {
+                                        "recordType": {
+                                            "type": "string"
+                                        },
+                                        "startField": {
+                                            "type": "string"
+                                        },
+                                        "stageField": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "description": "DAR-BE-073. Stages reached by a shared field rather than NetSuite's transaction links, e.g. a\n                    credit memo carrying the return's HC Return Id. Stages not named here are reached by link; when\n                    not sent, each stage keeps how it is reached now."
                     }
                 },
                 "required": [

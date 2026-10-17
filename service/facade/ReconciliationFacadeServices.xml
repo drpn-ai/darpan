@@ -2212,6 +2212,13 @@
             </parameter>
             <parameter name="lateAfterDays" type="Integer"/>
             <parameter name="reconciliationName"><description>Optional; generated from the stages when empty.</description></parameter>
+            <parameter name="stageReach" type="List">
+                <description>DAR-BE-073. Stages reached by a shared field rather than NetSuite's transaction links, e.g. a
+                    credit memo carrying the return's HC Return Id. Stages not named here are reached by link.</description>
+                <parameter name="reach" type="Map">
+                    <parameter name="recordType"/><parameter name="startField"/><parameter name="stageField"/>
+                </parameter>
+            </parameter>
             <parameter name="rules" type="List">
                 <description>Rules chosen while setting it up, as save#LifecycleRule takes them: leave out the start's
                     records whose field has this value.</description>
@@ -2412,6 +2419,14 @@
         <in-parameters>
             <parameter name="reconciliationId" required="true"/>
             <parameter name="stageRecordTypes" type="List" required="true"><parameter name="stageRecordType"/></parameter>
+            <parameter name="stageReach" type="List">
+                <description>DAR-BE-073. Stages reached by a shared field rather than NetSuite's transaction links, e.g. a
+                    credit memo carrying the return's HC Return Id. Stages not named here are reached by link; when
+                    not sent, each stage keeps how it is reached now.</description>
+                <parameter name="reach" type="Map">
+                    <parameter name="recordType"/><parameter name="startField"/><parameter name="stageField"/>
+                </parameter>
+            </parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>

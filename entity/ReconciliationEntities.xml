@@ -1023,6 +1023,12 @@
                 JSON [{"fieldId", "fieldLabel", "op" (IN | GT), "values", "valueLabel"}]: the records whose fields match,
                 every condition holding.</description>
         </field>
+        <field name="stageReach" type="text-very-long">
+            <description>DAR-BE-073. Stages this query asks about that are reached by a shared field rather than
+                nexttransactionlink, as JSON [{"recordType", "startField", "stageField"}]: a record of recordType whose
+                stageField equals the start record's startField (a credit memo carrying the return's
+                custbody_hc_return_id). A stage not named is reached by link.</description>
+        </field>
         <field name="lineKeyColumn" type="text-short">
             <description>SALES_LINES only: the transactionline column that names the line on the other
                 side of the pair - for gorjana custcol_hc_order_line_id, the OMS orderItemSeqId HotWax

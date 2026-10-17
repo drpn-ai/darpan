@@ -164,6 +164,57 @@ class LifecycleSaveSmokeTests {
         ec.message.clearErrors()
     }
 
+    // DAR-BE-073. A return's credit memo is found by the HC Return Id it shares with the return, not by a link: every
+    // query asking about Credit memo says so, the receipt stage's queries do not, and a stage rebuild keeps it.
+    @Test
+    void aStageReachedByASharedFieldSaysSoOnEveryQueryAskingAboutIt() {
+        List reach = [[recordType: "CustCred", startField: "custbody_hc_return_id", stageField: "custbody_hc_return_id"]]
+        Map out = save([recordType: "RtnAuth", stageRecordTypes: ["ItemRcpt", "CustCred"], stageReach: reach])
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        Closure<Map<String, Set>> reachByStage = {
+            Map<String, Set> by = [:]
+            ec.artifactExecution.disableAuthz()
+            try {
+                (this.call("facade.ReconciliationFacadeServices.get#Reconciliation", [reconciliationId: out.reconciliationId]).questions as List<Map>)
+                        .findAll { it.questionRole != "START" && it.isActive != "N" }.each { Map q ->
+                    def sc = ec.entity.find("darpan.rule.RuleSetCompareScope").condition("ruleSetId", q.ruleSetId).one()
+                    def src = ec.entity.find("darpan.rule.RuleSetCompareSource").condition("compareScopeId", sc.compareScopeId).one()
+                    def query = ec.entity.find("darpan.reconciliation.NsSuiteQlSourceQuery").condition("nsSuiteQlSourceQueryId", src.sourceConfigId).one()
+                    String stage = (query.absentChildRecordType ?: query.presentChildRecordType) as String
+                    by.computeIfAbsent(stage) { [] as Set }.add(query.stageReach)
+                }
+            } finally {
+                ec.artifactExecution.enableAuthz()
+            }
+            return by
+        }
+        String expected = '[{"recordType":"CustCred","startField":"custbody_hc_return_id","stageField":"custbody_hc_return_id"}]'
+        Map<String, Set> before = reachByStage()
+        assertEquals([expected] as Set, before.CustCred)
+        assertEquals([null] as Set, before.ItemRcpt)
+
+        // A reorder rebuilds the stage questions; the credit memo is still found by its return id.
+        call("facade.ReconciliationFacadeServices.save#LifecycleStages", [reconciliationId: out.reconciliationId, stageRecordTypes: ["CustCred", "ItemRcpt"]])
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        Map<String, Set> after = reachByStage()
+        assertEquals([expected] as Set, after.CustCred)
+        assertEquals([null] as Set, after.ItemRcpt)
+    }
+
+    @Test
+    void aReachIsRefusedForAStageNotInTheLifecycleOrOnSomethingOtherThanAFieldId() {
+        long before = count()
+        save([recordType: "RtnAuth", stageRecordTypes: ["ItemRcpt", "CustCred"],
+              stageReach: [[recordType: "CustRfnd", startField: "custbody_hc_return_id", stageField: "custbody_hc_return_id"]]])
+        assertTrue(ec.message.errors.any { it.contains("is not one of this lifecycle's stages") }, ec.message.errors?.toString())
+        ec.message.clearErrors()
+        save([recordType: "RtnAuth", stageRecordTypes: ["ItemRcpt", "CustCred"],
+              stageReach: [[recordType: "CustCred", startField: "x = 1 OR 1", stageField: "custbody_hc_return_id"]]])
+        assertTrue(ec.message.errors.any { it.contains("matched on a field id") }, ec.message.errors?.toString())
+        ec.message.clearErrors()
+        assertEquals(before, count())
+    }
+
     private long count() {
         ec.artifactExecution.disableAuthz()
         try { return ec.entity.find("darpan.reconciliation.Reconciliation").count() } finally { ec.artifactExecution.enableAuthz() }

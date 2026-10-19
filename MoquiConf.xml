@@ -5,6 +5,8 @@
             <before-request>
                 <actions>
                     <script><![CDATA[
+                        // DAR-BE-078: /rpc/json dispatches only facade.*, admin.* and gql.* (403 otherwise)
+                        darpan.facade.common.RpcMethodFence.enforce(ec)
                         darpan.facade.common.TenantAccessSupport.syncUserContext(ec)
                     ]]></script>
                 </actions>

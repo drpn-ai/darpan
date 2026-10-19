@@ -120,7 +120,8 @@ class LifecycleSupport {
                     : createQuery(ec, authId, tenantId, userId, now, startType, stage, null, "${plural} with no ${stageName}".toString())
             // DAR-BE-073. A stage reached by a shared field says so on each query that asks about it.
             if (reach[stage]) {
-                ec.entity.find(QUERY).condition("nsSuiteQlSourceQueryId", queryByAsk[ask]).disableAuthz().useCache(false).one()
+                TenantScopedFinder.findGlobalUnscoped(ec, QUERY, "stage-reach stamp on the query createQuery just created in this call")
+                        .condition("nsSuiteQlSourceQueryId", queryByAsk[ask]).useCache(false).one()
                         .set("stageReach", JsonOutput.toJson([[recordType: stage] + reach[stage]])).update()
             }
         }

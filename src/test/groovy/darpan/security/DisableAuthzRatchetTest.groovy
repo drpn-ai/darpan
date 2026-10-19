@@ -133,4 +133,73 @@ class DisableAuthzRatchetTest {
                 "If count < BASELINE: an allowlisted site was migrated — lower BASELINE to match. " +
                 "Sites: ${violations}")
     }
+
+    /**
+     * DAR-BE-075. The test above only ever watched darpan's Groovy, so a bypass written in service XML
+     * ({@code <set from="ec.entity.find(..).disableAuthz()..">} or {@code <service-call disable-authz="true">})
+     * or in any other Darpan component grew unseen — and moving Groovy into XML actions (DAR-BE-074) would
+     * have hidden the sites it moved. Same fail-mode rule: each count must equal its baseline exactly.
+     * Counts are frozen at 2026-10-19; none is a known leak — the point is that growth is now visible.
+     */
+    static final Map<String, Integer> COMPONENT_BASELINES = [
+            "darpan service+screen XML .disableAuthz("            : 69,
+            "darpan service+screen XML disable-authz=\"true\""    : 35,
+            "darpan-hotwax Groovy .disableAuthz("                 : 6,
+            "darpan-hotwax service+screen XML .disableAuthz("     : 0,
+            "darpan-hotwax service+screen XML disable-authz=\"true\"": 0,
+            "shopify-darpan Groovy .disableAuthz("                : 1,
+            "shopify-darpan service+screen XML .disableAuthz("    : 0,
+            "shopify-darpan service+screen XML disable-authz=\"true\"": 0,
+            "netsuite-darpan Groovy .disableAuthz("               : 4,
+            "netsuite-darpan service+screen XML .disableAuthz("   : 0,
+            "netsuite-darpan service+screen XML disable-authz=\"true\"": 0,
+            "database-darpan Groovy .disableAuthz("               : 10,
+            "database-darpan service+screen XML .disableAuthz("   : 0,
+            "database-darpan service+screen XML disable-authz=\"true\"": 0,
+    ]
+
+    @Test
+    void everyComponentAndXmlBypassCountIsWithinItsRatchetBaseline() {
+        Path componentRoot = ReconciliationSmokeTestSupport.resolveBackendRoot().resolve("runtime/component")
+        Map<String, Integer> counts = [:]
+        Map<String, List<String>> sites = [:]
+
+        ["darpan", "darpan-hotwax", "shopify-darpan", "netsuite-darpan", "database-darpan"].each { String component ->
+            Path root = componentRoot.resolve(component)
+            assertTrue(Files.exists(root), "Could not locate component ${component} at ${root}")
+            if (component != "darpan") {
+                tally(counts, sites, componentRoot, "${component} Groovy .disableAuthz(", [root.resolve("src/main/groovy")], ".groovy", ".disableAuthz(")
+            }
+            List<Path> xmlDirs = [root.resolve("service"), root.resolve("screen")]
+            tally(counts, sites, componentRoot, "${component} service+screen XML .disableAuthz(", xmlDirs, ".xml", ".disableAuthz(")
+            tally(counts, sites, componentRoot, "${component} service+screen XML disable-authz=\"true\"", xmlDirs, ".xml", 'disable-authz="true"')
+        }
+
+        assertTrue(counts.keySet() == COMPONENT_BASELINES.keySet(),
+                "ratchet scopes drifted from the baselines: counted ${counts.keySet()}, baselined ${COMPONENT_BASELINES.keySet()}")
+        List<String> mismatches = COMPONENT_BASELINES.findAll { String scope, Integer baseline -> counts[scope] != baseline }
+                .collect { String scope, Integer baseline -> "${scope}: ${counts[scope]} vs baseline ${baseline} — sites: ${sites[scope]}".toString() }
+        System.out.println("[DisableAuthzRatchetTest] component/XML counts: ${counts}")
+        assertTrue(mismatches.isEmpty(),
+                "Authz-bypass count changed. If it grew: a new bypass was added — route reads through TenantScopedFinder " +
+                "(findGlobalUnscoped with a reason, or a tenant-scoped finder) and justify any service-call bypass. " +
+                "If it shrank: a bypass was removed — lower that baseline to match.\n  " + mismatches.join("\n  "))
+    }
+
+    private static void tally(Map<String, Integer> counts, Map<String, List<String>> sites, Path labelRoot, String scope,
+                              List<Path> dirs, String extension, String needle) {
+        int total = 0
+        List<String> found = []
+        dirs.findAll { Files.exists(it) }.each { Path dir ->
+            Files.walk(dir).filter { Path p -> p.toString().endsWith(extension) }.forEach { Path p ->
+                int n = p.toFile().text.count(needle)
+                if (n > 0) {
+                    total += n
+                    found << "${labelRoot.relativize(p)} (${n})".toString()
+                }
+            }
+        }
+        counts[scope] = total
+        sites[scope] = found
+    }
 }

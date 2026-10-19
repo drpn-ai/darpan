@@ -4,8 +4,8 @@ name: Darpan Backend CI
 # *component* repo, so the framework has to be assembled around the checked-out code before the
 # JUnit suite (88 result files / 799 @Test on H2) can run. Assembly mirrors the verified darpan-cli
 # bootstrap recipe (REPO_MANIFEST in darpan-cli/bin/darpan): clone moqui-framework -> getRuntime ->
-# place moqui-sftp + ALL 4 Darpan components (darpan under test + darpan-hotwax + netsuite-darpan +
-# shopify-darpan) -> load (H2) -> test. The 3 integration components are mandatory, not optional:
+# place moqui-sftp + ALL 5 Darpan components (darpan under test + darpan-hotwax + netsuite-darpan +
+# shopify-darpan + database-darpan) -> load (H2) -> test. The 4 integration components are mandatory, not optional:
 # darpan's own main code and tests resolve their entities by name (darpan.hotwax.*, ShopifyAuthConfig,
 # Ns* configs), so omitting them makes those entity reads throw EntityNotFoundException at runtime.
 # The Spark 3.5 / JDK 21 `--add-opens` set is already injected by the component's own test task
@@ -129,7 +129,7 @@ jobs:
         working-directory: darpan-backend
         run: ./gradlew --no-daemon --console=plain getRuntime
 
-      - name: Place components (moqui-sftp + the 4 Darpan components — darpan under test + 3 integrations)
+      - name: Place components (moqui-sftp + the 5 Darpan components — darpan under test + 4 integrations)
         run: |
           set -euo pipefail
           git clone --depth 1 --branch master https://github.com/moqui/moqui-sftp.git \
@@ -141,7 +141,10 @@ jobs:
           # three are public drpn-ai repos on `main` and part of the canonical darpan-cli
           # REPO_MANIFEST. Without darpan-hotwax/shopify-darpan those entity definitions never load
           # and ~24 darpan tests fail with EntityNotFoundException in their shared @BeforeEach.
-          for repo in darpan-hotwax netsuite-darpan shopify-darpan; do
+          # database-darpan owns darpan.database.DatabaseSourceConfig / DatabaseSourceQuery, which
+          # darpan's saved-run, automation and tenant-filter tests read; without it those tests fail
+          # with EntityNotFoundException exactly like the hotwax/shopify case above.
+          for repo in darpan-hotwax netsuite-darpan shopify-darpan database-darpan; do
             git clone --depth 1 --branch main "https://github.com/drpn-ai/${repo}.git" \
               "darpan-backend/runtime/component/${repo}"
           done

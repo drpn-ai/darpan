@@ -8,6 +8,7 @@ import org.junit.jupiter.api.TestInstance
 import org.moqui.context.ExecutionContext
 
 import java.nio.file.Path
+import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
@@ -110,6 +111,107 @@ class MigrationLedgerSmokeTests {
                 .one()
         assertNotNull(row, "the FAILED ledger row was rolled back with the transaction around it")
         assertEquals("FAILED", row.getString("statusId"))
+    }
+
+    // ---- characterization of the row record#MigrationRun writes (DAR-BE-074) ----
+
+    private Map<String, Object> record(Map<String, Object> parameters) {
+        return ec.service.sync().name("migration.MigrationServices.record#MigrationRun")
+                .parameters(parameters).disableAuthz().call()
+    }
+
+    private def ledgerRow(String migrationId, String runId) {
+        return ec.entity.find("darpan.migration.DarpanMigrationRun")
+                .condition("migrationId", migrationId)
+                .condition("runId", runId)
+                .disableAuthz()
+                .one()
+    }
+
+    @Test
+    void recordStoresTheCallersStartAndStampsCompletionAndTheUser() {
+        Timestamp started = new Timestamp(1_700_000_000_000L)
+        Map<String, Object> out = record([migrationId  : "RULE_TENANT_STAMPS",
+                                          statusId     : MigrationLedgerSupport.STATUS_DRY_RUN,
+                                          startedDate  : started,
+                                          rowsAffected : 7L,
+                                          messageDetail: "previewed 7 row(s)"])
+        def row = ledgerRow("RULE_TENANT_STAMPS", out.runId as String)
+
+        assertNotNull(row)
+        assertEquals(started, row.get("startedDate"))
+        assertNotNull(row.get("completedDate"))
+        assertTrue((row.get("completedDate") as Timestamp).after(started))
+        assertEquals(ec.user.userId, row.get("appliedByUserId"))
+        assertEquals("DRY_RUN", row.getString("statusId"))
+        assertEquals(7, row.get("rowsAffected"))
+        assertEquals("previewed 7 row(s)", row.getString("messageDetail"))
+    }
+
+    @Test
+    void recordWithoutAStartUsesTheSameInstantForStartAndCompletion() {
+        Map<String, Object> out = record([migrationId: "RULE_TENANT_STAMPS",
+                                          statusId   : MigrationLedgerSupport.STATUS_FAILED])
+        def row = ledgerRow("RULE_TENANT_STAMPS", out.runId as String)
+
+        assertEquals(row.get("completedDate"), row.get("startedDate"))
+        assertNull(row.get("rowsAffected"))
+        assertNull(row.get("messageDetail"))
+    }
+
+    @Test
+    void recordTrimsTheIdsItIsGiven() {
+        Map<String, Object> out = record([migrationId: "  RULE_TENANT_STAMPS  ",
+                                          statusId   : " SUCCESS "])
+        def row = ledgerRow("RULE_TENANT_STAMPS", out.runId as String)
+
+        assertNotNull(row, "the padded migrationId must be stored trimmed")
+        assertEquals("SUCCESS", row.getString("statusId"))
+    }
+
+    @Test
+    void recordTruncatesAnOverlongMessageReadablyAndStoresAnEmptyOneAsNull() {
+        String exact = "x" * MigrationLedgerSupport.MAX_MESSAGE_LENGTH
+        String over = exact + "y"
+
+        def exactRow = ledgerRow("RULE_TENANT_STAMPS", record([migrationId  : "RULE_TENANT_STAMPS",
+                                                               statusId     : "FAILED",
+                                                               messageDetail: exact]).runId as String)
+        assertEquals(exact, exactRow.getString("messageDetail"))
+
+        def overRow = ledgerRow("RULE_TENANT_STAMPS", record([migrationId  : "RULE_TENANT_STAMPS",
+                                                              statusId     : "FAILED",
+                                                              messageDetail: over]).runId as String)
+        assertEquals(exact + " [truncated]", overRow.getString("messageDetail"))
+
+        def emptyRow = ledgerRow("RULE_TENANT_STAMPS", record([migrationId  : "RULE_TENANT_STAMPS",
+                                                               statusId     : "FAILED",
+                                                               messageDetail: ""]).runId as String)
+        assertNull(emptyRow.get("messageDetail"))
+    }
+
+    @Test
+    void recordRefusesABlankIdWithItsOwnErrorAndWritesNothing() {
+        ec.message.clearErrors()
+        long before = ec.entity.find("darpan.migration.DarpanMigrationRun").disableAuthz().count()
+        Map<String, Object> out = record([migrationId: "   ", statusId: "FAILED"])
+
+        assertNull(out?.runId)
+        assertEquals(["record#MigrationRun requires migrationId and statusId"], ec.message.errors)
+        ec.message.clearErrors()
+        assertEquals(before, ec.entity.find("darpan.migration.DarpanMigrationRun").disableAuthz().count())
+    }
+
+    @Test
+    void runIdsComeFromTheShortNameSequenceBank() {
+        // The ledger's runIds have always come from the "DarpanMigrationRun" bank. A switch to the
+        // full entity name (what entity-sequenced-id-primary would use) starts a fresh bank whose
+        // ids can collide with rows already in a client's ledger.
+        record([migrationId: "RULE_TENANT_STAMPS", statusId: "FAILED"])
+        assertNotNull(ec.entity.find("moqui.entity.SequenceValueItem")
+                .condition("seqName", "DarpanMigrationRun").disableAuthz().useCache(false).one())
+        assertNull(ec.entity.find("moqui.entity.SequenceValueItem")
+                .condition("seqName", "darpan.migration.DarpanMigrationRun").disableAuthz().useCache(false).one())
     }
 
     @Test

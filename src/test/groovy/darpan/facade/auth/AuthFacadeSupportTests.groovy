@@ -1107,7 +1107,7 @@ class AuthFacadeSupportTests {
     }
 
     /** Stands in for the framework ServiceFacade so the anonymous password-change path can be driven without
-     *  a running Moqui. Mirrors AdminUserSupportTests' stub, plus requireNewTransaction for the failed-login
+     *  a running Moqui. Adds requireNewTransaction for the failed-login
      *  counter, which must survive the rollback of the enclosing transaction. */
     static class ServiceFacadeStub {
         List<ServiceCallStub> calls = []

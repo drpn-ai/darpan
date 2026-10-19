@@ -126,50 +126,6 @@ class MigrationSupervisorSupport {
                 }
     }
 
-    /** Default cap on returned attempts. A ledger row per retry means this list is unbounded. */
-    static final int DEFAULT_HISTORY_LIMIT = 50
-
-    /**
-     * Every recorded attempt at one migration, newest first.
-     *
-     * <p>Separate from {@link #statusList} because status answers "where does this installation
-     * stand" while history answers "what happened here, and why" — the second is what an operator
-     * needs when a client's migration failed and the only alternative is reading the database.</p>
-     */
-    static List<Map<String, Object>> history(def ec, String migrationId, Integer maxRows) {
-        int limit = (maxRows != null && maxRows > 0) ? maxRows : DEFAULT_HISTORY_LIMIT
-        return TenantScopedFinder.findGlobalUnscoped(ec, LEDGER_ENTITY, LEDGER_READ_REASON)
-                .condition("migrationId", migrationId)
-                .orderBy("-startedDate")
-                .limit(limit)
-                .list()
-                .collect { row ->
-                    [runId          : row.getString("runId"),
-                     statusId       : row.getString("statusId"),
-                     startedDate    : row.get("startedDate"),
-                     completedDate  : row.get("completedDate"),
-                     appliedByUserId: row.getString("appliedByUserId"),
-                     rowsAffected   : row.get("rowsAffected"),
-                     messageDetail  : row.getString("messageDetail")]
-                }
-    }
-
-    /** Park or unpark a migration. A parked migration is skipped by the sweep and refused by name. */
-    static boolean setEnabled(def ec, String migrationId, boolean enabled) {
-        def row = TenantScopedFinder.findGlobalUnscoped(ec, REGISTRY_ENTITY, REGISTRY_READ_REASON)
-                .useCache(false)
-                .condition("migrationId", migrationId)
-                .one()
-        if (row == null) {
-            ec.message.addError("No registered migration with id ${migrationId}")
-            return false
-        }
-        row.set("enabled", enabled ? "Y" : "N")
-        row.set("lastUpdatedDate", ec.user.nowTimestamp)
-        row.update()
-        return true
-    }
-
     /**
      * Runs one named migration, for targeted remediation on a single installation.
      *

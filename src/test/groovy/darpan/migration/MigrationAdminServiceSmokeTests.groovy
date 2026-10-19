@@ -6,12 +6,14 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import org.moqui.context.ArtifactExecutionInfo
 import org.moqui.context.ExecutionContext
 
 import java.nio.file.Path
 import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -225,6 +227,83 @@ class MigrationAdminServiceSmokeTests {
         assertEquals(1, (history.attempts as List).size())
         assertEquals("connection refused reaching the OMS host",
                 (history.attempts as List<Map<String, Object>>)[0].messageDetail)
+    }
+
+    /**
+     * Runs {@code body} the way production runs: authz ON and without the harness's own grant.
+     * initMoqui disables authz for the whole test JVM AND pushes a "smokeTests" artifact authorized
+     * as anonymous-ALL, and Moqui lets anything below an anonymous-authorized artifact inherit it — so
+     * with that frame on the stack every entity read passes whatever the caller is. Pop it, enable
+     * authz, then put both back exactly as initMoqui left them.
+     */
+    private void withProductionAuthz(Closure body) {
+        def harnessFrame = ec.artifactExecution.peek()
+        assertEquals("smokeTests", harnessFrame?.name, "test precondition: unexpected artifact stack")
+        ec.artifactExecution.pop(harnessFrame)
+        boolean wasDisabled = ec.artifactExecution.authzDisabled
+        ec.artifactExecution.enableAuthz()
+        try {
+            assertFalse(ec.artifactExecution.authzDisabled, "test precondition: authz must be ON")
+            assertTrue(ec.artifactExecution.stack.isEmpty(), "test precondition: no inherited grant on the stack")
+            body.call()
+        } finally {
+            if (wasDisabled) ec.artifactExecution.disableAuthz()
+            ec.artifactExecution.push("smokeTests", ArtifactExecutionInfo.AT_OTHER, ArtifactExecutionInfo.AUTHZA_ALL, false)
+            ec.artifactExecution.setAnonymousAuthorizedAll()
+            ec.message.clearErrors()
+        }
+    }
+
+    @Test
+    void historyAndParkingWorkWithAuthzOnForARealSuperAdmin() {
+        // Every other test here runs with authz off. The supervisor's history and park/unpark reads
+        // are plain entity finds (DAR-BE-074), so this is the production path — a signed-in super
+        // admin through the admin.* fence, authz ON, no harness grant — and it must still read and
+        // write the installation-wide migration rows.
+        ec.service.sync().name("migration.MigrationServices.record#MigrationRun")
+                .parameters([migrationId  : "AUTOMATION_FILTERS",
+                             statusId     : MigrationLedgerSupport.STATUS_FAILED,
+                             messageDetail: "connection refused reaching the OMS host"])
+                .disableAuthz().call()
+
+        withProductionAuthz {
+            // Control: without the admin.* fence above it, the same user writing a ledger row is
+            // refused at the entity — so a pass below is the fence's grant, not a hollow test.
+            boolean refused
+            try {
+                ec.service.sync().name("migration.MigrationServices.record#MigrationRun")
+                        .parameters([migrationId: "AUTOMATION_FILTERS", statusId: "FAILED"]).call()
+                refused = ec.message.hasError()
+            } catch (Throwable expected) {
+                refused = true
+            }
+            assertTrue(refused, "entity authz was not enforced, so nothing below proves the fence's grant")
+            ec.message.clearErrors()
+
+            Map<String, Object> history = ec.service.sync()
+                    .name("admin.MigrationAdminServices.get#MigrationHistory")
+                    .parameters([migrationId: "AUTOMATION_FILTERS"]).call()
+            assertEquals([], ec.message.errors)
+            assertTrue(history.ok as Boolean)
+            assertEquals(["connection refused reaching the OMS host"],
+                    (history.attempts as List<Map<String, Object>>)*.messageDetail)
+
+            Map<String, Object> parked = ec.service.sync()
+                    .name("admin.MigrationAdminServices.set#MigrationEnabled")
+                    .parameters([migrationId: "RETIRED_FIELDS", enabled: false]).call()
+            assertEquals([], ec.message.errors)
+            assertTrue(parked.ok as Boolean)
+
+            Map<String, Object> unknown = ec.service.sync()
+                    .name("admin.MigrationAdminServices.set#MigrationEnabled")
+                    .parameters([migrationId: "NO_SUCH_MIGRATION", enabled: false]).call()
+            assertEquals(false, unknown.ok)
+            assertEquals(["No registered migration with id NO_SUCH_MIGRATION"], ec.message.errors)
+        }
+
+        assertEquals("N", ec.entity.find("darpan.migration.DarpanMigration")
+                .condition("migrationId", "RETIRED_FIELDS").useCache(false).disableAuthz().one()
+                .getString("enabled"))
     }
 
     @Test

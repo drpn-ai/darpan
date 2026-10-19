@@ -117,7 +117,20 @@
             <parameter name="rowsDeleted" type="Integer"/>
         </out-parameters>
         <actions>
-            <set field="rowsDeleted" from="darpan.reconciliation.automation.SourceSystemConnectorFieldWriteSupport.deleteRetiredFields(ec)"/>
+            <!-- One exact-PK delete per declared retirement. An already-absent row (never loaded, or
+                 deleted by an earlier run) counts zero, so a re-run reports 0. No authz-disable here:
+                 the migration supervisor calls this service with authz disabled for the whole call. -->
+            <set field="rowsDeleted" from="0"/>
+            <iterate list="darpan.reconciliation.automation.SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS" entry="retired">
+                <entity-find-one entity-name="darpan.reconciliation.SourceSystemConnectorField" value-field="retiredField" cache="false">
+                    <field-map field-name="systemEnumId" from="retired.systemEnumId"/>
+                    <field-map field-name="fieldPath" from="retired.fieldPath"/>
+                </entity-find-one>
+                <if condition="retiredField != null">
+                    <entity-delete value-field="retiredField"/>
+                    <set field="rowsDeleted" from="rowsDeleted + 1"/>
+                </if>
+            </iterate>
             <message>Deleted ${rowsDeleted} retired field row(s).</message>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

@@ -166,7 +166,8 @@ class TenantAccessSupport {
      * A {@code true} result means "this user administers that tenant <em>if it exists</em>". Super-admins return
      * {@code true} for any non-blank string, real or not. Callers taking unvalidated {@code tenantUserGroupId}
      * input MUST validate tenant existence independently before trusting a {@code true} result — see
-     * {@code AdminMembershipSupport.validateTenantExists} for the standard existence check.</p>
+     * the {@code moqui.security.UserGroup} lookup at the top of {@code add#TenantMember} in
+     * {@code service/admin/MembershipAdminServices.xml} for the standard existence check.</p>
      */
     static boolean isTenantAdmin(def ec, String tenantUserGroupId) {
         String normalizedTenantUserGroupId = normalize(tenantUserGroupId)

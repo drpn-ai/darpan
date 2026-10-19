@@ -632,8 +632,16 @@ class SourceSystemConnectorSupportSmokeTests {
                          label: "Return workflow status", fieldType: "string",
                          sequenceNum: 5, description: "withdrawn 2026-09-01"]).createOrUpdate()
 
-        ec.service.sync().name("facade.SourceEndpointFacadeServices.migrate#RetiredConnectorFields")
+        ec.message.clearAll()
+        Map result = ec.service.sync().name("facade.SourceEndpointFacadeServices.migrate#RetiredConnectorFields")
                 .disableAuthz().call()
+
+        // The count is what the migration supervisor records as rowsAffected on the ledger row, and
+        // the message is what it records as the run's detail — both are part of the contract.
+        assertEquals(2, result.rowsDeleted)
+        assertEquals(true, result.ok)
+        assertEquals(["Deleted 2 retired field row(s)."], result.messages)
+        assertEquals([], result.errors)
 
         assertEquals(0L, ec.entity.find("darpan.reconciliation.SourceSystemConnectorField")
                 .condition("systemEnumId", "SHOPIFY_RETURN_REFS")
@@ -833,19 +841,13 @@ class SourceSystemConnectorSupportSmokeTests {
         Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "SHOPIFY_RETURN_REFS")
         assertNotNull(connector, "SHOPIFY_RETURN_REFS connector row should resolve")
         String serviceName = connector.lookupServiceName as String
-        String noun = serviceName.substring(serviceName.indexOf("#") + 1)
-        String verb = serviceName.substring(serviceName.lastIndexOf(".") + 1, serviceName.indexOf("#"))
 
-        Path servicePath = ReconciliationSmokeTestSupport.resolveBackendRoot().resolve(
-                "runtime/component/shopify-darpan/service/reconciliation/ShopifyOrderExtractionServices.xml")
-        assertTrue(Files.exists(servicePath), "service file not found at ${servicePath}")
-        def service = new XmlParser(false, false).parse(servicePath.toFile()).children().find {
-            it.name() == "service" && it.attributes().get("noun") == noun && it.attributes().get("verb") == verb
-        }
+        // Read the definition Moqui actually loads, not the raw XML: parameters may arrive through
+        // <implements> (lookup#ShopifyIdExistence), and only the resolved list decides what survives.
+        def service = ec.service.getServiceDefinition(serviceName)
         assertNotNull(service, "${serviceName} is seeded on SHOPIFY_RETURN_REFS but defined nowhere")
 
-        List<String> declared = service.children().find { it.name() == "in-parameters" }?.children()
-                ?.collect { it.attributes().get("name") as String } ?: []
+        List<String> declared = (List<String>) service.inParameterNameList
         assertTrue(declared.contains(connector.configParameterName as String),
                 "dispatch sends the config id as '${connector.configParameterName}'; service declares ${declared}")
         assertTrue(declared.contains(connector.lookupIdsParameterName as String),

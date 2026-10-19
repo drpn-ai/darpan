@@ -221,8 +221,8 @@ class SharedConfigAccessSupport {
     /**
      * Reads grant rows and drops revoked ones IN GROOVY rather than via {@code conditionDate}.
      *
-     * <p>Matches {@code AdminMembershipSupport.findActiveMembershipRows}, the existing house pattern
-     * for this table shape. It is also the only form the stub-based tests can actually prove:
+     * <p>Uses the same notion of an active row as the admin membership services ({@code thruDate}
+     * null). It is also the only form the stub-based tests can actually prove:
      * {@code FinderStub.conditionDate} is a no-op, so a conditionDate-based expiry check would pass
      * a stub test without filtering anything.</p>
      */

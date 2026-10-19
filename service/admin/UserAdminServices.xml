@@ -17,9 +17,25 @@
             <parameter name="userId"><description>Id of the created user.</description></parameter>
         </out-parameters>
         <actions>
-            <set field="result" from="darpan.admin.AdminUserSupport.createUser(ec, username, userFullName, emailAddress, tempPassword)"/>
-            <set field="ok" from="result != null"/>
-            <set field="userId" from="result?.userId"/>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <if condition="!username?.trim()"><return error="true" message="Username is required."/></if>
+            <if condition="!tempPassword"><return error="true" message="Temporary password is required."/></if>
+            <!-- All credential work (password policy, hashing, history) stays in the framework service. -->
+            <service-call name="org.moqui.impl.UserServices.create#UserAccount" out-map="createdAccount"
+                    in-map="[username: username.trim(), userFullName: userFullName?.trim(),
+                        emailAddress: emailAddress?.trim() ?: null,
+                        newPassword: tempPassword, newPasswordVerify: tempPassword, requirePasswordChange: 'Y']"/>
+            <if condition="!createdAccount?.userId"><return/></if>
+            <!-- ok turns true once the framework call succeeds, as it always has: a later write that
+                 fails surfaces through ec.message (and rolls the call back), not through ok. -->
+            <set field="ok" from="true"/>
+            <set field="userId" from="createdAccount.userId"/>
+            <service-call name="create#moqui.security.UserGroupMember" in-map="[userGroupId: darpan.admin.AdminUserSupport.DARPAN_USER_GROUP_ID,
+                    userId: createdAccount.userId, fromDate: ec.user.nowTimestamp]"/>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'admin.UserAdminServices.create#UserAccount', targetType: 'User', targetId: (String) createdAccount.userId,
+                    detailText: 'Created user ' + username.trim() + '.', auditTimestamp: ec.user.nowTimestamp]"/>
         </actions>
     </service>
 
@@ -31,21 +47,71 @@
             <parameter name="emailAddress"><description>New email; unchanged when omitted.</description><text-email/></parameter>
         </in-parameters>
         <out-parameters><parameter name="ok" type="Boolean"><description>True when updated.</description></parameter></out-parameters>
-        <actions><set field="ok" from="darpan.admin.AdminUserSupport.updateUser(ec, userId, userFullName, emailAddress)"/></actions>
+        <actions>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <entity-find-one entity-name="moqui.security.UserAccount" value-field="targetAccount">
+                <field-map field-name="userId"/></entity-find-one>
+            <if condition="targetAccount == null"><return error="true" message="User ${userId ?: '(missing)'} was not found."/></if>
+            <!-- Entity-auto update applies EXPLICIT nulls (setIfEmpty), so an omitted field must be left
+                 out of the parameter map entirely - putting userFullName: null would wipe the display
+                 name on an email-only update, contradicting the "unchanged when omitted" service contract. -->
+            <set field="updateParams" from="[userId: userId]"/>
+            <if condition="userFullName?.trim()"><set field="updateParams.userFullName" from="userFullName.trim()"/></if>
+            <if condition="emailAddress?.trim()"><set field="updateParams.emailAddress" from="emailAddress.trim()"/></if>
+            <if condition="updateParams.size() == 1"><return error="true" message="Nothing to update."/></if>
+            <service-call name="org.moqui.impl.UserServices.update#UserAccount" in-map="updateParams"/>
+            <set field="ok" from="true"/>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'admin.UserAdminServices.update#UserAccount', targetType: 'User', targetId: userId,
+                    detailText: 'Updated profile for user ' + userId + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+        </actions>
     </service>
 
     <service verb="disable" noun="UserAccount" allow-remote="true">
         <description>Disable a user and revoke their live login keys. Self-disable is refused.</description>
         <in-parameters><parameter name="userId" required="true"><description>User to disable.</description></parameter></in-parameters>
         <out-parameters><parameter name="ok" type="Boolean"><description>True when disabled.</description></parameter></out-parameters>
-        <actions><set field="ok" from="darpan.admin.AdminUserSupport.setUserDisabled(ec, userId, true)"/></actions>
+        <actions>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <if condition="userId == ec.user.userId"><return error="true" message="You cannot disable your own account."/></if>
+            <entity-find-one entity-name="moqui.security.UserAccount" value-field="targetAccount">
+                <field-map field-name="userId"/></entity-find-one>
+            <if condition="targetAccount == null"><return error="true" message="User ${userId ?: '(missing)'} was not found."/></if>
+            <service-call name="org.moqui.impl.UserServices.disable#UserAccount" in-map="[userId: userId]"/>
+            <!-- ok turns true once the framework call succeeds, as it always has: a later write that
+                 fails surfaces through ec.message (and rolls the call back), not through ok. -->
+            <set field="ok" from="true"/>
+            <!-- UserLoginKey's PK is loginKey alone (not composite with userId), so the implicit delete
+                 CrUD service needs each row's key individually: find live keys for the user, delete each. -->
+            <entity-find entity-name="moqui.security.UserLoginKey" list="loginKeyList">
+                <econdition field-name="userId"/></entity-find>
+            <iterate list="loginKeyList" entry="loginKeyRow">
+                <service-call name="delete#moqui.security.UserLoginKey" in-map="[loginKey: loginKeyRow.loginKey]"/>
+            </iterate>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'admin.UserAdminServices.disable#UserAccount', targetType: 'User', targetId: userId,
+                    detailText: 'Disabled user ' + userId + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+        </actions>
     </service>
 
     <service verb="enable" noun="UserAccount" allow-remote="true">
         <description>Re-enable a disabled user.</description>
         <in-parameters><parameter name="userId" required="true"><description>User to enable.</description></parameter></in-parameters>
         <out-parameters><parameter name="ok" type="Boolean"><description>True when enabled.</description></parameter></out-parameters>
-        <actions><set field="ok" from="darpan.admin.AdminUserSupport.setUserDisabled(ec, userId, false)"/></actions>
+        <actions>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <entity-find-one entity-name="moqui.security.UserAccount" value-field="targetAccount">
+                <field-map field-name="userId"/></entity-find-one>
+            <if condition="targetAccount == null"><return error="true" message="User ${userId ?: '(missing)'} was not found."/></if>
+            <service-call name="org.moqui.impl.UserServices.enable#UserAccount" in-map="[userId: userId]"/>
+            <set field="ok" from="true"/>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'admin.UserAdminServices.enable#UserAccount', targetType: 'User', targetId: userId,
+                    detailText: 'Enabled user ' + userId + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+        </actions>
     </service>
 
     <service verb="reset" noun="Password" allow-remote="true">
@@ -56,7 +122,31 @@
             <parameter name="tempPassword" required="true"><description>Temporary password.</description></parameter>
         </in-parameters>
         <out-parameters><parameter name="ok" type="Boolean"><description>True when reset.</description></parameter></out-parameters>
-        <actions><set field="ok" from="darpan.admin.AdminUserSupport.resetPassword(ec, userId, tempPassword)"/></actions>
+        <actions>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <if condition="!tempPassword"><return error="true" message="Temporary password is required."/></if>
+            <entity-find-one entity-name="moqui.security.UserAccount" value-field="targetAccount">
+                <field-map field-name="userId"/></entity-find-one>
+            <if condition="targetAccount == null"><return error="true" message="User ${userId ?: '(missing)'} was not found."/></if>
+            <!-- All credential work (password policy, hashing, history) stays in the framework service;
+                 a refused password adds an error there, which stops this service before any revocation. -->
+            <service-call name="org.moqui.impl.UserServices.update#PasswordInternal" in-map="[userId: userId,
+                    newPassword: tempPassword, newPasswordVerify: tempPassword, requirePasswordChange: 'Y']"/>
+            <!-- ok turns true once the framework call succeeds, as it always has: a later write that
+                 fails surfaces through ec.message (and rolls the call back), not through ok. -->
+            <set field="ok" from="true"/>
+            <!-- UserLoginKey's PK is loginKey alone (not composite with userId), so the implicit delete
+                 CrUD service needs each row's key individually: find live keys for the user, delete each. -->
+            <entity-find entity-name="moqui.security.UserLoginKey" list="loginKeyList">
+                <econdition field-name="userId"/></entity-find>
+            <iterate list="loginKeyList" entry="loginKeyRow">
+                <service-call name="delete#moqui.security.UserLoginKey" in-map="[loginKey: loginKeyRow.loginKey]"/>
+            </iterate>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'admin.UserAdminServices.reset#Password', targetType: 'User', targetId: userId,
+                    detailText: 'Reset password for user ' + userId + '; change forced at next login.', auditTimestamp: ec.user.nowTimestamp]"/>
+        </actions>
     </service>
 
     <service verb="get" noun="UserList" allow-remote="true" authz-action="view">
@@ -96,6 +186,27 @@
                 </parameter></parameter>
             </parameter>
         </out-parameters>
-        <actions><set field="userDetail" from="darpan.admin.AdminUserSupport.getUserDetail(ec, userId)"/></actions>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <entity-find-one entity-name="moqui.security.UserAccount" value-field="targetAccount">
+                <field-map field-name="userId"/></entity-find-one>
+            <if condition="targetAccount == null"><return error="true" message="User ${userId ?: '(missing)'} was not found."/></if>
+            <!-- Cross-tenant on purpose: every tenant the user is an active member of. -->
+            <entity-find entity-name="darpan.auth.TenantUserPermissionGroupMember" list="permissionRowList">
+                <econdition field-name="userId"/></entity-find>
+            <set field="membershipList" from="[]"/>
+            <iterate list="permissionRowList" entry="permissionRow">
+                <!-- Ended rows are skipped here rather than in the query, so memberships keep the order
+                     the user's rows come back in. -->
+                <if condition="permissionRow.thruDate == null">
+                    <set field="ignoreAdd" from="membershipList.add([tenantUserGroupId: permissionRow.tenantUserGroupId,
+                            permissionUserGroupId: permissionRow.permissionUserGroupId, fromDate: permissionRow.fromDate])"/>
+                </if>
+            </iterate>
+            <set field="userDetail" from="[userId: targetAccount.userId, username: targetAccount.username,
+                    userFullName: targetAccount.userFullName, emailAddress: targetAccount.emailAddress,
+                    disabled: targetAccount.disabled == 'Y',
+                    requirePasswordChange: targetAccount.requirePasswordChange == 'Y', memberships: membershipList]"/>
+        </actions>
     </service>
 </services>

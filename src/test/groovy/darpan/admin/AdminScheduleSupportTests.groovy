@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  * Instance-wide schedule board: every tenant's scheduled automations on one timeline.
  *
  * Cross-tenant by design — the DARPAN_ADMIN_API artifact fence plus the super-admin content gate
- * are what make that safe, exactly as in AdminTenantSupport.listTenants. These tests pin the gate
+ * are what make that safe, exactly as in admin.TenantAdminServices.get#TenantList. These tests pin the gate
  * first, because a board that leaks another tenant's automation names is the failure that matters.
  */
 class AdminScheduleSupportTests {

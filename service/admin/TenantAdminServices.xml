@@ -28,21 +28,76 @@
             <parameter name="timeZone"><description>New timezone; unchanged when omitted.</description></parameter>
         </in-parameters>
         <out-parameters><parameter name="ok" type="Boolean"><description>True when updated.</description></parameter></out-parameters>
-        <actions><set field="ok" from="darpan.admin.AdminTenantSupport.updateTenant(ec, tenantUserGroupId, label, timeZone)"/></actions>
+        <actions>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <entity-find-one entity-name="moqui.security.UserGroup" value-field="tenantGroup">
+                <field-map field-name="userGroupId" from="tenantUserGroupId"/></entity-find-one>
+            <if condition="tenantGroup == null || tenantGroup.groupTypeEnumId != darpan.facade.common.TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID">
+                <return error="true" message="Tenant ${tenantUserGroupId ?: '(missing)'} was not found."/></if>
+            <!-- Validate BEFORE any write, the same way TenantAccessSupport.saveUserSettings does: a
+                 rejected timezone must not leave a half-applied rename behind. An unvalidated zone is
+                 also invisible downstream - the browser's Intl silently falls back to the viewer's own
+                 zone, so timestamps keep rendering and merely stop agreeing with the schedule label. -->
+            <if condition="timeZone?.trim()">
+                <set field="timeZoneError" from="darpan.facade.common.TenantAccessSupport.validateTimeZone(timeZone)"/>
+                <if condition="timeZoneError"><return error="true" message="${timeZoneError}"/></if>
+            </if>
+            <!-- ok turns true once validation passes, as it always has: a write that then fails
+                 surfaces through ec.message (and rolls the call back), not through ok. -->
+            <set field="ok" from="true"/>
+            <if condition="label?.trim()">
+                <service-call name="update#moqui.security.UserGroup"
+                        in-map="[userGroupId: tenantUserGroupId, description: label.trim()]"/>
+            </if>
+            <if condition="timeZone?.trim()">
+                <service-call name="store#darpan.auth.TenantSetting" in-map="[companyUserGroupId: tenantUserGroupId,
+                        timeZone: timeZone.trim(), lastUpdatedDate: ec.user.nowTimestamp]"/>
+            </if>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'admin.TenantAdminServices.update#Tenant', targetType: 'Tenant', targetId: tenantUserGroupId,
+                    detailText: 'Updated tenant ' + tenantUserGroupId + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+        </actions>
     </service>
 
     <service verb="deactivate" noun="Tenant" allow-remote="true">
         <description>Hide the tenant from the tenant app (availableTenants + active-tenant selection). Flag, not delete.</description>
         <in-parameters><parameter name="tenantUserGroupId" required="true"><description>Tenant to deactivate.</description></parameter></in-parameters>
         <out-parameters><parameter name="ok" type="Boolean"><description>True when deactivated.</description></parameter></out-parameters>
-        <actions><set field="ok" from="darpan.admin.AdminTenantSupport.setTenantDisabled(ec, tenantUserGroupId, true)"/></actions>
+        <actions>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <entity-find-one entity-name="moqui.security.UserGroup" value-field="tenantGroup">
+                <field-map field-name="userGroupId" from="tenantUserGroupId"/></entity-find-one>
+            <if condition="tenantGroup == null || tenantGroup.groupTypeEnumId != darpan.facade.common.TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID">
+                <return error="true" message="Tenant ${tenantUserGroupId ?: '(missing)'} was not found."/></if>
+            <set field="ok" from="true"/>
+            <service-call name="store#darpan.auth.TenantSetting" in-map="[companyUserGroupId: tenantUserGroupId,
+                    disabled: 'Y', lastUpdatedDate: ec.user.nowTimestamp]"/>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'admin.TenantAdminServices.deactivate#Tenant', targetType: 'Tenant', targetId: tenantUserGroupId,
+                    detailText: 'Deactivated tenant ' + tenantUserGroupId + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+        </actions>
     </service>
 
     <service verb="reactivate" noun="Tenant" allow-remote="true">
         <description>Re-enable a deactivated tenant.</description>
         <in-parameters><parameter name="tenantUserGroupId" required="true"><description>Tenant to reactivate.</description></parameter></in-parameters>
         <out-parameters><parameter name="ok" type="Boolean"><description>True when reactivated.</description></parameter></out-parameters>
-        <actions><set field="ok" from="darpan.admin.AdminTenantSupport.setTenantDisabled(ec, tenantUserGroupId, false)"/></actions>
+        <actions>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <entity-find-one entity-name="moqui.security.UserGroup" value-field="tenantGroup">
+                <field-map field-name="userGroupId" from="tenantUserGroupId"/></entity-find-one>
+            <if condition="tenantGroup == null || tenantGroup.groupTypeEnumId != darpan.facade.common.TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID">
+                <return error="true" message="Tenant ${tenantUserGroupId ?: '(missing)'} was not found."/></if>
+            <set field="ok" from="true"/>
+            <service-call name="store#darpan.auth.TenantSetting" in-map="[companyUserGroupId: tenantUserGroupId,
+                    disabled: 'N', lastUpdatedDate: ec.user.nowTimestamp]"/>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'admin.TenantAdminServices.reactivate#Tenant', targetType: 'Tenant', targetId: tenantUserGroupId,
+                    detailText: 'Reactivated tenant ' + tenantUserGroupId + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+        </actions>
     </service>
 
     <service verb="get" noun="TenantList" allow-remote="true" authz-action="view">
@@ -55,7 +110,27 @@
                 </parameter>
             </parameter>
         </out-parameters>
-        <actions><set field="tenantList" from="darpan.admin.AdminTenantSupport.listTenants(ec) ?: []"/></actions>
+        <actions>
+            <set field="tenantList" from="[]"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <!-- Cross-tenant on purpose (admin.* authz carries no tenant entity filter): every
+                 UgtDarpanCompany group, with its own TenantSetting flag and active-member count. -->
+            <entity-find entity-name="moqui.security.UserGroup" list="tenantGroupList">
+                <econdition field-name="groupTypeEnumId" from="darpan.facade.common.TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID"/>
+            </entity-find>
+            <iterate list="tenantGroupList" entry="tenantGroup">
+                <entity-find-one entity-name="darpan.auth.TenantSetting" value-field="tenantSetting">
+                    <field-map field-name="companyUserGroupId" from="tenantGroup.userGroupId"/></entity-find-one>
+                <entity-find-count entity-name="moqui.security.UserGroupMember" count-field="activeMemberCount">
+                    <econdition field-name="userGroupId" from="tenantGroup.userGroupId"/>
+                    <econdition field-name="thruDate" from="null"/>
+                </entity-find-count>
+                <set field="ignoreAdd" from="tenantList.add([tenantUserGroupId: tenantGroup.userGroupId,
+                        label: tenantGroup.description ?: tenantGroup.userGroupId,
+                        disabled: tenantSetting?.disabled == 'Y', memberCount: activeMemberCount as Integer])"/>
+            </iterate>
+            <order-map-list list="tenantList"><order-by field-name="label"/></order-map-list>
+        </actions>
     </service>
 
     <service verb="get" noun="TenantDetail" allow-remote="true" authz-action="view">
@@ -71,6 +146,30 @@
                 </parameter></parameter>
             </parameter>
         </out-parameters>
-        <actions><set field="tenantDetail" from="darpan.admin.AdminTenantSupport.getTenantDetail(ec, tenantUserGroupId)"/></actions>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <entity-find-one entity-name="moqui.security.UserGroup" value-field="tenantGroup">
+                <field-map field-name="userGroupId" from="tenantUserGroupId"/></entity-find-one>
+            <if condition="tenantGroup == null || tenantGroup.groupTypeEnumId != darpan.facade.common.TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID">
+                <return error="true" message="Tenant ${tenantUserGroupId ?: '(missing)'} was not found."/></if>
+            <entity-find-one entity-name="darpan.auth.TenantSetting" value-field="tenantSetting">
+                <field-map field-name="companyUserGroupId" from="tenantUserGroupId"/></entity-find-one>
+            <entity-find entity-name="darpan.auth.TenantUserPermissionGroupMember" list="permissionRowList">
+                <econdition field-name="tenantUserGroupId"/></entity-find>
+            <set field="memberList" from="[]"/>
+            <iterate list="permissionRowList" entry="permissionRow">
+                <!-- Ended rows are skipped here rather than in the query, so members keep the order the
+                     tenant's rows come back in. -->
+                <if condition="permissionRow.thruDate == null">
+                    <entity-find-one entity-name="moqui.security.UserAccount" value-field="memberAccount">
+                        <field-map field-name="userId" from="permissionRow.userId"/></entity-find-one>
+                    <set field="ignoreAdd" from="memberList.add([userId: permissionRow.userId, username: memberAccount?.username,
+                            permissionUserGroupId: permissionRow.permissionUserGroupId, fromDate: permissionRow.fromDate])"/>
+                </if>
+            </iterate>
+            <set field="tenantDetail" from="[tenantUserGroupId: tenantUserGroupId,
+                    label: tenantGroup.description ?: tenantUserGroupId, timeZone: tenantSetting?.timeZone,
+                    disabled: tenantSetting?.disabled == 'Y', createdDate: tenantSetting?.createdDate, members: memberList]"/>
+        </actions>
     </service>
 </services>

@@ -1,7 +1,7 @@
 package darpan.reconciliation.automation
 
 /**
- * Deletes {@code SourceSystemConnectorField} pill rows that were withdrawn from seed data after they
+ * Declares the {@code SourceSystemConnectorField} pill rows that were withdrawn from seed data after they
  * had already shipped.
  *
  * <p>Moqui seed loads are {@code createOrUpdate} and never delete, so removing a row from
@@ -14,11 +14,13 @@ package darpan.reconciliation.automation
  * mechanism: a deliberate, auditable declaration of exactly which (systemEnumId, fieldPath) rows to
  * delete.</p>
  *
- * <p>Deliberately does NOT compute "rows in the DB but not in the seed file" at runtime — a partially
+ * <p>The delete itself is the XML actions of
+ * {@code facade.SourceEndpointFacadeServices.migrate#RetiredConnectorFields}, which iterates this list.
+ * It deliberately does NOT compute "rows in the DB but not in the seed file" at runtime — a partially
  * loaded or mis-parsed seed would then delete live pills, turning a data-hygiene service into a
- * destructive one. {@link #deleteRetiredFields} deletes by exact PK only, one row per
- * {@code RETIRED_FIELDS} entry, never by {@code systemEnumId} alone (which would sweep every pill an
- * endpoint has, not just the retired one).</p>
+ * destructive one. It deletes by exact PK only, one row per {@code RETIRED_FIELDS} entry, never by
+ * {@code systemEnumId} alone (which would sweep every pill an endpoint has, not just the retired
+ * one).</p>
  *
  * <p>Kept as a sibling to {@link SourceEndpointWriteSupport} rather than folded into it: that class
  * owns {@code SourceEndpointAccess} (per-config, per-credential endpoint enablement, an owner-writable
@@ -27,8 +29,6 @@ package darpan.reconciliation.automation
  * concern, so this got its own file rather than growing an already large one.</p>
  */
 class SourceSystemConnectorFieldWriteSupport {
-    static final String ENTITY_NAME = "darpan.reconciliation.SourceSystemConnectorField"
-
     /**
      * Pills withdrawn after they had already shipped in seed data. Seed loads are createOrUpdate, so
      * removing a row from the seed file leaves it in every database that already loaded it — this list
@@ -65,30 +65,4 @@ class SourceSystemConnectorFieldWriteSupport {
                      "(IN_PROGRESS, ...) so the exclusion works as operators type it, and which lands " +
                      "on refund rows too — the per-return field could never reach one"],
     ].asImmutable()
-
-    /**
-     * Deletes each {@link #RETIRED_FIELDS} entry by its exact PK (systemEnumId + fieldPath). A row
-     * that is already absent — never loaded, or already deleted by a prior run — is silently skipped,
-     * so this is idempotent: a second run always deletes nothing and returns 0.
-     *
-     * <p>No entity-level authz-disable call here by design, matching
-     * {@link SourceEndpointWriteSupport#migrateLegacyCanReadOrders}'s write path: the caller (the
-     * {@code migrate#RetiredConnectorFields} service, called the same authz-disabled way its
-     * {@code migrate#SourceConfigEndpointAccess} sibling already is) covers authz for the whole call,
-     * so adding one here would only be a redundant bare call against
-     * {@code DisableAuthzRatchetTest}'s tracked baseline.</p>
-     *
-     * @return the number of rows actually deleted.
-     */
-    static int deleteRetiredFields(def ec) {
-        int rowsDeleted = 0
-        RETIRED_FIELDS.each { Map<String, String> retired ->
-            long deleted = ec.entity.find(ENTITY_NAME)
-                    .condition("systemEnumId", retired.systemEnumId)
-                    .condition("fieldPath", retired.fieldPath)
-                    .deleteAll()
-            rowsDeleted += (deleted ?: 0) as int
-        }
-        return rowsDeleted
-    }
 }

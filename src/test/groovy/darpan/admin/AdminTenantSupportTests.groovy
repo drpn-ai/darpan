@@ -76,77 +76,12 @@ class AdminTenantSupportTests {
         assertEquals(0, service.calls.size())
     }
 
-    @Test
-    void setTenantDisabledStoresFlagAndAudits() {
-        def service = new ServiceFacadeStub()
-        def ec = adminEc([
-                "moqui.security.UserGroup": new FinderStub(oneResult: [userGroupId: "KREWE",
-                        groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID]),
-                "darpan.auth.TenantSetting": new FinderStub(oneResult: [companyUserGroupId: "KREWE", disabled: "N"]),
-        ], service)
-
-        assertTrue(AdminTenantSupport.setTenantDisabled(ec, "KREWE", true))
-        def storeCall = service.calls.find { it.serviceName == "store#darpan.auth.TenantSetting" }
-        assertEquals("Y", storeCall.parametersMap.disabled)
-        assertTrue(service.calls*.serviceName.contains("create#darpan.admin.AdminAuditLog"))
-    }
-
-    @Test
-    void setTenantDisabledFailsForUnknownTenant() {
-        def message = new MessageFacadeStub()
-        def service = new ServiceFacadeStub()
-        def ec = adminEc(["moqui.security.UserGroup": new FinderStub(oneResult: null)], service, message)
-
-        assertFalse(AdminTenantSupport.setTenantDisabled(ec, "NOPE", true))
-        assertTrue(message.hasError())
-        assertEquals(0, service.calls.size())
-    }
-
-    private def tenantEc(ServiceFacadeStub service, MessageFacadeStub message = new MessageFacadeStub()) {
-        return adminEc(["moqui.security.UserGroup": new FinderStub(oneResult: [userGroupId: "KREWE",
-                groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID])], service, message)
-    }
-
-    @Test
-    void updateTenantStoresAValidTimeZone() {
-        def service = new ServiceFacadeStub()
-        def ec = tenantEc(service)
-
-        assertTrue(AdminTenantSupport.updateTenant(ec, "KREWE", null, "America/Chicago"))
-
-        def settingCall = service.calls.find { it.serviceName == "store#darpan.auth.TenantSetting" }
-        assertEquals("America/Chicago", settingCall.parametersMap.timeZone)
-    }
-
-    @Test
-    void updateTenantRejectsAnInvalidTimeZoneAndWritesNothing() {
-        // An unvalidated zone is invisible once stored: the browser's Intl silently falls back to
-        // the viewer's own zone, so timestamps keep rendering and only quietly stop agreeing with
-        // the schedule label. Nothing surfaces an error later, so this is the only place to catch it.
-        def service = new ServiceFacadeStub()
-        def message = new MessageFacadeStub()
-        def ec = tenantEc(service, message)
-
-        assertFalse(AdminTenantSupport.updateTenant(ec, "KREWE", null, "America/Chigago"))
-        assertTrue(message.hasError())
-        assertEquals(0, service.calls.size())
-    }
-
-    @Test
-    void updateTenantRejectsAnInvalidTimeZoneBeforeApplyingTheLabel() {
-        // Mirrors TenantAccessSupport.saveUserSettings, which validates ahead of BOTH its writes so
-        // a rejected timezone cannot leave a half-applied rename behind.
-        def service = new ServiceFacadeStub()
-        def ec = tenantEc(service)
-
-        assertFalse(AdminTenantSupport.updateTenant(ec, "KREWE", "Krewe Renamed", "Not/AZone"))
-        assertTrue(service.calls.every { it.serviceName != "update#moqui.security.UserGroup" },
-                "a rejected timezone must not leave a renamed tenant behind: ${service.calls*.serviceName}".toString())
-    }
+    // update#Tenant, deactivate#Tenant / reactivate#Tenant, get#TenantList and get#TenantDetail are
+    // XML actions now; their coverage lives in AdminServicesSmokeTests, through the real service engine.
 
     @Test
     void createTenantRejectsAnInvalidTimeZone() {
-        // Same hole as updateTenant, reachable through the create wizard instead.
+        // Same hole update#Tenant guards against, reachable through the create wizard instead.
         def service = new ServiceFacadeStub()
         def message = new MessageFacadeStub()
         def ec = adminEc(["moqui.security.UserGroup": new FinderStub(oneResult: null)], service, message)

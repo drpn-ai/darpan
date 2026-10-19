@@ -12,7 +12,40 @@
                 (DARPAN_TENANT_ADMIN, DARPAN_TENANT_USER, DARPAN_COMPANY_EDITOR, DARPAN_COMPANY_VIEW_ONLY).</description></parameter>
         </in-parameters>
         <out-parameters><parameter name="ok" type="Boolean"><description>True when the member was added.</description></parameter></out-parameters>
-        <actions><set field="ok" from="darpan.admin.AdminMembershipSupport.addTenantMember(ec, userId, tenantUserGroupId, permissionUserGroupId)"/></actions>
+        <actions>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <if condition="!(permissionUserGroupId in darpan.admin.AdminMembershipSupport.ASSIGNABLE_TENANT_ROLES)">
+                <return error="true" message="${permissionUserGroupId ?: '(missing)'} is not an assignable tenant role."/></if>
+            <entity-find-one entity-name="moqui.security.UserGroup" value-field="tenantGroup">
+                <field-map field-name="userGroupId" from="tenantUserGroupId"/></entity-find-one>
+            <if condition="tenantGroup == null || tenantGroup.groupTypeEnumId != darpan.facade.common.TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID">
+                <return error="true" message="Tenant ${tenantUserGroupId ?: '(missing)'} was not found."/></if>
+            <entity-find-one entity-name="darpan.auth.TenantSetting" value-field="tenantSetting">
+                <field-map field-name="companyUserGroupId" from="tenantUserGroupId"/></entity-find-one>
+            <if condition="tenantSetting?.disabled == 'Y'">
+                <return error="true" message="Tenant ${tenantUserGroupId} is deactivated."/></if>
+            <entity-find-one entity-name="moqui.security.UserAccount" value-field="memberAccount">
+                <field-map field-name="userId"/></entity-find-one>
+            <if condition="memberAccount == null"><return error="true" message="User ${userId ?: '(missing)'} was not found."/></if>
+            <entity-find entity-name="darpan.auth.TenantUserPermissionGroupMember" list="activePermissionRows">
+                <econdition field-name="tenantUserGroupId"/><econdition field-name="userId"/>
+                <econdition field-name="thruDate" from="null"/></entity-find>
+            <if condition="activePermissionRows">
+                <return error="true" message="${userId} is already a member of ${tenantUserGroupId}."/></if>
+            <!-- ok turns true once validation passes, as it always has: a write that then fails
+                 surfaces through ec.message (and rolls the call back), not through ok. -->
+            <set field="ok" from="true"/>
+            <!-- One fromDate for both rows so the two membership histories stay joinable. -->
+            <set field="fromDate" from="ec.user.nowTimestamp"/>
+            <service-call name="create#moqui.security.UserGroupMember"
+                    in-map="[userGroupId: tenantUserGroupId, userId: userId, fromDate: fromDate]"/>
+            <service-call name="create#darpan.auth.TenantUserPermissionGroupMember" in-map="[tenantUserGroupId: tenantUserGroupId,
+                    userId: userId, permissionUserGroupId: permissionUserGroupId, fromDate: fromDate]"/>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'admin.MembershipAdminServices.add#TenantMember', targetType: 'Membership', targetId: tenantUserGroupId + ':' + userId,
+                    detailText: 'Added ' + userId + ' to ' + tenantUserGroupId + ' as ' + permissionUserGroupId + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+        </actions>
     </service>
 
     <service verb="update" noun="TenantMemberRole" allow-remote="true">
@@ -23,7 +56,32 @@
             <parameter name="permissionUserGroupId" required="true"><description>New assignable tenant role.</description></parameter>
         </in-parameters>
         <out-parameters><parameter name="ok" type="Boolean"><description>True when the role was changed.</description></parameter></out-parameters>
-        <actions><set field="ok" from="darpan.admin.AdminMembershipSupport.updateTenantMemberRole(ec, userId, tenantUserGroupId, permissionUserGroupId)"/></actions>
+        <actions>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <if condition="!(permissionUserGroupId in darpan.admin.AdminMembershipSupport.ASSIGNABLE_TENANT_ROLES)">
+                <return error="true" message="${permissionUserGroupId ?: '(missing)'} is not an assignable tenant role."/></if>
+            <entity-find entity-name="darpan.auth.TenantUserPermissionGroupMember" list="activePermissionRows">
+                <econdition field-name="tenantUserGroupId"/><econdition field-name="userId"/>
+                <econdition field-name="thruDate" from="null"/></entity-find>
+            <if condition="!activePermissionRows">
+                <return error="true" message="${userId} is not a member of ${tenantUserGroupId}."/></if>
+            <!-- ok turns true once validation passes, as it always has: a write that then fails
+                 surfaces through ec.message (and rolls the call back), not through ok. -->
+            <set field="ok" from="true"/>
+            <!-- The new role starts at the exact instant the old one ends. -->
+            <set field="thruDate" from="ec.user.nowTimestamp"/>
+            <iterate list="activePermissionRows" entry="permissionRow">
+                <service-call name="update#darpan.auth.TenantUserPermissionGroupMember" in-map="[tenantUserGroupId: tenantUserGroupId,
+                        userId: userId, permissionUserGroupId: permissionRow.permissionUserGroupId,
+                        fromDate: permissionRow.fromDate, thruDate: thruDate]"/>
+            </iterate>
+            <service-call name="create#darpan.auth.TenantUserPermissionGroupMember" in-map="[tenantUserGroupId: tenantUserGroupId,
+                    userId: userId, permissionUserGroupId: permissionUserGroupId, fromDate: thruDate]"/>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'admin.MembershipAdminServices.update#TenantMemberRole', targetType: 'Membership', targetId: tenantUserGroupId + ':' + userId,
+                    detailText: 'Changed ' + userId + ' role in ' + tenantUserGroupId + ' to ' + permissionUserGroupId + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+        </actions>
     </service>
 
     <service verb="remove" noun="TenantMember" allow-remote="true">
@@ -34,6 +92,51 @@
             <parameter name="tenantUserGroupId" required="true"><description>Tenant to remove the member from.</description></parameter>
         </in-parameters>
         <out-parameters><parameter name="ok" type="Boolean"><description>True when the member was removed.</description></parameter></out-parameters>
-        <actions><set field="ok" from="darpan.admin.AdminMembershipSupport.removeTenantMember(ec, userId, tenantUserGroupId)"/></actions>
+        <actions>
+            <set field="ok" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <!-- Deliberately NOT the active-tenant check: removal from a DEACTIVATED tenant must stay legal.
+                 But the group must still exist and be a real Darpan tenant, or the raw UserGroupMember
+                 lookup below would match ANY group (e.g. DARPAN_SUPER_ADMIN, ADMIN, DARPAN_USER) and let
+                 this thruDate a caller's own super-admin membership or a user's base facade-access group. -->
+            <entity-find-one entity-name="moqui.security.UserGroup" value-field="tenantGroup">
+                <field-map field-name="userGroupId" from="tenantUserGroupId"/></entity-find-one>
+            <if condition="tenantGroup == null || tenantGroup.groupTypeEnumId != darpan.facade.common.TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID">
+                <return error="true" message="Tenant ${tenantUserGroupId ?: '(missing)'} was not found."/></if>
+            <entity-find entity-name="darpan.auth.TenantUserPermissionGroupMember" list="activePermissionRows">
+                <econdition field-name="tenantUserGroupId"/><econdition field-name="userId"/>
+                <econdition field-name="thruDate" from="null"/></entity-find>
+            <entity-find entity-name="moqui.security.UserGroupMember" list="activeGroupRows">
+                <econdition field-name="userGroupId" from="tenantUserGroupId"/><econdition field-name="userId"/>
+                <econdition field-name="thruDate" from="null"/></entity-find>
+            <if condition="!activePermissionRows &amp;&amp; !activeGroupRows">
+                <return error="true" message="${userId} is not a member of ${tenantUserGroupId}."/></if>
+            <!-- ok turns true once validation passes, as it always has: a write that then fails
+                 surfaces through ec.message (and rolls the call back), not through ok. -->
+            <set field="ok" from="true"/>
+            <set field="thruDate" from="ec.user.nowTimestamp"/>
+            <iterate list="activeGroupRows" entry="groupRow">
+                <service-call name="update#moqui.security.UserGroupMember" in-map="[userGroupId: tenantUserGroupId,
+                        userId: userId, fromDate: groupRow.fromDate, thruDate: thruDate]"/>
+            </iterate>
+            <iterate list="activePermissionRows" entry="permissionRow">
+                <service-call name="update#darpan.auth.TenantUserPermissionGroupMember" in-map="[tenantUserGroupId: tenantUserGroupId,
+                        userId: userId, permissionUserGroupId: permissionRow.permissionUserGroupId,
+                        fromDate: permissionRow.fromDate, thruDate: thruDate]"/>
+            </iterate>
+            <!-- A removed member whose active-tenant preference points at this tenant would resolve to a
+                 dead tenant at next session sync; delete the stale preference so sync re-resolves cleanly. -->
+            <entity-find-one entity-name="moqui.security.UserPreference" value-field="activeTenantPreference">
+                <field-map field-name="userId"/>
+                <field-map field-name="preferenceKey" from="darpan.facade.common.TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY"/>
+            </entity-find-one>
+            <if condition="activeTenantPreference != null &amp;&amp; activeTenantPreference.preferenceValue == tenantUserGroupId">
+                <service-call name="delete#moqui.security.UserPreference" in-map="[userId: userId,
+                        preferenceKey: darpan.facade.common.TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY]"/>
+            </if>
+            <service-call name="create#darpan.admin.AdminAuditLog" in-map="[adminUserId: ec.user.userId,
+                    serviceName: 'admin.MembershipAdminServices.remove#TenantMember', targetType: 'Membership', targetId: tenantUserGroupId + ':' + userId,
+                    detailText: 'Removed ' + userId + ' from ' + tenantUserGroupId + '.', auditTimestamp: ec.user.nowTimestamp]"/>
+        </actions>
     </service>
 </services>

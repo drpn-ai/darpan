@@ -24,12 +24,30 @@
             <parameter name="runId"/>
         </out-parameters>
         <actions>
-            <set field="runId" from="darpan.migration.MigrationLedgerSupport.write(ec, [
-                    migrationId  : migrationId,
-                    statusId     : statusId,
-                    startedDate  : startedDate,
-                    rowsAffected : rowsAffected,
-                    messageDetail: messageDetail])"/>
+            <!-- required="true" passes a whitespace-only id, so trim and re-check here. -->
+            <set field="migrationId" from="migrationId?.toString()?.trim()"/>
+            <set field="statusId" from="statusId?.toString()?.trim()"/>
+            <if condition="!migrationId || !statusId">
+                <message error="true">record#MigrationRun requires migrationId and statusId</message>
+                <return/>
+            </if>
+
+            <!-- One instant for both stamps, so a caller that passes no start records a zero-length attempt. -->
+            <set field="recordedDate" from="ec.user.nowTimestamp"/>
+            <!-- The short "DarpanMigrationRun" bank, not the full entity name entity-sequenced-id-primary
+                 would use: every runId already in a client's ledger came from this bank, and a fresh one
+                 would hand out ids that collide with them. -->
+            <set field="runId" from="ec.entity.sequencedIdPrimary('DarpanMigrationRun', null, null)"/>
+            <entity-make-value entity-name="darpan.migration.DarpanMigrationRun" value-field="ledgerRow" map="[
+                    migrationId    : migrationId,
+                    runId          : runId,
+                    startedDate    : startedDate instanceof java.sql.Timestamp ? startedDate : recordedDate,
+                    completedDate  : recordedDate,
+                    appliedByUserId: ec.user.userId,
+                    statusId       : statusId,
+                    rowsAffected   : rowsAffected,
+                    messageDetail  : darpan.migration.MigrationLedgerSupport.truncate(messageDetail)]"/>
+            <entity-create value-field="ledgerRow"/>
         </actions>
     </service>
 
@@ -141,7 +159,20 @@
         </in-parameters>
         <out-parameters><parameter name="ok" type="Boolean"/></out-parameters>
         <actions>
-            <set field="ok" from="darpan.migration.MigrationSupervisorSupport.setEnabled(ec, migrationId, enabled as boolean)"/>
+            <!-- Installation-wide registry row (no companyUserGroupId, no EntityFilter): a plain find
+                 under the caller's authz. cache="false" because this decides what the next sweep runs. -->
+            <entity-find-one entity-name="darpan.migration.DarpanMigration" value-field="migration" cache="false">
+                <field-map field-name="migrationId"/>
+            </entity-find-one>
+            <if condition="migration == null">
+                <set field="ok" from="false"/>
+                <message error="true">No registered migration with id ${migrationId}</message>
+                <return/>
+            </if>
+            <set field="migration.enabled" from="enabled ? 'Y' : 'N'"/>
+            <set field="migration.lastUpdatedDate" from="ec.user.nowTimestamp"/>
+            <entity-update value-field="migration"/>
+            <set field="ok" from="true"/>
         </actions>
     </service>
 
@@ -157,7 +188,26 @@
             <parameter name="attempts" type="List"><parameter name="attempt" type="Map"/></parameter>
         </out-parameters>
         <actions>
-            <set field="attempts" from="darpan.migration.MigrationSupervisorSupport.history(ec, migrationId, maxRows)"/>
+            <!-- A ledger row per retry means this list is unbounded; cap it at 50 unless asked. -->
+            <set field="historyLimit" from="maxRows != null &amp;&amp; maxRows &gt; 0 ? maxRows : 50"/>
+            <!-- Installation-wide ledger (no companyUserGroupId, no EntityFilter): a plain find under
+                 the caller's authz. -->
+            <entity-find entity-name="darpan.migration.DarpanMigrationRun" list="ledgerRows" limit="historyLimit">
+                <econdition field-name="migrationId"/>
+                <order-by field-name="-startedDate"/>
+            </entity-find>
+            <!-- Built key by key, not getValueMapList(): the admin wrapper serialises these maps as-is,
+                 so the key set and its order are part of the wire shape. -->
+            <set field="attempts" from="[]"/>
+            <iterate list="ledgerRows" entry="ledgerRow">
+                <script>attempts.add([runId          : ledgerRow.getString("runId"),
+                                      statusId       : ledgerRow.getString("statusId"),
+                                      startedDate    : ledgerRow.get("startedDate"),
+                                      completedDate  : ledgerRow.get("completedDate"),
+                                      appliedByUserId: ledgerRow.getString("appliedByUserId"),
+                                      rowsAffected   : ledgerRow.get("rowsAffected"),
+                                      messageDetail  : ledgerRow.getString("messageDetail")])</script>
+            </iterate>
             <set field="ok" from="!ec.message.hasError()"/>
         </actions>
     </service>

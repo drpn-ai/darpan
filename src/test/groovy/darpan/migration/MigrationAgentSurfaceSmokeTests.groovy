@@ -9,6 +9,7 @@ import org.junit.jupiter.api.TestInstance
 import org.moqui.context.ExecutionContext
 
 import java.nio.file.Path
+import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
@@ -153,6 +154,95 @@ class MigrationAgentSurfaceSmokeTests {
 
         assertEquals("DISABLED", row.status)
         assertFalse(row.enabled as Boolean)
+    }
+
+    // ---- characterization of set#MigrationEnabled / get#MigrationHistory (DAR-BE-074) ----
+
+    private def registryRow(String migrationId) {
+        return ec.entity.find("darpan.migration.DarpanMigration")
+                .condition("migrationId", migrationId).useCache(false).disableAuthz().one()
+    }
+
+    @Test
+    void setEnabledParksAndUnparksAndStampsTheRow() {
+        Map<String, Object> parked = ec.service.sync().name("migration.MigrationServices.set#MigrationEnabled")
+                .parameters([migrationId: "RULE_TENANT_STAMPS", enabled: false])
+                .disableAuthz().call()
+        assertEquals(true, parked.ok)
+        assertFalse(ec.message.hasError())
+        def row = registryRow("RULE_TENANT_STAMPS")
+        assertEquals("N", row.getString("enabled"))
+        assertNotNull(row.get("lastUpdatedDate"))
+
+        Map<String, Object> unparked = ec.service.sync().name("migration.MigrationServices.set#MigrationEnabled")
+                .parameters([migrationId: "RULE_TENANT_STAMPS", enabled: true])
+                .disableAuthz().call()
+        assertEquals(true, unparked.ok)
+        assertEquals("Y", registryRow("RULE_TENANT_STAMPS").getString("enabled"))
+    }
+
+    @Test
+    void setEnabledOnAnUnknownIdReportsNotOkWithExactlyOneError() {
+        Map<String, Object> out = ec.service.sync().name("migration.MigrationServices.set#MigrationEnabled")
+                .parameters([migrationId: "NO_SUCH_MIGRATION", enabled: false])
+                .disableAuthz().call()
+
+        assertEquals(false, out.ok)
+        assertEquals(["No registered migration with id NO_SUCH_MIGRATION"], ec.message.errors)
+        ec.message.clearErrors()
+    }
+
+    @Test
+    void historyRowsCarryExactlyTheLedgerFieldsInOrder() {
+        Timestamp started = new Timestamp(1_700_000_000_000L)
+        String runId = ec.service.sync().name("migration.MigrationServices.record#MigrationRun")
+                .parameters([migrationId  : "UNDECRYPTABLE_HOOKS",
+                             statusId     : MigrationLedgerSupport.STATUS_SUCCESS,
+                             startedDate  : started,
+                             rowsAffected : 9,
+                             messageDetail: "nine"])
+                .disableAuthz().call().runId as String
+
+        Map<String, Object> out = ec.service.sync()
+                .name("migration.MigrationServices.get#MigrationHistory")
+                .parameters([migrationId: "UNDECRYPTABLE_HOOKS"])
+                .disableAuthz().call()
+        Map<String, Object> attempt = (out.attempts as List<Map<String, Object>>)[0]
+
+        // Key order is part of the wire shape: the admin wrapper serialises these maps as-is.
+        assertEquals(["runId", "statusId", "startedDate", "completedDate", "appliedByUserId",
+                      "rowsAffected", "messageDetail"], attempt.keySet() as List)
+        assertEquals(runId, attempt.runId)
+        assertEquals("SUCCESS", attempt.statusId)
+        assertEquals(started, attempt.startedDate)
+        assertNotNull(attempt.completedDate)
+        assertEquals(ec.user.userId, attempt.appliedByUserId)
+        assertEquals(9, attempt.rowsAffected)
+        assertEquals("nine", attempt.messageDetail)
+    }
+
+    @Test
+    void historyHonoursMaxRowsAndFallsBackToTheDefaultCapForZero() {
+        (1..3).each { int i ->
+            ec.service.sync().name("migration.MigrationServices.record#MigrationRun")
+                    .parameters([migrationId: "UNDECRYPTABLE_HOOKS",
+                                 statusId   : MigrationLedgerSupport.STATUS_FAILED,
+                                 startedDate: new Timestamp(1_700_000_000_000L + i * 1000L),
+                                 messageDetail: "attempt ${i}".toString()])
+                    .disableAuthz().call()
+        }
+
+        List<Map<String, Object>> one = ec.service.sync()
+                .name("migration.MigrationServices.get#MigrationHistory")
+                .parameters([migrationId: "UNDECRYPTABLE_HOOKS", maxRows: 1])
+                .disableAuthz().call().attempts as List<Map<String, Object>>
+        assertEquals(["attempt 3"], one*.messageDetail)
+
+        List<Map<String, Object>> zero = ec.service.sync()
+                .name("migration.MigrationServices.get#MigrationHistory")
+                .parameters([migrationId: "UNDECRYPTABLE_HOOKS", maxRows: 0])
+                .disableAuthz().call().attempts as List<Map<String, Object>>
+        assertEquals(["attempt 3", "attempt 2", "attempt 1"], zero*.messageDetail)
     }
 
     // ---- read back why something failed ----

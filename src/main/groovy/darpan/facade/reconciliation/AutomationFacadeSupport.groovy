@@ -1005,12 +1005,12 @@ class AutomationFacadeSupport {
     }
 
     protected static void validateChatSpace(def ec, String chatSpaceId) {
-        // P0 #4: tenant condition pre-applied by TenantScopedFinder (no bare disableAuthz — see
-        // DisableAuthzRatchetTest); equivalent to the old explicit companyUserGroupId condition
-        // since findTenantScoped resolves the same currentActiveTenantUserGroupId internally.
-        def chatSpaceRow = TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.TENANT_CHAT_SPACE)
-                .condition("chatSpaceId", chatSpaceId)
-                .useCache(false).one()
+        // DAR-BE-077: chatSpaceId is the whole PK, and one() keeps only the PK when it has one, so a
+        // tenant condition beside it was silently dropped and another tenant's space passed. The
+        // tenant is checked on the row after the read instead.
+        def chatSpaceRow = TenantScopedFinder.findOneOwnedByTenant(ec, DarpanEntityConstants.TENANT_CHAT_SPACE,
+                "chatSpaceId", chatSpaceId, TenantAccessSupport.currentActiveTenantUserGroupId(ec),
+                "automation chat-space check — owner re-checked on the row (PK-only one())")
         if (chatSpaceRow == null || ((chatSpaceRow.isActive)?.toString()?.trim()) == "N") {
             ec.message.addError("Chat space '${chatSpaceId}' was not found or is inactive.")
         }
@@ -1206,10 +1206,11 @@ class AutomationFacadeSupport {
 
     protected static Map<String, Object> resolveChatSpaceSummary(def ec, def automation) {
         String chatSpaceId = readString(automation, "chatSpaceId")
-        // P0 #4: tenant-scoped read (no bare disableAuthz — see DisableAuthzRatchetTest); the
-        // automation's chatSpaceId was already validated against the active tenant at save time.
-        def chatSpaceRow = chatSpaceId ? TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.TENANT_CHAT_SPACE)
-                .condition("chatSpaceId", chatSpaceId).useCache(true).one() : null
+        // DAR-BE-077: owner re-checked on the row; a tenant condition beside the full PK is dropped by
+        // one(), and an automation saved before the fix may still name another tenant's space.
+        def chatSpaceRow = chatSpaceId ? TenantScopedFinder.findOneOwnedByTenant(ec, DarpanEntityConstants.TENANT_CHAT_SPACE,
+                "chatSpaceId", chatSpaceId, TenantAccessSupport.currentActiveTenantUserGroupId(ec),
+                "automation chat-space summary — owner re-checked on the row (PK-only one())") : null
         return [
                 chatSpaceId    : chatSpaceId,
                 chatSpaceName  : chatSpaceRow?.spaceName,

@@ -242,11 +242,13 @@ def persistRunResult = { Map<String, Object> fields ->
     if (!resultPath && !existingRunResultId) return null
 
     return ec.transaction.runUseOrBegin(30, "Error saving reconciliation run result", {
+        // The run-result id is the whole PK, so the owner is checked on the row: a tenant condition
+        // beside a full PK is dropped by one() (DAR-BE-077).
         def runResultValue = existingRunResultId ?
-                TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
-                        .condition("reconciliationRunResultId", existingRunResultId)
-                        .useCache(false)
-                        .one() :
+                TenantScopedFinder.findOneOwnedByTenant(ec, DarpanEntityConstants.RECONCILIATION_RUN_RESULT,
+                        "reconciliationRunResultId", existingRunResultId,
+                        TenantAccessSupport.currentActiveTenantUserGroupId(ec),
+                        "run-result update by the id beginRun minted — owner re-checked on the row") :
                 null
         boolean creating = runResultValue == null
         if (creating) runResultValue = ec.entity.makeValue(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
@@ -1082,10 +1084,10 @@ try {
         } else {
             String obsRowStatus = null
             try {
-                obsRowStatus = normalize(TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
-                        .condition("reconciliationRunResultId", obsRunId)
-                        .useCache(false)
-                        .one()?.statusEnumId)
+                obsRowStatus = normalize(TenantScopedFinder.findOneOwnedByTenant(ec,
+                        DarpanEntityConstants.RECONCILIATION_RUN_RESULT, "reconciliationRunResultId", obsRunId,
+                        TenantAccessSupport.currentActiveTenantUserGroupId(ec),
+                        "terminal status of the run this call began — owner re-checked on the row")?.statusEnumId)
             } catch (Throwable statusReadError) {
                 logger.warn("run#SavedRunDiff terminal status read failed (best-effort): ${statusReadError.message ?: statusReadError}")
             }

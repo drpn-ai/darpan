@@ -1,6 +1,8 @@
 package darpan.facade.settings
 
 import darpan.facade.common.TenantAccessSupport
+import darpan.facade.reconciliation.AutomationFacadeSupport
+import darpan.reconciliation.notification.TenantNotificationSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -15,6 +17,7 @@ import java.sql.Timestamp
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -141,6 +144,51 @@ class ChatSpaceCrossTenantSmokeTests {
         List<Map<String, Object>> spaces = (List<Map<String, Object>>) (result.chatSpaces ?: [])
         assertTrue(spaces.every { it.chatSpaceId != VICTIM_SPACE },
                 "the victim's space appeared in the attacker's listing: ${spaces*.chatSpaceId}")
+    }
+
+    @Test
+    void anAutomationCannotBeLinkedToAnotherTenantsChatSpace() {
+        // DAR-BE-077: save#Automation validates the linked space through this check.
+        ec.message.clearErrors()
+        AutomationFacadeSupport.validateChatSpace(ec, VICTIM_SPACE)
+        assertTrue(ec.message.hasError(), "another tenant's chat space passed the automation's chat-space check")
+        ec.message.clearErrors()
+    }
+
+    @Test
+    void anAutomationSummaryDoesNotRevealAnotherTenantsChatSpace() {
+        Map<String, Object> summary = AutomationFacadeSupport.resolveChatSpaceSummary(ec, [chatSpaceId: VICTIM_SPACE])
+        assertNull(summary.chatSpaceName, "the victim's space name leaked into the attacker's automation summary")
+        assertFalse(summary.chatSpaceActive as boolean, "the victim's space reads as usable for the attacker")
+    }
+
+    @Test
+    void runNotificationsNeverDeliverToAnotherTenantsChatSpace() {
+        Map<String, Object> resolved = TenantNotificationSupport.resolveDestinationChatSpaces(
+                ec, ATTACKER, VICTIM_SPACE, "NO_SUCH_RUN_RESULT")
+        List<Map<String, Object>> destinations = (List<Map<String, Object>>) (resolved.destinations ?: [])
+        assertTrue(destinations.every { it.chatSpaceId != VICTIM_SPACE },
+                "the attacker's run notification would be posted into the victim's chat space")
+    }
+
+    @Test
+    void positiveControlTheOwnTenantsSpaceStillResolves() {
+        // Without this the three refusals above could all be a broken lookup refusing everything.
+        ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, VICTIM)
+        try {
+            ec.message.clearErrors()
+            AutomationFacadeSupport.validateChatSpace(ec, VICTIM_SPACE)
+            assertFalse(ec.message.hasError(), "the owning tenant's own space was refused: ${ec.message.errors}")
+            assertEquals("Victim Ops",
+                    AutomationFacadeSupport.resolveChatSpaceSummary(ec, [chatSpaceId: VICTIM_SPACE]).chatSpaceName)
+            List destinations = (List) TenantNotificationSupport.resolveDestinationChatSpaces(
+                    ec, VICTIM, VICTIM_SPACE, "NO_SUCH_RUN_RESULT").destinations
+            assertTrue(destinations.any { it.chatSpaceId == VICTIM_SPACE },
+                    "the owning tenant's own space is no longer a delivery destination")
+        } finally {
+            ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, ATTACKER)
+            ec.message.clearErrors()
+        }
     }
 
     private def readSpace(String chatSpaceId) {

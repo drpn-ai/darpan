@@ -289,12 +289,11 @@ class TenantNotificationSupport {
         }
         List<Map<String, Object>> destinations = []
         for (String chatSpaceId : chatSpaceIds) {
-            def spaceRow = TenantScopedFinder.findGlobalUnscoped(ec,
-                            DarpanEntityConstants.TENANT_CHAT_SPACE,
-                            "chat-space read pinned to run-result tenantId — explicit companyUserGroupId condition always applied")
-                    ?.condition("chatSpaceId", chatSpaceId)
-                    ?.condition("companyUserGroupId", tenantId)
-                    ?.useCache(false)?.one()
+            // DAR-BE-077: the owner is checked on the row. A companyUserGroupId condition beside the
+            // full PK was silently dropped by one(), so this used to deliver into another tenant's space.
+            def spaceRow = TenantScopedFinder.findOneOwnedByTenant(ec, DarpanEntityConstants.TENANT_CHAT_SPACE,
+                    "chatSpaceId", chatSpaceId, tenantId,
+                    "run notification destination — owner re-checked against the run-result tenant")
             Map<String, Object> destination = describeDestination(ec, tenantId, chatSpaceId, spaceRow)
             if (destination != null) {
                 destinations.add(destination)

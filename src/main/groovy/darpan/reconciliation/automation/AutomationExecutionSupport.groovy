@@ -2378,11 +2378,16 @@ class AutomationExecutionSupport {
      * silently matching nothing.
      */
     protected static def findAutomationRunResult(def ec, String runResultId, String expectedTenantId) {
-        def finder = TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.RECONCILIATION_RUN_RESULT,
-                        "automation run-result read keyed by the id this runner minted — companyUserGroupId re-pinned to the automation's asserted tenant")
-                .condition("reconciliationRunResultId", runResultId)
-        if (normalize(expectedTenantId)) finder = finder.condition("companyUserGroupId", normalize(expectedTenantId))
-        return finder.useCache(false).one()
+        // The owner is checked on the row: a companyUserGroupId condition beside the full PK is dropped
+        // by one() (DAR-BE-077), so the old re-pin never applied.
+        if (normalize(expectedTenantId)) {
+            return TenantScopedFinder.findOneOwnedByTenant(ec, DarpanEntityConstants.RECONCILIATION_RUN_RESULT,
+                    "reconciliationRunResultId", runResultId, normalize(expectedTenantId),
+                    "automation run-result read keyed by the id this runner minted — owner re-checked on the row")
+        }
+        return TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.RECONCILIATION_RUN_RESULT,
+                        "automation run-result read keyed by the id this runner minted")
+                .condition("reconciliationRunResultId", runResultId).useCache(false).one()
     }
 
     /**

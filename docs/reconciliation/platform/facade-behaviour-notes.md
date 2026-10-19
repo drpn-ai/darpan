@@ -1,21 +1,37 @@
-# Facade Services (Auth, Settings, JSON Schema, Reconciliation)
+# Facade Behaviour Notes (Auth, Settings, JSON Schema, Reconciliation)
 
-This document defines the backend facade APIs used by `darpan-ui`. The file name keeps its
-historical "wave1" label, but the contracts below are the current facade surface. The retired
-`Pilot*` service family (`list#PilotMappings`, `run#PilotGenericDiff`,
-`get#PilotGeneratedOutput`, etc.) was replaced by the unprefixed services documented here.
+Behaviour notes for the `facade.*` services that `darpan-ui` calls. This is **not** the method
+list. The authoritative list of remote methods and their parameters is generated from the service
+XML:
+
+- `runtime/component/darpan/docs/api-contract/methods.txt` — every remotely callable method
+- `runtime/component/darpan/docs/api-contract/openapi.json` — parameters and descriptions
+
+Regenerate both with `./gradlew :runtime:component:darpan:generateApiContract`; the
+`checkApiContract` task and `ApiContractGeneratorTests` fail when they drift. Services added
+since these notes were written (lifecycle runs, flowchart runs, NetSuite checks, config sharing,
+Slack, source endpoints, archive/restore, and the partner facades) are documented only in the
+contract and in their service descriptions.
+
+The retired `Pilot*` service family (`list#PilotMappings`, `run#PilotGenericDiff`,
+`get#PilotGeneratedOutput`, etc.) was replaced by the unprefixed services described here.
 
 ## Auth and Remote Access
 
-- All facade services are in `service/facade/*.xml`.
-- All services are `allow-remote="true"`.
+- Darpan's facade services are in `service/facade/*.xml`; the HotWax OMS, Shopify and NetSuite
+  facades live in their own components under the same `facade.` namespace.
+- Facade services are `allow-remote="true"`, except the one-time `migrate#*` services, which are
+  `allow-remote="false"`.
+- `/rpc/json` dispatches only `facade.*`, `admin.*` and `gql.*` methods; anything else gets HTTP 403
+  (see [api-access-policy.md](api-access-policy.md)).
 - `facade.AuthFacadeServices.login#Session` uses `authenticate="anonymous-all"`.
 - `facade.AuthFacadeServices.get#SessionInfo` uses `authenticate="anonymous-all"` so darpan-ui can verify the explicit auth token without depending on a browser session cookie.
 - `facade.AuthFacadeServices.logout#Session` uses `authenticate="anonymous-all"` so darpan-ui can revoke the current token even after local auth state drift.
+- `facade.AuthFacadeServices.change#ExpiredPassword` uses `authenticate="anonymous-all"` so a user whose password must change (for example after an admin-issued temporary password) can set a new one before a session exists.
 - Remaining services use `authenticate="true"`.
-- Frontend calls are expected through authenticated remote service invocation using the `login_key` request header after login.
+- Frontend calls authenticate with the `login_key` request header after login, or, where the UI build enables cookie mode, with the HttpOnly session cookie plus CSRF.
 - These facade auth methods are thin adapters over Moqui's built-in login-key issuance and request authentication rather than a separate Darpan auth state machine.
-- Hosted frontend origins must be listed in `webapp_allow_origins` for browser preflight to reach `/rpc/json`; the production Docker defaults include `darpan-app-uat.hotwax.io`, `darpan-app.hotwax.io`, `darpan-uat.hotwax.io`, `darpan.hotwax.io`, `hotwax-darpan-dev.web.app`, `hotwax-darpan-dev.firebaseapp.com`, `hc-darpan-uat.web.app`, `hc-darpan-uat.firebaseapp.com`, `hc-darpan.web.app`, `hc-darpan.firebaseapp.com`, `app-uat.drpn.ai`, and `app.drpn.ai`.
+- Hosted frontend origins must be listed in `webapp_allow_origins` for browser preflight to reach `/rpc/json`. The list is set per Docker image through `Moqui_WEBAPP_ALLOW_ORIGINS` in `darpan-docker-config`: the prod image carries an exact first-party list, and the UAT image currently prepends `*` (see [api-access-policy.md](api-access-policy.md)).
 
 ## Shared-Tenant Access Scope
 
@@ -25,21 +41,21 @@ historical "wave1" label, but the contracts below are the current facade surface
 - `activeTenantLabel` is the display label for that active tenant.
 - `availableTenants[]` lists the user's switchable Darpan tenant groups.
 - `customerScopeId` remains in the payload as a compatibility alias for `activeTenantUserGroupId`.
-- `isSuperAdmin` is `true` only when the current user belongs to the Moqui `ADMIN` group.
-- The active tenant preference is stored in `UserPreference` under `darpan.auth.activeTenantUserGroupId`.
+- `isSuperAdmin` is `true` when the current user belongs to Moqui `ADMIN` or `DARPAN_SUPER_ADMIN`.
+- The active tenant preference is stored in `UserPreference` under `darpan.auth.activeTenantUserGroupId`. It is per user, not per session, so switching tenant in one tab re-points every tab for that user.
 - Only `UserGroup` rows tagged with the Darpan-specific `UgtDarpanCompany` group type are exposed as switchable tenants.
 - Current shared-tenant enforcement in this repo applies to:
   - tenant-owned facade entities are filtered through Moqui `ArtifactAuthzFilter` / `EntityFilterSet` records bound to the PWA service authz path
   - the active tenant is pushed into `ec.user.context.activeTenantUserGroupId` during request/login setup so those filters can apply consistently on authenticated facade reads
-  - Wave 1 settings list facades also apply explicit `companyUserGroupId = activeTenantUserGroupId` conditions so connection dashboards do not depend only on artifact-level filters
-  - Wave 1 settings facades remain split: tenant-owned records (`SFTP`, `NetSuite auth`, `NetSuite endpoint`) are tenant-scoped, while global settings (`LLM`, enum/global admin settings) require Darpan Admin access
+  - settings list facades also apply explicit `companyUserGroupId = activeTenantUserGroupId` conditions so connection dashboards do not depend only on artifact-level filters
+  - settings facades remain split: tenant-owned records (`SFTP`, `NetSuite auth`, `NetSuite endpoint`) are tenant-scoped, while global settings (`LLM`, enum/global admin settings) require Darpan Admin access
   - Generic reconciliation outputs under `runtime://datamanager/reconciliation-runs/**` are filtered by generated-output metadata for the active tenant; legacy tmp outputs remain tenant-scoped by folder path during migration
   - Legacy backend reconciliation and settings screens: authenticated super-admin only
 - This auth contract is the foundation for later issues that move the remaining runs/results surfaces onto the same tenant ownership model.
 
 ## Artifact Authorization Requirement
 
-Wave 1 facade methods require service artifact authorization in addition to session authentication.
+Facade methods require service artifact authorization in addition to session authentication.
 
 `runtime/component/darpan/data/SecuritySeedData.xml` should keep the legacy backend screen group admin-only and add a dedicated facade artifact group for the PWA service path:
 
@@ -60,20 +76,10 @@ Without the dedicated facade authz, authenticated users can still get errors lik
 
 ## Service Groups
 
-### `facade.AuthFacadeServices`
-- `login#Session`
-- `get#SessionInfo`
-- `save#ActiveTenant`
-- `save#UserSettings`
-- `verify#OwnPassword`
-- `change#OwnPassword`
-- `logout#Session`
-- `logout#AllSessions`
-
-## Stateless Auth Behavior
+### `facade.AuthFacadeServices`: Stateless Auth Behavior
 
 - Successful `login#Session` calls issue a Moqui login key and return it explicitly in the JSON-RPC result as `authToken`.
-- The frontend must send that token on later requests through the `login_key` request header.
+- In header mode the frontend sends that token on later requests through the `login_key` request header; in cookie mode (`VITE_DARPAN_COOKIE_AUTH=true`) the `darpan_login_key` HttpOnly cookie carries it and requests also send the CSRF token from `/apps/darpan/csrfToken`.
 - Token lifetime is aligned to `user-facade/login-key@expire-hours` from Moqui config. The default remains 144 hours, exposed as `authTokenExpiresInSeconds`.
 - `get#SessionInfo` authenticates from the `login_key` header when present and does not depend on `/Login`, `moquiSessionToken`, or browser session-cookie bootstrap.
 - `save#ActiveTenant` requires an authenticated request, validates that the requested tenant belongs to the current user, persists that selection in `UserPreference`, and returns refreshed `sessionInfo`.
@@ -84,22 +90,8 @@ Without the dedicated facade authz, authenticated users can still get errors lik
 - The UI contract is intentionally small: `authenticated`, `sessionInfo`, and the explicit token fields returned from `login#Session`.
 
 ### `facade.SettingsFacadeServices`
-- `list#EnumOptions`
-- `get#LlmSettings`
-- `save#LlmSettings`
-- `get#TenantSettings`
-- `save#TenantSettings`
-- `list#TenantChatSpaces`
-- `save#TenantChatSpace`
-- `delete#TenantChatSpace`
-- `get#UserNotificationDefault`
-- `save#UserNotificationDefault`
-- `list#SftpServers`
-- `save#SftpServer`
-- `list#NsAuthConfigs`
-- `save#NsAuthConfig`
-- `list#NsRestletConfigs`
-- `save#NsRestletConfig`
+
+Methods: see `docs/api-contract/methods.txt`.
 
 Shared-tenant rule:
 
@@ -108,18 +100,13 @@ Shared-tenant rule:
 - `save#TenantSettings` requires active-tenant write access and stores timezone on `darpan.auth.TenantSetting`, not on the current user.
 - `list#EnumOptions`, `get#LlmSettings`, and `save#LlmSettings` require Darpan Admin access.
 - `list#EnumOptions` now deduplicates `DarpanSystemSource` rows by logical system code and prefers canonical enum ids such as `OMS` over legacy duplicates such as `DarSysOms`.
+- Chat spaces are either Google Chat webhooks or Slack channels posted through a workspace connected with `facade.SlackFacadeServices`.
 - `list#TenantChatSpaces`, `save#TenantChatSpace`, and `delete#TenantChatSpace` are tenant-scoped through `companyUserGroupId`; `save#TenantChatSpace` and `delete#TenantChatSpace` require active-tenant write access, and `delete#TenantChatSpace` rejects a space still referenced by an automation or a live `ReconciliationRunNotifySubscription` (deactivate it instead). Webhook URLs are validated as HTTPS `chat.googleapis.com` space-message endpoints and returned in clear text as `googleChatWebhookUrl`; neither masking nor at-rest encryption applies as of 2026-08-14.
 - `get#UserNotificationDefault` and `save#UserNotificationDefault` are personal preferences (stored per-tenant on `UserPreference`, not a tenant-owned entity) — no active-tenant write access is required. The retired `get#TenantNotificationSettings` / `save#TenantNotificationSettings` pair (one webhook per tenant) no longer exists; existing tenant webhooks were migrated to `TenantChatSpace` by the one-time `migrate#TenantNotificationSettings` service during the v1.2.0 upgrade (see `docs/code-map.md`).
 
 ### `facade.JsonSchemaFacadeServices`
-- `list#JsonSchemas`
-- `get#JsonSchema`
-- `save#JsonSchemaText`
-- `infer#JsonSchemaFromText`
-- `validate#JsonTextAgainstSchema`
-- `flatten#JsonSchema`
-- `save#RefinedSchema`
-- `delete#JsonSchema`
+
+Methods: see `docs/api-contract/methods.txt`.
 
 Shared-tenant rule:
 
@@ -130,35 +117,8 @@ Shared-tenant rule:
 - Legacy rows without `companyUserGroupId` remain effectively admin-only until they are assigned.
 
 ### `facade.ReconciliationFacadeServices`
-- `create#RuleSetRun`
-- `save#RuleSetRun`
-- `create#CsvRun`
-- `list#SavedRuns`
-- `save#SavedRunName`
-- `delete#SavedRun`
-- `run#SavedRunDiff`
-- `get#ReconciliationRunStatus`
-- `subscribe#RunNotification`
-- `unsubscribe#RunNotification`
-- `list#Automations`
-- `get#Automation`
-- `save#Automation`
-- `delete#Automation`
-- `pause#Automation`
-- `resume#Automation`
-- `run#AutomationNow`
-- `list#AutomationExecutions`
-- `list#AutomationSourceOptions`
-- `create#Mapping`
-- `list#Mappings`
-- `get#Mapping`
-- `save#Mapping`
-- `save#DashboardPinnedMappings`
-- `save#DashboardPinnedSavedRuns`
-- `run#GenericDiff`
-- `list#GeneratedOutputs`
-- `get#GeneratedOutput`
-- `delete#GeneratedOutput`
+
+Methods: see `docs/api-contract/methods.txt`.
 
 Contract notes:
 
@@ -464,7 +424,7 @@ Expected success shape:
 
 ## Secret Redaction Policy
 
-Settings list/save payloads never expose raw stored secrets. They return flags such as:
+Settings list/save payloads never expose raw stored credentials. They return flags such as:
 
 - `hasPassword`
 - `hasApiToken`
@@ -472,8 +432,11 @@ Settings list/save payloads never expose raw stored secrets. They return flags s
 - `hasPrivateKeyPem`
 - `hasStoredLlmApiKey`
 
+Exception: chat-space webhook URLs are not treated as credentials. They are stored in clear text
+and `list#TenantChatSpaces` returns them to members of the tenant.
+
 ## UI Migration Notes
 
-- These facade services replace screen-transition dependency for Wave 1 UI pages.
+- These facade services replace the screen-transition dependency of the first UI pages.
 - Existing backend screens remain active during phased parallel cutover, but the legacy reconciliation/settings screen tree is restricted to authenticated super-admin users so it cannot bypass tenant scoping.
 - Backend UI surfaces (`screen/**`, `template/**`, `theme-library/**`) are not extended by this change.

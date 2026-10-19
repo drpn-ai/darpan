@@ -1,6 +1,11 @@
 # Theme Library (JS/CSS/HTML)
 
-This document defines the shared theme library for symmetric Darpan UI implementation.
+> **Legacy.** This library styles only the backend Moqui screens under `/apps/darpan`
+> (`screen/Settings.xml`, `screen/Reconciliation.xml`, `screen/Migrations.xml`), which are
+> super-admin only and are not extended. The product UI is `darpan-ui` and the operator UI is
+> `darpan-admin-ui`; neither uses this library. Do not adopt it in new work.
+
+This document describes the theme library the legacy backend screens share.
 
 ## Purpose
 
@@ -23,12 +28,15 @@ Provide reusable building blocks so screens do not re-implement styling and step
 - **JS behavior**: keyboard-first step progression (`Enter` next, `Shift+Enter` back), active-step sync between panels and indicators.
 - **HTML blocks**: canonical shell, 4-step flow, and config card templates.
 
-## Example Adoption
+## How the screens include it
+
+The screens link the files by URL under the app mount, not by `component://` location (a browser
+cannot resolve `component://`):
 
 ```html
-<link rel="stylesheet" href="component://darpan/theme-library/css/tokens.css" />
-<link rel="stylesheet" href="component://darpan/theme-library/css/components.css" />
-<script src="component://darpan/theme-library/js/theme-runtime.js"></script>
+<link rel="stylesheet" href="/apps/darpan/theme-library/css/tokens.css" />
+<link rel="stylesheet" href="/apps/darpan/theme-library/css/components.css" />
+<script src="/apps/darpan/theme-library/js/theme-runtime.js"></script>
 
 <section class="dt-shell" data-step-flow data-initial-step="1">
   <ol class="dt-flow">
@@ -45,6 +53,6 @@ Provide reusable building blocks so screens do not re-implement styling and step
 
 ## Operational Impact
 
-- No existing screen behavior changes until screens opt in and include these assets.
-- Enables consistency across Mapping, Reconciliation, and Settings pages.
-- Reduces duplicated CSS/JS/HTML patterns and improves maintenance.
+- Only the three legacy screens above include these assets, and they link only the two CSS files;
+  no screen loads `js/theme-runtime.js` today.
+- Changes here affect super-admin backend screens only.

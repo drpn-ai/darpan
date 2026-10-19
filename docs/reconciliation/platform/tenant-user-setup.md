@@ -35,9 +35,9 @@ Collect these before setup:
 | --- | --- | --- |
 | User ID | `alex@example.com` | Stable Moqui `UserAccount.userId`. Email address is a good default when allowed by the environment. |
 | Username | `alex@example.com` | Login username. Must be unique. |
-| Email | `alex@example.com` | Must be unique if provided. |
+| Email | `alex@example.com` | Always set it; password recovery depends on it. Must be unique. |
 | Full name | `Alex Chen` | Stored as `UserAccount.userFullName`. |
-| Initial password | one-time secret | Use only through approved user creation services or admin UI. Do not commit plaintext passwords. |
+| Initial password | one-time secret | Passed as `tempPassword` to the admin service; the user must change it at first sign-in. Do not commit or log it. |
 | Tenant ID | `ACME` | Existing Darpan tenant `UserGroup` with `groupTypeEnumId="UgtDarpanCompany"`. |
 | Tenant role | `DARPAN_TENANT_ADMIN` or `DARPAN_TENANT_USER` | Assign per user and per tenant. |
 | Default active tenant | `ACME` | Optional but useful for the first login. |
@@ -59,47 +59,67 @@ DARPAN_TENANT_USER
 DARPAN_USER
 ```
 
-3. Confirm the auth you are using is super-admin capable by calling `facade.AuthFacadeServices.get#SessionInfo` and checking:
+3. Confirm the session you are using is super-admin capable by calling `facade.AuthFacadeServices.get#SessionInfo` and checking:
 
 - `authenticated=true`
 - `sessionInfo.isSuperAdmin=true`
 
-Stop if the auth is not super-admin capable. `sessionInfo.canManageDarpanCore=true` is required for app-level settings, but it is not required for tenant-user setup.
+Stop if the session is not super-admin capable: every `admin.*` service refuses other users.
+`sessionInfo.canManageDarpanCore=true` is required for app-level settings, but it is not required
+for tenant-user setup.
 
-## Path A: Admin UI or Internal User Service
+## Path A: Admin App or `admin.*` Services (standard)
 
-Use this path when creating a real login user with a password.
+Use the Darpan admin app (`darpan-admin-ui`), or call the `admin.*` JSON-RPC services it uses.
+Each write records a `darpan.admin.AdminAuditLog` row.
 
-The standard Moqui service for creating a user account is:
+### 1. Create the account
 
-```text
-org.moqui.impl.UserServices.create#UserAccount
+Call `admin.UserAdminServices.create#UserAccount`:
+
+```json
+{
+  "username": "alex@example.com",
+  "userFullName": "Alex Chen",
+  "emailAddress": "alex@example.com",
+  "tempPassword": "<one-time secret>"
+}
 ```
 
-It accepts `username`, `newPassword`, `newPasswordVerify`, `userFullName`, `emailAddress`, `requirePasswordChange`, and related `UserAccount` fields. In this checkout the service is `allow-remote="false"`, so it is not a Darpan PWA JSON-RPC service by default. It is used by the Moqui Tools user screen:
+- Always pass `emailAddress`. The service treats it as optional, but password recovery depends on it.
+- The account is created through the framework's `create#UserAccount` with
+  `requirePasswordChange=Y`, so the user must change the temporary password at first sign-in
+  (`facade.AuthFacadeServices.change#ExpiredPassword`).
+- The service also adds the `DARPAN_USER` membership.
+- Credentials are shared out of band; there is no email invite.
 
-```text
-/apps/system/Security/UserAccount
-```
+### 2. Add the user to a tenant
 
-Recommended production flow:
+Call `admin.MembershipAdminServices.add#TenantMember` with `userId`, `tenantUserGroupId` and
+`permissionUserGroupId` (`DARPAN_TENANT_USER` or `DARPAN_TENANT_ADMIN`; the legacy
+`DARPAN_COMPANY_EDITOR` and `DARPAN_COMPANY_VIEW_ONLY` are also accepted). It writes the tenant
+`UserGroupMember` and the `TenantUserPermissionGroupMember` together. Repeat per tenant.
 
-1. Create the `UserAccount` through the approved admin UI or an environment-approved backend operation that calls `org.moqui.impl.UserServices.create#UserAccount`.
-2. Set `requirePasswordChange="Y"` unless the onboarding process already handles password rotation.
-3. Do not commit or log the initial password.
-4. Continue with the membership and role assignment records below.
+### 3. Later changes
 
-## Path B: Membership and Role Records
+| Change | Service |
+| --- | --- |
+| Name or email | `admin.UserAdminServices.update#UserAccount` |
+| Reset a forgotten password | `admin.UserAdminServices.reset#Password` (sets a new temporary password, forces a change at next sign-in, and revokes the user's login keys) |
+| Disable / re-enable sign-in | `disable#UserAccount` / `enable#UserAccount` |
+| Change a tenant role | `admin.MembershipAdminServices.update#TenantMemberRole` |
+| Remove from a tenant | `admin.MembershipAdminServices.remove#TenantMember` |
 
-There are no user-management facade services in this component. `facade.AuthFacadeServices`
-exposes only session and self-service contracts (`login#Session`, `get#SessionInfo`,
-`save#ActiveTenant`, `save#UserSettings`, `verify#OwnPassword`, `change#OwnPassword`,
-`logout#Session`, `logout#AllSessions`); services such as `save#TenantUserAccount`,
-`save#TenantUser`, or `save#TenantUserPermissionGroup` do not exist. Do not script against them.
+Do not route password changes through stock Moqui services such as
+`org.moqui.impl.UserServices.update#Password` over `/rpc/json`: the JSON-RPC endpoint only
+dispatches `facade.*`, `admin.*` and `gql.*`, and refuses everything else with HTTP 403. A user
+changes their own password with `facade.AuthFacadeServices.change#OwnPassword`.
 
-After the `UserAccount` exists (Path A), create the membership and role records as entity data —
-through the generic-data path in Path C or through Moqui Tools entity screens with a Moqui
-`ADMIN` account.
+## Path B: Membership and Role Records (fallback)
+
+Use a data load only when the admin app and `admin.*` services are not available, or when the
+setup must be committed as configuration data. The account itself still comes from Path A;
+a data load creates no login and writes no audit row.
 
 Required records:
 
@@ -145,7 +165,7 @@ For an existing user:
 </entity-facade-xml>
 ```
 
-Do not put plaintext passwords in generic data. For production users, create or reset the password through `org.moqui.impl.UserServices.create#UserAccount`, `update#Password`, an approved admin UI, or the environment's identity provider flow.
+Do not put plaintext passwords in generic data. Create accounts and reset passwords through the admin app or `admin.UserAdminServices` (Path A).
 
 ## Multiple Tenants
 
@@ -199,7 +219,7 @@ Also verify the negative path:
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| User cannot log in | Missing/disabled `UserAccount`, wrong password flow, or required password change not completed. | Create/reset through the approved user service or admin UI. |
+| User cannot log in | Missing/disabled `UserAccount`, wrong password flow, or required password change not completed. | Create, enable or reset through the admin app or `admin.UserAdminServices`. |
 | User logs in but sees no tenant switcher | Missing tenant `UserGroupMember` or tenant has the wrong `groupTypeEnumId`. | Add tenant membership and confirm the tenant is `UgtDarpanCompany`. |
 | User sees tenant but cannot run reconciliation | Missing `DARPAN_TENANT_USER`/`DARPAN_TENANT_ADMIN`, or assigned legacy view-only. | Add `TenantUserPermissionGroupMember` with `DARPAN_TENANT_USER` or `DARPAN_TENANT_ADMIN`. |
 | User can run but cannot edit settings | User is correctly assigned as Tenant User. | Use `DARPAN_TENANT_ADMIN` only if edit access is intended. |
@@ -207,7 +227,7 @@ Also verify the negative path:
 
 ## Handoff Checklist
 
-- [ ] `UserAccount` exists, is enabled, and has the intended login username/email.
+- [ ] `UserAccount` exists, is enabled, and has the intended login username and an email address.
 - [ ] Initial password was not committed or logged.
 - [ ] User has `DARPAN_USER`.
 - [ ] User has tenant `UserGroupMember` for every intended tenant.

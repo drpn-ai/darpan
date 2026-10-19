@@ -8,7 +8,7 @@
 
 ## Pipeline and Project Status
 - End-to-end pipeline (ingestion → Spark diff → Drools rules → notification → automation): `runtime/component/darpan/docs/reconciliation/reconciliation-flow.md`
-- RuleSet compare-scope cutover: runtime path shipped; the Mapping migration/deprecation ticket (RSCUT-009) has not landed, so mapping-backed runs remain a supported legacy bridge. Historical plan and tickets: `runtime/component/darpan/docs/reconciliation/projects/ruleset-only-cutover/README.md`
+- RuleSet compare-scope cutover: runtime path shipped; the Mapping migration/deprecation ticket (RSCUT-009) has not landed, so mapping-backed runs remain a supported legacy bridge. Historical plan and tickets: `runtime/component/darpan/docs/archive/reconciliation/projects/ruleset-only-cutover/README.md` (archived)
 
 ## 1. Purpose
 
@@ -138,7 +138,7 @@ Over time, the platform can expand to:
 
 - Additional workflows (shipments, returns, payments)
 - Additional systems (WMS, ERP, finance tools)
-- Additional alert channels (per-tenant Google Chat run-completion alerts are already implemented; see [reconciliation-flow](../reconciliation-flow.md))
+- Additional alert channels (per-tenant Google Chat and Slack run-completion alerts are already implemented; see [reconciliation-flow](../reconciliation-flow.md))
 - Historical trend analysis
 
 ## 11. Success Criteria

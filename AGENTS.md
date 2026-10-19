@@ -1,53 +1,47 @@
 # Darpan AGENTS.md
 
-Component-generic guidance lives here; user-specific preferences are in `/Users/aditipatel/sandbox/darpan/AGENTS.md`.
+Component-level guidance for `runtime/component/darpan`. Workspace rules (classification, backlog,
+branching, closeout notes) live in the wrapper checkout's `AGENTS.md` and `BACKLOG_WORKFLOW.md`;
+they win where this file is silent.
 
-## Load strategy (token-efficient)
-- Start with `runtime/component/darpan/SKILLS.md`.
-- Use only the guidance needed for the active task.
-- Prefer task skills when available:
-  - `$darpan-ui-change-guardrails`
-  - `$darpan-reconciliation-rules-first`
-  - `$darpan-xml-doc-consistency`
-  - `$darpan-production-cleanup-review`
-- Read feature docs in `runtime/component/darpan/docs/**` only for the feature being changed.
+## Workflow
+- Classify each ask as `feature`, `bug fix`, or `neither`. For a feature or bug fix, add or update
+  the item in the wrapper `roadmap/BACKLOG.md` first; it is the source of truth for status (not
+  GitHub Issues, not Linear).
+- Work directly on `main`; no topic branches. Put the backlog ID (`DAR-<SURFACE>-<n>`) in commit
+  messages.
+- Agents stop before deploy, tag push, or any live write to a client system.
+- Start with `SKILLS.md`, then read `docs/**` only for the feature being changed.
 
 ## Scope and ownership
-- Keep changes in `runtime/component/darpan/**` unless explicitly requested.
-- Put service contracts and any logic that stays cleanly declarative in `service/*.xml`; use `src/**` only when the logic is materially less clear or maintainable in XML; keep entity model changes in `entity/*.xml`.
-- Use generic, system-neutral naming for entities/services/screens/config.
+- Keep changes in `runtime/component/darpan/**` unless the task names another component. Custom UI
+  belongs in `darpan-ui` (tenant app) or `darpan-admin-ui` (operator app), never in backend
+  `screen/**`, `template/**` or `theme-library/**`.
+- Use generic, system-neutral names for entities, services and config.
 
-## Service and XML conventions
-- Define explicit `in-parameters` and `out-parameters` with type/default/description.
-- Keep XML `default-value` plain (example: `default-value="value"`), not extra-quoted.
-- Default to an XML-first implementation for services. Use XML actions or `entity-auto` for validation, orchestration, entity operations, and straightforward branching or transformation when they stay readable.
-- Escalate to Groovy/Java in `src/**` only when the XML-first option becomes materially less clear, maintainable, or reusable.
-- Prefer `component://` and `runtime://` locations over absolute paths.
-- Do not add backward-compatibility aliases in services/contracts unless explicitly requested.
+## Services and XML
+- XML actions are the default service body. Groovy is for Spark, Drools, streaming file I/O,
+  HTTP/GraphQL clients, crypto, and non-trivial JSON or string work.
+- Declare every `in-parameters` / `out-parameters` entry with type and description; a script
+  service drops undeclared outputs.
+- Tenant-scoped reads in Groovy go through `TenantScopedFinder`; do not add bare `disableAuthz`.
+- A new remote service is `facade.*` (tenant app) or `admin.*` (super-admin only). `/rpc/json`
+  refuses every other namespace. Regenerate `docs/api-contract/` with
+  `./gradlew :runtime:component:darpan:generateApiContract` in the same change.
+- Every entity with `companyUserGroupId` needs a `DARPAN_ACTIVE_COMPANY_SCOPE` filter row.
+- Do not add backward-compatibility aliases unless asked.
 
-## Reconciliation conventions
-- Validate inputs early and return structured validation errors.
+## Reconciliation
+- Validate inputs early and return structured errors.
 - Use Spark for large transforms; avoid `collect()` on large datasets.
-- Keep compare logic and source-SQL template selection configurable in Drools/RuleSet artifacts.
-- Emit diff outputs consistently under `runtime://tmp/reconciliation/**` with sanitized timestamped names.
-- Prefer app-managed encrypted settings for external API credentials; use environment variables only as fallback.
-- Mask credentials/secrets in logs and config.
+- Prefer configurable rules, connector registry rows and schema metadata over source-specific
+  branches.
+- Never log or return credentials; credentials live in encrypted entity fields.
 
-## UI conventions
-- For Darpan UI tasks, use provided mockups as source of truth and match layout/copy/control structure unless the request explicitly asks for deviations.
-- Use dark monochrome style only for current PWA/sample-page UI work: whitespace-heavy layouts, white/gray text on black/charcoal surfaces, and console-like monospaced typography.
-- Do not use legacy light/accent visual patterns unless explicitly requested with new approved mockups.
-- Use Moqui built-in pagination; avoid custom pagination unless unavoidable.
-- Isolate pagination state per list when multiple lists are on one screen.
-- Build dropdown options in actions/scripts, not complex inline `from` literals.
-- Use enumeration label fallback `enumCode ?: description ?: enumId`.
-- When moving/removing screens, verify legacy direct URLs or document restart/cache-refresh requirement.
-
-## Docs and verification
-- When behavior changes, update closest docs in `runtime/component/darpan/docs/**` in the same change.
-- Include one concrete example plus operational impact notes (paths/params/schema names) when relevant.
-- Validate XML after every entity/service/screen edit and fix errors before completion.
-- Tests are not automatic; run targeted checks as needed and report what was not run.
-
-## Ticket workflow
-- When closing a GitHub issue after review readiness, remove `needs review` as part of final closeout.
+## Verification
+- Run only the tests that cover the change: `scripts/focused-test.sh`, or
+  `./gradlew :runtime:component:darpan:test --tests <FQCN>`. Pools: `unitTest` (no Moqui boot),
+  `smokeTest` (boots Moqui), `testAll` (both), `mysqlTest` (MySQL locking). See `README.md`.
+- JDK 21 is required. Validate XML after every entity/service/screen edit.
+- Report what was not run, and state runtime/browser gaps separately from test results.
+- When behaviour changes, update the closest doc under `docs/**` in the same change.

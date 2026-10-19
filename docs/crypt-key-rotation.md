@@ -1,6 +1,6 @@
 # Crypt-Key Rotation Procedure
 
-Applies to: `runtime/component/darpan` — Moqui 4 / prod deploy via component Dockerfile + entrypoint.
+Applies to: `runtime/component/darpan` — Moqui 4 / deploys built from the `drpn-ai/darpan-docker-config` Dockerfiles + entrypoints.
 
 ## Background
 
@@ -114,15 +114,16 @@ grep -i "decrypt\|crypt\|PBE" <log-file>
 Any decryption error against a live record would indicate a record that was not yet re-encrypted
 in step 4. If found, temporarily re-add `entity_ds_crypt_pass_old` and complete the re-encrypt pass.
 
-## Files modified (MACH Security P1, 2026-06-29)
+## Where the dual-key wiring lives
 
-- `runtime/component/darpan/docker/MoquiProductionConf.xml` — added `<default-property>` for
-  `entity_ds_crypt_pass_old` and three `<decrypt-alt>` entries inside `<entity-facade>`, matching
-  the framework's `MoquiDefaultConf.xml` lines 433-436. Previously the prod-conf `<entity-facade>`
-  element overrode the framework element and lost the fallback decrypt entries entirely.
-- `runtime/component/darpan/docker/entrypoint.sh` — exports `entity_ds_crypt_pass_old` as optional,
-  defaulting to `entity_ds_crypt_pass`.
-- `runtime/component/darpan/docker/prod/entrypoint.sh` — same.
+All in the private `drpn-ai/darpan-docker-config` repo:
 
-(Paths above are as of 2026-06-29. The component `docker/` directory has since moved to the private
-`drpn-ai/darpan-docker-config` repo, where these files live at the repo root.)
+- `docker/MoquiProductionConf.xml` — the `<default-property>` for `entity_ds_crypt_pass_old` and
+  three `<decrypt-alt>` entries inside `<entity-facade>`, matching the framework's
+  `MoquiDefaultConf.xml`. Without them the prod-conf `<entity-facade>` element overrides the
+  framework element and loses the fallback decrypt entries. The same file serves both images.
+- `docker/entrypoint.sh` (UAT image) — exports `entity_ds_crypt_pass_old` as optional, defaulting to
+  `entity_ds_crypt_pass`.
+- `docker/prod/entrypoint.sh` (prod image) — same.
+
+The component itself no longer has a `docker/` directory.

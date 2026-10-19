@@ -4,7 +4,7 @@ This document maps the reconciliation configuration entities to their Moqui defi
 The model focuses on configuration, definition storage, and the run-result artifact manifest used to
 locate persisted source/result files. Automation execution records track scheduled windows, artifacts,
 counts, and sanitized errors. Run-completion alerting is part of the model through `TenantChatSpace`
-(a named Google Chat space registry per tenant) and `ReconciliationRunNotifySubscription` (per-run
+(a named Google Chat or Slack destination registry per tenant) and `ReconciliationRunNotifySubscription` (per-run
 "notify me" opt-ins); see [reconciliation-flow](../reconciliation-flow.md) for the notification path.
 The prior one-webhook-per-tenant `TenantNotificationSetting` entity is retired (2026-07-29) in favor
 of the registry. Per-rule evaluation history remains out of scope — rule failures are emitted as Diff
@@ -15,6 +15,18 @@ rows in the generated result artifact, not stored per rule.
 - Reconciliation entities: `runtime/component/darpan/entity/ReconciliationEntities.xml`
 - Rule entities: `runtime/component/darpan/entity/RuleEntities.xml`
 - Mapping entities: `runtime/component/darpan/entity/MappingEntities.xml`
+- Auth/tenant entities: `runtime/component/darpan/entity/AuthEntities.xml`
+- Admin audit: `runtime/component/darpan/entity/AdminEntities.xml`
+- Migration ledger: `runtime/component/darpan/entity/MigrationEntities.xml`
+- JSON schemas: `runtime/component/darpan/entity/JsonSchemaEntities.xml`
+- Partner-owned source configs: `HotWaxOmsRestSourceConfig` (darpan-hotwax), `ShopifyAuthConfig`
+  (shopify-darpan), `DatabaseSourceConfig` / `DatabaseSourceQuery` (database-darpan). The NetSuite
+  entities (`NsAuthConfig`, `NsRestletConfig`, `NsSuiteQlSourceQuery*`) are defined here in darpan;
+  netsuite-darpan's entity file is deliberately empty.
+
+The ERD and the per-entity sections below cover the core reconciliation model. Entities added
+later are summarized in [Other Entities](#other-entities); the entity XML is authoritative for
+fields.
 - DataDocument: `framework/entity/EntityEntities.xml`
 - SystemMessageRemote: `framework/entity/ServiceEntities.xml`
 - Enumeration: `framework/entity/BasicEntities.xml`
@@ -535,14 +547,15 @@ input for the one-time `migrate#TenantNotificationSettings` service (see
 one Google Chat webhook per tenant (`companyUserGroupId` primary key).
 
 ### TenantChatSpace (darpan.reconciliation.TenantChatSpace)
-Named Google Chat space registry entry for one tenant. Replaces the single-webhook
-`TenantNotificationSetting`.
+Named chat destination registry entry for one tenant, on one provider (Google Chat or Slack).
+Replaces the single-webhook `TenantNotificationSetting`.
 
 **Purpose**
 - Multiple named spaces per tenant instead of exactly one; users pick a personal default from this
   list and automations link one space each for completion notifications.
-- Holds the Google Chat incoming webhook URL, encrypted at rest; facade responses only return
-  configured status and a masked URL, never the raw secret.
+- Holds an incoming webhook URL (Google Chat or Slack) or a Slack channel posted to through a
+  connected `SlackWorkspaceInstall`. Webhook URLs are stored in clear text (decision 2026-08-14)
+  and `list#TenantChatSpaces` returns them to tenant members.
 - Read by `TenantNotificationSupport.resolveDestinationChatSpaces` when fan-out resolves an
   automation's linked space and per-run subscriber snapshots.
 - Managed through `facade.SettingsFacadeServices.list#TenantChatSpaces` / `save#TenantChatSpace` /
@@ -553,7 +566,10 @@ Named Google Chat space registry entry for one tenant. Replaces the single-webho
 - `chatSpaceId` (PK)
 - `companyUserGroupId`
 - `spaceName` (unique per tenant, case-insensitive, service-validated)
-- `googleChatWebhookUrl` (clear text since 2026-08-14)
+- `chatProviderEnumId` (Google Chat or Slack; resolve through `TenantNotificationSupport.resolveChatProvider`)
+- `webhookUrl` (clear text; supersedes `googleChatWebhookUrl`)
+- `googleChatWebhookUrl` (deprecated; read as a fallback until migrated)
+- `slackInstallId`, `slackChannelId`, `slackChannelName` (Slack bot delivery)
 - `isActive`
 - `createdByUserId`
 - `createdDate`
@@ -708,13 +724,44 @@ The current reconciliation baseline and planned target keep these responsibiliti
 **Operational Note**
 - Mapping deletion should remove `ReconciliationMappingMember` rows first, then delete `ReconciliationMapping` to satisfy FK constraints (`MAPMEM_MAPDEF`).
 
+## Other Entities
+
+Summary of entities not covered in detail above. Read the entity XML for fields.
+
+| Entity | Purpose |
+| --- | --- |
+| `darpan.reconciliation.ReconciliationRunStep` | One stage of one run (RESOLVE, EXTRACT_FILE1/2, COMPARE, VERIFY_*, CONCLUDE, WRITE_OUTPUT, NOTIFY): status, timings, heartbeat, record count, sanitized error, non-secret metrics. |
+| `darpan.rule.RuleSetCompareSourceKeyField` | One ordered field of a composite compare key for a compare source. |
+| `darpan.rule.RuleSetCompareSourceFilter` | One exclusion (or `INCLUDE_IN`) filter on a compare source's records. |
+| `darpan.reconciliation.ReconciliationAutomationSourceFilter` | The same filter, snapshotted on an automation source. |
+| `darpan.rule.RuleSetConclusionRule` / `RuleSetConclusionCondition` | Named conclusions a compare scope can reach about a finding, tried in order, nested up to three levels; and their conditions. |
+| `darpan.reconciliation.SourceSystemConnector` | Registry row that makes a source system's extraction, lookups and health checks data-driven. |
+| `darpan.reconciliation.SourceSystemConnectorField` | One selectable record field offered by a source endpoint's rules board. |
+| `darpan.reconciliation.SourceConfigEndpointAccess` | Whether one API source config may use one registered source endpoint. |
+| `darpan.reconciliation.NsSuiteQlSourceQuery` / `NsSuiteQlSourceQueryField` | One extractable NetSuite SuiteQL dataset bound to an `NsAuthConfig`, and its column-to-field mapping. |
+| `darpan.auth.ConfigTenantAccess` | Grants a tenant access to a shared source config (`SCFG_HOTWAX_OMS`, `SCFG_SHOPIFY_AUTH`, `SCFG_NS_AUTH`, `SCFG_NS_RESTLET`). Revoke sets `thruDate`; rows are never deleted. |
+| `darpan.reconciliation.SftpServerTenantAccess` | Tenant access to a shared tenant-group SFTP server. |
+| `darpan.auth.TenantSetting` | Tenant-level settings shared by the tenant's users: timezone, and the `disabled` flag set by `admin.TenantAdminServices` deactivate/reactivate. |
+| `darpan.auth.TenantUserPermissionGroupMember` | A user's permission group within one tenant. |
+| `darpan.reconciliation.SlackWorkspaceInstall` | One tenant's authorised Slack workspace and its bot token. |
+| `darpan.reconciliation.SlackOAuthState` | Single-use CSRF state for one in-flight Slack install. |
+| `darpan.reconciliation.SlackPostedMessage` | The Slack message `ts` a run posted to one destination. |
+| `darpan.migration.DarpanMigration` / `DarpanMigrationPrereq` / `DarpanMigrationRun` | Registry of one-time data migrations, their prerequisites, and one row per attempt. |
+| `darpan.admin.AdminAuditLog` | Immutable trail of `admin.*` mutations, written in the same transaction as the change. |
+| `darpan.reconciliation.JsonSchema` | Saved JSON Schemas, tenant-owned. |
+| `darpan.hotwax.HotWaxOmsRestSourceConfig` (darpan-hotwax) | Tenant-owned HotWax OMS source configuration. |
+| `darpan.shopify.ShopifyAuthConfig` (shopify-darpan) | Tenant-owned Shopify Admin API auth and read-capability settings. |
+| `darpan.database.DatabaseSourceConfig` / `DatabaseSourceQuery` (database-darpan) | Customer database connection and a validated parameterized SELECT against it. |
+
 ## What Is Out of Scope (By Design)
 
 - Data pull results
 - Per-rule evaluation result storage (rule failures are Diff rows in the generated result
   artifact, not per-rule history records)
 - Per-event notification delivery history (notification config is stored in `TenantChatSpace` and
-  `ReconciliationRunNotifySubscription`; deliveries are fire-and-forget to each resolved webhook)
+  `ReconciliationRunNotifySubscription`; deliveries are fire-and-forget to each resolved
+  destination; `SlackPostedMessage` keeps only the Slack message `ts` a run posted, so later
+  updates can thread or edit it)
 
 The automation execution record stores only the operational manifest. Detailed payload storage should
 stay in generated data-manager artifacts.
@@ -722,5 +769,4 @@ stay in generated data-manager artifacts.
 ## Future Enhancements
 
 - Rule evaluation result storage
-- Additional notification channels and delivery/audit history beyond the current chat-space
-  registry Google Chat fan-out
+- Delivery/audit history beyond the current chat-space registry fan-out

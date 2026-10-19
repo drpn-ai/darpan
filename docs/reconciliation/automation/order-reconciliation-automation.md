@@ -13,7 +13,9 @@ The automation surface starts at `/reconciliation/automations` in `darpan-ui`.
 - Existing-run setup asks for a saved run, input mode, sources, schedule, and automation name.
 - New-run setup sends the user through the existing reconciliation create flow, creates the saved run, then returns to automation setup with that run selected.
 
-View-only tenant sessions can list automation rows and execution history. They cannot create, edit, pause, resume, delete, or mutate settings. Run access is controlled separately from edit access through the active-tenant permission flags returned by the auth facade.
+The trash action archives an automation rather than deleting it: it leaves the list and stops firing, and **Show archived** brings it back with its execution history intact.
+
+View-only tenant sessions can list automation rows and execution history. They cannot create, edit, pause, resume, archive, delete, or mutate settings. Run access is controlled separately from edit access through the active-tenant permission flags returned by the auth facade.
 
 ## Backend Services
 
@@ -23,23 +25,34 @@ Dashboard and workflow callers should use the remote facade services in `facade.
 - `get#Automation`
 - `save#Automation`
 - `delete#Automation`
-- `pause#Automation`
-- `resume#Automation`
+- `pause#Automation` / `resume#Automation` — change `isActive`
+- `archive#Automation` / `restore#Automation` (DAR-BE-061) — set `isArchived`; an archived automation is hidden from the default list and is never picked up by the scheduler
+- `sync#Automation` — re-derive the automation's snapshot from its saved run: overwrites the compare scope, input mode, both source definitions and the exclusion filters; keeps the name, schedule, window, chat space, active state and the SFTP server, path and pattern; never re-points the automation at a different run
 - `run#AutomationNow`
 - `list#AutomationExecutions`
+- `reprocess#AutomationExecution` — operator re-drive: resets a `FAILED` or dead-lettered execution to `PENDING` so the retry scanner runs it again
 - `list#AutomationSourceOptions`
+
+The authoritative method list is `docs/api-contract/methods.txt`.
 
 Execution is handled by internal services in `reconciliation.ReconciliationAutomationServices`:
 
 - `execute#Automation`
-- `scan#DueAutomations`
+- `scan#DueAutomations` (also re-drives due retries)
+- `sweep#StuckReconciliationRuns`
 - `run#SftpFileAutomation`
 - `poll#SftpAndReconcile`
 
+These are `allow-remote="false"` and are not reachable over `/rpc/json`.
+
 `save#Automation` persists one tenant-owned `ReconciliationAutomation` row and exactly two `ReconciliationAutomationSource` rows, one for `FILE_1` and one for `FILE_2`. Each source must match the selected saved-run file side.
 
+An automation snapshots its saved run's source wiring, including per-side exclusion filters
+(`ReconciliationAutomationSourceFilter`, mirroring `RuleSetCompareSourceFilter`). Editing the saved
+run does not change the automation until `sync#Automation` runs.
+
 An automation may also set `chatSpaceId`, pointing at one `darpan.reconciliation.TenantChatSpace`
-row from the tenant's Google Chat space registry (`facade.SettingsFacadeServices.list#TenantChatSpaces`).
+row from the tenant's chat-space registry (Google Chat or Slack) (`facade.SettingsFacadeServices.list#TenantChatSpaces`).
 When set, every terminal-state execution of that automation notifies the linked space in addition
 to any per-run subscriber snapshots; when unset, the automation only notifies subscribers who
 opted in for that specific run.
@@ -57,11 +70,13 @@ Supported relative windows are:
 - previous month
 - last N days
 - last N weeks
+- last N months (`AUT_WIN_LAST_MONTHS`)
 - custom range
+- state based (`AUT_WIN_STATE`): no date window; the source extracts current state instead (only for connectors with `supportsStateExtract=Y`)
 
 Long windows are split on calendar-month boundaries before extraction. The execution table stores the parent window and each child window so backfills and duplicate checks remain auditable.
 
-API source extraction is pluggable. Each source row must resolve to a configured extraction service through `safeMetadataJson.extractServiceName`. The executor sends:
+API source extraction is pluggable. Each source row must resolve to a configured extraction service through `safeMetadataJson.extractServiceName`, which must match an enabled `SourceSystemConnector` registry row (`data/SourceSystemConnectorSeedData.xml`); the registry also supplies window parameter names and the lookup services verification uses. The executor sends:
 
 - `automationId`
 - `fileSide`
@@ -79,7 +94,7 @@ Example OMS source metadata:
 {
   "extractServiceName": "reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders",
   "parameters": {
-    "omsRestSourceConfigId": "GORJANA_OMS"
+    "omsRestSourceConfigId": "ACME_OMS"
   }
 }
 ```
@@ -113,6 +128,14 @@ For API Order Sync saved runs, Shopify and HotWax are extracted independently fr
 3. Darpan compares the two extracted files and writes the diff output.
 
 The Shopify extractor normalizes GraphQL order GIDs to numeric `legacyResourceId` values because API Order Sync compares Shopify orders to HotWax order `externalId` values.
+
+## Verification
+
+Scheduled executions run the same verification passes as a manual run (`VERIFY_MISSING`, and
+`VERIFY_EXCHANGE` / `VERIFY_RETURNS` where the scope calls for them), so a scheduled run and a
+manual run of the same window report the same differences. The missing-diff pass on the scheduled
+path is on unless the `darpan.reconciliation.automation.verifyMissingDiffs` JVM property is
+`false`. See [reconciliation-flow](../reconciliation-flow.md#4a-verification-passes).
 
 ## SFTP File Mode
 
@@ -152,6 +175,8 @@ Common statuses:
 - `AUT_STAT_NO_DATA`
 - `AUT_STAT_FAILED`
 - `AUT_STAT_SKIP_DUP`
+- `AUT_STAT_DEAD_LETTER` — a transient failure is requeued to `PENDING` with a backoff `nextRetryDate`; the 5-minute scanner re-drives it until `retryCount` reaches `maxRetryCount` (default 3, `darpan.reconciliation.automation.maxRetryCount`), then dead-letters it and sends a best-effort failure alert. Permanent (config) failures skip retry and go straight to `FAILED`.
+- `AUT_STAT_CANCELLED`
 
 Generated source files and result artifacts should live under the data-manager reconciliation run tree. Error metadata and facade responses must not include access tokens, passwords, authorization headers, or raw secret values.
 
@@ -168,7 +193,7 @@ Run these checks before closing the automation feature for production handoff:
 - Verify a reconciliation result artifact and execution history row.
 - Create an SFTP-file automation from the same saved run.
 - Drop two test files, run the automation manually, verify the result artifact, and confirm consumed-file archive behavior.
-- Configure a tenant Google Chat space through Settings, link it to the automation as `chatSpaceId`, run a manual or automation execution to a terminal state, and confirm exactly one completion message per resolved destination (linked space plus any subscriber snapshots) is posted for the tenant. Repeat for a failed run and confirm the failure/termination-reason line appears.
+- Configure a tenant chat space (Google Chat or Slack) through Settings, link it to the automation as `chatSpaceId`, run a manual or automation execution to a terminal state, and confirm exactly one completion message per resolved destination (linked space plus any subscriber snapshots) is posted for the tenant. Repeat for a failed run and confirm the failure/termination-reason line appears.
 - Confirm a view-only tenant session cannot mutate automations or source settings.
 - Confirm cross-tenant automation, SFTP, Shopify, OMS, saved-run, and result access is denied.
 

@@ -4,9 +4,25 @@
 
 JSON schema authoring, refinement, and validation for reconciliation payloads.
 
+## Model
+
+- The database is the source of truth: one tenant-owned `darpan.reconciliation.JsonSchema` row per
+  schema, keyed for users by a human-readable `schemaName`. Saves also mirror the text to
+  `runtime://datamanager/schemas/json/{schemaName}.json`; the legacy `runtime://schemas/json/**`
+  location is read only as a last fallback.
+- `darpan-ui` uses the facade (`facade.JsonSchemaFacadeServices`: list/get, text save, inference
+  from JSON or CSV sample text, refined save from a field list, flatten, validate text against a
+  schema, delete). Every call is scoped to the active tenant. The method list is
+  `docs/api-contract/methods.txt`.
+- The `jsonschema.JsonSchemaServices` layer underneath holds file-based create/infer/validate,
+  `resolve#JsonPathForKey` (finds a JSONPath such as `$.data.orders[*].id` from a bare key), and
+  delete/flatten. Inference samples large inputs rather than reading them whole.
+- Saved schemas drive compare-source setup: a JSON compare source names a saved schema plus a
+  schema-backed ID field path.
+
 ## Entrypoints
 
-- Route: `runtime/component/darpan/screen/Reconciliation/JsonSchema/JsonSchemaManager.xml`
+- Legacy backend screen (super-admin only, not extended): `runtime/component/darpan/screen/Reconciliation/JsonSchema/JsonSchemaManager.xml`
 - Services: `runtime/component/darpan/service/jsonschema/JsonSchemaServices.xml`
 - XML-backed schema CRUD/orchestration: `save#JsonSchema`
 - Facade XML wrapper for darpan-ui text saves: `runtime/component/darpan/service/facade/JsonSchemaFacadeServices.xml`

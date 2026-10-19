@@ -1,7 +1,7 @@
 # Darpan Tenancy Model
 
-Status: current as of 2026-07-02 (MACH P3 — documents the pooled model and the staged
-isolation backlog; nothing here is a commitment to build).
+Status: describes `main` as of October 2026. Documents the pooled model and the staged
+isolation backlog; nothing in the backlog section is a commitment to build.
 
 ## Today: pooled multi-tenancy
 
@@ -9,15 +9,27 @@ All tenants share one deployment end to end:
 
 - **One database.** Tenant rows are discriminated by `companyUserGroupId`
   (a `moqui.security.UserGroup`). Isolation is enforced in three layers:
-  `TenantScopedFinder` (default-deny SQL predicate on every tenant read),
-  `DARPAN_ACTIVE_COMPANY_SCOPE` EntityFilters (authz-enabled paths), and
-  fail-closed system-write assertions (`assertSystemWriteTenant`) on cron/SFTP paths.
+  - `TenantScopedFinder` (default-deny SQL predicate on every tenant read in Groovy; bare
+    `disableAuthz` is held down by `DisableAuthzRatchetTest`);
+  - `DARPAN_ACTIVE_COMPANY_SCOPE` EntityFilters on authz-enabled paths. Since DAR-BE-076 every
+    entity, in any Darpan component, that carries `companyUserGroupId` has a filter row (or a
+    recorded reason in `TenantOwnedEntityFilterContractTests.EXCLUDED`), and that test fails when a
+    new tenant-owned entity lands without one;
+  - fail-closed system-write assertions (`assertSystemWriteTenant`) on cron/SFTP paths.
+- **The active tenant is a per-user preference**, `darpan.auth.activeTenantUserGroupId` in
+  `UserPreference`, not per session: switching tenant in one tab re-points every tab that user has
+  open. Shared source configs reach other tenants only through explicit `ConfigTenantAccess`
+  grants.
 - **One Spark runtime.** Reconciliation batches for all tenants share the JVM-embedded
   SparkSession. A slow batch delays, but cannot read, another tenant's run
   (per-run artifact directories, tenant-stamped run results).
-- **One crypt key.** Encrypted fields (`encrypt="true"`: partner credentials, webhook
-  URLs, private keys) share `entity_ds_crypt_pass`. Rotation is dual-key with a bulk
+- **One crypt key.** Encrypted fields (`encrypt="true"`: partner credentials, API tokens,
+  Slack bot tokens, private keys) share `entity_ds_crypt_pass`. Rotation is dual-key with a bulk
   re-encryption sweep — see [crypt-key-rotation.md](crypt-key-rotation.md).
+- **Chat webhook URLs are not encrypted.** Since 1.5.0, `TenantChatSpace` webhook URLs are stored in
+  clear text and `facade.SettingsFacadeServices.list#TenantChatSpaces` returns them to members of
+  the tenant, including view-only members. Treat read access to a tenant's chat spaces as access to
+  its webhooks.
 - **One rule-engine JVM.** Tenant rules are compiled from structured expressions
   (raw DRL fail-closed by default, DAR-289) and evaluated under a fire-count cap plus
   a wall-clock watchdog (`darpan.reconciliation.rule.maxEvalMillis`).
@@ -41,3 +53,10 @@ All tenants share one deployment end to end:
 
 Anything proposing stages 2–4 should start from this doc plus ADR 0001 and name the
 trigger it claims has fired.
+
+## Dual-mode multitenancy (design only)
+
+DAR-BE-055 (tenant hierarchy, vanity hostnames, schema-per-tenant residency) is a design in the
+wrapper's `docs/superpowers/specs/2026-09-28-dual-mode-multitenancy-design.md` and a backlog item.
+Nothing from it is built; the pooled model above is the only model in code. Moqui 4 has no
+framework multitenancy, so any schema-per-tenant mode has to be built in Darpan.

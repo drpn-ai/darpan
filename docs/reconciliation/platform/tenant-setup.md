@@ -44,31 +44,28 @@ Collect these before setup:
 | Input | Example | Notes |
 | --- | --- | --- |
 | Tenant ID | `ACME` | Use a stable `UserGroup.userGroupId`. Prefer uppercase IDs without spaces. |
-| Tenant label | `Acme` | Store as `UserGroup.description` unless a richer tenant service exists. |
-| Users | `alex@example.com`, `sam@example.com` | User accounts should already exist unless the target environment has a user-provisioning service. |
+| Tenant label | `Acme` | `admin.TenantAdminServices.create#Tenant` stores it as the tenant's display label. |
+| Tenant timezone | `America/New_York` | Optional; defaults to UTC. |
+| Users | `alex@example.com`, `sam@example.com` | Create missing accounts with `admin.UserAdminServices.create#UserAccount`, always with an email address. |
 | Role per user | `DARPAN_TENANT_ADMIN` or `DARPAN_TENANT_USER` | Assign per user and per tenant. |
 | Optional default active tenant | `ACME` | Set for users who should land in the new tenant immediately. |
 | Optional tenant settings | timezone, SFTP, NetSuite, Google Chat spaces | Create only after the active tenant is set correctly. |
 
 For creating the login account itself, see [Darpan Tenant User Setup Tutorial](tenant-user-setup.md).
 
-## Path A: Record Creation Plus Facade Verification
+## Path A: Admin App or `admin.*` Services (standard)
 
-There are no tenant-management facade services in this component. `facade.AuthFacadeServices`
-exposes only session and self-service contracts: `login#Session`, `get#SessionInfo`,
-`save#ActiveTenant`, `save#UserSettings`, `verify#OwnPassword`, `change#OwnPassword`,
-`logout#Session`, and `logout#AllSessions`. Services such as `list#Tenants`, `save#Tenant`,
-`save#TenantUser`, or `save#TenantUserPermissionGroup` do not exist; do not script against them.
-
-Tenant, membership, and role records are created as entity data — either through the data-load
-path (Path B below) or through Moqui Tools entity screens with a Moqui `ADMIN` account. The
-facade is used to verify the result and set the active tenant, as follows.
+Tenant, user and membership setup goes through the operator surface: the Darpan admin app
+(`darpan-admin-ui`), or the `admin.*` JSON-RPC services it calls. Both require a super-admin
+session (`DARPAN_SUPER_ADMIN` or Moqui `ADMIN`); `admin.*` is refused for every other user.
+Each admin write also records a `darpan.admin.AdminAuditLog` row.
 
 ### 1. Authenticate
 
-Call `facade.AuthFacadeServices.login#Session` with a super-admin username and password, or use a provided valid `login_key`.
+Sign in to the admin app, or call `facade.AuthFacadeServices.login#Session` with a super-admin
+username and password and send the returned `login_key` on later calls.
 
-The PWA JSON-RPC endpoint is usually:
+The JSON-RPC endpoint is usually:
 
 ```text
 https://<darpan-host>/rpc/json
@@ -82,47 +79,46 @@ http://localhost:8080/rpc/json
 
 ### 2. Verify Admin Scope
 
-Call `facade.AuthFacadeServices.get#SessionInfo` and confirm:
+Call `facade.AuthFacadeServices.get#SessionInfo` (or `admin.ObserveAdminServices.get#AdminSessionInfo`)
+and confirm:
 
 - `authenticated` is `true`
 - `sessionInfo.isSuperAdmin` is `true`
 
-Stop if the auth does not have super-admin capability. `sessionInfo.canManageDarpanCore=true` is additionally required only for Darpan app-level settings, not tenant setup.
+Stop if the session does not have super-admin capability. `sessionInfo.canManageDarpanCore=true` is additionally required only for Darpan app-level settings, not tenant setup.
 
 ### 3. Create the Tenant
 
-Create the tenant `UserGroup` record through Path B data load or Moqui Tools entity screens:
+Call `admin.TenantAdminServices.create#Tenant`:
 
-```xml
-<moqui.security.UserGroup userGroupId="ACME"
-        description="Acme"
-        groupTypeEnumId="UgtDarpanCompany"/>
+```json
+{ "tenantUserGroupId": "ACME", "label": "Acme", "timeZone": "America/New_York" }
 ```
 
-### 4. Assign Users
+It creates the tenant `UserGroup` (`groupTypeEnumId="UgtDarpanCompany"`) and its `TenantSetting`
+row in one transaction. `update#Tenant`, `deactivate#Tenant` and `reactivate#Tenant` cover the
+rest of the tenant lifecycle.
 
-For each tenant user, the setup must create both records (same load/tooling path):
+### 4. Create Users and Assign Them
 
-```xml
-<moqui.security.UserGroupMember userGroupId="DARPAN_USER"
-        userId="alex@example.com"
-        fromDate="2026-05-02 00:00:00"/>
+For a user who has no account yet, call `admin.UserAdminServices.create#UserAccount` with
+`username`, `userFullName`, `emailAddress` and `tempPassword`. Always pass `emailAddress`: the
+service accepts it as optional, but password recovery depends on it. The account is created with
+`DARPAN_USER` membership and must change the temporary password at first sign-in. See
+[Darpan Tenant User Setup Tutorial](tenant-user-setup.md).
 
-<moqui.security.UserGroupMember userGroupId="ACME"
-        userId="alex@example.com"
-        fromDate="2026-05-02 00:00:00"/>
+Then add the user to the tenant with `admin.MembershipAdminServices.add#TenantMember`:
+
+```json
+{ "userId": "<userId>", "tenantUserGroupId": "ACME", "permissionUserGroupId": "DARPAN_TENANT_ADMIN" }
 ```
 
-Then assign the tenant role:
+It writes the tenant `UserGroupMember` and the `TenantUserPermissionGroupMember` together. Use
+`DARPAN_TENANT_USER` for a Tenant User. `update#TenantMemberRole` changes the role and
+`remove#TenantMember` ends both rows.
 
-```xml
-<darpan.auth.TenantUserPermissionGroupMember tenantUserGroupId="ACME"
-        userId="alex@example.com"
-        permissionUserGroupId="DARPAN_TENANT_ADMIN"
-        fromDate="2026-05-02 00:00:00"/>
-```
-
-For Tenant User, use `DARPAN_TENANT_USER`.
+Granting Super Admin or Darpan Admin is not an `admin.*` operation; add those platform groups
+through the data-load path (Path B).
 
 ### 5. Set Active Tenant
 
@@ -175,11 +171,12 @@ Expected Super Admin response:
 - `canManageDarpanCore=false` unless the same user also has `DARPAN_ADMIN` or Moqui `ADMIN`
 - can select every configured Darpan tenant
 
-## Path B: Generic Data Load Setup
+## Path B: Generic Data Load Setup (fallback)
 
-This is the standard record-creation path, since the component does not expose
-tenant-management facade services. Use it directly whenever setup should be committed as
-seed/configuration data.
+Use a data load only when the admin app and `admin.*` services are not available, when setup
+must be committed as seed/configuration data, or to grant the platform groups (`DARPAN_ADMIN`,
+`DARPAN_SUPER_ADMIN`). A data load writes no audit row and creates no login account; create
+accounts with `admin.UserAdminServices.create#UserAccount` first.
 
 ### 1. Create a Data File
 
@@ -244,7 +241,7 @@ Create tenant-owned settings only after the active tenant is correct.
 | SFTP | `facade.SettingsFacadeServices.save#SftpServer` | `SftpServer.companyUserGroupId` is the active tenant. |
 | NetSuite auth | `facade.SettingsFacadeServices.save#NsAuthConfig` | `NsAuthConfig.companyUserGroupId` is the active tenant. |
 | NetSuite endpoint | `facade.SettingsFacadeServices.save#NsRestletConfig` | Endpoint auth binding must be visible in the active tenant. |
-| Google Chat spaces | `facade.SettingsFacadeServices.save#TenantChatSpace` | Readback (`list#TenantChatSpaces`) must return only masked webhook status per named space. |
+| Chat spaces (Google Chat webhook or Slack channel) | `facade.SettingsFacadeServices.save#TenantChatSpace` (Slack needs the workspace connected first through `facade.SlackFacadeServices`) | `list#TenantChatSpaces` returns the named spaces for the active tenant. Google Chat webhook URLs are stored in clear text and returned to tenant members, so treat them as visible to anyone with tenant access. |
 
 Do not create tenant-specific LLM provider settings in the current data model. LLM and enum/global settings are Darpan-admin-only app-level settings.
 
@@ -266,7 +263,7 @@ access needed), and automations pick their notification space from the registry 
 ## Handoff Checklist
 
 - [ ] Tenant `UserGroup` exists with `groupTypeEnumId="UgtDarpanCompany"`.
-- [ ] Any new login users were created through [Darpan Tenant User Setup Tutorial](tenant-user-setup.md).
+- [ ] Any new login users were created through [Darpan Tenant User Setup Tutorial](tenant-user-setup.md), each with an email address.
 - [ ] Every non-admin app user has `DARPAN_USER`.
 - [ ] Every tenant user has tenant `UserGroupMember`.
 - [ ] Every tenant user has the intended `TenantUserPermissionGroupMember`.

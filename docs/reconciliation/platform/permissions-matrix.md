@@ -4,7 +4,7 @@
 
 This document defines the Darpan permission contract for tenant data, tenant-wide administration, Darpan app administration, and user-visible page/action access.
 
-It is the role matrix for DAR-220 and the implementation contract for the first permission foundation slices in DAR-221 and DAR-225.
+Two surfaces apply it: the tenant app (`darpan-ui`, `facade.*` services) and the operator admin app (`darpan-admin-ui`, `admin.*` services). `admin.*` is super-admin only.
 
 ## Role Contract
 
@@ -62,24 +62,29 @@ Current implementation notes:
 | Sign in and receive session info | Yes | Yes | Yes |
 | Select tenant context | Any Darpan tenant | Associated tenants only | Associated tenants only |
 | View tenant dashboard and tenant records | All tenants | Active associated tenant | Active associated tenant |
-| View SFTP, NetSuite, saved runs, schemas, rules, run history, and results | Yes | Yes | Yes |
+| View source settings (SFTP, NetSuite, SuiteQL queries, Shopify, HotWax OMS, chat spaces), saved runs, schemas, rules, run history, and results | Yes | Yes | Yes |
 | Upload files for reconciliation | Yes | Yes | Yes |
 | Execute reconciliation run | Yes | Yes | Yes |
 | Download or review run results | Yes | Yes | Yes |
 | Create/update/delete SFTP settings | Yes | Yes | No |
-| Create/update/delete NetSuite auth or endpoint settings | Yes | Yes | No |
+| Create/update/delete NetSuite auth, endpoint or SuiteQL query settings | Yes | Yes | No |
+| Create/update/delete Shopify or HotWax OMS source settings | Yes | Yes | No |
+| Share a source config with another tenant (`grant/revoke#ConfigTenantAccess`) | Yes | Yes, when Tenant Admin of both the target tenant and a tenant already using the config | No |
+| Connect Slack, add/remove chat spaces | Yes | Yes | No |
+| Set own notification default and subscribe to run notifications | Yes | Yes | Yes |
 | Create/update/delete saved runs or run definitions | Yes | Yes | No |
 | Create/update/delete schemas or schema inference output | Yes | Yes | No |
 | Create/update/delete rules or rulesets | Yes | Yes | No |
 | Delete run results or generated output metadata | Yes | Yes, where product allows tenant deletion | No |
 | Edit tenant timezone | Yes | Yes | No |
 | Edit user-owned preferences such as display name or pins | Own preferences and permitted admin reset flows | Own preferences | Own preferences |
-| Manage tenants | Yes | No | No |
-| Manage users | Yes | No | No |
-| Assign tenant memberships and tenant permission groups | Yes | No | No |
+| Manage tenants (admin app, `admin.TenantAdminServices`) | Yes | No | No |
+| Manage users (admin app, `admin.UserAdminServices`) | Yes | No | No |
+| Assign tenant memberships and tenant permission groups (`admin.MembershipAdminServices`) | Yes | No | No |
+| Run or dry-run data migrations, view the cross-tenant schedule board (`admin.*`) | Yes | No | No |
 | View/edit AI/LLM provider settings | No, unless also Darpan Admin | No | No |
 | View/edit enum/global system settings | No, unless also Darpan Admin | No | No |
-| Use debug, diagnostics, migration, or Darpan core management screens | No, unless also Darpan Admin | No | No |
+| Use legacy debug or Darpan core management screens | No, unless also Darpan Admin | No | No |
 
 ## Page and Action Matrix
 
@@ -90,7 +95,9 @@ Current implementation notes:
 | User settings and tenant switcher | View/edit own preferences. Tenant switcher includes all configured tenants. | View/edit own preferences. Tenant switcher includes associated tenants only. | View/edit own preferences. Tenant switcher includes associated tenants only. |
 | Tenant timezone settings | View/edit active tenant timezone. | View/edit active tenant timezone. | View only. |
 | SFTP settings | View/edit. Can also manage admin/platform SFTP where a screen is explicitly super-admin-only. | View/edit active tenant SFTP. | View only; may select a visible SFTP only for allowed run/upload workflows if backend permits it. |
-| NetSuite auth and endpoint settings | View/edit. | View/edit active tenant NetSuite settings. | View redacted/list/detail status only. |
+| NetSuite auth, endpoint and SuiteQL query settings | View/edit. | View/edit active tenant NetSuite settings. | View redacted/list/detail status only. |
+| Shopify and HotWax OMS settings | View/edit. | View/edit active tenant settings; share with another tenant where also Tenant Admin there. | View redacted/list/detail status only. |
+| Chat spaces and Slack connection | View/edit. | View/edit active tenant spaces. | View the list; set own default. |
 | Saved run editor and run definitions | View/edit/delete/run. | View/edit/delete/run active tenant definitions. | View definitions and run allowed definitions; no create/update/delete. |
 | Reconciliation create/upload/diff flow | Upload/run and edit run setup. | Upload/run and edit run setup. | Upload/run only. No saved-run, schema, rule, or settings mutation. |
 | Run history and result detail | View/download/delete where supported. | View/download/delete where tenant policy permits. | View/download only. |
@@ -98,7 +105,7 @@ Current implementation notes:
 | Ruleset manager/editor | View/edit/create/delete. | View/edit/create/delete active tenant rules. | View only. |
 | AI/LLM settings | No access unless also Darpan Admin. | No access. | No access. |
 | Global enum/system settings | No access unless also Darpan Admin. | No access. | No access. |
-| Tenant/user/permission management | View/edit. | No access. | No access. |
+| Admin app: tenants, users, memberships, migrations, schedule board | View/edit. | No access. | No access. |
 | Debug and operational diagnostics | No access unless also Darpan Admin. | No access unless a future tenant-safe diagnostic surface is explicitly created. | No access unless a future tenant-safe diagnostic surface is explicitly created. |
 
 ## Effective Access Resolution
@@ -133,11 +140,10 @@ Minimum fields:
 
 The UI derives `canViewTenantSettings`, `canRunActiveTenantReconciliation`, `canEditTenantSettings`, and `canManageGlobalSettings` from these backend session fields. Run/upload execution is intentionally separate from configuration edit so Tenant User can run reconciliation without being able to mutate schemas or saved runs.
 
-## Implementation Follow-up Anchors
+## Open Items
 
-- DAR-221 should continue mapping the seeded groups to narrower backend service and artifact authorization checks where service-level write gates are still broad.
-- DAR-222 should enforce tenant read/write visibility consistently, including null-tenant read behavior.
-- DAR-223 should create safe services for user creation, tenant association, and tenant permission assignment.
-- DAR-224 should build the Super Admin management UI for users, tenants, and permission assignments.
-- DAR-225 should continue splitting remaining UI route/action gates into tenant view, tenant run/upload, tenant configuration edit, and global/core management capabilities.
-- DAR-226 should validate the matrix with backend service tests, route/action tests, and audit/safety checks.
+- `DARPAN_FACADE_APP_USER` still grants `AUTHZA_ALL` on `facade.*` to every `DARPAN_USER`; the
+  role gates live in service code (`TenantAccessSupport.requireActiveTenantWriteAccess` and
+  similar). Downgrading it to view-only is planned once every mutating user holds an editor-tier
+  group (see the comment in `data/SecuritySeedData.xml`).
+- Work items for this matrix are tracked in the wrapper `roadmap/BACKLOG.md`.

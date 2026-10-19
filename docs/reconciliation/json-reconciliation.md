@@ -174,7 +174,7 @@ Implementation boundary: the service contract and XML actions handle the anonymo
 
 ## Schema Management
 
-For details on creating and managing schemas used in reconciliation, see [JSON Schema Management](json-schema-management.md).
+For details on creating and managing schemas used in reconciliation, see the [JSON schema domain](../domains/jsonschema/README.md).
 
 
 ## JSONPath Expression

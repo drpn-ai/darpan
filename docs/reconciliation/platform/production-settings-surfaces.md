@@ -15,22 +15,23 @@ For the step-by-step tenant creation tutorial, see [Darpan Tenant Setup Tutorial
 - `service/facade/SettingsFacadeServices.xml` makes `list#EnumOptions`, `get#LlmSettings`, and `save#LlmSettings` Darpan-admin only.
 - `service/facade/SettingsFacadeServices.xml` already filters tenant settings, SFTP, the chat-space notification registry, NetSuite auth, and NetSuite endpoint lists by `activeTenantUserGroupId`, checks tenant record access on edits, and requires active-tenant write access for saves. The personal notification default (`get/save#UserNotificationDefault`) and per-run subscribe/unsubscribe are user-level preferences and do not require tenant write access.
 - `service/facade/JsonSchemaFacadeServices.xml` and `service/facade/ReconciliationFacadeServices.xml` already treat schemas, mappings, saved runs, and generated outputs as tenant-owned records using `companyUserGroupId`.
-- `darpan-ui/src/App.vue` is the active tenant switch point. It keys route rendering by active tenant, refreshes command data on tenant change, and redirects to the hub after saving a new active tenant.
+- `darpan-ui` keys route rendering by active tenant and refreshes command data on tenant change. The active tenant is a server-side user preference, so switching it in one tab re-points every open tab for that user.
+- `service/admin/*.xml` is the operator surface (`admin.*`, used by `darpan-admin-ui`) for tenants, users, memberships, migrations and the schedule board. Only `DARPAN_SUPER_ADMIN` and Moqui `ADMIN` can call it.
 - `darpan-ui/src/pages/settings/*` owns Settings pages and workflows. Current settings pages do not consistently gate create/edit affordances from `canEditActiveTenantData` or `isSuperAdmin`; this is the main production readiness gap on the UI side.
 
 ## Production Tenant Setup Runbook
 
 Use this sequence for each production tenant group.
 
-1. Create or confirm the tenant `moqui.security.UserGroup`.
-   - Use `groupTypeEnumId="UgtDarpanCompany"`.
+1. Create or confirm the tenant with the admin app or `admin.TenantAdminServices.create#Tenant`.
+   - It creates the `moqui.security.UserGroup` (`groupTypeEnumId="UgtDarpanCompany"`) and its `TenantSetting`.
    - Keep generic groups such as `ALL_USERS`, `ADMIN`, and `DARPAN_USER` out of the tenant list.
-   - Current seed examples live in `data/SecuritySeedData.xml` as `GORJANA` and `KREWE`.
-2. Add user membership to the tenant.
-   - Use `moqui.security.UserGroupMember` for every user who should be able to select the tenant.
+   - The component seeds no tenants; the `UgtDarpanCompany` group type is in `data/SecuritySeedData.xml`.
+2. Create missing user accounts with `admin.UserAdminServices.create#UserAccount`, always with an email address.
+3. Add each user to the tenant with `admin.MembershipAdminServices.add#TenantMember`.
+   - It writes the tenant `moqui.security.UserGroupMember` and the `darpan.auth.TenantUserPermissionGroupMember` together.
    - Super-admin users can see configured Darpan tenants, but tenant-owned data still follows the selected active tenant.
-3. Add the user's tenant-specific permission row.
-   - Use `darpan.auth.TenantUserPermissionGroupMember`.
+   - A data load of the same rows is the fallback only (see [tenant-setup](tenant-setup.md)).
    - Set `tenantUserGroupId` to the tenant group.
    - Set `permissionUserGroupId` to `DARPAN_TENANT_ADMIN` for create/update/delete/run access.
    - Set `permissionUserGroupId` to `DARPAN_TENANT_USER` for view plus upload/run access without tenant mutation access.
@@ -41,7 +42,8 @@ Use this sequence for each production tenant group.
    - Runtime switching should go through `facade.AuthFacadeServices.save#ActiveTenant`.
    - Session metadata should return `activeTenantUserGroupId`, `activeTenantLabel`, `availableTenants`, `activeTenantPermissionGroupIds`, `canEditActiveTenantData`, `canManageDarpanCore`, and `isSuperAdmin`.
 5. Create tenant-owned settings while the intended tenant is active.
-   - SFTP servers, named Google Chat spaces (`TenantChatSpace`), NetSuite auth configs, NetSuite endpoints, schemas, mappings, saved runs, and result metadata must carry `companyUserGroupId`.
+   - SFTP servers, chat spaces (`TenantChatSpace`, Google Chat or Slack), NetSuite auth configs, NetSuite endpoints, SuiteQL queries, Shopify and HotWax OMS configs, schemas, mappings, saved runs, and result metadata must carry `companyUserGroupId`.
+   - To reuse one source credential across tenants, share it with `facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess` instead of copying it.
    - New records should also carry `createdByUserId` where the entity supports it.
    - Do not backfill blank `companyUserGroupId` rows to `ALL_USERS`; assign them to a real tenant or keep them admin-only until assigned.
 6. Keep global/admin settings out of tenant setup.
@@ -53,8 +55,10 @@ Use this sequence for each production tenant group.
 | --- | --- | --- | --- |
 | Tenant timezone | Tenant-level | Tenant User can read. Tenant Admin can update. Super-admin follows active tenant and can edit. | Critical. Timestamp display and tenant workflow interpretation are shared tenant configuration, not personal user settings. |
 | SFTP servers | Tenant-level | Tenant User can list/open visible records. Tenant Admin can create/update/delete if delete exists. Super-admin follows active tenant and can edit. | Critical. Tenant-scoped integration config used by automation and reconciliation file movement. |
-| Google Chat notification registry | Tenant-level | Tenant User can read configured/redacted status. Tenant Admin can create/update/delete unreferenced spaces. Super-admin follows active tenant and can edit. | Critical when tenants need run-completion notifications. Multiple named spaces can be stored per tenant (registry, not a single webhook); raw URLs are never returned by facade reads. A user's personal default chat space and per-run "notify me" subscriptions are user-level, not tenant-gated. |
-| NetSuite auth configs | Tenant-level | Tenant User can list/open redacted status. Tenant Admin can create/update. Super-admin follows active tenant and can edit. | Critical. Credentials must not be global because tenants can connect to different NetSuite accounts. |
+| Chat-space notification registry (Google Chat, Slack) | Tenant-level | Tenant User can list spaces. Tenant Admin can create/update/delete unreferenced spaces and connect Slack. Super-admin follows active tenant and can edit. | Critical when tenants need run-completion notifications. Multiple named spaces can be stored per tenant (registry, not a single webhook). Google Chat webhook URLs are stored in clear text and returned by `list#TenantChatSpaces` to tenant members. A user's personal default chat space and per-run "notify me" subscriptions are user-level, not tenant-gated. |
+| NetSuite auth configs | Tenant-level, shareable | Tenant User can list/open redacted status. Tenant Admin can create/update and share. Super-admin follows active tenant and can edit. | Critical. Never global; owned by one tenant and shared with named tenants only through `ConfigTenantAccess`. |
+| Shopify and HotWax OMS source configs | Tenant-level, shareable | Same as NetSuite auth. | Critical. Served by `shopify-darpan` / `darpan-hotwax` facades; shared through `ConfigTenantAccess`. |
+| NetSuite SuiteQL queries | Tenant-level | Tenant User can list/open. Tenant Admin can create/update. | Needed for NetSuite order and lifecycle checks. |
 | NetSuite endpoint configs | Tenant-level | Tenant User can list/open. Tenant Admin can create/update. Super-admin follows active tenant and can edit. | Critical. Endpoint URLs, RESTlet config, auth binding, and timeouts vary by tenant. |
 | Saved runs and mappings | Tenant-level | Tenant User can list/open/run allowed definitions. Tenant Admin can create/update/delete/run. Super-admin follows active tenant and can edit. | Critical. Saved reconciliation definitions are shared operational tenant assets, not personal user settings. |
 | Schemas | Tenant-level | Tenant User can view. Tenant Admin can create/update/delete/infer/save. Super-admin follows active tenant and can edit. | Critical where schemas drive saved runs, mapping setup, and field selection. |
@@ -68,14 +72,17 @@ Use this sequence for each production tenant group.
 
 | Surface | Tenant | User | Admin/Global | Deferred |
 | --- | --- | --- | --- | --- |
-| Tenant groups (`UgtDarpanCompany`) | Yes. Tenant identity is a `UserGroup`. | No. | Super-admins can administer groups. | No. |
-| User tenant membership (`UserGroupMember`) | Yes. Controls selectable tenants. | Per user assignment. | Super-admin setup task. | No. |
-| Tenant-specific permission (`TenantUserPermissionGroupMember`) | Yes. Bound to one tenant and one user. | Per user assignment. | Super-admin setup task. | No. |
+| Tenant groups (`UgtDarpanCompany`) | Yes. Tenant identity is a `UserGroup` plus `TenantSetting`. | No. | Super-admin, in the admin app (`admin.TenantAdminServices`). | No. |
+| User accounts | No. | Yes. | Super-admin, in the admin app (`admin.UserAdminServices`). | No. |
+| User tenant membership (`UserGroupMember`) | Yes. Controls selectable tenants. | Per user assignment. | Super-admin, in the admin app (`admin.MembershipAdminServices`). | No. |
+| Tenant-specific permission (`TenantUserPermissionGroupMember`) | Yes. Bound to one tenant and one user. | Per user assignment. | Written with the membership by `add#TenantMember`. | No. |
 | Active tenant preference (`darpan.auth.activeTenantUserGroupId`) | Selects current tenant scope. | Stored per user. | Super-admins also operate through an active tenant. | No. |
 | Tenant timezone | Yes. `TenantSetting.companyUserGroupId`. | No. | No, except super-admin acting in active tenant. | No. |
 | SFTP servers | Yes. `SftpServer.companyUserGroupId`. | Created-by metadata only. | No, except super-admin acting in active tenant. | No. |
-| Google Chat notification registry | Yes. `TenantChatSpace.companyUserGroupId`, multiple named spaces. | Personal default chat space and per-run subscriptions stored as `UserPreference` / `ReconciliationRunNotifySubscription`. | No, except super-admin acting in active tenant. | No. |
-| NetSuite auth configs | Yes. `NsAuthConfig.companyUserGroupId`. | Created-by metadata only. | No, except super-admin acting in active tenant. | No. |
+| Chat-space notification registry | Yes. `TenantChatSpace.companyUserGroupId`, multiple named spaces; Slack workspace installs are tenant-owned too. | Personal default chat space and per-run subscriptions stored as `UserPreference` / `ReconciliationRunNotifySubscription`. | No, except super-admin acting in active tenant. | No. |
+| NetSuite auth configs | Yes. `NsAuthConfig.companyUserGroupId`, plus `ConfigTenantAccess` grants. | Created-by metadata only. | No, except super-admin acting in active tenant. | No. |
+| Shopify and HotWax OMS configs | Yes. Owning `companyUserGroupId`, plus `ConfigTenantAccess` grants. | Created-by metadata only. | No, except super-admin acting in active tenant. | No. |
+| NetSuite SuiteQL queries | Yes. `NsSuiteQlSourceQuery.companyUserGroupId`. | Created-by metadata only. | No, except super-admin acting in active tenant. | No. |
 | NetSuite endpoint configs | Yes. `NsRestletConfig.companyUserGroupId`; auth binding must be visible in the active tenant. | Created-by metadata only. | No, except super-admin acting in active tenant. | No. |
 | Saved runs and mappings | Yes. `ReconciliationMapping.companyUserGroupId` and related saved-run contract. | Created-by metadata only. | No, except super-admin acting in active tenant. | No. |
 | Schemas | Yes. `JsonSchema.companyUserGroupId`. | Created-by metadata only. | No, except super-admin acting in active tenant. | No. |
@@ -116,19 +123,19 @@ Run these checks after production setup or after moving a tenant to a new enviro
 - As a Tenant User, call `save#SftpServer`; the service must fail with the active-tenant read-only write error.
 - If automation uses the server, run or dry-run the SFTP automation path and confirm it resolves only active-tenant server IDs.
 
-### Google Chat Notifications
+### Chat-Space Notifications
 
 - As tenant A editor, save a named Google Chat space through `facade.SettingsFacadeServices.save#TenantChatSpace`.
 - Confirm the stored `darpan.reconciliation.TenantChatSpace.companyUserGroupId` is tenant A.
 - Call `list#TenantChatSpaces` and confirm each row includes `googleChatConfigured=true` and the `googleChatWebhookUrl` in clear text. Masking and at-rest encryption were both removed 2026-08-14; treat read access to this service as read access to the webhook itself.
 - Save again with the same `chatSpaceId` and confirm the row is updated, not duplicated; saving a second space with the same name (case-insensitive) in the same tenant must fail.
 - Switch to tenant B and call `list#TenantChatSpaces`; tenant A's spaces must not appear.
-- As a Tenant User in tenant A, call `list#TenantChatSpaces`; the configured/redacted status may appear.
+- As a Tenant User in tenant A, call `list#TenantChatSpaces`; the spaces appear, webhook URLs included.
 - As a Tenant User, call `save#TenantChatSpace` or `delete#TenantChatSpace`; the service must fail with the active-tenant read-only write error.
 - As tenant A editor, call `save#UserNotificationDefault` to set a personal default chat space, then `get#UserNotificationDefault` to confirm it round-trips; a Tenant User can set their own default without tenant write access.
 - While a run is `AUT_STAT_PENDING` or `AUT_STAT_RUNNING`, call `subscribe#RunNotification`; confirm `get#ReconciliationRunStatus` reports `mySubscription=true` and the snapshotted `mySubscriptionSpaceName`. Call `unsubscribe#RunNotification` and confirm the subscription is removed.
 - Try `delete#TenantChatSpace` on a space still linked to an automation or an active subscription; the service must reject it and require deactivation (`isActive='N'`) instead.
-- Run a manual saved run or automation to a terminal state (success, with-issues, or failed) and confirm exactly one completion message per resolved destination (linked automation space plus any subscriber snapshots, deduplicated) is posted without exposing a raw URL in the facade response. `AUT_STAT_NO_DATA` and `AUT_STAT_SKIP_DUP` must not notify.
+- Run a manual saved run or automation to a terminal state (success, with-issues, or failed) and confirm exactly one completion message per resolved destination (linked automation space plus any subscriber snapshots, deduplicated) is posted. `AUT_STAT_NO_DATA` and `AUT_STAT_SKIP_DUP` must not notify.
 
 ### NetSuite Auth and Endpoint Settings
 
@@ -138,6 +145,7 @@ Run these checks after production setup or after moving a tenant to a new enviro
 - Switch to tenant B and call `list#NsAuthConfigs` and `list#NsRestletConfigs`; tenant A rows must not appear.
 - Attempt to save a tenant B endpoint that references tenant A auth; the backend must reject it because the auth config is not available in the active tenant.
 - Confirm endpoint timeout, method, active flag, and headers JSON remain endpoint-level settings, while credentials stay on `NsAuthConfig`.
+- Share the tenant A auth config with tenant B through `grant#ConfigTenantAccess`; tenant B can now list and use it. Revoke it and confirm tenant B loses access.
 
 ### Saved Runs, Mappings, Schemas, and Results
 
@@ -152,7 +160,7 @@ Run these checks after production setup or after moving a tenant to a new enviro
 
 - As a user without Darpan Admin access, call `get#LlmSettings`, `save#LlmSettings`, and `list#EnumOptions`; all must fail with the Darpan-admin settings restriction.
 - As a Darpan Admin, call the same services and confirm they operate independently of Tenant Admin/Tenant User and Super Admin permission.
-- Do not configure tenant-specific LLM providers in the current data model; the current LLM settings are platform-wide `SystemMessageRemote` records.
+- Do not configure tenant-specific LLM providers in the current data model; the current LLM settings are platform-wide `SystemMessageRemote` records. No product feature reads them yet.
 
 ## Task-Ready Checklist
 
@@ -276,7 +284,7 @@ Run these checks after production setup or after moving a tenant to a new enviro
 - [ ] Manual browser smoke:
   - Login as a Tenant Admin user.
   - Save SFTP, NetSuite auth, NetSuite endpoint, schema, and saved run.
-  - Switch to a Tenant User tenant in the user menu.
+  - Switch the active tenant to one where the user is a Tenant User.
   - Confirm tenant-specific records refresh and write controls disappear or fail closed.
   - Login as a Darpan Admin and confirm global AI settings are available.
   - Login as a Super Admin without Darpan Admin and confirm global AI settings are not available while tenant-owned data still follows the active tenant.

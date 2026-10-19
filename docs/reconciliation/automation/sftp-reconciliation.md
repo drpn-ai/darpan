@@ -7,6 +7,7 @@ Services:
 - `facade.ReconciliationFacadeServices.run#AutomationNow`
 - `facade.ReconciliationFacadeServices.list#AutomationExecutions`
 - `facade.ReconciliationFacadeServices.list#AutomationSourceOptions`
+- `facade.ReconciliationFacadeServices.archive#Automation` / `restore#Automation` / `sync#Automation` / `reprocess#AutomationExecution` (see [order-reconciliation-automation](order-reconciliation-automation.md))
 - `reconciliation.ReconciliationAutomationServices.run#SftpFileAutomation`
 - `reconciliation.ReconciliationAutomationServices.poll#SftpAndReconcile`
 
@@ -22,7 +23,7 @@ The poll service checks configured SFTP locations, stages the newest matching fi
 When `ruleSetId` is provided, SFTP automation now uses the same compare-scope + DRL path as Generic reconciliation. Legacy scheduled jobs can continue to run through the mapping bridge until they are migrated.
 
 ## Prerequisites
-- Install/configure the `moqui-sftp` component. For Docker builds, the `Dockerfile` in the private `drpn-ai/darpan-docker-config` repo clones `https://github.com/hotwax/moqui-sftp.git` before running `addRuntime`.
+- Install/configure the upstream `moqui/moqui-sftp` component. Both Dockerfiles in the private `drpn-ai/darpan-docker-config` repo clone `https://github.com/moqui/moqui-sftp.git` at the `MOQUI_SFTP_REF` tag (`v1.0.3`); CI clones its `master`. darpan does not compile against it: `SftpAutomationSupport` resolves `org.moqui.sftp.SftpClient` at runtime (ADR 0001 rule 1).
 - Create `darpan.reconciliation.SftpServer` records with host, port, username, and either `password` or `privateKey`.
 - For RuleSet mode:
   - define a `RuleSet`

@@ -1,17 +1,19 @@
 # Reconciliation Flow: Ingestion to Alert
 
-This page describes the real end-to-end pipeline as implemented in this component: how source
+This page describes the real end-to-end pipeline as implemented in this component (on `main`): how source
 data gets in, how the Spark diff runs, where Drools rule evaluation happens, how a completed run
 turns into a tenant notification, and how the automation layer schedules and supervises all of
 it. Every service named here exists in `service/**` and every class in `src/main/groovy/**`.
 
 ```text
-ingest (file upload | API window | SFTP poll)
+ingest (file upload | API window | SFTP poll)                      RESOLVE, EXTRACT_FILE1/2
   -> stage artifacts under runtime://datamanager/reconciliation-runs/{runId}/{timestamp}/
-  -> Spark base compare (missing-object Diffs + matched pairs)
+  -> Spark base compare (missing-object Diffs + matched pairs)       COMPARE
   -> Drools RuleSet execution on matched pairs (rule failures -> Diff rows)
-  -> persist result JSON + ReconciliationRunResult manifest
-  -> Google Chat run-completed notification (chat-space registry fan-out, all terminal states)
+  -> verification passes (missing recheck, exchanges, returns)       VERIFY_MISSING/_EXCHANGE/_RETURNS
+  -> conclusion rules name each verified finding                     CONCLUDE
+  -> persist result JSON + ReconciliationRunResult manifest          WRITE_OUTPUT
+  -> run-completed notification to Google Chat or Slack spaces       NOTIFY
 ```
 
 ## 1. Ingestion
@@ -21,7 +23,7 @@ Three entry paths feed the same compare pipeline:
 | Path | Entry services | Notes |
 | --- | --- | --- |
 | File upload (UI) | `facade.ReconciliationFacadeServices.run#GenericDiff`, `run#SavedRunDiff` | JSON-RPC friendly: accepts `file1Name`/`file1Text` and `file2Name`/`file2Text` instead of multipart uploads. Payload-shape mismatches (JSON into a CSV run, schema documents as record data) are rejected before Spark staging. |
-| API window extraction | `run#SavedRunDiff` (manual, with `windowStartDate`/`windowEndDate`) and `reconciliation.ReconciliationAutomationServices.execute#Automation` (scheduled) | API-backed compare sources use `sourceTypeEnumId=AUT_SRC_API` plus either a `SystemMessageRemote` (for example Shopify or HotWax OMS) or a tenant `NsRestletConfig` (NetSuite Restlet). Window normalization lives in `darpan/facade/reconciliation/ReconciliationApiWindowSupport.groovy`; Shopify extraction runs a single Bulk Operations `created_at` query (shopify-darpan `extractShopifyOrders.groovy` + `ShopifyBulkOperationClient`) with no client-side window splitting. The requested period is always the active tenant time zone; source-system time zones only affect API parameter representation. |
+| API window extraction | `run#SavedRunDiff` (manual, with `windowStartDate`/`windowEndDate`) and `reconciliation.ReconciliationAutomationServices.execute#Automation` (scheduled) | API-backed compare sources use `sourceTypeEnumId=AUT_SRC_API`. Dispatch is data-driven through the `darpan.reconciliation.SourceSystemConnector` registry (`data/SourceSystemConnectorSeedData.xml`): each row names the extract service, its config type, and optional lookup services used by verification. Seeded connectors cover HotWax OMS (REST and GraphQL: orders, order lines, transfer orders, returns), Shopify (orders, order-line units, return refs), NetSuite (`NETSUITE_SUITEQL` → `reconciliation.NetSuiteOrderExtractionServices.extract#NetSuiteOrders` in `netsuite-darpan`, driven by a tenant `NsSuiteQlSourceQuery`; the older `NETSUITE` RESTlet row has no extract service) and `DATABASE` (`database-darpan`). Window normalization lives in `darpan/facade/reconciliation/ReconciliationApiWindowSupport.groovy`; Shopify extraction runs a single Bulk Operations `created_at` query (shopify-darpan `extractShopifyOrders.groovy` + `ShopifyBulkOperationClient`) with no client-side window splitting. The requested period is always the active tenant time zone; source-system time zones only affect API parameter representation. |
 | SFTP polling | `reconciliation.ReconciliationAutomationServices.poll#SftpAndReconcile`, `run#SftpFileAutomation` | Checks configured `SftpServer` locations (via the `moqui-sftp` component), stages the newest matching files, archives consumed files, and routes into the compare pipeline. Support classes: `darpan/reconciliation/automation/SftpAutomationSupport.groovy`, `pollSftpAndRunReconciliation.groovy`. |
 
 All paths stage source files into the run artifact folder
@@ -63,6 +65,17 @@ CSV compare-scope extraction validates the configured primary-ID column before S
 so header/file-type mismatches fail with a contract error listing available columns instead of a
 raw `UNRESOLVED_COLUMN` stack fragment.
 
+**Duplicate keys (DAR-BE-063).** `RuleSetCompareSource.duplicateKeyHandling` decides what a key
+on more than one record of a side does. Blank (the default): a ruled run fails, and a base-diff run
+collapses the key to one record. `FINDING`: every record under the repeated key becomes a
+`DUPLICATE_IN_FILE_n` finding and the key is left out of the compare on both sides, so the other
+side's record is not reported missing.
+
+**Source filters.** Per-side filters (`RuleSetCompareSourceFilter`, and
+`ReconciliationAutomationSourceFilter` for automations) exclude matching records before compare;
+an `INCLUDE_IN` filter instead keeps only records whose value is listed. The run reports how many
+each filter removed. Support: `darpan/reconciliation/source/SourceFilterSupport.groovy`.
+
 ## 4. Drools rule evaluation
 
 Rule storage and execution live in `reconciliation.ReconciliationRuleEngineServices`
@@ -83,8 +96,45 @@ Support classes: `darpan/reconciliation/rule/RuleEngineSupport.groovy` (compilat
 `RuleConditionParser.groovy` (structured rule-expression parsing, including per-field
 `preActions` such as `STRING_TO_INT`), and `RuleDiffSupport.groovy` (Diff row shaping).
 
-Runtime stack note: Drools 7.73 with MVEL2 forced to 2.5.x — MVEL2 2.4.x fails on JDK 21
-(see [runtime-baseline](../runtime-baseline.md)).
+Runtime stack note: Drools 8.44.0.Final (`drools-engine`, `drools-mvel`, `drools-xml-support`,
+`kie-api`); MVEL comes in transitively (see [runtime-baseline](../runtime-baseline.md)).
+
+## 4a. Verification passes
+
+A missing-object diff can be wrong when one side's window or API view is incomplete. After
+compare, up to three passes recheck findings against the live source systems, each recorded as its
+own `ReconciliationRunStep`:
+
+| Stage | Support class | What it does |
+| --- | --- | --- |
+| `VERIFY_MISSING` | `MissingDiffVerificationSupport` | Point-looks-up each missing-in-side ID through the connector's `lookupServiceName`; IDs found are removed from the missing counts. |
+| `VERIFY_EXCHANGE` | `ExchangePairVerificationSupport` | Sweeps one system's exchanges and pair-looks-up the other (`exchangeSweepServiceName`, `pairLookupServiceName`). |
+| `VERIFY_RETURNS` | `ReturnPresenceVerificationSupport` | Grades return presence in both missing directions (window edges, cancelled-order refunds). |
+
+`RunVerificationSupport` holds the shared decision logic, and both the manual path
+(`runSavedRunDiff.groovy`) and the scheduled path (`AutomationExecutionSupport`) call it, so a
+manual and a scheduled run of the same window publish the same counts. A pass that declines records
+why (switched off, no config, nothing to check) instead of leaving no step row. Rows written before
+the split carry the retired single `VERIFY` stage code.
+
+## 4b. Conclusions
+
+When a compare scope has conclusion rules (`darpan.rule.RuleSetConclusionRule` +
+`RuleSetConclusionCondition`), the `CONCLUDE` stage names every verified finding. Rules are tried
+in `sequenceNum` order and the first whose conditions all hold wins; rules can nest up to three
+levels through `parentSequenceNum`; a finding no rule matches is `UNEXPLAINED`. A rule may carry
+an open question (`questionText`) shown under "Needs a decision". Code:
+`darpan/reconciliation/conclusion/` (`ConclusionTreeEngine`, `RunConclusionSupport`) and
+`darpan/facade/reconciliation/RunConclusionStep.groovy`, the seam both run paths call.
+
+## 4c. Stage timeline
+
+Every run writes one `darpan.reconciliation.ReconciliationRunStep` row per stage
+(`RESOLVE`, `EXTRACT_FILE1`, `EXTRACT_FILE2`, `COMPARE`, `VERIFY_*`, `CONCLUDE`, `WRITE_OUTPUT`,
+`NOTIFY`), with status, timings, heartbeat, record count, sanitized error detail and
+non-secret metrics. The stage sequence lives in
+`darpan/facade/reconciliation/RunObservability.groovy` (`STAGE_SEQUENCE`); the UI's stage list
+mirrors those positions, so change both together.
 
 ## 5. Result persistence
 
@@ -102,7 +152,8 @@ Runtime stack note: Drools 7.73 with MVEL2 forced to 2.5.x — MVEL2 2.4.x fails
 Every run that reaches a terminal state — `AUT_STAT_SUCCESS` (including success with rule
 processing warnings), `AUT_STAT_FAILED`, or a reaper-killed stale run — can notify the owning
 tenant. The silent no-op statuses `AUT_STAT_NO_DATA` and `AUT_STAT_SKIP_DUP` never trigger
-notification, and neither does a retry-exhausted `AUT_STAT_DEAD_LETTER` automation execution.
+notification. A retry-exhausted automation execution (`AUT_STAT_DEAD_LETTER`) sends a
+best-effort failure alert ("gave up after N retries") through the same path.
 
 1. Four terminal-state call sites invoke
    `darpan.reconciliation.notification.TenantNotificationSupport.notifyRunCompleted(...)`:
@@ -132,15 +183,24 @@ notification, and neither does a retry-exhausted `AUT_STAT_DEAD_LETTER` automati
    automatic retries. Other skip reasons: `NO_TENANT`, `NO_RESULT_ID`, `RESULT_NOT_FOUND`,
    `TENANT_MISMATCH`.
 4. `reconciliation.ReconciliationNotificationServices.build#RunCompletedPayload` builds the
-   Google Chat text payload: run name, tenant label, result ID, a deep link to the run result
+   text payload: run name, tenant label, result ID, a deep link to the run result
    (base URL from the `DARPAN_APP_BASE_URL` env var, the `darpan.app.baseUrl` property, or the
    first allowed web origin), the three difference counts, and — for failed or reaper-killed runs
    — a status/termination-reason warning line.
-5. `TenantNotificationSupport.deliverGoogleChat` posts the payload to each resolved destination's
-   webhook. URLs are validated to be HTTPS `chat.googleapis.com` space-message endpoints with
-   key/token parameters.
+5. `TenantNotificationSupport.deliverToDestination` picks the transport per destination:
+   - Google Chat webhook (`deliverGoogleChat`). URLs are validated to be HTTPS
+     `chat.googleapis.com` space-message endpoints with key/token parameters.
+   - Slack incoming webhook (`deliverSlack`); success is HTTP 200 with the body `ok`.
+   - Slack bot delivery through a connected workspace (`SlackApiClient.postMessage` to the space's
+     `slackChannelId`, using the `SlackWorkspaceInstall` bot token).
 
-Tenants manage the named chat-space registry through
+Webhook URLs are stored in clear text on `TenantChatSpace.webhookUrl` (the legacy
+`googleChatWebhookUrl` column is read as a fallback) and `list#TenantChatSpaces` returns them to
+tenant members.
+
+Tenants connect Slack through `facade.SlackFacadeServices` (`begin#SlackInstall`,
+`save#SlackBotToken`, `list#SlackChannels`, `disconnect#SlackWorkspace`) and manage the named
+chat-space registry through
 `facade.SettingsFacadeServices.list#TenantChatSpaces` / `save#TenantChatSpace` /
 `delete#TenantChatSpace` (tenant write access required; a space still referenced by an automation
 or a subscription must be deactivated, not deleted). Each user's personal default chat space is
@@ -165,8 +225,8 @@ The automation layer is documented in detail in
   `AUT_IN_SFTP_FILES`, Quartz-style `scheduleExpr`, window settings) plus exactly two
   `ReconciliationAutomationSource` rows, managed through the
   `facade.ReconciliationFacadeServices` automation services
-  (`list/get/save/delete/pause/resume#Automation`, `run#AutomationNow`,
-  `list#AutomationExecutions`, `list#AutomationSourceOptions`).
+  (`list/get/save/delete/pause/resume/archive/restore/sync#Automation`, `run#AutomationNow`,
+  `list#AutomationExecutions`, `reprocess#AutomationExecution`, `list#AutomationSourceOptions`).
 - Execution: `execute#Automation` resolves the scheduled date window, creates idempotent child
   execution rows (`ReconciliationAutomationExecution`), extracts sources, and runs the RuleSet
   compare-scope pipeline. Support classes: `AutomationExecutionSupport.groovy`,
@@ -178,3 +238,21 @@ The automation layer is documented in detail in
 | `scan_ReconciliationAutomations_5m` | every 5 min | `scan#DueAutomations` | Find active automations with `nextScheduledFireTime` due, **submit** `execute#Automation` fire-and-forget onto the async worker pool, and advance the fire time from `scheduleExpr` **at submission**. The scan never waits for an execution, so a long reconciliation cannot hold the tick open; each run reports itself through its own `ReconciliationAutomationExecution`/`ReconciliationRunResult` rows. Submissions per tick are capped at `darpan.reconciliation.automation.maxConcurrentExecutions` minus the executions already `AUT_STAT_RUNNING`; the remainder is deferred to the next tick with its schedule untouched (`deferredCount`). |
 | `sweep_StuckReconciliationRuns_10m` | every 10 min | `sweep#StuckReconciliationRuns` | Reaper (`darpan/reconciliation/automation/StuckRunReaper.groovy`): flips `ReconciliationRunResult` and `ReconciliationAutomationExecution` rows stale in `AUT_STAT_RUNNING`/`AUT_STAT_PENDING` for more than `staleMinutes` (default 120) to `AUT_STAT_FAILED`, so the UI stops blocking re-triggers and the scanner stops skipping those windows. |
 | `purge_ReconciliationGeneratedFiles_daily` | 02:00 daily | `reconciliation.ReconciliationGenericServices.purge#GeneratedOutputFiles` | Deletes generated outputs older than the retention window (default 15 days). |
+
+## 8. Lifecycle (flowchart) runs
+
+A second run shape sits beside the two-sided compare. A `darpan.reconciliation.Reconciliation` is a
+tenant-owned chart of yes/no questions (`darpan.reconciliation.ReconciliationRun` rows, each
+pointing at a RuleSet and optionally at a parent question and branch). A lifecycle is a chart
+built by the lifecycle builder from a start record and its stages; the place a record stops at is
+the finding.
+
+- Services: `reconciliation.ReconciliationFlowchartServices.run#Reconciliation` walks the chart
+  for one window and `run#FlowchartQuestion` runs one question (both `allow-remote="false"`); the
+  UI reaches them through `facade.ReconciliationFacadeServices` (`list/get/save/run#Reconciliation`,
+  `save#Lifecycle*`, `*#LifecycleRule`, `*#LifecycleStageException`, `*#LifecycleFinding`,
+  `import#NetSuiteChecksAsRuns`).
+- Code: `darpan/reconciliation/flowchart/` (`RunFlowchartTree`, `RunFlowchartWalker`,
+  `LifecycleSupport`, `LifecycleStageCompiler`, `NetSuiteCheckImportSupport`).
+
+These services are on `main` and not in the v1.5.1 release.

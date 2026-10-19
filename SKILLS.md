@@ -1,52 +1,40 @@
 ---
-name: darpan-gemini
-description: Guide coding and verifying functionality within the Darpan component, ensuring local conventions and safety.
+name: darpan-backend-component
+description: Guide coding and verifying changes inside the Darpan Moqui component, following local conventions and safety rules.
 ---
 
-# Skill: darpan-gemini (v1.1)
-## Goal
-Guide coding and verifying functionality within the Darpan component, ensuring local conventions and safety.
+# Skill: darpan-backend-component
 
 ## Use when
-- Coding logic in `runtime/component/darpan/**`.
-- Reviewing PRs or code in Darpan.
-- Implementing reconciliation or JSON schema features.
-- Implementing backend contracts consumed by `darpan-ui`.
+- Changing logic, services, entities or seed data in `runtime/component/darpan/**`.
+- Reviewing backend changes in this component.
+- Adding backend contracts consumed by `darpan-ui` or `darpan-admin-ui`.
 
-## Don’t use when
-- Modifying framework/base components (unless explicitly requested).
-- writing generic Moqui logic unrelated to Darpan.
-
-## Inputs
-- required: Task context (Java/Groovy/XML)
-- optional: Previous test results
+## Don't use when
+- The change belongs to the framework, another component, or a UI repo.
 
 ## Procedure
-1. **Scope Check**: Is this in `runtime/component/darpan`? If not, stop and confirm.
-2. **Repo Boundary**: Keep custom UI/PWA work in `darpan-ui`; in this component, change only backend contracts/services/processing.
-3. **Docs**: Update `docs/**` if behavior changes.
-4. **Logic**:
-    - Start XML-first for service orchestration, validation, entity operations, and straightforward transforms that remain readable.
-    - Use Groovy/Java only when the service would become materially less clear, maintainable, or reusable in XML.
-    - Spark for large datasets (keep sessions alive).
-5. **Data**: Store inputs in `runtime://tmp/`, schemas in `runtime/schemas/json/`.
-6. **Verify**: Run `./gradlew test` (targeted) or XML validation interactively.
+1. **Intake.** Classify the ask; for a feature or bug fix, update the wrapper `roadmap/BACKLOG.md`
+   item first. Work on `main`.
+2. **Scope.** Confirm the change is in this component. UI work goes to `darpan-ui` /
+   `darpan-admin-ui`.
+3. **Logic.** XML actions first; Groovy only for Spark, Drools, file streaming, HTTP clients,
+   crypto, or non-trivial JSON/string work. Tenant reads in Groovy use `TenantScopedFinder`.
+4. **Contract.** New remote services are `facade.*` or `admin.*`; regenerate
+   `docs/api-contract/` with `generateApiContract`.
+5. **Data.** Run artifacts live under `runtime://datamanager/reconciliation-runs/**`; schemas are
+   stored in the `JsonSchema` entity. Seed changes also go into the release's upgrade data.
+6. **Verify.** Focused tests only (`scripts/focused-test.sh` or `test --tests <FQCN>`), on JDK 21.
+   Note that Gradle does not rerun tests for a data-XML-only change; use `--rerun` after the task.
+7. **Docs.** Update `docs/**` when behaviour changes.
 
 ## Guardrails
-- **Compatibility**: Preserve Java 17 Spark flags.
-- **Secrets**: No connection strings/secrets in logs/commits.
-- **Safe**: Sanitize filenames `[A-Za-z0-9._-]`.
-- **Pagination**: Use Moqui built-in widgets.
-- **Boundary**: Do not add new custom UI/PWA surfaces under backend `screen/**`, `template/**`, or `theme-library/**`.
+- Keep the Spark `--add-opens` JVM flags in `build.gradle`, `dev-stack.sh` and the
+  `darpan-docker-config` entrypoints.
+- No secrets in logs, responses, commits or test fixtures.
+- Sanitize file names to `[A-Za-z0-9._-]`.
+- No new custom UI under backend `screen/**`, `template/**` or `theme-library/**`.
 
 ## Failure handling
-- **Test Failure**: Rollback or fix logic immediately.
-- **XML Error**: Validate against XSD before committing.
-
-## Examples
-**Example A (Reconciliation Output)**:
-Input: DataFrame diff result.
-Output: Save to `runtime://.../YYYYMMDD-HHmmss.csv`.
-```groovy
-df.coalesce(1).write().option("header", "true").csv(outputPath)
-```
+- Test failure: find the root cause before changing code; do not weaken the test.
+- XML error: fix it before anything else; the component will not load.

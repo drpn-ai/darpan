@@ -7554,7 +7554,7 @@
                         "type": "integer"
                     }
                 },
-                "description": "NetSuite SuiteQL check definitions the active tenant can see, paged.\n\n            Paged like every other settings list so the shared list component can render it \u2014\n            the composable every settings page uses requires a pagination block, and a list\n            service that returns everything is the one that cannot be shown."
+                "description": "NetSuite SuiteQL check definitions the active tenant can see, paged.\n\n            Paged like every other list service (pageIndex/pageSize in, a pagination block out), so\n            a caller gets a bounded page and the total instead of every row at once."
             },
             "ListNsSuiteQlSourceQueriesResult": {
                 "type": "object",

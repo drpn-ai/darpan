@@ -41,6 +41,16 @@ class RpcMethodFenceTests {
     }
 
     @Test
+    void checksTheTopLevelMethodEvenWhenABatchKeyIsPresent() {
+        // The dispatcher treats a request as a batch only when _requestBodyJsonList is truthy; an
+        // empty JSON array body falls through to the top-level (e.g. query-string) method.
+        assertNotNull(RpcMethodFence.rejection("/rpc/json", [_requestBodyJsonList: [], method: UPDATE_PASSWORD]))
+        assertNotNull(RpcMethodFence.rejection("/rpc/json", [_requestBodyJsonList: [[method: "facade.AuthFacadeServices.get#SessionInfo"]],
+                                                              method: UPDATE_PASSWORD]))
+        assertNotNull(RpcMethodFence.rejection("/rpc/json", [_requestBodyJsonList: "not-a-list", method: UPDATE_PASSWORD]))
+    }
+
+    @Test
     void leavesAMissingMethodToTheDispatcher() {
         assertNull(RpcMethodFence.rejection("/rpc/json", [:]))
         assertNull(RpcMethodFence.rejection("/rpc/json", [_requestBodyJsonList: ["not-a-map"]]))
@@ -63,7 +73,9 @@ class RpcMethodFenceTests {
 
     @Test
     void closesTheFrameworkRestLoginTransition() {
-        assertNotNull(RpcMethodFence.rejection("/rest/login", [username: "x", password: "y"]))
+        ["/rest/login", "/rest/login/", "/rest/login/x", "/rest/login;foo/x", "//rest//login"].each { String path ->
+            assertNotNull(RpcMethodFence.rejection(path, [username: "x", password: "y"]), "not fenced: ${path}")
+        }
         assertNull(RpcMethodFence.rejection("/rest/s1/graphql/sdl", [:]))
     }
 

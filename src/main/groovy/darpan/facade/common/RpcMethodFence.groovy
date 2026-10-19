@@ -41,15 +41,18 @@ class RpcMethodFence {
     /** Null when the request may proceed; otherwise the refusal reason. Pure, for unit tests. */
     static String rejection(String path, Map params) {
         List<String> segments = segmentsOf(path)
-        if (segments == ["rest", "login"]) return "The /rest/login endpoint is not available."
+        // A transition takes trailing path segments, so match the pair, not the exact path.
+        if (hasPair(segments, "rest", "login")) return "The /rest/login endpoint is not available."
         if (!isJsonRpc(segments)) return null
 
-        List<Object> methods = []
+        // Check the top-level method AND every batch entry, whatever the shape. The dispatcher takes
+        // the batch branch only when _requestBodyJsonList is truthy, so an empty-array body falls
+        // through to the top-level (e.g. query-string) method; checking one or the other by our own
+        // reading of the shape would leave that gap.
+        List<Object> methods = [params?.get("method")]
         def batch = params?.get("_requestBodyJsonList")
         if (batch instanceof List) {
             ((List) batch).each { Object call -> methods.add(call instanceof Map ? ((Map) call).get("method") : null) }
-        } else {
-            methods.add(params?.get("method"))
         }
         for (Object method in methods) {
             // A missing method is left to the dispatcher, which answers it with a JSON-RPC error.
@@ -65,8 +68,12 @@ class RpcMethodFence {
 
     /** True for any path holding the rpc/json transition, including extra trailing segments. */
     static boolean isJsonRpc(List<String> segments) {
+        return hasPair(segments, "rpc", "json")
+    }
+
+    static boolean hasPair(List<String> segments, String first, String second) {
         for (int i = 0; i < segments.size() - 1; i++) {
-            if (segments[i] == "rpc" && segments[i + 1] == "json") return true
+            if (segments[i] == first && segments[i + 1] == second) return true
         }
         return false
     }

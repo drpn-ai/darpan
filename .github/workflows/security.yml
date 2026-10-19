@@ -108,13 +108,17 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-            ~/.gradle/dependency-check-data
-          key: gradle-sec-${{ runner.os }}-${{ hashFiles('component-darpan/build.gradle') }}
+            ~/.gradle/dependency-check-data-13
+          # The plugin major is part of the key: dependency-check 12.2.2 changed the NVD database
+          # schema, so a database cached by an older plugin must never be restored into this one.
+          key: gradle-sec-odc13-${{ runner.os }}-${{ hashFiles('component-darpan/build.gradle') }}
           restore-keys: |
-            gradle-sec-${{ runner.os }}-
+            gradle-sec-odc13-${{ runner.os }}-
 
-      - name: Clone Moqui framework (master)
-        run: git clone --depth 1 --branch master https://github.com/moqui/moqui-framework.git darpan-backend
+      - name: Clone Moqui framework (drpn-ai fork, master)
+        # Same fork the test workflow and both production Dockerfiles build, so the scan covers the
+        # dependency tree that actually ships.
+        run: git clone --depth 1 --branch master https://github.com/drpn-ai/moqui-framework.git darpan-backend
 
       - name: Download Moqui runtime
         working-directory: darpan-backend
@@ -135,15 +139,16 @@ jobs:
         # plugin id) because init scripts must reference the class, not the plugin
         # registry entry. FQN confirmed from:
         #   META-INF/gradle-plugins/org.owasp.dependencycheck.properties in
-        #   dependency-check-gradle-9.2.0.jar → implementation-class=org.owasp.dependencycheck.gradle.DependencyCheckPlugin
+        #   dependency-check-gradle-13.0.0.jar → implementation-class=org.owasp.dependencycheck.gradle.DependencyCheckPlugin
+        # 10.0.3 is the last release on Maven Central; later ones are on the Gradle Plugin Portal only.
         run: |
           cat > /tmp/owasp-dc.init.gradle << 'INIT_SCRIPT'
           initscript {
               repositories {
-                  mavenCentral()
+                  gradlePluginPortal()
               }
               dependencies {
-                  classpath 'org.owasp:dependency-check-gradle:9.2.0'
+                  classpath 'org.owasp:dependency-check-gradle:13.0.0'
               }
           }
 
@@ -153,12 +158,14 @@ jobs:
               dependencyCheck {
                   // Fail on High (7.0+) and Critical (9.0+); Medium and below are
                   // reported in the HTML/JSON output but do not fail the build.
-                  failBuildOnCVSS = 7
+                  // Property<Float> since the 12.1.7 move to Gradle's property API.
+                  failBuildOnCVSS = 7.0f
 
                   // Produce both human-readable and machine-readable output.
                   formats = ['HTML', 'JSON']
 
-                  outputDirectory = "${project.buildDir}/reports/dependency-check"
+                  // Output goes to build/reports/dependency-check, the plugin's default since 13.0.0
+                  // (the upload step below reads that path).
 
                   // Suppress known false-positives via a committed suppressions file
                   // (check in at .github/owasp-suppressions.xml when needed).
@@ -169,7 +176,7 @@ jobs:
                   // Use the cached NVD data directory (populated by the cache action).
                   // This avoids re-downloading the full NVD database on every run.
                   data {
-                      directory = System.getProperty('user.home') + '/.gradle/dependency-check-data'
+                      directory = System.getProperty('user.home') + '/.gradle/dependency-check-data-13'
                   }
 
                   // The plugin does NOT read the NVD_API_KEY env var on its own — without this

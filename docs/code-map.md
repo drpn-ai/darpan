@@ -136,7 +136,8 @@ This wiki lives in `runtime/component/darpan/docs/Home.md`. The Darpan component
   Docker startup through the component-owned `loadDarpanUpgradeData` Gradle task invoked as
   `:runtime:component:darpan:loadDarpanUpgradeData` (Gradle 9 removed `-b`), the `darpan-seed`
   reader type, and the `component://darpan/data/upgrade-data.xml` location
-- Release upgrade records must also be reflected in the appropriate generic source data file; release preflight generates upgrade candidates from generic source data diffs against the previous tag
+- Release upgrade records must also be reflected in the appropriate generic source data file; release preflight generates upgrade candidates from generic source data diffs against the previous tag. Candidates only: it sorts alphabetically, so `upgrade-data.xml` is hand-ordered parent-first
+- Client configuration is not upgrade data: `darpan-tenant-config` files (`GorjanaConclusionRulesData.xml`, `ShopifyNsBilledRuleSetData.xml`, `TriSystemOrderRunsRuleSetData.xml`, `OrderLineUnitRuleSetData.xml`) load per tenant on the instance they belong to, after `ConclusionCatalogSeedData.xml`
 - Archived release upgrade data: versioned files such as `data/releases/1.5.1/upgrade-data.xml` (and the pre-reset history under `data/releases/pre-reset/`); these are generated release artifacts and should not be treated as source seed files when diffing upgrade data
 - **v1.2.0 one-time migration action** (not covered by `loadDarpanUpgradeData`, which only loads
   declarative seed data): `reconciliation.ReconciliationNotificationServices.migrate#TenantNotificationSettings`

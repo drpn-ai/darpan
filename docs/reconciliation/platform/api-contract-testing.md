@@ -49,6 +49,9 @@ base branch's `openapi.json` and fails on a breaking change (removed method, rem
 newly-required request param, removed response field, type change) unless
 `ApiContractGenerator.CONTRACT_VERSION` was bumped. Additive changes always pass. The version is
 3 today (bumped in 1.5.0 when `list#TenantChatSpaces` dropped `googleChatWebhookUrlMasked`).
+2.0.0 kept it at 3: its 30 new methods are additive. The gate sees types, not values or
+transport, so 2.0.0's breaking changes passed it: the `/rpc/json` method fence and the new run
+stage codes.
 
 The generator does not yet cover database-darpan's facade, and it emits `servers: "/"`.
 

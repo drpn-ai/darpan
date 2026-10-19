@@ -112,7 +112,9 @@ A reconciliation source's primary-ID expression may carry an optional normalizer
 
 - **This component's CI** is `.github/workflows/ci.yml` (test suite + coverage floors +
   contract drift/compat gates + docs-catalog check) and `security.yml`, plus the
-  `secret-scan` gitleaks job. These run on `drpn-ai/darpan`.
+  `secret-scan` gitleaks job. These run on `drpn-ai/darpan`. `ci.yml` clones darpan-hotwax,
+  shopify-darpan, netsuite-darpan and database-darpan at `main`, not at release tags, so a green
+  run does not prove a tagged set; the prod Dockerfile pins in `darpan-docker-config` are what ship.
 - **`darpan-backend/.travis.yml` and any workflows in the moqui-framework checkout are
   UPSTREAM Moqui's** (`origin=moqui/moqui-framework`, push disabled) — they are not
   Darpan CI, do not run for us, and must not be "fixed" in our checkouts.

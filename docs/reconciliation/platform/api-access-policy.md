@@ -34,7 +34,9 @@ public docs site.
   a JSON-RPC method must start with `facade.`, `admin.` or `gql.`, checked for the top-level
   method **and every batch entry**. Any other method — including stock Moqui services that are
   `allow-remote="true"` — is refused with **HTTP 403** before dispatch. A request with no method is
-  left to the dispatcher, which answers with a JSON-RPC error.
+  left to the dispatcher, which answers with a JSON-RPC error. New in 2.0.0 (DAR-BE-078) and
+  breaking for any integration that called another namespace; the post-deploy probe is an
+  anonymous `org.moqui.impl.UserServices.update#Password`, which must answer 403.
 - **`/rest/login` is closed.** The same fence refuses the framework's `/rest/login` transition
   (HTTP 403). No Darpan client uses it; sign-in goes through `facade.AuthFacadeServices.login#Session`.
 - **The remote surface is the generated contract.** `docs/api-contract/methods.txt` lists every

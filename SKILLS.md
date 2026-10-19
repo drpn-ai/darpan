@@ -20,10 +20,12 @@ description: Guide coding and verifying changes inside the Darpan Moqui componen
    `darpan-admin-ui`.
 3. **Logic.** XML actions first; Groovy only for Spark, Drools, file streaming, HTTP clients,
    crypto, or non-trivial JSON/string work. Tenant reads in Groovy use `TenantScopedFinder`.
-4. **Contract.** New remote services are `facade.*` or `admin.*`; regenerate
+4. **Contract.** New remote services are `facade.*` or `admin.*` (`RpcMethodFence` refuses any
+   `/rpc/json` method outside those and `gql.*` with 403); regenerate
    `docs/api-contract/` with `generateApiContract`.
 5. **Data.** Run artifacts live under `runtime://datamanager/reconciliation-runs/**`; schemas are
-   stored in the `JsonSchema` entity. Seed changes also go into the release's upgrade data.
+   stored in the `JsonSchema` entity. Seed changes also go into the release's upgrade data;
+   client configuration (`darpan-tenant-config`) does not.
 6. **Verify.** Focused tests only (`scripts/focused-test.sh` or `test --tests <FQCN>`), on JDK 21.
    Note that Gradle does not rerun tests for a data-XML-only change; use `--rerun` after the task.
 7. **Docs.** Update `docs/**` when behaviour changes.

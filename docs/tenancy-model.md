@@ -14,7 +14,9 @@ All tenants share one deployment end to end:
   - `DARPAN_ACTIVE_COMPANY_SCOPE` EntityFilters on authz-enabled paths. Since DAR-BE-076 every
     entity, in any Darpan component, that carries `companyUserGroupId` has a filter row (or a
     recorded reason in `TenantOwnedEntityFilterContractTests.EXCLUDED`), and that test fails when a
-    new tenant-owned entity lands without one;
+    new tenant-owned entity lands without one. Existing environments take the 13 rows DAR-BE-076
+    added from the 2.0.0 upgrade data; once loaded, a row with no tenant stamp drops out of tenant
+    reads, so count NULL stamps first (the queries are in the upgrade-data header);
   - fail-closed system-write assertions (`assertSystemWriteTenant`) on cron/SFTP paths.
 - **The active tenant is a per-user preference**, `darpan.auth.activeTenantUserGroupId` in
   `UserPreference`, not per session: switching tenant in one tab re-points every tab that user has

@@ -136,6 +136,11 @@ non-secret metrics. The stage sequence lives in
 `darpan/facade/reconciliation/RunObservability.groovy` (`STAGE_SEQUENCE`); the UI's stage list
 mirrors those positions, so change both together.
 
+Since 2.0.0 the sequence is `RESOLVE` 1, `EXTRACT_FILE1` 2, `EXTRACT_FILE2` 3, `COMPARE` 4,
+`VERIFY_MISSING` 5, `VERIFY_EXCHANGE` 6, `VERIFY_RETURNS` 7, `CONCLUDE` 8, `WRITE_OUTPUT` 9,
+`NOTIFY` 10. Before it, `VERIFY` was 5, `WRITE_OUTPUT` 6 and `NOTIFY` 7. Old rows keep their codes
+(`VERIFY` still sorts at 5); a consumer reading `stageCode` or `stageSequence` must expect both.
+
 ## 5. Result persistence
 
 - Result JSON is written into the same run artifact folder as the staged source files.
@@ -255,4 +260,5 @@ the finding.
 - Code: `darpan/reconciliation/flowchart/` (`RunFlowchartTree`, `RunFlowchartWalker`,
   `LifecycleSupport`, `LifecycleStageCompiler`, `NetSuiteCheckImportSupport`).
 
-These services are on `main` and not in the v1.5.1 release.
+These services are new in 2.0.0. A flowchart question under one that did not finish ends `AUT_STAT_NOT_RUN`,
+a status the 2.0.0 upgrade data seeds.

@@ -85,12 +85,13 @@ class SourceFilterEntityContractTests {
     @Test
     void neitherTableShipsSeedOrUpgradeRows() {
         // Backward compatibility: zero rows must mean today's behavior. Any seeded row would change
-        // an existing tenant's extract silently on upgrade.
+        // an existing tenant's extract silently on upgrade. Match row ELEMENTS only: DAR-BE-076's
+        // EntityFilter rows legitimately name both entities in an entityName attribute.
         ["data/SourceSystemConnectorSeedData.xml", "data/upgrade-data.xml"].each { String relativePath ->
             String text = Paths.get(relativePath).toFile().text
-            assertTrue(!text.contains("RuleSetCompareSourceFilter"),
+            assertTrue(!(text =~ /<(?:[\w.]+\.)?RuleSetCompareSourceFilter[\s\/>]/).find(),
                     "${relativePath} must not seed RuleSetCompareSourceFilter rows")
-            assertTrue(!text.contains("ReconciliationAutomationSourceFilter"),
+            assertTrue(!(text =~ /<(?:[\w.]+\.)?ReconciliationAutomationSourceFilter[\s\/>]/).find(),
                     "${relativePath} must not seed ReconciliationAutomationSourceFilter rows")
         }
     }

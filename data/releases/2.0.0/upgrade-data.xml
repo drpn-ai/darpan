@@ -1,0 +1,705 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Release-scoped upgrade data for Darpan 2.0.0 (v1.5.1..v2.0.0).
+REBUILT 2026-10-03 from the generic seed files under runtime/component/darpan/data/, covering every
+record added or modified between v1.5.1 and darpan main 268d218, then hand-ordered. Every record below
+is copied VERBATIM from its seed file and was checked equivalent to it. RE-CHECKED 2026-10-19 for the
+2.0.0 cut against the full v1.5.1..b473ecf seed diff: all 80 non-tenant-config records owed are here,
+byte-equivalent to their seed declarations, and nothing here is absent from that diff. Load with:
+./gradlew loadDarpanUpgradeData
+
+REBUILT, NOT APPENDED. The previous version of this file carried 3 of the 31 records then owed. 1.5.1's
+pack is frozen at data/releases/1.5.1/upgrade-data.xml and must not be edited. This file is a DELTA
+carrying only what changed after 1.5.1. An environment that has not yet loaded 1.5.1 must load
+data/releases/1.5.1/upgrade-data.xml FIRST — this file restates a row that pack also restates, and
+ordering the two the other way leaves the 1.5.1 values in place.
+
+SCOPE: the darpan-seed files (AutomationSeedData, DarpanSystemSourceSeedData,
+SourceSystemConnectorSeedData, SourceSystemConnectorFieldSeedData, SecuritySeedData) plus
+ConclusionCatalogSeedData.
+The catalog file is type="seed", which the docker entrypoint's by-type load never picks up, so this
+file is the only way the conclusion catalog reaches a deployed instance.
+DELIBERATELY EXCLUDED: the 88 darpan-tenant-config records added in the same range
+(GorjanaConclusionRulesData, ShopifyNsBilledRuleSetData, TriSystemOrderRunsRuleSetData,
+OrderLineUnitRuleSetData). They are gorjana's client configuration; an upgrade pack loads on every
+instance, sm-darpan included. Load them per tenant, catalog first.
+
+ORDERING, parent before child. Moqui's entity-facade loader inserts in DOCUMENT ORDER and does not
+topologically sort, so a child ahead of its parent fails with a raw *_ibfk_* error that points nowhere
+near this file. release_preflight.py sorts alphabetically and WILL break this if regenerated:
+  1. EnumerationType DarpanConclusion, then its UNEXPLAINED enumeration
+  2. AUT_STAT_NOT_RUN (its type AutomationExecStatus shipped long ago)
+  3. the ten DarpanSystemSource endpoint enums (their parents OMS / SHOPIFY / NETSUITE already exist)
+  4. the twelve SourceSystemConnector rows (remotes HOTWAX_ORDERS_API / SHOPIFY_REMOTE already exist)
+  5. the forty-two SourceSystemConnectorField pills, which FK their connector by systemEnumId
+  6. the thirteen DAR-BE-076 EntityFilter rows, which FK only EntityFilterSet DARPAN_ACTIVE_COMPANY_SCOPE
+     (shipped long before 1.5.1), so their position is free; they are last so they land after the rest
+
+OPERATOR IMPACT: 80 records.
+
+  - TENANT FILTER ON THIRTEEN MORE ENTITIES (DAR-BE-076), security: DatabaseSourceConfig,
+    DatabaseSourceQuery, NsSuiteQlSourceQuery, Reconciliation, ReconciliationRun,
+    ReconciliationAutomationSourceFilter, ReconciliationRunStep, SlackOAuthState, SlackWorkspaceInstall,
+    SourceConfigEndpointAccess, RuleSetCompareSourceFilter, RuleSetConclusionRule and
+    RuleSetConclusionCondition join DARPAN_ACTIVE_COMPANY_SCOPE, like the twenty entities already in it.
+    No live leak was found on any of them (every caller-keyed read was already gated in code); this
+    makes the framework enforce it too. A filter hides rows whose companyUserGroupId is NULL from any
+    authz-enabled facade read; the DAR-BE-076 build moves the reads that must still see such rows to
+    gated children reads, so the app itself loses nothing. NEEDS the darpan build carrying DAR-BE-076:
+    on an older build a shared-config peer reads the owner's disabled endpoints as enabled, a run step
+    written without a tenant stops heartbeating, and save#RuleSetRun fails on an unstamped exclusion
+    filter. BEFORE loading, count NULL stamps on each environment (expect 0). One per newly filtered
+    entity, plus RULE_SET_COMPARE_SCOPE and RULE_SET_COMPARE_SOURCE_KEY_FIELD (already filtered; an
+    unstamped key-field row made save#RuleSetRun fail 23505), which the sweep below also stamps:
+      SELECT COUNT(*) FROM RULE_SET_COMPARE_SOURCE_FILTER WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM RULE_SET_COMPARE_SOURCE_KEY_FIELD WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM RULE_SET_CONCLUSION_RULE WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM RULE_SET_CONCLUSION_CONDITION WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM RULE_SET_COMPARE_SCOPE WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM RECONCILIATION WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM RECONCILIATION_RUN WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM RECONCILIATION_RUN_STEP WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM RECONCILIATION_AUTOMATION_SOURCE_FILTER WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM SOURCE_CONFIG_ENDPOINT_ACCESS WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM NS_SUITE_QL_SOURCE_QUERY WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM DATABASE_SOURCE_CONFIG WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM DATABASE_SOURCE_QUERY WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM SLACK_WORKSPACE_INSTALL WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM SLACK_O_AUTH_STATE WHERE COMPANY_USER_GROUP_ID IS NULL;
+    (Table names follow Moqui's default entity-name mapping; none of these entities sets table-name.
+    SLACK_O_AUTH_STATE is the derived name for SlackOAuthState: confirm it with SHOW TABLES LIKE 'SLACK%'.)
+    A non-zero filter, key-field or scope count: run reconciliation.ReconciliationRuleEngineServices.sweep#RuleChildTenantStamps
+    (it now stamps the filter and key-field rows too) and recount. Unstamped exclusion-filter rows are ALREADY ignored by
+    every run (the run-time reads pin the tenant), so a non-zero count also means exclusions that are not
+    being applied today. A non-zero count on any other table: report it before loading, so the rows can be
+    stamped or retired on purpose rather than discovered later. SLACK_O_AUTH_STATE rows are short-lived
+    install handshakes; stale unstamped ones can simply expire.
+
+  - SOURCE NAMES RENAMED (DAR-BE-069), display only: endpoint names say what they return, not which API
+    serves them ("HotWax Returns (Reconciliation API)" -> "HotWax refunded returns", "HotWax Returns (GraphQL)"
+    -> "HotWax returns", "Shopify Order Return References" -> "Shopify returns", "Orders API" -> "Orders", ...).
+    Four enums (OMS_RECON_ORDERS, OMS_RETURNS, OMS_TRANSFER_ORDERS, SHOPIFY_RETURN_REFS) and four connectors (OMS,
+    OMS_RECON_ORDERS, OMS_RETURNS, OMS_TRANSFER_ORDERS) are restated for it; each differs from v1.5.1 ONLY in its
+    description / endpointLabel. Run results already written keep the name they were stamped with.
+
+  - FIELD LABELS RENAMED (DAR-BE-069), display only: 31 pill labels across OMS, OMS_GQL, OMS_RECON_ORDERS,
+    OMS_RETURNS, OMS_RETURNS_GQL, SHOPIFY and SHOPIFY_RETURN_REFS get short plain names ("Shopify reference" ->
+    "Shopify ID", "Order external ID" -> "Shopify order ID", "Grand total" -> "Order total", ...). Saved rules store
+    field PATHS, never labels, so existing runs and automations are untouched and simply show the new names. 15 of
+    the renamed rows were not otherwise in this pack and are restated at the end of the file.
+
+  - RETURNS ID CHOICES (DAR-BE-071), picker only: on OMS_RETURNS and OMS_RETURNS_GQL the "which field identifies
+    each record" card offers exactly "Shopify return ID" (shopifyReturnId, was "Shopify ID") and "Refund or return
+    ID" (externalId, was "Shopify refund ID" — named like Shopify's own column). Return ID and Shopify order ID stay
+    as rule pills but are no longer offered as the key. isPrimaryIdCandidate is read only by that card, so runs
+    already keyed on either keep running unchanged. Adds OMS_RETURNS's Return ID row (42nd pill).
+
+  - NEW ENDPOINTS, inert until configured: OMS_GQL (HotWax Orders over GraphQL, DAR-BE-064),
+    OMS_ORDER_ITEMS, OMS_ORDER_LINE_UNITS, SHOPIFY_ORDER_LINE_UNITS, NETSUITE_SUITEQL — each an
+    endpoint enum plus a connector row; OMS_GQL also gets its nine pills. No existing run references
+    any of them.
+
+  - OMS_RETURNS_GQL (DAR-BE-040 fix 3): OMS returns over GraphQL, beside OMS_RETURNS. The REST endpoint
+    serves refunded returns only, so a returns run on OMS_RETURNS reports every pending return as missing
+    in HotWax. Records match REST field for field, and the nine pills mirror OMS_RETURNS, so moving a rule
+    set over is a source switch (HOTWAX_OMS_REST_RETURNS -> HOTWAX_OMS_GQL_RETURNS) with no rule change.
+    The endpoint gate is absent-means-enabled, so it is available on every open OMS config at once. Needs
+    the OMS GraphQL upgrade (gorjana has it since 2026-09-30); elsewhere the extract fails loudly. Slower
+    than REST, throttle-bound: 258 s against 17 s for a 6-hour gorjana window (live, 2026-10-03).
+    Plus a tenth, GraphQL-only pill (DAR-BE-068): "Order product store", the return's ORIGIN order's
+    productStoreId, for include/exclude rules. Filter-only (not compared); REST has no equivalent.
+
+  - SHOPIFY (orders) is MODIFIED in two columns, and one of them changes behaviour:
+      filterParameterName  (none) -> sourceFilters
+      evidenceFieldsJson   (none) -> the Shopify evidence map the run-conclusions feature reads
+    From this load on, any source-filter rows (table RULE_SET_COMPARE_SOURCE_FILTER) saved against a
+    Shopify-orders source START APPLYING; before it they were silently ignored. Check each environment before loading:
+      SELECT f.* FROM RULE_SET_COMPARE_SOURCE_FILTER f JOIN RULE_SET_COMPARE_SOURCE s
+        ON s.COMPARE_SCOPE_ID = f.COMPARE_SCOPE_ID ... WHERE s.SYSTEM_ENUM_ID = 'SHOPIFY'
+    (adjust the join to the source's key columns). Six new SHOPIFY pills arrive with it: cancelledAt,
+    displayFinancialStatus, displayFulfillmentStatus, hasPaymentTransaction, requiresShipping,
+    sourceName.
+
+  - SHOPIFY_RETURN_REFS is restated (create-or-update by primary key, whole row) with two changes
+    since 1.5.1: keepFieldsBase swaps the withdrawn returnWorkflowStatus for orderReturnStatus, and
+    lookupMaxIds rises 10000 -> 50000. Its "Return status" pill (field orderReturnStatus) is new: after this load the
+    endpoint's ONLY return-status pill. Its values are Shopify's own Order.returnStatus — IN_PROGRESS,
+    INSPECTION_COMPLETE, NO_RETURN, RETURN_FAILED, RETURN_REQUESTED, RETURNED — which replaces 1.5.1's
+    per-return field, whose in-progress value was spelled OPEN and so matched nothing an operator
+    would type. Being order-wide it lands on REFUND rows too, so excluding IN_PROGRESS drops an
+    in-progress order's refund rows as well as its return: deliberate, and a real behaviour change.
+
+  - AUT_STAT_NOT_RUN: the terminal status a flowchart question under a failed one ends in (DAR-UI-048).
+    ReconciliationRunResult.statusId FKs it, so flowchart runs fail without this row.
+
+  - DarpanConclusion / UNEXPLAINED: the conclusion catalog root and its catch-all, needed before any
+    tenant's conclusion rules can load.
+
+COMPANION BUILDS. These records name fields and services that exist only in the matching connector
+builds: darpan-hotwax v0.9.0 (OMS_GQL, OMS_RETURNS_GQL, OMS_ORDER_ITEMS, OMS_ORDER_LINE_UNITS) and
+shopify-darpan v0.7.0 (the new SHOPIFY pills, sourceFilters, SHOPIFY_ORDER_LINE_UNITS,
+orderReturnStatus). Against an older build a pill appears but selects a field the extract does not
+contain, so every rule on it matches nothing, silently. NETSUITE_SUITEQL needs netsuite-darpan v0.3.0,
+which carries its extract. Load this file only on an image built from those tags plus darpan v2.0.0.
+
+ONE MANUAL STEP, carried over unchanged: a seed load is createOrUpdate and never deletes, so the
+withdrawn $.records[*].returnWorkflowStatus pill (and, where the few-hour-old original was loaded,
+$.records[*].returnStatus) stays behind. Both PKs are in
+SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS, but that migration is ALREADY APPLIED wherever
+1.5.0's migrations ran, and run#PendingMigrations skips applied ones. Re-run it explicitly ONCE per
+environment, after this file loads:
+
+    admin.MigrationAdminServices.run#Migration  migrationId=RETIRED_FIELDS  force=true
+
+It is idempotent and a safe no-op where the stale rows never existed. Any exclusion rule saved against
+returnWorkflowStatus keeps its stored expression and matches nothing after this load: re-add it on the
+new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes IN_PROGRESS).
+-->
+<entity-facade-xml type="darpan-seed">
+
+    <!-- 1. Conclusion catalog root (DAR-UI-044). EnumerationType before its enumeration.
+         Source: data/ConclusionCatalogSeedData.xml -->
+    <moqui.basic.EnumerationType enumTypeId="DarpanConclusion" description="Run result conclusion"/>
+    <moqui.basic.Enumeration enumId="UNEXPLAINED" enumTypeId="DarpanConclusion" enumCode="UNEXPLAINED"
+            description="Unexplained" sequenceNum="999"/>
+
+    <!-- 2. DAR-UI-048: a flowchart question under a failed one ends NOT_RUN.
+         Source: data/AutomationSeedData.xml -->
+    <moqui.basic.Enumeration enumId="AUT_STAT_NOT_RUN"
+            enumTypeId="AutomationExecStatus"
+            enumCode="NOT_RUN"
+            description="Not run: a question above it in the flowchart failed or was switched off"
+            sequenceNum="9"/>
+
+    <!-- 3. Endpoint enums for the new connectors below.
+         Source: data/DarpanSystemSourceSeedData.xml -->
+    <moqui.basic.Enumeration
+            enumId="NETSUITE_SUITEQL"
+            enumTypeId="DarpanSystemSource"
+            enumCode="NETSUITE_SUITEQL"
+            description="NetSuite SuiteQL"
+            sequenceNum="12"
+            parentEnumId="NETSUITE"/>
+    <moqui.basic.Enumeration
+            enumId="OMS_GQL"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_GQL"
+            description="HotWax orders and payments"
+            sequenceNum="14"
+            parentEnumId="OMS"/>
+    <moqui.basic.Enumeration
+            enumId="OMS_ORDER_ITEMS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_ORDER_ITEMS"
+            description="HotWax order lines (NetSuite)"
+            sequenceNum="13"
+            parentEnumId="OMS"/>
+    <moqui.basic.Enumeration
+            enumId="OMS_ORDER_LINE_UNITS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_ORDER_LINE_UNITS"
+            description="HotWax order lines"
+            sequenceNum="11"
+            parentEnumId="OMS"/>
+    <moqui.basic.Enumeration
+            enumId="SHOPIFY_ORDER_LINE_UNITS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="SHOPIFY_ORDER_LINE_UNITS"
+            description="Shopify order lines"
+            sequenceNum="10"
+            parentEnumId="SHOPIFY"/>
+
+    <moqui.basic.Enumeration
+            enumId="OMS_RETURNS_GQL"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_GQL_RETURNS"
+            description="HotWax returns"
+            sequenceNum="15"
+            parentEnumId="OMS"/>
+
+    <!-- DAR-BE-069: restated for the source-name renames (create-or-update by primary key, whole row). -->
+    <moqui.basic.Enumeration
+            enumId="OMS_RECON_ORDERS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_RECON_ORDERS"
+            description="HotWax sales orders"
+            sequenceNum="7"
+            parentEnumId="OMS"/>
+    <moqui.basic.Enumeration
+            enumId="OMS_RETURNS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_RETURNS"
+            description="HotWax refunded returns"
+            sequenceNum="8"
+            parentEnumId="OMS"/>
+    <moqui.basic.Enumeration
+            enumId="OMS_TRANSFER_ORDERS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_TRANSFER_ORDERS"
+            description="HotWax transfer orders"
+            sequenceNum="6"
+            parentEnumId="OMS"/>
+    <moqui.basic.Enumeration
+            enumId="SHOPIFY_RETURN_REFS"
+            enumTypeId="DarpanSystemSource"
+            enumCode="SHOPIFY_RETURN_REFS"
+            description="Shopify returns"
+            sequenceNum="9"
+            parentEnumId="SHOPIFY"/>
+
+    <!-- 4. Connectors. SHOPIFY and SHOPIFY_RETURN_REFS are MODIFIED rows (restated whole); the rest are new.
+         Source: data/SourceSystemConnectorSeedData.xml -->
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="NETSUITE_SUITEQL"
+            extractServiceName="reconciliation.NetSuiteOrderExtractionServices.extract#NetSuiteOrders"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="NETSUITE_SUITEQL"
+            configParameterName="nsSuiteQlSourceQueryId"
+            configEntityName="darpan.reconciliation.NsSuiteQlSourceQuery"
+            endpointLabel="SuiteQL"
+            sendUrlTemplate="https://{account}.suitetalk.api.netsuite.com/services/rest/query/v1/suiteql"
+            remoteSendServiceName="reconciliation.NetSuiteOrderExtractionServices.extract#NetSuiteOrders"
+            systemAliases="NETSUITE_SUITEQL,NETSUITE_ORDERS,NETSUITE_SALES_ORDERS,DAR_SYS_NETSUITE_SUITEQL"
+            preserveWindowInstants="N"
+            windowDateOnly="Y"
+            filterParameterName="sourceFilters"
+            evidenceFieldsJson='{"system":"NetSuite","state":"status","stateLabels":{"A":"Pending Approval","B":"Pending Fulfillment","C":"Cancelled","D":"Partially Fulfilled","E":"Pending Billing/Partially Fulfilled","F":"Pending Billing","G":"Billed","H":"Closed"},"facts":["orderLineId","lineState","quantityShipped","quantityBilled","quantityBackordered","tranId"]}'
+            enabled="Y"/>
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_GQL"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_GQL"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Orders and payments"
+            sendUrlTemplate="{baseUrl}/rest/s1/graphql"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders"
+            systemAliases="OMS_GQL,HOTWAX_GQL,DAR_SYS_OMS_GQL"
+            preserveWindowInstants="N"
+            keepFieldsParameterName="keepRecordFields"
+            keepFieldsBase="orderId,orderName,externalId,grandTotal,orderDate,statusId"
+            filterParameterName="sourceFilters"
+            pairLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            enabled="Y"/>
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_ORDER_ITEMS"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrderItems"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_REST_ORDER_ITEMS"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Order lines (NetSuite)"
+            sendUrlTemplate="{baseUrl}/rest/s1/oms/orders"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrderItems"
+            systemAliases="OMS_ORDER_ITEMS,HOTWAX_ORDER_ITEMS,DAR_SYS_OMS_ORDER_ITEMS"
+            preserveWindowInstants="N"
+            filterParameterName="sourceFilters"
+            windowFieldName="orderDate"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            evidenceFieldsJson='{"system":"HotWax","state":"statusId","stateLabels":{"ITEM_COMPLETED":"Completed","ITEM_APPROVED":"Approved","ITEM_CREATED":"Created","ITEM_CANCELLED":"Cancelled"},"facts":["facilityId","orderItemSeqId","omsOrderId"]}'
+            enabled="Y"/>
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_ORDER_LINE_UNITS"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrderLineUnits"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_REST_LINE_UNITS"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Order lines"
+            sendUrlTemplate="{baseUrl}/rest/s1/oms/orders"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrderLineUnits"
+            systemAliases="OMS_ORDER_LINE_UNITS,HOTWAX_ORDER_LINE_UNITS,DAR_SYS_OMS_LINE_UNITS"
+            preserveWindowInstants="N"
+            filterParameterName="sourceFilters"
+            windowFieldName="orderDate"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            evidenceFieldsJson='{"system":"HotWax","state":"statusId","stateLabels":{"ITEM_COMPLETED":"Completed","ITEM_APPROVED":"Approved","ITEM_CREATED":"Created","ITEM_CANCELLED":"Cancelled"},"facts":["facilityId","orderItemSeqId","omsOrderId"]}'
+            enabled="Y"/>
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="SHOPIFY_ORDER_LINE_UNITS"
+            extractServiceName="reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrderLineUnits"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="SHOPIFY_ORDER_LINE_UNITS_API"
+            configParameterName="shopifyAuthConfigId"
+            configEntityName="darpan.shopify.ShopifyAuthConfig"
+            remoteId="SHOPIFY_REMOTE"
+            endpointLabel="Order lines"
+            sendUrlTemplate="https://{shop}.myshopify.com/admin/api/{apiVersion}/graphql.json"
+            remoteSendServiceName="facade.ShopifyFacadeServices.execute#ShopifyGraphql"
+            systemAliases="SHOPIFY_ORDER_LINE_UNITS,DAR_SYS_SHOPIFY_LINE_UNITS"
+            preserveWindowInstants="Y"
+            filterParameterName="sourceFilters"
+            healthCheckServiceName="facade.ShopifyFacadeServices.probe#ShopifyAuthConnection"
+            evidenceFieldsJson='{"system":"Shopify","state":"unitState","stateLabels":{"OPEN":"Open","FULFILLED":"Fulfilled","REMOVED":"Removed"},"facts":["shopifyOrderName","sku"]}'
+            enabled="Y"/>
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="SHOPIFY_RETURN_REFS"
+            extractServiceName="reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrderReturnRefs"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="SHOPIFY_RETURN_REFS_API"
+            configParameterName="shopifyAuthConfigId"
+            configEntityName="darpan.shopify.ShopifyAuthConfig"
+            remoteId="SHOPIFY_REMOTE"
+            endpointLabel="Returns"
+            systemAliases="SHOPIFY_RETURN_REFS,SHOPIFY_RETURNS,DAR_SYS_SHOPIFY_RETURN_REFS"
+            preserveWindowInstants="N"
+            filterParameterName="sourceFilters"
+            keepFieldsBase="refundOrReturnId,refundOrReturnType,orderId,createdAt,orderCancelledAt,refundLineEverFulfilled,orderReturnStatus"
+            lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyRefundOrReturnIds"
+            lookupIdsParameterName="refundOrReturnIds"
+            lookupMaxIds="50000"
+            enabled="Y"/>
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="SHOPIFY"
+            extractServiceName="reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="SHOPIFY_AUTH"
+            configParameterName="shopifyAuthConfigId"
+            configEntityName="darpan.shopify.ShopifyAuthConfig"
+            remoteId="SHOPIFY_REMOTE"
+            endpointLabel="Orders"
+            sendUrlTemplate="https://{shop}.myshopify.com/admin/api/{apiVersion}/graphql.json"
+            remoteSendServiceName="facade.ShopifyFacadeServices.execute#ShopifyGraphql"
+            systemAliases="SHOPIFY,DAR_SYS_SHOPIFY"
+            preserveWindowInstants="Y"
+            lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderIds"
+            exchangeStateLookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderExchangeState"
+            exchangeSweepServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyExchangeSweep"
+            healthCheckServiceName="facade.ShopifyFacadeServices.probe#ShopifyAuthConnection"
+            filterParameterName="sourceFilters"
+            evidenceFieldsJson='{"system":"Shopify","state":"displayFulfillmentStatus","stateLabels":{"FULFILLED":"Fulfilled","UNFULFILLED":"Unfulfilled","PARTIALLY_FULFILLED":"Partially fulfilled","RESTOCKED":"Restocked","ON_HOLD":"On hold","IN_PROGRESS":"In progress","SCHEDULED":"Scheduled","PENDING_FULFILLMENT":"Pending fulfillment","OPEN":"Open"},"facts":["name","displayFinancialStatus","sourceName"]}'
+            enabled="Y"/>
+
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_RETURNS_GQL"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlReturns"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_GQL_RETURNS"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Returns"
+            sendUrlTemplate="{baseUrl}/rest/s1/graphql"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlReturns"
+            systemAliases="OMS_RETURNS_GQL,HOTWAX_GQL_RETURNS,DAR_SYS_OMS_RETURNS_GQL"
+            preserveWindowInstants="N"
+            keepFieldsParameterName="keepRecordFields"
+            keepFieldsBase="returnId,shopifyReturnId,externalId,orderExternalId,statusId,entryDate,returnTotal,currencyUomId,returnChannelEnumId"
+            filterParameterName="sourceFilters"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            orderStateLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId"
+            lookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsReturnsByExternalId"
+            lookupIdsParameterName="externalIds"
+            lookupMaxIds="10000"
+            enabled="Y"/>
+
+    <!-- DAR-BE-069: restated for the source-name renames (create-or-update by primary key, whole row). -->
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_REST"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Orders"
+            sendUrlTemplate="{baseUrl}/rest/s1/oms/orders"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsOrders"
+            systemAliases="OMS,HOTWAX,DAR_SYS_OMS"
+            preserveWindowInstants="N"
+            keepFieldsParameterName="keepRecordFields"
+            keepFieldsBase="orderId,orderName,externalId,grandTotal,orderDate,statusId"
+            filterParameterName="sourceFilters"
+            pairLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            enabled="Y"/>
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_RECON_ORDERS"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_REST_RECON"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Sales orders"
+            sendUrlTemplate="{baseUrl}/rest/s1/oms/reconciliationOrders"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders"
+            systemAliases="OMS_RECON_ORDERS,HOTWAX_RECON_ORDERS,DAR_SYS_OMS_RECON"
+            preserveWindowInstants="N"
+            keepFieldsParameterName="keepRecordFields"
+            keepFieldsBase="orderId,orderName,externalId,grandTotal,orderDate,statusId"
+            filterParameterName="sourceFilters"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            enabled="Y"/>
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_RETURNS"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReturns"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_REST_RETURNS"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Refunded returns"
+            sendUrlTemplate="{baseUrl}/rest/s1/oms/reconciliationReturns"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReturns"
+            systemAliases="OMS_RETURNS,HOTWAX_RETURNS,DAR_SYS_OMS_RETURNS"
+            preserveWindowInstants="N"
+            keepFieldsParameterName="keepRecordFields"
+            keepFieldsBase="returnId,shopifyReturnId,externalId,orderExternalId,statusId,entryDate,returnTotal,currencyUomId,returnChannelEnumId"
+            filterParameterName="sourceFilters"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            orderStateLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId"
+            lookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsReturnsByExternalId"
+            lookupIdsParameterName="externalIds"
+            lookupMaxIds="10000"
+            enabled="Y"/>
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_TRANSFER_ORDERS"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsTransferOrders"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_REST_TRANSFER"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Transfer orders"
+            sendUrlTemplate="{baseUrl}/rest/s1/oms/orders"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsTransferOrders"
+            systemAliases="OMS_TRANSFER_ORDERS,HOTWAX_TRANSFER_ORDERS,DAR_SYS_OMS_TO"
+            preserveWindowInstants="N"
+            keepFieldsParameterName="keepRecordFields"
+            keepFieldsBase="orderId,orderName,orderDate,statusId,originFacilityId,grandTotal,currencyUom"
+            filterParameterName="sourceFilters"
+            windowFieldName="orderDate"
+            supportsStateExtract="Y"
+            statusParameterName="orderStatusIds"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            enabled="Y"/>
+
+    <!-- 5. Rules-board pills. Each FKs a connector above by systemEnumId.
+         Source: data/SourceSystemConnectorFieldSeedData.xml -->
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].externalId"
+            label="Shopify order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            description="Shopify reference stored on the OMS order. In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].grandTotal"
+            label="Order total" fieldType="string" sequenceNum="4"
+            description="In keepFieldsBase. Comparison only — not key-like."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].hasPaymentPreference"
+            label="Has payment" fieldType="string" sequenceNum="8"
+            description="Y when the order carries at least one OrderPaymentPreference, else N. Compared against Shopify hasPaymentTransaction by the presence OPP rule (operator &lt;=)."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].orderDate"
+            label="Order date" fieldType="string" sequenceNum="5"
+            description="In keepFieldsBase. Epoch millis, as on the REST connector."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].orderId"
+            label="Order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
+            description="OMS order identity. In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].orderName"
+            label="Order name" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
+            description="Operator-facing order name. In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].paymentMethodTypeIds"
+            label="Payment methods" fieldType="string" sequenceNum="9"
+            description="Comma-joined OPP paymentMethodTypeIds from the first two OPPs (detail, not a key)."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].productStoreId"
+            label="Store" fieldType="string" sequenceNum="7"
+            description="NOT in keepFieldsBase; selected in the GraphQL document only when a filter or rule reads it."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].statusId"
+            label="Order status" fieldType="string" sequenceNum="6"
+            description="In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].orderReturnStatus"
+            label="Return status" fieldType="string" sequenceNum="5"
+            description="ADDED 2026-09-01 (DAR-BE-026), replacing the withdrawn returnWorkflowStatus pill —
+                see the retirement entry in SourceSystemConnectorFieldWriteSupport.RETIRED_FIELDS. This is
+                the endpoint's ONLY return-status field. Holds Shopify's own Order.returnStatus, an
+                OrderReturnStatus: IN_PROGRESS, INSPECTION_COMPLETE, NO_RETURN, RETURN_FAILED,
+                RETURN_REQUESTED, RETURNED. Those are the values to type, and they are the ones Shopify
+                itself shows: the admin renders IN_PROGRESS as 'Return in progress' and the order search
+                spells it return_status:in_progress. The withdrawn field held a per-return ReturnStatus
+                instead, whose in-progress value is spelled OPEN — a word on no surface an operator could
+                see — so excluding IN_PROGRESS matched nothing and reported a zero count, which reads
+                exactly like an undeployed feature. Present on EVERY row, refund and return alike, because
+                it describes the whole ORDER: excluding IN_PROGRESS therefore drops an in-progress order's
+                refund rows as well as its return, which is deliberate — the per-return field it replaced
+                could never reach a refund row at all. Key always present, null when Shopify reports
+                nothing, so a consumer can tell 'extract predates the field' from 'Shopify said nothing'.
+                Exclude IN_PROGRESS to drop orders whose return has not finished yet."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].cancelledAt"
+            label="Cancelled on" fieldType="DateTime" sequenceNum="7" description="Set on a cancelled order."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].displayFinancialStatus"
+            label="Payment status" fieldType="String" sequenceNum="4" description="PAID, PENDING, PARTIALLY_REFUNDED, REFUNDED, ..."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].displayFulfillmentStatus"
+            label="Fulfillment status" fieldType="String" sequenceNum="3" description="FULFILLED, UNFULFILLED, PARTIALLY_FULFILLED, RESTOCKED, ..."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].hasPaymentTransaction"
+            label="Has payment" fieldType="String" sequenceNum="8" description="DAR-BE-064: Y when any SUCCESS SALE, CAPTURE or AUTHORIZATION transaction exists, else N."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].requiresShipping"
+            label="Needs shipping" fieldType="Boolean" sequenceNum="6" description="false on orders with nothing to ship (gorjana's digital gift cards, POS carry-outs)."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].sourceName"
+            label="Sales channel" fieldType="String" sequenceNum="5" description="web, pos, shopify_draft_order, or an app id."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].returnId"
+            label="Return ID" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="1"
+            description="OMS return identity. Not offered as the ID (DAR-BE-071): HotWax-only, so it never joins to Shopify."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].shopifyReturnId"
+            label="Shopify return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
+            description="PREFERRED join key. The Shopify return reference: the SHOPIFY_RTN_ID identification where present, else SHOPIFY_RETURN_ID — the same pick REST makes. Populated on RETURN_REQUESTED returns that have no refund yet, which REST no longer serves at all. Matches Shopify SHOPIFY_RETURN_REFS's refundOrReturnId."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].externalId"
+            label="Refund or return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            description="The Shopify refund id. BLANK on returns with no refund yet; the extract then fills it from shopifyReturnId (the same join-key fallback REST records get). Kept as a candidate so rule sets keyed on it keep resolving."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].orderExternalId"
+            label="Shopify order ID" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="4"
+            description="Order spine — the Shopify order id of the return's order, resolved through OMS orders. Absent on a return with no items, as on REST. Not offered as the ID (DAR-BE-071): one order can carry several returns, and duplicate keys collapse."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].statusId"
+            label="Return status" fieldType="string" sequenceNum="5" description="The RETURN's status. Includes RETURN_REQUESTED, which REST never serves; RETURN_CANCELLED is excluded by the extract."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].entryDate"
+            label="Created" fieldType="string" sequenceNum="6" description="Epoch milliseconds, as on REST. The extract windows on it."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].returnTotal"
+            label="Return total" fieldType="string" sequenceNum="7" description="Sum of returnPrice x returnQuantity over the return's items — what REST reports."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].currencyUomId"
+            label="Currency" fieldType="string" sequenceNum="8" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].returnChannelEnumId"
+            label="Return channel" fieldType="string" sequenceNum="9"
+            description="Return channel. Exclusion rules on it run client-side, after the built-in exclusions."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].orderProductStoreId"
+            label="Store" fieldType="string" sequenceNum="10"
+            description="DAR-BE-068: the product store of the return's ORIGIN order (Return.productStoreId is unpopulated). GraphQL only — REST's record has no order id to reach it. NOT in keepFieldsBase: filters run before projection, so the pill filters without being compared. Absent on a return with no items, so an include rule drops those."/>
+
+    <!-- DAR-BE-069: label renames restated (create-or-update by primary key, whole row). -->
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].externalId"
+            label="Shopify order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            description="Shopify reference stored on the OMS order. In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].grandTotal"
+            label="Order total" fieldType="string" sequenceNum="4"
+            description="In keepFieldsBase. Comparison only — not key-like."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].statusId"
+            label="Order status" fieldType="string" sequenceNum="6"
+            description="In keepFieldsBase."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].productStoreId"
+            label="Store" fieldType="string" sequenceNum="8"
+            description="NOT in keepFieldsBase. Same reason as salesChannelEnumId."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RECON_ORDERS" fieldPath="$.records[*].externalId"
+            label="Shopify order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RECON_ORDERS" fieldPath="$.records[*].grandTotal"
+            label="Order total" fieldType="string" sequenceNum="4" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RECON_ORDERS" fieldPath="$.records[*].statusId"
+            label="Order status" fieldType="string" sequenceNum="6" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].returnId"
+            label="Return ID" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="1"
+            description="OMS return identity. Not offered as the ID (DAR-BE-071): HotWax-only, so it never joins to Shopify."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].shopifyReturnId"
+            label="Shopify return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"
+            description="PREFERRED join key. Holds whichever Shopify id is the reference — refund or return —
+                despite the name, and unlike externalId it is populated on RETURN_REQUESTED returns that have
+                no refund yet. Matches Shopify SHOPIFY_RETURN_REFS's refundOrReturnId."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].externalId"
+            label="Refund or return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"
+            description="The original join key — a Shopify refund id or, for a small number of returns, a return
+                id instead. BLANK on returns with no refund yet, which is why shopifyReturnId above supersedes it.
+                Kept as a candidate so existing rule sets keyed on it keep resolving."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].orderExternalId"
+            label="Shopify order ID" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="4"
+            description="Order spine — joins a return back to its order. Not offered as the ID (DAR-BE-071): one order can carry several returns, and duplicate keys collapse."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].statusId"
+            label="Return status" fieldType="string" sequenceNum="5" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS" fieldPath="$.records[*].entryDate"
+            label="Created" fieldType="string" sequenceNum="6" description="Server-side projected."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].refundOrReturnId"
+            label="Refund or return ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"
+            description="RENAMED 2026-08-18 (was '$.records[*].eventId', labelled 'Event ID' then 'Refund or
+                Return ID'): 'event' is this extractor's internal abstraction, not a Shopify term, and it
+                surfaced verbatim on the rules board, the run summary and the diff columns. bareId-normalized
+                identity — a REFUND id when refundOrReturnType is REFUND, a RETURN id when it is RETURN.
+                Matches OMS externalId whichever kind it is: the single join key for returns reconciliation,
+                with no precedence rule needed on either side."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].refundOrReturnType"
+            label="Type" fieldType="string" sequenceNum="2"
+            description="RENAMED 2026-08-18 (was '$.records[*].eventType'). REFUND or RETURN — identifies
+                which kind of id refundOrReturnId carries on this row. Not a join key; useful for filtering
+                or as a comparison field."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY_RETURN_REFS" fieldPath="$.records[*].createdAt"
+            label="Created" fieldType="string" sequenceNum="4"
+            description="RELABELLED (was 'Order created', then 'Event created'): the individual refund's or
+                return's own creation date — a refund row carries the refund's createdAt, a return row
+                carries the return's — never the order's creation date. Windowing filters on this field, not
+                on any order-level date."/>
+
+
+    <!-- 6. DAR-BE-076: the active-tenant entity filter on the thirteen remaining tenant-owned entities.
+         Source: data/SecuritySeedData.xml -->
+    <!-- DAR-BE-076 — the remaining tenant-owned entities (companyUserGroupId) that had no filter, so an
+         authz-enabled facade read of any of them returned every tenant's rows. Like every row above,
+         a row whose companyUserGroupId is NULL is hidden too. Reads that must see past the active
+         tenant (a shared config's endpoint decisions, a system sweep) go through
+         TenantScopedFinder.findGlobalUnscoped with a reason. The completeness guard is
+         darpan.security.TenantOwnedEntityFilterContractTests: a new tenant-owned entity without a row
+         here fails it. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_DB_SOURCE_CONFIG"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.database.DatabaseSourceConfig"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_DB_SOURCE_QUERY"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.database.DatabaseSourceQuery"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_NS_SUITEQL_QUERY"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.NsSuiteQlSourceQuery"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RECONCILIATION"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.Reconciliation"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RECON_RUN"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.ReconciliationRun"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUTOMATION_SRC_FILTER"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.ReconciliationAutomationSourceFilter"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RUN_STEP"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.ReconciliationRunStep"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_SLACK_OAUTH_STATE"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.SlackOAuthState"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_SLACK_INSTALL"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.SlackWorkspaceInstall"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <!-- Rows are stamped with the CONFIG OWNER's tenant, and a shared peer reads them too: that read
+         (SourceEndpointAccessSupport.decisionsFor) is findGlobalUnscoped after the config is authorized. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_ENDPOINT_ACCESS"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.SourceConfigEndpointAccess"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULE_SOURCE_FILTER"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.rule.RuleSetCompareSourceFilter"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_CONCLUSION_RULE"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.rule.RuleSetConclusionRule"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_CONCLUSION_CONDITION"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.rule.RuleSetConclusionCondition"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+
+</entity-facade-xml>

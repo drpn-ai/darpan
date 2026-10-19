@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-Release-scoped upgrade data for the NEXT Darpan release (unreleased).
+Release-scoped upgrade data for Darpan 2.0.0 (v1.5.1..v2.0.0).
 REBUILT 2026-10-03 from the generic seed files under runtime/component/darpan/data/, covering every
 record added or modified between v1.5.1 and darpan main 268d218, then hand-ordered. Every record below
-is copied VERBATIM from its seed file and was checked equivalent to it. Load with:
+is copied VERBATIM from its seed file and was checked equivalent to it. RE-CHECKED 2026-10-19 for the
+2.0.0 cut against the full v1.5.1..b473ecf seed diff: all 80 non-tenant-config records owed are here,
+byte-equivalent to their seed declarations, and nothing here is absent from that diff. Load with:
 ./gradlew loadDarpanUpgradeData
 
 REBUILT, NOT APPENDED. The previous version of this file carried 3 of the 31 records then owed. 1.5.1's
@@ -46,17 +48,32 @@ OPERATOR IMPACT: 80 records.
     gated children reads, so the app itself loses nothing. NEEDS the darpan build carrying DAR-BE-076:
     on an older build a shared-config peer reads the owner's disabled endpoints as enabled, a run step
     written without a tenant stops heartbeating, and save#RuleSetRun fails on an unstamped exclusion
-    filter. BEFORE loading, count NULL stamps on each environment (expect 0):
+    filter. BEFORE loading, count NULL stamps on each environment (expect 0). One per newly filtered
+    entity, plus RULE_SET_COMPARE_SCOPE and RULE_SET_COMPARE_SOURCE_KEY_FIELD (already filtered; an
+    unstamped key-field row made save#RuleSetRun fail 23505), which the sweep below also stamps:
       SELECT COUNT(*) FROM RULE_SET_COMPARE_SOURCE_FILTER WHERE COMPANY_USER_GROUP_ID IS NULL;
-      SELECT COUNT(*) FROM RECONCILIATION_RUN_STEP WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM RULE_SET_COMPARE_SOURCE_KEY_FIELD WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM RULE_SET_CONCLUSION_RULE WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM RULE_SET_CONCLUSION_CONDITION WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM RULE_SET_COMPARE_SCOPE WHERE COMPANY_USER_GROUP_ID IS NULL;
       SELECT COUNT(*) FROM RECONCILIATION WHERE COMPANY_USER_GROUP_ID IS NULL;
       SELECT COUNT(*) FROM RECONCILIATION_RUN WHERE COMPANY_USER_GROUP_ID IS NULL;
-      SELECT COUNT(*) FROM RULE_SET_COMPARE_SCOPE WHERE COMPANY_USER_GROUP_ID IS NULL;
-    A non-zero filter or scope count: run reconciliation.ReconciliationRuleEngineServices.sweep#RuleChildTenantStamps
-    (it now stamps the filter rows too) and recount. Unstamped exclusion-filter rows are ALREADY ignored by
+      SELECT COUNT(*) FROM RECONCILIATION_RUN_STEP WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM RECONCILIATION_AUTOMATION_SOURCE_FILTER WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM SOURCE_CONFIG_ENDPOINT_ACCESS WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM NS_SUITE_QL_SOURCE_QUERY WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM DATABASE_SOURCE_CONFIG WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM DATABASE_SOURCE_QUERY WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM SLACK_WORKSPACE_INSTALL WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM SLACK_O_AUTH_STATE WHERE COMPANY_USER_GROUP_ID IS NULL;
+    (Table names follow Moqui's default entity-name mapping; none of these entities sets table-name.
+    SLACK_O_AUTH_STATE is the derived name for SlackOAuthState: confirm it with SHOW TABLES LIKE 'SLACK%'.)
+    A non-zero filter, key-field or scope count: run reconciliation.ReconciliationRuleEngineServices.sweep#RuleChildTenantStamps
+    (it now stamps the filter and key-field rows too) and recount. Unstamped exclusion-filter rows are ALREADY ignored by
     every run (the run-time reads pin the tenant), so a non-zero count also means exclusions that are not
-    being applied today. A non-zero count on the other three: report it before loading, so the rows can be
-    stamped or retired on purpose rather than discovered later.
+    being applied today. A non-zero count on any other table: report it before loading, so the rows can be
+    stamped or retired on purpose rather than discovered later. SLACK_O_AUTH_STATE rows are short-lived
+    install handshakes; stale unstamped ones can simply expire.
 
   - SOURCE NAMES RENAMED (DAR-BE-069), display only: endpoint names say what they return, not which API
     serves them ("HotWax Returns (Reconciliation API)" -> "HotWax refunded returns", "HotWax Returns (GraphQL)"
@@ -105,7 +122,7 @@ OPERATOR IMPACT: 80 records.
 
   - SHOPIFY_RETURN_REFS is restated (create-or-update by primary key, whole row) with two changes
     since 1.5.1: keepFieldsBase swaps the withdrawn returnWorkflowStatus for orderReturnStatus, and
-    lookupMaxIds rises 10000 -> 50000. Its "Order return status" pill is new: after this load the
+    lookupMaxIds rises 10000 -> 50000. Its "Return status" pill (field orderReturnStatus) is new: after this load the
     endpoint's ONLY return-status pill. Its values are Shopify's own Order.returnStatus — IN_PROGRESS,
     INSPECTION_COMPLETE, NO_RETURN, RETURN_FAILED, RETURN_REQUESTED, RETURNED — which replaces 1.5.1's
     per-return field, whose in-progress value was spelled OPEN and so matched nothing an operator
@@ -119,10 +136,11 @@ OPERATOR IMPACT: 80 records.
     tenant's conclusion rules can load.
 
 COMPANION BUILDS. These records name fields and services that exist only in the matching connector
-builds: darpan-hotwax 0a666b4+ (OMS_GQL, OMS_ORDER_ITEMS, OMS_ORDER_LINE_UNITS) and shopify-darpan
-ddb681e+ (the new SHOPIFY pills, sourceFilters, SHOPIFY_ORDER_LINE_UNITS, orderReturnStatus). Against
-an older build a pill appears but selects a field the extract does not contain, so every rule on it
-matches nothing, silently. NETSUITE_SUITEQL needs the netsuite-darpan build that carries its extract.
+builds: darpan-hotwax v0.9.0 (OMS_GQL, OMS_RETURNS_GQL, OMS_ORDER_ITEMS, OMS_ORDER_LINE_UNITS) and
+shopify-darpan v0.7.0 (the new SHOPIFY pills, sourceFilters, SHOPIFY_ORDER_LINE_UNITS,
+orderReturnStatus). Against an older build a pill appears but selects a field the extract does not
+contain, so every rule on it matches nothing, silently. NETSUITE_SUITEQL needs netsuite-darpan v0.3.0,
+which carries its extract. Load this file only on an image built from those tags plus darpan v2.0.0.
 
 ONE MANUAL STEP, carried over unchanged: a seed load is createOrUpdate and never deletes, so the
 withdrawn $.records[*].returnWorkflowStatus pill (and, where the few-hour-old original was loaded,

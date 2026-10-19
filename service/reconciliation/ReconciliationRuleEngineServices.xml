@@ -390,7 +390,9 @@
 
     <service verb="sweep" noun="RuleChildTenantStamps" authenticate="false">
         <description>Backfill the denormalized companyUserGroupId stamp on Rule / RuleSetCompareScope /
-            RuleSetCompareSource from the parent RuleSet (MACH P1 defense-in-depth). New rows are stamped
+            RuleSetCompareSource / RuleSetCompareSourceFilter / RuleSetCompareSourceKeyField from the parent
+            RuleSet (MACH P1 defense-in-depth; the filter and key-field rows since DAR-BE-076, because both are under
+            the active-tenant entity filter, which hides unstamped rows). New rows are stamped
             at create/save time; this system sweep heals pre-existing rows and is an idempotent no-op
             afterwards. Scheduled via ServiceJob sweep_RuleChildTenantStamps_hourly.</description>
         <out-parameters>

@@ -13,7 +13,8 @@ data/releases/1.5.1/upgrade-data.xml FIRST — this file restates a row that pac
 ordering the two the other way leaves the 1.5.1 values in place.
 
 SCOPE: the darpan-seed files (AutomationSeedData, DarpanSystemSourceSeedData,
-SourceSystemConnectorSeedData, SourceSystemConnectorFieldSeedData) plus ConclusionCatalogSeedData.
+SourceSystemConnectorSeedData, SourceSystemConnectorFieldSeedData, SecuritySeedData) plus
+ConclusionCatalogSeedData.
 The catalog file is type="seed", which the docker entrypoint's by-type load never picks up, so this
 file is the only way the conclusion catalog reaches a deployed instance.
 DELIBERATELY EXCLUDED: the 88 darpan-tenant-config records added in the same range
@@ -29,8 +30,33 @@ near this file. release_preflight.py sorts alphabetically and WILL break this if
   3. the ten DarpanSystemSource endpoint enums (their parents OMS / SHOPIFY / NETSUITE already exist)
   4. the twelve SourceSystemConnector rows (remotes HOTWAX_ORDERS_API / SHOPIFY_REMOTE already exist)
   5. the forty-two SourceSystemConnectorField pills, which FK their connector by systemEnumId
+  6. the thirteen DAR-BE-076 EntityFilter rows, which FK only EntityFilterSet DARPAN_ACTIVE_COMPANY_SCOPE
+     (shipped long before 1.5.1), so their position is free; they are last so they land after the rest
 
-OPERATOR IMPACT: 67 records.
+OPERATOR IMPACT: 80 records.
+
+  - TENANT FILTER ON THIRTEEN MORE ENTITIES (DAR-BE-076), security: DatabaseSourceConfig,
+    DatabaseSourceQuery, NsSuiteQlSourceQuery, Reconciliation, ReconciliationRun,
+    ReconciliationAutomationSourceFilter, ReconciliationRunStep, SlackOAuthState, SlackWorkspaceInstall,
+    SourceConfigEndpointAccess, RuleSetCompareSourceFilter, RuleSetConclusionRule and
+    RuleSetConclusionCondition join DARPAN_ACTIVE_COMPANY_SCOPE, like the twenty entities already in it.
+    No live leak was found on any of them (every caller-keyed read was already gated in code); this
+    makes the framework enforce it too. A filter hides rows whose companyUserGroupId is NULL from any
+    authz-enabled facade read; the DAR-BE-076 build moves the reads that must still see such rows to
+    gated children reads, so the app itself loses nothing. NEEDS the darpan build carrying DAR-BE-076:
+    on an older build a shared-config peer reads the owner's disabled endpoints as enabled, a run step
+    written without a tenant stops heartbeating, and save#RuleSetRun fails on an unstamped exclusion
+    filter. BEFORE loading, count NULL stamps on each environment (expect 0):
+      SELECT COUNT(*) FROM RULE_SET_COMPARE_SOURCE_FILTER WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM RECONCILIATION_RUN_STEP WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM RECONCILIATION WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM RECONCILIATION_RUN WHERE COMPANY_USER_GROUP_ID IS NULL;
+      SELECT COUNT(*) FROM RULE_SET_COMPARE_SCOPE WHERE COMPANY_USER_GROUP_ID IS NULL;
+    A non-zero filter or scope count: run reconciliation.ReconciliationRuleEngineServices.sweep#RuleChildTenantStamps
+    (it now stamps the filter rows too) and recount. Unstamped exclusion-filter rows are ALREADY ignored by
+    every run (the run-time reads pin the tenant), so a non-zero count also means exclusions that are not
+    being applied today. A non-zero count on the other three: report it before loading, so the rows can be
+    stamped or retired on purpose rather than discovered later.
 
   - SOURCE NAMES RENAMED (DAR-BE-069), display only: endpoint names say what they return, not which API
     serves them ("HotWax Returns (Reconciliation API)" -> "HotWax refunded returns", "HotWax Returns (GraphQL)"
@@ -592,5 +618,70 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
                 return's own creation date — a refund row carries the refund's createdAt, a return row
                 carries the return's — never the order's creation date. Windowing filters on this field, not
                 on any order-level date."/>
+
+
+    <!-- 6. DAR-BE-076: the active-tenant entity filter on the thirteen remaining tenant-owned entities.
+         Source: data/SecuritySeedData.xml -->
+    <!-- DAR-BE-076 — the remaining tenant-owned entities (companyUserGroupId) that had no filter, so an
+         authz-enabled facade read of any of them returned every tenant's rows. Like every row above,
+         a row whose companyUserGroupId is NULL is hidden too. Reads that must see past the active
+         tenant (a shared config's endpoint decisions, a system sweep) go through
+         TenantScopedFinder.findGlobalUnscoped with a reason. The completeness guard is
+         darpan.security.TenantOwnedEntityFilterContractTests: a new tenant-owned entity without a row
+         here fails it. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_DB_SOURCE_CONFIG"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.database.DatabaseSourceConfig"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_DB_SOURCE_QUERY"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.database.DatabaseSourceQuery"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_NS_SUITEQL_QUERY"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.NsSuiteQlSourceQuery"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RECONCILIATION"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.Reconciliation"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RECON_RUN"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.ReconciliationRun"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUTOMATION_SRC_FILTER"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.ReconciliationAutomationSourceFilter"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RUN_STEP"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.ReconciliationRunStep"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_SLACK_OAUTH_STATE"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.SlackOAuthState"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_SLACK_INSTALL"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.SlackWorkspaceInstall"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <!-- Rows are stamped with the CONFIG OWNER's tenant, and a shared peer reads them too: that read
+         (SourceEndpointAccessSupport.decisionsFor) is findGlobalUnscoped after the config is authorized. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_ENDPOINT_ACCESS"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.SourceConfigEndpointAccess"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULE_SOURCE_FILTER"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.rule.RuleSetCompareSourceFilter"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_CONCLUSION_RULE"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.rule.RuleSetConclusionRule"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_CONCLUSION_CONDITION"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.rule.RuleSetConclusionCondition"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
 
 </entity-facade-xml>

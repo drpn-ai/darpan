@@ -9,7 +9,8 @@ import static darpan.common.ValueSupport.readField
 
 /**
  * Backfill sweep for the denormalized {@code companyUserGroupId} stamp on Rule /
- * RuleSetCompareScope / RuleSetCompareSource (MACH P1 defense-in-depth).
+ * RuleSetCompareScope / RuleSetCompareSource / RuleSetCompareSourceFilter (MACH P1 defense-in-depth;
+ * the filter rows since DAR-BE-076).
  *
  * <p>New rows are stamped at create/save time from the parent RuleSet; this sweep heals rows
  * created before the stamp existed (and any row that slipped through a non-facade write path).
@@ -57,13 +58,18 @@ class RuleTenantStampSupport {
                     tenantByRuleSetId[normalize(readField(scope, "ruleSetId"))]
             if (scopeId && tenantId) tenantByCompareScopeId[scopeId] = tenantId
         }
-        (TenantScopedFinder.findGlobalUnscoped(ec, "darpan.rule.RuleSetCompareSource", SWEEP_REASON)
-                .condition("companyUserGroupId", null).useCache(false).list() ?: []).each { row ->
-            String tenantId = tenantByCompareScopeId[normalize(readField(row, "compareScopeId"))]
-            if (!tenantId) return
-            row.set("companyUserGroupId", tenantId)
-            row.update()
-            stamped++
+        // DAR-BE-076: exclusion-filter and composite-key rows hang off the compare scope too. They are
+        // under the active-tenant entity filter, so an unstamped row is invisible to every facade read of it.
+        ["darpan.rule.RuleSetCompareSource", "darpan.rule.RuleSetCompareSourceFilter",
+         "darpan.rule.RuleSetCompareSourceKeyField"].each { String entityName ->
+            (TenantScopedFinder.findGlobalUnscoped(ec, entityName, SWEEP_REASON)
+                    .condition("companyUserGroupId", null).useCache(false).list() ?: []).each { row ->
+                String tenantId = tenantByCompareScopeId[normalize(readField(row, "compareScopeId"))]
+                if (!tenantId) return
+                row.set("companyUserGroupId", tenantId)
+                row.update()
+                stamped++
+            }
         }
 
         if (stamped) logger.info("[rule-tenant-stamp] backfilled companyUserGroupId on {} rule-child rows", stamped)

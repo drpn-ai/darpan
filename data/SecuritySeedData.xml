@@ -229,6 +229,67 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.shopify.ShopifyAuthConfig"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <!-- DAR-BE-076 — the remaining tenant-owned entities (companyUserGroupId) that had no filter, so an
+         authz-enabled facade read of any of them returned every tenant's rows. Like every row above,
+         a row whose companyUserGroupId is NULL is hidden too. Reads that must see past the active
+         tenant (a shared config's endpoint decisions, a system sweep) go through
+         TenantScopedFinder.findGlobalUnscoped with a reason. The completeness guard is
+         darpan.security.TenantOwnedEntityFilterContractTests: a new tenant-owned entity without a row
+         here fails it. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_DB_SOURCE_CONFIG"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.database.DatabaseSourceConfig"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_DB_SOURCE_QUERY"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.database.DatabaseSourceQuery"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_NS_SUITEQL_QUERY"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.NsSuiteQlSourceQuery"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RECONCILIATION"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.Reconciliation"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RECON_RUN"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.ReconciliationRun"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUTOMATION_SRC_FILTER"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.ReconciliationAutomationSourceFilter"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RUN_STEP"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.ReconciliationRunStep"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_SLACK_OAUTH_STATE"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.SlackOAuthState"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_SLACK_INSTALL"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.SlackWorkspaceInstall"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <!-- Rows are stamped with the CONFIG OWNER's tenant, and a shared peer reads them too: that read
+         (SourceEndpointAccessSupport.decisionsFor) is findGlobalUnscoped after the config is authorized. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_ENDPOINT_ACCESS"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.SourceConfigEndpointAccess"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_RULE_SOURCE_FILTER"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.rule.RuleSetCompareSourceFilter"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_CONCLUSION_RULE"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.rule.RuleSetConclusionRule"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_CONCLUSION_CONDITION"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.rule.RuleSetConclusionCondition"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_ADMIN"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"/>
     <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_USER"

@@ -182,9 +182,14 @@ class RunObservability {
         def step = null
         try {
             ec.transaction.runUseOrBegin(30, "Error starting reconciliation step", {
+                def run = ec.entity.find(RUN_RESULT_ENTITY).condition("reconciliationRunResultId", runId).useCache(false).one()
                 step = ec.entity.makeValue(RUN_STEP_ENTITY)
                 step.set("reconciliationRunResultId", runId)
-                if (ctx.get("companyUserGroupId") != null) step.set("companyUserGroupId", ctx.get("companyUserGroupId"))
+                // DAR-BE-076: the step is under the active-tenant entity filter, so an unstamped step is
+                // invisible to its own heartbeat (heartbeatStageProgress) on a facade thread. Some callers
+                // pass no tenant in ctx; the run row they are recording always carries one.
+                Object stepTenant = ctx?.get("companyUserGroupId") ?: run?.get("companyUserGroupId")
+                if (stepTenant != null) step.set("companyUserGroupId", stepTenant)
                 step.set("stageCode", stageCode)
                 step.set("stageSequence", stageSequenceOf(stageCode))
                 step.set("statusEnumId", STATUS_RUNNING)
@@ -194,7 +199,6 @@ class RunObservability {
                 step.set("lastUpdatedDate", now)
                 step.setSequencedIdPrimary()
                 step.create()
-                def run = ec.entity.find(RUN_RESULT_ENTITY).condition("reconciliationRunResultId", runId).useCache(false).one()
                 if (run != null) {
                     run.set("currentStage", stageCode)
                     // progressPercent mirrors the current stage's advisory progress; the prior

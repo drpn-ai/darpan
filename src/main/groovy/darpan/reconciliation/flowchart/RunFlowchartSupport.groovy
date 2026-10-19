@@ -232,32 +232,6 @@ class RunFlowchartSupport {
                 firstRunResultId: first, outcomes: walked.outcomes]
     }
 
-    static Map listReconciliations(def ec) {
-        List rows = TenantScopedFinder.findTenantScoped(ec, RECONCILIATION).orderBy("reconciliationName").useCache(false).list() ?: []
-        return [reconciliations: rows.findAll { it.get("isArchived") != "Y" }.collect { def r ->
-            String id = r.get("reconciliationId") as String
-            ["reconciliationId", "reconciliationName", "description", "defaultTimeWindow", "isActive", "isArchived"]
-                    .collectEntries { [(it): r.get(it)] } +
-                    [questionCount: (TenantScopedFinder.findTenantScoped(ec, QUESTION).condition("reconciliationId", id)
-                            .useCache(false).list() ?: []).count { it.get("isActive") != "N" }]
-        }]
-    }
-
-    static Map deleteQuestion(def ec, String reconciliationRunId) {
-        if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for runs.")) return [:]
-        def question = TenantScopedFinder.findTenantScopedByIdQuiet(ec, QUESTION, "reconciliationRunId", reconciliationRunId)
-        if (question == null) { ec.message.addError("Question '${reconciliationRunId}' was not found."); return [:] }
-        long children = (TenantScopedFinder.findTenantScoped(ec, QUESTION)
-                .condition("parentReconciliationRunId", reconciliationRunId).useCache(false).list() ?: [])
-                .count { it.get("isActive") != "N" }
-        if (children > 0) { ec.message.addError("Remove the questions under it first."); return [:] }
-        // Plan 2 final review I1: a soft delete. Every question that ever ran has result rows pointing at
-        // it (FK RECRES_RUN), and those past results must stay readable.
-        question.set("isActive", "N")
-        question.update()
-        return [deleted: true]
-    }
-
     /** DAR-UI-048 plan 3. One row per press of Run, newest first. A deleted question's rows still count. */
     static Map listExecutions(def ec, String reconciliationId) {
         if (findReconciliation(ec, reconciliationId) == null) { ec.message.addError("Run '${reconciliationId}' was not found."); return [:] }
@@ -283,14 +257,5 @@ class RunFlowchartSupport {
         if (statuses.any { it == "AUT_STAT_CANCELLED" }) return "AUT_STAT_CANCELLED"
         if (statuses.any { it == "AUT_STAT_FAILED" }) return "AUT_STAT_FAILED"
         return "AUT_STAT_SUCCESS"
-    }
-
-    static Map getExecution(def ec, String reconciliationExecutionId) {
-        List rows = TenantScopedFinder.findTenantScoped(ec, RUN_RESULT)
-                .condition("reconciliationExecutionId", reconciliationExecutionId).orderBy("createdDate").useCache(false).list() ?: []
-        return [results: rows.collect { def r ->
-            ["reconciliationRunResultId", "reconciliationRunId", "parentRunResultId", "statusEnumId", "yesCount",
-             "noCount", "unaskedCount", "differenceCount", "errorMessage", "resultDataManagerPath"].collectEntries { [(it): r.get(it)] }
-        }]
     }
 }

@@ -1140,10 +1140,10 @@
                      resolved value is composite (>1 field) — this uniformly covers single→composite,
                      composite→composite (fields/order changed), and composite→single (rows deleted,
                      primaryIdExpression set above). -->
-                <entity-find entity-name="darpan.rule.RuleSetCompareSourceKeyField" list="file1ExistingKeyFields">
-                    <econdition field-name="compareScopeId" from="file1Source.compareScopeId"/>
-                    <econdition field-name="fileSide" value="FILE_1"/>
-                </entity-find>
+                <!-- DAR-BE-076: children of the (tenant-gated) compare scope, not a plain entity-find. The key
+                     fields are under the active-tenant entity filter, which hides NULL-stamped rows; a hidden row
+                     escapes this delete pass and the recreate below collides on its primary key. -->
+                <set field="file1ExistingKeyFields" from="darpan.facade.common.TenantScopedFinder.findTenantScopedChildren(ec, 'darpan.rule.RuleSetCompareSourceKeyField', 'darpan.rule.RuleSetCompareScope', 'compareScopeId', file1Source.compareScopeId, 'compareScopeId')?.condition('fileSide', 'FILE_1')?.useCache(false)?.list() ?: []"/>
                 <!-- The recreate is a replacement, not a new key: keep the earliest original createdDate. -->
                 <set field="file1KeyFieldCreatedDate" from="(file1ExistingKeyFields ? file1ExistingKeyFields.collect({ it.createdDate }).findAll({ it }).min() : null) ?: nowTs"/>
                 <iterate list="file1ExistingKeyFields" entry="file1OldKeyField">
@@ -1169,10 +1169,12 @@
                      would silently drop later. -->
                 <if condition="file1ExcludeFilters != null">
                     <set field="file1FilterRows" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.validateExcludeFilterPayload(file1ExcludeFilters, 'Source 1')"/>
-                    <entity-find entity-name="darpan.rule.RuleSetCompareSourceFilter" list="file1ExistingFilters">
-                        <econdition field-name="compareScopeId" from="file1Source.compareScopeId"/>
-                        <econdition field-name="fileSide" value="FILE_1"/>
-                    </entity-find>
+                    <!-- DAR-BE-076: read as children of the (tenant-gated) compare scope, NOT a plain entity-find.
+                         RuleSetCompareSourceFilter is under the active-tenant entity filter, which hides rows whose
+                         companyUserGroupId is NULL; a hidden row escapes this delete pass and the recreate below then
+                         collides on its primary key (compareScopeId, fileSide, sequenceNum) and fails the whole save.
+                         The scope gate keeps the read inside the active tenant; the child read sees every row of it. -->
+                    <set field="file1ExistingFilters" from="darpan.facade.common.TenantScopedFinder.findTenantScopedChildren(ec, 'darpan.rule.RuleSetCompareSourceFilter', 'darpan.rule.RuleSetCompareScope', 'compareScopeId', file1Source.compareScopeId, 'compareScopeId')?.condition('fileSide', 'FILE_1')?.useCache(false)?.list() ?: []"/>
                     <iterate list="file1ExistingFilters" entry="file1OldFilter">
                         <service-call name="delete#darpan.rule.RuleSetCompareSourceFilter" disable-authz="true"
                                 in-map="[compareScopeId: file1OldFilter.compareScopeId, fileSide: file1OldFilter.fileSide, sequenceNum: file1OldFilter.sequenceNum]"/>
@@ -1202,10 +1204,10 @@
                 <set field="ignoreFile2Update" from="file2Source.update()"/>
 
                 <!-- See the FILE_1 key-field delete/recreate comment above. -->
-                <entity-find entity-name="darpan.rule.RuleSetCompareSourceKeyField" list="file2ExistingKeyFields">
-                    <econdition field-name="compareScopeId" from="file2Source.compareScopeId"/>
-                    <econdition field-name="fileSide" value="FILE_2"/>
-                </entity-find>
+                <!-- DAR-BE-076: children of the (tenant-gated) compare scope, not a plain entity-find. The key
+                     fields are under the active-tenant entity filter, which hides NULL-stamped rows; a hidden row
+                     escapes this delete pass and the recreate below collides on its primary key. -->
+                <set field="file2ExistingKeyFields" from="darpan.facade.common.TenantScopedFinder.findTenantScopedChildren(ec, 'darpan.rule.RuleSetCompareSourceKeyField', 'darpan.rule.RuleSetCompareScope', 'compareScopeId', file2Source.compareScopeId, 'compareScopeId')?.condition('fileSide', 'FILE_2')?.useCache(false)?.list() ?: []"/>
                 <!-- See the FILE_1 createdDate note above. -->
                 <set field="file2KeyFieldCreatedDate" from="(file2ExistingKeyFields ? file2ExistingKeyFields.collect({ it.createdDate }).findAll({ it }).min() : null) ?: nowTs"/>
                 <iterate list="file2ExistingKeyFields" entry="file2OldKeyField">
@@ -1224,10 +1226,8 @@
                 <!-- See the FILE_1 exclusion-filter comment above. -->
                 <if condition="file2ExcludeFilters != null">
                     <set field="file2FilterRows" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.validateExcludeFilterPayload(file2ExcludeFilters, 'Source 2')"/>
-                    <entity-find entity-name="darpan.rule.RuleSetCompareSourceFilter" list="file2ExistingFilters">
-                        <econdition field-name="compareScopeId" from="file2Source.compareScopeId"/>
-                        <econdition field-name="fileSide" value="FILE_2"/>
-                    </entity-find>
+                    <!-- See the FILE_1 DAR-BE-076 note: children of the gated compare scope, unstamped rows included. -->
+                    <set field="file2ExistingFilters" from="darpan.facade.common.TenantScopedFinder.findTenantScopedChildren(ec, 'darpan.rule.RuleSetCompareSourceFilter', 'darpan.rule.RuleSetCompareScope', 'compareScopeId', file2Source.compareScopeId, 'compareScopeId')?.condition('fileSide', 'FILE_2')?.useCache(false)?.list() ?: []"/>
                     <iterate list="file2ExistingFilters" entry="file2OldFilter">
                         <service-call name="delete#darpan.rule.RuleSetCompareSourceFilter" disable-authz="true"
                                 in-map="[compareScopeId: file2OldFilter.compareScopeId, fileSide: file2OldFilter.fileSide, sequenceNum: file2OldFilter.sequenceNum]"/>
@@ -2142,7 +2142,16 @@
             <parameter name="results" type="List"><parameter name="result" type="Map"/></parameter>
         </out-parameters>
         <actions>
-            <set field="results" from="darpan.reconciliation.flowchart.RunFlowchartSupport.getExecution(ec, reconciliationExecutionId).results"/>
+            <!-- Tenant scope: the explicit condition (TenantScopedFinder's sentinel when there is no active
+                 tenant) holds in every authz posture; on a facade call the active-tenant entity filter applies it
+                 again. A list find, so the condition is never dropped the way it is beside a full primary key. -->
+            <entity-find entity-name="darpan.reconciliation.ReconciliationRunResult" list="executionRows" cache="false">
+                <econdition field-name="reconciliationExecutionId" from="reconciliationExecutionId"/>
+                <econdition field-name="companyUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec) ?: darpan.facade.common.TenantScopedFinder.NO_ACTIVE_TENANT_SENTINEL"/>
+                <order-by field-name="createdDate"/>
+            </entity-find>
+            <set field="results" from="executionRows.collect { r -> ['reconciliationRunResultId', 'reconciliationRunId', 'parentRunResultId', 'statusEnumId', 'yesCount',
+                    'noCount', 'unaskedCount', 'differenceCount', 'errorMessage', 'resultDataManagerPath'].collectEntries { [(it): r.get(it)] } }"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
@@ -2158,7 +2167,24 @@
             <parameter name="reconciliations" type="List"><parameter name="reconciliation" type="Map"/></parameter>
         </out-parameters>
         <actions>
-            <set field="reconciliations" from="darpan.reconciliation.flowchart.RunFlowchartSupport.listReconciliations(ec).reconciliations"/>
+            <!-- See get#ReconciliationExecution for the tenant condition. -->
+            <set field="tenantScope" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec) ?: darpan.facade.common.TenantScopedFinder.NO_ACTIVE_TENANT_SENTINEL"/>
+            <entity-find entity-name="darpan.reconciliation.Reconciliation" list="reconciliationRows" cache="false">
+                <econdition field-name="companyUserGroupId" from="tenantScope"/>
+                <order-by field-name="reconciliationName"/>
+            </entity-find>
+            <set field="reconciliations" from="[]"/>
+            <iterate list="reconciliationRows" entry="reconciliationRow">
+                <if condition="reconciliationRow.isArchived != 'Y'">
+                    <entity-find entity-name="darpan.reconciliation.ReconciliationRun" list="questionRows" cache="false">
+                        <econdition field-name="reconciliationId" from="reconciliationRow.reconciliationId"/>
+                        <econdition field-name="companyUserGroupId" from="tenantScope"/>
+                    </entity-find>
+                    <!-- A NULL isActive is an active question, so this cannot be a SQL isActive != 'N' condition. -->
+                    <set field="ignoreAdd" from="reconciliations.add(['reconciliationId', 'reconciliationName', 'description', 'defaultTimeWindow', 'isActive', 'isArchived']
+                            .collectEntries { [(it): reconciliationRow.get(it)] } + [questionCount: questionRows.count { it.isActive != 'N' }])"/>
+                </if>
+            </iterate>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
@@ -2174,7 +2200,29 @@
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
         </out-parameters>
         <actions>
-            <set field="deleted" from="darpan.reconciliation.flowchart.RunFlowchartSupport.deleteQuestion(ec, reconciliationRunId)"/>
+            <if condition="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for runs.')">
+                <!-- The row this service writes is resolved and gated in code (owner only); a foreign or missing
+                     question gets the same not-found answer. -->
+                <set field="question" from="darpan.facade.common.TenantScopedFinder.findTenantScopedByIdQuiet(ec, 'darpan.reconciliation.ReconciliationRun', 'reconciliationRunId', reconciliationRunId)"/>
+                <if condition="question == null">
+                    <message error="true">Question '${reconciliationRunId}' was not found.</message>
+                    <else>
+                        <entity-find entity-name="darpan.reconciliation.ReconciliationRun" list="childRows" cache="false">
+                            <econdition field-name="parentReconciliationRunId" from="reconciliationRunId"/>
+                            <econdition field-name="companyUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec) ?: darpan.facade.common.TenantScopedFinder.NO_ACTIVE_TENANT_SENTINEL"/>
+                        </entity-find>
+                        <if condition="childRows.count { it.isActive != 'N' } &gt; 0">
+                            <message error="true">Remove the questions under it first.</message>
+                            <else>
+                                <!-- Plan 2 final review I1: a soft delete. Every question that ever ran has result rows
+                                     pointing at it (FK RECRES_RUN), and those past results must stay readable. -->
+                                <set field="ignoreInactive" from="question.set('isActive', 'N')"/>
+                                <entity-update value-field="question"/>
+                            </else>
+                        </if>
+                    </else>
+                </if>
+            </if>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

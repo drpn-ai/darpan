@@ -531,7 +531,11 @@
                 <message error="true">Port must be between 1 and 65535.</message>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="existingServer" from="ec.entity.find('darpan.reconciliation.SftpServer').condition('sftpServerId', sftpServerIdValue).useCache(false).one()"/>
+                <!-- DAR-BE-079: the existence check must see every tenant's row. A bare find is filtered
+                     by DARPAN_SCOPE_SFTP_SERVER, so a foreign row read as null, the gate below was
+                     skipped, and store# (PK-only refresh/update, no filter) overwrote and re-owned it.
+                     Read unscoped, then gate. Do not revert this to a bare ec.entity.find. -->
+                <set field="existingServer" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.SftpServer', 'save#SftpServer existence check; the requireTenantRecordAccess gate below refuses a foreign row (DAR-BE-079)').condition('sftpServerId', sftpServerIdValue).useCache(false).one()"/>
                 <if condition="existingServer">
                     <set field="ignoreServerAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, existingServer, &quot;SFTP server '${sftpServerIdValue}' was not found.&quot;, &quot;SFTP server '${sftpServerIdValue}' is not available in your active tenant.&quot;)"/>
                 </if>

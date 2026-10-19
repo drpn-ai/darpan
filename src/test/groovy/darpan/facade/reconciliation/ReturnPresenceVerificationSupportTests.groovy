@@ -873,4 +873,165 @@ class ReturnPresenceVerificationSupportTests {
         assertEquals(1, result.siblingReturnSuppressedCount)
         assertEquals(2, result.removedCount)
     }
+
+    // --- ORDER + LINE PAIRING (DAR-BE-085, DAR-BE-086) -------------------------------------------
+    // Fixtures are the gorjana records probed live 2026-10-19.
+
+    private static Map lineRow(String id, long createdAtMillis, String type, String orderId, String lineIds,
+                               Boolean orderReadable = null) {
+        Map data = [refundOrReturnId: id, refundOrReturnType: type, orderId: orderId,
+                    createdAt: isoInstant(createdAtMillis), orderCancelledAt: null, lineIds: lineIds]
+        if (orderReadable != null) data.orderReadable = orderReadable
+        return [diffType : "MISSING_IN_FILE_1", primaryId: id, presentIn: SHOPIFY_LABEL, missingIn: OMS_LABEL,
+                data     : JsonOutput.toJson(data),
+                message  : "Present in ${SHOPIFY_LABEL}, missing in ${OMS_LABEL}".toString()]
+    }
+
+    private static Map omsLine(String returnId, String lineId, boolean shopifyKeyed, long entryMillis, String seq = "01") {
+        return [returnId: returnId, returnItemSeqId: seq, lineId: lineId, returnStatusId: "RETURN_COMPLETED",
+                returnExternalId: shopifyKeyed ? "26947223683" : "WARRANTY-8f0fa38a-REFUND",
+                returnChannelEnumId: shopifyKeyed ? "AFTSHIP_RTN_CHANNEL" : "AFTSHP_OL_WTY",
+                entryDate: isoInstant(entryMillis), shopifyKeyed: shopifyKeyed]
+    }
+
+    private List<List<String>> lineLookupCalls = []
+
+    private Closure linesLookup(Map<String, List<Map>> linesByOrder, boolean ok = true) {
+        return { List<String> ids ->
+            lineLookupCalls.add(ids)
+            ok ? [ok: true, returnLinesByExternalId: ids.collectEntries { [(it): linesByOrder[it] ?: []] }, errors: []] :
+                    [ok: false, returnLinesByExternalId: [:], errors: ["OMS return-lines lookup failed [THROTTLED]"]]
+        }
+    }
+
+    private Map verifyWithLines(File file, Closure returnLinesLookup) {
+        return ReturnPresenceVerificationSupport.verifyReturnPresenceForRun([
+                diffFile         : file,
+                file1Label       : SHOPIFY_LABEL,
+                file2Label       : OMS_LABEL,
+                omsSideLabel     : OMS_LABEL,
+                shopifySideLabel : SHOPIFY_LABEL,
+                nowMillis        : NOW,
+                returnLinesLookup: returnLinesLookup,
+        ])
+    }
+
+    @Test
+    void aWarrantyRefundPairsWithTheUnkeyedOmsReturnOnItsLine() {
+        // M1019398: Shopify refund 1113004081283 on line 16502340714627; OMS warranty return M240616 on
+        // the same line, keyed WARRANTY-<uuid>, entered three weeks BEFORE the refund.
+        File diff = writeDiffDocument([lineRow("1113004081283", OLD, "REFUND", "7187329777795", "16502340714627")])
+
+        Map result = verifyWithLines(diff, linesLookup(["7187329777795": [
+                omsLine("M240616", "16502340714627", false, OLD - 19L * 86_400_000L)]]))
+
+        assertEquals(1, result.linePairedCount)
+        assertEquals(1, result.removedCount)
+        assertTrue((result.auditNote as String).contains("same order line"), result.auditNote as String)
+        assertEquals([], (List) parseDocument(diff).differences)
+    }
+
+    @Test
+    void aRefundDoesNotPairWithAShopifyKeyedOmsReturnOnTheSameLine() {
+        // That OMS return carries a numeric Shopify id, so the id join already accounted for it against
+        // ITS refund. This refund is a second one and must stay visible.
+        File diff = writeDiffDocument([lineRow("1113004081283", OLD, "REFUND", "7187329777795", "16502340714627")])
+
+        Map result = verifyWithLines(diff, linesLookup(["7187329777795": [
+                omsLine("M202525", "16502340714627", true, OLD)]]))
+
+        assertEquals(0, result.linePairedCount)
+        assertEquals(1, ((List) parseDocument(diff).differences).size())
+    }
+
+    @Test
+    void aRebuiltReturnOnAnOrderOmsBookedNothingForStaysReportedMissing() {
+        // THE FALSE NEGATIVE: 6872256348291 (created 2026-06-14) had a return on 2026-10-16 that Shopify
+        // would only show through its event; OMS M528328 has no return items. It must reach the report.
+        File diff = writeDiffDocument([lineRow("301523693011075", OLD, "RETURN", "6872256348291", "15542749593731", false)])
+
+        Map result = verifyWithLines(diff, linesLookup(["6872256348291": []]))
+
+        assertEquals(0, result.linePairedCount)
+        assertEquals(0, result.removedCount)
+        assertEquals(["301523693011075"], ((List<Map>) parseDocument(diff).differences)*.primaryId)
+        assertEquals([["6872256348291"]], lineLookupCalls)
+    }
+
+    @Test
+    void aRebuiltReturnPairsWithAnyRecentOmsReturnOnItsLineButNotAnAncientOne() {
+        File diff = writeDiffDocument([
+                lineRow("901", OLD, "RETURN", "6000000000001", "11", false),
+                lineRow("902", OLD, "RETURN", "6000000000002", "22", false),
+        ])
+
+        Map result = verifyWithLines(diff, linesLookup([
+                // Keyed or not does not matter here: the rebuilt row has no id to have matched it by.
+                "6000000000001": [omsLine("M1", "11", true, OLD + 40L * 60_000L)],
+                // Entered 90 days before the event: an earlier return cycle on the same line, not this one.
+                "6000000000002": [omsLine("M2", "22", false, OLD - 90L * 86_400_000L)],
+        ]))
+
+        assertEquals(1, result.linePairedCount)
+        assertEquals(["902"], ((List<Map>) parseDocument(diff).differences)*.primaryId)
+    }
+
+    @Test
+    void oneOmsReturnLineAccountsForOneShopifyEventOnly() {
+        File diff = writeDiffDocument([
+                lineRow("1001", OLD, "REFUND", "7187329777795", "16502340714627"),
+                lineRow("1002", OLD + 60_000L, "REFUND", "7187329777795", "16502340714627"),
+        ])
+
+        Map result = verifyWithLines(diff, linesLookup(["7187329777795": [
+                omsLine("M240616", "16502340714627", false, OLD)]]))
+
+        assertEquals(1, result.linePairedCount, "the older refund takes the only OMS line")
+        assertEquals(["1002"], ((List<Map>) parseDocument(diff).differences)*.primaryId)
+    }
+
+    @Test
+    void anEventIsPairedOnlyWhenEveryLineItTouchedIsCovered() {
+        File diff = writeDiffDocument([lineRow("1101", OLD, "REFUND", "7187329777795", "16502340681859,16502340714627")])
+
+        Map result = verifyWithLines(diff, linesLookup(["7187329777795": [
+                omsLine("M240616", "16502340714627", false, OLD)]]))
+
+        assertEquals(0, result.linePairedCount, "half a refund accounted for is not a match")
+    }
+
+    @Test
+    void aFailedLineLookupPairsNothingAndSaysSo() {
+        File diff = writeDiffDocument([lineRow("1113004081283", OLD, "REFUND", "7187329777795", "16502340714627")])
+
+        Map result = verifyWithLines(diff, linesLookup([:], false))
+
+        assertEquals(0, result.linePairedCount)
+        assertEquals(1, ((List) parseDocument(diff).differences).size())
+        assertTrue(((List) result.warnings).any { it.toString().contains("THROTTLED") }, "${result.warnings}")
+    }
+
+    @Test
+    void aReadableReturnRowIsNeverLinePairedAndNeverLookedUp() {
+        // An ordinary RETURN row has a real Shopify return id; line pairing is reserved for rows that
+        // cannot have one.
+        File diff = writeDiffDocument([lineRow("38121701507", OLD, "RETURN", "6872256348291", "15542749593731")])
+
+        Map result = verifyWithLines(diff, linesLookup(["6872256348291": [omsLine("M9", "15542749593731", false, OLD)]]))
+
+        assertEquals(0, result.linePairedCount)
+        assertEquals([], lineLookupCalls)
+    }
+
+    @Test
+    void aRowAnotherRuleAlreadyRemovedIsNotLookedUpForPairing() {
+        File diff = writeDiffDocument([lineRow("1201", RECENT, "REFUND", "7187329777795", "16502340714627")])
+
+        Map result = verifyWithLines(diff, linesLookup(["7187329777795": [omsLine("M240616", "16502340714627", false, OLD)]]))
+
+        assertEquals(1, result.pendingCount)
+        assertEquals(0, result.linePairedCount)
+        assertEquals([], lineLookupCalls, "a pending row needs no second reason, and no HTTP call")
+        assertEquals(result.removedCount, (result.pendingCount as int) + (result.linePairedCount as int))
+    }
 }

@@ -490,6 +490,29 @@ class RunVerificationSupport {
     }
 
     /**
+     * The OMS return-lines lookup behind order + line pairing (DAR-BE-085, DAR-BE-086), or null when this
+     * run cannot do it. Same OMS-side resolution and lookup fence as {@link #buildCancelledOrderLookup}.
+     */
+    static Closure buildReturnLinesLookup(def ec, Object omsSource, Map<String, Object> connector,
+                                          String runOwnerUserGroupId, Closure dispatcher,
+                                          Map<String, Object> runConfigDefaults = null) {
+        if (omsSource == null || connector == null || dispatcher == null) return null
+        String serviceName = normalize(connector.get("returnLinesLookupServiceName"))
+        if (serviceName == null) return null
+        if (!SourceSystemConnectorSupport.isAllowedLookupServiceShape(serviceName)) return null
+        String configId = resolveSourceConfigId(omsSource, connector, runConfigDefaults)
+        if (configId == null) return null
+        String configParameterName = normalize(connector.get("configParameterName")) ?: "sourceConfigId"
+        return { List<String> ids ->
+            Map out = (Map) dispatcher.call(serviceName, [(configParameterName): configId,
+                                                          externalIds       : ids,
+                                                          companyUserGroupId: runOwnerUserGroupId])
+            return [ok: out?.get("ok"), returnLinesByExternalId: out?.get("returnLinesByExternalId") ?: [:],
+                    errors: out?.get("errors") ?: []]
+        }
+    }
+
+    /**
      * Resolve the return-presence pass for a run, or null when this run is not a returns pair.
      *
      * <p>args: {@code ec}, {@code diffFile}, {@code sides} (each {@code [source, extractResult, label]}),
@@ -536,6 +559,8 @@ class RunVerificationSupport {
                 normalize((omsSide.get("extractResult") as Map)?.get("fileLocation")))
         Closure cancelledOrderLookup = buildCancelledOrderLookup(ec, omsSide.get("source"), omsConnector,
                 normalize(args.get("runOwnerUserGroupId")), (Closure) args.get("dispatcher"), runConfigDefaults)
+        Closure returnLinesLookup = buildReturnLinesLookup(ec, omsSide.get("source"), omsConnector,
+                normalize(args.get("runOwnerUserGroupId")), (Closure) args.get("dispatcher"), runConfigDefaults)
 
         String omsLabel = normalize(omsSide.get("label"))
         String shopifyLabel = normalize(shopifySide.get("label"))
@@ -552,6 +577,7 @@ class RunVerificationSupport {
                             windowStartMillis   : args.get("windowStartMillis"),
                             omsExtractFile      : omsExtractFile,
                             cancelledOrderLookup: cancelledOrderLookup,
+                            returnLinesLookup   : returnLinesLookup,
                     ])
                 }] as Map
     }
@@ -735,6 +761,7 @@ class RunVerificationSupport {
                 preWindowSuppressedCount      : result.get("preWindowSuppressedCount") ?: 0,
                 cancelledRefundSuppressedCount: result.get("cancelledRefundSuppressedCount") ?: 0,
                 siblingReturnSuppressedCount  : result.get("siblingReturnSuppressedCount") ?: 0,
+                linePairedCount               : result.get("linePairedCount") ?: 0,
                 removedCount                  : result.get("removedCount") ?: 0] as Map<String, Object>
     }
 

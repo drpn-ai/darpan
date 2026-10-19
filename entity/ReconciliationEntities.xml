@@ -1225,6 +1225,13 @@
                 this connector is a side. Distinct from pairLookupServiceName, which names the exchange pair
                 verify stage: same service today, but re-pointing one must not silently move the other.</description>
         </field>
+        <field name="returnLinesLookupServiceName" type="text-medium">
+            <description>Optional lookup#* service returning, per originating Shopify order id, the order lines
+                this source booked a return against (DAR-BE-085, DAR-BE-086). The returns verify stage pairs a
+                missing-in-OMS Shopify event by order and line when no shared id can exist: AfterShip warranty
+                returns, and returns rebuilt from their event on orders past Shopify's 60-day read limit. Same
+                lookup fence as lookupServiceName. Blank disables order + line pairing.</description>
+        </field>
         <field name="healthCheckServiceName" type="text-medium">
             <description>Optional connection-diagnostics probe (probe#* shape only, enforced by the
                 probe fence) that exercises this connector's stored credentials against the remote

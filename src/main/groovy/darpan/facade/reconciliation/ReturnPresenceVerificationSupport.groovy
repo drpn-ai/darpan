@@ -147,6 +147,12 @@ class ReturnPresenceVerificationSupport {
     static final String REFUND_LINE_EVER_FULFILLED_FIELD = "refundLineEverFulfilled"
     static final String EVENT_TYPE_REFUND = "REFUND"
     static final String EVENT_TYPE_RETURN = "RETURN"
+    /** Comma-joined Shopify order line ids on an event row (ShopifyReturnRefsSupport.LINE_IDS_FIELD). */
+    static final String LINE_IDS_FIELD = "lineIds"
+    /** FALSE on a RETURN row rebuilt from its event because Shopify would not return the order. */
+    static final String ORDER_READABLE_FIELD = "orderReadable"
+    /** How far before a rebuilt return event an OMS return may have been entered and still pair with it. */
+    static final long REBUILT_RETURN_PAIR_LOOKBACK_MILLIS = 30L * 86_400_000L
     /** Streaming scan target — extracts reach GB scale and only this one field is needed. */
     private static final Pattern ORDER_EXTERNAL_ID = Pattern.compile('"orderExternalId"\\s*:\\s*"([^"]+)"')
 
@@ -172,6 +178,10 @@ class ReturnPresenceVerificationSupport {
      *                        (one order Map or a List of them, each with a statusId). Absent disables
      *                        cancellation-refund suppression entirely
      *   maxOrderLookups   : optional cap on candidate orders, default DEFAULT_MAX_ORDER_LOOKUPS
+     *   returnLinesLookup : optional Closure<Map> — List<String> orderIds ->
+     *                        [ok: Boolean, returnLinesByExternalId: Map<String, List<Map>>, errors: List<String>],
+     *                        matching lookup#HotWaxOmsReturnLinesByOrderExternalId. Absent disables
+     *                        order + line pairing (see ORDER + LINE PAIRING below)
      *
      * returns [performed, rewritten, pendingCount, preWindowSuppressedCount, malformedCount,
      *          removedCount, removedMissingInFile1, removedMissingInFile2, cancelledRefundSuppressedCount,
@@ -192,6 +202,7 @@ class ReturnPresenceVerificationSupport {
                 ? ((Number) args.windowStartMillis).longValue()
                 : null
         Closure cancelledOrderLookup = (args?.cancelledOrderLookup instanceof Closure) ? (Closure) args.cancelledOrderLookup : null
+        Closure returnLinesLookup = (args?.returnLinesLookup instanceof Closure) ? (Closure) args.returnLinesLookup : null
         int maxOrderLookups = normalizeInt(args?.maxOrderLookups, DEFAULT_MAX_ORDER_LOOKUPS)
 
         String omsToken = DiffDetailClassifier.normalizeToken(omsSideLabel)
@@ -222,6 +233,8 @@ class ReturnPresenceVerificationSupport {
         // orderId -> row ids of the missing-in-OMS REFUND rows grading LEFT in place. Populated in
         // Pass 1, resolved in bulk in Pass 1.5 (CANCELLATION-REFUND SUPPRESSION, see class doc).
         Map<String, Set<String>> candidateRowIdsByOrderId = [:]
+        // Missing-in-OMS rows that can only ever pair by order + line, resolved in Pass 1.6.
+        List<Map<String, Object>> lineCandidates = []
         int pendingCount = 0
         int preWindowCount = 0
         int cancelledByFieldCount = 0
@@ -321,6 +334,28 @@ class ReturnPresenceVerificationSupport {
                     siblingSuppressed = true
                 }
             }
+            // ORDER + LINE PAIRING candidates (DAR-BE-085, DAR-BE-086). Two kinds of missing-in-OMS row
+            // can never pair by id, because no id both systems hold exists:
+            //   UNKEYED_REFUND  — any REFUND carrying its lines; it pairs only with an OMS return the id
+            //                     join could not have matched (no numeric Shopify id: AfterShip warranty
+            //                     returns, keyed WARRANTY-<uuid>). A Shopify-keyed OMS return on the same
+            //                     line belongs to a different refund and must not absorb this one.
+            //   REBUILT_RETURN  — a RETURN rebuilt from its event because Shopify would not return the
+            //                     order (older than 60 days). Keyed by the event id, so it pairs with any
+            //                     OMS return on its lines entered no earlier than the lookback before it.
+            // Collected here, resolved in bulk in Pass 1.6: the lookup is an HTTP call.
+            if (missingInOms && !remove && returnLinesLookup != null) {
+                String type = normalize(data.get("refundOrReturnType"))
+                List<String> lineIds = splitLineIds(data.get(LINE_IDS_FIELD))
+                String pairOrderId = normalize(data.get("orderId"))
+                String pairRowId = DiffDocumentStreamSupport.rowIdOf(row)
+                String kind = EVENT_TYPE_REFUND.equalsIgnoreCase(type) ? "UNKEYED_REFUND" :
+                        (EVENT_TYPE_RETURN.equalsIgnoreCase(type) && Boolean.FALSE == data.get(ORDER_READABLE_FIELD) ? "REBUILT_RETURN" : null)
+                if (kind && lineIds && pairOrderId && pairRowId) {
+                    lineCandidates.add([rowId: pairRowId, orderId: pairOrderId, lineIds: lineIds,
+                                        createdMillis: ownCreatedMillis, kind: kind] as Map<String, Object>)
+                }
+            }
             if (!remove) return
 
             String rowId = DiffDocumentStreamSupport.rowIdOf(row)
@@ -389,13 +424,28 @@ class ReturnPresenceVerificationSupport {
             }
         }
 
+        // Pass 1.6 — ORDER + LINE PAIRING. Same fail-closed posture and same removal set as Pass 1.5.
+        int linePairedCount = 0
+        if (returnLinesLookup != null && !lineCandidates.isEmpty()) {
+            Set<String> alreadyRemoved = removeIdsByToken.get(omsToken) ?: ([] as Set<String>)
+            List<Map<String, Object>> open = lineCandidates.findAll { !alreadyRemoved.contains(it.rowId) }
+            Set<String> pairedRowIds = pairByOrderLine(open, returnLinesLookup, maxOrderLookups, warnings)
+            if (pairedRowIds) {
+                Set<String> omsRemovals = removeIdsByToken.computeIfAbsent(omsToken) { new LinkedHashSet<String>() }
+                int before = omsRemovals.size()
+                omsRemovals.addAll(pairedRowIds)
+                linePairedCount = omsRemovals.size() - before
+            }
+        }
+
         int removedCount = (removeIdsByToken.values()*.size().sum() ?: 0) as int
-        String auditNote = buildAuditNote(pendingCount, preWindowCount, graceHours, cancelledRefundCount, siblingReturnCount, cancelledItemCount)
+        String auditNote = buildAuditNote(pendingCount, preWindowCount, graceHours, cancelledRefundCount, siblingReturnCount,
+                cancelledItemCount, linePairedCount)
         if (removedCount == 0) {
             return [performed: true, rewritten: false, pendingCount: 0, preWindowSuppressedCount: 0,
                     malformedCount: malformedCount, removedCount: 0, removedMissingInFile1: 0, removedMissingInFile2: 0,
                     cancelledRefundSuppressedCount: 0, siblingReturnSuppressedCount: 0, cancelledItemSuppressedCount: 0,
-                    warnings: warnings, auditNote: auditNote] as Map<String, Object>
+                    linePairedCount: 0, warnings: warnings, auditNote: auditNote] as Map<String, Object>
         }
 
         int removedMissingInOms = removeIdsByToken.get(omsToken)?.size() ?: 0
@@ -417,7 +467,77 @@ class ReturnPresenceVerificationSupport {
                 cancelledRefundSuppressedCount: cancelledRefundCount,
                 siblingReturnSuppressedCount: siblingReturnCount,
                 cancelledItemSuppressedCount: cancelledItemCount,
+                linePairedCount: linePairedCount,
                 warnings: warnings, auditNote: auditNote] as Map<String, Object>
+    }
+
+    /**
+     * ORDER + LINE PAIRING. Looks up the OMS return lines on every candidate's order, then pairs each
+     * candidate, oldest first, only when EVERY line it touched finds an eligible OMS return line not
+     * already used by an earlier candidate — one OMS return line accounts for one Shopify event. Partial
+     * coverage pairs nothing. A capped, failed, not-ok or throwing lookup pairs nothing for that chunk.
+     */
+    private static Set<String> pairByOrderLine(List<Map<String, Object>> candidates, Closure returnLinesLookup,
+                                               int maxOrderLookups, List<String> warnings) {
+        Set<String> paired = new LinkedHashSet<String>()
+        List<String> orderIds = candidates.collect { it.orderId as String }.unique()
+        if (orderIds.isEmpty()) return paired
+        if (orderIds.size() > maxOrderLookups) {
+            warnings.add("Order-line pairing skipped: ${orderIds.size()} candidate order(s) exceeds the ${maxOrderLookups}-lookup cap; no rows were paired.".toString())
+            return paired
+        }
+        Map<String, List<Map>> linesByOrderId = [:]
+        orderIds.collate(ORDER_LOOKUP_CHUNK_SIZE).each { List<String> chunk ->
+            Map chunkResult
+            try {
+                chunkResult = (Map) returnLinesLookup.call(chunk)
+            } catch (Throwable t) {
+                warnings.add("Order-line pairing lookup failed for ${chunk.size()} order(s): ${normalize(t.message) ?: t.class.simpleName}".toString())
+                return
+            }
+            if (chunkResult?.ok != true) {
+                warnings.add("Order-line pairing lookup did not complete for ${chunk.size()} order(s): ${(chunkResult?.errors ?: []).join('; ')}".toString())
+                return
+            }
+            ((Map) (chunkResult.returnLinesByExternalId ?: [:])).each { Object key, Object lines ->
+                String orderId = normalize(key)
+                if (orderId && chunk.contains(orderId) && lines instanceof List) linesByOrderId.put(orderId, (List<Map>) lines)
+            }
+        }
+
+        Set<String> usedReturnLines = new HashSet<String>()
+        candidates.sort { Map a, Map b -> ((Long) a.createdMillis) <=> ((Long) b.createdMillis) }.each { Map<String, Object> candidate ->
+            List<Map> available = (linesByOrderId.get(candidate.orderId as String) ?: []).findAll { Map line ->
+                eligibleForPairing(line, candidate) && !usedReturnLines.contains(returnLineKey(line))
+            }
+            List<String> claimed = []
+            boolean covered = ((List<String>) candidate.lineIds).every { String lineId ->
+                Map match = available.find { Map line -> normalize(line.lineId) == lineId && !claimed.contains(returnLineKey(line)) }
+                if (match == null) return false
+                claimed.add(returnLineKey(match))
+                return true
+            }
+            if (!covered) return
+            usedReturnLines.addAll(claimed)
+            paired.add(candidate.rowId as String)
+        }
+        return paired
+    }
+
+    private static boolean eligibleForPairing(Map line, Map<String, Object> candidate) {
+        if (candidate.kind == "UNKEYED_REFUND") return line.shopifyKeyed != true
+        Long entryMillis = parseMillisOrNull(line.entryDate)
+        return entryMillis != null && entryMillis >= ((Long) candidate.createdMillis) - REBUILT_RETURN_PAIR_LOOKBACK_MILLIS
+    }
+
+    private static String returnLineKey(Map line) {
+        return "${normalize(line.returnId)}|${normalize(line.returnItemSeqId)}".toString()
+    }
+
+    private static List<String> splitLineIds(Object raw) {
+        String text = normalize(raw)
+        if (!text) return []
+        return text.split(",").collect { normalize(it) }.findAll { it }.unique()
     }
 
     /**
@@ -512,7 +632,7 @@ class ReturnPresenceVerificationSupport {
 
     private static String buildAuditNote(int pendingCount, int preWindowCount, int graceHours,
                                          int cancelledRefundCount, int siblingReturnCount = 0,
-                                         int cancelledItemCount = 0) {
+                                         int cancelledItemCount = 0, int linePairedCount = 0) {
         String note = "${AUDIT_NOTE_PREFIX}${pendingCount} pending (younger than ${graceHours}h)."
         if (preWindowCount > 0) {
             note += " ${preWindowCount} pre-window Shopify event(s) excluded from the missing-in-OMS count (extractor lookback artifact, not a genuine gap)."
@@ -525,6 +645,9 @@ class ReturnPresenceVerificationSupport {
         }
         if (cancelledItemCount > 0) {
             note += " ${cancelledItemCount} cancelled-item refund(s) suppressed from the missing-in-OMS count — the refunded line was never shipped, so it cannot have been returned and OMS books a cancellation instead."
+        }
+        if (linePairedCount > 0) {
+            note += " ${linePairedCount} return(s) or refund(s) matched to an OMS return on the same order line — the two systems share no id for these (AfterShip warranty returns, or orders past Shopify's 60-day read limit)."
         }
         return note
     }

@@ -811,6 +811,44 @@ class SourceSystemConnectorSupportSmokeTests {
     }
 
     @Test
+    void theReturnLinesLookupIsDeclaredExactlyByTheOmsReturnsEndpoints() {
+        // DAR-BE-085/086: order + line pairing. Both transports of the OMS returns side declare it, and
+        // every declarer must be a side the return-presence pass actually treats as OMS.
+        List rows = ec.entity.find(SourceSystemConnectorSupport.ENTITY_NAME)
+                .condition("returnLinesLookupServiceName", org.moqui.entity.EntityCondition.IS_NOT_NULL, null)
+                .useCache(false).list()*.systemEnumId
+        assertEquals(["OMS_RETURNS", "OMS_RETURNS_GQL"], rows.sort())
+        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS_GQL")
+        assertEquals("reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsReturnLinesByOrderExternalId",
+                connector.returnLinesLookupServiceName)
+        assertTrue(SourceSystemConnectorSupport.isAllowedLookupServiceShape(connector.returnLinesLookupServiceName as String))
+    }
+
+    @Test
+    void theReturnLinesLookupServiceDeclaresEveryParameterTheReturnsStageDispatches() {
+        // Same reasoning as the order-state contract above: Moqui drops undeclared in-parameters silently,
+        // so a renamed one would make pairing fail closed and look exactly like "nothing to pair".
+        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, "OMS_RETURNS")
+        String serviceName = connector.returnLinesLookupServiceName as String
+        String noun = serviceName.substring(serviceName.indexOf("#") + 1)
+        String verb = serviceName.substring(serviceName.lastIndexOf(".") + 1, serviceName.indexOf("#"))
+        Path servicePath = ReconciliationSmokeTestSupport.resolveBackendRoot().resolve(
+                "runtime/component/darpan-hotwax/service/reconciliation/HotWaxOmsExtractionServices.xml")
+        def service = new XmlParser(false, false).parse(servicePath.toFile()).children().find {
+            it.name() == "service" && it.attributes().get("noun") == noun && it.attributes().get("verb") == verb
+        }
+        assertNotNull(service, "${serviceName} is seeded on OMS_RETURNS but defined nowhere")
+        List<String> declared = service.children().find { it.name() == "in-parameters" }?.children()
+                ?.collect { it.attributes().get("name") as String } ?: []
+        assertTrue(declared.containsAll([connector.configParameterName as String, "externalIds", "companyUserGroupId"]),
+                "the returns stage dispatches config id, externalIds and companyUserGroupId; service declares ${declared}")
+        List<String> outputs = service.children().find { it.name() == "out-parameters" }?.children()
+                ?.collect { it.attributes().get("name") as String } ?: []
+        assertTrue(outputs.containsAll(["ok", "returnLinesByExternalId", "errors"]),
+                "script services return DECLARED outputs only; declares ${outputs}")
+    }
+
+    @Test
     void shopifyReturnRefsConnectorDeclaresTheRefundOrReturnPointLookup() {
         // Without this the generic missing-diff verification pass never runs for the returns pair, so
         // every order the Shopify extract's search-index net misses becomes a permanent false

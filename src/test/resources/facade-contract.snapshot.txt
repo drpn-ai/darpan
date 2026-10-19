@@ -1687,6 +1687,8 @@ SERVICE save Lifecycle
     recordType : String [required]
     rules : List
     rules.rule : Map
+    stageReach : List
+    stageReach.reach : Map
     stageRecordTypes : List [required]
     stageRecordTypes.stageRecordType : String
   OUT:
@@ -1784,6 +1786,8 @@ SERVICE save LifecycleStages
   allow-remote: true
   IN:
     reconciliationId : String [required]
+    stageReach : List
+    stageReach.reach : Map
     stageRecordTypes : List [required]
     stageRecordTypes.stageRecordType : String
   OUT:

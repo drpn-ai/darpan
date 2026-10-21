@@ -91,7 +91,7 @@
         </relationship>
     </entity>
 
-    <entity entity-name="PasswordResetCode" package="darpan.auth" use="configuration">
+    <entity entity-name="PasswordResetCode" package="darpan.auth" use="transactional" cache="never">
         <description>DAR-BE-028 — one emailed password-reset code. Deliberately NOT a moqui.security.UserAuthcFactor:
             MoquiShiroRealm treats any live UserAuthcFactor as a required second factor, so a pending reset code
             stored there would refuse the account's correct password at sign-in until it expired.

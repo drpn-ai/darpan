@@ -676,11 +676,43 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="saveResult" from="darpan.facade.auth.PasswordResetSupport.saveRecoveryEmail(ec, emailAddress, currentPassword)"/>
-            <set field="ok" from="saveResult.ok"/>
-            <set field="messages" from="saveResult.messages"/>
-            <set field="errors" from="saveResult.errors"/>
-            <set field="emailAddressMasked" from="saveResult.emailAddressMasked"/>
+            <!-- Trimmed and lower-cased before validating, so a pasted "  Me@Example.COM " is accepted. -->
+            <set field="email" from="emailAddress?.trim()?.toLowerCase()"/>
+            <if condition="!org.apache.commons.validator.routines.EmailValidator.getInstance().isValid(email)">
+                <return error="true" message="Enter a valid email address."/></if>
+
+            <!-- A session token alone must not redirect future resets (change the address, then reset the password,
+                 is a takeover), so the current password is checked here. A wrong one counts toward the login lockout;
+                 the count runs in its own transaction, so it survives this service's rollback. -->
+            <set field="passwordCheck" from="darpan.facade.auth.AuthFacadeSupport.verifyOwnPassword(ec, currentPassword)"/>
+            <if condition="!passwordCheck.passwordVerified">
+                <script>darpan.facade.auth.AuthFacadeSupport.incrementFailedLogins(ec, ec.user.userId)</script>
+                <return error="true" message="Current password is incorrect."/>
+            </if>
+
+            <set field="emailAddressMasked" from="darpan.facade.auth.PasswordResetSupport.maskEmail(email)"/>
+            <entity-find entity-name="moqui.security.UserAccount" list="otherHolderList" limit="1">
+                <econdition field-name="emailAddress" from="email" ignore-case="true"/>
+                <econdition field-name="userId" operator="not-equals" from="ec.user.userId"/>
+            </entity-find>
+            <if condition="otherHolderList"><then>
+                <!-- Not saved, yet answered like a save: the signed-in user learns nothing about other accounts,
+                     and the inbox's owner is told instead. -->
+                <log level="warn" message="Recovery email not saved for userId ${ec.user.userId}: the address belongs to another account"/>
+                <script>darpan.facade.auth.PasswordResetSupport.sendEmail.call(ec, 'DARPAN_RECOVERY_EMAIL_CONFLICT', email, [username: ec.user.username])</script>
+            </then><else>
+                <set field="previousEmail" from="ec.user.userAccount?.emailAddress?.trim()"/>
+                <!-- Facade services carry inheritAuthz=Y, so this own-user write is authorized (as save#UserSettings). -->
+                <service-call name="update#moqui.security.UserAccount" in-map="[userId: ec.user.userId, emailAddress: email]"/>
+                <script>darpan.facade.auth.PasswordResetSupport.sendEmail.call(ec, 'DARPAN_RECOVERY_EMAIL_SET', email, [username: ec.user.username, isOldAddress: false])</script>
+                <if condition="previousEmail &amp;&amp; previousEmail.toLowerCase() != email">
+                    <script>darpan.facade.auth.PasswordResetSupport.sendEmail.call(ec, 'DARPAN_RECOVERY_EMAIL_SET', previousEmail, [username: ec.user.username, isOldAddress: true])</script>
+                </if>
+            </else></if>
+
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
 
@@ -693,7 +725,21 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="available" from="darpan.facade.auth.PasswordResetSupport.isEmailConfigured(ec)"/>
+            <!-- The from address needs no check: the templates default it to support@drpn.ai. An existing database
+                 only gets the template from upgrade data, so it is checked as well as SMTP. -->
+            <entity-find-one entity-name="moqui.basic.email.EmailServer" value-field="emailServer">
+                <field-map field-name="emailServerId" value="SYSTEM"/></entity-find-one>
+            <entity-find-one entity-name="moqui.basic.email.EmailTemplate" value-field="resetCodeTemplate">
+                <field-map field-name="emailTemplateId" value="DARPAN_PASSWORD_RESET_CODE"/></entity-find-one>
+            <set field="available" from="(emailServer?.smtpHost as boolean) &amp;&amp; resetCodeTemplate != null"/>
+
+            <!-- Darpan has no startup hook, so the first check that finds mail unconfigured logs the WARN that tells a
+                 deploy "codes will never arrive"; the cache entry keeps it to one per node, not one per login-page view. -->
+            <set field="configWarnedCache" from="ec.cache.getCache('darpan.passwordReset.configWarned')"/>
+            <if condition="!available &amp;&amp; !configWarnedCache.get('warned')">
+                <log level="warn" message="Password reset email is not configured: EmailServer SYSTEM smtpHost ${emailServer?.smtpHost ? 'set' : 'missing'}, EmailTemplate DARPAN_PASSWORD_RESET_CODE ${resetCodeTemplate != null ? 'loaded' : 'missing'} (PasswordResetEmailSeedData.xml)"/>
+                <script>configWarnedCache.put('warned', true)</script>
+            </if>
         </actions>
     </service>
 

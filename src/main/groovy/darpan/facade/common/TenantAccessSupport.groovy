@@ -6,6 +6,8 @@ import java.time.ZoneId
 import java.time.DateTimeException
 import java.util.TimeZone
 
+import darpan.facade.auth.PasswordResetSupport
+
 import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.sanitizeFileToken
 
@@ -368,7 +370,12 @@ class TenantAccessSupport {
             lastLoginDate : resolveLastLoginDate(ec),
             lastRun       : resolveLastRun(ec),
         ]
-        if (sessionInfo.userId) sessionInfo.putAll(darpan.facade.auth.PasswordResetSupport.recoveryEmailFlags(ec))
+        if (sessionInfo.userId) {
+            // DAR-BE-028: whether password reset can reach this account. Masked: the UI never needs the whole address.
+            String recoveryEmail = normalize(ec?.user?.userAccount?.emailAddress)
+            sessionInfo.recoveryEmailMissing = !recoveryEmail
+            sessionInfo.emailAddressMasked = PasswordResetSupport.maskEmail(recoveryEmail)
+        }
         applyScopeToSessionInfo(ec, sessionInfo)
         return sessionInfo
     }

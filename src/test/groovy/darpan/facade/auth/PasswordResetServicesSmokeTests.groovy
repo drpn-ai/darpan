@@ -106,7 +106,7 @@ class PasswordResetServicesSmokeTests {
 
     @Test
     void notConfiguredWithoutSystemServer() {
-        assertFalse(PasswordResetSupport.isEmailConfigured(ec))
+        assertEquals(false, anon("get#PasswordResetStatus", [:]).out.available)
     }
 
     // ---- Task 2: request + verify ----

@@ -2,7 +2,6 @@ package darpan.facade.auth
 
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantScopedFinder
-import org.apache.commons.validator.routines.EmailValidator
 import org.moqui.entity.EntityCondition
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -11,7 +10,6 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.sql.Timestamp
-import java.util.concurrent.atomic.AtomicBoolean
 
 import static darpan.common.ValueSupport.normalize
 
@@ -26,8 +24,6 @@ class PasswordResetSupport {
     static final String TEMPLATE_RECOVERY_SET = "DARPAN_RECOVERY_EMAIL_SET"
     static final String TEMPLATE_RECOVERY_CONFLICT = "DARPAN_RECOVERY_EMAIL_CONFLICT"
 
-    static final String EMAIL_SERVER_ID = "SYSTEM"
-
     static final String PURPOSE_PASSWORD_RESET = "DrpnRcPasswordReset"
     static final int CODE_LIFETIME_MINUTES = 15
     static final int MAX_FAILED_ATTEMPTS = 5
@@ -40,7 +36,6 @@ class PasswordResetSupport {
     private static final String RESET_CODE_ENTITY = "darpan.auth.PasswordResetCode"
     private static final long HOUR_MILLIS = 3_600_000L
     private static final SecureRandom random = new SecureRandom()
-    private static final AtomicBoolean notConfiguredWarned = new AtomicBoolean(false)
 
     /** Every mail this feature sends goes through here, so tests can record sends instead of making them.
      *  Async, like the framework's own reset#Password: SMTP time never shows in the reply, and an SMTP
@@ -49,27 +44,6 @@ class PasswordResetSupport {
         ec.service.async().name("org.moqui.impl.EmailServices.send#EmailTemplate")
                 .parameters([emailTemplateId: emailTemplateId, toAddresses: toAddress, bodyParameters: bodyParameters])
                 .call()
-    }
-
-    /** True when a reset email could actually go out: a SYSTEM EmailServer with an SMTP host, and the reset
-     *  template loaded (an existing database only gets it from upgrade data). Darpan has no
-     *  startup hook, so the first caller that finds it unconfigured logs the one WARN
-     *  that tells a deploy "codes will never arrive". */
-    static boolean isEmailConfigured(def ec) {
-        List<String> missing = []
-        def server = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.basic.email.EmailServer",
-                "framework email configuration, not tenant data")
-                .condition("emailServerId", EMAIL_SERVER_ID).useCache(false).one()
-        // The from address needs no check: the templates default it to support@drpn.ai.
-        if (!server?.smtpHost) missing << "no EmailServer ${EMAIL_SERVER_ID} with an smtpHost".toString()
-        def template = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.basic.email.EmailTemplate",
-                "framework email configuration, not tenant data")
-                .condition("emailTemplateId", TEMPLATE_RESET_CODE).useCache(false).one()
-        if (template == null) missing << "EmailTemplate ${TEMPLATE_RESET_CODE} is not loaded (PasswordResetEmailSeedData.xml)".toString()
-        if (missing && notConfiguredWarned.compareAndSet(false, true)) {
-            logger.warn("Password reset email is not configured: {}", missing.join("; "))
-        }
-        return missing.isEmpty()
     }
 
     /** First letter of the local part and the whole domain: enough for a user to recognise their own
@@ -201,65 +175,6 @@ class PasswordResetSupport {
         // Also clears an expired lockout's leftovers, as the realm does on a correct login.
         ec.service.sync().name("update#moqui.security.UserAccount").parameters([userId: userId, hasLoggedOut: "Y",
                 disabledDateTime: null, successiveFailedLogins: 0]).call()
-    }
-
-    /** Save the signed-in user's recovery email (UserAccount.emailAddress), trimmed and lower-cased, with no
-     *  confirmation code (Aditi, 2026-10-21). The new address, and the old one if it changes, get a notice in
-     *  place of a code. An address another account already holds is NOT saved, yet the reply is the same as a
-     *  save, so a signed-in user cannot test whether an address has a Darpan account; that inbox is told.
-     *  Requires the current password, checked here on the server (security review, 2026-10-21). */
-    static Map<String, Object> saveRecoveryEmail(def ec, Object emailAddress, Object currentPassword) {
-        String userId = normalize(ec.user.userId)
-        String email = normalize(emailAddress)?.toLowerCase()
-        Map<String, Object> result = [emailAddressMasked: null]
-        if (!userId) {
-            ec.message.addError("Authentication required to save a recovery email.")
-        } else if (!email || !EmailValidator.getInstance().isValid(email)) {
-            ec.message.addError("Enter a valid email address.")
-        } else if (!currentPasswordMatches(ec, currentPassword)) {
-            // A session token alone must not redirect future resets: change the address, then reset the
-            // password, is a takeover. A wrong password counts toward the login lockout like any other guess.
-            AuthFacadeSupport.incrementFailedLogins(ec, userId)
-            ec.message.clearAll()
-            ec.message.addError("Current password is incorrect.")
-        } else {
-            def own = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
-                    "self-scoped auth: the signed-in user's own account").condition("userId", userId).useCache(false).one()
-            def holders = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
-                    "self-scoped auth: is this address already another account's (uniqueness, no reply detail)")
-                    .condition(ec.entity.conditionFactory.makeCondition("emailAddress",
-                            EntityCondition.ComparisonOperator.EQUALS, email).ignoreCase())
-                    .condition("userId", EntityCondition.ComparisonOperator.NOT_EQUAL, userId).useCache(false).list()
-            if (holders) {
-                logger.warn("Recovery email not saved for {}: the address belongs to another account", logSubject(own))
-                sendEmail(ec, TEMPLATE_RECOVERY_CONFLICT, email, [username: own.username])
-            } else {
-                String previous = normalize(own.emailAddress)
-                // Facade services carry inheritAuthz=Y, so this own-user write is authorized (as saveUserSettings).
-                ec.service.sync().name("update#moqui.security.UserAccount").parameters([userId: userId, emailAddress: email]).call()
-                sendEmail(ec, TEMPLATE_RECOVERY_SET, email, [username: own.username, isOldAddress: false])
-                if (previous && previous.toLowerCase() != email) {
-                    sendEmail(ec, TEMPLATE_RECOVERY_SET, previous, [username: own.username, isOldAddress: true])
-                }
-            }
-            result.emailAddressMasked = maskEmail(email)
-        }
-        result.putAll(FacadeSupport.envelope(ec))
-        return result
-    }
-
-    private static boolean currentPasswordMatches(def ec, Object currentPassword) {
-        if (!currentPassword?.toString()) return false
-        Map<String, Object> check = AuthFacadeSupport.verifyOwnPassword(ec, currentPassword)
-        boolean verified = check.passwordVerified == true && !ec.message.hasError()
-        ec.message.clearAll()
-        return verified
-    }
-
-    /** The two session flags darpan-ui needs; masked, because the UI never needs the whole address. */
-    static Map<String, Object> recoveryEmailFlags(def ec) {
-        String email = normalize(ec?.user?.userAccount?.emailAddress)
-        return [recoveryEmailMissing: !email, emailAddressMasked: maskEmail(email)]
     }
 
     /** True for a permanent disable, or the framework's temporary lockout until disable-minutes have passed.

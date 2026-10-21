@@ -704,9 +704,9 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             entityName="darpan.rule.RuleSetConclusionCondition"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
 
-    <!-- 7. DAR-BE-088 / DAR-BE-089 (after 2.0.0): the month-close vocabulary and the tenant filter on the
-         three catalog entities and the four findings-ledger entities. NEEDS the darpan build carrying
-         entity/MonthCloseEntities.xml: the filter rows name entities that build creates. Enum types come before their members (document order is load order).
+    <!-- 7. DAR-BE-088 / DAR-BE-089 / DAR-BE-090 (after 2.0.0): the month-close vocabulary and the tenant filter on
+         the three catalog entities, the four findings-ledger entities and the two check-health entities. NEEDS
+         the darpan build carrying entity/MonthCloseEntities.xml: the filter rows name entities that build creates. Enum types come before their members (document order is load order).
          Sources: data/MonthCloseSeedData.xml, data/SecuritySeedData.xml. Gorjana's catalog itself is
          tenant config (data/GorjanaMonthCloseCatalogData.xml) and is deliberately NOT here: it loads per
          tenant, after this pack. -->
@@ -797,6 +797,15 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_FINDING_EVENT"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.monthclose.MonthCloseFindingEvent"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <!-- DAR-BE-090 — check health (one run per check per morning, and its source reads). -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_CHECK_RUN"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.monthclose.MonthCloseCheckRun"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_SOURCE_READ"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.monthclose.MonthCloseSourceRead"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
 
 </entity-facade-xml>

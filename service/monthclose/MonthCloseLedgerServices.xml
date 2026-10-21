@@ -33,7 +33,7 @@
             <parameter name="findings" type="List">
                 <description>One Map per (statement, record): statementCode, recordKey, headline (all required);
                     ruleText, expectedAmount, actualAmount, currencyUomId, expectedSource, actualSource,
-                    conclusionEnumId; records [{systemEnumId, recordType, recordId, internalId, recordStatus}];
+                    conclusionEnumId, diagnosisText; records [{systemEnumId, recordType, recordId, internalId, recordStatus}];
                     checks [{label, passed (Boolean), value}].</description></parameter>
         </in-parameters>
         <out-parameters>
@@ -126,6 +126,7 @@
                 <set field="finding.expectedSource" from="f.expectedSource"/>
                 <set field="finding.actualSource" from="f.actualSource"/>
                 <set field="finding.conclusionEnumId" from="f.conclusionEnumId"/>
+                <set field="finding.diagnosisText" from="f.diagnosisText"/>
                 <set field="finding.lastCheckedStamp" from="checkStamp"/>
                 <entity-create value-field="finding" or-update="true"/>
 
@@ -219,6 +220,109 @@
                     <script>closedFindingIds.add(finding.findingId)</script>
                     <set field="closedCount" from="closedCount + 1"/>
                 </if>
+            </iterate>
+        </actions>
+    </service>
+
+    <service verb="record" noun="CheckRun" authenticate="false" allow-remote="false">
+        <description>DAR-BE-090. Records how one check ran on one morning: one source read per extract, and the check's
+            status derived from them. Every read complete: ran. Any read partial or failed: partial, with each bad read
+            named in the reason. notRunReason given, or no reads at all: notRun. The returned checkStatusEnumId is
+            what close#ResolvedFindings must be given, so a partial read can never close a finding. A second call the
+            same morning replaces the first run's status and reads.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="checkId" required="true"/>
+            <parameter name="reportDate" type="Date" required="true"/>
+            <parameter name="checkedDay" type="Date">
+                <description>The day the check's window covered; the day before reportDate when blank.</description></parameter>
+            <parameter name="runStamp" type="Timestamp" default="ec.user.nowTimestamp"/>
+            <parameter name="notRunReason">
+                <description>Set when the check did not run (no saved run configured, the run errored before
+                    reading). The check is notRun and any reads are kept for the record.</description></parameter>
+            <parameter name="sourceReads" type="List">
+                <description>One Map per extract: systemEnumId (an endpoint or a root system), statusEnumId
+                    (MCSR_COMPLETE / MCSR_PARTIAL / MCSR_FAILED), recordCount, readStamp, reason.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="checkRunId"/>
+            <parameter name="checkStatusEnumId"/>
+            <parameter name="reason"/>
+        </out-parameters>
+        <actions>
+            <service-call name="monthclose.MonthCloseLedgerServices.get#TenantCheck" in-map="[companyUserGroupId:companyUserGroupId, checkId:checkId]"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <set field="sourceReads" from="sourceReads ?: []"/>
+            <set field="checkedDay" from="checkedDay ?: java.sql.Date.valueOf(reportDate.toLocalDate().minusDays(1))"/>
+
+            <!-- Validate first: a bad read writes nothing. -->
+            <set field="badReads" from="[]"/>
+            <iterate list="sourceReads" entry="sr">
+                <entity-find-one entity-name="moqui.basic.Enumeration" value-field="systemEnum" cache="true">
+                    <field-map field-name="enumId" from="sr.systemEnumId"/></entity-find-one>
+                <if condition="systemEnum?.enumTypeId != 'DarpanSystemSource'">
+                    <return error="true" message="Unknown system ${sr.systemEnumId} on a source read of check ${checkId}"/></if>
+                <if condition="!(sr.statusEnumId in ['MCSR_COMPLETE', 'MCSR_PARTIAL', 'MCSR_FAILED'])">
+                    <return error="true" message="Source read status ${sr.statusEnumId} is not a MonthCloseSourceRead status"/></if>
+                <if condition="sr.statusEnumId != 'MCSR_COMPLETE'">
+                    <set field="rootSystemId" from="systemEnum.parentEnumId ?: systemEnum.enumId"/>
+                    <script>badReads.add("The ${darpan.monthclose.MonthCloseReportAssembler.systemKey(rootSystemId)} read ${sr.statusEnumId == 'MCSR_FAILED' ? 'failed' : 'was partial'}: ${sr.reason ?: 'no reason was given'}.".toString())</script>
+                </if>
+            </iterate>
+
+            <if condition="notRunReason">
+                <set field="checkStatusEnumId" value="MCCS_NOT_RUN"/>
+                <set field="reason" from="notRunReason"/>
+                <else-if condition="!sourceReads">
+                    <set field="checkStatusEnumId" value="MCCS_NOT_RUN"/>
+                    <set field="reason" value="The check recorded no source read."/>
+                </else-if>
+                <else-if condition="badReads">
+                    <set field="checkStatusEnumId" value="MCCS_PARTIAL"/>
+                    <set field="reason" from="badReads.join(' ')"/>
+                </else-if>
+                <else>
+                    <set field="checkStatusEnumId" value="MCCS_RAN"/>
+                    <set field="reason" from="null"/>
+                </else>
+            </if>
+
+            <entity-find entity-name="darpan.monthclose.MonthCloseCheckRun" list="existingRuns" for-update="true">
+                <econdition field-name="companyUserGroupId"/>
+                <econdition field-name="checkId"/>
+                <econdition field-name="reportDate"/>
+            </entity-find>
+            <if condition="existingRuns">
+                <set field="checkRun" from="existingRuns[0]"/>
+                <entity-delete-by-condition entity-name="darpan.monthclose.MonthCloseSourceRead">
+                    <econdition field-name="checkRunId" from="checkRun.checkRunId"/>
+                    <econdition field-name="companyUserGroupId"/></entity-delete-by-condition>
+                <else>
+                    <entity-make-value value-field="checkRun" entity-name="darpan.monthclose.MonthCloseCheckRun"/>
+                    <entity-sequenced-id-primary value-field="checkRun"/>
+                    <set field="checkRun.companyUserGroupId" from="companyUserGroupId"/>
+                    <set field="checkRun.checkId" from="checkId"/>
+                    <set field="checkRun.reportDate" from="reportDate"/>
+                </else>
+            </if>
+            <set field="checkRun.checkedDay" from="checkedDay"/>
+            <set field="checkRun.statusEnumId" from="checkStatusEnumId"/>
+            <set field="checkRun.reason" from="reason"/>
+            <set field="checkRun.runStamp" from="runStamp"/>
+            <entity-create value-field="checkRun" or-update="true"/>
+            <set field="checkRunId" from="checkRun.checkRunId"/>
+
+            <set field="readSeq" from="0"/>
+            <iterate list="sourceReads" entry="sr">
+                <set field="readSeq" from="readSeq + 1"/>
+                <entity-find-one entity-name="moqui.basic.Enumeration" value-field="systemEnum" cache="true">
+                    <field-map field-name="enumId" from="sr.systemEnumId"/></entity-find-one>
+                <entity-make-value value-field="sourceRead" entity-name="darpan.monthclose.MonthCloseSourceRead"
+                        map="[checkRunId:checkRunId, readSeqId:String.format('%02d', readSeq), companyUserGroupId:companyUserGroupId,
+                              systemEnumId:(systemEnum.parentEnumId ?: systemEnum.enumId), endpointEnumId:systemEnum.enumId,
+                              statusEnumId:sr.statusEnumId, recordCount:(sr.recordCount != null ? sr.recordCount as Long : null),
+                              readStamp:sr.readStamp, reason:sr.reason]"/>
+                <entity-create value-field="sourceRead"/>
             </iterate>
         </actions>
     </service>

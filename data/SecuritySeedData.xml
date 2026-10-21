@@ -321,6 +321,15 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.monthclose.MonthCloseFindingEvent"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <!-- DAR-BE-090 — check health (one run per check per morning, and its source reads). -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_CHECK_RUN"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.monthclose.MonthCloseCheckRun"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_SOURCE_READ"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.monthclose.MonthCloseSourceRead"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_ADMIN"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"/>
     <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_USER"

@@ -59,8 +59,14 @@ class TenantOwnedEntityFilterContractTests {
             "darpan.monthclose.MonthCloseFindingEvent"                     : "DARPAN_SCOPE_MC_FINDING_EVENT",
     ].asImmutable()
 
+    /** DAR-BE-090: check health. */
+    static final Map<String, String> DAR_BE_090_FILTERS = [
+            "darpan.monthclose.MonthCloseCheckRun"                         : "DARPAN_SCOPE_MC_CHECK_RUN",
+            "darpan.monthclose.MonthCloseSourceRead"                       : "DARPAN_SCOPE_MC_SOURCE_READ",
+    ].asImmutable()
+
     /** Every filter row this class pins by id, with its entity. */
-    static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS).asImmutable()
+    static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS).asImmutable()
 
     /** Entities deliberately NOT in the filter set, each with the reason. */
     static final Map<String, String> EXCLUDED = [

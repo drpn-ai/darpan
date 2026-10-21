@@ -185,6 +185,10 @@
         <field name="conclusionEnumId" type="id">
             <description>DarpanConclusion reached for the record; blank when no conclusion rule matched.</description>
         </field>
+        <field name="diagnosisText" type="text-intermediate">
+            <description>DAR-BE-090. One sentence on what the conclusion means for this record; the finding JSON's
+                diagnosis.explanation. Blank falls back to the conclusion's description.</description>
+        </field>
         <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="MCF_COMPANY_GRP">
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>
@@ -303,5 +307,89 @@
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>
         <index name="MCFE_TENANT"><index-field name="companyUserGroupId"/></index>
+    </entity>
+
+    <!-- DAR-BE-090. Check health: one row per check per morning, and one row per source read under it, so the
+         report can say whether this morning's checks can be trusted. The check's status is derived from its reads
+         when the run is recorded (record#CheckRun) and is what close#ResolvedFindings is given. "compared" counts
+         and the statements a bad read affects are not stored: they come from the reads' recordCount and the
+         statement-to-check join. -->
+    <entity entity-name="MonthCloseCheckRun" package="darpan.monthclose" use="transactional">
+        <description>One check on one morning. A second run the same morning replaces the first (unique on tenant,
+            check and reportDate), so the report always shows the latest run.</description>
+        <field name="checkRunId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="checkId" type="id" not-null="true"/>
+        <field name="reportDate" type="date" not-null="true">
+            <description>The morning the check ran, as a tenant calendar day.</description>
+        </field>
+        <field name="checkedDay" type="date" not-null="true">
+            <description>The tenant calendar day the check's window covered, normally the day before reportDate.</description>
+        </field>
+        <field name="statusEnumId" type="id" not-null="true">
+            <description>MonthCloseCheckStatus derived from the reads: MCCS_RAN when every read was complete,
+                MCCS_PARTIAL when any was partial or failed, MCCS_NOT_RUN when the check did not run.</description>
+        </field>
+        <field name="reason" type="text-intermediate">
+            <description>Why the check was partial or did not run, in plain words; blank when it ran.</description>
+        </field>
+        <field name="runStamp" type="date-time" not-null="true">
+            <description>When the run was recorded.</description>
+        </field>
+        <relationship type="one" related="darpan.monthclose.MonthCloseCheck" fk-name="MCCR_CHECK">
+            <key-map field-name="checkId"/>
+        </relationship>
+        <relationship type="one" title="Status" related="moqui.basic.Enumeration" fk-name="MCCR_STATUS">
+            <key-map field-name="statusEnumId" related="enumId"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="MCCR_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <relationship type="many" related="darpan.monthclose.MonthCloseSourceRead" short-alias="sourceReads">
+            <key-map field-name="checkRunId"/>
+        </relationship>
+        <index name="MCCR_TENANT_DAY" unique="true">
+            <index-field name="companyUserGroupId"/>
+            <index-field name="checkId"/>
+            <index-field name="reportDate"/>
+        </index>
+    </entity>
+
+    <entity entity-name="MonthCloseSourceRead" package="darpan.monthclose" use="transactional">
+        <description>One extract a check run made from one system, and how it ended.</description>
+        <field name="checkRunId" type="id" is-pk="true"/>
+        <field name="readSeqId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="systemEnumId" type="id" not-null="true">
+            <description>The ROOT system (OMS, NETSUITE, SHOPIFY), resolved through parentEnumId when written.</description>
+        </field>
+        <field name="endpointEnumId" type="id">
+            <description>The endpoint that read it, e.g. OMS_RETURNS_GQL, as given by the run.</description>
+        </field>
+        <field name="statusEnumId" type="id" not-null="true">
+            <description>MonthCloseSourceRead: MCSR_COMPLETE, MCSR_PARTIAL or MCSR_FAILED.</description>
+        </field>
+        <field name="recordCount" type="number-integer">
+            <description>Records read; blank when the read failed before counting.</description>
+        </field>
+        <field name="readStamp" type="date-time">
+            <description>When the read finished; blank when it failed.</description>
+        </field>
+        <field name="reason" type="text-intermediate">
+            <description>Why the read was partial or failed, in plain words; blank when complete.</description>
+        </field>
+        <relationship type="one" related="darpan.monthclose.MonthCloseCheckRun" fk-name="MCSRD_CHECK_RUN">
+            <key-map field-name="checkRunId"/>
+        </relationship>
+        <relationship type="one" title="System" related="moqui.basic.Enumeration" fk-name="MCSRD_SYSTEM">
+            <key-map field-name="systemEnumId" related="enumId"/>
+        </relationship>
+        <relationship type="one" title="Status" related="moqui.basic.Enumeration" fk-name="MCSRD_STATUS">
+            <key-map field-name="statusEnumId" related="enumId"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="MCSRD_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <index name="MCSRD_TENANT"><index-field name="companyUserGroupId"/></index>
     </entity>
 </entities>

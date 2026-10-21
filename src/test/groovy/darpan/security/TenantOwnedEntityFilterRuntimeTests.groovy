@@ -88,6 +88,8 @@ class TenantOwnedEntityFilterRuntimeTests {
             "darpan.monthclose.MonthCloseFindingRecord"                    : "findingId",
             "darpan.monthclose.MonthCloseFindingCheck"                     : "findingId",
             "darpan.monthclose.MonthCloseFindingEvent"                     : "findingId",
+            "darpan.monthclose.MonthCloseCheckRun"                         : "checkRunId",
+            "darpan.monthclose.MonthCloseSourceRead"                       : "checkRunId",
     ].asImmutable()
 
     /** Entities whose companyUserGroupId is not-null: they get no unstamped fixture row. */
@@ -102,6 +104,8 @@ class TenantOwnedEntityFilterRuntimeTests {
             "darpan.monthclose.MonthCloseFindingRecord",
             "darpan.monthclose.MonthCloseFindingCheck",
             "darpan.monthclose.MonthCloseFindingEvent",
+            "darpan.monthclose.MonthCloseCheckRun",
+            "darpan.monthclose.MonthCloseSourceRead",
     ].toSet().asImmutable()
 
     private ExecutionContext ec
@@ -680,6 +684,8 @@ class TenantOwnedEntityFilterRuntimeTests {
             case "darpan.monthclose.MonthCloseFindingRecord": return "MCFR"
             case "darpan.monthclose.MonthCloseFindingCheck": return "MCFC"
             case "darpan.monthclose.MonthCloseFindingEvent": return "MCFE"
+            case "darpan.monthclose.MonthCloseCheckRun": return "MCCR"
+            case "darpan.monthclose.MonthCloseSourceRead": return "MCSRD"
         }
         throw new IllegalArgumentException(entityName)
     }
@@ -716,6 +722,11 @@ class TenantOwnedEntityFilterRuntimeTests {
             case "darpan.monthclose.MonthCloseFindingCheck": return [findingId: id, sequenceNum: 1L, label: "x", passed: "N"]
             case "darpan.monthclose.MonthCloseFindingEvent": return [findingId: id, eventSeqId: "01", eventStamp: FROM_DATE,
                     eventDate: java.sql.Date.valueOf("2026-10-07"), eventTypeEnumId: "MCFE_FOUND", byTypeEnumId: "MCAT_CHECK"]
+            case "darpan.monthclose.MonthCloseCheckRun": return [checkRunId: id, checkId: "TOEF_MCCK_${s}".toString(),
+                    reportDate: java.sql.Date.valueOf("2026-10-08"), checkedDay: java.sql.Date.valueOf("2026-10-07"),
+                    statusEnumId: "MCCS_RAN", runStamp: FROM_DATE]
+            case "darpan.monthclose.MonthCloseSourceRead": return [checkRunId: id, readSeqId: "01", systemEnumId: "OMS",
+                    statusEnumId: "MCSR_COMPLETE", recordCount: 1L]
         }
         throw new IllegalArgumentException(entityName)
     }

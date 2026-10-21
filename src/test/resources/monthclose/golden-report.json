@@ -1,0 +1,119 @@
+{
+  "schema": "darpan.monthClose.report/v1",
+  "about": "Daily month-close checks for Gorjana. Each finding is one record that breaks one of Gorjana Accounting's statements R1 to R17.",
+  "report": {
+    "tenant": { "id": "GORJANA", "name": "Gorjana", "timeZone": "America/Los_Angeles" },
+    "date": "2026-10-08",
+    "checkedDay": "2026-10-07",
+    "month": "2026-10",
+    "generatedAt": "2026-10-08T06:12:40-07:00"
+  },
+  "health": {
+    "complete": true,
+    "summary": "Every configured check ran over complete reads. R5, R10 and R17 have no check yet.",
+    "sources": {
+      "NetSuite": { "read": "complete", "records": 4120, "readAt": "2026-10-08T06:04:11-07:00", "reason": null, "affects": [] },
+      "OMS": { "read": "complete", "records": 3871, "readAt": "2026-10-08T06:02:55-07:00", "reason": null, "affects": [] }
+    },
+    "checks": { "ran": 3, "partial": 0, "notRun": 0 },
+    "notCovered": ["R5", "R10", "R17"]
+  },
+  "summary": {
+    "open": 11, "pending": 3, "newToday": 4, "fixedToday": 2,
+    "oldestOpen": { "id": "F-20544", "statement": "R11", "firstFound": "2026-10-02", "ageDays": 6 },
+    "byCategory": {
+      "orders": { "open": 5, "pending": 2, "newToday": 2, "fixedToday": 1 },
+      "refundsAndCredits": { "open": 4, "pending": 1, "newToday": 1, "fixedToday": 1 },
+      "returns": { "open": 2, "pending": 0, "newToday": 1, "fixedToday": 0 },
+      "exchangesAndWarranty": { "open": 0, "pending": 0, "newToday": 0, "fixedToday": 0 }
+    }
+  },
+  "categories": {
+    "orders": {
+      "label": "Orders",
+      "counts": { "open": 5, "pending": 2, "newToday": 2, "fixedToday": 1 },
+      "statements": {
+        "R2": {
+          "id": "R2",
+          "text": "Every invoice and credit memo carries the Shopify order id (the Etail id).",
+          "weight": "firm",
+          "status": "ran",
+          "reason": null,
+          "checks": [
+            { "id": "invoices-without-etail-id", "label": "NetSuite invoices and memos with no Etail id", "status": "ran", "reason": null, "matchedBy": null, "graceDays": 1, "compared": { "NetSuite": 2210 } }
+          ],
+          "counts": { "open": 0, "pending": 1, "newToday": 1, "fixedToday": 0 },
+          "findings": [
+            {
+              "id": "F-20790",
+              "headline": "Invoice INV-552310 has no Etail id",
+              "state": "pending",
+              "firstFound": "2026-10-08",
+              "ageDays": 0,
+              "records": {
+                "NetSuite": { "invoice": [ { "id": "INV-552310", "internalId": "51000940", "status": "Paid In Full" } ] }
+              },
+              "difference": null,
+              "next": "darpan findings show F-20790"
+            }
+          ],
+          "findingsOmitted": 0
+        }
+      }
+    },
+    "refundsAndCredits": {
+      "label": "Refunds and credits",
+      "counts": { "open": 4, "pending": 1, "newToday": 1, "fixedToday": 1 },
+      "statements": {
+        "R4": {
+          "id": "R4",
+          "text": "Every refund we give a customer is booked in NetSuite at the same amount, to the cent, with nothing left open.",
+          "weight": "derived",
+          "status": "ran",
+          "reason": null,
+          "checks": [
+            { "id": "returns-vs-credit-memos", "label": "OMS returns against NetSuite credit memos", "status": "ran", "reason": null, "matchedBy": "return id (custbody_hc_return_id)", "graceDays": 1, "compared": { "OMS": 412, "NetSuite": 409 } }
+          ],
+          "counts": { "open": 1, "pending": 0, "newToday": 0, "fixedToday": 0 },
+          "findings": [
+            {
+              "id": "F-20761",
+              "headline": "Credit memo is 0.01 less than the refund for return M258615",
+              "state": "open",
+              "firstFound": "2026-10-07",
+              "ageDays": 1,
+              "records": {
+                "OMS": { "return": [ { "id": "M258615", "internalId": null, "status": "Completed" } ] },
+                "NetSuite": { "creditMemo": [ { "id": "CM-88213", "internalId": "51000002", "status": "Open" } ] }
+              },
+              "difference": { "amount": "-0.01", "currency": "USD" },
+              "next": "darpan findings show F-20761"
+            }
+          ],
+          "findingsOmitted": 0
+        },
+        "R5": {
+          "id": "R5",
+          "text": "Store credit given in Shopify is in NetSuite at the same amount.",
+          "weight": "firm",
+          "status": "notRun",
+          "reason": "No check is configured for this statement yet.",
+          "checks": [],
+          "counts": { "open": 0, "pending": 0, "newToday": 0, "fixedToday": 0 },
+          "findings": [],
+          "findingsOmitted": 0
+        }
+      }
+    },
+    "returns": {
+      "label": "Returns",
+      "counts": { "open": 2, "pending": 0, "newToday": 1, "fixedToday": 0 },
+      "statements": {}
+    },
+    "exchangesAndWarranty": {
+      "label": "Exchanges and warranty",
+      "counts": { "open": 0, "pending": 0, "newToday": 0, "fixedToday": 0 },
+      "statements": {}
+    }
+  }
+}

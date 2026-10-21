@@ -349,7 +349,7 @@ class AuthFacadeSupport {
      *  ends with errors is returned over JSON-RPC as an error object built from the error strings alone, so
      *  the messages are dropped and the user is told only that something was wrong. Swapping the reasons
      *  into the error position keeps the failure a failure while making it one the user can act on. */
-    private static void promotePasswordPolicyMessagesToErrors(def ec) {
+    static void promotePasswordPolicyMessagesToErrors(def ec) {
         List<String> reasons = FacadeSupport.getMessages(ec).findAll { it }
         ec.message.clearAll()
         if (reasons) {

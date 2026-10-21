@@ -54,4 +54,15 @@ class PasswordResetSupportTests {
     void overLimitAtTwentyPerIp() {
         assertTrue(PasswordResetSupport.overLimit(0, 20))
     }
+
+    /** Security review 2026-10-21: the log names the matched account, never the raw username or email typed. */
+    @Test
+    void logSubjectNamesUserIdOnly() {
+        assertEquals("userId U1", PasswordResetSupport.logSubject([userId: "U1", emailAddress: "a@b.co"]))
+    }
+
+    @Test
+    void logSubjectWithoutAccountRevealsNoInput() {
+        assertEquals("unmatched input", PasswordResetSupport.logSubject(null))
+    }
 }

@@ -31,6 +31,8 @@ class PasswordResetServicesSmokeTests {
     private static final String OK_EMAIL = "pwr.ok@example.com"
     private static final String NOEMAIL_ID = "PWR_NOEMAIL"
     private static final String DISABLED_ID = "PWR_DISABLED"
+    private static final String OLD_PASSWORD = "Old-pass1!"
+    private static final String NEW_PASSWORD = "New-pass2!"
     private static final String CODE_FAILURE = "That code didn't work. Request a new one."
 
     @BeforeAll
@@ -207,7 +209,131 @@ class PasswordResetServicesSmokeTests {
         assertEquals(before, account(OK_ID).successiveFailedLogins)
     }
 
+    /** Security review 2026-10-21: parallel guesses must not each slip past the cap. Every guess is checked and
+     *  counted under a row lock, so once five are counted the code is ended and later guesses count nothing. */
+    @Test
+    void concurrentWrongGuessesNeverCountPastFive() {
+        anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME])
+        String wrong = lastCode() == "000000" ? "111111" : "000000"
+        List<Thread> threads = (1..8).collect {
+            Thread.start {
+                def tec = org.moqui.Moqui.getExecutionContext()
+                try {
+                    tec.user.loginAnonymousIfNoUser()
+                    tec.service.sync().name("facade.AuthFacadeServices.verify#PasswordResetCode")
+                            .parameters([usernameOrEmail: OK_USERNAME, code: wrong]).call()
+                } finally {
+                    tec.destroy()
+                }
+            }
+        }
+        threads*.join()
+        assertEquals(5, codeRow(OK_ID).failedAttempts)
+    }
+
+    // ---- Task 3: complete ----
+
+    @Test
+    void completeSetsPasswordAndSignsOutEverywhere() {
+        setPassword(OK_ID, OLD_PASSWORD)
+        ["PWRKEY1", "PWRKEY2"].each { String key ->
+            ec.entity.makeValue("moqui.security.UserLoginKey").setAll([loginKey: key, userId: OK_ID,
+                    fromDate: ec.user.nowTimestamp, thruDate: new java.sql.Timestamp(System.currentTimeMillis() + 86_400_000L)]).create()
+        }
+        anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME])
+        Map done = complete(lastCode(), NEW_PASSWORD)
+        assertTrue(done.out.passwordUpdated as boolean, "errors: ${done.errors}")
+        assertEquals(0L, ec.entity.find("moqui.security.UserLoginKey").condition("userId", OK_ID).disableAuthz().count())
+        assertTrue(signIn(NEW_PASSWORD), "new password should sign in")
+        def changed = sent.findAll { it.templateId == PasswordResetSupport.TEMPLATE_PASSWORD_CHANGED }
+        assertEquals(1, changed.size())
+        assertEquals(OK_EMAIL, changed[0].to)
+    }
+
+    @Test
+    void liveCodeDoesNotBlockPasswordLogin() {
+        setPassword(OK_ID, OLD_PASSWORD)
+        anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME])
+        assertTrue(signIn(OLD_PASSWORD), "a pending reset code must not stop the correct password signing in")
+    }
+
+    @Test
+    void codeDeadAfterComplete() {
+        setPassword(OK_ID, OLD_PASSWORD)
+        anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME])
+        String code = lastCode()
+        assertTrue(complete(code, NEW_PASSWORD).out.passwordUpdated as boolean)
+        assertFalse(verify(code).out.verified as boolean)
+        Map again = complete(code, "Another-pass3!")
+        assertFalse(again.out.passwordUpdated as boolean)
+        assertEquals([CODE_FAILURE], again.errors)
+    }
+
+    @Test
+    void policyFailurePassesThrough() {
+        setPassword(OK_ID, OLD_PASSWORD)
+        anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME])
+        String code = lastCode()
+        Map refused = complete(code, "a")
+        assertFalse(refused.out.passwordUpdated as boolean)
+        assertFalse(refused.errors.isEmpty())
+        assertNotEquals([CODE_FAILURE], refused.errors)
+        assertTrue(refused.errors.any { it.contains("8") }, "policy errors: ${refused.errors}")
+        assertTrue(verify(code).out.verified as boolean, "a policy refusal must not use up or count against the code")
+        assertEquals(0, codeRow(OK_ID).failedAttempts ?: 0)
+    }
+
+    @Test
+    void disabledNeverReEnabled() {
+        String code = "123456"
+        ec.entity.makeValue("darpan.auth.PasswordResetCode").setAll([userId: DISABLED_ID,
+                purposeEnumId: PasswordResetSupport.PURPOSE_PASSWORD_RESET, codeSalt: "salt",
+                codeHash: ec.ecfi.getSimpleHash(code, "salt"), fromDate: ec.user.nowTimestamp,
+                thruDate: new java.sql.Timestamp(System.currentTimeMillis() + 600_000L), failedAttempts: 0])
+                .setSequencedIdPrimary().create()
+        Map refused = anon("complete#PasswordReset", [usernameOrEmail: "pwr.disabled", code: code,
+                newPassword: NEW_PASSWORD, newPasswordVerify: NEW_PASSWORD])
+        assertFalse(refused.out.passwordUpdated as boolean)
+        assertEquals([CODE_FAILURE], refused.errors)
+        assertEquals("Y", account(DISABLED_ID).disabled)
+    }
+
+    @Test
+    void requirePasswordChangeCleared() {
+        setPassword(OK_ID, OLD_PASSWORD)
+        def row = account(OK_ID)
+        row.requirePasswordChange = "Y"
+        row.update()
+        anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME])
+        assertTrue(complete(lastCode(), NEW_PASSWORD).out.passwordUpdated as boolean)
+        assertEquals("N", account(OK_ID).requirePasswordChange)
+    }
+
     // ---- helpers ----
+
+    private Map complete(String code, String newPassword) {
+        return anon("complete#PasswordReset", [usernameOrEmail: OK_USERNAME, code: code,
+                newPassword: newPassword, newPasswordVerify: newPassword])
+    }
+
+    private boolean signIn(String password) {
+        Map call = anon("login#Session", [username: OK_USERNAME, password: password])
+        boolean authenticated = call.out.authenticated as boolean
+        ec.user.logoutUser()
+        return authenticated
+    }
+
+    private void setPassword(String userId, String password) {
+        ec.service.sync().name("org.moqui.impl.UserServices.update#PasswordInternal")
+                .parameters([userId: userId, newPassword: password, newPasswordVerify: password]).disableAuthz().call()
+        assertFalse(ec.message.hasError(), "fixture password refused: ${ec.message.errors} ${ec.message.messages}")
+        ec.message.clearAll()
+    }
+
+    private def codeRow(String userId) {
+        return ec.entity.find("darpan.auth.PasswordResetCode").condition("userId", userId).orderBy("-fromDate")
+                .useCache(false).disableAuthz().list()[0]
+    }
 
     /** Call a facade service with no session, the way an anonymous /rpc/json caller reaches it. */
     private Map anon(String verbNoun, Map params) {
@@ -236,7 +362,10 @@ class PasswordResetServicesSmokeTests {
     private void upsertAccount(String userId, String username, String email, String disabled) {
         ec.entity.makeValue("moqui.security.UserAccount").setAll([userId: userId, username: username,
                 userFullName: username, emailAddress: email, disabled: disabled, requirePasswordChange: "N",
+                currentPassword: null, passwordSalt: null,
                 successiveFailedLogins: 0]).createOrUpdate()
+        ec.entity.find("moqui.security.UserPasswordHistory").condition("userId", userId).disableAuthz().deleteAll()
+        ec.entity.find("moqui.security.UserLoginKey").condition("userId", userId).disableAuthz().deleteAll()
     }
 
     private String renderBody(String location, Map params) {

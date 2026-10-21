@@ -589,6 +589,50 @@
         </actions>
     </service>
 
+    <service verb="complete" noun="PasswordReset" allow-remote="true" authenticate="anonymous-all">
+        <description>DAR-BE-028. Set a new password with an emailed reset code, then sign the account out on every
+            device and email it that the password changed. Issues no token: darpan-ui calls login#Session afterwards
+            with the new password. A disabled account is refused and stays disabled.</description>
+        <in-parameters>
+            <parameter name="usernameOrEmail" required="true">
+                <description>The same value the code was requested with.</description>
+            </parameter>
+            <parameter name="code" required="true">
+                <description>The emailed code; spaces and other non-digits are ignored.</description>
+            </parameter>
+            <parameter name="newPassword" required="true">
+                <description>The replacement password, subject to the standard Moqui password policy.</description>
+            </parameter>
+            <parameter name="newPasswordVerify" required="true">
+                <description>Confirmation value for the new password.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean">
+                <description>True when the call completed without facade errors.</description>
+            </parameter>
+            <parameter name="messages" type="List">
+                <description>Informational messages; always empty for this service.</description>
+                <parameter name="message"/>
+            </parameter>
+            <parameter name="errors" type="List">
+                <description>Password-policy reasons in full when the new password was refused; otherwise the one
+                    code message: That code didn't work. Request a new one.</description>
+                <parameter name="error"/>
+            </parameter>
+            <parameter name="passwordUpdated" type="Boolean">
+                <description>True when the password was changed and the account can now sign in with it.</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="completeResult" from="darpan.facade.auth.PasswordResetSupport.completePasswordReset(ec, usernameOrEmail, code, newPassword, newPasswordVerify)"/>
+            <set field="ok" from="completeResult.ok"/>
+            <set field="messages" from="completeResult.messages"/>
+            <set field="errors" from="completeResult.errors"/>
+            <set field="passwordUpdated" from="completeResult.passwordUpdated"/>
+        </actions>
+    </service>
+
     <service verb="logout" noun="Session" allow-remote="true" authenticate="anonymous-all">
         <description>Revoke the login-key token from the current request (header or cookie) and end the caller's own session only.
             Other active sessions on the same UserAccount — including other people on a shared login — are not affected;

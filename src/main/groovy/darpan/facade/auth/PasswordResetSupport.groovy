@@ -110,7 +110,7 @@ class PasswordResetSupport {
                 outcome = "code sent"
             }
         }
-        logger.info("Password reset requested for [{}]: {}", value, outcome)
+        logger.info("Password reset requested for {}: {}", logSubject(account), outcome)
         ec.message.clearAll()
         holdToFloor(started)
         return FacadeSupport.envelope(ec)
@@ -123,24 +123,67 @@ class PasswordResetSupport {
         long started = System.nanoTime()
         String codeValue = normalizeCode(code)
         def account = findAccountForReset(ec, normalize(usernameOrEmail))
-        def resetCode = null
-        boolean verified = false
+        String resetCodeId = null
         if (account != null && "Y" != normalize(account.disabled)) {
-            resetCode = liveCode(ec, (String) account.userId)
-            if (resetCode != null) {
-                verified = codeValue.length() == 6 && hashMatches(codeValue, (String) resetCode.codeSalt, (String) resetCode.codeHash, ec)
-                if (!verified) countFailedAttempt(ec, (String) resetCode.resetCodeId)
-            }
+            resetCodeId = checkCodeLocked(ec, (String) account.userId, codeValue)
         }
+        boolean verified = resetCodeId != null
         if (!verified) {
             ec.message.clearAll()
             ec.message.addError(CODE_FAILURE_MESSAGE)
             holdToFloor(started)
         }
         Map<String, Object> result = [verified: verified, userAccount: verified ? account : null,
-                                      resetCode: verified ? resetCode : null]
+                                      resetCodeId: resetCodeId]
         result.putAll(FacadeSupport.envelope(ec))
         return result
+    }
+
+    /** Set a new password with a verified code, then sign the account out everywhere and tell its email.
+     *  The account's `disabled` is passed through, never left to update#PasswordInternal's N default, which
+     *  would let a disabled account re-enable itself (DAR-BE-078). Password-policy refusals are reported in
+     *  full, are reachable only with a right code, and neither use up nor count against the code. */
+    static Map<String, Object> completePasswordReset(def ec, Object usernameOrEmail, Object code,
+                                                     Object newPassword, Object newPasswordVerify) {
+        Map<String, Object> check = verifyPasswordResetCode(ec, usernameOrEmail, code)
+        if (!check.verified) return [passwordUpdated: false] + FacadeSupport.envelope(ec)
+
+        def account = check.userAccount
+        String userId = (String) account.userId
+        Map updateOut = ec.service.sync().name("org.moqui.impl.UserServices.update#PasswordInternal").parameters([
+                userId               : userId,
+                newPassword          : newPassword?.toString(),
+                newPasswordVerify    : newPasswordVerify?.toString(),
+                requirePasswordChange: "N",
+                disabled             : account.disabled,
+        ]).call()
+
+        if (updateOut?.updateSuccessful == true && !ec.message.hasError()) {
+            ec.message.clearAll()
+            Timestamp now = ec.user.nowTimestamp
+            def row = codes(ec, "mark a reset code used").condition("resetCodeId", check.resetCodeId).one()
+            row.usedDate = now
+            row.thruDate = now
+            row.update()
+            AuthFacadeSupport.deleteAllLoginKeysForUser(ec, userId)
+            sendEmail(ec, TEMPLATE_PASSWORD_CHANGED, (String) account.emailAddress,
+                    [username: account.username, changedAt: ec.l10n.format(now, null)])
+            logger.info("Password reset completed for {}", logSubject(account))
+            return [passwordUpdated: true] + FacadeSupport.envelope(ec)
+        }
+
+        if (updateOut?.passwordIssues == true) {
+            AuthFacadeSupport.promotePasswordPolicyMessagesToErrors(ec)
+        } else {
+            ec.message.clearAll()
+            ec.message.addError(CODE_FAILURE_MESSAGE)
+        }
+        return [passwordUpdated: false] + FacadeSupport.envelope(ec)
+    }
+
+    /** Who a log line is about: the matched userId, never the raw username or email that was typed. */
+    static String logSubject(def account) {
+        return account?.userId ? "userId ${account.userId}".toString() : "unmatched input"
     }
 
     /** Exact username, then case-insensitive username (both exactly as login resolves them), then email.
@@ -194,32 +237,38 @@ class PasswordResetSupport {
         return code
     }
 
-    private static def liveCode(def ec, String userId) {
-        Timestamp now = ec.user.nowTimestamp
-        return codes(ec, "self-scoped auth: live reset code for anonymous password reset").condition("userId", userId)
-                .condition("purposeEnumId", PURPOSE_PASSWORD_RESET).condition("usedDate", null)
-                .condition("thruDate", EntityCondition.ComparisonOperator.GREATER_THAN, now)
-                .orderBy("-fromDate").useCache(false).list()?.find { true }
+    /** The resetCodeId when the code is live and right for the account, else null.
+     *
+     *  Check and count are one step under a row lock, in their own transaction. Two reasons: parallel guesses
+     *  must each be counted before the next is compared, or a burst of them all slips past the cap; and the
+     *  caller is about to fail with an error, which rolls its own transaction back, so a counter written there
+     *  would roll back with it and give unlimited guesses. */
+    private static String checkCodeLocked(def ec, String userId, String codeValue) {
+        return (String) ec.transaction.runRequireNew(null, "Could not check a password reset code", {
+            Timestamp now = ec.user.nowTimestamp
+            def row = codes(ec, "self-scoped auth: lock the live reset code to check a guess").condition("userId", userId)
+                    .condition("purposeEnumId", PURPOSE_PASSWORD_RESET).condition("usedDate", null)
+                    .condition("thruDate", EntityCondition.ComparisonOperator.GREATER_THAN, now)
+                    .orderBy("-fromDate").forUpdate(true).useCache(false).list()?.find { true }
+            if (row == null) return null
+            // Re-check under the lock: the WHERE above can be evaluated before the lock is granted, so a guess
+            // that waited behind the fifth can arrive holding a row the fifth has just ended.
+            if (((row.failedAttempts ?: 0) as int) >= MAX_FAILED_ATTEMPTS || !(((Timestamp) row.thruDate) > now)) return null
+            if (codeValue.length() == 6 && hashMatches(codeValue, (String) row.codeSalt, (String) row.codeHash, ec)) {
+                return (String) row.resetCodeId
+            }
+            int attempts = ((row.failedAttempts ?: 0) as int) + 1
+            row.failedAttempts = attempts
+            if (attempts >= MAX_FAILED_ATTEMPTS) row.thruDate = now
+            row.update()
+            return null
+        })
     }
 
     private static boolean hashMatches(String code, String salt, String expectedHash, def ec) {
         if (!salt || !expectedHash) return false
         String actual = ec.ecfi.getSimpleHash(code, salt)
         return MessageDigest.isEqual(actual.getBytes(StandardCharsets.UTF_8), expectedHash.getBytes(StandardCharsets.UTF_8))
-    }
-
-    /** Its own transaction: the caller is about to fail with an error, which rolls its transaction back,
-     *  and a counter that rolled back with it would give unlimited guesses. */
-    private static void countFailedAttempt(def ec, String resetCodeId) {
-        ec.transaction.runRequireNew(null, "Could not count a failed reset code attempt", {
-            def row = codes(ec, "count a failed reset code attempt").condition("resetCodeId", resetCodeId)
-                    .forUpdate(true).one()
-            if (row == null) return
-            int attempts = ((row.failedAttempts ?: 0) as int) + 1
-            row.failedAttempts = attempts
-            if (attempts >= MAX_FAILED_ATTEMPTS) row.thruDate = ec.user.nowTimestamp
-            row.update()
-        })
     }
 
     private static def codes(def ec, String reason) {

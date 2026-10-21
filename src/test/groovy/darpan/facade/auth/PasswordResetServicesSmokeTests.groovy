@@ -404,7 +404,56 @@ class PasswordResetServicesSmokeTests {
         assertEquals(true, anon("get#PasswordResetStatus", [:]).out.available, "an SMTP host is all it needs now")
     }
 
+    // ---- Final review fixes ----
+
+    /** Review C1: the framework's temporary lockout sets disabled=Y with a disabledDateTime and only a correct
+     *  login clears it, so a reset must treat an EXPIRED lockout as enabled (as MoquiShiroRealm does) or a
+     *  locked-out user who forgot their password could never get a code. */
+    @Test
+    void activeLockoutGetsNoCode() {
+        lockOut(OK_ID, new java.sql.Timestamp(System.currentTimeMillis()))
+        anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME])
+        assertTrue(sent.isEmpty(), "sends: ${sent}")
+    }
+
+    @Test
+    void expiredLockoutCanResetAndIsCleared() {
+        setPassword(OK_ID, OLD_PASSWORD)
+        lockOut(OK_ID, new java.sql.Timestamp(System.currentTimeMillis() - 2L * 86_400_000L))
+        anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME])
+        Map done = complete(lastCode(), NEW_PASSWORD)
+        assertTrue(done.out.passwordUpdated as boolean, "errors: ${done.errors}")
+        def row = account(OK_ID)
+        assertEquals("N", row.disabled)
+        assertNull(row.disabledDateTime)
+        assertEquals(0L, (row.successiveFailedLogins ?: 0) as long)
+    }
+
+    /** Review I3: SMTP alone is not enough — without the seeded template the link would show and every real
+     *  account's request would fail, so availability also needs DARPAN_PASSWORD_RESET_CODE. */
+    @Test
+    void statusNeedsTheResetTemplate() {
+        ec.entity.makeValue("moqui.basic.email.EmailServer").setAll([emailServerId: "SYSTEM", smtpHost: "smtp.test"]).createOrUpdate()
+        def template = ec.entity.find("moqui.basic.email.EmailTemplate")
+                .condition("emailTemplateId", PasswordResetSupport.TEMPLATE_RESET_CODE).disableAuthz().one()
+        Map saved = new HashMap(template.getMap())
+        template.delete()
+        try {
+            assertEquals(false, anon("get#PasswordResetStatus", [:]).out.available)
+        } finally {
+            ec.entity.makeValue("moqui.basic.email.EmailTemplate").setAll(saved).createOrUpdate()
+        }
+    }
+
     // ---- helpers ----
+
+    private void lockOut(String userId, java.sql.Timestamp since) {
+        def row = account(userId)
+        row.disabled = "Y"
+        row.disabledDateTime = since
+        row.successiveFailedLogins = 4
+        row.update()
+    }
 
     /** Call a facade service signed in as username. */
     private Map signedIn(String username, String verbNoun, Map params) {

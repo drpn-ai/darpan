@@ -51,7 +51,8 @@ class PasswordResetSupport {
                 .call()
     }
 
-    /** True when a reset email could actually go out: a SYSTEM EmailServer with an SMTP host. Darpan has no
+    /** True when a reset email could actually go out: a SYSTEM EmailServer with an SMTP host, and the reset
+     *  template loaded (an existing database only gets it from upgrade data). Darpan has no
      *  startup hook, so the first caller that finds it unconfigured logs the one WARN
      *  that tells a deploy "codes will never arrive". */
     static boolean isEmailConfigured(def ec) {
@@ -61,6 +62,10 @@ class PasswordResetSupport {
                 .condition("emailServerId", EMAIL_SERVER_ID).useCache(false).one()
         // The from address needs no check: the templates default it to support@drpn.ai.
         if (!server?.smtpHost) missing << "no EmailServer ${EMAIL_SERVER_ID} with an smtpHost".toString()
+        def template = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.basic.email.EmailTemplate",
+                "framework email configuration, not tenant data")
+                .condition("emailTemplateId", TEMPLATE_RESET_CODE).useCache(false).one()
+        if (template == null) missing << "EmailTemplate ${TEMPLATE_RESET_CODE} is not loaded (PasswordResetEmailSeedData.xml)".toString()
         if (missing && notConfiguredWarned.compareAndSet(false, true)) {
             logger.warn("Password reset email is not configured: {}", missing.join("; "))
         }
@@ -86,8 +91,8 @@ class PasswordResetSupport {
         def account = findAccountForReset(ec, value)
         if (account == null) {
             outcome = "no such account"
-        } else if ("Y" == normalize(account.disabled)) {
-            // Includes the framework's temporary lockout: a locked-out user waits it out, then resets.
+        } else if (lockedOut(ec, account)) {
+            // A permanent disable, or the framework's temporary lockout while it lasts: the user waits it out.
             outcome = "account disabled"
         } else if (!normalize(account.emailAddress)) {
             outcome = "no email on file"
@@ -124,7 +129,7 @@ class PasswordResetSupport {
         String codeValue = normalizeCode(code)
         def account = findAccountForReset(ec, normalize(usernameOrEmail))
         String resetCodeId = null
-        if (account != null && "Y" != normalize(account.disabled)) {
+        if (account != null && !lockedOut(ec, account)) {
             resetCodeId = checkCodeLocked(ec, (String) account.userId, codeValue)
         }
         boolean verified = resetCodeId != null
@@ -155,7 +160,10 @@ class PasswordResetSupport {
                 newPassword          : newPassword?.toString(),
                 newPasswordVerify    : newPasswordVerify?.toString(),
                 requirePasswordChange: "N",
-                disabled             : account.disabled,
+                // Never update#PasswordInternal's N default blindly (DAR-BE-078). A permanent disable or a live
+                // lockout was refused above, so the only "Y" left here is a lockout that has expired, which the
+                // realm itself treats as enabled; a reset is the correct login that would have cleared it.
+                disabled             : "N",
         ]).call()
 
         if (updateOut?.updateSuccessful == true && !ec.message.hasError()) {
@@ -190,7 +198,9 @@ class PasswordResetSupport {
         TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserLoginKey",
                 "self-scoped auth: delete all login keys for userId after a password reset")
                 .condition("userId", userId).deleteAll()
-        ec.service.sync().name("update#moqui.security.UserAccount").parameters([userId: userId, hasLoggedOut: "Y"]).call()
+        // Also clears an expired lockout's leftovers, as the realm does on a correct login.
+        ec.service.sync().name("update#moqui.security.UserAccount").parameters([userId: userId, hasLoggedOut: "Y",
+                disabledDateTime: null, successiveFailedLogins: 0]).call()
     }
 
     /** Save the signed-in user's recovery email (UserAccount.emailAddress), trimmed and lower-cased, with no
@@ -250,6 +260,17 @@ class PasswordResetSupport {
     static Map<String, Object> recoveryEmailFlags(def ec) {
         String email = normalize(ec?.user?.userAccount?.emailAddress)
         return [recoveryEmailMissing: !email, emailAddressMasked: maskEmail(email)]
+    }
+
+    /** True for a permanent disable, or the framework's temporary lockout until disable-minutes have passed.
+     *  Mirrors MoquiShiroRealm.loginPrePassword: nothing clears disabled=Y when a lockout expires (only a correct
+     *  login does), so reading the flag alone would shut a locked-out user out of reset for good. */
+    static boolean lockedOut(def ec, def account) {
+        if ("Y" != normalize(account.disabled)) return false
+        Timestamp since = (Timestamp) account.disabledDateTime
+        if (since == null) return true
+        Integer minutes = (ec.ecfi.confXmlRoot.first("user-facade").first("login").attribute("disable-minutes") as Integer) ?: 30
+        return since.time + minutes * 60_000L > ec.user.nowTimestamp.time
     }
 
     /** Who a log line is about: the matched userId, never the raw username or email that was typed. */

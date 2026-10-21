@@ -77,11 +77,18 @@ class RpcMethodFence {
         return hasPair(segments, "rpc", "json")
     }
 
+    /** Matches on each segment's name before its first dot: Moqui strips a render-mode extension before it
+     *  matches a screen or transition (ScreenUrlInfo), so /Login/resetPassword.json reaches resetPassword. */
     static boolean hasPair(List<String> segments, String first, String second) {
         for (int i = 0; i < segments.size() - 1; i++) {
-            if (segments[i] == first && segments[i + 1] == second) return true
+            if (nameBeforeDot(segments[i]) == first && nameBeforeDot(segments[i + 1]) == second) return true
         }
         return false
+    }
+
+    static String nameBeforeDot(String segment) {
+        int dot = segment.indexOf('.')
+        return dot > 0 ? segment.substring(0, dot) : segment
     }
 
     static List<String> segmentsOf(String path) {

@@ -92,6 +92,18 @@ class RpcMethodFenceTests {
         assertNull(RpcMethodFence.rejection("/Login/login", [username: "x", password: "y"]))
     }
 
+    /** Security review 2026-10-21: Moqui strips a render-mode extension before matching a screen or transition
+     *  name (ScreenUrlInfo: "is there an extension beyond a transition name?"), so a fenced transition must be
+     *  matched on the name before the first dot. */
+    @Test
+    void fencedTransitionsCannotBeReachedWithARenderModeExtension() {
+        ["/Login/resetPassword.json", "/Login/resetPassword.html", "/Login.html/resetPassword",
+         "/rest/login.json", "/rest.json/login"].each { String path ->
+            assertNotNull(RpcMethodFence.rejection(path, [username: "x"]), "not fenced: ${path}")
+        }
+        assertNull(RpcMethodFence.rejection("/Login/login.json", [username: "x", password: "y"]))
+    }
+
     @Test
     void everyPublishedApiMethodPassesTheFence() {
         // The product's remote surface: if the fence ever refuses one of these, a client breaks.

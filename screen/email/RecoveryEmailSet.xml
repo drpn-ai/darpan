@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-028 email body. Plain on purpose: no bold, and no links, because a link in a reset email is the
+     phishing shape users should learn to distrust, and a code needs none. -->
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+        require-authentication="false">
+    <widgets>
+        <render-mode><text type="html"><![CDATA[<html><body>]]></text></render-mode>
+        <section name="RecoveryAddressSide" condition="isOldAddress">
+            <widgets><container><label text="This address will no longer receive Darpan password reset codes for ${username}."/></container></widgets>
+            <fail-widgets><container><label text="This address will receive Darpan password reset codes for ${username}."/></container></fail-widgets>
+        </section>
+        <container><label text="Not you? Ignore this email and tell your administrator."/></container>
+        <render-mode><text type="html"><![CDATA[</body></html>]]></text></render-mode>
+    </widgets>
+</screen>

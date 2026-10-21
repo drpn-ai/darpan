@@ -290,6 +290,20 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.rule.RuleSetConclusionCondition"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <!-- DAR-BE-088 — the month-close statement catalog (entity/MonthCloseEntities.xml). Tenant-owned from day
+         one, so the filter rows land with the entities rather than in a later sweep. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_STATEMENT"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.monthclose.MonthCloseStatement"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_CHECK"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.monthclose.MonthCloseCheck"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_STATEMENT_CHECK"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.monthclose.MonthCloseStatementCheck"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_ADMIN"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"/>
     <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_USER"

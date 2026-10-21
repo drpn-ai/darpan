@@ -81,6 +81,9 @@ class TenantOwnedEntityFilterRuntimeTests {
             "darpan.rule.RuleSetCompareSourceFilter"                   : "compareScopeId",
             "darpan.rule.RuleSetConclusionRule"                        : "compareScopeId",
             "darpan.rule.RuleSetConclusionCondition"                   : "compareScopeId",
+            "darpan.monthclose.MonthCloseStatement"                    : "statementId",
+            "darpan.monthclose.MonthCloseCheck"                        : "checkId",
+            "darpan.monthclose.MonthCloseStatementCheck"               : "statementId",
     ].asImmutable()
 
     /** Entities whose companyUserGroupId is not-null: they get no unstamped fixture row. */
@@ -88,6 +91,9 @@ class TenantOwnedEntityFilterRuntimeTests {
             "darpan.reconciliation.SlackOAuthState",
             "darpan.reconciliation.SlackWorkspaceInstall",
             "darpan.reconciliation.SourceConfigEndpointAccess",
+            "darpan.monthclose.MonthCloseStatement",
+            "darpan.monthclose.MonthCloseCheck",
+            "darpan.monthclose.MonthCloseStatementCheck",
     ].toSet().asImmutable()
 
     private ExecutionContext ec
@@ -196,6 +202,33 @@ class TenantOwnedEntityFilterRuntimeTests {
             }
         }
         assertEquals([], visible, "a caller with no active tenant must see no tenant-owned row")
+    }
+
+    @Test
+    void gorjanasMonthCloseCatalogIsSeenByGorjanaOnly() {
+        // DAR-BE-088: the real catalog file, loaded as an install loads it, read the way a facade service reads it.
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/MonthCloseSeedData.xml",
+                "component://darpan/data/GorjanaMonthCloseCatalogData.xml")
+        Set<String> categoryIds = ec.entity.find("moqui.basic.Enumeration").condition("enumTypeId", "MonthCloseCategory")
+                .disableAuthz().useCache(false).list()*.get("enumId") as Set<String>
+        assertEquals(4, categoryIds.size(), "test precondition: the four categories are seeded")
+
+        actAs(EDITOR_USERNAME, GORJANA)
+        List gorjana = []
+        underFacadeGrant {
+            gorjana = ec.entity.find("darpan.monthclose.MonthCloseStatement").condition("statementId", "like", "GORJANA_R%")
+                    .orderBy("sequenceNum").useCache(false).list()
+        }
+        assertEquals((1..17).collect { "R${it}".toString() }, gorjana*.get("statementCode"), "GORJANA sees R1-R17 in order")
+        assertEquals([], gorjana.findAll { !categoryIds.contains(it.get("categoryEnumId")) }*.get("statementCode"),
+                "every statement carries a MonthCloseCategory")
+
+        actAs(EDITOR_USERNAME, KREWE)
+        long krewe = -1L
+        underFacadeGrant {
+            krewe = ec.entity.find("darpan.monthclose.MonthCloseStatement").condition("statementId", "like", "GORJANA_R%").count()
+        }
+        assertEquals(0L, krewe, "another tenant must see none of gorjana's catalog")
     }
 
     // -----------------------------------------------------------------------------------------
@@ -632,6 +665,9 @@ class TenantOwnedEntityFilterRuntimeTests {
             case "darpan.rule.RuleSetCompareSourceFilter": return "SCF"
             case "darpan.rule.RuleSetConclusionRule": return "SCR"
             case "darpan.rule.RuleSetConclusionCondition": return "SCC"
+            case "darpan.monthclose.MonthCloseStatement": return "MCS"
+            case "darpan.monthclose.MonthCloseCheck": return "MCCK"
+            case "darpan.monthclose.MonthCloseStatementCheck": return "MCSC"
         }
         throw new IllegalArgumentException(entityName)
     }
@@ -656,6 +692,10 @@ class TenantOwnedEntityFilterRuntimeTests {
             case "darpan.rule.RuleSetConclusionRule": return [compareScopeId: id, sequenceNum: 1L, conclusionEnumId: "UNEXPLAINED"]
             case "darpan.rule.RuleSetConclusionCondition": return [compareScopeId: id, sequenceNum: 1L, conditionSeq: 1L,
                     subject: "x", checkLabel: "y"]
+            case "darpan.monthclose.MonthCloseStatement": return [statementId: id, statementCode: id,
+                    categoryEnumId: "MCC_ORDERS", weightEnumId: "MCSW_FIRM", statementText: "x"]
+            case "darpan.monthclose.MonthCloseCheck": return [checkId: id, checkCode: id, label: "x"]
+            case "darpan.monthclose.MonthCloseStatementCheck": return [statementId: id, checkId: "TOEF_MCCK_${s}".toString()]
         }
         throw new IllegalArgumentException(entityName)
     }

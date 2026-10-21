@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-088. The month-close statement catalog: what a tenant's accounting team needs to be true at
+  month end (statements), the checks that test them, and which check tests which statement. The JSON
+  contract these rows feed is docs/superpowers/specs/2026-10-21-month-close-json-contract.md in the
+  wrapper repo; the findings ledger (DAR-BE-089) hangs off MonthCloseStatement and MonthCloseCheck.
+
+  All three entities are tenant-owned and NOT NULL on companyUserGroupId: a catalog row always belongs
+  to one tenant. Each is in the DARPAN_ACTIVE_COMPANY_SCOPE entity filter (SecuritySeedData.xml).
+  The JSON never shows statementId or checkId: it shows statementCode ("R4") and checkCode
+  ("returns-vs-credit-memos"), which are unique within a tenant only.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+
+    <entity entity-name="MonthCloseStatement" package="darpan.monthclose" use="configuration">
+        <description>One thing a tenant needs to be true at month end, in the tenant's own words, e.g. gorjana's
+            R4 "Every refund we give a customer is booked in NetSuite at the same amount...".</description>
+        <field name="statementId" type="id" is-pk="true">
+            <description>Globally unique row id, e.g. GORJANA_R4. Never shown; the JSON uses statementCode.</description>
+        </field>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="statementCode" type="text-short" not-null="true">
+            <description>The tenant's label for the statement, e.g. R4. The JSON statement id; unique per tenant.</description>
+        </field>
+        <field name="categoryEnumId" type="id" not-null="true">
+            <description>Enumeration of type MonthCloseCategory; its enumCode is the JSON category id.</description>
+        </field>
+        <field name="weightEnumId" type="id" not-null="true">
+            <description>Enumeration of type MonthCloseStatementWeight: firm (the tenant said it) or derived
+                (inferred from production problems, awaiting the tenant's confirmation).</description>
+        </field>
+        <field name="statementText" type="text-intermediate" not-null="true">
+            <description>The statement verbatim, in the tenant's words.</description>
+        </field>
+        <field name="sequenceNum" type="number-integer">
+            <description>Order of statements in the report.</description>
+        </field>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="MCSTMT_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <relationship type="one" title="Category" related="moqui.basic.Enumeration" fk-name="MCSTMT_CATEGORY">
+            <key-map field-name="categoryEnumId" related="enumId"/>
+        </relationship>
+        <relationship type="one" title="Weight" related="moqui.basic.Enumeration" fk-name="MCSTMT_WEIGHT">
+            <key-map field-name="weightEnumId" related="enumId"/>
+        </relationship>
+        <index name="MCSTMT_TENANT_CODE" unique="true">
+            <index-field name="companyUserGroupId"/>
+            <index-field name="statementCode"/>
+        </index>
+    </entity>
+
+    <entity entity-name="MonthCloseCheck" package="darpan.monthclose" use="configuration">
+        <description>One check that tests one or more statements, usually a saved run on a daily schedule. Its
+            findings land on the ledger (DAR-BE-089) under this check. The three templates are plain text with
+            {name} placeholders, replaced literally from the finding's fields; they are NEVER expanded as Groovy
+            or FTL, because tenant configuration must not be able to run code.</description>
+        <field name="checkId" type="id" is-pk="true">
+            <description>Globally unique row id. Never shown; the JSON uses checkCode.</description>
+        </field>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="checkCode" type="text-short" not-null="true">
+            <description>Kebab-case slug, e.g. returns-vs-credit-memos. The JSON check id; unique per tenant.</description>
+        </field>
+        <field name="label" type="text-medium" not-null="true">
+            <description>What the check compares, in a few words.</description>
+        </field>
+        <field name="savedRunId" type="id">
+            <description>The saved run (RuleSet) that executes the check. Blank until the run is configured.</description>
+        </field>
+        <field name="graceDays" type="number-integer">
+            <description>Days a new finding stays pending before it counts as open. Blank means 0.</description>
+        </field>
+        <field name="matchedBy" type="text-medium">
+            <description>The shared id the two sides join on, in words, e.g. "return id (custbody_hc_return_id)".
+                Blank for a one-sided check.</description>
+        </field>
+        <field name="fixOwner" type="text-medium">
+            <description>The team that fixes this check's findings, e.g. HotWax Support.</description>
+        </field>
+        <field name="fixWhereEnumId" type="id">
+            <description>The ROOT system where the fix is made (OMS, NETSUITE or SHOPIFY of type
+                DarpanSystemSource), never an endpoint.</description>
+        </field>
+        <field name="headlineTemplate" type="text-intermediate">
+            <description>One-line finding headline, e.g. "Credit memo is {differenceAbs} less than the refund for
+                return {returnId}". At most 120 characters once filled, no trailing period.</description>
+        </field>
+        <field name="fixActionTemplate" type="text-intermediate">
+            <description>What to change, filled with the finding's values.</description>
+        </field>
+        <field name="passesWhenTemplate" type="text-intermediate">
+            <description>What the next scheduled check must see for the finding to close.</description>
+        </field>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="MCCHK_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <relationship type="one" title="Saved" related="darpan.rule.RuleSet" fk-name="MCCHK_RULE_SET">
+            <key-map field-name="savedRunId" related="ruleSetId"/>
+        </relationship>
+        <relationship type="one" title="FixWhere" related="moqui.basic.Enumeration" fk-name="MCCHK_FIX_WHERE">
+            <key-map field-name="fixWhereEnumId" related="enumId"/>
+        </relationship>
+        <index name="MCCHK_TENANT_CODE" unique="true">
+            <index-field name="companyUserGroupId"/>
+            <index-field name="checkCode"/>
+        </index>
+    </entity>
+
+    <entity entity-name="MonthCloseStatementCheck" package="darpan.monthclose" use="configuration">
+        <description>Which check tests which statement. Many-to-many: one comparison serves several statements
+            (returns against credit memos covers R4, R6, R7, R8, R9, R14 and R16), and one statement can need two
+            checks (R1: invoiced orders and cash sales). Stamped with the tenant like both parents, so the
+            filter applies to it directly.</description>
+        <field name="statementId" type="id" is-pk="true"/>
+        <field name="checkId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="sequenceNum" type="number-integer">
+            <description>Order of a statement's checks in the report.</description>
+        </field>
+        <relationship type="one" related="darpan.monthclose.MonthCloseStatement" fk-name="MCSC_STATEMENT">
+            <key-map field-name="statementId"/>
+        </relationship>
+        <relationship type="one" related="darpan.monthclose.MonthCloseCheck" fk-name="MCSC_CHECK">
+            <key-map field-name="checkId"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="MCSC_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <index name="MCSC_TENANT"><index-field name="companyUserGroupId"/></index>
+    </entity>
+</entities>

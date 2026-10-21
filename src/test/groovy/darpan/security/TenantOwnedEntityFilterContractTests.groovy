@@ -44,6 +44,16 @@ class TenantOwnedEntityFilterContractTests {
             "darpan.rule.RuleSetConclusionCondition"                   : "DARPAN_SCOPE_CONCLUSION_CONDITION",
     ].asImmutable()
 
+    /** DAR-BE-088: the month-close statement catalog, filtered from the day its entities were added. */
+    static final Map<String, String> DAR_BE_088_FILTERS = [
+            "darpan.monthclose.MonthCloseStatement"                    : "DARPAN_SCOPE_MC_STATEMENT",
+            "darpan.monthclose.MonthCloseCheck"                        : "DARPAN_SCOPE_MC_CHECK",
+            "darpan.monthclose.MonthCloseStatementCheck"               : "DARPAN_SCOPE_MC_STATEMENT_CHECK",
+    ].asImmutable()
+
+    /** Every filter row this class pins by id, with its entity. */
+    static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS).asImmutable()
+
     /** Entities deliberately NOT in the filter set, each with the reason. */
     static final Map<String, String> EXCLUDED = [
             // Carries companyUserGroupId but cannot be filtered.
@@ -109,7 +119,7 @@ class TenantOwnedEntityFilterContractTests {
     @Test
     void everyDarBe076EntityHasAFilterRowWithTheStandardFilterMap() {
         Map<String, Map<String, String>> rows = seedFilters()
-        DAR_BE_076_FILTERS.each { String entityName, String filterId ->
+        NAMED_FILTERS.each { String entityName, String filterId ->
             Map<String, String> row = rows[filterId]
             assertTrue(row != null, "SecuritySeedData.xml is missing EntityFilter ${filterId} for ${entityName}")
             assertEquals(entityName, row.entityName, "${filterId} must filter ${entityName}")
@@ -122,7 +132,7 @@ class TenantOwnedEntityFilterContractTests {
         // The filterMap names companyUserGroupId; on an entity without that field the filter cannot
         // express "this tenant only", so the row would protect nothing.
         Map<String, List<String>> fields = entityFields()
-        DAR_BE_076_FILTERS.keySet().each { String entityName ->
+        NAMED_FILTERS.keySet().each { String entityName ->
             assertTrue(fields.containsKey(entityName), "${entityName} is not defined in any component's entity XML")
             assertTrue(fields[entityName].contains("companyUserGroupId"), "${entityName} has no companyUserGroupId field")
         }
@@ -133,7 +143,7 @@ class TenantOwnedEntityFilterContractTests {
         // The seed file only reaches an existing database through the upgrade pack.
         Map<String, Map<String, String>> seed = seedFilters()
         Map<String, Map<String, String>> pack = filterRows(componentRoot().resolve("darpan/data/upgrade-data.xml"))
-        DAR_BE_076_FILTERS.values().each { String filterId ->
+        NAMED_FILTERS.values().each { String filterId ->
             assertTrue(pack.containsKey(filterId), "upgrade-data.xml is missing EntityFilter ${filterId}")
             assertEquals(seed[filterId], pack[filterId], "upgrade-data.xml must restate ${filterId} verbatim")
         }

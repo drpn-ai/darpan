@@ -22,6 +22,7 @@
   tools/netsuite-chain-config/upload-gorjana-checks.py creates the run.
 -->
 <entity-facade-xml type="darpan-tenant-config">
+    <moqui.basic.Enumeration enumId="CONC_NS_NO_LINE_LOCATION" enumTypeId="DarpanConclusion" enumCode="CONC_NS_NO_LINE_LOCATION" description="No location on the NetSuite line"/>
     <moqui.basic.Enumeration enumId="CONC_NS_BACKORDERED" enumTypeId="DarpanConclusion" enumCode="CONC_NS_BACKORDERED" description="Backordered in NetSuite"/>
     <moqui.basic.Enumeration enumId="CONC_NEVER_REACHED_NS" enumTypeId="DarpanConclusion" enumCode="CONC_NEVER_REACHED_NS" description="Never reached NetSuite"/>
     <moqui.basic.Enumeration enumId="CONC_SHIPPED_NOT_COMPLETED" enumTypeId="DarpanConclusion" enumCode="CONC_SHIPPED_NOT_COMPLETED" description="Shipped, not completed in HotWax"/>
@@ -39,6 +40,12 @@
 
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="5" conclusionEnumId="CONC_COMPLETED_CLOSED_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="5" conditionSeq="1" subject="FILE_2" presence="EXCLUDED" keyScope="FULL" fieldExpression="lineState" operator="IN" conditionValues="CLOSED" checkLabel="NetSuite closed the line" companyUserGroupId="GORJANA"/>
+
+    <!-- DAR-BE-093, gorjana R3. Ahead of the backorder it shows as: NetSuite cannot ship a line with no location. A line
+         that shipped had a location that worked, so only OPEN lines. SuiteQL omits a null column, so BLANK reads absent. -->
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="8" conclusionEnumId="CONC_NS_NO_LINE_LOCATION" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="8" conditionSeq="1" subject="FILE_2" presence="EXCLUDED" keyScope="FULL" fieldExpression="lineState" operator="IN" conditionValues="OPEN" checkLabel="NetSuite has the line, nothing shipped" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="8" conditionSeq="2" subject="FILE_2" presence="ANY" keyScope="FULL" fieldExpression="lineLocation" operator="BLANK" checkLabel="The line has no location" companyUserGroupId="GORJANA"/>
 
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="10" conclusionEnumId="CONC_NS_BACKORDERED" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="EXCLUDED" keyScope="FULL" checkLabel="NetSuite has the line" companyUserGroupId="GORJANA"/>

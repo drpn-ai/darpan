@@ -50,7 +50,7 @@ class GorjanaConclusionRulesDataTests {
         Set<String> scopes = load("data/TriSystemOrderRunsRuleSetData.xml").'**'
                 .findAll { it.name() == 'darpan.rule.RuleSetCompareScope' }.collect { it.@compareScopeId.toString() } as Set
 
-        assertEquals(17, rules.size(), "the catalogue for runs A-open, B, C and C-cancel")
+        assertEquals(18, rules.size(), "the catalogue for runs A-open, B, C and C-cancel")
         Set<String> seen = []
         rules.each { rule ->
             String key = "${rule.@compareScopeId}/${rule.@sequenceNum}".toString()
@@ -90,7 +90,7 @@ class GorjanaConclusionRulesDataTests {
         assertEquals("CONC_SHIPPED_NOT_BILLED", conclude("GORJANA_OMS_NS_LINE_SCOPE", "MISSING_FROM_FILE_2",
                 null, [presence: "EXCLUDED", record: [lineState: "SHIPPED"]]))
         assertEquals("CONC_NS_BACKORDERED", conclude("GORJANA_OMS_NS_LINE_SCOPE", "MISSING_FROM_FILE_2",
-                null, [presence: "EXCLUDED", record: [lineState: "OPEN", quantityBackordered: "1"]]))
+                null, [presence: "EXCLUDED", record: [lineState: "OPEN", quantityBackordered: "1", lineLocation: "12"]]))
         // run C: NetSuite billed, HotWax not completed
         assertEquals("CONC_BILLED_NOT_COMPLETED", conclude("GORJANA_OMS_NS_LINE_SCOPE", "MISSING_FROM_FILE_1",
                 null, [presence: "KEPT", record: [lineState: "BILLED"]]))
@@ -109,6 +109,23 @@ class GorjanaConclusionRulesDataTests {
                 [presence: "EXCLUDED", record: [unitState: "COMPLETED"]], null))
         assertEquals("CONC_OPEN_CLOSED_IN_NS", conclude("GORJANA_OMS_NS_CANCEL_SCOPE", "MISSING_FROM_FILE_1",
                 [presence: "EXCLUDED", record: [unitState: "OPEN"]], null))
+    }
+
+    /**
+     * DAR-BE-093, gorjana R3 ("every store sale carries its store"). A completed item NetSuite never shipped because its
+     * line has no location is named for that cause, ahead of the backorder it shows as. SuiteQL omits a null column, so
+     * the field is absent. A line that shipped had a location that worked, so it keeps its own conclusion.
+     */
+    @Test
+    void anUnshippedLineWithNoLocationIsNamedForTheLocation() {
+        assertEquals("CONC_NS_NO_LINE_LOCATION", conclude("GORJANA_OMS_NS_LINE_SCOPE", "MISSING_FROM_FILE_2",
+                null, [presence: "EXCLUDED", record: [lineState: "OPEN", quantityBackordered: "1"]]))
+        assertEquals("CONC_NS_NO_LINE_LOCATION", conclude("GORJANA_OMS_NS_LINE_SCOPE", "MISSING_FROM_FILE_2",
+                null, [presence: "EXCLUDED", record: [lineState: "OPEN", lineLocation: ""]]))
+        assertEquals("CONC_SHIPPED_NOT_BILLED", conclude("GORJANA_OMS_NS_LINE_SCOPE", "MISSING_FROM_FILE_2",
+                null, [presence: "EXCLUDED", record: [lineState: "SHIPPED"]]))
+        assertEquals("CONC_COMPLETED_CLOSED_IN_NS", conclude("GORJANA_OMS_NS_LINE_SCOPE", "MISSING_FROM_FILE_2",
+                null, [presence: "EXCLUDED", record: [lineState: "CLOSED"]]))
     }
 
     private static String conclude(String scope, String bucket, Map file1, Map file2) {

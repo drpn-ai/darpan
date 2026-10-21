@@ -418,7 +418,7 @@
             preserveWindowInstants="N"
             windowDateOnly="Y"
             filterParameterName="sourceFilters"
-            evidenceFieldsJson='{"system":"NetSuite","state":"status","stateLabels":{"A":"Pending Approval","B":"Pending Fulfillment","C":"Cancelled","D":"Partially Fulfilled","E":"Pending Billing/Partially Fulfilled","F":"Pending Billing","G":"Billed","H":"Closed"},"facts":["orderLineId","lineState","quantityShipped","quantityBilled","quantityBackordered","tranId"]}'
+            evidenceFieldsJson='{"system":"NetSuite","state":"status","stateLabels":{"A":"Pending Approval","B":"Pending Fulfillment","C":"Cancelled","D":"Partially Fulfilled","E":"Pending Billing/Partially Fulfilled","F":"Pending Billing","G":"Billed","H":"Closed"},"facts":["orderLineId","lineState","lineLocation","quantityShipped","quantityBilled","quantityBackordered","tranId"]}'
             enabled="Y"/>
 
     <!-- Database sources. Both sides of a run may be AUT_SRC_DB, which is how two OFBiz instances

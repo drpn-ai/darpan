@@ -1,6 +1,7 @@
 package darpan.audit
 
 import darpan.facade.common.TenantScopedFinder
+import darpan.reconciliation.core.ReconciliationServices
 import org.moqui.entity.EntityCondition
 
 import java.math.RoundingMode
@@ -433,7 +434,7 @@ class AuditReportAssembler {
                                         // The check's schedule arrives with DAR-BE-092 (automation linked to the check).
                                         nextCheck : null,
                                         passesWhen: fillTemplate(check.passesWhenTemplate as String, fill) ?:
-                                                "The check looks at ${f.recordKey} and no longer reports it.".toString()],
+                                                "The check looks at ${displayKey(f.recordKey as String)} and no longer reports it.".toString()],
                                 darpanChanges: DARPAN_CHANGES],
                         history  : events.collect { Map e ->
                             [at: isoDateTime(e.eventStamp as Timestamp, zone), event: codes[e.eventTypeEnumId as String],
@@ -458,13 +459,22 @@ class AuditReportAssembler {
      */
     private static Map<String, String> templateValues(Map f, List<Map> recordRows) {
         String currency = f.currencyUomId
-        Map<String, String> values = [recordKey: f.recordKey as String, headline: f.headline as String, currency: currency]
+        Map<String, String> values = [recordKey: displayKey(f.recordKey as String), headline: f.headline as String, currency: currency]
         ["expectedAmount", "actualAmount", "differenceAmount"].each { String k ->
             if (f[k] != null) values[k] = amountText(f[k] as BigDecimal, currency)
         }
         if (f.differenceAmount != null) values.differenceAbs = amountText((f.differenceAmount as BigDecimal).abs(), currency)
         recordRows.each { Map r -> values.putIfAbsent(r.recordType as String, r.recordId as String) }
         return values
+    }
+
+    /**
+     * A record key as people and agents read it. A composite compare key (order id + item seq id) is joined by an
+     * invisible unit separator; it reads as order/item. The ledger keeps the raw key, which closing matches against the
+     * examined keys.
+     */
+    static String displayKey(String key) {
+        return key?.replace(ReconciliationServices.COMPOSITE_KEY_DELIMITER, "/")
     }
 
     /** Literal {name} replacement. Tenant configuration never runs code: no Groovy, no FTL. Unknown names stay as written. */

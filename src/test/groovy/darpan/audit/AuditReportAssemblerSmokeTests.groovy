@@ -563,6 +563,11 @@ class AuditReportAssemblerSmokeTests {
         assertNull(AuditReportAssembler.money(null, "USD"))
         assertEquals('Fix CM-1 by {unknown}; ${x} stays text',
                 AuditReportAssembler.fillTemplate('Fix {creditMemo} by {unknown}; ${x} stays text', [creditMemo: "CM-1"]))
+        // DAR-BE-093: a composite compare key (order id + item seq id) is joined by an invisible unit separator; people
+        // and agents read it as order/item.
+        assertEquals("M1137118/01", AuditReportAssembler.displayKey("M1137118\u001F01"))
+        assertEquals("INV1", AuditReportAssembler.displayKey("INV1"))
+        assertNull(AuditReportAssembler.displayKey(null))
         assertEquals("NetSuite", AuditReportAssembler.systemKey("NETSUITE"))
         assertEquals("AMAZON", AuditReportAssembler.systemKey("AMAZON"), "an unmapped root keeps its enumId")
     }

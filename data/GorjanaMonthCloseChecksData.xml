@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-093 — gorjana month close, comparison 2: the checks behind R1, R2 and R3, measured against gorjana production
+  on 2026-10-21 (tools/live-probes/NsMonthCloseOrdersProbe.groovy).
+
+  R1 "Every order that is fulfilled, in store or online, is in NetSuite with its invoice. This includes digital gift
+     cards." = run C (GORJANA_OMS_NS_LINE_RS, TriSystemOrderRunsRuleSetData.xml): every item HotWax completed is BILLED
+     on its NetSuite line. No exclusions, so gift-card-only and POS orders count, as R1 says. BILLED reads
+     quantitybilled, which a CashSale sets as well as an invoice (3,802 of 3,806 cash-sold lines, Oct 1-20), so
+     "with its invoice" covers both. POS reaches NetSuite as SalesOrd (21,454 of 29,120 orders, week of 12 Oct).
+  R2 "Every invoice and credit memo carries the Shopify order id (the Etail id)." = two single-sided runs over every
+     CustInvc / CustCred (tools/netsuite-chain-config/gorjana-month-close-queries.xml), named by CONC_NO_ETAIL_ID.
+  R3 "Every store sale carries its store in NetSuite." = run C's CONC_NS_NO_LINE_LOCATION (GorjanaConclusionRulesData):
+     a completed item NetSuite never shipped because its line has no location. Billed lines with no location (63 a
+     week, all web channel) are not findings: NetSuite billed them, so the location did not stop anything.
+
+  Two checks share run C's automation (completed-not-billed for R1, lines-without-location for R3): one automation runs
+  every check whose automationId names it, each with its own headline.
+
+  automationId is blank here on purpose: an automation is created per environment and gets its id there. Set it on
+  each AuditCheck once the automation exists (prod-owed on DAR-BE-093).
+
+  NOT seed data - tenant configuration. Load per install, AFTER AuditSeedData.xml, GorjanaMonthCloseCatalogData.xml,
+  TriSystemOrderRunsRuleSetData.xml, GorjanaConclusionRulesData.xml and
+  tools/netsuite-chain-config/gorjana-month-close-queries.xml (R2's rule sets name those query rows):
+
+      ec.entity.makeDataLoader().location("component://darpan/data/GorjanaMonthCloseChecksData.xml").load()
+-->
+<entity-facade-xml type="darpan-tenant-config">
+
+    <!-- ================================================================ R2: invoices and credit memos, Etail id -->
+    <moqui.basic.Enumeration enumId="CONC_NO_ETAIL_ID" enumTypeId="DarpanConclusion" enumCode="CONC_NO_ETAIL_ID" description="No Shopify order id (Etail id)"/>
+
+    <darpan.rule.RuleSet ruleSetId="GORJANA_INVOICE_ETAIL_RS" ruleSetName="Invoices - Etail id"
+            description="Every NetSuite invoice carries the Shopify order id (custbody_celigo_etail_order_id). Reads every invoice so a fixed one is seen and closes."
+            version="1.0" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_INVOICE_ETAIL_SCOPE" ruleSetId="GORJANA_INVOICE_ETAIL_RS"
+            objectType="INVOICE" scopeMode="EVALUATE" description="Every NetSuite invoice carries the Shopify order id (custbody_celigo_etail_order_id). Reads every invoice so a fixed one is seen and closes."
+            companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_INVOICE_ETAIL_SCOPE" fileSide="FILE_1"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="tranId"
+            sourceConfigId="NS_INVOICE_ETAIL" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_INVOICE_ETAIL_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="tranId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_INVOICE_ETAIL_SCOPE" sequenceNum="10" conclusionEnumId="CONC_NO_ETAIL_ID" appliesToBucket="FINDING" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_INVOICE_ETAIL_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="etailOrderId" operator="BLANK" checkLabel="The invoice has no Etail id" companyUserGroupId="GORJANA"/>
+
+    <darpan.rule.RuleSet ruleSetId="GORJANA_CREDIT_ETAIL_RS" ruleSetName="Credit memos - Etail id"
+            description="Every NetSuite credit memo carries the Shopify order id (custbody_celigo_etail_order_id). Reads every credit memo so a fixed one is seen and closes."
+            version="1.0" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_CREDIT_ETAIL_SCOPE" ruleSetId="GORJANA_CREDIT_ETAIL_RS"
+            objectType="CREDIT_MEMO" scopeMode="EVALUATE" description="Every NetSuite credit memo carries the Shopify order id (custbody_celigo_etail_order_id). Reads every credit memo so a fixed one is seen and closes."
+            companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_CREDIT_ETAIL_SCOPE" fileSide="FILE_1"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="tranId"
+            sourceConfigId="NS_CREDIT_ETAIL" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_CREDIT_ETAIL_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="tranId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_CREDIT_ETAIL_SCOPE" sequenceNum="10" conclusionEnumId="CONC_NO_ETAIL_ID" appliesToBucket="FINDING" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_CREDIT_ETAIL_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="etailOrderId" operator="BLANK" checkLabel="The credit memo has no Etail id" companyUserGroupId="GORJANA"/>
+
+    <!-- ================================================================ The checks -->
+    <!-- graceDays 4: invoices follow fulfilment by p95 4 days (SalesOrd -> CustInvc, gorjana-chain-pairs.xml), so a
+         completed item is pending, not open, until it has had that long to bill. -->
+    <darpan.audit.AuditCheck checkId="GORJANA_CHK_COMPLETED_BILLED" companyUserGroupId="GORJANA" checkCode="completed-not-billed"
+            label="HotWax completed items against NetSuite billed lines" savedRunId="GORJANA_OMS_NS_LINE_RS"
+            file1RecordType="orderItem" file2RecordType="salesOrderLine" graceDays="4"
+            matchedBy="OMS order id + item seq id (custbody_hc_order_id + custcol_hc_order_line_id)"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Item {recordKey} is completed in HotWax and not billed in NetSuite"
+            fixActionTemplate="Bill the NetSuite line for item {recordKey}, or sync the order if NetSuite does not have it."
+            passesWhenTemplate="NetSuite has billed the line for item {recordKey}."/>
+    <darpan.audit.AuditCheck checkId="GORJANA_CHK_LINE_LOCATION" companyUserGroupId="GORJANA" checkCode="lines-without-location"
+            label="Completed items whose NetSuite line has no location" savedRunId="GORJANA_OMS_NS_LINE_RS"
+            file1RecordType="orderItem" file2RecordType="salesOrderLine" graceDays="1"
+            matchedBy="OMS order id + item seq id (custbody_hc_order_id + custcol_hc_order_line_id)"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Item {recordKey} has no location on its NetSuite line"
+            fixActionTemplate="Set the store on the NetSuite line for item {recordKey}, then ship and bill it."
+            passesWhenTemplate="The NetSuite line for item {recordKey} has its store and is billed."/>
+    <darpan.audit.AuditCheck checkId="GORJANA_CHK_INVOICE_ETAIL" companyUserGroupId="GORJANA" checkCode="invoices-without-etail-id"
+            label="NetSuite invoices with no Etail id" savedRunId="GORJANA_INVOICE_ETAIL_RS"
+            file1RecordType="invoice" graceDays="1"
+            fixOwner="Gorjana Accounting" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Invoice {recordKey} has no Etail id"
+            fixActionTemplate="Enter the Shopify order id in the Etail Order Id field of invoice {recordKey}."
+            passesWhenTemplate="Invoice {recordKey} carries an Etail id."/>
+    <darpan.audit.AuditCheck checkId="GORJANA_CHK_CREDIT_ETAIL" companyUserGroupId="GORJANA" checkCode="credit-memos-without-etail-id"
+            label="NetSuite credit memos with no Etail id" savedRunId="GORJANA_CREDIT_ETAIL_RS"
+            file1RecordType="creditMemo" graceDays="1"
+            fixOwner="Gorjana Accounting" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Credit memo {recordKey} has no Etail id"
+            fixActionTemplate="Enter the Shopify order id in the Etail Order Id field of credit memo {recordKey}."
+            passesWhenTemplate="Credit memo {recordKey} carries an Etail id."/>
+
+    <!-- Which rows break which statement. R1 is every completed item NetSuite did not bill, whatever the reason; R3 is the
+         ones whose reason is the missing location, so such an item breaks both. -->
+    <darpan.audit.AuditStatementCheck statementId="GORJANA_R1" checkId="GORJANA_CHK_COMPLETED_BILLED" companyUserGroupId="GORJANA"
+            sequenceNum="1" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="GORJANA_R3" checkId="GORJANA_CHK_LINE_LOCATION" companyUserGroupId="GORJANA"
+            sequenceNum="1" diffTypes="MISSING_IN_FILE_2" conclusionCodes="CONC_NS_NO_LINE_LOCATION"/>
+    <darpan.audit.AuditStatementCheck statementId="GORJANA_R2" checkId="GORJANA_CHK_INVOICE_ETAIL" companyUserGroupId="GORJANA"
+            sequenceNum="1" diffTypes="FINDING" conclusionCodes="CONC_NO_ETAIL_ID"/>
+    <darpan.audit.AuditStatementCheck statementId="GORJANA_R2" checkId="GORJANA_CHK_CREDIT_ETAIL" companyUserGroupId="GORJANA"
+            sequenceNum="2" diffTypes="FINDING" conclusionCodes="CONC_NO_ETAIL_ID"/>
+
+</entity-facade-xml>

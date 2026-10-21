@@ -189,6 +189,14 @@ class AuditAutomationSmokeTests {
     }
 
     @Test
+    void aCompositeKeyReadsAsOrderSlashItemButStaysRawForClosing() {
+        Map check = [checkId: "X", headlineTemplate: "Item {recordKey} is not billed", file1RecordType: "orderItem"]
+        Map row = [type: "MISSING_IN_FILE_2", id: "M1137118\u001F01", note: "missing"]
+        assertEquals("Item M1137118/01 is not billed", AuditAutomationSupport.headline(check, row))
+        assertEquals(["M1137118/01"], AuditAutomationSupport.recordsOf(check, row, omsSource, nsSource)*.recordId)
+    }
+
+    @Test
     void aFailureMessageIsSanitizedBeforeTheLedgerStoresIt() {
         AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-10-14", [], []), omsSource, nsSource,
                 [recordCount: 1], null, null, new IllegalStateException("NetSuite 401 for apiToken=sk_live_secret, retry"))

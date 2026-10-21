@@ -241,15 +241,15 @@ class AuditAutomationSupport {
             def source = side == "FILE_1" ? file1Source : file2Source
             [systemEnumId: normalize(readField(source, "systemEnumId")),
              recordType  : normalize(side == "FILE_1" ? check.file1RecordType : check.file2RecordType) ?: "record",
-             recordId    : row.id as String]
+             recordId    : AuditReportAssembler.displayKey(row.id as String)]
         }.findAll { it.systemEnumId }
     }
 
     /** The check's headline template filled from the row, else the row's own note; one line, at most 120 characters. */
     static String headline(Map check, Map row) {
         String filled = AuditReportAssembler.fillTemplate(check.headlineTemplate as String,
-                [recordKey: row.id as String, note: normalize(row.note), type: row.type as String])
-        String text = filled ?: "${row.id}: ${normalize(row.note) ?: row.type}".toString()
+                [recordKey: AuditReportAssembler.displayKey(row.id as String), note: normalize(row.note), type: row.type as String])
+        String text = filled ?: "${AuditReportAssembler.displayKey(row.id as String)}: ${normalize(row.note) ?: row.type}".toString()
         text = text.replaceAll(/\s+/, " ").trim().replaceAll(/\.+$/, "")
         return text.length() > 120 ? text.take(119).trim() + "…" : text
     }

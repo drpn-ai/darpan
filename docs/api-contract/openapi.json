@@ -4125,7 +4125,7 @@
                 "properties": {
                     
                 },
-                "description": "DAR-BE-028. Whether this environment can send password reset email (a SYSTEM EmailServer with\n            an SMTP host, and DARPAN_MAIL_FROM set). darpan-ui hides \"Forgot password?\" when it cannot."
+                "description": "DAR-BE-028. Whether this environment can send password reset email (a SYSTEM EmailServer with\n            an SMTP host). darpan-ui hides \"Forgot password?\" when it cannot."
             },
             "GetPasswordResetStatusResult": {
                 "type": "object",

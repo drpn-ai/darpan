@@ -26,6 +26,13 @@ class PasswordResetServicesSmokeTests {
     private Closure originalSendEmail
     private List<Map> sent = []
 
+    private static final String OK_ID = "PWR_OK"
+    private static final String OK_USERNAME = "pwr.ok"
+    private static final String OK_EMAIL = "pwr.ok@example.com"
+    private static final String NOEMAIL_ID = "PWR_NOEMAIL"
+    private static final String DISABLED_ID = "PWR_DISABLED"
+    private static final String CODE_FAILURE = "That code didn't work. Request a new one."
+
     @BeforeAll
     void setup() {
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
@@ -54,6 +61,14 @@ class PasswordResetServicesSmokeTests {
         }
         // The seed carries SYSTEM by id alone (EmailTemplate FKs it); a test that wants mail configured sets smtpHost.
         ec.entity.makeValue("moqui.basic.email.EmailServer").setAll([emailServerId: "SYSTEM", smtpHost: null]).createOrUpdate()
+    }
+
+    @BeforeEach
+    void resetAccounts() {
+        ec.entity.find("darpan.auth.PasswordResetCode").disableAuthz().deleteAll()
+        upsertAccount(OK_ID, OK_USERNAME, OK_EMAIL, "N")
+        upsertAccount(NOEMAIL_ID, "pwr.noemail", null, "N")
+        upsertAccount(DISABLED_ID, "pwr.disabled", "pwr.disabled@example.com", "Y")
     }
 
     @AfterEach
@@ -88,6 +103,140 @@ class PasswordResetServicesSmokeTests {
     @Test
     void notConfiguredWithoutSystemServer() {
         assertFalse(PasswordResetSupport.isEmailConfigured(ec))
+    }
+
+    // ---- Task 2: request + verify ----
+
+    @Test
+    void requestReplyIsUniform() {
+        List<List> replies = [OK_USERNAME, "pwr.noemail", "pwr.disabled", "no.such.user"].collect { String who ->
+            Map call = anon("request#PasswordReset", [usernameOrEmail: who])
+            [call.out.ok, call.out.messages, call.out.errors, call.errors]
+        }
+        assertEquals(1, replies.unique(false).size(), "replies differ: ${replies}")
+        assertEquals([true, [], [], []], replies[0])
+        assertEquals(1, sent.size(), "sends: ${sent}")
+        assertEquals(PasswordResetSupport.TEMPLATE_RESET_CODE, sent[0].templateId)
+        assertEquals(OK_EMAIL, sent[0].to)
+        assertTrue(((String) sent[0].params.code) ==~ /\d{6}/, "code: ${sent[0].params.code}")
+        assertEquals(15, sent[0].params.expiresMinutes)
+    }
+
+    @Test
+    void requestHeldToFloor() {
+        [OK_USERNAME, "pwr.noemail", "pwr.disabled", "no.such.user"].each { String who ->
+            long started = System.nanoTime()
+            anon("request#PasswordReset", [usernameOrEmail: who])
+            long elapsedMs = (System.nanoTime() - started).intdiv(1_000_000L)
+            assertTrue(elapsedMs >= 400, "${who} answered in ${elapsedMs}ms")
+        }
+    }
+
+    @Test
+    void mixedCaseLookup() {
+        anon("request#PasswordReset", [usernameOrEmail: "PWR.OK"])
+        anon("request#PasswordReset", [usernameOrEmail: OK_EMAIL.toUpperCase()])
+        assertEquals(2, sent.size(), "sends: ${sent}")
+    }
+
+    @Test
+    void newRequestEndsPrevious() {
+        anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME])
+        String first = lastCode()
+        anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME])
+        String second = lastCode()
+        if (first != second) assertFalse(verify(first).out.verified as boolean)
+        assertTrue(verify(second).out.verified as boolean)
+    }
+
+    @Test
+    void fiveWrongBurnsCode() {
+        anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME])
+        String code = lastCode()
+        String wrong = code == "000000" ? "111111" : "000000"
+        5.times { assertFalse(verify(wrong).out.verified as boolean) }
+        assertFalse(verify(code).out.verified as boolean)
+    }
+
+    @Test
+    void expiredCodeFails() {
+        anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME])
+        def row = ec.entity.find("darpan.auth.PasswordResetCode").condition("userId", OK_ID).disableAuthz().one()
+        row.thruDate = new java.sql.Timestamp(System.currentTimeMillis() - 60_000L)
+        row.update()
+        assertFalse(verify(lastCode()).out.verified as boolean)
+    }
+
+    @Test
+    void fourthRequestInHourSendsNothing() {
+        4.times { anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME]) }
+        assertEquals(3, sent.size())
+    }
+
+    @Test
+    void codeFailureTextUniform() {
+        anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME])
+        String code = lastCode()
+        String wrong = code == "000000" ? "111111" : "000000"
+        assertEquals([CODE_FAILURE], verify(wrong).errors)
+        assertEquals([CODE_FAILURE], anon("verify#PasswordResetCode", [usernameOrEmail: "no.such.user", code: code]).errors)
+        4.times { verify(wrong) }
+        assertEquals([CODE_FAILURE], verify(code).errors)
+    }
+
+    @Test
+    void pastedCodeVerifies() {
+        anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME])
+        String code = lastCode()
+        assertTrue(verify(" " + code[0..2] + " " + code[3..5] + "\n").out.verified as boolean)
+    }
+
+    @Test
+    void verifyDoesNotConsume() {
+        anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME])
+        assertTrue(verify(lastCode()).out.verified as boolean)
+        assertTrue(verify(lastCode()).out.verified as boolean)
+    }
+
+    @Test
+    void noFailedLoginCount() {
+        def before = account(OK_ID).successiveFailedLogins
+        anon("request#PasswordReset", [usernameOrEmail: OK_USERNAME])
+        String wrong = lastCode() == "000000" ? "111111" : "000000"
+        5.times { verify(wrong) }
+        assertEquals(before, account(OK_ID).successiveFailedLogins)
+    }
+
+    // ---- helpers ----
+
+    /** Call a facade service with no session, the way an anonymous /rpc/json caller reaches it. */
+    private Map anon(String verbNoun, Map params) {
+        ec.user.logoutUser()
+        ec.message.clearAll()
+        Map out = ec.service.sync().name("facade.AuthFacadeServices.${verbNoun}".toString()).parameters(params).call() ?: [:]
+        List<String> errors = new ArrayList<>(ec.message.errors)
+        ec.message.clearAll()
+        return [out: out, errors: errors]
+    }
+
+    private Map verify(String code) {
+        return anon("verify#PasswordResetCode", [usernameOrEmail: OK_USERNAME, code: code])
+    }
+
+    private String lastCode() {
+        def resets = sent.findAll { it.templateId == PasswordResetSupport.TEMPLATE_RESET_CODE }
+        assertFalse(resets.isEmpty(), "no reset code was sent")
+        return resets.last().params.code
+    }
+
+    private def account(String userId) {
+        return ec.entity.find("moqui.security.UserAccount").condition("userId", userId).useCache(false).disableAuthz().one()
+    }
+
+    private void upsertAccount(String userId, String username, String email, String disabled) {
+        ec.entity.makeValue("moqui.security.UserAccount").setAll([userId: userId, username: username,
+                userFullName: username, emailAddress: email, disabled: disabled, requirePasswordChange: "N",
+                successiveFailedLogins: 0]).createOrUpdate()
     }
 
     private String renderBody(String location, Map params) {

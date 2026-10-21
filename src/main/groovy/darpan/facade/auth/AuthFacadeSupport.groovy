@@ -295,7 +295,7 @@ class AuthFacadeSupport {
     /** Exact username first, then case-insensitive, mirroring MoquiShiroRealm.loginPrePassword. Login accepts
      *  either casing, so resolving the account any more strictly here would strand a user who signed in
      *  successfully and then could not complete the change they were just told to make. */
-    private static def findUserAccountForPasswordChange(def ec, String usernameValue) {
+    static def findUserAccountForPasswordChange(def ec, String usernameValue) {
         def finder = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
                 "self-scoped auth: resolve account for anonymous forced password change")
         def account = finder.condition("username", usernameValue).one()

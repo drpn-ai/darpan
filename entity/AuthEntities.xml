@@ -90,4 +90,30 @@
             <key-map field-name="createdByUserId" related-field-name="userId"/>
         </relationship>
     </entity>
+
+    <entity entity-name="PasswordResetCode" package="darpan.auth" use="configuration">
+        <description>DAR-BE-028 — one emailed password-reset code. Deliberately NOT a moqui.security.UserAuthcFactor:
+            MoquiShiroRealm treats any live UserAuthcFactor as a required second factor, so a pending reset code
+            stored there would refuse the account's correct password at sign-in until it expired.
+            Global, not tenant-scoped: an account and its credentials belong to no tenant.</description>
+        <field name="resetCodeId" type="id" is-pk="true"/>
+        <field name="userId" type="id" not-null="true"/>
+        <field name="purposeEnumId" type="id"/>
+        <field name="codeHash" type="text-medium"><description>Hash of the code with codeSalt; the code itself is never stored.</description></field>
+        <field name="codeSalt" type="text-short"><description>Random per row, unlike the framework's fixed single-use salt.</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"><description>Expiry; also set to now when the code is replaced or burned.</description></field>
+        <field name="usedDate" type="date-time"><description>Set once the code has reset the password.</description></field>
+        <field name="failedAttempts" type="number-integer" default="0"/>
+        <field name="requestIp" type="text-short"><description>Client IP of the request, for the per-IP cap.</description></field>
+
+        <relationship type="one-nofk" related="moqui.security.UserAccount" short-alias="user">
+            <description>No FK in order to allow externally authenticated users.</description>
+        </relationship>
+        <relationship type="one" title="ResetCodePurpose" related="moqui.basic.Enumeration" short-alias="purposeEnum">
+            <key-map field-name="purposeEnumId"/>
+        </relationship>
+        <index name="PWDRST_USER_FROM"><index-field name="userId"/><index-field name="fromDate"/></index>
+        <index name="PWDRST_IP_FROM"><index-field name="requestIp"/><index-field name="fromDate"/></index>
+    </entity>
 </entities>

@@ -522,6 +522,73 @@
         </actions>
     </service>
 
+    <service verb="request" noun="PasswordReset" allow-remote="true" authenticate="anonymous-all">
+        <description>DAR-BE-028. Email a 6-digit password reset code to the account's email on file. The reply is
+            identical, in content and in time, whether a code was sent or not (no such account, disabled, no email
+            on file, over the hourly limit), so it reveals nothing about which accounts exist. The code expires in
+            15 minutes; requesting again replaces it.</description>
+        <in-parameters>
+            <parameter name="usernameOrEmail" required="true">
+                <description>Username (matched exactly, then case-insensitively, as login does) or the account's email.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean">
+                <description>True when the call completed without facade errors.</description>
+            </parameter>
+            <parameter name="messages" type="List">
+                <description>Informational messages; always empty for this service.</description>
+                <parameter name="message"/>
+            </parameter>
+            <parameter name="errors" type="List">
+                <description>Always empty: every outcome gets the same reply.</description>
+                <parameter name="error"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="requestResult" from="darpan.facade.auth.PasswordResetSupport.requestPasswordReset(ec, usernameOrEmail)"/>
+            <set field="ok" from="requestResult.ok"/>
+            <set field="messages" from="requestResult.messages"/>
+            <set field="errors" from="requestResult.errors"/>
+        </actions>
+    </service>
+
+    <service verb="verify" noun="PasswordResetCode" allow-remote="true" authenticate="anonymous-all">
+        <description>DAR-BE-028. Check an emailed reset code without using it up, so darpan-ui can confirm it before
+            asking for the new password. Five wrong guesses end the code. Wrong guesses never count as failed logins.</description>
+        <in-parameters>
+            <parameter name="usernameOrEmail" required="true">
+                <description>The same value the code was requested with.</description>
+            </parameter>
+            <parameter name="code" required="true">
+                <description>The emailed code; spaces and other non-digits are ignored.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean">
+                <description>True when the call completed without facade errors.</description>
+            </parameter>
+            <parameter name="messages" type="List">
+                <description>Informational messages; always empty for this service.</description>
+                <parameter name="message"/>
+            </parameter>
+            <parameter name="errors" type="List">
+                <description>One message for every failure (no account, no live code, wrong, expired, used up): That code didn't work. Request a new one.</description>
+                <parameter name="error"/>
+            </parameter>
+            <parameter name="verified" type="Boolean">
+                <description>True when the code is live and correct for the account.</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="verifyResult" from="darpan.facade.auth.PasswordResetSupport.verifyPasswordResetCode(ec, usernameOrEmail, code)"/>
+            <set field="ok" from="verifyResult.ok"/>
+            <set field="messages" from="verifyResult.messages"/>
+            <set field="errors" from="verifyResult.errors"/>
+            <set field="verified" from="verifyResult.verified"/>
+        </actions>
+    </service>
+
     <service verb="logout" noun="Session" allow-remote="true" authenticate="anonymous-all">
         <description>Revoke the login-key token from the current request (header or cookie) and end the caller's own session only.
             Other active sessions on the same UserAccount — including other people on a shared login — are not affected;

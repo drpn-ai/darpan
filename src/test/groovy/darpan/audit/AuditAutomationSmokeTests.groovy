@@ -189,6 +189,21 @@ class AuditAutomationSmokeTests {
     }
 
     @Test
+    void aFailureMessageIsSanitizedBeforeTheLedgerStoresIt() {
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-10-14", [], []), omsSource, nsSource,
+                [recordCount: 1], null, null, new IllegalStateException("NetSuite 401 for apiToken=sk_live_secret, retry"))
+        String readReason = reads(checkRun("2026-10-14").checkRunId as String)[1].reason as String
+        assertFalse(readReason.contains("sk_live_secret"), readReason)
+        assertTrue(readReason.contains("apiToken=***"), readReason)
+
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-10-15", [], []), omsSource, nsSource,
+                [recordCount: 1], [recordCount: 1], null, new IllegalStateException("password: hunter2 " + ("x" * 2000)))
+        String notRun = checkRun("2026-10-15").reason as String
+        assertFalse(notRun.contains("hunter2"), notRun.take(80))
+        assertTrue(notRun.length() <= 1000, "length ${notRun.length()}")
+    }
+
+    @Test
     void theRunsOwnErrorsSurviveTheLedgerWrite() {
         ec.message.addError("the run's own error")
         AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-10-20", [], []), omsSource, nsSource,

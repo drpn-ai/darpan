@@ -15,6 +15,10 @@ import java.time.ZoneId
 
 import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.readField
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.sanitizeErrorDetail
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.sanitizeErrorMessage
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.sanitizeText
+import static darpan.reconciliation.automation.AutomationRuntimeSupport.truncate
 
 /**
  * DAR-BE-092. The scheduled side of an audit run: an automation that runs an audit's checks (AuditCheck.automationId)
@@ -39,6 +43,8 @@ class AuditAutomationSupport {
 
     private static final Logger logger = LoggerFactory.getLogger(AuditAutomationSupport.class)
     private static final String LEDGER = "audit.AuditLedgerServices"
+    /** The ledger's reason columns are text-intermediate (1023). */
+    private static final int REASON_MAX = 1000
     private static final String WHY = "audit run hook on a scheduled thread: explicit companyUserGroupId condition applied"
 
     /** The audit checks this automation runs; empty when it feeds no audit. */
@@ -74,7 +80,7 @@ class AuditAutomationSupport {
         if (ec.message.hasError()) {
             String errors = ec.message.errorsString
             ec.message.clearErrors()
-            throw new IllegalStateException("Audit ${audit.auditCode}: ${errors}")
+            throw new IllegalStateException("Audit ${audit.auditCode}: ${sanitizeText(errors)}")
         }
         return ((out.runs ?: []) as List<Map>).withIndex().collect { Map run, int index ->
             Timestamp start = Timestamp.from((run.windowFromDate as Date).toLocalDate().atStartOfDay(zone).toInstant())
@@ -119,14 +125,14 @@ class AuditAutomationSupport {
             Timestamp now = new Timestamp(System.currentTimeMillis())
             List<Map> reads = sourceReads(file1Source, file2Source, file1Result, file2Result, failure, now)
             String notRunReason = failure != null && file1Result != null && file2Result != null ?
-                    "The compare failed: ${failure.message ?: failure.class.simpleName}".toString() : null
+                    truncate("The compare failed: ${sanitizeErrorMessage(failure)}".toString(), REASON_MAX) : null
             File diff = reconcileResult && failure == null ? AutomationExecutionSupport.resolveDiffFile(ec, reconcileResult) : null
             List<String> examined = readKeys(window.auditFile1KeysOut as String) + readKeys(window.auditFile2KeysOut as String)
             checks.each { Map check ->
                 recordCheck(ec, tenantId, check, window, reads, notRunReason, diff, file1Source, file2Source, examined.unique(), now)
             }
         } catch (Exception e) {
-            logger.error("Audit ledger write failed for automation ${readField(automation, 'automationId')} window ${window.auditPeriod}: ${e.message}", e)
+            logger.error("Audit ledger write failed for automation ${readField(automation, 'automationId')} window ${window.auditPeriod}: ${sanitizeErrorDetail(e)}")
         } finally {
             ec.message.clearErrors()
             priorErrors.each { ec.message.addError(it) }
@@ -149,7 +155,7 @@ class AuditAutomationSupport {
     private static Map call(def ec, String serviceName, Map params) {
         Map out = AutomationExecutionSupport.dispatchInternalService(ec, serviceName, params)
         if (ec.message.hasError()) {
-            logger.error("Audit ledger ${serviceName} for check ${params.checkId} (${params.period}) refused: ${ec.message.errorsString}")
+            logger.error("Audit ledger ${serviceName} for check ${params.checkId} (${params.period}) refused: ${sanitizeText(ec.message.errorsString)}")
             ec.message.clearErrors()
             return null
         }
@@ -159,7 +165,7 @@ class AuditAutomationSupport {
     /** One read per side, as record#CheckRun takes them. */
     static List<Map> sourceReads(def file1Source, def file2Source, Map file1Result, Map file2Result, Throwable failure,
                                  Timestamp now) {
-        String why = failure ? (failure.message ?: failure.class.simpleName) : null
+        String why = failure ? truncate(sanitizeErrorMessage(failure), REASON_MAX) : null
         String system1 = normalize(readField(file1Source, "systemEnumId"))
         String system2 = normalize(readField(file2Source, "systemEnumId"))
         List<Map> reads = []
@@ -178,7 +184,7 @@ class AuditAutomationSupport {
         boolean partial = result.partial == true
         return [systemEnumId: systemEnumId, statusEnumId: partial ? "AUDSR_PARTIAL" : "AUDSR_COMPLETE",
                 recordCount: result.recordCount != null ? (result.recordCount as Long) : null, readStamp: now,
-                reason: partial ? (normalize(result.partialReason) ?: "The connector reported a partial read.") : null]
+                reason: partial ? (truncate(sanitizeText(normalize(result.partialReason)), REASON_MAX) ?: "The connector reported a partial read.") : null]
     }
 
     /**

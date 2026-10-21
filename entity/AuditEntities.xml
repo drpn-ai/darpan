@@ -43,6 +43,29 @@
         </index>
     </entity>
 
+    <entity entity-name="AuditPeriodExtension" package="darpan.audit" use="configuration">
+        <description>DAR-BE-091. A user's ask that one ended period of an audit keeps running: each morning through
+            continueThruDate, that period's checks re-read the whole period beside the new period's own run, so its open
+            findings can still close. No row: the period stops at its last day and its findings stay as they are.</description>
+        <field name="auditId" type="id" is-pk="true"/>
+        <field name="period" type="text-short" is-pk="true">
+            <description>The period kept running, in the audit's period form: 2026-10 (month), 2026-Q4, 2026-10-14 (day).</description>
+        </field>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="continueThruDate" type="date" not-null="true">
+            <description>The last morning the period still runs, after the period's own last day.</description>
+        </field>
+        <field name="requestedByUserId" type="id"/>
+        <field name="requestedStamp" type="date-time"/>
+        <relationship type="one" related="darpan.audit.Audit" fk-name="AUDPX_AUDIT">
+            <key-map field-name="auditId"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUDPX_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <index name="AUDPX_TENANT"><index-field name="companyUserGroupId"/></index>
+    </entity>
+
     <entity entity-name="AuditStatement" package="darpan.audit" use="configuration">
         <description>One thing a tenant needs to be true at month end, in the tenant's own words, e.g. gorjana's
             R4 "Every refund we give a customer is booked in NetSuite at the same amount...".</description>
@@ -184,6 +207,10 @@
         <field name="recordKey" type="text-medium" not-null="true">
             <description>The check's key for the record, e.g. the OMS return id; stable across mornings.</description>
         </field>
+        <field name="period" type="text-short" not-null="true">
+            <description>DAR-BE-091. The period whose run found it, e.g. 2026-10: each period of an audit is its own run and
+                report, and an extended October keeps running beside November.</description>
+        </field>
         <field name="stateEnumId" type="id" not-null="true">
             <description>AuditFindingState: AUDFS_PENDING inside the check's grace age, AUDFS_OPEN after it, AUDFS_FIXED
                 once a complete check looked at the record and no longer reported it.</description>
@@ -257,6 +284,7 @@
             <index-field name="companyUserGroupId"/>
             <index-field name="checkId"/>
             <index-field name="statementId"/>
+            <index-field name="period"/>
             <index-field name="recordKey"/>
         </index>
         <index name="AUDF_TENANT_STATE">
@@ -352,13 +380,17 @@
          and the statements a bad read affects are not stored: they come from the reads' recordCount and the
          statement-to-check join. -->
     <entity entity-name="AuditCheckRun" package="darpan.audit" use="transactional">
-        <description>One check on one morning. A second run the same morning replaces the first (unique on tenant,
-            check and reportDate), so the report always shows the latest run.</description>
+        <description>One check on one morning for one period. A second run the same morning replaces the first (unique on
+            tenant, check, period and reportDate), so the report always shows the latest run.</description>
         <field name="checkRunId" type="id" is-pk="true"/>
         <field name="companyUserGroupId" type="id" not-null="true"/>
         <field name="checkId" type="id" not-null="true"/>
         <field name="reportDate" type="date" not-null="true">
             <description>The morning the check ran, as a tenant calendar day.</description>
+        </field>
+        <field name="period" type="text-short" not-null="true">
+            <description>DAR-BE-091. The period this run checked, e.g. 2026-10. On Nov 3 an extended October and November
+                are two runs of one check.</description>
         </field>
         <field name="windowFromDate" type="date" not-null="true">
             <description>DAR-BE-091. First day the check's window covered (tenant calendar day): the start of the audit's
@@ -393,6 +425,7 @@
         <index name="AUDCR_TENANT_DAY" unique="true">
             <index-field name="companyUserGroupId"/>
             <index-field name="checkId"/>
+            <index-field name="period"/>
             <index-field name="reportDate"/>
         </index>
     </entity>

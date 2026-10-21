@@ -30,6 +30,9 @@
             <parameter name="reportDate" type="Date" required="true">
                 <description>The morning the check ran, as a tenant calendar day.</description></parameter>
             <parameter name="checkStamp" type="Timestamp" default="ec.user.nowTimestamp"/>
+            <parameter name="period">
+                <description>DAR-BE-091. The period whose run this is, e.g. 2026-10 on Nov 3 while October is extended. Blank:
+                    the report day's own period. A past period must still be running (extended).</description></parameter>
             <parameter name="findings" type="List">
                 <description>One Map per (statement, record): statementCode, recordKey, headline (all required);
                     ruleText, expectedAmount, actualAmount, currencyUomId, expectedSource, actualSource,
@@ -46,6 +49,10 @@
         <actions>
             <service-call name="audit.AuditLedgerServices.get#TenantCheck" in-map="[companyUserGroupId:companyUserGroupId, checkId:checkId]" out-map="tenantCheck"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <set field="runWindow" from="darpan.audit.AuditReportAssembler.resolveCheckRun(ec, companyUserGroupId, tenantCheck.auditIds, reportDate.toLocalDate(), period)"/>
+            <if condition="runWindow.error">
+                <return error="true" message="Audit check ${checkId}: ${runWindow.error}"/></if>
+            <set field="period" from="runWindow.period"/>
             <set field="graceDays" from="(tenantCheck.check.graceDays ?: 0) as int"/>
             <set field="statementIdByCode" from="tenantCheck.statementIdByCode"/>
             <set field="findings" from="findings ?: []"/>
@@ -78,6 +85,7 @@
                     <econdition field-name="companyUserGroupId"/>
                     <econdition field-name="checkId"/>
                     <econdition field-name="statementId"/>
+                    <econdition field-name="period"/>
                     <econdition field-name="recordKey" from="f.recordKey"/>
                 </entity-find>
                 <set field="eventTypeEnumId" from="null"/>
@@ -106,6 +114,7 @@
                         <set field="finding.checkId" from="checkId"/>
                         <set field="finding.statementId" from="statementId"/>
                         <set field="finding.recordKey" from="f.recordKey"/>
+                        <set field="finding.period" from="period"/>
                         <set field="finding.firstFoundDate" from="reportDate"/>
                         <set field="finding.lastSeenDate" from="reportDate"/>
                         <set field="finding.timesSeen" from="1"/>
@@ -180,6 +189,9 @@
             <parameter name="checkId" required="true"/>
             <parameter name="reportDate" type="Date" required="true"/>
             <parameter name="checkStamp" type="Timestamp" default="ec.user.nowTimestamp"/>
+            <parameter name="period">
+                <description>DAR-BE-091. The period whose run this is, e.g. 2026-10 on Nov 3 while October is extended. Blank:
+                    the report day's own period. A past period must still be running (extended).</description></parameter>
             <parameter name="checkStatusEnumId" required="true">
                 <description>AuditCheckStatus of this morning's check; only AUDCS_RAN closes anything.</description></parameter>
             <parameter name="examinedRecordKeys" type="List">
@@ -191,8 +203,13 @@
             <parameter name="skippedReason"/>
         </out-parameters>
         <actions>
-            <service-call name="audit.AuditLedgerServices.get#TenantCheck" in-map="[companyUserGroupId:companyUserGroupId, checkId:checkId]"/>
+            <service-call name="audit.AuditLedgerServices.get#TenantCheck" in-map="[companyUserGroupId:companyUserGroupId, checkId:checkId]"
+                    out-map="tenantCheck"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <set field="runWindow" from="darpan.audit.AuditReportAssembler.resolveCheckRun(ec, companyUserGroupId, tenantCheck.auditIds, reportDate.toLocalDate(), period)"/>
+            <if condition="runWindow.error">
+                <return error="true" message="Audit check ${checkId}: ${runWindow.error}"/></if>
+            <set field="period" from="runWindow.period"/>
             <set field="closedFindingIds" from="[]"/>
             <set field="closedCount" from="0" type="Integer"/>
             <if condition="checkStatusEnumId != 'AUDCS_RAN'">
@@ -203,6 +220,7 @@
             <entity-find entity-name="darpan.audit.AuditFinding" list="candidates" for-update="true">
                 <econdition field-name="companyUserGroupId"/>
                 <econdition field-name="checkId"/>
+                <econdition field-name="period"/>
                 <econdition field-name="stateEnumId" operator="in" from="['AUDFS_OPEN', 'AUDFS_PENDING']"/>
                 <econdition field-name="lastSeenDate" operator="less" from="reportDate"/>
             </entity-find>
@@ -235,11 +253,14 @@
             <parameter name="companyUserGroupId" required="true"/>
             <parameter name="checkId" required="true"/>
             <parameter name="reportDate" type="Date" required="true"/>
+            <parameter name="period">
+                <description>DAR-BE-091. The period whose run this is, e.g. 2026-10 on Nov 3 while October is extended. Blank:
+                    the report day's own period. A past period must still be running (extended).</description></parameter>
             <parameter name="windowFromDate" type="Date">
-                <description>First day the window covered. Blank: the start of the period of the check's audit (the 1st
-                    for a monthly audit), so the run re-examines every open finding of the period.</description></parameter>
+                <description>First day the window covered. Blank: the period's first day (the 1st for a monthly audit), so
+                    the run re-examines every open finding of the period.</description></parameter>
             <parameter name="windowThruDate" type="Date">
-                <description>Last day the window covered, inclusive. Blank: reportDate.</description></parameter>
+                <description>Last day the window covered, inclusive. Blank: reportDate, or a past period's last day.</description></parameter>
             <parameter name="runStamp" type="Timestamp" default="ec.user.nowTimestamp"/>
             <parameter name="notRunReason">
                 <description>Set when the check did not run (no saved run configured, the run errored before
@@ -250,6 +271,7 @@
         </in-parameters>
         <out-parameters>
             <parameter name="checkRunId"/>
+            <parameter name="period"/>
             <parameter name="checkStatusEnumId"/>
             <parameter name="reason"/>
         </out-parameters>
@@ -258,20 +280,12 @@
                     out-map="tenantCheck"/>
             <if condition="ec.message.hasError()"><return/></if>
             <set field="sourceReads" from="sourceReads ?: []"/>
-            <set field="windowThruDate" from="windowThruDate ?: reportDate"/>
-            <if condition="!windowFromDate">
-                <!-- The period comes from the check's audit; a check serving audits of different periods must be told. -->
-                <entity-find entity-name="darpan.audit.Audit" list="checkAudits">
-                    <econdition field-name="auditId" operator="in" from="tenantCheck.auditIds"/>
-                    <econdition field-name="companyUserGroupId"/>
-                </entity-find>
-                <set field="periodEnumIds" from="checkAudits*.periodEnumId.unique()"/>
-                <if condition="periodEnumIds.size() != 1">
-                    <return error="true" message="Audit check ${checkId} serves audits of ${periodEnumIds.size() ?: 'no'} periods; pass windowFromDate"/></if>
-                <entity-find-one entity-name="moqui.basic.Enumeration" value-field="periodEnum" cache="true">
-                    <field-map field-name="enumId" from="periodEnumIds[0]"/></entity-find-one>
-                <set field="windowFromDate" from="java.sql.Date.valueOf(darpan.audit.AuditReportAssembler.periodStart(windowThruDate.toLocalDate(), periodEnum?.enumCode))"/>
-            </if>
+            <set field="runWindow" from="darpan.audit.AuditReportAssembler.resolveCheckRun(ec, companyUserGroupId, tenantCheck.auditIds, reportDate.toLocalDate(), period)"/>
+            <if condition="runWindow.error">
+                <return error="true" message="Audit check ${checkId}: ${runWindow.error}"/></if>
+            <set field="period" from="runWindow.period"/>
+            <set field="windowFromDate" from="windowFromDate ?: java.sql.Date.valueOf(runWindow.from)"/>
+            <set field="windowThruDate" from="windowThruDate ?: java.sql.Date.valueOf(runWindow.thru)"/>
             <if condition="windowFromDate &gt; windowThruDate">
                 <return error="true" message="Audit check ${checkId}: window ${windowFromDate} to ${windowThruDate} runs backwards"/></if>
 
@@ -310,6 +324,7 @@
             <entity-find entity-name="darpan.audit.AuditCheckRun" list="existingRuns" for-update="true">
                 <econdition field-name="companyUserGroupId"/>
                 <econdition field-name="checkId"/>
+                <econdition field-name="period"/>
                 <econdition field-name="reportDate"/>
             </entity-find>
             <if condition="existingRuns">
@@ -323,6 +338,7 @@
                     <set field="checkRun.companyUserGroupId" from="companyUserGroupId"/>
                     <set field="checkRun.checkId" from="checkId"/>
                     <set field="checkRun.reportDate" from="reportDate"/>
+                    <set field="checkRun.period" from="period"/>
                 </else>
             </if>
             <set field="checkRun.windowFromDate" from="windowFromDate"/>

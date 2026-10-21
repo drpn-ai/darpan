@@ -1,11 +1,13 @@
 {
   "schema": "darpan.audit.report/v1",
-  "about": "Month close audit for Gorjana. Each finding is one record that breaks one of the audit's statements R1 to R17.",
+  "about": "Month close audit for Gorjana, 2026-10. Each finding is one record that breaks one of the audit's statements R1 to R17.",
   "report": {
     "tenant": { "id": "GORJANA", "name": "Gorjana", "timeZone": "America/Los_Angeles" },
     "audit": { "id": "month-close", "name": "Month close", "period": "month" },
     "date": "2026-10-08",
     "window": { "from": "2026-10-01", "thru": "2026-10-08" },
+    "running": true,
+    "extendedThru": null,
     "period": "2026-10",
     "generatedAt": "2026-10-08T06:12:40-07:00"
   },

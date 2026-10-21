@@ -4,6 +4,7 @@
     "id": "F-20761",
     "headline": "Credit memo is 0.01 less than the refund for return M258615",
     "audit": { "id": "month-close", "name": "Month close" },
+    "period": "2026-10",
     "category": { "id": "refundsAndCredits", "label": "Refunds and credits" },
     "statement": {
       "id": "R4",

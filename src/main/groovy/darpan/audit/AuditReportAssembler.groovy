@@ -7,6 +7,9 @@ import java.math.RoundingMode
 import java.sql.Date
 import java.sql.Timestamp
 import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeParseException
+import java.util.regex.Matcher
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
@@ -65,8 +68,13 @@ class AuditReportAssembler {
     // The report
     // ---------------------------------------------------------------------------------------------------------
 
-    /** The report for one audit on one morning, or null when the tenant or the audit (in that tenant) does not exist. */
-    static Map<String, Object> assembleReport(def ec, String tenantId, String auditId, Date reportDate, Timestamp generatedStamp) {
+    /**
+     * The report for one period of one audit as of one morning (DAR-BE-091: each period is its own run and report; a
+     * blank period is the morning's own). Null when the tenant or the audit (in that tenant) does not exist; throws
+     * IllegalArgumentException when the period does not parse or has not started by that morning.
+     */
+    static Map<String, Object> assembleReport(def ec, String tenantId, String auditId, Date reportDate, String period,
+                                              Timestamp generatedStamp) {
         Map tenant = loadTenant(ec, tenantId)
         if (tenant == null) return null
         Map audit = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.Audit", "auditId", auditId, tenantId, WHY)?.getMap()
@@ -74,6 +82,10 @@ class AuditReportAssembler {
         ZoneId zone = tenant.zone as ZoneId
         LocalDate day = reportDate.toLocalDate()
         Map<String, String> codes = enumCodes(ec)
+        String periodCode = codes[audit.periodEnumId as String]
+        period = period ?: periodOf(day, periodCode)
+        Map window = periodWindow(ec, tenantId, audit, period, day)
+        if (window == null) throw new IllegalArgumentException("${period} is not a ${periodCode} period of audit ${audit.auditCode} that has started by ${day}")
 
         List<Map> categories = ec.entity.find("moqui.basic.Enumeration").condition("enumTypeId", "AuditCategory")
                 .orderBy("sequenceNum").useCache(true).list()*.getMap()
@@ -89,7 +101,7 @@ class AuditReportAssembler {
         Set<String> configuredCheckIds = checkIdsByStatement.values().flatten().toSet() as Set<String>
 
         // This morning's runs and their reads.
-        Map<String, Map> runByCheck = tenantRows(ec, "darpan.audit.AuditCheckRun", tenantId)
+        Map<String, Map> runByCheck = tenantRows(ec, "darpan.audit.AuditCheckRun", tenantId).condition("period", period)
                 .condition("reportDate", reportDate).list().collectEntries { [(it.checkId): it.getMap()] }
         Map<String, List<Map>> readsByRun = [:].withDefault { [] }
         if (runByCheck) {
@@ -102,11 +114,13 @@ class AuditReportAssembler {
         configuredCheckIds.each { String checkId ->
             Map run = runByCheck[checkId]
             checkStatus[checkId] = (run?.statusEnumId ?: NOT_RUN) as String
-            checkReason[checkId] = run ? (run.reason as String) : "The check did not run on the morning of ${day}.".toString()
+            checkReason[checkId] = run ? (run.reason as String) : (window.running ?
+                    "The check did not run on the morning of ${day}." :
+                    "The ${period} audit ended on ${window.extendedThru ?: window.end} and was not extended to ${day}.").toString()
         }
 
         // The ledger as of the end of the report date.
-        List<Map> ledger = findingsAsOf(ec, tenantId, statementIds, day, zone, checksById)
+        List<Map> ledger = findingsAsOf(ec, tenantId, statementIds, period, day, zone, checksById)
         Map<String, List<Map>> ledgerByStatement = ledger.groupBy { it.row.statementId as String }
 
         Map<String, Map> statementJsonById = [:]
@@ -176,18 +190,18 @@ class AuditReportAssembler {
         String name = tenant.name as String
         List<String> allCodes = statements*.statementCode as List<String>
         String range = allCodes.size() > 1 ? " ${allCodes.first()} to ${allCodes.last()}" : (allCodes ? " ${allCodes[0]}" : "")
-        String periodCode = codes[audit.periodEnumId as String]
-        // DAR-BE-091: the audit reconciles its period to date, the report day included.
-        LocalDate windowFrom = periodStart(day, periodCode)
 
         return [schema    : REPORT_SCHEMA,
-                about     : "${audit.auditName} audit for ${name}. Each finding is one record that breaks one of the audit's statements${range}.".toString(),
-                report    : [tenant     : [id: tenantId, name: name, timeZone: zone.id],
-                             audit      : [id: audit.auditCode, name: audit.auditName, period: periodCode],
-                             date       : day.toString(),
-                             window     : [from: windowFrom.toString(), thru: day.toString()],
-                             period     : periodOf(day, periodCode),
-                             generatedAt: isoDateTime(generatedStamp, zone)],
+                about     : "${audit.auditName} audit for ${name}, ${period}. Each finding is one record that breaks one of the audit's statements${range}.".toString(),
+                report    : [tenant      : [id: tenantId, name: name, timeZone: zone.id],
+                             audit       : [id: audit.auditCode, name: audit.auditName, period: periodCode],
+                             date        : day.toString(),
+                             period      : period,
+                             // DAR-BE-091: the period to date, the report day included; a past period's whole span.
+                             window      : [from: (window.from as LocalDate).toString(), thru: (window.thru as LocalDate).toString()],
+                             running     : window.running,
+                             extendedThru: (window.extendedThru as LocalDate)?.toString(),
+                             generatedAt : isoDateTime(generatedStamp, zone)],
                 health    : health,
                 summary   : summary,
                 categories: categoryJson]
@@ -255,8 +269,8 @@ class AuditReportAssembler {
      * date"), with pending vs open decided by the age at that sighting, as record#CheckFindings decided it.
      * Fixed findings are kept only when they became fixed on {@code day}.
      */
-    private static List<Map> findingsAsOf(def ec, String tenantId, Set<String> statementIds, LocalDate day, ZoneId zone,
-                                          Map<String, Map> checksById) {
+    private static List<Map> findingsAsOf(def ec, String tenantId, Set<String> statementIds, String period, LocalDate day,
+                                          ZoneId zone, Map<String, Map> checksById) {
         if (!statementIds) return []
         Date dayDate = Date.valueOf(day)
         // A day of margin on the closed stamp; the events decide.
@@ -264,6 +278,7 @@ class AuditReportAssembler {
         def cf = ec.entity.conditionFactory
         List<Map> rows = tenantRows(ec, "darpan.audit.AuditFinding", tenantId)
                 .condition("statementId", EntityCondition.IN, statementIds as List)
+                .condition("period", period)
                 .condition("firstFoundDate", EntityCondition.LESS_THAN_EQUAL_TO, dayDate)
                 .condition(cf.makeCondition([
                         cf.makeCondition("stateEnumId", EntityCondition.IN, [OPEN, PENDING]),
@@ -383,6 +398,7 @@ class AuditReportAssembler {
                         id       : f.findingId,
                         headline : f.headline,
                         audit    : [id: audit?.auditCode, name: audit?.auditName],
+                        period   : f.period,
                         category : [id: category?.enumCode, label: category?.description],
                         statement: [id: statement.statementCode, text: statement.statementText, weight: codes[statement.weightEnumId as String]],
                         check    : [id: check.checkCode, label: check.label, matchedBy: check.matchedBy ?: null],
@@ -520,6 +536,86 @@ class AuditReportAssembler {
     private static Map<String, String> enumCodes(def ec) {
         return ec.entity.find("moqui.basic.Enumeration").condition("enumTypeId", "in", ENUM_TYPES).useCache(true).list()
                 .collectEntries { [(it.enumId): it.enumCode] }
+    }
+
+    /** [first day, last day] of a period written in the audit's form (2026-10-14, 2026-10, 2026-Q4); null when it does not parse. */
+    static List<LocalDate> periodBounds(String period, String periodCode) {
+        if (!period) return null
+        try {
+            switch (periodCode) {
+                case "day":
+                    LocalDate d = LocalDate.parse(period)
+                    return [d, d]
+                case "quarter":
+                    Matcher m = period =~ /^(\d{4})-Q([1-4])$/
+                    if (!m.matches()) return null
+                    LocalDate start = LocalDate.of(m.group(1) as int, ((m.group(2) as int) - 1) * 3 + 1, 1)
+                    return [start, start.plusMonths(3).minusDays(1)]
+                default:
+                    YearMonth ym = YearMonth.parse(period)
+                    return [ym.atDay(1), ym.atEndOfMonth()]
+            }
+        } catch (DateTimeParseException ignored) {
+            return null
+        }
+    }
+
+    /**
+     * DAR-BE-091. One period of an audit as of one morning: its window (first day to the earlier of its last day and
+     * the morning), the extension a user asked for, and whether the period still runs that morning — inside its own
+     * span, or after it while extended. Null when the period does not parse or has not started by that morning.
+     */
+    static Map periodWindow(def ec, String tenantId, Map audit, String period, LocalDate day) {
+        String periodCode = enumCodes(ec)[audit.periodEnumId as String]
+        List<LocalDate> bounds = periodBounds(period, periodCode)
+        if (bounds == null || day < bounds[0]) return null
+        def extension = tenantRows(ec, "darpan.audit.AuditPeriodExtension", tenantId).condition("auditId", audit.auditId)
+                .condition("period", period).list().find()
+        LocalDate extendedThru = (extension?.continueThruDate as Date)?.toLocalDate()
+        boolean running = day <= bounds[1] || (extendedThru != null && day <= extendedThru)
+        return [period: period, from: bounds[0], thru: day < bounds[1] ? day : bounds[1], end: bounds[1],
+                extendedThru: extendedThru, running: running]
+    }
+
+    /**
+     * DAR-BE-091. Every run an audit owes on one morning: its current period, from the period's first day to the
+     * morning, then each ended period a user extended past that morning, over the period's whole span. "Meanwhile the
+     * new month audit will start": on Nov 3 an October extended to Nov 5 and November both run.
+     */
+    static List<Map> auditRuns(def ec, String tenantId, Map audit, LocalDate day) {
+        String periodCode = enumCodes(ec)[audit.periodEnumId as String]
+        List<Map> runs = [periodWindow(ec, tenantId, audit, periodOf(day, periodCode), day)]
+        tenantRows(ec, "darpan.audit.AuditPeriodExtension", tenantId).condition("auditId", audit.auditId)
+                .condition("continueThruDate", EntityCondition.GREATER_THAN_EQUAL_TO, Date.valueOf(day))
+                .orderBy("period").list().each { ext ->
+            Map w = periodWindow(ec, tenantId, audit, ext.period as String, day)
+            if (w != null && w.end < day) runs << w
+        }
+        return runs
+    }
+
+    /**
+     * DAR-BE-091. The period and window of one check's run on one morning, for the ledger writers. A blank period is
+     * the morning's own period, which needs the check's audits to share one kind of period. A past period must still
+     * be running (extended). Returns [period, from, thru, ...] or [error: why].
+     */
+    static Map resolveCheckRun(def ec, String tenantId, List auditIds, LocalDate day, String period) {
+        List<Map> audits = auditIds ? tenantRows(ec, "darpan.audit.Audit", tenantId).condition("auditId", EntityCondition.IN, auditIds)
+                .list()*.getMap() : []
+        Map<String, String> codes = enumCodes(ec)
+        List<String> kinds = audits.collect { codes[it.periodEnumId as String] }.unique()
+        if (!period) {
+            if (kinds.size() != 1) return [error: "The check serves audits of ${kinds.size() ?: 'no'} kinds of period; pass the period".toString()]
+            period = periodOf(day, kinds[0])
+        }
+        List<Map> windows = audits.collect { periodWindow(ec, tenantId, it, period, day) }.findAll { it != null }
+        Map running = windows.find { it.running }
+        if (running != null) return running
+        if (!audits.any { periodBounds(period, codes[it.periodEnumId as String]) != null }) {
+            return [error: "${period} is not a period of the check's audits".toString()]
+        }
+        if (!windows) return [error: "Period ${period} has not started on ${day}".toString()]
+        return [error: "Period ${period} ended on ${windows[0].end} and is not extended to ${day}".toString()]
     }
 
     /**

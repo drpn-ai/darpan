@@ -63,4 +63,26 @@ class GraphQlSchemaDescriptionTests {
         assertTrue(art.types.size() > 30, "the audit types are declared (${art.types.size()})")
         assertEquals([], missing, "${missing.size()} declarations have no description")
     }
+
+    /** The built schema, generated parts too (connections, PageInfo, sort enums, id and paging arguments, scalars). */
+    @Test
+    void everythingThePublishedSchemaPrintsIsDescribed() {
+        def schema = ec.factory.getToolFactory("GraphQL").getInstance().schema
+        List<String> missing = []
+        schema.allTypesAsList.each { type ->
+            String name = type.name
+            if (name.startsWith("__") || name in ["String", "Int", "Boolean", "ID", "Float"]) return
+            if (!type.description) missing << "type ${name}"
+            // graphql-java loads through Moqui's classloader, not darpan's compile classpath: match by class name.
+            if (type.class.simpleName == "GraphQLObjectType") {
+                type.fieldDefinitions.each { f ->
+                    if (!f.description) missing << "field ${name}.${f.name}"
+                    f.arguments.each { a -> if (!a.description) missing << "argument ${name}.${f.name}(${a.name})" }
+                }
+            } else if (type.class.simpleName == "GraphQLEnumType") {
+                type.values.each { v -> if (!v.description) missing << "enum value ${name}.${v.name}" }
+            }
+        }
+        assertEquals([], missing - ["type Query"], "${missing.size()} printed items have no description")
+    }
 }

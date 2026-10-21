@@ -197,6 +197,13 @@ class AuditAutomationSmokeTests {
     }
 
     @Test
+    void aHeadlineCanNameTheRowsConclusion() {
+        Map check = [checkId: "X", headlineTemplate: "RMA {recordKey}: {conclusion}"]
+        assertEquals("RMA RMA348610: No address it came from", AuditAutomationSupport.headline(check,
+                [type: "FINDING", id: "RMA348610", note: "n", conclusionLabel: "No address it came from"]))
+    }
+
+    @Test
     void aRecordCarriesItsInternalIdAndItsStatusInItsSystemsWords() {
         Map check = [checkId: "X", file1RecordType: "return", file2RecordType: "creditMemo"]
         List systems = [[side: "FILE_1", state: "Completed"], [side: "FILE_2", state: "Credit Memo : Open"]]

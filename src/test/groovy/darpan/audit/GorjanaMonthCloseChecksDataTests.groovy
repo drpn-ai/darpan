@@ -20,6 +20,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 class GorjanaMonthCloseChecksDataTests {
 
     private static final String FILE = "GorjanaMonthCloseChecksData.xml"
+    /** DAR-BE-094: comparison 1, the returns checks (R9 so far). */
+    private static final String RETURNS = "GorjanaMonthCloseReturnsChecksData.xml"
 
     private static Path dataDir() {
         return ReconciliationSmokeTestSupport.resolveBackendRoot().resolve("runtime/component/darpan/data")
@@ -39,17 +41,25 @@ class GorjanaMonthCloseChecksDataTests {
 
     @Test
     void theFileIsTenantConfigurationNotSeed() {
-        assertEquals("darpan-tenant-config", doc(FILE).attribute("type"))
+        [FILE, RETURNS].each { assertEquals("darpan-tenant-config", doc(it).attribute("type"), it) }
     }
 
     @Test
     void everyReferenceResolves() {
-        List<Node> checks = rows(FILE, "darpan.audit.AuditCheck")
-        List<Node> links = rows(FILE, "darpan.audit.AuditStatementCheck")
-        Set<String> ruleSets = attr(rows(FILE, "darpan.rule.RuleSet") +
+        [FILE, RETURNS].each { everyReferenceResolvesIn(it) }
+        assertEquals(["GORJANA_R1", "GORJANA_R2", "GORJANA_R3"] as Set, attr(rows(FILE, "darpan.audit.AuditStatementCheck"), "statementId"),
+                "comparison 2 covers R1-R3")
+        assertEquals(["GORJANA_R9"] as Set, attr(rows(RETURNS, "darpan.audit.AuditStatementCheck"), "statementId"),
+                "comparison 1 covers R9 so far")
+    }
+
+    private static void everyReferenceResolvesIn(String file) {
+        List<Node> checks = rows(file, "darpan.audit.AuditCheck")
+        List<Node> links = rows(file, "darpan.audit.AuditStatementCheck")
+        Set<String> ruleSets = attr(rows(file, "darpan.rule.RuleSet") +
                 rows("TriSystemOrderRunsRuleSetData.xml", "darpan.rule.RuleSet"), "ruleSetId")
         Set<String> statements = attr(rows("GorjanaMonthCloseCatalogData.xml", "darpan.audit.AuditStatement"), "statementId")
-        Set<String> conclusions = attr(rows(FILE, "moqui.basic.Enumeration") +
+        Set<String> conclusions = attr(rows(file, "moqui.basic.Enumeration") +
                 rows("GorjanaConclusionRulesData.xml", "moqui.basic.Enumeration"), "enumId")
 
         checks.each { Node c ->
@@ -69,7 +79,6 @@ class GorjanaMonthCloseChecksDataTests {
                 assertTrue(conclusions.contains(code), "undeclared conclusion ${code}")
             }
         }
-        assertEquals(["GORJANA_R1", "GORJANA_R2", "GORJANA_R3"] as Set, attr(links, "statementId"), "comparison 2 covers R1-R3")
     }
 
     @Test
@@ -85,19 +94,41 @@ class GorjanaMonthCloseChecksDataTests {
     void theR2RunsReadEveryRecordSoAFixedOneCloses() {
         // A source filter runs in the getter, before the examined-keys file is written: a filtered-out record would
         // never be examined, and its finding could never close.
-        assertTrue(rows(FILE, "darpan.rule.RuleSetCompareSourceFilter").isEmpty())
-        rows(FILE, "darpan.rule.RuleSetCompareScope").each { assertEquals("EVALUATE", it.attribute("scopeMode")) }
+        [FILE, RETURNS].each { String file ->
+            assertTrue(rows(file, "darpan.rule.RuleSetCompareSourceFilter").isEmpty(), file)
+            rows(file, "darpan.rule.RuleSetCompareScope").each { assertEquals("EVALUATE", it.attribute("scopeMode"), file) }
+        }
+    }
+
+    @Test
+    void anR9RowIsAFindingWhenTheCustomerNameOrTheReturnAddressIsMissing() {
+        Map whole = [tranId: "RMA1", returnId: "M258615", customerName: "Ada Lovelace", shipAddressId: "9001"]
+        ["GORJANA_RMA_CUSTOMER_SCOPE", "GORJANA_RETURN_CREDIT_CUSTOMER_SCOPE"].each { String scope ->
+            assertEquals("UNEXPLAINED", conclude(RETURNS, scope, whole), "${scope}: name and address")
+            assertEquals("CONC_NO_CUSTOMER_NAME", conclude(RETURNS, scope, whole - [customerName: "Ada Lovelace"]), "${scope}: no name")
+            assertEquals("CONC_NO_CUSTOMER_NAME", conclude(RETURNS, scope, whole + [customerName: " "]), "${scope}: blank name")
+            assertEquals("CONC_NO_RETURN_ADDRESS", conclude(RETURNS, scope, whole - [shipAddressId: "9001"]), "${scope}: no address")
+            // A billing address is not the address it came from: its absence alone is no R9 finding (open question).
+            assertEquals("UNEXPLAINED", conclude(RETURNS, scope, whole + [billAddressId: null]), "${scope}: no billing address")
+        }
+        // A credit memo that is not a return's (no HC return id) is not R9's to judge.
+        assertEquals("UNEXPLAINED", conclude(RETURNS, "GORJANA_RETURN_CREDIT_CUSTOMER_SCOPE",
+                [tranId: "CM1", customerName: null, shipAddressId: null]))
     }
 
     private static String conclude(String scope, Map record) {
+        return conclude(FILE, scope, record)
+    }
+
+    private static String conclude(String file, String scope, Map record) {
         Closure<List<Map>> scoped = { String name ->
-            rows(FILE, name).findAll { it.attribute("compareScopeId") == scope }.collect { Node node ->
+            rows(file, name).findAll { it.attribute("compareScopeId") == scope }.collect { Node node ->
                 Map m = new LinkedHashMap(node.attributes())
                 ["sequenceNum", "conditionSeq"].each { String k -> if (m[k] != null) m[k] = Integer.valueOf(m[k] as String) }
                 m
             }
         }
-        Map<String, String> labels = rows(FILE, "moqui.basic.Enumeration")
+        Map<String, String> labels = rows(file, "moqui.basic.Enumeration")
                 .collectEntries { [(it.attribute("enumId") as String): it.attribute("description") as String] }
         List<Map> rules = RunConclusionStep.buildRules(scoped("darpan.rule.RuleSetConclusionRule"),
                 scoped("darpan.rule.RuleSetConclusionCondition"), labels)

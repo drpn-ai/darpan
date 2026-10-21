@@ -205,7 +205,8 @@ class AuditAutomationSupport {
             // type / id / note. Read either.
             Map row = [type: (raw.diffType ?: raw.type) as String, id: (raw.primaryId ?: raw.id) as String,
                        note: normalize(raw.message ?: raw.note), data: AuditAutomationSupport.rowData(raw.data),
-                       systems: raw.conclusion instanceof Map ? ((Map) raw.conclusion).systems : null]
+                       systems: raw.conclusion instanceof Map ? ((Map) raw.conclusion).systems : null,
+                       conclusionLabel: raw.conclusion instanceof Map ? normalize(((Map) raw.conclusion).label) : null]
             String type = row.type as String
             String code = (raw.conclusion instanceof Map ? ((Map) raw.conclusion).code : null) as String
             links.each { Map link ->
@@ -272,10 +273,14 @@ class AuditAutomationSupport {
         }
     }
 
-    /** The check's headline template filled from the row, else the row's own note; one line, at most 120 characters. */
+    /**
+     * The check's headline template filled from the row ({recordKey}, {note}, {type}, and {conclusion}: the row's
+     * conclusion label), else the row's own note; one line, at most 120 characters.
+     */
     static String headline(Map check, Map row) {
         String filled = AuditReportAssembler.fillTemplate(check.headlineTemplate as String,
-                [recordKey: AuditReportAssembler.displayKey(row.id as String), note: normalize(row.note), type: row.type as String])
+                [recordKey: AuditReportAssembler.displayKey(row.id as String), note: normalize(row.note), type: row.type as String,
+                 conclusion: normalize(row.conclusionLabel)])
         String text = filled ?: "${AuditReportAssembler.displayKey(row.id as String)}: ${normalize(row.note) ?: row.type}".toString()
         text = text.replaceAll(/\s+/, " ").trim().replaceAll(/\.+$/, "")
         return text.length() > 120 ? text.take(119).trim() + "…" : text

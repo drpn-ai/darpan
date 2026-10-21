@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- DAR-BE-089. The findings ledger's two writers. Only a scheduled check calls them: the external API has no
+         mutations, so nothing an agent does can found, keep or close a finding.
+
+         Tenant. A scheduled run executes as _NA_ with authz disabled and no active tenant in the user context
+         (AutomationExecutionSupport.executeAutomation), so the DARPAN_ACTIVE_COMPANY_SCOPE filter does not apply
+         here. Every find therefore carries an explicit companyUserGroupId condition, the check must belong to
+         the caller's tenant before anything is written, and no find puts the tenant beside a full primary key
+         (Moqui drops non-PK conditions on a one() by PK). authenticate="false" and allow-remote="false" as
+         sweep#RuleChildTenantStamps: internal only, and no disable-authz site is added.
+
+         Call order for one check on one morning: record#CheckFindings with what the check reported, then
+         close#ResolvedFindings with every record key the check looked at. Closing reads "not reported this
+         morning" as lastSeenDate before reportDate, so it must run after recording. -->
+
+    <service verb="record" noun="CheckFindings" authenticate="false" allow-remote="false">
+        <description>Writes one check's reported findings for one morning. A record seen for the first time becomes
+            a new finding (event found). A known open or pending finding seen on a later morning is stillOpen, and a
+            fixed one reported again is reopened with its first-found day kept. A second call on the same morning
+            refreshes the evidence and writes no event, so a rerun never double-counts. State is pending while the
+            finding is younger than the check's graceDays, open after. Records and evidence checks are replaced, so
+            they always show the latest read. Each record's systemEnumId is stored as its ROOT system, never the
+            endpoint. Every finding is validated before anything is written.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="checkId" required="true"/>
+            <parameter name="reportDate" type="Date" required="true">
+                <description>The morning the check ran, as a tenant calendar day.</description></parameter>
+            <parameter name="checkStamp" type="Timestamp" default="ec.user.nowTimestamp"/>
+            <parameter name="findings" type="List">
+                <description>One Map per (statement, record): statementCode, recordKey, headline (all required);
+                    ruleText, expectedAmount, actualAmount, currencyUomId, expectedSource, actualSource,
+                    conclusionEnumId; records [{systemEnumId, recordType, recordId, internalId, recordStatus}];
+                    checks [{label, passed (Boolean), value}].</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="findingIds" type="List"/>
+            <parameter name="foundCount" type="Integer"/>
+            <parameter name="stillOpenCount" type="Integer"/>
+            <parameter name="reopenedCount" type="Integer"/>
+            <parameter name="refreshedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <service-call name="monthclose.MonthCloseLedgerServices.get#TenantCheck" in-map="[companyUserGroupId:companyUserGroupId, checkId:checkId]" out-map="tenantCheck"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <set field="graceDays" from="(tenantCheck.check.graceDays ?: 0) as int"/>
+            <set field="statementIdByCode" from="tenantCheck.statementIdByCode"/>
+            <set field="findings" from="findings ?: []"/>
+
+            <!-- Validate everything first: a bad row writes nothing. -->
+            <iterate list="findings" entry="f">
+                <if condition="!f.statementCode || !f.recordKey || !f.headline">
+                    <return error="true" message="Every finding needs statementCode, recordKey and headline (check ${checkId})"/></if>
+                <if condition="!statementIdByCode[f.statementCode]">
+                    <return error="true" message="Check ${checkId} does not test statement ${f.statementCode}"/></if>
+                <set field="fRecords" from="f.records ?: []"/>
+                <iterate list="fRecords" entry="r">
+                    <if condition="!r.systemEnumId || !r.recordType || !r.recordId">
+                        <return error="true" message="A record of finding ${f.recordKey} needs systemEnumId, recordType and recordId"/></if>
+                    <entity-find-one entity-name="moqui.basic.Enumeration" value-field="systemEnum" cache="true">
+                        <field-map field-name="enumId" from="r.systemEnumId"/></entity-find-one>
+                    <if condition="systemEnum?.enumTypeId != 'DarpanSystemSource'">
+                        <return error="true" message="Unknown system ${r.systemEnumId} on finding ${f.recordKey}"/></if>
+                </iterate>
+            </iterate>
+
+            <set field="findingIds" from="[]"/>
+            <set field="foundCount" from="0" type="Integer"/>
+            <set field="stillOpenCount" from="0" type="Integer"/>
+            <set field="reopenedCount" from="0" type="Integer"/>
+            <set field="refreshedCount" from="0" type="Integer"/>
+            <iterate list="findings" entry="f">
+                <set field="statementId" from="statementIdByCode[f.statementCode]"/>
+                <entity-find entity-name="darpan.monthclose.MonthCloseFinding" list="existingList" for-update="true">
+                    <econdition field-name="companyUserGroupId"/>
+                    <econdition field-name="checkId"/>
+                    <econdition field-name="statementId"/>
+                    <econdition field-name="recordKey" from="f.recordKey"/>
+                </entity-find>
+                <set field="eventTypeEnumId" from="null"/>
+                <if condition="existingList">
+                    <set field="finding" from="existingList[0]"/>
+                    <if condition="finding.stateEnumId == 'MCFS_FIXED'">
+                        <set field="eventTypeEnumId" value="MCFE_REOPENED"/>
+                        <set field="reopenedCount" from="reopenedCount + 1"/>
+                        <set field="finding.timesSeen" from="(finding.timesSeen ?: 0) + 1"/>
+                        <set field="finding.lastSeenDate" from="reportDate"/>
+                        <set field="finding.closedStamp" from="null"/>
+                        <set field="finding.closedByTypeEnumId" from="null"/>
+                        <set field="finding.closedById" from="null"/>
+                        <else-if condition="finding.lastSeenDate &lt; reportDate">
+                            <set field="eventTypeEnumId" value="MCFE_STILL_OPEN"/>
+                            <set field="stillOpenCount" from="stillOpenCount + 1"/>
+                            <set field="finding.timesSeen" from="(finding.timesSeen ?: 0) + 1"/>
+                            <set field="finding.lastSeenDate" from="reportDate"/>
+                        </else-if>
+                        <else><set field="refreshedCount" from="refreshedCount + 1"/></else>
+                    </if>
+                    <else>
+                        <entity-make-value value-field="finding" entity-name="darpan.monthclose.MonthCloseFinding"/>
+                        <entity-sequenced-id-primary value-field="finding"/>
+                        <set field="finding.companyUserGroupId" from="companyUserGroupId"/>
+                        <set field="finding.checkId" from="checkId"/>
+                        <set field="finding.statementId" from="statementId"/>
+                        <set field="finding.recordKey" from="f.recordKey"/>
+                        <set field="finding.firstFoundDate" from="reportDate"/>
+                        <set field="finding.lastSeenDate" from="reportDate"/>
+                        <set field="finding.timesSeen" from="1"/>
+                        <set field="eventTypeEnumId" value="MCFE_FOUND"/>
+                        <set field="foundCount" from="foundCount + 1"/>
+                    </else>
+                </if>
+
+                <!-- Grace age: days from first found to this morning, against the check's graceDays. -->
+                <set field="ageDays" from="reportDate.toLocalDate().toEpochDay() - finding.firstFoundDate.toLocalDate().toEpochDay()"/>
+                <set field="finding.stateEnumId" from="ageDays &lt; graceDays ? 'MCFS_PENDING' : 'MCFS_OPEN'"/>
+                <set field="finding.headline" from="f.headline"/>
+                <set field="finding.ruleText" from="f.ruleText"/>
+                <set field="finding.expectedAmount" from="f.expectedAmount != null ? new BigDecimal(f.expectedAmount.toString()) : null"/>
+                <set field="finding.actualAmount" from="f.actualAmount != null ? new BigDecimal(f.actualAmount.toString()) : null"/>
+                <set field="finding.differenceAmount" from="finding.expectedAmount != null &amp;&amp; finding.actualAmount != null ? finding.actualAmount - finding.expectedAmount : null"/>
+                <set field="finding.currencyUomId" from="f.currencyUomId"/>
+                <set field="finding.expectedSource" from="f.expectedSource"/>
+                <set field="finding.actualSource" from="f.actualSource"/>
+                <set field="finding.conclusionEnumId" from="f.conclusionEnumId"/>
+                <set field="finding.lastCheckedStamp" from="checkStamp"/>
+                <entity-create value-field="finding" or-update="true"/>
+
+                <!-- The latest read replaces the last one's records and evidence checks. -->
+                <entity-delete-by-condition entity-name="darpan.monthclose.MonthCloseFindingRecord">
+                    <econdition field-name="findingId" from="finding.findingId"/>
+                    <econdition field-name="companyUserGroupId"/></entity-delete-by-condition>
+                <entity-delete-by-condition entity-name="darpan.monthclose.MonthCloseFindingCheck">
+                    <econdition field-name="findingId" from="finding.findingId"/>
+                    <econdition field-name="companyUserGroupId"/></entity-delete-by-condition>
+                <set field="recordSeq" from="0"/>
+                <set field="fRecords" from="f.records ?: []"/>
+                <iterate list="fRecords" entry="r">
+                    <set field="recordSeq" from="recordSeq + 1"/>
+                    <entity-find-one entity-name="moqui.basic.Enumeration" value-field="systemEnum" cache="true">
+                        <field-map field-name="enumId" from="r.systemEnumId"/></entity-find-one>
+                    <entity-make-value value-field="findingRecord" entity-name="darpan.monthclose.MonthCloseFindingRecord"
+                            map="[findingId:finding.findingId, recordSeqId:String.format('%02d', recordSeq),
+                                  companyUserGroupId:companyUserGroupId, systemEnumId:(systemEnum.parentEnumId ?: systemEnum.enumId),
+                                  recordType:r.recordType, recordId:r.recordId?.toString(), internalId:r.internalId?.toString(),
+                                  recordStatus:r.recordStatus]"/>
+                    <entity-create value-field="findingRecord"/>
+                </iterate>
+                <set field="checkSeq" from="0"/>
+                <set field="fChecks" from="f.checks ?: []"/>
+                <iterate list="fChecks" entry="c">
+                    <set field="checkSeq" from="checkSeq + 1"/>
+                    <entity-make-value value-field="findingCheck" entity-name="darpan.monthclose.MonthCloseFindingCheck"
+                            map="[findingId:finding.findingId, sequenceNum:checkSeq, companyUserGroupId:companyUserGroupId,
+                                  label:c.label, passed:(c.passed ? 'Y' : 'N'), checkValue:c.value?.toString()]"/>
+                    <entity-create value-field="findingCheck"/>
+                </iterate>
+
+                <if condition="eventTypeEnumId">
+                    <service-call name="monthclose.MonthCloseLedgerServices.create#FindingEvent"
+                            in-map="[companyUserGroupId:companyUserGroupId, findingId:finding.findingId, checkId:checkId,
+                                     eventTypeEnumId:eventTypeEnumId, eventStamp:checkStamp, eventDate:reportDate]"/>
+                </if>
+                <script>findingIds.add(finding.findingId)</script>
+            </iterate>
+        </actions>
+    </service>
+
+    <service verb="close" noun="ResolvedFindings" authenticate="false" allow-remote="false">
+        <description>Marks fixed every open or pending finding of one check whose record the check looked at this
+            morning (examinedRecordKeys) and did not report (lastSeenDate before reportDate). Runs only when the check
+            ran over complete reads: a partial or not-run check closes NOTHING, because a record missing from a
+            partial read is not evidence that it was fixed. In v1 only a scheduled check closes a finding.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="checkId" required="true"/>
+            <parameter name="reportDate" type="Date" required="true"/>
+            <parameter name="checkStamp" type="Timestamp" default="ec.user.nowTimestamp"/>
+            <parameter name="checkStatusEnumId" required="true">
+                <description>MonthCloseCheckStatus of this morning's check; only MCCS_RAN closes anything.</description></parameter>
+            <parameter name="examinedRecordKeys" type="List">
+                <description>Every record key the check looked at this morning, reported or not.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="closedFindingIds" type="List"/>
+            <parameter name="closedCount" type="Integer"/>
+            <parameter name="skippedReason"/>
+        </out-parameters>
+        <actions>
+            <service-call name="monthclose.MonthCloseLedgerServices.get#TenantCheck" in-map="[companyUserGroupId:companyUserGroupId, checkId:checkId]"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <set field="closedFindingIds" from="[]"/>
+            <set field="closedCount" from="0" type="Integer"/>
+            <if condition="checkStatusEnumId != 'MCCS_RAN'">
+                <set field="skippedReason" value="Check ${checkId} status is ${checkStatusEnumId}; only a check that ran over complete reads closes findings."/>
+                <return/>
+            </if>
+            <set field="examined" from="new HashSet((examinedRecordKeys ?: [])*.toString())"/>
+            <entity-find entity-name="darpan.monthclose.MonthCloseFinding" list="candidates" for-update="true">
+                <econdition field-name="companyUserGroupId"/>
+                <econdition field-name="checkId"/>
+                <econdition field-name="stateEnumId" operator="in" from="['MCFS_OPEN', 'MCFS_PENDING']"/>
+                <econdition field-name="lastSeenDate" operator="less" from="reportDate"/>
+            </entity-find>
+            <iterate list="candidates" entry="finding">
+                <if condition="examined.contains(finding.recordKey)">
+                    <set field="finding.stateEnumId" value="MCFS_FIXED"/>
+                    <set field="finding.closedStamp" from="checkStamp"/>
+                    <set field="finding.closedByTypeEnumId" value="MCAT_CHECK"/>
+                    <set field="finding.closedById" from="checkId"/>
+                    <set field="finding.lastCheckedStamp" from="checkStamp"/>
+                    <entity-update value-field="finding"/>
+                    <service-call name="monthclose.MonthCloseLedgerServices.create#FindingEvent"
+                            in-map="[companyUserGroupId:companyUserGroupId, findingId:finding.findingId, checkId:checkId,
+                                     eventTypeEnumId:'MCFE_FIXED', eventStamp:checkStamp, eventDate:reportDate]"/>
+                    <script>closedFindingIds.add(finding.findingId)</script>
+                    <set field="closedCount" from="closedCount + 1"/>
+                </if>
+            </iterate>
+        </actions>
+    </service>
+
+    <service verb="get" noun="TenantCheck" authenticate="false" allow-remote="false">
+        <description>The check, if it belongs to the tenant, and its statements' codes. Fails closed: a check owned by
+            another tenant, or one that tests no statement, is an error.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="checkId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="check" type="Map"/>
+            <parameter name="statementIdByCode" type="Map"/>
+        </out-parameters>
+        <actions>
+            <entity-find entity-name="darpan.monthclose.MonthCloseCheck" list="checkList">
+                <econdition field-name="checkId"/>
+                <econdition field-name="companyUserGroupId"/>
+            </entity-find>
+            <if condition="!checkList">
+                <return error="true" message="Month-close check ${checkId} does not belong to tenant ${companyUserGroupId}"/></if>
+            <set field="check" from="checkList[0].getMap()"/>
+            <entity-find entity-name="darpan.monthclose.MonthCloseStatementCheck" list="links">
+                <econdition field-name="checkId"/>
+                <econdition field-name="companyUserGroupId"/>
+            </entity-find>
+            <if condition="!links">
+                <return error="true" message="Month-close check ${checkId} tests no statement"/></if>
+            <entity-find entity-name="darpan.monthclose.MonthCloseStatement" list="statements">
+                <econdition field-name="statementId" operator="in" from="links*.statementId"/>
+                <econdition field-name="companyUserGroupId"/>
+            </entity-find>
+            <set field="statementIdByCode" from="statements.collectEntries { [(it.statementCode): it.statementId] }"/>
+        </actions>
+    </service>
+
+    <service verb="create" noun="FindingEvent" authenticate="false" allow-remote="false">
+        <description>Appends one history row, by the scheduled check.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="findingId" required="true"/>
+            <parameter name="checkId" required="true"/>
+            <parameter name="eventTypeEnumId" required="true"/>
+            <parameter name="eventStamp" type="Timestamp" required="true"/>
+            <parameter name="eventDate" type="Date" required="true"/>
+        </in-parameters>
+        <actions>
+            <entity-make-value value-field="event" entity-name="darpan.monthclose.MonthCloseFindingEvent"
+                    map="[findingId:findingId, companyUserGroupId:companyUserGroupId, eventTypeEnumId:eventTypeEnumId,
+                          eventStamp:eventStamp, eventDate:eventDate, byTypeEnumId:'MCAT_CHECK', byId:checkId]"/>
+            <entity-sequenced-id-secondary value-field="event"/>
+            <entity-create value-field="event"/>
+        </actions>
+    </service>
+</services>

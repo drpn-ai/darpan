@@ -84,6 +84,10 @@ class TenantOwnedEntityFilterRuntimeTests {
             "darpan.monthclose.MonthCloseStatement"                    : "statementId",
             "darpan.monthclose.MonthCloseCheck"                        : "checkId",
             "darpan.monthclose.MonthCloseStatementCheck"               : "statementId",
+            "darpan.monthclose.MonthCloseFinding"                          : "findingId",
+            "darpan.monthclose.MonthCloseFindingRecord"                    : "findingId",
+            "darpan.monthclose.MonthCloseFindingCheck"                     : "findingId",
+            "darpan.monthclose.MonthCloseFindingEvent"                     : "findingId",
     ].asImmutable()
 
     /** Entities whose companyUserGroupId is not-null: they get no unstamped fixture row. */
@@ -94,6 +98,10 @@ class TenantOwnedEntityFilterRuntimeTests {
             "darpan.monthclose.MonthCloseStatement",
             "darpan.monthclose.MonthCloseCheck",
             "darpan.monthclose.MonthCloseStatementCheck",
+            "darpan.monthclose.MonthCloseFinding",
+            "darpan.monthclose.MonthCloseFindingRecord",
+            "darpan.monthclose.MonthCloseFindingCheck",
+            "darpan.monthclose.MonthCloseFindingEvent",
     ].toSet().asImmutable()
 
     private ExecutionContext ec
@@ -668,6 +676,10 @@ class TenantOwnedEntityFilterRuntimeTests {
             case "darpan.monthclose.MonthCloseStatement": return "MCS"
             case "darpan.monthclose.MonthCloseCheck": return "MCCK"
             case "darpan.monthclose.MonthCloseStatementCheck": return "MCSC"
+            case "darpan.monthclose.MonthCloseFinding": return "MCF"
+            case "darpan.monthclose.MonthCloseFindingRecord": return "MCFR"
+            case "darpan.monthclose.MonthCloseFindingCheck": return "MCFC"
+            case "darpan.monthclose.MonthCloseFindingEvent": return "MCFE"
         }
         throw new IllegalArgumentException(entityName)
     }
@@ -696,6 +708,14 @@ class TenantOwnedEntityFilterRuntimeTests {
                     categoryEnumId: "MCC_ORDERS", weightEnumId: "MCSW_FIRM", statementText: "x"]
             case "darpan.monthclose.MonthCloseCheck": return [checkId: id, checkCode: id, label: "x"]
             case "darpan.monthclose.MonthCloseStatementCheck": return [statementId: id, checkId: "TOEF_MCCK_${s}".toString()]
+            case "darpan.monthclose.MonthCloseFinding": return [findingId: id, statementId: "TOEF_MCS_${s}".toString(),
+                    checkId: "TOEF_MCCK_${s}".toString(), recordKey: id, stateEnumId: "MCFS_OPEN", headline: "x",
+                    firstFoundDate: java.sql.Date.valueOf("2026-10-07"), lastSeenDate: java.sql.Date.valueOf("2026-10-08")]
+            case "darpan.monthclose.MonthCloseFindingRecord": return [findingId: id, recordSeqId: "01", systemEnumId: "OMS",
+                    recordType: "return", recordId: "x"]
+            case "darpan.monthclose.MonthCloseFindingCheck": return [findingId: id, sequenceNum: 1L, label: "x", passed: "N"]
+            case "darpan.monthclose.MonthCloseFindingEvent": return [findingId: id, eventSeqId: "01", eventStamp: FROM_DATE,
+                    eventDate: java.sql.Date.valueOf("2026-10-07"), eventTypeEnumId: "MCFE_FOUND", byTypeEnumId: "MCAT_CHECK"]
         }
         throw new IllegalArgumentException(entityName)
     }

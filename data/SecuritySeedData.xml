@@ -304,6 +304,23 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.monthclose.MonthCloseStatementCheck"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <!-- DAR-BE-089 — the findings ledger, filtered from the day its entities were added. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_FINDING"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.monthclose.MonthCloseFinding"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_FINDING_RECORD"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.monthclose.MonthCloseFindingRecord"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_FINDING_CHECK"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.monthclose.MonthCloseFindingCheck"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_FINDING_EVENT"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.monthclose.MonthCloseFindingEvent"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_ADMIN"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"/>
     <moqui.security.ArtifactAuthzFilter artifactAuthzId="DARPAN_FACADE_APP_USER"

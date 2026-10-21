@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  DAR-BE-088. The month-close statement catalog: what a tenant's accounting team needs to be true at
+  DAR-BE-088 / DAR-BE-089. The month-close statement catalog: what a tenant's accounting team needs to be true at
   month end (statements), the checks that test them, and which check tests which statement. The JSON
   contract these rows feed is docs/superpowers/specs/2026-10-21-month-close-json-contract.md in the
   wrapper repo; the findings ledger (DAR-BE-089) hangs off MonthCloseStatement and MonthCloseCheck.
@@ -129,5 +129,179 @@
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>
         <index name="MCSC_TENANT"><index-field name="companyUserGroupId"/></index>
+    </entity>
+    <!-- DAR-BE-089. The findings ledger: one row per record that breaks one statement, kept across mornings
+         so a finding has a first-found day, a still-open count and a fixed day. Written only by the scheduled
+         checks (record#CheckFindings, close#ResolvedFindings); the external API reads it and never writes. The
+         four children carry the tenant like their parent so the filter applies to each directly. -->
+    <entity entity-name="MonthCloseFinding" package="darpan.monthclose" use="transactional" sequence-primary-prefix="F-">
+        <description>One record that breaks one statement, as found by one check. Identity is (tenant, check, statement,
+            recordKey): the same record found again on a later morning is the same finding, and one record that breaks two
+            statements of one check is two findings.</description>
+        <field name="findingId" type="id" is-pk="true">
+            <description>F-&lt;n&gt;. The stored id and the JSON id are the same string.</description>
+        </field>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="statementId" type="id" not-null="true"/>
+        <field name="checkId" type="id" not-null="true"/>
+        <field name="recordKey" type="text-medium" not-null="true">
+            <description>The check's key for the record, e.g. the OMS return id; stable across mornings.</description>
+        </field>
+        <field name="stateEnumId" type="id" not-null="true">
+            <description>MonthCloseFindingState: MCFS_PENDING inside the check's grace age, MCFS_OPEN after it, MCFS_FIXED
+                once a complete check looked at the record and no longer reported it.</description>
+        </field>
+        <field name="headline" type="text-intermediate" not-null="true"/>
+        <field name="firstFoundDate" type="date" not-null="true">
+            <description>The morning (tenant calendar day) a check first reported it. Kept when the finding reopens.</description>
+        </field>
+        <field name="lastSeenDate" type="date" not-null="true">
+            <description>The latest morning a check still reported it.</description>
+        </field>
+        <field name="lastCheckedStamp" type="date-time">
+            <description>When a check last looked at the record, whether or not it reported it.</description>
+        </field>
+        <field name="timesSeen" type="number-integer">
+            <description>Mornings on which a check reported it, counting the first.</description>
+        </field>
+        <field name="closedStamp" type="date-time"/>
+        <field name="closedByTypeEnumId" type="id">
+            <description>MonthCloseActorType of what closed it; in v1 always MCAT_CHECK.</description>
+        </field>
+        <field name="closedById" type="id">
+            <description>The check (checkId) that closed it.</description>
+        </field>
+        <field name="expectedAmount" type="currency-amount"/>
+        <field name="actualAmount" type="currency-amount"/>
+        <field name="differenceAmount" type="currency-amount">
+            <description>actualAmount - expectedAmount; blank when either side is blank.</description>
+        </field>
+        <field name="currencyUomId" type="id"/>
+        <field name="expectedSource" type="text-medium"/>
+        <field name="actualSource" type="text-medium"/>
+        <field name="ruleText" type="text-intermediate">
+            <description>The exact condition the record failed, in plain words.</description>
+        </field>
+        <field name="conclusionEnumId" type="id">
+            <description>DarpanConclusion reached for the record; blank when no conclusion rule matched.</description>
+        </field>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="MCF_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <relationship type="one" related="darpan.monthclose.MonthCloseStatement" fk-name="MCF_STATEMENT">
+            <key-map field-name="statementId"/>
+        </relationship>
+        <relationship type="one" related="darpan.monthclose.MonthCloseCheck" fk-name="MCF_CHECK">
+            <key-map field-name="checkId"/>
+        </relationship>
+        <relationship type="one" title="State" related="moqui.basic.Enumeration" fk-name="MCF_STATE">
+            <key-map field-name="stateEnumId" related="enumId"/>
+        </relationship>
+        <relationship type="one" title="ClosedByType" related="moqui.basic.Enumeration" fk-name="MCF_CLOSED_BY_TYPE">
+            <key-map field-name="closedByTypeEnumId" related="enumId"/>
+        </relationship>
+        <relationship type="one" title="Conclusion" related="moqui.basic.Enumeration" fk-name="MCF_CONCLUSION">
+            <key-map field-name="conclusionEnumId" related="enumId"/>
+        </relationship>
+        <relationship type="many" related="darpan.monthclose.MonthCloseFindingRecord" short-alias="records">
+            <key-map field-name="findingId"/>
+        </relationship>
+        <relationship type="many" related="darpan.monthclose.MonthCloseFindingCheck" short-alias="checks">
+            <key-map field-name="findingId"/>
+        </relationship>
+        <relationship type="many" related="darpan.monthclose.MonthCloseFindingEvent" short-alias="events">
+            <key-map field-name="findingId"/>
+        </relationship>
+        <index name="MCF_TENANT_KEY" unique="true">
+            <index-field name="companyUserGroupId"/>
+            <index-field name="checkId"/>
+            <index-field name="statementId"/>
+            <index-field name="recordKey"/>
+        </index>
+        <index name="MCF_TENANT_STATE">
+            <index-field name="companyUserGroupId"/>
+            <index-field name="stateEnumId"/>
+        </index>
+    </entity>
+
+    <entity entity-name="MonthCloseFindingRecord" package="darpan.monthclose" use="transactional">
+        <description>One id of the finding in one system. Replaced on every sighting, so it always shows what the latest
+            check read.</description>
+        <field name="findingId" type="id" is-pk="true"/>
+        <field name="recordSeqId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="systemEnumId" type="id" not-null="true">
+            <description>The ROOT system (OMS, NETSUITE, SHOPIFY of DarpanSystemSource), resolved through parentEnumId
+                when the row is written; never an endpoint such as OMS_RETURNS_GQL.</description>
+        </field>
+        <field name="recordType" type="text-short" not-null="true">
+            <description>camelCase singular, e.g. return, creditMemo, rma (contract "Records").</description>
+        </field>
+        <field name="recordId" type="text-medium" not-null="true">
+            <description>The id a person searches by, e.g. a NetSuite tranId or an OMS returnId.</description>
+        </field>
+        <field name="internalId" type="text-medium">
+            <description>The system's own key when it differs from recordId.</description>
+        </field>
+        <field name="recordStatus" type="text-medium">
+            <description>The record's status in its own system's words, when the check read it.</description>
+        </field>
+        <relationship type="one" related="darpan.monthclose.MonthCloseFinding" fk-name="MCFR_FINDING">
+            <key-map field-name="findingId"/>
+        </relationship>
+        <relationship type="one" title="System" related="moqui.basic.Enumeration" fk-name="MCFR_SYSTEM">
+            <key-map field-name="systemEnumId" related="enumId"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="MCFR_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <index name="MCFR_TENANT"><index-field name="companyUserGroupId"/></index>
+    </entity>
+
+    <entity entity-name="MonthCloseFindingCheck" package="darpan.monthclose" use="transactional">
+        <description>One sub-condition of the finding's evidence, in order. Replaced on every sighting.</description>
+        <field name="findingId" type="id" is-pk="true"/>
+        <field name="sequenceNum" type="number-integer" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="label" type="text-medium" not-null="true"/>
+        <field name="passed" type="text-indicator" not-null="true"/>
+        <field name="checkValue" type="text-medium">
+            <description>What was seen, e.g. "160.22 vs 160.23".</description>
+        </field>
+        <relationship type="one" related="darpan.monthclose.MonthCloseFinding" fk-name="MCFC_FINDING">
+            <key-map field-name="findingId"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="MCFC_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <index name="MCFC_TENANT"><index-field name="companyUserGroupId"/></index>
+    </entity>
+
+    <entity entity-name="MonthCloseFindingEvent" package="darpan.monthclose" use="transactional">
+        <description>One row of a finding's history: found, stillOpen, fixed or reopened. Append-only.</description>
+        <field name="findingId" type="id" is-pk="true"/>
+        <field name="eventSeqId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="eventStamp" type="date-time" not-null="true"/>
+        <field name="eventDate" type="date" not-null="true">
+            <description>The morning (tenant calendar day) of the event; a past report reads state from the last event
+                on or before its date.</description>
+        </field>
+        <field name="eventTypeEnumId" type="id" not-null="true"/>
+        <field name="byTypeEnumId" type="id" not-null="true"/>
+        <field name="byId" type="id"/>
+        <relationship type="one" related="darpan.monthclose.MonthCloseFinding" fk-name="MCFE_FINDING">
+            <key-map field-name="findingId"/>
+        </relationship>
+        <relationship type="one" title="EventType" related="moqui.basic.Enumeration" fk-name="MCFE_EVENT_TYPE">
+            <key-map field-name="eventTypeEnumId" related="enumId"/>
+        </relationship>
+        <relationship type="one" title="ByType" related="moqui.basic.Enumeration" fk-name="MCFE_BY_TYPE">
+            <key-map field-name="byTypeEnumId" related="enumId"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="MCFE_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <index name="MCFE_TENANT"><index-field name="companyUserGroupId"/></index>
     </entity>
 </entities>

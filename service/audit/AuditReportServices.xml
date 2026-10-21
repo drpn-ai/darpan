@@ -45,6 +45,53 @@
         </actions>
     </service>
 
+    <!-- DAR-BE-098. The GraphQL roots auditReport and auditFinding (moqui-gql graphql/DarpanSchema.gql.xml). The engine
+         passes companyUserGroupId from the request's pinned tenant (the API key's), never from a caller argument. -->
+    <service verb="get" noun="AuditReportGraph" authenticate="false" allow-remote="false">
+        <description>The audit-run report in its GraphQL shape: assemble#AuditReport with each keyed object turned into a
+            list (contract, "GraphQL mapping"). The audit is named by its code; another tenant's audit reads as not
+            found.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="audit" required="true"><description>The audit's code, e.g. month-close.</description></parameter>
+            <parameter name="date"><description>The morning, YYYY-MM-DD; blank is today in the tenant's zone.</description></parameter>
+            <parameter name="period"><description>Which period's run, e.g. 2026-10 while October is extended.</description></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="report" type="Map"/></out-parameters>
+        <actions>
+            <set field="auditId" from="darpan.audit.AuditReportGraph.auditIdFor(ec, companyUserGroupId, audit)"/>
+            <if condition="!auditId"><return error="true" message="Audit ${audit} was not found"/></if>
+            <script>
+                try {
+                    reportDate = darpan.audit.AuditReportGraph.reportDateFor(ec, companyUserGroupId, date)
+                } catch (IllegalArgumentException e) {
+                    ec.message.addError(e.message)
+                }
+            </script>
+            <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="audit.AuditReportServices.assemble#AuditReport" out-map="assembled"
+                    in-map="[companyUserGroupId:companyUserGroupId, auditId:auditId, reportDate:reportDate, period:period]"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <set field="report" from="darpan.audit.AuditReportGraph.report(assembled.document)"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="AuditFindingGraph" authenticate="false" allow-remote="false">
+        <description>One finding's document in its GraphQL shape: assemble#AuditFinding with records as a list. A finding
+            of another tenant reads as not found.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="id" required="true"><description>The finding id, e.g. F-20761.</description></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="finding" type="Map"/></out-parameters>
+        <actions>
+            <service-call name="audit.AuditReportServices.assemble#AuditFinding" out-map="assembled"
+                    in-map="[companyUserGroupId:companyUserGroupId, findingId:id]"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <set field="finding" from="darpan.audit.AuditReportGraph.finding(assembled.document)"/>
+        </actions>
+    </service>
+
     <service verb="get" noun="AuditWindow" authenticate="false" allow-remote="false">
         <description>DAR-BE-091. The window an audit's checks read on one morning: from the first day of the audit's
             period to the report day, inclusive ("on the 14th it reconciles 1-14, on the 15th 1-15"). The scheduled

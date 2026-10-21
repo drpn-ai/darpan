@@ -148,6 +148,66 @@ class AutomationExecutionServiceSmokeTests {
         assertEquals(TEST_COMPANY_USER_GROUP_ID, runResult.companyUserGroupId)
     }
 
+    /**
+     * DAR-BE-092 end to end through the real executor and Spark compare: an automation that runs an audit's check
+     * reads the audit's window (the month to date) instead of its own previous-day window, and after the run writes
+     * the check's health and its findings. Its own automation id, so the AUTO_API_ARTIFACT tests keep their windows.
+     */
+    @Test
+    void anAuditAutomationReadsTheMonthToDateAndWritesTheLedger() {
+        String automationId = "AUTO_API_AUDIT"
+        seedApiAutomation(automationId)
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AuditSeedData.xml")
+        upsertEntityValue("darpan.audit.Audit", [auditId: "AUTO_AUDIT"], [auditId: "AUTO_AUDIT",
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID, auditCode: "month-close", auditName: "Month close", periodEnumId: "AUDP_MONTH"])
+        upsertEntityValue("darpan.audit.AuditStatement", [statementId: "AUTO_AUDIT_R4"], [statementId: "AUTO_AUDIT_R4",
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID, auditId: "AUTO_AUDIT", statementCode: "R4",
+                categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM", statementText: "Every Shopify order reaches the OMS."])
+        upsertEntityValue("darpan.audit.AuditCheck", [checkId: "AUTO_AUDIT_CHECK"], [checkId: "AUTO_AUDIT_CHECK",
+                companyUserGroupId: TEST_COMPANY_USER_GROUP_ID, checkCode: "orders-shopify-vs-oms", label: "Shopify orders against the OMS",
+                automationId: automationId, file1RecordType: "order", file2RecordType: "order"])
+        upsertEntityValue("darpan.audit.AuditStatementCheck", [checkId: "AUTO_AUDIT_CHECK", statementId: "AUTO_AUDIT_R4"], [
+                checkId: "AUTO_AUDIT_CHECK", statementId: "AUTO_AUDIT_R4", companyUserGroupId: TEST_COMPANY_USER_GROUP_ID,
+                diffTypes: "MISSING_IN_FILE_2"])
+        List<Map> windowsSeen = []
+        AutomationExecutionSupport.setSourceExtractor { def ignoredEc, def ignoredAutomation, def source,
+                Map<String, Object> window, Map<String, Object> ignoredParams ->
+            windowsSeen << window
+            String fileSide = source.get("fileSide")
+            return [dataAvailable : true,
+                    fileLocation  : fileSide == AutomationExecutionSupport.FILE_SIDE_1 ?
+                            "component://darpan/data/test/test-orders-1.json" : "component://darpan/data/test/test-orders-2.json",
+                    fileName      : "${fileSide}.json".toString(),
+                    fileTypeEnumId: "DftJson",
+                    recordCount   : 3]
+        }
+
+        Timestamp fire = Timestamp.from(java.time.Instant.parse("2026-05-14T10:00:00Z"))
+        Map<String, Object> result = AutomationExecutionSupport.executeAutomation(ec, [automationId: automationId,
+                scheduledFireTime: fire, sparkMaster: "local[1]", sparkAppName: "AutomationExecutionServiceSmokeTests"])
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals(1, result.executedCount)
+        assertEquals([java.time.Instant.parse("2026-05-01T00:00:00Z"), java.time.Instant.parse("2026-05-15T00:00:00Z")],
+                [(windowsSeen[0].childWindowStartDate as Timestamp).toInstant(), (windowsSeen[0].childWindowEndDate as Timestamp).toInstant()],
+                "the audit's month to date, not the automation's previous day")
+
+        def run = ec.entity.find("darpan.audit.AuditCheckRun").condition("checkId", "AUTO_AUDIT_CHECK").disableAuthz().useCache(false).one()
+        assertEquals(["AUDCS_RAN", "2026-05", java.sql.Date.valueOf("2026-05-14")], [run.statusEnumId, run.period, run.reportDate])
+        List reads = ec.entity.find("darpan.audit.AuditSourceRead").condition("checkRunId", run.checkRunId).orderBy("readSeqId")
+                .disableAuthz().useCache(false).list()
+        assertEquals([["SHOPIFY", "AUDSR_COMPLETE", 3L], ["OMS", "AUDSR_COMPLETE", 3L]],
+                reads.collect { [it.systemEnumId, it.statusEnumId, it.recordCount as Long] })
+        List findings = ec.entity.find("darpan.audit.AuditFinding").condition("checkId", "AUTO_AUDIT_CHECK").disableAuthz().useCache(false).list()
+        assertEquals(2, findings.size(), "the two orders missing in the OMS break R4")
+        assertTrue(findings*.recordKey.contains("6470622019715"))
+        assertEquals(["AUTO_AUDIT_R4"] as Set, findings*.statementId as Set)
+        Map one = findings.find { it.recordKey == "6470622019715" }.getMap()
+        assertEquals("6470622019715: Present in Shopify, missing in HotWax", one.headline, "the document's own message")
+        List recs = ec.entity.find("darpan.audit.AuditFindingRecord").condition("findingId", one.findingId).disableAuthz().useCache(false).list()
+        assertEquals([["SHOPIFY", "order", "6470622019715"]], recs.collect { [it.systemEnumId, it.recordType, it.recordId] })
+    }
+
     @Test
     void automationSaveCopiesSourceExclusionFilters() {
         String automationId = saveAutomationWithSourceFilters([

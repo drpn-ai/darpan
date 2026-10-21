@@ -129,6 +129,17 @@
         <field name="savedRunId" type="id">
             <description>The saved run (RuleSet) that executes the check. Blank until the run is configured.</description>
         </field>
+        <field name="automationId" type="id">
+            <description>DAR-BE-092. The scheduled automation that runs this check. When set, that automation reads the
+                audit's windows (get#AuditWindow: the period to date, plus any extended period) instead of its own, and
+                after each window writes the check's health, findings and closings to the ledger.</description>
+        </field>
+        <field name="file1RecordType" type="text-short">
+            <description>DAR-BE-092. The contract record type of a FILE_1 record, e.g. return; blank reads as record.</description>
+        </field>
+        <field name="file2RecordType" type="text-short">
+            <description>DAR-BE-092. The contract record type of a FILE_2 record, e.g. creditMemo.</description>
+        </field>
         <field name="graceDays" type="number-integer">
             <description>Days a new finding stays pending before it counts as open. Blank means 0.</description>
         </field>
@@ -162,6 +173,10 @@
         <relationship type="one" title="FixWhere" related="moqui.basic.Enumeration" fk-name="AUDCHK_FIX_WHERE">
             <key-map field-name="fixWhereEnumId" related="enumId"/>
         </relationship>
+        <relationship type="one" related="darpan.reconciliation.ReconciliationAutomation" fk-name="AUDCHK_AUTOMATION">
+            <key-map field-name="automationId"/>
+        </relationship>
+        <index name="AUDCHK_AUTOMATION"><index-field name="automationId"/></index>
         <index name="AUDCHK_TENANT_CODE" unique="true">
             <index-field name="companyUserGroupId"/>
             <index-field name="checkCode"/>
@@ -178,6 +193,14 @@
         <field name="companyUserGroupId" type="id" not-null="true"/>
         <field name="sequenceNum" type="number-integer">
             <description>Order of a statement's checks in the report.</description>
+        </field>
+        <field name="diffTypes" type="text-medium">
+            <description>DAR-BE-092. Which rows of the check's run break this statement: comma-separated diff row types,
+                e.g. MISSING_IN_FILE_2 or FINDING. Blank: every row.</description>
+        </field>
+        <field name="conclusionCodes" type="text-medium">
+            <description>DAR-BE-092. Narrows the rows to these conclusion codes (comma-separated). Blank: any conclusion,
+                or none.</description>
         </field>
         <relationship type="one" related="darpan.audit.AuditStatement" fk-name="AUDSC_STATEMENT">
             <key-map field-name="statementId"/>

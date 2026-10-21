@@ -2,6 +2,7 @@ package darpan.reconciliation.automation
 
 import darpan.facade.reconciliation.ReconciliationApiWindowSupport
 
+import darpan.audit.AuditAutomationSupport
 import darpan.common.DarpanEntityConstants
 import darpan.common.TransactionDetachSupport
 import darpan.facade.common.DataManagerSupport
@@ -326,7 +327,13 @@ class AutomationExecutionSupport {
         }
 
         Timestamp scheduledFireTime = resolveScheduledFireTime(ec, input)
-        List<Map<String, Object>> windows = resolveWindows(automation, input + [scheduledFireTime: scheduledFireTime])
+        // DAR-BE-092: an automation that runs an audit's checks reads the audit's windows (the period to date, plus any
+        // extended period) instead of its own, and writes the audit ledger after each one.
+        List<Map> auditChecks = AuditAutomationSupport.checksFor(ec, automation)
+        Map audit = auditChecks ? AuditAutomationSupport.auditFor(ec, normalize(readField(automation, "companyUserGroupId")), auditChecks) : null
+        List<Map<String, Object>> windows = audit ?
+                AuditAutomationSupport.resolveWindows(ec, automation, audit, scheduledFireTime) :
+                resolveWindows(automation, input + [scheduledFireTime: scheduledFireTime])
         Map<String, Object> sourcesBySide = loadAutomationSources(ec, automationId)
         def file1Source = requireApiSource(automation, sourcesBySide[FILE_SIDE_1], FILE_SIDE_1)
         def file2Source = requireApiSource(automation, sourcesBySide[FILE_SIDE_2], FILE_SIDE_2)
@@ -385,6 +392,11 @@ class AutomationExecutionSupport {
             // below so an abort closes whatever stage was open instead of orphaning it RUNNING.
             def openStep = null
             Map<String, Object> stepCtx = [companyUserGroupId: readField(automation, "companyUserGroupId")]
+            // DAR-BE-092: what the window read, kept for the audit ledger on every exit.
+            Map<String, Object> file1Result = null
+            Map<String, Object> file2Result = null
+            Map<String, Object> reconcileResult = null
+            if (audit) AuditAutomationSupport.attachKeyFiles(window)
             try {
                 Timestamp startedTimestamp = nowTimestamp(ec)
                 // Task 2b: mint the run-result row as the execution goes RUNNING and carry its id in the
@@ -414,7 +426,7 @@ class AutomationExecutionSupport {
                 openStep = null
 
                 openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE1)
-                Map<String, Object> file1Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file1Source, window, windowParams), file1Source)
+                file1Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file1Source, window, windowParams), file1Source)
                 RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [recordCount: file1Result.recordCount])
                 openStep = null
                 // Task 2c: refresh the clock after source-1 extraction, a real (possibly slow) I/O call —
@@ -429,7 +441,7 @@ class AutomationExecutionSupport {
                 // this throws RunCancelledException out of the run loop, caught below.
                 RunObservability.checkpointCancel(ec, mintedRunResultId)
                 openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE2)
-                Map<String, Object> file2Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file2Source, window, windowParams), file2Source)
+                file2Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file2Source, window, windowParams), file2Source)
                 RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [recordCount: file2Result.recordCount])
                 openStep = null
                 // Task 2c: after source-2 extraction too — a NO_DATA window returns just below without
@@ -464,6 +476,8 @@ class AutomationExecutionSupport {
                     // only runs after a won notification claim). An orphan there never fires AND pins
                     // its chat space against deletion forever, so purge it here.
                     TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, mintedRunResultId)
+                    AuditAutomationSupport.recordWindow(ec, automation, auditChecks, window, file1Source, file2Source,
+                            file1Result, file2Result, null, null)
                     executionResults << noDataFields + [
                             automationExecutionId: automationExecutionId,
                             childWindowStartDate : window.childWindowStartDate,
@@ -473,7 +487,7 @@ class AutomationExecutionSupport {
                 }
 
                 openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_COMPARE)
-                Map<String, Object> reconcileResult = normalizeReconcileResult(
+                reconcileResult = normalizeReconcileResult(
                         reconcileRunner.call(ec, automation, file1Source, file2Source, file1Result, file2Result, window, executionParams)
                 )
                 RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [:])
@@ -564,6 +578,11 @@ class AutomationExecutionSupport {
                         lastUpdatedDate           : completedTimestamp,
                 ]
                 updateAutomationExecution(ec, execution, successFields)
+                // DAR-BE-092: health, findings, closings, before anyone is told the run finished. A rule failure
+                // makes the check notRun, so nothing closes on a compare that did not fully evaluate.
+                AuditAutomationSupport.recordWindow(ec, automation, auditChecks, window, file1Source, file2Source,
+                        file1Result, file2Result, reconcileResult,
+                        ruleExecutionFailed ? new IllegalStateException("A rule failed to build or evaluate.") : null)
                 notifyRunCompletedWithStage(ec, mintedRunResultId, stepCtx, [
                         reconciliationRunResultId: reconciliationRunResultId,
                         runName                  : normalize(readField(automation, "automationName")),
@@ -620,6 +639,9 @@ class AutomationExecutionSupport {
                 Timestamp completedTimestamp = nowTimestamp(ec)
                 Map<String, Object> failureFields = buildFailureFields(ec, execution, t, completedTimestamp, window)
                 updateAutomationExecution(ec, execution, failureFields)
+                // DAR-BE-092: the failed read (or compare) is recorded, so the check is partial or notRun and closes nothing.
+                AuditAutomationSupport.recordWindow(ec, automation, auditChecks, window, file1Source, file2Source,
+                        file1Result, file2Result, reconcileResult, t)
                 // Task 2b terminal guarantee: close the row minted at RUNNING on EVERY failure exit,
                 // including a transient one that requeues the execution to PENDING. Left RUNNING it would
                 // be an active run nobody is running, which the reaper turns into a spurious FAILED alert
@@ -662,6 +684,7 @@ class AutomationExecutionSupport {
                     ]
             } finally {
                 ReconciliationServices.unpersistDatasets(autoPersistedSources)
+                AuditAutomationSupport.discardKeyFiles(window)
             }
         }
 
@@ -2066,6 +2089,9 @@ class AutomationExecutionSupport {
                 // attacker cluster. PWA never sends this; operators set spark.master via server property.
                 sparkMaster         : (ec.resource.properties["spark.master"] ?: "local[*]"),
                 sparkAppName        : normalize(params.sparkAppName) ?: "AutomationRuleSetCompareScope",
+                // DAR-BE-092 / DAR-BE-091: an audit window's examined records, both sides.
+                file1KeysOutLocation: window?.auditFile1KeysOut,
+                file2KeysOutLocation: window?.auditFile2KeysOut,
         ].findAll { it.value != null } as Map<String, Object>
 
         return dispatchInternalService(ec,

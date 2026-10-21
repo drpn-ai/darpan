@@ -3,6 +3,7 @@ package darpan.audit
 import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.DiffDocumentStreamSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
+import groovy.json.JsonSlurper
 import org.moqui.entity.EntityCondition
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -203,7 +204,8 @@ class AuditAutomationSupport {
             // The document on disk names a row diffType / primaryId / message; the compare's in-memory rows say
             // type / id / note. Read either.
             Map row = [type: (raw.diffType ?: raw.type) as String, id: (raw.primaryId ?: raw.id) as String,
-                       note: normalize(raw.message ?: raw.note)]
+                       note: normalize(raw.message ?: raw.note), data: AuditAutomationSupport.rowData(raw.data),
+                       systems: raw.conclusion instanceof Map ? ((Map) raw.conclusion).systems : null]
             String type = row.type as String
             String code = (raw.conclusion instanceof Map ? ((Map) raw.conclusion).code : null) as String
             links.each { Map link ->
@@ -231,18 +233,43 @@ class AuditAutomationSupport {
         return list.isEmpty() || (value != null && list.contains(value))
     }
 
+    /**
+     * The row's record in each system it names. internalId is the system's own key from the record the row carries
+     * (its `internalId` field, when it differs from the id a person searches by); the row carries ONE record, on the
+     * side RunConclusionSupport reads it from. recordStatus is the conclusion step's evidence state for that side:
+     * the connector's state field in its labels, so it reads in that system's words. A check with no conclusions
+     * has no evidence, and its records no status.
+     */
     static List<Map> recordsOf(Map check, Map row, def file1Source, def file2Source) {
         String type = row.type as String
         List<String> sides = type == "MISSING_IN_FILE_1" ? ["FILE_2"] :
                 type == "MISSING_IN_FILE_2" || type == "FINDING" ? ["FILE_1"] :
                 type?.startsWith("DUPLICATE_IN_FILE_1") ? ["FILE_1"] :
                 type?.startsWith("DUPLICATE_IN_FILE_2") ? ["FILE_2"] : ["FILE_1", "FILE_2"]
+        String dataSide = type == "MISSING_IN_FILE_1" || type?.startsWith("DUPLICATE_IN_FILE_2") ? "FILE_2" : "FILE_1"
+        String recordId = AuditReportAssembler.displayKey(row.id as String)
         return sides.collect { String side ->
             def source = side == "FILE_1" ? file1Source : file2Source
+            String internalId = side == dataSide ? normalize(((Map) row.data)?.get("internalId")) : null
+            Map evidence = ((row.systems ?: []) as List).find { it instanceof Map && it.side == side } as Map
             [systemEnumId: normalize(readField(source, "systemEnumId")),
              recordType  : normalize(side == "FILE_1" ? check.file1RecordType : check.file2RecordType) ?: "record",
-             recordId    : AuditReportAssembler.displayKey(row.id as String)]
+             recordId    : recordId,
+             internalId  : internalId == recordId ? null : internalId,
+             recordStatus: normalize(evidence?.state)]
         }.findAll { it.systemEnumId }
+    }
+
+    /** A row's `data` is the record as a JSON string on disk, a Map in memory; anything else reads as no record. */
+    static Map rowData(Object data) {
+        if (data instanceof Map) return (Map) data
+        if (data == null) return null
+        try {
+            Object parsed = new JsonSlurper().parseText(data.toString())
+            return parsed instanceof Map ? (Map) parsed : null
+        } catch (Exception ignored) {
+            return null
+        }
     }
 
     /** The check's headline template filled from the row, else the row's own note; one line, at most 120 characters. */

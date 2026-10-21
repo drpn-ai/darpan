@@ -197,6 +197,26 @@ class AuditAutomationSmokeTests {
     }
 
     @Test
+    void aRecordCarriesItsInternalIdAndItsStatusInItsSystemsWords() {
+        Map check = [checkId: "X", file1RecordType: "return", file2RecordType: "creditMemo"]
+        List systems = [[side: "FILE_1", state: "Completed"], [side: "FILE_2", state: "Credit Memo : Open"]]
+        // A value difference: both sides, the row's record is FILE_1's; FILE_2's internal key is not on the row.
+        List<Map> both = AuditAutomationSupport.recordsOf(check, [type: "RULE", id: "M258615", systems: systems,
+                data: AuditAutomationSupport.rowData('{"returnId":"M258615","internalId":"51000002"}')], omsSource, nsSource)
+        assertEquals([["return", "51000002", "Completed"], ["creditMemo", null, "Credit Memo : Open"]],
+                both.collect { [it.recordType, it.internalId, it.recordStatus] })
+        // Missing in FILE_1: the row's record is FILE_2's.
+        List<Map> second = AuditAutomationSupport.recordsOf(check, [type: "MISSING_IN_FILE_1", id: "CM-88213", systems: systems,
+                data: [tranId: "CM-88213", internalId: "51000002"]], omsSource, nsSource)
+        assertEquals([["creditMemo", "51000002", "Credit Memo : Open"]], second.collect { [it.recordType, it.internalId, it.recordStatus] })
+        // No conclusions, no evidence: no status. An internal id equal to the id says nothing new.
+        List<Map> bare = AuditAutomationSupport.recordsOf(check, [type: "MISSING_IN_FILE_2", id: "M1", data: [internalId: "M1"]],
+                omsSource, nsSource)
+        assertEquals([[null, null]], bare.collect { [it.internalId, it.recordStatus] })
+        assertEquals(null, AuditAutomationSupport.rowData("not json"))
+    }
+
+    @Test
     void aFailureMessageIsSanitizedBeforeTheLedgerStoresIt() {
         AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-10-14", [], []), omsSource, nsSource,
                 [recordCount: 1], null, null, new IllegalStateException("NetSuite 401 for apiToken=sk_live_secret, retry"))

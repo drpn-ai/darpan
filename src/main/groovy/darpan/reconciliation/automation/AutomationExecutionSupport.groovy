@@ -16,6 +16,7 @@ import darpan.facade.reconciliation.RunConclusionStep
 import darpan.facade.reconciliation.RunObservability
 import darpan.facade.reconciliation.RunVerificationSupport
 import darpan.reconciliation.core.ReconciliationServices
+import darpan.reconciliation.core.RuleSetCompareScopeAdapter
 import darpan.reconciliation.notification.TenantNotificationSupport
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
@@ -183,7 +184,10 @@ class AutomationExecutionSupport {
     private static final Closure DEFAULT_RECONCILE_RUNNER = { def ec, def automation, def file1Source, def file2Source,
             Map<String, Object> file1Result, Map<String, Object> file2Result, Map<String, Object> window,
             Map<String, Object> params ->
-        return callRuleSetCompareScope(ec, automation, file1Source, file2Source, file1Result, file2Result, window, params)
+        // DAR-BE-093: no second source means an EVALUATE scope (see executeAutomation).
+        return file2Source == null ?
+                callRuleSetEvaluateScope(ec, automation, file1Source, file1Result, window, params) :
+                callRuleSetCompareScope(ec, automation, file1Source, file2Source, file1Result, file2Result, window, params)
     }
 
     private static Closure sourceExtractor = DEFAULT_SOURCE_EXTRACTOR
@@ -335,8 +339,14 @@ class AutomationExecutionSupport {
                 AuditAutomationSupport.resolveWindows(ec, automation, audit, scheduledFireTime) :
                 resolveWindows(automation, input + [scheduledFireTime: scheduledFireTime])
         Map<String, Object> sourcesBySide = loadAutomationSources(ec, automationId)
+        // DAR-BE-093: an EVALUATE scope reads ONE source (DAR-BE-049), as runSavedRunDiff already runs it: no FILE_2
+        // source, no second extract, evaluate#RuleSetCompareScope instead of the compare, and none of the three
+        // verification passes (each compares two sides). save#Automation still requires two sources, so only a
+        // configured automation reaches this, e.g. an audit check that reads one system (gorjana's R2).
+        boolean evaluateMode = isEvaluateScope(ec, automation)
         def file1Source = requireApiSource(automation, sourcesBySide[FILE_SIDE_1], FILE_SIDE_1)
-        def file2Source = requireApiSource(automation, sourcesBySide[FILE_SIDE_2], FILE_SIDE_2)
+        def file2Source = evaluateMode ? requireNoSecondSource(automation, sourcesBySide[FILE_SIDE_2]) :
+                requireApiSource(automation, sourcesBySide[FILE_SIDE_2], FILE_SIDE_2)
         Map<String, Object> executionParams = new LinkedHashMap<String, Object>(input)
         Map<String, Object> sourceExtractorConfigDefaults = resolveSourceExtractorConfigDefaults(ec, automation, [file1Source, file2Source])
         if (sourceExtractorConfigDefaults) executionParams.sourceExtractorConfigDefaults = sourceExtractorConfigDefaults
@@ -440,17 +450,19 @@ class AutomationExecutionSupport {
                 // Cancellation stays cooperative (RunObservability.requestCancel only stamps the request):
                 // this throws RunCancelledException out of the run loop, caught below.
                 RunObservability.checkpointCancel(ec, mintedRunResultId)
-                openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE2)
-                file2Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file2Source, window, windowParams), file2Source)
-                RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [recordCount: file2Result.recordCount])
-                openStep = null
+                if (!evaluateMode) {
+                    openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE2)
+                    file2Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file2Source, window, windowParams), file2Source)
+                    RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [recordCount: file2Result.recordCount])
+                    openStep = null
+                }
                 // Task 2c: after source-2 extraction too — a NO_DATA window returns just below without
                 // ever reaching the reconcile heartbeat, so this is the last one it gets before its own
                 // terminal close (which also bumps lastUpdatedStamp).
                 heartbeatAutomationRun(ec, automation, execution, mintedRunResultId)
                 RunObservability.checkpointCancel(ec, mintedRunResultId)
 
-                if (!hasData(file1Result) || !hasData(file2Result)) {
+                if (!hasData(file1Result) || (!evaluateMode && !hasData(file2Result))) {
                     Timestamp completedTimestamp = nowTimestamp(ec)
                     Map<String, Object> noDataFields = executionUpdateFields(file1Result, file2Result, [:]) + [
                             statusEnumId    : STATUS_NO_DATA,
@@ -517,15 +529,17 @@ class AutomationExecutionSupport {
                 // corrected in place by each pass, exactly as it is on the interactive path
                 // (runSavedRunDiff.groovy writes at writeDiffDatasetOutput, then verifies).
                 ensureAutomationResultArtifact(ec, automation, file1Source, file2Source, reconcileResult, window, executionParams)
-                // Runs by default; a no-op only if VERIFY_MISSING_DIFFS_PROPERTY is explicitly "false".
-                verifyMissingDiffsIfEnabled(ec, automation, file1Source, file2Source, reconcileResult,
-                        mintedRunResultId, stepCtx, executionParams)
-                // Second and third verification passes, in the same order the interactive path runs
-                // them. Each is a no-op unless this run's connector pair is the one it applies to.
-                verifyExchangePairsIfEnabled(ec, automation, file1Source, file2Source, file1Result, file2Result,
-                        reconcileResult, mintedRunResultId, stepCtx, window, executionParams)
-                verifyReturnPresenceIfEnabled(ec, automation, file1Source, file2Source, file1Result, file2Result,
-                        reconcileResult, mintedRunResultId, stepCtx, window, executionParams)
+                if (!evaluateMode) {
+                    // Runs by default; a no-op only if VERIFY_MISSING_DIFFS_PROPERTY is explicitly "false".
+                    verifyMissingDiffsIfEnabled(ec, automation, file1Source, file2Source, reconcileResult,
+                            mintedRunResultId, stepCtx, executionParams)
+                    // Second and third verification passes, in the same order the interactive path runs
+                    // them. Each is a no-op unless this run's connector pair is the one it applies to.
+                    verifyExchangePairsIfEnabled(ec, automation, file1Source, file2Source, file1Result, file2Result,
+                            reconcileResult, mintedRunResultId, stepCtx, window, executionParams)
+                    verifyReturnPresenceIfEnabled(ec, automation, file1Source, file2Source, file1Result, file2Result,
+                            reconcileResult, mintedRunResultId, stepCtx, window, executionParams)
+                }
                 // DAR-UI-044: the same conclude seam the interactive path calls.
                 concludeIfConfigured(ec, automation, file1Source, file2Source, file1Result, file2Result,
                         reconcileResult, mintedRunResultId, stepCtx)
@@ -2099,6 +2113,30 @@ class AutomationExecutionSupport {
     }
 
     /**
+     * DAR-BE-093: an EVALUATE scope's stage, with runSavedRunDiff's parameters. Every FILE_1 row is a finding row, so
+     * the examined keys are FILE_1's alone.
+     */
+    protected static Map<String, Object> callRuleSetEvaluateScope(def ec, def automation, def file1Source,
+            Map<String, Object> file1Result, Map<String, Object> window, Map<String, Object> params) {
+        Map<String, Object> serviceParams = [
+                ruleSetId           : normalize(readField(automation, "ruleSetId")) ?: normalize(readField(automation, "savedRunId")),
+                compareScopeId      : normalize(readField(automation, "compareScopeId")),
+                file1Location       : file1Result.fileLocation ?: file1Result.dataManagerPath,
+                file1Name           : file1Result.fileName,
+                file1FileTypeEnumId : file1Result.fileTypeEnumId ?: readField(file1Source, "fileTypeEnumId"),
+                file1SchemaFileName : file1Result.schemaFileName ?: readField(file1Source, "schemaFileName"),
+                hasHeader           : params.containsKey("hasHeader") ? params.hasHeader : Boolean.TRUE,
+                // Server-side only, as callRuleSetCompareScope.
+                sparkMaster         : (ec.resource.properties["spark.master"] ?: "local[*]"),
+                sparkAppName        : normalize(params.sparkAppName) ?: "AutomationRuleSetEvaluateScope",
+                file1KeysOutLocation: window?.auditFile1KeysOut,
+        ].findAll { it.value != null } as Map<String, Object>
+
+        return dispatchInternalService(ec,
+                "reconciliation.ReconciliationCoreServices.evaluate#RuleSetCompareScope", serviceParams)
+    }
+
+    /**
      * The single authz-relaxed service-dispatch seam on the automation path.
      *
      * <p>Callers reach internal reconciliation services under the automation's own tenant anchor,
@@ -2170,6 +2208,27 @@ class AutomationExecutionSupport {
         // switches — so the sweep must skip archived rows itself, or a "deleted" automation keeps firing. In Groovy
         // rather than SQL so NULL (rows from before the column existed) still counts as not archived.
         return rows.findAll { normalize(readField(it, "isArchived")) != "Y" }
+    }
+
+    /** DAR-BE-093: whether the automation's compare scope is EVALUATE (one source). */
+    protected static boolean isEvaluateScope(def ec, def automation) {
+        String compareScopeId = normalize(readField(automation, "compareScopeId"))
+        String tenantId = normalize(readField(automation, "companyUserGroupId"))
+        if (!compareScopeId || !tenantId) return false
+        def scope = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.rule.RuleSetCompareScope",
+                        "scheduled path reads its compare scope's mode; explicit companyUserGroupId condition applied")
+                // list(), not one(): one() drops a non-PK condition beside the full PK, and with it the tenant pin.
+                .condition("compareScopeId", compareScopeId).condition("companyUserGroupId", tenantId).useCache(false).list().find()
+        return normalize(readField(scope, "scopeMode"))?.toUpperCase() == RuleSetCompareScopeAdapter.SCOPE_MODE_EVALUATE
+    }
+
+    /** An EVALUATE scope takes one source; a FILE_2 source beside it is a configuration error, as the engine says. */
+    protected static def requireNoSecondSource(def automation, def source) {
+        if (source) {
+            throw new IllegalArgumentException("Automation ${normalize(readField(automation, 'automationId'))} runs an " +
+                    "${RuleSetCompareScopeAdapter.SCOPE_MODE_EVALUATE} scope, which takes one source, but has a ${FILE_SIDE_2} source.")
+        }
+        return null
     }
 
     protected static def requireApiSource(def automation, def source, String fileSide) {
@@ -2263,8 +2322,9 @@ class AutomationExecutionSupport {
 
         String file1Label = normalize(reconcileResult.file1Label) ?:
                 sourceLabel(ec, normalize(readField(file1Source, "systemEnumId")), "File 1")
-        String file2Label = normalize(reconcileResult.file2Label) ?:
-                sourceLabel(ec, normalize(readField(file2Source, "systemEnumId")), "File 2")
+        // No second source (EVALUATE): no second system to name, as runSavedRunDiff writes it.
+        String file2Label = file2Source == null ? null : (normalize(reconcileResult.file2Label) ?:
+                sourceLabel(ec, normalize(readField(file2Source, "systemEnumId")), "File 2"))
         Map<String, Object> output = ReconciliationServices.writeDiffDatasetOutput(
                 ec,
                 diffDf,
@@ -2306,7 +2366,7 @@ class AutomationExecutionSupport {
     }
 
     protected static boolean hasData(Map<String, Object> sourceResult) {
-        return sourceResult.dataAvailable == true && normalize(sourceResult.fileLocation)
+        return sourceResult?.dataAvailable == true && normalize(sourceResult?.fileLocation)
     }
 
     protected static Map<String, Object> executionUpdateFields(Map<String, Object> file1Result, Map<String, Object> file2Result,
@@ -2314,10 +2374,10 @@ class AutomationExecutionSupport {
         return [
                 file1Name        : normalize(file1Result.fileName),
                 file1DataManagerPath: normalize(file1Result.dataManagerPath),
-                file2Name        : normalize(file2Result.fileName),
-                file2DataManagerPath: normalize(file2Result.dataManagerPath),
+                file2Name        : normalize(file2Result?.fileName),
+                file2DataManagerPath: normalize(file2Result?.dataManagerPath),
                 file1RecordCount : normalizeInt(file1Result.recordCount),
-                file2RecordCount : normalizeInt(file2Result.recordCount),
+                file2RecordCount : normalizeInt(file2Result?.recordCount),
                 differenceCount  : normalizeInt(reconcileResult.differenceCount),
                 onlyInFile1Count : normalizeInt(reconcileResult.onlyInFile1Count ?: reconcileResult.missingInFile2Count),
                 onlyInFile2Count : normalizeInt(reconcileResult.onlyInFile2Count ?: reconcileResult.missingInFile1Count),
@@ -2511,8 +2571,8 @@ class AutomationExecutionSupport {
                     createdByUserId        : normalize(readField(automation, "createdByUserId")) ?: currentUserId(ec),
                     file1Name              : normalize(file1Result.fileName),
                     file1DataManagerPath   : normalize(file1Result.dataManagerPath),
-                    file2Name              : normalize(file2Result.fileName),
-                    file2DataManagerPath   : normalize(file2Result.dataManagerPath),
+                    file2Name              : normalize(file2Result?.fileName),
+                    file2DataManagerPath   : normalize(file2Result?.dataManagerPath),
                     resultDataManagerPath  : normalize(resultDataManagerPath),
                     reconciliationType     : normalize(reconcileResult.reconciliationType ?: reconcileResult.objectType),
                     differenceCount        : normalizeInt(reconcileResult.differenceCount),

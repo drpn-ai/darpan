@@ -1,0 +1,5 @@
+{"records": [
+  {"tranId": "INV9000001", "internalId": "81000001", "etailOrderId": "7187000000001", "orderId": "M2000001", "orderOrigin": "HOTWAX", "status": "Invoice : Paid In Full", "tranDate": "2026-10-13"},
+  {"tranId": "INV9000002", "internalId": "81000002", "orderId": "M2000002", "orderOrigin": "HOTWAX", "status": "Invoice : Open", "tranDate": "2026-10-13"},
+  {"tranId": "INV9000003", "internalId": "81000003", "etailOrderId": " ", "status": "Invoice : Open", "tranDate": "2026-10-14"}
+]}

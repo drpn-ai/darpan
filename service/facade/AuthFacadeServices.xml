@@ -686,7 +686,7 @@
 
     <service verb="get" noun="PasswordResetStatus" allow-remote="true" authenticate="anonymous-all">
         <description>DAR-BE-028. Whether this environment can send password reset email (a SYSTEM EmailServer with
-            an SMTP host, and DARPAN_MAIL_FROM set). darpan-ui hides "Forgot password?" when it cannot.</description>
+            an SMTP host). darpan-ui hides "Forgot password?" when it cannot.</description>
         <out-parameters>
             <parameter name="available" type="Boolean">
                 <description>True when reset codes can be emailed.</description>

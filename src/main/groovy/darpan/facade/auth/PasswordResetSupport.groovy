@@ -26,7 +26,6 @@ class PasswordResetSupport {
     static final String TEMPLATE_RECOVERY_SET = "DARPAN_RECOVERY_EMAIL_SET"
     static final String TEMPLATE_RECOVERY_CONFLICT = "DARPAN_RECOVERY_EMAIL_CONFLICT"
 
-    static final String MAIL_FROM_ENV = "DARPAN_MAIL_FROM"
     static final String EMAIL_SERVER_ID = "SYSTEM"
 
     static final String PURPOSE_PASSWORD_RESET = "DrpnRcPasswordReset"
@@ -52,16 +51,16 @@ class PasswordResetSupport {
                 .call()
     }
 
-    /** True when a reset email could actually go out: a SYSTEM EmailServer with an SMTP host, and a from
-     *  address. Darpan has no startup hook, so the first caller that finds it unconfigured logs the one WARN
+    /** True when a reset email could actually go out: a SYSTEM EmailServer with an SMTP host. Darpan has no
+     *  startup hook, so the first caller that finds it unconfigured logs the one WARN
      *  that tells a deploy "codes will never arrive". */
     static boolean isEmailConfigured(def ec) {
         List<String> missing = []
         def server = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.basic.email.EmailServer",
                 "framework email configuration, not tenant data")
                 .condition("emailServerId", EMAIL_SERVER_ID).useCache(false).one()
+        // The from address needs no check: the templates default it to support@drpn.ai.
         if (!server?.smtpHost) missing << "no EmailServer ${EMAIL_SERVER_ID} with an smtpHost".toString()
-        if (!System.getenv(MAIL_FROM_ENV)) missing << "${MAIL_FROM_ENV} is not set".toString()
         if (missing && notConfiguredWarned.compareAndSet(false, true)) {
             logger.warn("Password reset email is not configured: {}", missing.join("; "))
         }

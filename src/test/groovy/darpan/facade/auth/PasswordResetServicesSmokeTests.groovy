@@ -88,7 +88,9 @@ class PasswordResetServicesSmokeTests {
                     .disableAuthz().one()
             assertNotNull(template, "missing EmailTemplate ${id}")
             assertEquals("SYSTEM", template.emailServerId)
-            assertTrue(((String) template.fromAddress).contains("DARPAN_MAIL_FROM"), "${id} fromAddress")
+            // Aditi 2026-10-21: mail comes from support@drpn.ai everywhere; DARPAN_MAIL_FROM only overrides it.
+            String expectedFrom = System.getenv("DARPAN_MAIL_FROM") ?: "support@drpn.ai"
+            assertEquals(expectedFrom, ec.resource.expand((String) template.fromAddress, ""), "${id} fromAddress")
             assertEquals("Darpan", template.fromName)
         }
     }
@@ -399,7 +401,7 @@ class PasswordResetServicesSmokeTests {
     void statusReflectsConfig() {
         assertEquals(false, anon("get#PasswordResetStatus", [:]).out.available)
         ec.entity.makeValue("moqui.basic.email.EmailServer").setAll([emailServerId: "SYSTEM", smtpHost: "smtp.test"]).createOrUpdate()
-        assertEquals(System.getenv("DARPAN_MAIL_FROM") as boolean, anon("get#PasswordResetStatus", [:]).out.available)
+        assertEquals(true, anon("get#PasswordResetStatus", [:]).out.available, "an SMTP host is all it needs now")
     }
 
     // ---- helpers ----

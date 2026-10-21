@@ -105,6 +105,12 @@
                                         "$ref": "#/components/schemas/ChangeOwnPasswordRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/CompletePasswordResetRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetPasswordResetStatusRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetSessionInfoRequest"
                                     },
                                     {
@@ -117,13 +123,22 @@
                                         "$ref": "#/components/schemas/LogoutSessionRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/RequestPasswordResetRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/SaveActiveTenantRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveRecoveryEmailRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveUserSettingsRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/VerifyOwnPasswordRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/VerifyPasswordResetCodeRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/GrantConfigTenantAccessRequest"
@@ -474,13 +489,18 @@
                                         "admin.UserAdminServices.update#UserAccount": "#/components/schemas/UpdateUserAccountRequest",
                                         "facade.AuthFacadeServices.change#ExpiredPassword": "#/components/schemas/ChangeExpiredPasswordRequest",
                                         "facade.AuthFacadeServices.change#OwnPassword": "#/components/schemas/ChangeOwnPasswordRequest",
+                                        "facade.AuthFacadeServices.complete#PasswordReset": "#/components/schemas/CompletePasswordResetRequest",
+                                        "facade.AuthFacadeServices.get#PasswordResetStatus": "#/components/schemas/GetPasswordResetStatusRequest",
                                         "facade.AuthFacadeServices.get#SessionInfo": "#/components/schemas/GetSessionInfoRequest",
                                         "facade.AuthFacadeServices.login#Session": "#/components/schemas/LoginSessionRequest",
                                         "facade.AuthFacadeServices.logout#AllSessions": "#/components/schemas/LogoutAllSessionsRequest",
                                         "facade.AuthFacadeServices.logout#Session": "#/components/schemas/LogoutSessionRequest",
+                                        "facade.AuthFacadeServices.request#PasswordReset": "#/components/schemas/RequestPasswordResetRequest",
                                         "facade.AuthFacadeServices.save#ActiveTenant": "#/components/schemas/SaveActiveTenantRequest",
+                                        "facade.AuthFacadeServices.save#RecoveryEmail": "#/components/schemas/SaveRecoveryEmailRequest",
                                         "facade.AuthFacadeServices.save#UserSettings": "#/components/schemas/SaveUserSettingsRequest",
                                         "facade.AuthFacadeServices.verify#OwnPassword": "#/components/schemas/VerifyOwnPasswordRequest",
+                                        "facade.AuthFacadeServices.verify#PasswordResetCode": "#/components/schemas/VerifyPasswordResetCodeRequest",
                                         "facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess": "#/components/schemas/GrantConfigTenantAccessRequest",
                                         "facade.ConfigSharingFacadeServices.list#ConfigTenantAccess": "#/components/schemas/ListConfigTenantAccessRequest",
                                         "facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess": "#/components/schemas/RevokeConfigTenantAccessRequest",
@@ -685,6 +705,12 @@
                                             "$ref": "#/components/schemas/ChangeOwnPasswordResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/CompletePasswordResetResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetPasswordResetStatusResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/GetSessionInfoResponse"
                                         },
                                         {
@@ -697,13 +723,22 @@
                                             "$ref": "#/components/schemas/LogoutSessionResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/RequestPasswordResetResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/SaveActiveTenantResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveRecoveryEmailResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveUserSettingsResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/VerifyOwnPasswordResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/VerifyPasswordResetCodeResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GrantConfigTenantAccessResponse"
@@ -3824,6 +3859,12 @@
                                 ],
                                 "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
                             },
+                            "recoveryEmailMissing": {
+                                "type": "boolean"
+                            },
+                            "emailAddressMasked": {
+                                "type": "string"
+                            },
                             "lastRun": {
                                 "type": "object",
                                 "properties": {
@@ -3964,6 +4005,197 @@
                     "result"
                 ]
             },
+            "CompletePasswordResetParams": {
+                "type": "object",
+                "properties": {
+                    "usernameOrEmail": {
+                        "type": "string",
+                        "description": "The same value the code was requested with."
+                    },
+                    "code": {
+                        "type": "string",
+                        "description": "The emailed code; spaces and other non-digits are ignored."
+                    },
+                    "newPassword": {
+                        "type": "string",
+                        "description": "The replacement password, subject to the standard Moqui password policy."
+                    },
+                    "newPasswordVerify": {
+                        "type": "string",
+                        "description": "Confirmation value for the new password."
+                    }
+                },
+                "required": [
+                    "usernameOrEmail",
+                    "code",
+                    "newPassword",
+                    "newPasswordVerify"
+                ],
+                "description": "DAR-BE-028. Set a new password with an emailed reset code, then sign the account out on every\n            device and email it that the password changed. Issues no token: darpan-ui calls login#Session afterwards\n            with the new password. A disabled account is refused and stays disabled."
+            },
+            "CompletePasswordResetResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages; always empty for this service."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Password-policy reasons in full when the new password was refused; otherwise the one\n                    code message: That code didn't work. Request a new one."
+                    },
+                    "passwordUpdated": {
+                        "type": "boolean",
+                        "description": "True when the password was changed and the account can now sign in with it."
+                    }
+                }
+            },
+            "CompletePasswordResetRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuthFacadeServices.complete#PasswordReset",
+                "x-darpan-method": "facade.AuthFacadeServices.complete#PasswordReset",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuthFacadeServices.complete#PasswordReset"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/CompletePasswordResetParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "CompletePasswordResetResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuthFacadeServices.complete#PasswordReset. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/CompletePasswordResetResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetPasswordResetStatusParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "DAR-BE-028. Whether this environment can send password reset email (a SYSTEM EmailServer with\n            an SMTP host, and DARPAN_MAIL_FROM set). darpan-ui hides \"Forgot password?\" when it cannot."
+            },
+            "GetPasswordResetStatusResult": {
+                "type": "object",
+                "properties": {
+                    "available": {
+                        "type": "boolean",
+                        "description": "True when reset codes can be emailed."
+                    }
+                }
+            },
+            "GetPasswordResetStatusRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuthFacadeServices.get#PasswordResetStatus",
+                "x-darpan-method": "facade.AuthFacadeServices.get#PasswordResetStatus",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuthFacadeServices.get#PasswordResetStatus"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetPasswordResetStatusParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetPasswordResetStatusResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuthFacadeServices.get#PasswordResetStatus. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetPasswordResetStatusResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "GetSessionInfoParams": {
                 "type": "object",
                 "properties": {
@@ -4030,6 +4262,12 @@
                                     }
                                 ],
                                 "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                            },
+                            "recoveryEmailMissing": {
+                                "type": "boolean"
+                            },
+                            "emailAddressMasked": {
+                                "type": "string"
                             },
                             "lastRun": {
                                 "type": "object",
@@ -4272,6 +4510,12 @@
                                     }
                                 ],
                                 "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                            },
+                            "recoveryEmailMissing": {
+                                "type": "boolean"
+                            },
+                            "emailAddressMasked": {
+                                "type": "string"
                             },
                             "lastRun": {
                                 "type": "object",
@@ -4608,6 +4852,102 @@
                     "result"
                 ]
             },
+            "RequestPasswordResetParams": {
+                "type": "object",
+                "properties": {
+                    "usernameOrEmail": {
+                        "type": "string",
+                        "description": "Username (matched exactly, then case-insensitively, as login does) or the account's email."
+                    }
+                },
+                "required": [
+                    "usernameOrEmail"
+                ],
+                "description": "DAR-BE-028. Email a 6-digit password reset code to the account's email on file. The reply is\n            identical, in content and in time, whether a code was sent or not (no such account, disabled, no email\n            on file, over the hourly limit), so it reveals nothing about which accounts exist. The code expires in\n            15 minutes; requesting again replaces it."
+            },
+            "RequestPasswordResetResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages; always empty for this service."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Always empty: every outcome gets the same reply."
+                    }
+                }
+            },
+            "RequestPasswordResetRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuthFacadeServices.request#PasswordReset",
+                "x-darpan-method": "facade.AuthFacadeServices.request#PasswordReset",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuthFacadeServices.request#PasswordReset"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RequestPasswordResetParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RequestPasswordResetResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuthFacadeServices.request#PasswordReset. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RequestPasswordResetResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "SaveActiveTenantParams": {
                 "type": "object",
                 "properties": {
@@ -4680,6 +5020,12 @@
                                     }
                                 ],
                                 "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                            },
+                            "recoveryEmailMissing": {
+                                "type": "boolean"
+                            },
+                            "emailAddressMasked": {
+                                "type": "string"
                             },
                             "lastRun": {
                                 "type": "object",
@@ -4821,6 +5167,111 @@
                     "result"
                 ]
             },
+            "SaveRecoveryEmailParams": {
+                "type": "object",
+                "properties": {
+                    "emailAddress": {
+                        "type": "string",
+                        "description": "The recovery email address."
+                    },
+                    "currentPassword": {
+                        "type": "string",
+                        "description": "The account's current password, checked on the server: a session token alone cannot\n                    redirect where reset codes go. A wrong one counts as a failed login."
+                    }
+                },
+                "required": [
+                    "emailAddress",
+                    "currentPassword"
+                ],
+                "description": "DAR-BE-028. Save the signed-in user's recovery email, where password reset codes go. Saved as\n            typed (trimmed, lower-cased) with no confirmation code; the new address, and the previous one when it\n            changes, get a notice. An address already used by another account is not saved, but the reply is the\n            same, so this cannot be used to test whether an address has an account. Requires the current password."
+            },
+            "SaveRecoveryEmailResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages; always empty for this service."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Validation errors, such as an address that is not a valid email."
+                    },
+                    "emailAddressMasked": {
+                        "type": "string",
+                        "description": "The address as typed, masked (a\u2022\u2022\u2022@example.com), for darpan-ui to show."
+                    }
+                }
+            },
+            "SaveRecoveryEmailRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuthFacadeServices.save#RecoveryEmail",
+                "x-darpan-method": "facade.AuthFacadeServices.save#RecoveryEmail",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuthFacadeServices.save#RecoveryEmail"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveRecoveryEmailParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveRecoveryEmailResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuthFacadeServices.save#RecoveryEmail. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveRecoveryEmailResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "SaveUserSettingsParams": {
                 "type": "object",
                 "properties": {
@@ -4894,6 +5345,12 @@
                                     }
                                 ],
                                 "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                            },
+                            "recoveryEmailMissing": {
+                                "type": "boolean"
+                            },
+                            "emailAddressMasked": {
+                                "type": "string"
                             },
                             "lastRun": {
                                 "type": "object",
@@ -5112,6 +5569,12 @@
                                 ],
                                 "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
                             },
+                            "recoveryEmailMissing": {
+                                "type": "boolean"
+                            },
+                            "emailAddressMasked": {
+                                "type": "string"
+                            },
                             "lastRun": {
                                 "type": "object",
                                 "properties": {
@@ -5245,6 +5708,111 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/VerifyOwnPasswordResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "VerifyPasswordResetCodeParams": {
+                "type": "object",
+                "properties": {
+                    "usernameOrEmail": {
+                        "type": "string",
+                        "description": "The same value the code was requested with."
+                    },
+                    "code": {
+                        "type": "string",
+                        "description": "The emailed code; spaces and other non-digits are ignored."
+                    }
+                },
+                "required": [
+                    "usernameOrEmail",
+                    "code"
+                ],
+                "description": "DAR-BE-028. Check an emailed reset code without using it up, so darpan-ui can confirm it before\n            asking for the new password. Five wrong guesses end the code. Wrong guesses never count as failed logins."
+            },
+            "VerifyPasswordResetCodeResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "description": "True when the call completed without facade errors."
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Informational messages; always empty for this service."
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "One message for every failure (no account, no live code, wrong, expired, used up): That code didn't work. Request a new one."
+                    },
+                    "verified": {
+                        "type": "boolean",
+                        "description": "True when the code is live and correct for the account."
+                    }
+                }
+            },
+            "VerifyPasswordResetCodeRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuthFacadeServices.verify#PasswordResetCode",
+                "x-darpan-method": "facade.AuthFacadeServices.verify#PasswordResetCode",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuthFacadeServices.verify#PasswordResetCode"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/VerifyPasswordResetCodeParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "VerifyPasswordResetCodeResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuthFacadeServices.verify#PasswordResetCode. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/VerifyPasswordResetCodeResult"
                     }
                 },
                 "required": [
@@ -20563,13 +21131,18 @@
         "admin.UserAdminServices.update#UserAccount": "UpdateUserAccount",
         "facade.AuthFacadeServices.change#ExpiredPassword": "ChangeExpiredPassword",
         "facade.AuthFacadeServices.change#OwnPassword": "ChangeOwnPassword",
+        "facade.AuthFacadeServices.complete#PasswordReset": "CompletePasswordReset",
+        "facade.AuthFacadeServices.get#PasswordResetStatus": "GetPasswordResetStatus",
         "facade.AuthFacadeServices.get#SessionInfo": "GetSessionInfo",
         "facade.AuthFacadeServices.login#Session": "LoginSession",
         "facade.AuthFacadeServices.logout#AllSessions": "LogoutAllSessions",
         "facade.AuthFacadeServices.logout#Session": "LogoutSession",
+        "facade.AuthFacadeServices.request#PasswordReset": "RequestPasswordReset",
         "facade.AuthFacadeServices.save#ActiveTenant": "SaveActiveTenant",
+        "facade.AuthFacadeServices.save#RecoveryEmail": "SaveRecoveryEmail",
         "facade.AuthFacadeServices.save#UserSettings": "SaveUserSettings",
         "facade.AuthFacadeServices.verify#OwnPassword": "VerifyOwnPassword",
+        "facade.AuthFacadeServices.verify#PasswordResetCode": "VerifyPasswordResetCode",
         "facade.ConfigSharingFacadeServices.grant#ConfigTenantAccess": "GrantConfigTenantAccess",
         "facade.ConfigSharingFacadeServices.list#ConfigTenantAccess": "ListConfigTenantAccess",
         "facade.ConfigSharingFacadeServices.revoke#ConfigTenantAccess": "RevokeConfigTenantAccess",

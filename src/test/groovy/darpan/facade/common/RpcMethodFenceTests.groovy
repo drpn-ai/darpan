@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Path
 
+import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
@@ -77,6 +78,18 @@ class RpcMethodFenceTests {
             assertNotNull(RpcMethodFence.rejection(path, [username: "x", password: "y"]), "not fenced: ${path}")
         }
         assertNull(RpcMethodFence.rejection("/rest/s1/graphql/sdl", [:]))
+    }
+
+    /** DAR-BE-028 — the framework's reset#Password screen transition is a weaker second reset (it reveals
+     *  whether an account exists and its emailed password never expires); /Login itself stays for legacy /apps. */
+    @Test
+    void closesTheFrameworkLoginResetPasswordTransition() {
+        ["/Login/resetPassword", "/Login/resetPassword;jsessionid=x", "/Login/resetPassword/x"].each { String path ->
+            assertEquals("The /Login/resetPassword endpoint is not available.",
+                    RpcMethodFence.rejection(path, [username: "x"]), "not fenced: ${path}")
+        }
+        assertNull(RpcMethodFence.rejection("/Login", [:]))
+        assertNull(RpcMethodFence.rejection("/Login/login", [username: "x", password: "y"]))
     }
 
     @Test

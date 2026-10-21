@@ -18,6 +18,9 @@ import org.moqui.context.ExecutionContext
  * <p>Also closes the framework's /rest/login transition, which no Darpan client uses and which
  * returns the realm's raw "no account" vs "password incorrect" text.
  *
+ * <p>And /Login/resetPassword (DAR-BE-028): the framework reset#Password it reaches reveals whether an account
+ * exists and emails a reset password that never expires; darpan-ui uses Darpan's own reset instead.
+ *
  * <p>Runs from the webroot before-request hook (darpan MoquiConf.xml). It reads the same parsed
  * request-parameter map the dispatcher reads, so the method checked is the method dispatched.
  */
@@ -43,6 +46,9 @@ class RpcMethodFence {
         List<String> segments = segmentsOf(path)
         // A transition takes trailing path segments, so match the pair, not the exact path.
         if (hasPair(segments, "rest", "login")) return "The /rest/login endpoint is not available."
+        // DAR-BE-028: Darpan has its own reset (facade.AuthFacadeServices.request#PasswordReset), so the framework's
+        // weaker one goes. /Login itself stays: the legacy super-admin /apps screens sign in through it.
+        if (hasPair(segments, "Login", "resetPassword")) return "The /Login/resetPassword endpoint is not available."
         if (!isJsonRpc(segments)) return null
 
         // Check the top-level method AND every batch entry, whatever the shape. The dispatcher takes

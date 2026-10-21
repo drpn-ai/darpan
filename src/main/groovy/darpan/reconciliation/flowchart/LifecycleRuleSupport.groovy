@@ -142,7 +142,7 @@ class LifecycleRuleSupport {
             // The excused check sits on the spine between two stages; it is not a stage.
             if (current.questionRole == LifecycleStageCompiler.EXCUSED) continue
             String type = queryOf(ec, current.ruleSetId as String)?.get("absentChildRecordType") as String
-            if (type) out << [recordType: type, label: LifecycleStageCompiler.RECORD_TYPES[type]?.name ?: current.runName]
+            if (type) out << [recordType: type, label: (LifecycleStageCompiler.RECORD_TYPES[type] ?: LifecycleStageCompiler.COMPOSITE_STAGES[type])?.name ?: current.runName]
         }
         return out
     }
@@ -195,6 +195,7 @@ class LifecycleRuleSupport {
         String recordType = start.query.get("recordType") as String
         return [details  : LifecycleSupport.detailsOf(ec, reconciliationId),
                 findings : LifecycleSupport.listFindings(ec, reconciliationId),
+                conclusions: LifecycleSupport.listConclusions(ec, reconciliationId),
                 rules    : listRules(ec, start),
                 stages   : stagesOf(ec, reconciliationId),
                 exceptions: listExceptions(ec, reconciliationId),

@@ -69,6 +69,18 @@ class LifecycleStageCompilerTests {
         assertEquals("Return Authorizations", LifecycleStageCompiler.lifecycleName("RtnAuth"))
     }
 
+    // DAR-UI-052. A return is settled by a refund, an invoice or a replacement order, whichever it got: one stage that
+    // names no NetSuite type and so can never be where a lifecycle starts.
+    @Test
+    void settledIsAStageOfItsOwnButNeverAStart() {
+        List<Map> qs = LifecycleStageCompiler.compile("RtnAuth", ["ItemRcpt", "CustCred", "Settled"])
+        assertTrue(qs*.noOutcomeLabel.containsAll(["Credited, never settled", "Received, credited and settled", "Settled, never credited"]),
+                qs*.noOutcomeLabel.findAll { it }.toString())
+        assertEquals("Settlement", LifecycleStageCompiler.words("Settled").name)
+        assertTrue(LifecycleStageCompiler.isComposite("Settled"))
+        assertThrows(IllegalArgumentException) { LifecycleStageCompiler.compile("Settled", ["CustCred"]) }
+    }
+
     @Test
     void unknownOrRepeatedRecordTypesAreRefused() {
         assertThrows(IllegalArgumentException) { LifecycleStageCompiler.compile("SalesOrd", []) }

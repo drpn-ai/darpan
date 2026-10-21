@@ -215,6 +215,138 @@ class LifecycleSaveSmokeTests {
         assertEquals(before, count())
     }
 
+    // --- DAR-UI-052: a return is settled by a refund, an invoice or a replacement order; places name their records
+
+    static final List SETTLED_REACH = [
+            [recordType: "CustCred", startField: "custbody_hc_return_id", stageField: "custbody_hc_return_id"],
+            [recordType: "Settled", anyOf: [
+                    [recordType: "CustRfnd", startField: "custbody_hc_return_id", stageField: "custbody_hc_return_id"],
+                    [recordType: "SalesOrd", stageField: "custbody_hc_exchange_credit_memo_id",
+                     via: [recordType: "CustCred", startField: "custbody_hc_return_id", stageField: "custbody_hc_return_id"]]]]]
+
+    Map saveReturns() {
+        return save([recordType: "RtnAuth", stageRecordTypes: ["ItemRcpt", "CustCred", "Settled"], stageReach: SETTLED_REACH])
+    }
+
+    private List<String> settledReach(String reconciliationId) {
+        ec.artifactExecution.disableAuthz()
+        try {
+            return (call("facade.ReconciliationFacadeServices.get#Reconciliation", [reconciliationId: reconciliationId]).questions as List<Map>)
+                    .findAll { it.questionRole != "START" && it.isActive != "N" }.collect { Map q ->
+                def sc = ec.entity.find("darpan.rule.RuleSetCompareScope").condition("ruleSetId", q.ruleSetId).one()
+                def src = ec.entity.find("darpan.rule.RuleSetCompareSource").condition("compareScopeId", sc.compareScopeId).one()
+                def query = ec.entity.find("darpan.reconciliation.NsSuiteQlSourceQuery").condition("nsSuiteQlSourceQueryId", src.sourceConfigId).one()
+                (query.absentChildRecordType ?: query.presentChildRecordType) == "Settled" ? query.stageReach as String : null
+            }.findAll { it }.unique()
+        } finally {
+            ec.artifactExecution.enableAuthz()
+        }
+    }
+
+    @Test
+    void settledIsReachedByAnyOfItsRecordsOnEveryQueryAskingAboutIt() {
+        Map out = saveReturns()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        String expected = '[{"recordType":"Settled","anyOf":[{"recordType":"CustRfnd","startField":"custbody_hc_return_id",' +
+                '"stageField":"custbody_hc_return_id"},{"recordType":"SalesOrd","stageField":"custbody_hc_exchange_credit_memo_id",' +
+                '"via":{"recordType":"CustCred","startField":"custbody_hc_return_id","stageField":"custbody_hc_return_id"}}]}]'
+        assertEquals([expected], settledReach(out.reconciliationId as String))
+        // A rebuild keeps it.
+        call("facade.ReconciliationFacadeServices.save#LifecycleStages", [reconciliationId: out.reconciliationId,
+                stageRecordTypes: ["ItemRcpt", "CustCred", "Settled"], stageReach: SETTLED_REACH])
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals([expected], settledReach(out.reconciliationId as String))
+    }
+
+    // Settled is no NetSuite type: saved without what settles it, every record would read "never settled".
+    @Test
+    void settledWithoutItsRecordsOrWithAnUnknownOneIsRefused() {
+        long before = count()
+        save([recordType: "RtnAuth", stageRecordTypes: ["ItemRcpt", "Settled"]])
+        assertTrue(ec.message.errors.any { it.contains("Settlement needs the records that reach it") }, ec.message.errors?.toString())
+        ec.message.clearErrors()
+        save([recordType: "RtnAuth", stageRecordTypes: ["ItemRcpt", "Settled"], stageReach: [[recordType: "Settled", anyOf: [[recordType: "Journal"]]]]])
+        assertTrue(ec.message.errors.any { it.contains("'Journal' is not a record type") }, ec.message.errors?.toString())
+        ec.message.clearErrors()
+        assertEquals(before, count())
+    }
+
+    private void seedConclusion(String enumId, String label) {
+        ec.artifactExecution.disableAuthz()
+        try {
+            ec.entity.makeValue("moqui.basic.EnumerationType").setAll([enumTypeId: "DarpanConclusion", description: "Run result conclusion"]).createOrUpdate()
+            ec.entity.makeValue("moqui.basic.Enumeration").setAll([enumId: enumId, enumTypeId: "DarpanConclusion", enumCode: enumId,
+                    description: label]).createOrUpdate()
+        } finally {
+            ec.artifactExecution.enableAuthz()
+        }
+    }
+
+    private List conclusionRows(String entity, String reconciliationId, String place) {
+        ec.artifactExecution.disableAuthz()
+        try {
+            Map q = (call("facade.ReconciliationFacadeServices.get#Reconciliation", [reconciliationId: reconciliationId]).questions as List<Map>)
+                    .find { it.isActive != "N" && it.noOutcomeLabel == place }
+            def sc = ec.entity.find("darpan.rule.RuleSetCompareScope").condition("ruleSetId", q.ruleSetId).one()
+            return ec.entity.find(entity).condition("compareScopeId", sc.compareScopeId).orderBy("sequenceNum,conditionSeq").list()
+                    .findAll { true }.collect { it.getMap() }
+        } finally {
+            ec.artifactExecution.enableAuthz()
+        }
+    }
+
+    @Test
+    void aPlaceNamesItsRecordsByConclusionsThatSurviveARebuild() {
+        seedConclusion("CONC_TEST_POS", "POS return not received in NetSuite")
+        seedConclusion("CONC_TEST_EXCHANGE", "Exchange sent, goods not back")
+        Map out = saveReturns()
+        String rid = out.reconciliationId as String
+        List conclusions = [
+                [conclusionEnumId: "CONC_TEST_POS", conditions: [[field: "hcReturnChannel", operator: "IN", values: ["POS_RTN_CHANNEL"], checkLabel: "Returned at a store"]]],
+                [conclusionEnumId: "CONC_TEST_EXCHANGE", conditions: [[field: "hcOutcome", values: ["Exchange"], checkLabel: "Outcome is Exchange"],
+                                                                     [field: "hcReturnChannel", operator: "NOT_BLANK", checkLabel: "Has a channel"]]]]
+        Map saved = call("facade.ReconciliationFacadeServices.save#LifecycleConclusions",
+                [reconciliationId: rid, place: "Credited, never received", conclusions: conclusions])
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals(["POS return not received in NetSuite", "Exchange sent, goods not back"],
+                (saved.conclusions as List<Map>).find { it.place == "Credited, never received" }.conclusions*.label)
+
+        List rules = conclusionRows("darpan.rule.RuleSetConclusionRule", rid, "Credited, never received")
+        assertEquals([[10, "CONC_TEST_POS", "FINDING", "KREWE"], [20, "CONC_TEST_EXCHANGE", "FINDING", "KREWE"]],
+                rules.collect { [it.sequenceNum as int, it.conclusionEnumId, it.appliesToBucket, it.companyUserGroupId] })
+        List conditions = conclusionRows("darpan.rule.RuleSetConclusionCondition", rid, "Credited, never received")
+        assertEquals([[10, 1, "FILE_1", "hcReturnChannel", "IN", "POS_RTN_CHANNEL"], [20, 1, "FILE_1", "hcOutcome", "IN", "Exchange"],
+                      [20, 2, "FILE_1", "hcReturnChannel", "NOT_BLANK", ""]],
+                conditions.collect { [it.sequenceNum as int, it.conditionSeq as int, it.subject, it.fieldExpression, it.operator, it.conditionValues ?: ""] })
+
+        // A rebuild makes new questions; the place of the same name names its records the same way.
+        call("facade.ReconciliationFacadeServices.save#LifecycleStages", [reconciliationId: rid,
+                stageRecordTypes: ["ItemRcpt", "CustCred", "Settled"], stageReach: SETTLED_REACH])
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals(["CONC_TEST_POS", "CONC_TEST_EXCHANGE"], conclusionRows("darpan.rule.RuleSetConclusionRule", rid, "Credited, never received")*.conclusionEnumId)
+        Map got = call("facade.ReconciliationFacadeServices.get#Reconciliation", [reconciliationId: rid])
+        assertEquals(["Credited, never received"], (got.conclusions as List<Map>)*.place)
+    }
+
+    @Test
+    void aConclusionIsRefusedForAnUnknownPlaceConclusionOrOperator() {
+        seedConclusion("CONC_TEST_POS", "POS return not received in NetSuite")
+        String rid = saveReturns().reconciliationId as String
+        Map ok = [conclusionEnumId: "CONC_TEST_POS", conditions: [[field: "hcReturnChannel", values: ["POS_RTN_CHANNEL"], checkLabel: "At a store"]]]
+        call("facade.ReconciliationFacadeServices.save#LifecycleConclusions", [reconciliationId: rid, place: "Nowhere", conclusions: [ok]])
+        assertTrue(ec.message.errors.any { it.contains("is not one of this lifecycle's places") }, ec.message.errors?.toString())
+        ec.message.clearErrors()
+        call("facade.ReconciliationFacadeServices.save#LifecycleConclusions", [reconciliationId: rid, place: "Credited, never received",
+                conclusions: [[conclusionEnumId: "DftJson", conditions: ok.conditions]]])
+        assertTrue(ec.message.errors.any { it.contains("is not a conclusion") }, ec.message.errors?.toString())
+        ec.message.clearErrors()
+        call("facade.ReconciliationFacadeServices.save#LifecycleConclusions", [reconciliationId: rid, place: "Credited, never received",
+                conclusions: [[conclusionEnumId: "CONC_TEST_POS", conditions: [[field: "hcReturnChannel", operator: "OLDER_THAN", values: ["30"], checkLabel: "x"]]]]])
+        assertTrue(ec.message.errors.any { it.contains("A condition is one of") }, ec.message.errors?.toString())
+        ec.message.clearErrors()
+        assertEquals([], conclusionRows("darpan.rule.RuleSetConclusionRule", rid, "Credited, never received"))
+    }
+
     private long count() {
         ec.artifactExecution.disableAuthz()
         try { return ec.entity.find("darpan.reconciliation.Reconciliation").count() } finally { ec.artifactExecution.enableAuthz() }

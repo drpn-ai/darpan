@@ -333,6 +333,9 @@
                                         "$ref": "#/components/schemas/SaveLifecycleRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/SaveLifecycleConclusionsRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/SaveLifecycleDetailsRequest"
                                     },
                                     {
@@ -565,6 +568,7 @@
                                         "facade.ReconciliationFacadeServices.save#DashboardPinnedMappings": "#/components/schemas/SaveDashboardPinnedMappingsRequest",
                                         "facade.ReconciliationFacadeServices.save#DashboardPinnedSavedRuns": "#/components/schemas/SaveDashboardPinnedSavedRunsRequest",
                                         "facade.ReconciliationFacadeServices.save#Lifecycle": "#/components/schemas/SaveLifecycleRequest",
+                                        "facade.ReconciliationFacadeServices.save#LifecycleConclusions": "#/components/schemas/SaveLifecycleConclusionsRequest",
                                         "facade.ReconciliationFacadeServices.save#LifecycleDetails": "#/components/schemas/SaveLifecycleDetailsRequest",
                                         "facade.ReconciliationFacadeServices.save#LifecycleFinding": "#/components/schemas/SaveLifecycleFindingRequest",
                                         "facade.ReconciliationFacadeServices.save#LifecycleRule": "#/components/schemas/SaveLifecycleRuleRequest",
@@ -931,6 +935,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveLifecycleResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveLifecycleConclusionsResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveLifecycleDetailsResponse"
@@ -11164,6 +11171,14 @@
                             "description": "Moqui type Map"
                         },
                         "description": "DAR-UI-050. A lifecycle built from stages: the findings people wrote for its stages."
+                    },
+                    "conclusions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        },
+                        "description": "DAR-UI-052. A lifecycle built from stages: per place, how its records are named,\n                    [place, reconciliationRunId, conclusions: [conclusionEnumId, label, conditions]]."
                     }
                 }
             },
@@ -15236,6 +15251,14 @@
                                         },
                                         "stageField": {
                                             "type": "string"
+                                        },
+                                        "anyOf": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "description": "Moqui type Map"
+                                            },
+                                            "description": "DAR-UI-052. For a composite stage (Settled): the\n                        records any one of which reaches it, each [recordType, startField, stageField], or [recordType] for a\n                        linked record, or [recordType, stageField, via: [recordType, startField, stageField]] for a record\n                        naming in stageField the internal id of the via record (a replacement order naming the credit memo)."
                                         }
                                     }
                                 }
@@ -15353,6 +15376,118 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/SaveLifecycleResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SaveLifecycleConclusionsParams": {
+                "type": "object",
+                "properties": {
+                    "reconciliationId": {
+                        "type": "string"
+                    },
+                    "place": {
+                        "type": "string",
+                        "description": "The place's name, e.g. \"Credited, never received\"."
+                    },
+                    "conclusions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        },
+                        "description": "[conclusionEnumId, conditions: [field, operator (IN, NOT_IN, BLANK, NOT_BLANK), values, checkLabel]];\n                    an empty list clears the place."
+                    }
+                },
+                "required": [
+                    "reconciliationId",
+                    "place"
+                ],
+                "description": "DAR-UI-052. How one place of a lifecycle names its records: ordered conclusions, each a\n            DarpanConclusion with conditions on the record's fields (a detail such as hcReturnChannel, or status) that\n            must all hold. The first that holds names a record; none leaves it Unexplained. Drawn on every run of the\n            place, and carried to the place of the same name when the stages change. Replaces the place's list."
+            },
+            "SaveLifecycleConclusionsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "conclusions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    }
+                }
+            },
+            "SaveLifecycleConclusionsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.save#LifecycleConclusions",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.save#LifecycleConclusions",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.save#LifecycleConclusions"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveLifecycleConclusionsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveLifecycleConclusionsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.save#LifecycleConclusions. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveLifecycleConclusionsResult"
                     }
                 },
                 "required": [
@@ -15842,6 +15977,14 @@
                                         },
                                         "stageField": {
                                             "type": "string"
+                                        },
+                                        "anyOf": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "description": "Moqui type Map"
+                                            },
+                                            "description": "DAR-UI-052. For a composite stage (Settled): the\n                        records any one of which reaches it, each [recordType, startField, stageField], or [recordType] for a\n                        linked record, or [recordType, stageField, via: [recordType, startField, stageField]] for a record\n                        naming in stageField the internal id of the via record (a replacement order naming the credit memo)."
                                         }
                                     }
                                 }
@@ -21207,6 +21350,7 @@
         "facade.ReconciliationFacadeServices.save#DashboardPinnedMappings": "SaveDashboardPinnedMappings",
         "facade.ReconciliationFacadeServices.save#DashboardPinnedSavedRuns": "SaveDashboardPinnedSavedRuns",
         "facade.ReconciliationFacadeServices.save#Lifecycle": "SaveLifecycle",
+        "facade.ReconciliationFacadeServices.save#LifecycleConclusions": "SaveLifecycleConclusions",
         "facade.ReconciliationFacadeServices.save#LifecycleDetails": "SaveLifecycleDetails",
         "facade.ReconciliationFacadeServices.save#LifecycleFinding": "SaveLifecycleFinding",
         "facade.ReconciliationFacadeServices.save#LifecycleRule": "SaveLifecycleRule",

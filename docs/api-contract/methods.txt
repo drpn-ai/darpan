@@ -101,6 +101,7 @@ facade.ReconciliationFacadeServices.save#Automation
 facade.ReconciliationFacadeServices.save#DashboardPinnedMappings
 facade.ReconciliationFacadeServices.save#DashboardPinnedSavedRuns
 facade.ReconciliationFacadeServices.save#Lifecycle
+facade.ReconciliationFacadeServices.save#LifecycleConclusions
 facade.ReconciliationFacadeServices.save#LifecycleDetails
 facade.ReconciliationFacadeServices.save#LifecycleFinding
 facade.ReconciliationFacadeServices.save#LifecycleRule

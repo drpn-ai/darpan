@@ -1,5 +1,6 @@
 package darpan.reconciliation.flowchart
 
+import darpan.facade.common.FacadeSupport
 import darpan.facade.common.SharedConfigAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
@@ -99,6 +100,9 @@ class LifecycleSupport {
         List<Map> plan = (List<Map>) ctx.plan
         def now = ctx.now
         Map<String, Map> reach = (Map<String, Map>) (ctx.stageReach ?: [:])
+        // DAR-UI-052. A composite stage (Settled) is no NetSuite type: without what reaches it, it would match nothing.
+        String unreached = plan.collect { it.stageRecordType as String }.find { it && LifecycleStageCompiler.isComposite(it) && !reach[it]?.anyOf }
+        if (unreached) { ec.message.addError("${LifecycleStageCompiler.words(unreached).name} needs the records that reach it."); return false }
         // One query per distinct thing asked, shared by every question that asks it: the start's population, and
         // "is X missing?" / "has it reached X?" per stage.
         String plural = LifecycleStageCompiler.words(startType).plural
@@ -194,6 +198,7 @@ class LifecycleSupport {
         }
         List<Map> exceptions = LifecycleRuleSupport.listExceptions(ec, reconciliationId)
         List<Map> findings = listFindings(ec, reconciliationId)
+        List<Map> conclusions = listConclusions(ec, reconciliationId)
         // A stage keeps how it is reached through a reorder, unless the save says otherwise.
         Map<String, Map> reach
         try {
@@ -222,6 +227,12 @@ class LifecycleSupport {
         findings.findAll { stages.contains(it.stageRecordType) }.each { Map f ->
             saveFinding(ec, [reconciliationId: reconciliationId, stageRecordType: f.stageRecordType, fieldId: f.fieldId,
                     fieldLabel: f.fieldLabel, op: f.op, value: f.value, valueLabel: f.valueLabel])
+        }
+        // DAR-UI-052. Conclusions follow their place by name; a place the new stages no longer make has nothing to name.
+        Set<String> places = RunFlowchartSupport.loadQuestions(ec, reconciliationId)
+                .findAll { it.isActive != "N" && it.noOutcomeLabel }*.noOutcomeLabel as Set<String>
+        conclusions.findAll { places.contains(it.place) }.each { Map p ->
+            saveConclusions(ec, [reconciliationId: reconciliationId, place: p.place, conclusions: p.conclusions])
         }
         return ec.message.hasError() ? [:] : [reconciliationName: name]
     }
@@ -306,6 +317,98 @@ class LifecycleSupport {
                      label: q.noOutcomeLabel, fieldId: rule?.fieldId, fieldLabel: rule?.fieldLabel, op: rule?.op,
                      value: (rule?.values as List)?.find(), valueLabel: rule?.valueLabel] as Map
                 }
+    }
+
+    static final String CONCLUSION_RULE = "darpan.rule.RuleSetConclusionRule"
+    static final String CONCLUSION_CONDITION = "darpan.rule.RuleSetConclusionCondition"
+    /** What ConclusionConditionSupport.holds answers; a condition reads one field of the place's record. */
+    static final List<String> CONCLUSION_OPERATORS = ["IN", "NOT_IN", "BLANK", "NOT_BLANK"].asImmutable()
+
+    /**
+     * DAR-UI-052. How a place's records are named: ordered conclusions, each a DarpanConclusion and the conditions on
+     * the record (a detail key such as hcReturnChannel, or a standard column such as status) that must all hold. The
+     * first that holds names the record; none means Unexplained. They are the place question's conclusion rules
+     * (RunConclusionStep draws them on every run), so a save replaces the place's rules, and a stage rebuild carries
+     * them to the place of the same name. An empty list clears the place.
+     */
+    static Map saveConclusions(def ec, Map params) {
+        if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for runs.")) return [:]
+        String reconciliationId = normalize(params.reconciliationId), place = normalize(params.place)
+        def run = reconciliationId ? RunFlowchartSupport.findReconciliation(ec, reconciliationId) : null
+        if (run == null || run.get("buildMode") != BUILD_MODE_STAGES) {
+            ec.message.addError("Conclusions belong to a lifecycle built from stages; '${reconciliationId}' is not one."); return [:]
+        }
+        Map question = RunFlowchartSupport.loadQuestions(ec, reconciliationId)
+                .find { it.isActive != "N" && it.noOutcomeLabel && it.noOutcomeLabel == place }
+        if (question == null) { ec.message.addError("'${place}' is not one of this lifecycle's places."); return [:] }
+        def scope = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareScope")
+                .condition("ruleSetId", question.ruleSetId).useCache(false).one()
+        if (scope == null) { ec.message.addError("The place '${place}' has no rule to conclude on."); return [:] }
+        String compareScopeId = scope.get("compareScopeId") as String, tenantId = run.get("companyUserGroupId") as String
+
+        List<Map> conclusions = []
+        for (Object o : ((params.conclusions ?: []) as List)) {
+            Map c = (Map) o
+            String enumId = normalize(c.conclusionEnumId)
+            def conclusion = enumId ? FacadeSupport.findEnum(ec, enumId) : null
+            if (conclusion == null || conclusion.get("enumTypeId") != "DarpanConclusion") {
+                ec.message.addError("'${enumId}' is not a conclusion."); return [:]
+            }
+            List<Map> conditions = []
+            for (Object co : ((c.conditions ?: []) as List)) {
+                Map cond = (Map) co
+                String field = normalize(cond.field), operator = (normalize(cond.operator) ?: "IN").toUpperCase()
+                List<String> values = ((cond.values ?: []) as List).collect { normalize(it) }.findAll { it } as List<String>
+                if (!(field ==~ /[a-zA-Z][a-zA-Z0-9_]{0,59}/)) { ec.message.addError("'${field}' is not a field of the place's records."); return [:] }
+                if (!(operator in CONCLUSION_OPERATORS)) { ec.message.addError("A condition is one of ${CONCLUSION_OPERATORS.join(', ')}, not '${operator}'."); return [:] }
+                if (operator in ["IN", "NOT_IN"] && (!values || values.any { it.contains(",") })) {
+                    ec.message.addError("'${field}' ${operator == 'IN' ? 'is' : 'is not'} needs values without commas."); return [:]
+                }
+                String checkLabel = normalize(cond.checkLabel)
+                if (!checkLabel) { ec.message.addError("Every condition says what it checks."); return [:] }
+                conditions << [field: field, operator: operator, values: values, checkLabel: checkLabel]
+            }
+            if (!conditions) { ec.message.addError("'${conclusion.get('description')}' needs at least one condition."); return [:] }
+            conclusions << [conclusionEnumId: enumId, conditions: conditions]
+        }
+
+        TenantScopedFinder.findTenantScoped(ec, CONCLUSION_CONDITION).condition("compareScopeId", compareScopeId).useCache(false).list()*.delete()
+        TenantScopedFinder.findTenantScoped(ec, CONCLUSION_RULE).condition("compareScopeId", compareScopeId).useCache(false).list()*.delete()
+        def now = ec.user.nowTimestamp
+        conclusions.eachWithIndex { Map c, int i ->
+            int seq = (i + 1) * 10
+            ec.entity.makeValue(CONCLUSION_RULE).setAll([compareScopeId: compareScopeId, sequenceNum: seq, conclusionEnumId: c.conclusionEnumId,
+                    appliesToBucket: "FINDING", companyUserGroupId: tenantId, createdDate: now, lastUpdatedDate: now]).create()
+            ((List<Map>) c.conditions).eachWithIndex { Map cond, int j ->
+                ec.entity.makeValue(CONCLUSION_CONDITION).setAll([compareScopeId: compareScopeId, sequenceNum: seq, conditionSeq: j + 1,
+                        subject: "FILE_1", fieldExpression: cond.field, operator: cond.operator,
+                        conditionValues: ((List) cond.values).join(","), checkLabel: cond.checkLabel, companyUserGroupId: tenantId]).create()
+            }
+        }
+        return ec.message.hasError() ? [:] : [conclusions: listConclusions(ec, reconciliationId)]
+    }
+
+    /** DAR-UI-052. Each place that names its records: [place, conclusions: [conclusionEnumId, label, conditions]]. */
+    static List<Map> listConclusions(def ec, String reconciliationId) {
+        List<Map> out = []
+        RunFlowchartSupport.loadQuestions(ec, reconciliationId).findAll { it.isActive != "N" && it.noOutcomeLabel }
+                .sort { (it.runSequence ?: 0) as int }.each { Map q ->
+            def scope = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareScope")
+                    .condition("ruleSetId", q.ruleSetId).useCache(false).one()
+            if (scope == null) return
+            List rules = TenantScopedFinder.findTenantScoped(ec, CONCLUSION_RULE).condition("compareScopeId", scope.get("compareScopeId"))
+                    .orderBy("sequenceNum").useCache(false).list()
+            if (!rules) return
+            List conditions = TenantScopedFinder.findTenantScoped(ec, CONCLUSION_CONDITION).condition("compareScopeId", scope.get("compareScopeId"))
+                    .orderBy("sequenceNum,conditionSeq").useCache(false).list()
+            out << [place: q.noOutcomeLabel, reconciliationRunId: q.reconciliationRunId, conclusions: rules.collect { r ->
+                [conclusionEnumId: r.get("conclusionEnumId"), label: FacadeSupport.findEnum(ec, r.get("conclusionEnumId") as String)?.get("description"),
+                 conditions: conditions.findAll { it.get("sequenceNum") == r.get("sequenceNum") }.collect { c ->
+                     [field: c.get("fieldExpression"), operator: c.get("operator"),
+                      values: ((c.get("conditionValues") ?: "") as String).split(",").findAll { it } as List, checkLabel: c.get("checkLabel")] }]
+            }]
+        }
+        return out
     }
 
     /** Where a stage's records are the ones that reached it: [question, branch]. */
@@ -433,14 +536,45 @@ class LifecycleSupport {
         Map<String, Map> out = [:]
         ((raw ?: []) as List).each { Object o ->
             Map m = (Map) o
-            String type = normalize(m.recordType), startField = normalize(m.startField), stageField = normalize(m.stageField)
+            String type = normalize(m.recordType)
             if (!stages.contains(type)) throw new IllegalArgumentException("'${type}' is not one of this lifecycle's stages.")
-            if (!(startField ==~ /[a-z][a-z0-9_]*/) || !(stageField ==~ /[a-z][a-z0-9_]*/)) {
-                throw new IllegalArgumentException("A stage is matched on a field id, not '${startField}' / '${stageField}'.")
+            if (LifecycleStageCompiler.isComposite(type)) {
+                List alternatives = (m.anyOf ?: []) as List
+                if (!alternatives) throw new IllegalArgumentException("${LifecycleStageCompiler.words(type).name} needs the records that reach it.")
+                out[type] = [anyOf: alternatives.collect { alternative((Map) it) }]
+                return
             }
-            out[type] = [startField: startField, stageField: stageField]
+            out[type] = fieldPair(m)
         }
         return out
+    }
+
+    private static boolean isFieldId(String f) { f ==~ /[a-z][a-z0-9_]*/ }
+
+    private static Map fieldPair(Map m) {
+        String startField = normalize(m.startField), stageField = normalize(m.stageField)
+        if (!isFieldId(startField) || !isFieldId(stageField)) {
+            throw new IllegalArgumentException("A stage is matched on a field id, not '${startField}' / '${stageField}'.")
+        }
+        return [startField: startField, stageField: stageField]
+    }
+
+    /**
+     * DAR-UI-052. One way a composite stage is reached: a NetSuite record type, linked (no fields), carrying the start
+     * record's field (startField + stageField), or naming, in stageField, the internal id of a record reached that way
+     * (via): a replacement order naming the return's credit memo.
+     */
+    private static Map alternative(Map m) {
+        String type = normalize(m.recordType)
+        if (!LifecycleStageCompiler.RECORD_TYPES.containsKey(type)) throw new IllegalArgumentException("'${type}' is not a record type a lifecycle can use.")
+        if (m.via) {
+            Map via = (Map) m.via
+            String viaType = normalize(via.recordType), stageField = normalize(m.stageField)
+            if (!LifecycleStageCompiler.RECORD_TYPES.containsKey(viaType)) throw new IllegalArgumentException("'${viaType}' is not a record type a lifecycle can use.")
+            if (!isFieldId(stageField)) throw new IllegalArgumentException("A stage is matched on a field id, not '${stageField}'.")
+            return [recordType: type, stageField: stageField, via: [recordType: viaType] + fieldPair(via)]
+        }
+        return normalize(m.startField) || normalize(m.stageField) ? [recordType: type] + fieldPair(m) : [recordType: type]
     }
 
     /** DAR-BE-073. How the lifecycle's current stages are reached, read off their queries. */
@@ -449,7 +583,9 @@ class LifecycleSupport {
         questions.findAll { it.questionRole != RunFlowchartTree.ROLE_START }.each { Map q ->
             String raw = LifecycleRuleSupport.queryForRule(ec, q.ruleSetId as String)?.get("stageReach") as String
             if (!raw) return
-            ((List) new JsonSlurper().parseText(raw)).each { Map e -> out[e.recordType as String] = [startField: e.startField, stageField: e.stageField] }
+            ((List) new JsonSlurper().parseText(raw)).each { Map e ->
+                out[e.recordType as String] = e.anyOf ? [anyOf: e.anyOf] : [startField: e.startField, stageField: e.stageField]
+            }
         }
         return out
     }

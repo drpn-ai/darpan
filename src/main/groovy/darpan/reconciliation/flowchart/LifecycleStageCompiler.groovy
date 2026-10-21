@@ -35,11 +35,22 @@ class LifecycleStageCompiler {
             CustRfnd: [name: "Refund", plural: "Refunds", past: "Refunded", neg: "never refunded"],
     ].asImmutable()
 
+    /**
+     * DAR-UI-052. Stages that are no single NetSuite type: reached when ANY of several records exists (a return is
+     * settled by a refund, an invoice or a replacement order). Each needs its stageReach anyOf, which names only
+     * RECORD_TYPES, so these keys never reach SuiteQL and a lifecycle never starts from one.
+     */
+    static final Map<String, Map<String, String>> COMPOSITE_STAGES = [
+            Settled: [name: "Settlement", plural: "Settlements", past: "Settled", neg: "never settled"],
+    ].asImmutable()
+
     static Map<String, String> words(String recordType) {
-        Map<String, String> w = RECORD_TYPES[recordType]
+        Map<String, String> w = RECORD_TYPES[recordType] ?: COMPOSITE_STAGES[recordType]
         if (w == null) throw new IllegalArgumentException("'${recordType}' is not a record type a lifecycle can use.")
         return w
     }
+
+    static boolean isComposite(String stage) { COMPOSITE_STAGES.containsKey(stage) }
 
     /**
      * Ordered question specs: key, parentKey, parentBranch, questionRole, recordType (START) or stageRecordType
@@ -47,6 +58,7 @@ class LifecycleStageCompiler {
      * Order matters: a stage comes before the questions beside it, so the first YES child is always the next stage.
      */
     static List<Map> compile(String startRecordType, List<String> stages) {
+        if (isComposite(startRecordType)) throw new IllegalArgumentException("A lifecycle starts from records, not from '${startRecordType}'.")
         Map<String, String> start = words(startRecordType)
         if (!stages) throw new IllegalArgumentException("A lifecycle needs at least one stage.")
         List<Map<String, String>> s = stages.collect { words(it) }

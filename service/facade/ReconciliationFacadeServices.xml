@@ -2074,6 +2074,9 @@
                 <description>DAR-UI-050. A lifecycle built from stages: the custom fields its records show, [fieldId, label].</description></parameter>
             <parameter name="findings" type="List"><parameter name="finding" type="Map"/>
                 <description>DAR-UI-050. A lifecycle built from stages: the findings people wrote for its stages.</description></parameter>
+            <parameter name="conclusions" type="List"><parameter name="placeConclusions" type="Map"/>
+                <description>DAR-UI-052. A lifecycle built from stages: per place, how its records are named,
+                    [place, reconciliationRunId, conclusions: [conclusionEnumId, label, conditions]].</description></parameter>
         </out-parameters>
         <actions>
             <set field="got" from="darpan.reconciliation.flowchart.RunFlowchartSupport.getReconciliation(ec, reconciliationId)"/>
@@ -2086,6 +2089,7 @@
             <set field="lifecycle" from="described?.lifecycle"/>
             <set field="details" from="described?.details"/>
             <set field="findings" from="described?.findings"/>
+            <set field="conclusions" from="described?.conclusions"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
@@ -2265,6 +2269,11 @@
                     credit memo carrying the return's HC Return Id. Stages not named here are reached by link.</description>
                 <parameter name="reach" type="Map">
                     <parameter name="recordType"/><parameter name="startField"/><parameter name="stageField"/>
+                    <parameter name="anyOf" type="List"><description>DAR-UI-052. For a composite stage (Settled): the
+                        records any one of which reaches it, each [recordType, startField, stageField], or [recordType] for a
+                        linked record, or [recordType, stageField, via: [recordType, startField, stageField]] for a record
+                        naming in stageField the internal id of the via record (a replacement order naming the credit memo).</description>
+                        <parameter name="alternative" type="Map"/></parameter>
                 </parameter>
             </parameter>
             <parameter name="rules" type="List">
@@ -2460,6 +2469,33 @@
         </actions>
     </service>
 
+    <service verb="save" noun="LifecycleConclusions" allow-remote="true" authenticate="true">
+        <description>DAR-UI-052. How one place of a lifecycle names its records: ordered conclusions, each a
+            DarpanConclusion with conditions on the record's fields (a detail such as hcReturnChannel, or status) that
+            must all hold. The first that holds names a record; none leaves it Unexplained. Drawn on every run of the
+            place, and carried to the place of the same name when the stages change. Replaces the place's list.</description>
+        <in-parameters>
+            <parameter name="reconciliationId" required="true"/>
+            <parameter name="place" required="true"><description>The place's name, e.g. "Credited, never received".</description></parameter>
+            <parameter name="conclusions" type="List"><parameter name="conclusion" type="Map"/>
+                <description>[conclusionEnumId, conditions: [field, operator (IN, NOT_IN, BLANK, NOT_BLANK), values, checkLabel]];
+                    an empty list clears the place.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="conclusions" type="List"><parameter name="placeConclusions" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.reconciliation.flowchart.LifecycleSupport.saveConclusions(ec, context)"/>
+            <set field="conclusions" from="result?.conclusions ?: []"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
     <service verb="save" noun="LifecycleStages" allow-remote="true" authenticate="true">
         <description>DAR-UI-050. Changes a lifecycle's stages: their order, or which they are. The old stage questions are
             turned off (past runs stay readable) and new ones compiled under the same start, so filters stay; stage
@@ -2473,6 +2509,11 @@
                     not sent, each stage keeps how it is reached now.</description>
                 <parameter name="reach" type="Map">
                     <parameter name="recordType"/><parameter name="startField"/><parameter name="stageField"/>
+                    <parameter name="anyOf" type="List"><description>DAR-UI-052. For a composite stage (Settled): the
+                        records any one of which reaches it, each [recordType, startField, stageField], or [recordType] for a
+                        linked record, or [recordType, stageField, via: [recordType, startField, stageField]] for a record
+                        naming in stageField the internal id of the via record (a replacement order naming the credit memo).</description>
+                        <parameter name="alternative" type="Map"/></parameter>
                 </parameter>
             </parameter>
         </in-parameters>

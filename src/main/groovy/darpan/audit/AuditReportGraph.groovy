@@ -76,6 +76,18 @@ class AuditReportGraph {
         return out
     }
 
+    /** findings(query:): each node's records as a list, as in the report. */
+    static Map findingsPage(Map page) {
+        if (page == null) return null
+        Map out = new LinkedHashMap(page)
+        out.edges = ((List<Map>) page.edges ?: []).collect { Map edge ->
+            Map node = new LinkedHashMap((Map) edge.node)
+            node.records = records((Map) node.records)
+            [cursor: edge.cursor, node: node]
+        }
+        return out
+    }
+
     private static Map statement(Map st) {
         st.checks = ((List<Map>) st.checks ?: []).collect { Map check ->
             Map c = new LinkedHashMap(check)

@@ -102,6 +102,32 @@
         </actions>
     </service>
 
+    <service verb="get" noun="AuditFindingsGraph" authenticate="false" allow-remote="false">
+        <description>DAR-BE-098, findings(query:). One page of the tenant's findings in their GraphQL shape: each node is the
+            report's finding summary plus its audit, statement, category, period and last sighting, records as a list.
+            The engine parses query: and hands over the terms; the tenant is the request's, never an argument.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="searchTerms" type="List"><description>The parsed query: terms, [key, comparator, values] each:
+                audit, statement, category, state, period (eq, in) and firstFound (eq, gt, gte, lt, lte).</description></parameter>
+            <parameter name="sortKey"><description>FIRST_FOUND (default) or STATEMENT (catalog order, each oldest first).</description></parameter>
+            <parameter name="reverse" type="Boolean"/>
+            <parameter name="first" type="Integer"><description>Page size, 1 to 100; default 50.</description></parameter>
+            <parameter name="after"><description>A cursor from this list, under the same sortKey and reverse.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="page" type="Map"/>
+            <parameter name="publicError"><description>Why there is no page, in words a caller may see.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.audit.AuditReportAssembler.findingsPage(ec, companyUserGroupId, searchTerms,
+                    sortKey, reverse, first, after)"/>
+            <set field="publicError" from="result.publicError"/>
+            <if condition="publicError"><return/></if>
+            <set field="page" from="darpan.audit.AuditReportGraph.findingsPage(result.page)"/>
+        </actions>
+    </service>
+
     <service verb="get" noun="AuditWindow" authenticate="false" allow-remote="false">
         <description>DAR-BE-091. The window an audit's checks read on one morning: from the first day of the audit's
             period to the report day, inclusive ("on the 14th it reconciles 1-14, on the 15th 1-15"). The scheduled

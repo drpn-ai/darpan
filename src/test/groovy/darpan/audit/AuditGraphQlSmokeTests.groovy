@@ -69,6 +69,21 @@ class AuditGraphQlSmokeTests {
         }
         findingA = morning(A, "INV-A1")
         morning(B, "INV-B1")
+        // Tenant A's returns statement, found a day later, for findings(query:): two returns.
+        insert("darpan.audit.AuditStatement", [statementId: "${A}_R8".toString(), companyUserGroupId: A, auditId: "${A}_MC".toString(),
+                statementCode: "R8", categoryEnumId: "AUDC_RETURNS", weightEnumId: "AUDSW_FIRM", sequenceNum: 8L,
+                statementText: "Every return has its credit memo."])
+        insert("darpan.audit.AuditCheck", [checkId: "${A}_RET".toString(), companyUserGroupId: A, checkCode: "returns-vs-credit-memos",
+                label: "OMS returns against NetSuite credit memos", graceDays: 0L])
+        insert("darpan.audit.AuditStatementCheck", [checkId: "${A}_RET".toString(), statementId: "${A}_R8".toString(),
+                companyUserGroupId: A, sequenceNum: 1L])
+        Map base = [companyUserGroupId: A, checkId: "${A}_RET".toString(), reportDate: Date.valueOf("2026-10-09")]
+        ec.service.sync().name("${LEDGER}.record#CheckRun").parameters(base + [sourceReads: [[systemEnumId: "OMS_RETURNS_GQL",
+                statusEnumId: "AUDSR_COMPLETE", recordCount: 412L, readStamp: new java.sql.Timestamp(System.currentTimeMillis())]]]).call()
+        ec.service.sync().name("${LEDGER}.record#CheckFindings").parameters(base + [findings: ["M258615", "M258616"].collect {
+            [statementCode: "R8", recordKey: it, headline: "Return ${it} has no credit memo".toString(),
+             records: [[systemEnumId: "OMS_RETURNS_GQL", recordType: "return", recordId: it, recordStatus: "Completed"]]] }]).call()
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
     }
 
     /** One morning's run of the invoice check for a tenant, finding one invoice; answers its finding id. */
@@ -213,6 +228,89 @@ class AuditGraphQlSmokeTests {
         assertEquals([], out.errors)
         assertEquals("darpan.audit.report/v1", out.data.auditReport.schema)
         assertEquals(["an earlier caller's error"], ec.message.errors as List)
+    }
+
+    private static final String PAGE = "edges { cursor node { id statement category period headline state firstFound lastSeen " +
+            "ageDays next records { system recordType id internalId status } } } pageInfo { hasNextPage hasPreviousPage startCursor endCursor }"
+
+    private Map findings(String tenant, String args) {
+        return gql(tenant, "{ findings(${args}) { ${PAGE} } }")
+    }
+
+    private static List<Map> nodes(Map out) {
+        return ((List<Map>) out.data.findings.edges)*.node
+    }
+
+    @Test
+    void findingsListsTheKeysTenantOldestFirstInTheReportsShape() {
+        Map out = findings(A, "first: 10")
+        assertEquals([], out.errors, "errors")
+        List<Map> list = nodes(out)
+        assertEquals(["Invoice INV-A1 has no Etail id", "Return M258615 has no credit memo", "Return M258616 has no credit memo"],
+                list*.headline, "oldest first, then by id")
+        Map first = list[0]
+        assertEquals([findingA, "R2", "orders", "2026-10", "pending", "2026-10-08", "2026-10-08", "darpan findings show ${findingA}".toString()],
+                [first.id, first.statement, first.category, first.period, first.state, first.firstFound, first.lastSeen, first.next])
+        assertEquals([[system: "NetSuite", recordType: "invoice", id: "INV-A1", internalId: "51000940", status: null]], first.records)
+        assertEquals([system: "OMS", recordType: "return", id: "M258615", internalId: null, status: "Completed"], list[1].records[0],
+                "records under the root system, as the report keys them")
+        assertEquals(false, out.data.findings.pageInfo.hasNextPage)
+        assertTrue(nodes(findings(B, "first: 10"))*.headline == ["Invoice INV-B1 has no Etail id"], "B sees only B's")
+    }
+
+    @Test
+    void findingsSearchesByStatementStateCategoryFirstFoundAndPeriod() {
+        Closure<List<String>> heads = { String q -> nodes(findings(A, "first: 10, query: \"${q}\""))*.headline }
+        assertEquals(2, heads("statement:R8").size())
+        assertEquals(["Invoice INV-A1 has no Etail id"], heads("statement:R2"))
+        assertEquals(3, heads("statement:R2,R8").size(), "comma is in")
+        assertEquals(2, heads("category:returns").size())
+        assertEquals(["Invoice INV-A1 has no Etail id"], heads("state:pending"), "R8's grace is 0: open")
+        assertEquals(2, heads("state:open").size())
+        assertEquals(2, heads("firstFound:>=2026-10-09").size())
+        assertEquals(1, heads("firstFound:<2026-10-09").size())
+        assertEquals(3, heads("period:2026-10").size())
+        assertEquals([], heads("period:2026-09"))
+        assertEquals(2, heads("statement:R8 firstFound:2026-10-09 state:open").size(), "terms AND together")
+        assertEquals([], heads("statement:R2 category:returns"))
+    }
+
+    @Test
+    void findingsPagesWithACursorAndSortsByStatement() {
+        Map one = findings(A, "first: 2")
+        assertEquals(2, nodes(one).size())
+        assertEquals([true, false], [one.data.findings.pageInfo.hasNextPage, one.data.findings.pageInfo.hasPreviousPage])
+        Map two = findings(A, "first: 2, after: \"${one.data.findings.pageInfo.endCursor}\"")
+        assertEquals(["Return M258616 has no credit memo"], nodes(two)*.headline)
+        assertEquals([false, true], [two.data.findings.pageInfo.hasNextPage, two.data.findings.pageInfo.hasPreviousPage])
+
+        assertEquals(["R8", "R8", "R2"], nodes(findings(A, "first: 10, sortKey: STATEMENT, reverse: true"))*.statement)
+        assertEquals(["R2", "R8", "R8"], nodes(findings(A, "first: 10, sortKey: STATEMENT"))*.statement)
+        List<Map> newest = nodes(findings(A, "first: 1, sortKey: FIRST_FOUND, reverse: true"))
+        assertEquals("Return M258616 has no credit memo", newest[0].headline, "newest first, then by id descending")
+        Map rest = findings(A, "first: 5, sortKey: STATEMENT, reverse: true, after: \"${findings(A, 'first: 1, sortKey: STATEMENT, reverse: true').data.findings.pageInfo.endCursor}\"")
+        assertEquals(["R8", "R2"], nodes(rest)*.statement, "a cursor keeps its sort")
+    }
+
+    @Test
+    void findingsRefusesAnUndeclaredSearchKeyAndATooLargePage() {
+        Map bad = findings(A, 'first: 10, query: "colour:red"')
+        assertNull(bad.data?.findings)
+        assertTrue(bad.errors.toString().contains("FIELD_NOT_FILTERABLE"), bad.errors.toString())
+        Map op = findings(A, 'first: 10, query: "statement:>R2"')
+        assertTrue(op.errors.toString().contains("OPERATOR_NOT_ALLOWED"), op.errors.toString())
+        Map date = findings(A, 'first: 10, query: "firstFound:yesterday"')
+        assertTrue(date.errors.toString().contains("firstFound must be YYYY-MM-DD"), date.errors.toString())
+        Map big = findings(A, "first: 100000")
+        assertTrue(big.errors.toString().contains("TOO_LARGE") || big.errors.toString().contains("first"), big.errors.toString())
+        assertTrue(findings(A, 'first: 10, after: "not-a-cursor"').errors.toString().contains("after is not a cursor"))
+    }
+
+    @Test
+    void findingsWithNoTenantCallsNothing() {
+        Map out = findings("", "first: 10")
+        assertNull(out.data?.findings)
+        assertEquals([], out.errors)
     }
 
     private void insert(String entityName, Map<String, Object> fields) {

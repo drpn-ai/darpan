@@ -368,6 +368,7 @@ class TenantAccessSupport {
             lastLoginDate : resolveLastLoginDate(ec),
             lastRun       : resolveLastRun(ec),
         ]
+        if (sessionInfo.userId) sessionInfo.putAll(darpan.facade.auth.PasswordResetSupport.recoveryEmailFlags(ec))
         applyScopeToSessionInfo(ec, sessionInfo)
         return sessionInfo
     }

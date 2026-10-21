@@ -2,6 +2,7 @@ package darpan.facade.auth
 
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantScopedFinder
+import org.apache.commons.validator.routines.EmailValidator
 import org.moqui.entity.EntityCondition
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -165,7 +166,7 @@ class PasswordResetSupport {
             row.usedDate = now
             row.thruDate = now
             row.update()
-            AuthFacadeSupport.deleteAllLoginKeysForUser(ec, userId)
+            signOutEverywhere(ec, userId)
             sendEmail(ec, TEMPLATE_PASSWORD_CHANGED, (String) account.emailAddress,
                     [username: account.username, changedAt: ec.l10n.format(now, null)])
             logger.info("Password reset completed for {}", logSubject(account))
@@ -179,6 +180,62 @@ class PasswordResetSupport {
             ec.message.addError(CODE_FAILURE_MESSAGE)
         }
         return [passwordUpdated: false] + FacadeSupport.envelope(ec)
+    }
+
+    /** End every session the account has, failing closed: unlike AuthFacadeSupport.deleteAllLoginKeysForUser,
+     *  a failure here is not swallowed, so it rolls the reset back instead of reporting a reset that left an
+     *  old session alive. Login keys cover darpan-ui (header token and persistent cookie); hasLoggedOut=Y is the
+     *  framework's broadcast that evicts session-authenticated requests elsewhere (UserFacadeImpl, legacy /apps),
+     *  and the account's next successful login clears it. */
+    private static void signOutEverywhere(def ec, String userId) {
+        TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserLoginKey",
+                "self-scoped auth: delete all login keys for userId after a password reset")
+                .condition("userId", userId).deleteAll()
+        ec.service.sync().name("update#moqui.security.UserAccount").parameters([userId: userId, hasLoggedOut: "Y"]).call()
+    }
+
+    /** Save the signed-in user's recovery email (UserAccount.emailAddress), trimmed and lower-cased, with no
+     *  confirmation code (Aditi, 2026-10-21). The new address, and the old one if it changes, get a notice in
+     *  place of a code. An address another account already holds is NOT saved, yet the reply is the same as a
+     *  save, so a signed-in user cannot test whether an address has a Darpan account; that inbox is told. */
+    static Map<String, Object> saveRecoveryEmail(def ec, Object emailAddress) {
+        String userId = normalize(ec.user.userId)
+        String email = normalize(emailAddress)?.toLowerCase()
+        Map<String, Object> result = [emailAddressMasked: null]
+        if (!userId) {
+            ec.message.addError("Authentication required to save a recovery email.")
+        } else if (!email || !EmailValidator.getInstance().isValid(email)) {
+            ec.message.addError("Enter a valid email address.")
+        } else {
+            def own = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
+                    "self-scoped auth: the signed-in user's own account").condition("userId", userId).useCache(false).one()
+            def holders = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
+                    "self-scoped auth: is this address already another account's (uniqueness, no reply detail)")
+                    .condition(ec.entity.conditionFactory.makeCondition("emailAddress",
+                            EntityCondition.ComparisonOperator.EQUALS, email).ignoreCase())
+                    .condition("userId", EntityCondition.ComparisonOperator.NOT_EQUAL, userId).useCache(false).list()
+            if (holders) {
+                logger.warn("Recovery email not saved for {}: the address belongs to another account", logSubject(own))
+                sendEmail(ec, TEMPLATE_RECOVERY_CONFLICT, email, [username: own.username])
+            } else {
+                String previous = normalize(own.emailAddress)
+                // Facade services carry inheritAuthz=Y, so this own-user write is authorized (as saveUserSettings).
+                ec.service.sync().name("update#moqui.security.UserAccount").parameters([userId: userId, emailAddress: email]).call()
+                sendEmail(ec, TEMPLATE_RECOVERY_SET, email, [username: own.username, isOldAddress: false])
+                if (previous && previous.toLowerCase() != email) {
+                    sendEmail(ec, TEMPLATE_RECOVERY_SET, previous, [username: own.username, isOldAddress: true])
+                }
+            }
+            result.emailAddressMasked = maskEmail(email)
+        }
+        result.putAll(FacadeSupport.envelope(ec))
+        return result
+    }
+
+    /** The two session flags darpan-ui needs; masked, because the UI never needs the whole address. */
+    static Map<String, Object> recoveryEmailFlags(def ec) {
+        String email = normalize(ec?.user?.userAccount?.emailAddress)
+        return [recoveryEmailMissing: !email, emailAddressMasked: maskEmail(email)]
     }
 
     /** Who a log line is about: the matched userId, never the raw username or email that was typed. */

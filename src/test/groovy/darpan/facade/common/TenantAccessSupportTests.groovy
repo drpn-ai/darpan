@@ -980,6 +980,7 @@ class TenantAccessSupportTests {
         private final Map<String, Object> backingRow
         String timeZone
         String userFullName = null
+        String emailAddress = null
 
         RefreshableUserAccountStub(Map<String, Object> backingRow) {
             this.backingRow = backingRow

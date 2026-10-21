@@ -244,6 +244,9 @@ class PasswordResetServicesSmokeTests {
         Map done = complete(lastCode(), NEW_PASSWORD)
         assertTrue(done.out.passwordUpdated as boolean, "errors: ${done.errors}")
         assertEquals(0L, ec.entity.find("moqui.security.UserLoginKey").condition("userId", OK_ID).disableAuthz().count())
+        // Security review 2026-10-21: session-authenticated requests elsewhere (legacy /apps via /Login) are only
+        // evicted by the framework's hasLoggedOut broadcast; deleting login keys alone leaves them signed in.
+        assertEquals("Y", account(OK_ID).hasLoggedOut)
         assertTrue(signIn(NEW_PASSWORD), "new password should sign in")
         def changed = sent.findAll { it.templateId == PasswordResetSupport.TEMPLATE_PASSWORD_CHANGED }
         assertEquals(1, changed.size())
@@ -309,7 +312,89 @@ class PasswordResetServicesSmokeTests {
         assertEquals("N", account(OK_ID).requirePasswordChange)
     }
 
+    // ---- Task 4: recovery email, session flags, status ----
+
+    @Test
+    void savesTrimmedLowerCased() {
+        Map saved = signedIn(OK_USERNAME, "save#RecoveryEmail", [emailAddress: "  New.Addr@Example.COM "])
+        assertEquals([], saved.errors)
+        assertEquals("n•••@example.com", saved.out.emailAddressMasked)
+        assertEquals("new.addr@example.com", account(OK_ID).emailAddress)
+        def notices = sent.findAll { it.templateId == PasswordResetSupport.TEMPLATE_RECOVERY_SET }
+        assertEquals(2, notices.size(), "sends: ${sent}")
+        assertEquals(["new.addr@example.com", false], [notices[0].to, notices[0].params.isOldAddress])
+        assertEquals([OK_EMAIL, true], [notices[1].to, notices[1].params.isOldAddress])
+    }
+
+    @Test
+    void caseOnlyChangeIsNotConflict() {
+        Map saved = signedIn(OK_USERNAME, "save#RecoveryEmail", [emailAddress: OK_EMAIL.toUpperCase()])
+        assertEquals([], saved.errors)
+        assertEquals(OK_EMAIL, account(OK_ID).emailAddress)
+        assertTrue(sent.every { it.templateId != PasswordResetSupport.TEMPLATE_RECOVERY_CONFLICT }, "sends: ${sent}")
+        assertEquals(1, sent.count { it.templateId == PasswordResetSupport.TEMPLATE_RECOVERY_SET })
+    }
+
+    @Test
+    void conflictDoesNotSaveAndRepliesOk() {
+        Map saved = signedIn("pwr.noemail", "save#RecoveryEmail", [emailAddress: OK_EMAIL])
+        assertEquals([], saved.errors)
+        assertTrue(saved.out.ok as boolean)
+        assertEquals("p•••@example.com", saved.out.emailAddressMasked)
+        assertNull(account(NOEMAIL_ID).emailAddress)
+        assertEquals(1, sent.size(), "sends: ${sent}")
+        assertEquals([PasswordResetSupport.TEMPLATE_RECOVERY_CONFLICT, OK_EMAIL], [sent[0].templateId, sent[0].to])
+    }
+
+    @Test
+    void invalidEmailRefused() {
+        Map saved = signedIn(OK_USERNAME, "save#RecoveryEmail", [emailAddress: "not an email"])
+        assertFalse(saved.errors.isEmpty())
+        assertEquals(OK_EMAIL, account(OK_ID).emailAddress)
+        assertTrue(sent.isEmpty())
+    }
+
+    @Test
+    void anonymousRefused() {
+        ec.user.logoutUser()
+        def refused = assertThrows(org.moqui.context.AuthenticationRequiredException) {
+            ec.service.sync().name("facade.AuthFacadeServices.save#RecoveryEmail").parameters([emailAddress: "x@example.com"]).call()
+        }
+        assertTrue(refused.message.contains("logged in"), refused.message)
+        ec.message.clearAll()
+        assertNull(account(NOEMAIL_ID).emailAddress)
+    }
+
+    @Test
+    void sessionFlags() {
+        Map before = signedIn("pwr.noemail", "get#SessionInfo", [:])
+        assertEquals(true, before.out.sessionInfo.recoveryEmailMissing)
+        assertNull(before.out.sessionInfo.emailAddressMasked)
+        signedIn("pwr.noemail", "save#RecoveryEmail", [emailAddress: "fresh@example.com"])
+        Map after = signedIn("pwr.noemail", "get#SessionInfo", [:])
+        assertEquals(false, after.out.sessionInfo.recoveryEmailMissing)
+        assertEquals("f•••@example.com", after.out.sessionInfo.emailAddressMasked)
+    }
+
+    @Test
+    void statusReflectsConfig() {
+        assertEquals(false, anon("get#PasswordResetStatus", [:]).out.available)
+        ec.entity.makeValue("moqui.basic.email.EmailServer").setAll([emailServerId: "SYSTEM", smtpHost: "smtp.test"]).createOrUpdate()
+        assertEquals(System.getenv("DARPAN_MAIL_FROM") as boolean, anon("get#PasswordResetStatus", [:]).out.available)
+    }
+
     // ---- helpers ----
+
+    /** Call a facade service signed in as username. */
+    private Map signedIn(String username, String verbNoun, Map params) {
+        ec.user.logoutUser()
+        assertTrue(ec.user.internalLoginUser(username), "could not sign in ${username}")
+        ec.message.clearAll()
+        Map out = ec.service.sync().name("facade.AuthFacadeServices.${verbNoun}".toString()).parameters(params).call() ?: [:]
+        List<String> errors = new ArrayList<>(ec.message.errors)
+        ec.message.clearAll()
+        return [out: out, errors: errors]
+    }
 
     private Map complete(String code, String newPassword) {
         return anon("complete#PasswordReset", [usernameOrEmail: OK_USERNAME, code: code,
@@ -362,7 +447,7 @@ class PasswordResetServicesSmokeTests {
     private void upsertAccount(String userId, String username, String email, String disabled) {
         ec.entity.makeValue("moqui.security.UserAccount").setAll([userId: userId, username: username,
                 userFullName: username, emailAddress: email, disabled: disabled, requirePasswordChange: "N",
-                currentPassword: null, passwordSalt: null,
+                currentPassword: null, passwordSalt: null, hasLoggedOut: "N",
                 successiveFailedLogins: 0]).createOrUpdate()
         ec.entity.find("moqui.security.UserPasswordHistory").condition("userId", userId).disableAuthz().deleteAll()
         ec.entity.find("moqui.security.UserLoginKey").condition("userId", userId).disableAuthz().deleteAll()

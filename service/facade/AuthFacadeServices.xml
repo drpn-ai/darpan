@@ -61,6 +61,8 @@
                 <parameter name="userTimeZone" type="String"/>
                 <parameter name="tenantTimeZone" type="String"/>
                 <parameter name="lastLoginDate" type="Timestamp"/>
+                <parameter name="recoveryEmailMissing" type="Boolean"/>
+                <parameter name="emailAddressMasked" type="String"/>
                 <parameter name="lastRun" type="Map">
                     <parameter name="reconciliationRunResultId" type="String"/>
                     <parameter name="savedRunId" type="String"/>
@@ -127,6 +129,8 @@
                 <parameter name="userTimeZone" type="String"/>
                 <parameter name="tenantTimeZone" type="String"/>
                 <parameter name="lastLoginDate" type="Timestamp"/>
+                <parameter name="recoveryEmailMissing" type="Boolean"/>
+                <parameter name="emailAddressMasked" type="String"/>
                 <parameter name="lastRun" type="Map">
                     <parameter name="reconciliationRunResultId" type="String"/>
                     <parameter name="savedRunId" type="String"/>
@@ -198,6 +202,8 @@
                 <parameter name="userTimeZone" type="String"/>
                 <parameter name="tenantTimeZone" type="String"/>
                 <parameter name="lastLoginDate" type="Timestamp"/>
+                <parameter name="recoveryEmailMissing" type="Boolean"/>
+                <parameter name="emailAddressMasked" type="String"/>
                 <parameter name="lastRun" type="Map">
                     <parameter name="reconciliationRunResultId" type="String"/>
                     <parameter name="savedRunId" type="String"/>
@@ -271,6 +277,8 @@
                 <parameter name="userTimeZone" type="String"/>
                 <parameter name="tenantTimeZone" type="String"/>
                 <parameter name="lastLoginDate" type="Timestamp"/>
+                <parameter name="recoveryEmailMissing" type="Boolean"/>
+                <parameter name="emailAddressMasked" type="String"/>
                 <parameter name="lastRun" type="Map">
                     <parameter name="reconciliationRunResultId" type="String"/>
                     <parameter name="savedRunId" type="String"/>
@@ -344,6 +352,8 @@
                 <parameter name="userTimeZone" type="String"/>
                 <parameter name="tenantTimeZone" type="String"/>
                 <parameter name="lastLoginDate" type="Timestamp"/>
+                <parameter name="recoveryEmailMissing" type="Boolean"/>
+                <parameter name="emailAddressMasked" type="String"/>
                 <parameter name="lastRun" type="Map">
                     <parameter name="reconciliationRunResultId" type="String"/>
                     <parameter name="savedRunId" type="String"/>
@@ -419,6 +429,8 @@
                 <parameter name="userTimeZone" type="String"/>
                 <parameter name="tenantTimeZone" type="String"/>
                 <parameter name="lastLoginDate" type="Timestamp"/>
+                <parameter name="recoveryEmailMissing" type="Boolean"/>
+                <parameter name="emailAddressMasked" type="String"/>
                 <parameter name="lastRun" type="Map">
                     <parameter name="reconciliationRunResultId" type="String"/>
                     <parameter name="savedRunId" type="String"/>
@@ -630,6 +642,54 @@
             <set field="messages" from="completeResult.messages"/>
             <set field="errors" from="completeResult.errors"/>
             <set field="passwordUpdated" from="completeResult.passwordUpdated"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="RecoveryEmail" allow-remote="true" authenticate="true">
+        <description>DAR-BE-028. Save the signed-in user's recovery email, where password reset codes go. Saved as
+            typed (trimmed, lower-cased) with no confirmation code; the new address, and the previous one when it
+            changes, get a notice. An address already used by another account is not saved, but the reply is the
+            same, so this cannot be used to test whether an address has an account.</description>
+        <in-parameters>
+            <parameter name="emailAddress" required="true">
+                <description>The recovery email address.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean">
+                <description>True when the call completed without facade errors.</description>
+            </parameter>
+            <parameter name="messages" type="List">
+                <description>Informational messages; always empty for this service.</description>
+                <parameter name="message"/>
+            </parameter>
+            <parameter name="errors" type="List">
+                <description>Validation errors, such as an address that is not a valid email.</description>
+                <parameter name="error"/>
+            </parameter>
+            <parameter name="emailAddressMasked" type="String">
+                <description>The address as typed, masked (a•••@example.com), for darpan-ui to show.</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="saveResult" from="darpan.facade.auth.PasswordResetSupport.saveRecoveryEmail(ec, emailAddress)"/>
+            <set field="ok" from="saveResult.ok"/>
+            <set field="messages" from="saveResult.messages"/>
+            <set field="errors" from="saveResult.errors"/>
+            <set field="emailAddressMasked" from="saveResult.emailAddressMasked"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="PasswordResetStatus" allow-remote="true" authenticate="anonymous-all">
+        <description>DAR-BE-028. Whether this environment can send password reset email (a SYSTEM EmailServer with
+            an SMTP host, and DARPAN_MAIL_FROM set). darpan-ui hides "Forgot password?" when it cannot.</description>
+        <out-parameters>
+            <parameter name="available" type="Boolean">
+                <description>True when reset codes can be emailed.</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="available" from="darpan.facade.auth.PasswordResetSupport.isEmailConfigured(ec)"/>
         </actions>
     </service>
 

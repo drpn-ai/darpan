@@ -225,7 +225,8 @@
     </service>
 
     <service verb="record" noun="CheckRun" authenticate="false" allow-remote="false">
-        <description>DAR-BE-090. Records how one check ran on one morning: one source read per extract, and the check's
+        <description>DAR-BE-090 / DAR-BE-091. Records how one check ran on one morning, over which window, with one source
+            read per extract, and the check's
             status derived from them. Every read complete: ran. Any read partial or failed: partial, with each bad read
             named in the reason. notRunReason given, or no reads at all: notRun. The returned checkStatusEnumId is
             what close#ResolvedFindings must be given, so a partial read can never close a finding. A second call the
@@ -234,8 +235,11 @@
             <parameter name="companyUserGroupId" required="true"/>
             <parameter name="checkId" required="true"/>
             <parameter name="reportDate" type="Date" required="true"/>
-            <parameter name="checkedDay" type="Date">
-                <description>The day the check's window covered; the day before reportDate when blank.</description></parameter>
+            <parameter name="windowFromDate" type="Date">
+                <description>First day the window covered. Blank: the start of the period of the check's audit (the 1st
+                    for a monthly audit), so the run re-examines every open finding of the period.</description></parameter>
+            <parameter name="windowThruDate" type="Date">
+                <description>Last day the window covered, inclusive. Blank: reportDate.</description></parameter>
             <parameter name="runStamp" type="Timestamp" default="ec.user.nowTimestamp"/>
             <parameter name="notRunReason">
                 <description>Set when the check did not run (no saved run configured, the run errored before
@@ -250,10 +254,26 @@
             <parameter name="reason"/>
         </out-parameters>
         <actions>
-            <service-call name="audit.AuditLedgerServices.get#TenantCheck" in-map="[companyUserGroupId:companyUserGroupId, checkId:checkId]"/>
+            <service-call name="audit.AuditLedgerServices.get#TenantCheck" in-map="[companyUserGroupId:companyUserGroupId, checkId:checkId]"
+                    out-map="tenantCheck"/>
             <if condition="ec.message.hasError()"><return/></if>
             <set field="sourceReads" from="sourceReads ?: []"/>
-            <set field="checkedDay" from="checkedDay ?: java.sql.Date.valueOf(reportDate.toLocalDate().minusDays(1))"/>
+            <set field="windowThruDate" from="windowThruDate ?: reportDate"/>
+            <if condition="!windowFromDate">
+                <!-- The period comes from the check's audit; a check serving audits of different periods must be told. -->
+                <entity-find entity-name="darpan.audit.Audit" list="checkAudits">
+                    <econdition field-name="auditId" operator="in" from="tenantCheck.auditIds"/>
+                    <econdition field-name="companyUserGroupId"/>
+                </entity-find>
+                <set field="periodEnumIds" from="checkAudits*.periodEnumId.unique()"/>
+                <if condition="periodEnumIds.size() != 1">
+                    <return error="true" message="Audit check ${checkId} serves audits of ${periodEnumIds.size() ?: 'no'} periods; pass windowFromDate"/></if>
+                <entity-find-one entity-name="moqui.basic.Enumeration" value-field="periodEnum" cache="true">
+                    <field-map field-name="enumId" from="periodEnumIds[0]"/></entity-find-one>
+                <set field="windowFromDate" from="java.sql.Date.valueOf(darpan.audit.AuditReportAssembler.periodStart(windowThruDate.toLocalDate(), periodEnum?.enumCode))"/>
+            </if>
+            <if condition="windowFromDate &gt; windowThruDate">
+                <return error="true" message="Audit check ${checkId}: window ${windowFromDate} to ${windowThruDate} runs backwards"/></if>
 
             <!-- Validate first: a bad read writes nothing. -->
             <set field="badReads" from="[]"/>
@@ -305,7 +325,8 @@
                     <set field="checkRun.reportDate" from="reportDate"/>
                 </else>
             </if>
-            <set field="checkRun.checkedDay" from="checkedDay"/>
+            <set field="checkRun.windowFromDate" from="windowFromDate"/>
+            <set field="checkRun.windowThruDate" from="windowThruDate"/>
             <set field="checkRun.statusEnumId" from="checkStatusEnumId"/>
             <set field="checkRun.reason" from="reason"/>
             <set field="checkRun.runStamp" from="runStamp"/>
@@ -337,6 +358,7 @@
         <out-parameters>
             <parameter name="check" type="Map"/>
             <parameter name="statementIdByCode" type="Map"/>
+            <parameter name="auditIds" type="List"><description>DAR-BE-091. The audits the check's statements belong to.</description></parameter>
         </out-parameters>
         <actions>
             <entity-find entity-name="darpan.audit.AuditCheck" list="checkList">
@@ -362,6 +384,7 @@
             <if condition="sharedCodes">
                 <return error="true" message="Audit check ${checkId} tests two statements coded ${sharedCodes.join(', ')}; a check's statements need distinct codes"/></if>
             <set field="statementIdByCode" from="statements.collectEntries { [(it.statementCode): it.statementId] }"/>
+            <set field="auditIds" from="statements*.auditId.unique()"/>
         </actions>
     </service>
 

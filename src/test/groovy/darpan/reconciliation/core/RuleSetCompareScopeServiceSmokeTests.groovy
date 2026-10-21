@@ -363,6 +363,39 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertEquals("gid://shopify/Order/6470622478467", matchedPairs[0].file2.node.id)
     }
 
+    /**
+     * DAR-BE-091. An audit run re-examines every open finding of its period, and a finding may close only when the run
+     * looked at its record. Each side's keys are written out, so a record present on either side counts as examined.
+     */
+    @Test
+    void bothSidesWriteTheKeysTheyHeld() {
+        File dir = File.createTempDir("keys-out-", "")
+        File keys1 = new File(dir, "file1-keys.txt")
+        File keys2 = new File(dir, "file2-keys.txt")
+        ec.service.sync()
+                .name("reconciliation.ReconciliationCoreServices.reconcile#RuleSetCompareScope")
+                .parameters([
+                        ruleSetId          : "DARPAN_TEST_COMPARE_RS",
+                        compareScopeId     : "DARPAN_TEST_ORDER_JSON_SCOPE",
+                        file1Location      : "component://darpan/data/test/test-orders-1.json",
+                        file2Location      : "component://darpan/data/test/test-orders-2.json",
+                        file1KeysOutLocation: keys1.absolutePath,
+                        file2KeysOutLocation: keys2.absolutePath,
+                        sparkMaster        : "local[1]",
+                        sparkAppName       : "RuleSetCompareScopeServiceSmokeTests"
+                ])
+                .disableAuthz()
+                .call()
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        Set<String> file1 = keys1.readLines()*.trim().findAll { it } as Set
+        Set<String> file2 = keys2.readLines()*.trim().findAll { it } as Set
+        assertEquals(["6470622478467"] as Set, file1.intersect(file2), "the one matched order is on both sides")
+        assertEquals(["6470622019715", "6470622478467", "6470624575619", "6470624804995", "6470625460355"] as Set,
+                file1 + file2, "the matched order and the four missing on one side")
+        assertTrue(file2.contains("6470624804995"), "a record only FILE_2 holds is examined too")
+        dir.deleteDir()
+    }
+
     @Test
     void baseDiffStageReturnsEmptyMissingDiffDatasetWhenNoObjectsAreMissing() {
         Map<String, Object> result = ec.service.sync()

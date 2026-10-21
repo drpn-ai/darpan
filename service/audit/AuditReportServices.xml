@@ -35,6 +35,35 @@
         </actions>
     </service>
 
+    <service verb="get" noun="AuditWindow" authenticate="false" allow-remote="false">
+        <description>DAR-BE-091. The window an audit's checks read on one morning: from the first day of the audit's
+            period to the report day, inclusive ("on the 14th it reconciles 1-14, on the 15th 1-15"). The scheduled
+            run (DAR-BE-092) asks this before extracting, so every open finding of the period is examined again.</description>
+        <in-parameters>
+            <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="auditId" required="true"/>
+            <parameter name="reportDate" type="Date" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="windowFromDate" type="Date"/>
+            <parameter name="windowThruDate" type="Date"/>
+            <parameter name="period"/>
+        </out-parameters>
+        <actions>
+            <entity-find entity-name="darpan.audit.Audit" list="audits">
+                <econdition field-name="auditId"/>
+                <econdition field-name="companyUserGroupId"/>
+            </entity-find>
+            <if condition="!audits">
+                <return error="true" message="Audit ${auditId} was not found for tenant ${companyUserGroupId}"/></if>
+            <entity-find-one entity-name="moqui.basic.Enumeration" value-field="periodEnum" cache="true">
+                <field-map field-name="enumId" from="audits[0].periodEnumId"/></entity-find-one>
+            <set field="windowThruDate" from="reportDate"/>
+            <set field="windowFromDate" from="java.sql.Date.valueOf(darpan.audit.AuditReportAssembler.periodStart(reportDate.toLocalDate(), periodEnum?.enumCode))"/>
+            <set field="period" from="darpan.audit.AuditReportAssembler.periodOf(reportDate.toLocalDate(), periodEnum?.enumCode)"/>
+        </actions>
+    </service>
+
     <service verb="assemble" noun="AuditFinding" authenticate="false" allow-remote="false">
         <description>The darpan.audit.finding/v1 document for one finding: status, records, evidence, diagnosis,
             how to fix and verify it, and its history. A finding of another tenant reads as not found.</description>

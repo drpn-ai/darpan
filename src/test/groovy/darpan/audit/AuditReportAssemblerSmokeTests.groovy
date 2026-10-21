@@ -13,6 +13,7 @@ import org.moqui.context.ExecutionContext
 import java.nio.file.Path
 import java.sql.Date
 import java.sql.Timestamp
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 
@@ -103,6 +104,12 @@ class AuditReportAssemblerSmokeTests {
         statement(TRUN, "TREP_T_AUDIT", "TREP_T_R1", "R1", "AUDC_ORDERS", "AUDSW_FIRM", 1, "trun R1")
         insert("darpan.audit.AuditCheck", [checkId: "TREP_T", companyUserGroupId: TRUN, checkCode: "trun-check", label: "trun"])
         link(TRUN, "TREP_T", "TREP_T_R1", 1)
+        // A check that tests a monthly and a daily audit's statements: its window cannot be guessed.
+        audit(TRUN, "TREP_T_DAILY", "daily", "Daily", "AUDP_DAY")
+        statement(TRUN, "TREP_T_DAILY", "TREP_T_D1", "D1", "AUDC_ORDERS", "AUDSW_FIRM", 1, "trun D1")
+        insert("darpan.audit.AuditCheck", [checkId: "TREP_T2", companyUserGroupId: TRUN, checkCode: "two-periods", label: "two periods"])
+        link(TRUN, "TREP_T2", "TREP_T_R1", 1)
+        link(TRUN, "TREP_T2", "TREP_T_D1", 2)
 
         Map memo = [statementCode: "R4", recordKey: "M258615", headline: "Credit memo is 0.01 less than the refund for return M258615",
                 ruleText: "Credit memo total equals the refund given, to the cent, and nothing is left open.",
@@ -172,7 +179,8 @@ class AuditReportAssemblerSmokeTests {
         assertEquals("darpan.audit.report/v1", doc.schema)
         assertEquals([tenant: [id: GORJANA, name: "Gorjana", timeZone: "America/Los_Angeles"],
                       audit: [id: "month-close", name: "Month close", period: "month"], date: "2026-10-08",
-                      checkedDay: "2026-10-07", period: "2026-10", generatedAt: "2026-10-08T06:12:40-07:00"], doc.report)
+                      window: [from: "2026-10-01", thru: "2026-10-08"], period: "2026-10",
+                      generatedAt: "2026-10-08T06:12:40-07:00"], doc.report, "month to date, the report day included")
         assertEquals("Month close audit for Gorjana. Each finding is one record that breaks one of the audit's statements R2 to R12.", doc.about)
         assertEquals(["orders", "refundsAndCredits", "returns", "exchangesAndWarranty"], (doc.categories as Map).keySet() as List)
         assertEquals("Refunds and credits", doc.categories.refundsAndCredits.label)
@@ -334,13 +342,62 @@ class AuditReportAssemblerSmokeTests {
 
         Map ops = report(GORJANA, DAILY_OPS, "2026-10-08")
         assertEquals([id: "daily-ops", name: "Daily ops", period: "day"], ops.report.audit)
-        assertEquals("2026-10-07", ops.report.period, "a daily audit reports its checked day")
+        assertEquals("2026-10-08", ops.report.period, "a daily audit's period is its day")
+        assertEquals([from: "2026-10-08", thru: "2026-10-08"], ops.report.window)
         Map d1 = ops.categories.orders.statements.D1
         assertEquals([opsFinding], d1.findings*.id)
         assertEquals("notRun", d1.status)
         assertEquals([ran: 0, partial: 0, notRun: 1], ops.health.checks)
         assertEquals(["D1"], (ops.categories as Map).values().collectMany { (it.statements as Map).keySet() as List })
         assertEquals([id: "daily-ops", name: "Daily ops"], finding(GORJANA, opsFinding).finding.audit)
+    }
+
+    // ---- the window (DAR-BE-091) ------------------------------------------------------------------------------------
+
+    @Test
+    void aMonthlyAuditReconcilesItsMonthToDate() {
+        assertEquals(["2026-10-01", "2026-10-14", "2026-10"], window(GORJANA, MONTH_CLOSE, "2026-10-14"), "on the 14th, 1-14")
+        assertEquals(["2026-10-01", "2026-10-15", "2026-10"], window(GORJANA, MONTH_CLOSE, "2026-10-15"), "on the 15th, 1-15")
+        assertEquals(["2026-11-01", "2026-11-01", "2026-11"], window(GORJANA, MONTH_CLOSE, "2026-11-01"), "the 1st starts a new month")
+        assertEquals(["2026-10-14", "2026-10-14", "2026-10-14"], window(GORJANA, DAILY_OPS, "2026-10-14"), "a daily audit reads its day")
+        ec.service.sync().name("${REPORTS}.get#AuditWindow").parameters([companyUserGroupId: KREWE, auditId: MONTH_CLOSE,
+                reportDate: Date.valueOf("2026-10-14")]).call()
+        assertTrue(ec.message.errorsString.contains("was not found for tenant KREWE"), ec.message.errorsString)
+        ec.message.clearErrors()
+    }
+
+    @Test
+    void aQuarterStartsOnItsFirstMonth() {
+        assertEquals(LocalDate.of(2026, 10, 1), AuditReportAssembler.periodStart(LocalDate.of(2026, 11, 14), "quarter"))
+        assertEquals(LocalDate.of(2026, 1, 1), AuditReportAssembler.periodStart(LocalDate.of(2026, 3, 31), "quarter"))
+        assertEquals(LocalDate.of(2026, 4, 1), AuditReportAssembler.periodStart(LocalDate.of(2026, 4, 1), "quarter"))
+        assertEquals("2026-Q4", AuditReportAssembler.periodOf(LocalDate.of(2026, 11, 14), "quarter"))
+        assertEquals("2026-Q1", AuditReportAssembler.periodOf(LocalDate.of(2026, 3, 31), "quarter"))
+    }
+
+    @Test
+    void aCheckRunKeepsTheWindowItRead() {
+        Map run = ec.entity.find("darpan.audit.AuditCheckRun").condition("checkId", RET)
+                .condition("reportDate", Date.valueOf("2026-10-08")).useCache(false).one().getMap()
+        assertEquals([Date.valueOf("2026-10-01"), Date.valueOf("2026-10-08")], [run.windowFromDate, run.windowThruDate],
+                "blank window = the audit's month to the report day")
+    }
+
+    @Test
+    void aCheckServingAuditsOfTwoPeriodsMustBeGivenItsWindow() {
+        ec.service.sync().name("${LEDGER}.record#CheckRun").parameters([companyUserGroupId: TRUN, checkId: "TREP_T2",
+                reportDate: Date.valueOf("2026-11-14"), sourceReads: [read("OMS", "AUDSR_COMPLETE", 1, null)]]).call()
+        assertTrue(ec.message.errorsString.contains("serves audits of 2 periods; pass windowFromDate"), ec.message.errorsString)
+        ec.message.clearErrors()
+        Map ok = ec.service.sync().name("${LEDGER}.record#CheckRun").parameters([companyUserGroupId: TRUN, checkId: "TREP_T2",
+                reportDate: Date.valueOf("2026-11-14"), windowFromDate: Date.valueOf("2026-11-01"),
+                sourceReads: [read("OMS", "AUDSR_COMPLETE", 1, null)]]).call()
+        noErrors()
+        assertEquals("AUDCS_RAN", ok.checkStatusEnumId)
+        ec.service.sync().name("${LEDGER}.record#CheckRun").parameters([companyUserGroupId: TRUN, checkId: "TREP_T",
+                reportDate: Date.valueOf("2026-11-14"), windowFromDate: Date.valueOf("2026-11-20"), sourceReads: []]).call()
+        assertTrue(ec.message.errorsString.contains("runs backwards"), ec.message.errorsString)
+        ec.message.clearErrors()
     }
 
     // ---- tenant ---------------------------------------------------------------------------------------------------
@@ -502,6 +559,13 @@ class AuditReportAssemblerSmokeTests {
                 reportDate: Date.valueOf(day), generatedStamp: at(day, "06:12:40")]).call()
         noErrors()
         return new JsonSlurper().parseText(JsonOutput.toJson(out.document)) as Map
+    }
+
+    private List<String> window(String tenant, String auditId, String day) {
+        Map out = ec.service.sync().name("${REPORTS}.get#AuditWindow").parameters([companyUserGroupId: tenant, auditId: auditId,
+                reportDate: Date.valueOf(day)]).call()
+        noErrors()
+        return [out.windowFromDate?.toString(), out.windowThruDate?.toString(), out.period as String]
     }
 
     private Map finding(String tenant, String findingId) {

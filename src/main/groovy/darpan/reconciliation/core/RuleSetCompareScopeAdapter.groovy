@@ -248,6 +248,10 @@ class RuleSetCompareScopeAdapter {
         }
         String keysOutLocation = ReconciliationServices.normalize(context.get("file1KeysOutLocation"))
         if (keysOutLocation) writeSideIds(ingestBySide, "FILE_1", keysOutLocation)
+        // DAR-BE-091. The other side's keys too, so an audit run's examined records cover both systems: a finding whose
+        // record now exists only on FILE_2 was looked at, and may close.
+        String file2KeysOutLocation = ReconciliationServices.normalize(context.get("file2KeysOutLocation"))
+        if (file2KeysOutLocation && !singleSided) writeSideIds(ingestBySide, "FILE_2", file2KeysOutLocation)
         // DAR-BE-063: a side that opts into duplicateKeyHandling=FINDING reports its repeated keys as
         // findings; they leave the compare on BOTH sides before validate/collapse ever sees them.
         Map<String, Object> duplicateSplit = singleSided ? [ingestBySide: ingestBySide, duplicateDataBySide: [:], duplicateKeyCountBySide: [:], persistedFrames: []] :

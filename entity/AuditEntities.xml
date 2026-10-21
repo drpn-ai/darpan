@@ -360,8 +360,13 @@
         <field name="reportDate" type="date" not-null="true">
             <description>The morning the check ran, as a tenant calendar day.</description>
         </field>
-        <field name="checkedDay" type="date" not-null="true">
-            <description>The tenant calendar day the check's window covered, normally the day before reportDate.</description>
+        <field name="windowFromDate" type="date" not-null="true">
+            <description>DAR-BE-091. First day the check's window covered (tenant calendar day): the start of the audit's
+                period, so every open finding of the period is examined again each morning.</description>
+        </field>
+        <field name="windowThruDate" type="date" not-null="true">
+            <description>Last day the check's window covered, inclusive: the report day itself ("on the 14th it reconciles
+                1-14").</description>
         </field>
         <field name="statusEnumId" type="id" not-null="true">
             <description>AuditCheckStatus derived from the reads: AUDCS_RAN when every read was complete,

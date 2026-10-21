@@ -727,7 +727,8 @@ class TenantOwnedEntityFilterRuntimeTests {
             case "darpan.audit.AuditFindingEvent": return [findingId: id, eventSeqId: "01", eventStamp: FROM_DATE,
                     eventDate: java.sql.Date.valueOf("2026-10-07"), eventTypeEnumId: "AUDFE_FOUND", byTypeEnumId: "AUDAT_CHECK"]
             case "darpan.audit.AuditCheckRun": return [checkRunId: id, checkId: "TOEF_MCCK_${s}".toString(),
-                    reportDate: java.sql.Date.valueOf("2026-10-08"), checkedDay: java.sql.Date.valueOf("2026-10-07"),
+                    reportDate: java.sql.Date.valueOf("2026-10-08"), windowFromDate: java.sql.Date.valueOf("2026-10-01"),
+                    windowThruDate: java.sql.Date.valueOf("2026-10-08"),
                     statusEnumId: "AUDCS_RAN", runStamp: FROM_DATE]
             case "darpan.audit.AuditSourceRead": return [checkRunId: id, readSeqId: "01", systemEnumId: "OMS",
                     statusEnumId: "AUDSR_COMPLETE", recordCount: 1L]

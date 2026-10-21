@@ -173,20 +173,20 @@ class AuditReportAssembler {
         Map health = health(configuredCheckIds, checkStatus, checkReason, checksById, runByCheck, readsByRun,
                 checkIdsByStatement, statements, notCovered, zone, codes)
 
-        List<Date> checkedDays = runByCheck.values()*.checkedDay.findAll { it != null } as List<Date>
-        LocalDate checkedDay = checkedDays ? (checkedDays.countBy { it }.max { it.value }.key as Date).toLocalDate() : day.minusDays(1)
         String name = tenant.name as String
         List<String> allCodes = statements*.statementCode as List<String>
         String range = allCodes.size() > 1 ? " ${allCodes.first()} to ${allCodes.last()}" : (allCodes ? " ${allCodes[0]}" : "")
         String periodCode = codes[audit.periodEnumId as String]
+        // DAR-BE-091: the audit reconciles its period to date, the report day included.
+        LocalDate windowFrom = periodStart(day, periodCode)
 
         return [schema    : REPORT_SCHEMA,
                 about     : "${audit.auditName} audit for ${name}. Each finding is one record that breaks one of the audit's statements${range}.".toString(),
                 report    : [tenant     : [id: tenantId, name: name, timeZone: zone.id],
                              audit      : [id: audit.auditCode, name: audit.auditName, period: periodCode],
                              date       : day.toString(),
-                             checkedDay : checkedDay.toString(),
-                             period     : periodOf(checkedDay, periodCode),
+                             window     : [from: windowFrom.toString(), thru: day.toString()],
+                             period     : periodOf(day, periodCode),
                              generatedAt: isoDateTime(generatedStamp, zone)],
                 health    : health,
                 summary   : summary,
@@ -522,7 +522,20 @@ class AuditReportAssembler {
                 .collectEntries { [(it.enumId): it.enumCode] }
     }
 
-    /** report.period: the period the checked day falls in, e.g. 2026-10-07 (day), 2026-10 (month), 2026-Q4 (quarter). */
+    /**
+     * DAR-BE-091. The first day of the period containing {@code day}: the day itself for a daily audit, the 1st for a
+     * monthly one, the first day of the quarter for a quarterly one. An audit check reads from here to the report day,
+     * so on the 14th a monthly audit reconciles the 1st-14th and every open finding of the month is looked at again.
+     */
+    static LocalDate periodStart(LocalDate day, String periodCode) {
+        switch (periodCode) {
+            case "day": return day
+            case "quarter": return LocalDate.of(day.year, ((int) ((day.monthValue - 1) / 3)) * 3 + 1, 1)
+            default: return day.withDayOfMonth(1)
+        }
+    }
+
+    /** report.period: the period the report day falls in, e.g. 2026-10-07 (day), 2026-10 (month), 2026-Q4 (quarter). */
     static String periodOf(LocalDate day, String periodCode) {
         switch (periodCode) {
             case "day": return day.toString()

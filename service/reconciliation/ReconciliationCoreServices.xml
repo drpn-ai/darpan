@@ -113,6 +113,7 @@
                  restrict FILE_1 to, and where to write the FILE_1 keys this question asked about. -->
             <parameter name="file1IncludeIdsLocation"/>
             <parameter name="file1KeysOutLocation"/>
+            <parameter name="file2KeysOutLocation"><description>DAR-BE-091. Every distinct compare_id on FILE_2, one per line: with file1KeysOutLocation, the records an audit run examined.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ruleSetId"/>
@@ -166,6 +167,7 @@
                  restrict FILE_1 to, and where to write the FILE_1 keys this question asked about. -->
             <parameter name="file1IncludeIdsLocation"/>
             <parameter name="file1KeysOutLocation"/>
+            <parameter name="file2KeysOutLocation"><description>DAR-BE-091. Every distinct compare_id on FILE_2, one per line: with file1KeysOutLocation, the records an audit run examined.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ruleSetId"/>
@@ -209,7 +211,7 @@
                     file1SchemaFileName:file1SchemaFileName, file2SchemaFileName:file2SchemaFileName,
                     file1Label:file1LabelInput, file2Label:file2LabelInput,
                     hasHeader:hasHeader, allowDuplicateCompareIds:allowDuplicateCompareIdsValue,
-                    file1IncludeIdsLocation:file1IncludeIdsLocation, file1KeysOutLocation:file1KeysOutLocation,
+                    file1IncludeIdsLocation:file1IncludeIdsLocation, file1KeysOutLocation:file1KeysOutLocation, file2KeysOutLocation:file2KeysOutLocation,
                     sparkMaster:sparkMaster, sparkAppName:sparkAppName]"
                     out-map="prepared"/>
 
@@ -405,6 +407,7 @@
                  restrict FILE_1 to, and where to write the FILE_1 keys this question asked about. -->
             <parameter name="file1IncludeIdsLocation"/>
             <parameter name="file1KeysOutLocation"/>
+            <parameter name="file2KeysOutLocation"><description>DAR-BE-091. Every distinct compare_id on FILE_2, one per line: with file1KeysOutLocation, the records an audit run examined.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ruleSetId"/>
@@ -461,7 +464,7 @@
                     hasHeader:hasHeader,
                     allowDuplicateCompareIds:activeRuleCount == 0,
                     buildMatchedPairs:activeRuleCount > 0,
-                    file1IncludeIdsLocation:file1IncludeIdsLocation, file1KeysOutLocation:file1KeysOutLocation,
+                    file1IncludeIdsLocation:file1IncludeIdsLocation, file1KeysOutLocation:file1KeysOutLocation, file2KeysOutLocation:file2KeysOutLocation,
                     sparkMaster:sparkMaster, sparkAppName:sparkAppName]"
                     out-map="baseResult"/>
 

@@ -193,6 +193,28 @@ class AuditGraphQlSmokeTests {
         assertTrue(out.errors.toString().contains("Audit no-such-audit was not found"), out.errors.toString())
     }
 
+    @Test
+    void anInternalErrorIsGenericButAPublicOneIsWordForWord() {
+        // An empty id passes GraphQL (ID!) but fails the service's own required-parameter check: a framework message,
+        // which must not reach a public caller.
+        Map out = gql(A, '{ auditFinding(id: "") { schema } }')
+        String errors = out.errors.toString()
+        assertTrue(errors.contains("could not be completed"), errors)
+        assertFalse(errors.toLowerCase().contains("required") || errors.contains("findingId") || errors.contains("Field"), errors)
+        // A message the service marks as public reads as written.
+        assertTrue(gql(A, '{ auditReport(audit: "month-close", date: "2026-13-45") { schema } }').errors.toString()
+                .contains("date must be YYYY-MM-DD"))
+    }
+
+    @Test
+    void anErrorAlreadyOnTheContextIsNotBlamedOnTheQuery() {
+        ec.message.addError("an earlier caller's error")
+        Map out = gql(A, '{ auditReport(audit: "month-close", date: "2026-10-08") { schema } }')
+        assertEquals([], out.errors)
+        assertEquals("darpan.audit.report/v1", out.data.auditReport.schema)
+        assertEquals(["an earlier caller's error"], ec.message.errors as List)
+    }
+
     private void insert(String entityName, Map<String, Object> fields) {
         ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
     }

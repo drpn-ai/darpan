@@ -31,6 +31,12 @@ class AuditReportGraph {
                 .condition("auditCode", auditCode).useCache(false).list().find()?.get("auditId") as String
     }
 
+    /** True when the finding is the tenant's own; another tenant's reads exactly like one that does not exist. */
+    static boolean ownsFinding(def ec, String tenantId, String findingId) {
+        if (!tenantId || !findingId) return false
+        return TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditFinding", "findingId", findingId, tenantId, WHY) != null
+    }
+
     /** The morning to report: date as YYYY-MM-DD, or blank for today in the tenant's zone. Throws on a malformed date. */
     static Date reportDateFor(def ec, String tenantId, String date) {
         if (date?.trim()) {

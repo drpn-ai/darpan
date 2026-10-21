@@ -46,7 +46,9 @@
     </service>
 
     <!-- DAR-BE-098. The GraphQL roots auditReport and auditFinding (moqui-gql graphql/DarpanSchema.gql.xml). The engine
-         passes companyUserGroupId from the request's pinned tenant (the API key's), never from a caller argument. -->
+         passes companyUserGroupId from the request's pinned tenant (the API key's), never from a caller argument.
+         publicError is the ONLY text a caller sees: an expected refusal, worded for them. Anything on ec.message is
+         treated as internal, logged by the engine and answered with a generic error. -->
     <service verb="get" noun="AuditReportGraph" authenticate="false" allow-remote="false">
         <description>The audit-run report in its GraphQL shape: assemble#AuditReport with each keyed object turned into a
             list (contract, "GraphQL mapping"). The audit is named by its code; another tenant's audit reads as not
@@ -57,18 +59,21 @@
             <parameter name="date"><description>The morning, YYYY-MM-DD; blank is today in the tenant's zone.</description></parameter>
             <parameter name="period"><description>Which period's run, e.g. 2026-10 while October is extended.</description></parameter>
         </in-parameters>
-        <out-parameters><parameter name="report" type="Map"/></out-parameters>
+        <out-parameters>
+            <parameter name="report" type="Map"/>
+            <parameter name="publicError"><description>Why there is no report, in words a caller may see.</description></parameter>
+        </out-parameters>
         <actions>
             <set field="auditId" from="darpan.audit.AuditReportGraph.auditIdFor(ec, companyUserGroupId, audit)"/>
-            <if condition="!auditId"><return error="true" message="Audit ${audit} was not found"/></if>
+            <if condition="!auditId"><set field="publicError" value="Audit ${audit} was not found"/><return/></if>
             <script>
                 try {
                     reportDate = darpan.audit.AuditReportGraph.reportDateFor(ec, companyUserGroupId, date)
                 } catch (IllegalArgumentException e) {
-                    ec.message.addError(e.message)
+                    publicError = e.message
                 }
             </script>
-            <if condition="ec.message.hasError()"><return/></if>
+            <if condition="publicError"><return/></if>
             <service-call name="audit.AuditReportServices.assemble#AuditReport" out-map="assembled"
                     in-map="[companyUserGroupId:companyUserGroupId, auditId:auditId, reportDate:reportDate, period:period]"/>
             <if condition="ec.message.hasError()"><return/></if>
@@ -83,8 +88,13 @@
             <parameter name="companyUserGroupId" required="true"/>
             <parameter name="id" required="true"><description>The finding id, e.g. F-20761.</description></parameter>
         </in-parameters>
-        <out-parameters><parameter name="finding" type="Map"/></out-parameters>
+        <out-parameters>
+            <parameter name="finding" type="Map"/>
+            <parameter name="publicError"><description>Why there is no finding, in words a caller may see.</description></parameter>
+        </out-parameters>
         <actions>
+            <if condition="!darpan.audit.AuditReportGraph.ownsFinding(ec, companyUserGroupId, id)">
+                <set field="publicError" value="Finding ${id} was not found"/><return/></if>
             <service-call name="audit.AuditReportServices.assemble#AuditFinding" out-map="assembled"
                     in-map="[companyUserGroupId:companyUserGroupId, findingId:id]"/>
             <if condition="ec.message.hasError()"><return/></if>

@@ -295,52 +295,67 @@ class LifecycleSaveSmokeTests {
         }
     }
 
+    // DAR-UI-052 (Aditi, 2026-10-21: "rules to be lifecycle level rules"). One ordered list for the lifecycle; each rule
+    // names its places or none (every place), and each place gets the rules meant for it, in the lifecycle's order.
     @Test
-    void aPlaceNamesItsRecordsByConclusionsThatSurviveARebuild() {
+    void theLifecyclesRulesReachEachPlaceTheyNameInOrderAndSurviveARebuild() {
+        seedConclusion("CONC_TEST_NOT_HOTWAX", "Not a HotWax return")
         seedConclusion("CONC_TEST_POS", "POS return not received in NetSuite")
         seedConclusion("CONC_TEST_EXCHANGE", "Exchange sent, goods not back")
         Map out = saveReturns()
         String rid = out.reconciliationId as String
         List conclusions = [
-                [conclusionEnumId: "CONC_TEST_POS", conditions: [[field: "hcReturnChannel", operator: "IN", values: ["POS_RTN_CHANNEL"], checkLabel: "Returned at a store"]]],
-                [conclusionEnumId: "CONC_TEST_EXCHANGE", conditions: [[field: "hcOutcome", values: ["Exchange"], checkLabel: "Outcome is Exchange"],
-                                                                     [field: "hcReturnChannel", operator: "NOT_BLANK", checkLabel: "Has a channel"]]]]
-        Map saved = call("facade.ReconciliationFacadeServices.save#LifecycleConclusions",
-                [reconciliationId: rid, place: "Credited, never received", conclusions: conclusions])
+                [conclusionEnumId: "CONC_TEST_NOT_HOTWAX", conditions: [[field: "hcReturnChannel", operator: "BLANK", checkLabel: "No HotWax return channel"]]],
+                [conclusionEnumId: "CONC_TEST_POS", places: ["Credited, never received"],
+                 conditions: [[field: "hcReturnChannel", operator: "IN", values: ["POS_RTN_CHANNEL"], checkLabel: "Returned at a store"]]],
+                [conclusionEnumId: "CONC_TEST_EXCHANGE", places: ["Credited, never received"],
+                 conditions: [[field: "hcOutcome", values: ["Exchange"], checkLabel: "Outcome is Exchange"],
+                              [field: "hcReturnChannel", operator: "NOT_BLANK", checkLabel: "Has a channel"]]]]
+        Map saved = call("facade.ReconciliationFacadeServices.save#LifecycleConclusions", [reconciliationId: rid, conclusions: conclusions])
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())
-        assertEquals(["POS return not received in NetSuite", "Exchange sent, goods not back"],
-                (saved.conclusions as List<Map>).find { it.place == "Credited, never received" }.conclusions*.label)
+        assertEquals([["Not a HotWax return", []], ["POS return not received in NetSuite", ["Credited, never received"]],
+                      ["Exchange sent, goods not back", ["Credited, never received"]]],
+                (saved.conclusions as List<Map>).collect { [it.label, it.places] })
 
         List rules = conclusionRows("darpan.rule.RuleSetConclusionRule", rid, "Credited, never received")
-        assertEquals([[10, "CONC_TEST_POS", "FINDING", "KREWE"], [20, "CONC_TEST_EXCHANGE", "FINDING", "KREWE"]],
+        assertEquals([[10, "CONC_TEST_NOT_HOTWAX", "FINDING", "KREWE"], [20, "CONC_TEST_POS", "FINDING", "KREWE"], [30, "CONC_TEST_EXCHANGE", "FINDING", "KREWE"]],
                 rules.collect { [it.sequenceNum as int, it.conclusionEnumId, it.appliesToBucket, it.companyUserGroupId] })
         List conditions = conclusionRows("darpan.rule.RuleSetConclusionCondition", rid, "Credited, never received")
-        assertEquals([[10, 1, "FILE_1", "hcReturnChannel", "IN", "POS_RTN_CHANNEL"], [20, 1, "FILE_1", "hcOutcome", "IN", "Exchange"],
-                      [20, 2, "FILE_1", "hcReturnChannel", "NOT_BLANK", ""]],
+        assertEquals([[10, 1, "FILE_1", "hcReturnChannel", "BLANK", ""], [20, 1, "FILE_1", "hcReturnChannel", "IN", "POS_RTN_CHANNEL"],
+                      [30, 1, "FILE_1", "hcOutcome", "IN", "Exchange"], [30, 2, "FILE_1", "hcReturnChannel", "NOT_BLANK", ""]],
                 conditions.collect { [it.sequenceNum as int, it.conditionSeq as int, it.subject, it.fieldExpression, it.operator, it.conditionValues ?: ""] })
+        // A rule for every place reaches a place no rule names; one for a single place does not.
+        assertEquals(["CONC_TEST_NOT_HOTWAX"], conclusionRows("darpan.rule.RuleSetConclusionRule", rid, "Received, never credited")*.conclusionEnumId)
 
-        // A rebuild makes new questions; the place of the same name names its records the same way.
+        // A rebuild makes new questions; the places get the same rules.
         call("facade.ReconciliationFacadeServices.save#LifecycleStages", [reconciliationId: rid,
                 stageRecordTypes: ["ItemRcpt", "CustCred", "Settled"], stageReach: SETTLED_REACH])
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())
-        assertEquals(["CONC_TEST_POS", "CONC_TEST_EXCHANGE"], conclusionRows("darpan.rule.RuleSetConclusionRule", rid, "Credited, never received")*.conclusionEnumId)
+        assertEquals(["CONC_TEST_NOT_HOTWAX", "CONC_TEST_POS", "CONC_TEST_EXCHANGE"],
+                conclusionRows("darpan.rule.RuleSetConclusionRule", rid, "Credited, never received")*.conclusionEnumId)
+        // A written finding is a new place: the rule for every place names its records too.
+        call("facade.ReconciliationFacadeServices.save#LifecycleFinding", [reconciliationId: rid, stageRecordType: "Settled",
+                fieldId: "status", fieldLabel: "Status", op: "IN", value: "Return Authorization : Pending Refund", valueLabel: "Pending Refund"])
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals(["CONC_TEST_NOT_HOTWAX"], conclusionRows("darpan.rule.RuleSetConclusionRule", rid, "Settled, Status is Pending Refund")*.conclusionEnumId)
         Map got = call("facade.ReconciliationFacadeServices.get#Reconciliation", [reconciliationId: rid])
-        assertEquals(["Credited, never received"], (got.conclusions as List<Map>)*.place)
+        assertEquals(["CONC_TEST_NOT_HOTWAX", "CONC_TEST_POS", "CONC_TEST_EXCHANGE"], (got.conclusions as List<Map>)*.conclusionEnumId)
     }
 
     @Test
     void aConclusionIsRefusedForAnUnknownPlaceConclusionOrOperator() {
         seedConclusion("CONC_TEST_POS", "POS return not received in NetSuite")
         String rid = saveReturns().reconciliationId as String
-        Map ok = [conclusionEnumId: "CONC_TEST_POS", conditions: [[field: "hcReturnChannel", values: ["POS_RTN_CHANNEL"], checkLabel: "At a store"]]]
-        call("facade.ReconciliationFacadeServices.save#LifecycleConclusions", [reconciliationId: rid, place: "Nowhere", conclusions: [ok]])
+        List conditions = [[field: "hcReturnChannel", values: ["POS_RTN_CHANNEL"], checkLabel: "At a store"]]
+        call("facade.ReconciliationFacadeServices.save#LifecycleConclusions", [reconciliationId: rid,
+                conclusions: [[conclusionEnumId: "CONC_TEST_POS", places: ["Nowhere"], conditions: conditions]]])
         assertTrue(ec.message.errors.any { it.contains("is not one of this lifecycle's places") }, ec.message.errors?.toString())
         ec.message.clearErrors()
-        call("facade.ReconciliationFacadeServices.save#LifecycleConclusions", [reconciliationId: rid, place: "Credited, never received",
-                conclusions: [[conclusionEnumId: "DftJson", conditions: ok.conditions]]])
+        call("facade.ReconciliationFacadeServices.save#LifecycleConclusions", [reconciliationId: rid,
+                conclusions: [[conclusionEnumId: "DftJson", conditions: conditions]]])
         assertTrue(ec.message.errors.any { it.contains("is not a conclusion") }, ec.message.errors?.toString())
         ec.message.clearErrors()
-        call("facade.ReconciliationFacadeServices.save#LifecycleConclusions", [reconciliationId: rid, place: "Credited, never received",
+        call("facade.ReconciliationFacadeServices.save#LifecycleConclusions", [reconciliationId: rid,
                 conclusions: [[conclusionEnumId: "CONC_TEST_POS", conditions: [[field: "hcReturnChannel", operator: "OLDER_THAN", values: ["30"], checkLabel: "x"]]]]])
         assertTrue(ec.message.errors.any { it.contains("A condition is one of") }, ec.message.errors?.toString())
         ec.message.clearErrors()

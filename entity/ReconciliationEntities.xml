@@ -37,6 +37,11 @@
                 "Fulfillment not expected, never billed") whose records are not findings, as a JSON list. Every other
                 place a record stops at is a finding. Empty = every place is.</description>
         </field>
+        <field name="conclusionRules" type="text-very-long">
+            <description>DAR-UI-052. A lifecycle built from stages: the ordered rules that name the records at its places,
+                as a JSON list of [conclusionEnumId, places (empty = every place), conditions: [field, operator, values,
+                checkLabel]]. Written onto each place's RuleSetConclusionRule rows whenever the places change.</description>
+        </field>
 
         <relationship type="many" related="darpan.reconciliation.ReconciliationRun" short-alias="runs">
             <key-map field-name="reconciliationId"/>

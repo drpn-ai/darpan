@@ -198,7 +198,6 @@ class LifecycleSupport {
         }
         List<Map> exceptions = LifecycleRuleSupport.listExceptions(ec, reconciliationId)
         List<Map> findings = listFindings(ec, reconciliationId)
-        List<Map> conclusions = listConclusions(ec, reconciliationId)
         // A stage keeps how it is reached through a reorder, unless the save says otherwise.
         Map<String, Map> reach
         try {
@@ -228,12 +227,8 @@ class LifecycleSupport {
             saveFinding(ec, [reconciliationId: reconciliationId, stageRecordType: f.stageRecordType, fieldId: f.fieldId,
                     fieldLabel: f.fieldLabel, op: f.op, value: f.value, valueLabel: f.valueLabel])
         }
-        // DAR-UI-052. Conclusions follow their place by name; a place the new stages no longer make has nothing to name.
-        Set<String> places = RunFlowchartSupport.loadQuestions(ec, reconciliationId)
-                .findAll { it.isActive != "N" && it.noOutcomeLabel }*.noOutcomeLabel as Set<String>
-        conclusions.findAll { places.contains(it.place) }.each { Map p ->
-            saveConclusions(ec, [reconciliationId: reconciliationId, place: p.place, conclusions: p.conclusions])
-        }
+        // DAR-UI-052. The lifecycle's conclusion rules onto its new places; a rule for a place these stages no longer make waits.
+        applyConclusions(ec, reconciliationId)
         return ec.message.hasError() ? [:] : [reconciliationName: name]
     }
 
@@ -290,6 +285,8 @@ class LifecycleSupport {
                          runName: w.name, questionRole: ROLE_FINDING, parentReconciliationRunId: anchor.question.reconciliationRunId,
                          parentBranch: anchor.branch, runSequence: sequence + 1, noOutcomeLabel: label])
         question.create()
+        // DAR-UI-052. A written finding is a new place: the lifecycle's rules for every place name its records too.
+        applyConclusions(ec, reconciliationId)
         return ec.message.hasError() ? [:] : [findings: listFindings(ec, reconciliationId)]
     }
 
@@ -325,28 +322,24 @@ class LifecycleSupport {
     static final List<String> CONCLUSION_OPERATORS = ["IN", "NOT_IN", "BLANK", "NOT_BLANK"].asImmutable()
 
     /**
-     * DAR-UI-052. How a place's records are named: ordered conclusions, each a DarpanConclusion and the conditions on
-     * the record (a detail key such as hcReturnChannel, or a standard column such as status) that must all hold. The
-     * first that holds names the record; none means Unexplained. They are the place question's conclusion rules
-     * (RunConclusionStep draws them on every run), so a save replaces the place's rules, and a stage rebuild carries
-     * them to the place of the same name. An empty list clears the place.
+     * DAR-UI-052. How a lifecycle names the records at its places: ONE ordered list of rules for the lifecycle (Aditi,
+     * 2026-10-21: "rules to be lifecycle level rules"; audit-level rules come later). A rule is a DarpanConclusion, the
+     * places it applies to (none = every place), and conditions on the record's fields (a detail key such as
+     * hcReturnChannel, or a standard column such as status) that must all hold. At each place, the first rule that
+     * applies there and holds names the record; none leaves it Unexplained. Replaces the lifecycle's list; an empty list
+     * clears it. Stored on the lifecycle (conclusionRules) and written onto each place's conclusion rules, where the
+     * conclude step draws them on every run.
      */
     static Map saveConclusions(def ec, Map params) {
         if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access for runs.")) return [:]
-        String reconciliationId = normalize(params.reconciliationId), place = normalize(params.place)
+        String reconciliationId = normalize(params.reconciliationId)
         def run = reconciliationId ? RunFlowchartSupport.findReconciliation(ec, reconciliationId) : null
         if (run == null || run.get("buildMode") != BUILD_MODE_STAGES) {
             ec.message.addError("Conclusions belong to a lifecycle built from stages; '${reconciliationId}' is not one."); return [:]
         }
-        Map question = RunFlowchartSupport.loadQuestions(ec, reconciliationId)
-                .find { it.isActive != "N" && it.noOutcomeLabel && it.noOutcomeLabel == place }
-        if (question == null) { ec.message.addError("'${place}' is not one of this lifecycle's places."); return [:] }
-        def scope = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareScope")
-                .condition("ruleSetId", question.ruleSetId).useCache(false).one()
-        if (scope == null) { ec.message.addError("The place '${place}' has no rule to conclude on."); return [:] }
-        String compareScopeId = scope.get("compareScopeId") as String, tenantId = run.get("companyUserGroupId") as String
+        Set<String> places = placeQuestions(ec, reconciliationId)*.noOutcomeLabel as Set<String>
 
-        List<Map> conclusions = []
+        List<Map> rules = []
         for (Object o : ((params.conclusions ?: []) as List)) {
             Map c = (Map) o
             String enumId = normalize(c.conclusionEnumId)
@@ -354,12 +347,15 @@ class LifecycleSupport {
             if (conclusion == null || conclusion.get("enumTypeId") != "DarpanConclusion") {
                 ec.message.addError("'${enumId}' is not a conclusion."); return [:]
             }
+            List<String> at = ((c.places ?: []) as List).collect { normalize(it) }.findAll { it }.unique() as List<String>
+            String unknown = at.find { !places.contains(it) }
+            if (unknown) { ec.message.addError("'${unknown}' is not one of this lifecycle's places."); return [:] }
             List<Map> conditions = []
             for (Object co : ((c.conditions ?: []) as List)) {
                 Map cond = (Map) co
                 String field = normalize(cond.field), operator = (normalize(cond.operator) ?: "IN").toUpperCase()
                 List<String> values = ((cond.values ?: []) as List).collect { normalize(it) }.findAll { it } as List<String>
-                if (!(field ==~ /[a-zA-Z][a-zA-Z0-9_]{0,59}/)) { ec.message.addError("'${field}' is not a field of the place's records."); return [:] }
+                if (!(field ==~ /[a-zA-Z][a-zA-Z0-9_]{0,59}/)) { ec.message.addError("'${field}' is not a field of the lifecycle's records."); return [:] }
                 if (!(operator in CONCLUSION_OPERATORS)) { ec.message.addError("A condition is one of ${CONCLUSION_OPERATORS.join(', ')}, not '${operator}'."); return [:] }
                 if (operator in ["IN", "NOT_IN"] && (!values || values.any { it.contains(",") })) {
                     ec.message.addError("'${field}' ${operator == 'IN' ? 'is' : 'is not'} needs values without commas."); return [:]
@@ -369,46 +365,63 @@ class LifecycleSupport {
                 conditions << [field: field, operator: operator, values: values, checkLabel: checkLabel]
             }
             if (!conditions) { ec.message.addError("'${conclusion.get('description')}' needs at least one condition."); return [:] }
-            conclusions << [conclusionEnumId: enumId, conditions: conditions]
+            rules << [conclusionEnumId: enumId, places: at, conditions: conditions]
         }
-
-        TenantScopedFinder.findTenantScoped(ec, CONCLUSION_CONDITION).condition("compareScopeId", compareScopeId).useCache(false).list()*.delete()
-        TenantScopedFinder.findTenantScoped(ec, CONCLUSION_RULE).condition("compareScopeId", compareScopeId).useCache(false).list()*.delete()
-        def now = ec.user.nowTimestamp
-        conclusions.eachWithIndex { Map c, int i ->
-            int seq = (i + 1) * 10
-            ec.entity.makeValue(CONCLUSION_RULE).setAll([compareScopeId: compareScopeId, sequenceNum: seq, conclusionEnumId: c.conclusionEnumId,
-                    appliesToBucket: "FINDING", companyUserGroupId: tenantId, createdDate: now, lastUpdatedDate: now]).create()
-            ((List<Map>) c.conditions).eachWithIndex { Map cond, int j ->
-                ec.entity.makeValue(CONCLUSION_CONDITION).setAll([compareScopeId: compareScopeId, sequenceNum: seq, conditionSeq: j + 1,
-                        subject: "FILE_1", fieldExpression: cond.field, operator: cond.operator,
-                        conditionValues: ((List) cond.values).join(","), checkLabel: cond.checkLabel, companyUserGroupId: tenantId]).create()
-            }
-        }
+        run.set("conclusionRules", rules ? JsonOutput.toJson(rules) : null)
+        run.update()
+        applyConclusions(ec, reconciliationId)
         return ec.message.hasError() ? [:] : [conclusions: listConclusions(ec, reconciliationId)]
     }
 
-    /** DAR-UI-052. Each place that names its records: [place, conclusions: [conclusionEnumId, label, conditions]]. */
-    static List<Map> listConclusions(def ec, String reconciliationId) {
-        List<Map> out = []
-        RunFlowchartSupport.loadQuestions(ec, reconciliationId).findAll { it.isActive != "N" && it.noOutcomeLabel }
-                .sort { (it.runSequence ?: 0) as int }.each { Map q ->
+    /** The questions whose records are a place: every active one with a place name. */
+    private static List<Map> placeQuestions(def ec, String reconciliationId) {
+        return RunFlowchartSupport.loadQuestions(ec, reconciliationId).findAll { it.isActive != "N" && it.noOutcomeLabel }
+    }
+
+    private static List<Map> conclusionRulesOf(def run) {
+        String raw = run?.get("conclusionRules") as String
+        return raw ? (new JsonSlurper().parseText(raw) as List<Map>) : []
+    }
+
+    /**
+     * DAR-UI-052. Writes the lifecycle's rules onto every place it has now, each place getting the rules that apply
+     * there in the lifecycle's order (the sequence keeps that order, so the first that holds still wins). Run whenever the
+     * places change: a stage rebuild makes new questions, a written finding adds one.
+     */
+    static void applyConclusions(def ec, String reconciliationId) {
+        def run = RunFlowchartSupport.findReconciliation(ec, reconciliationId)
+        if (run == null) return
+        List<Map> rules = conclusionRulesOf(run)
+        String tenantId = run.get("companyUserGroupId") as String
+        def now = ec.user.nowTimestamp
+        placeQuestions(ec, reconciliationId).each { Map q ->
             def scope = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareScope")
                     .condition("ruleSetId", q.ruleSetId).useCache(false).one()
             if (scope == null) return
-            List rules = TenantScopedFinder.findTenantScoped(ec, CONCLUSION_RULE).condition("compareScopeId", scope.get("compareScopeId"))
-                    .orderBy("sequenceNum").useCache(false).list()
-            if (!rules) return
-            List conditions = TenantScopedFinder.findTenantScoped(ec, CONCLUSION_CONDITION).condition("compareScopeId", scope.get("compareScopeId"))
-                    .orderBy("sequenceNum,conditionSeq").useCache(false).list()
-            out << [place: q.noOutcomeLabel, reconciliationRunId: q.reconciliationRunId, conclusions: rules.collect { r ->
-                [conclusionEnumId: r.get("conclusionEnumId"), label: FacadeSupport.findEnum(ec, r.get("conclusionEnumId") as String)?.get("description"),
-                 conditions: conditions.findAll { it.get("sequenceNum") == r.get("sequenceNum") }.collect { c ->
-                     [field: c.get("fieldExpression"), operator: c.get("operator"),
-                      values: ((c.get("conditionValues") ?: "") as String).split(",").findAll { it } as List, checkLabel: c.get("checkLabel")] }]
-            }]
+            String compareScopeId = scope.get("compareScopeId") as String
+            TenantScopedFinder.findTenantScoped(ec, CONCLUSION_CONDITION).condition("compareScopeId", compareScopeId).useCache(false).list()*.delete()
+            TenantScopedFinder.findTenantScoped(ec, CONCLUSION_RULE).condition("compareScopeId", compareScopeId).useCache(false).list()*.delete()
+            rules.eachWithIndex { Map r, int i ->
+                List at = (r.places ?: []) as List
+                if (at && !at.contains(q.noOutcomeLabel)) return
+                int seq = (i + 1) * 10
+                ec.entity.makeValue(CONCLUSION_RULE).setAll([compareScopeId: compareScopeId, sequenceNum: seq, conclusionEnumId: r.conclusionEnumId,
+                        appliesToBucket: "FINDING", companyUserGroupId: tenantId, createdDate: now, lastUpdatedDate: now]).create()
+                ((List<Map>) r.conditions).eachWithIndex { Map cond, int j ->
+                    ec.entity.makeValue(CONCLUSION_CONDITION).setAll([compareScopeId: compareScopeId, sequenceNum: seq, conditionSeq: j + 1,
+                            subject: "FILE_1", fieldExpression: cond.field, operator: cond.operator,
+                            conditionValues: ((List) cond.values).join(","), checkLabel: cond.checkLabel, companyUserGroupId: tenantId]).create()
+                }
+            }
         }
-        return out
+    }
+
+    /** DAR-UI-052. The lifecycle's rules in order: [conclusionEnumId, label, places (empty = every place), conditions]. */
+    static List<Map> listConclusions(def ec, String reconciliationId) {
+        return conclusionRulesOf(RunFlowchartSupport.findReconciliation(ec, reconciliationId)).collect { Map r ->
+            [conclusionEnumId: r.conclusionEnumId, label: FacadeSupport.findEnum(ec, r.conclusionEnumId as String)?.get("description"),
+             places: r.places ?: [], conditions: r.conditions] as Map
+        }
     }
 
     /** Where a stage's records are the ones that reached it: [question, branch]. */

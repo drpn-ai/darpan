@@ -21,7 +21,6 @@
     <moqui.basic.Enumeration enumId="CONC_RTN_EXCHANGE_NOT_BACK" enumTypeId="DarpanConclusion" enumCode="CONC_RTN_EXCHANGE_NOT_BACK" description="Exchange sent, goods not back"/>
     <moqui.basic.Enumeration enumId="CONC_RTN_WARRANTY_NO_TXN" enumTypeId="DarpanConclusion" enumCode="CONC_RTN_WARRANTY_NO_TXN" description="Warranty claim, nothing in NetSuite"/>
     <moqui.basic.Enumeration enumId="CONC_RTN_NEVER_SHIPPED_BACK" enumTypeId="DarpanConclusion" enumCode="CONC_RTN_NEVER_SHIPPED_BACK" description="Never shipped back"/>
-    <moqui.basic.Enumeration enumId="CONC_RTN_NOT_FROM_HOTWAX" enumTypeId="DarpanConclusion" enumCode="CONC_RTN_NOT_FROM_HOTWAX" description="Not a HotWax return"/>
     <moqui.basic.Enumeration enumId="CONC_RTN_WARRANTY_IN_PROGRESS" enumTypeId="DarpanConclusion" enumCode="CONC_RTN_WARRANTY_IN_PROGRESS" description="Warranty claim in progress"/>
     <moqui.basic.Enumeration enumId="CONC_RTN_REFUND_NOT_CREDITED" enumTypeId="DarpanConclusion" enumCode="CONC_RTN_REFUND_NOT_CREDITED" description="Refund owed, not credited"/>
     <moqui.basic.Enumeration enumId="CONC_RTN_REFUND_NOT_PAID" enumTypeId="DarpanConclusion" enumCode="CONC_RTN_REFUND_NOT_PAID" description="Refund credited, not paid"/>

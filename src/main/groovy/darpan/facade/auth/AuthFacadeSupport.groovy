@@ -368,7 +368,7 @@ class AuthFacadeSupport {
         ec.message.addError("Unable to change the password. Check the username and current password.")
     }
 
-    private static void incrementFailedLogins(def ec, String userId) {
+    static void incrementFailedLogins(def ec, String userId) {
         if (!userId) return
         try {
             ec.service.sync().name("org.moqui.impl.UserServices.increment#UserAccountFailedLogins")

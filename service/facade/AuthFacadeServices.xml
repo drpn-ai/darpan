@@ -649,10 +649,14 @@
         <description>DAR-BE-028. Save the signed-in user's recovery email, where password reset codes go. Saved as
             typed (trimmed, lower-cased) with no confirmation code; the new address, and the previous one when it
             changes, get a notice. An address already used by another account is not saved, but the reply is the
-            same, so this cannot be used to test whether an address has an account.</description>
+            same, so this cannot be used to test whether an address has an account. Requires the current password.</description>
         <in-parameters>
             <parameter name="emailAddress" required="true">
                 <description>The recovery email address.</description>
+            </parameter>
+            <parameter name="currentPassword" required="true">
+                <description>The account's current password, checked on the server: a session token alone cannot
+                    redirect where reset codes go. A wrong one counts as a failed login.</description>
             </parameter>
         </in-parameters>
         <out-parameters>
@@ -672,7 +676,7 @@
             </parameter>
         </out-parameters>
         <actions>
-            <set field="saveResult" from="darpan.facade.auth.PasswordResetSupport.saveRecoveryEmail(ec, emailAddress)"/>
+            <set field="saveResult" from="darpan.facade.auth.PasswordResetSupport.saveRecoveryEmail(ec, emailAddress, currentPassword)"/>
             <set field="ok" from="saveResult.ok"/>
             <set field="messages" from="saveResult.messages"/>
             <set field="errors" from="saveResult.errors"/>

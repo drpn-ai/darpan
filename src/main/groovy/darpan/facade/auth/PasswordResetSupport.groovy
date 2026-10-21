@@ -197,8 +197,9 @@ class PasswordResetSupport {
     /** Save the signed-in user's recovery email (UserAccount.emailAddress), trimmed and lower-cased, with no
      *  confirmation code (Aditi, 2026-10-21). The new address, and the old one if it changes, get a notice in
      *  place of a code. An address another account already holds is NOT saved, yet the reply is the same as a
-     *  save, so a signed-in user cannot test whether an address has a Darpan account; that inbox is told. */
-    static Map<String, Object> saveRecoveryEmail(def ec, Object emailAddress) {
+     *  save, so a signed-in user cannot test whether an address has a Darpan account; that inbox is told.
+     *  Requires the current password, checked here on the server (security review, 2026-10-21). */
+    static Map<String, Object> saveRecoveryEmail(def ec, Object emailAddress, Object currentPassword) {
         String userId = normalize(ec.user.userId)
         String email = normalize(emailAddress)?.toLowerCase()
         Map<String, Object> result = [emailAddressMasked: null]
@@ -206,6 +207,12 @@ class PasswordResetSupport {
             ec.message.addError("Authentication required to save a recovery email.")
         } else if (!email || !EmailValidator.getInstance().isValid(email)) {
             ec.message.addError("Enter a valid email address.")
+        } else if (!currentPasswordMatches(ec, currentPassword)) {
+            // A session token alone must not redirect future resets: change the address, then reset the
+            // password, is a takeover. A wrong password counts toward the login lockout like any other guess.
+            AuthFacadeSupport.incrementFailedLogins(ec, userId)
+            ec.message.clearAll()
+            ec.message.addError("Current password is incorrect.")
         } else {
             def own = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.security.UserAccount",
                     "self-scoped auth: the signed-in user's own account").condition("userId", userId).useCache(false).one()
@@ -230,6 +237,14 @@ class PasswordResetSupport {
         }
         result.putAll(FacadeSupport.envelope(ec))
         return result
+    }
+
+    private static boolean currentPasswordMatches(def ec, Object currentPassword) {
+        if (!currentPassword?.toString()) return false
+        Map<String, Object> check = AuthFacadeSupport.verifyOwnPassword(ec, currentPassword)
+        boolean verified = check.passwordVerified == true && !ec.message.hasError()
+        ec.message.clearAll()
+        return verified
     }
 
     /** The two session flags darpan-ui needs; masked, because the UI never needs the whole address. */

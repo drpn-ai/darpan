@@ -316,7 +316,8 @@ class PasswordResetServicesSmokeTests {
 
     @Test
     void savesTrimmedLowerCased() {
-        Map saved = signedIn(OK_USERNAME, "save#RecoveryEmail", [emailAddress: "  New.Addr@Example.COM "])
+        setPassword(OK_ID, OLD_PASSWORD)
+        Map saved = signedIn(OK_USERNAME, "save#RecoveryEmail", [emailAddress: "  New.Addr@Example.COM ", currentPassword: OLD_PASSWORD])
         assertEquals([], saved.errors)
         assertEquals("n•••@example.com", saved.out.emailAddressMasked)
         assertEquals("new.addr@example.com", account(OK_ID).emailAddress)
@@ -328,7 +329,8 @@ class PasswordResetServicesSmokeTests {
 
     @Test
     void caseOnlyChangeIsNotConflict() {
-        Map saved = signedIn(OK_USERNAME, "save#RecoveryEmail", [emailAddress: OK_EMAIL.toUpperCase()])
+        setPassword(OK_ID, OLD_PASSWORD)
+        Map saved = signedIn(OK_USERNAME, "save#RecoveryEmail", [emailAddress: OK_EMAIL.toUpperCase(), currentPassword: OLD_PASSWORD])
         assertEquals([], saved.errors)
         assertEquals(OK_EMAIL, account(OK_ID).emailAddress)
         assertTrue(sent.every { it.templateId != PasswordResetSupport.TEMPLATE_RECOVERY_CONFLICT }, "sends: ${sent}")
@@ -337,7 +339,8 @@ class PasswordResetServicesSmokeTests {
 
     @Test
     void conflictDoesNotSaveAndRepliesOk() {
-        Map saved = signedIn("pwr.noemail", "save#RecoveryEmail", [emailAddress: OK_EMAIL])
+        setPassword(NOEMAIL_ID, OLD_PASSWORD)
+        Map saved = signedIn("pwr.noemail", "save#RecoveryEmail", [emailAddress: OK_EMAIL, currentPassword: OLD_PASSWORD])
         assertEquals([], saved.errors)
         assertTrue(saved.out.ok as boolean)
         assertEquals("p•••@example.com", saved.out.emailAddressMasked)
@@ -348,17 +351,32 @@ class PasswordResetServicesSmokeTests {
 
     @Test
     void invalidEmailRefused() {
-        Map saved = signedIn(OK_USERNAME, "save#RecoveryEmail", [emailAddress: "not an email"])
+        setPassword(OK_ID, OLD_PASSWORD)
+        Map saved = signedIn(OK_USERNAME, "save#RecoveryEmail", [emailAddress: "not an email", currentPassword: OLD_PASSWORD])
         assertFalse(saved.errors.isEmpty())
         assertEquals(OK_EMAIL, account(OK_ID).emailAddress)
         assertTrue(sent.isEmpty())
+    }
+
+    /** Security review 2026-10-21: a session token alone must not be able to redirect future resets (that is a
+     *  takeover: change the address, then reset the password). The current password is checked on the server,
+     *  and a wrong one counts toward the account's failed-login lockout. */
+    @Test
+    void wrongCurrentPasswordRefusedAndCounted() {
+        setPassword(OK_ID, OLD_PASSWORD)
+        def before = (account(OK_ID).successiveFailedLogins ?: 0) as long
+        Map refused = signedIn(OK_USERNAME, "save#RecoveryEmail", [emailAddress: "thief@example.com", currentPassword: "Wrong-pass9!"])
+        assertEquals(["Current password is incorrect."], refused.errors)
+        assertEquals(OK_EMAIL, account(OK_ID).emailAddress)
+        assertTrue(sent.isEmpty(), "sends: ${sent}")
+        assertEquals(before + 1, (account(OK_ID).successiveFailedLogins ?: 0) as long)
     }
 
     @Test
     void anonymousRefused() {
         ec.user.logoutUser()
         def refused = assertThrows(org.moqui.context.AuthenticationRequiredException) {
-            ec.service.sync().name("facade.AuthFacadeServices.save#RecoveryEmail").parameters([emailAddress: "x@example.com"]).call()
+            ec.service.sync().name("facade.AuthFacadeServices.save#RecoveryEmail").parameters([emailAddress: "x@example.com", currentPassword: OLD_PASSWORD]).call()
         }
         assertTrue(refused.message.contains("logged in"), refused.message)
         ec.message.clearAll()
@@ -367,10 +385,11 @@ class PasswordResetServicesSmokeTests {
 
     @Test
     void sessionFlags() {
+        setPassword(NOEMAIL_ID, OLD_PASSWORD)
         Map before = signedIn("pwr.noemail", "get#SessionInfo", [:])
         assertEquals(true, before.out.sessionInfo.recoveryEmailMissing)
         assertNull(before.out.sessionInfo.emailAddressMasked)
-        signedIn("pwr.noemail", "save#RecoveryEmail", [emailAddress: "fresh@example.com"])
+        assertEquals([], signedIn("pwr.noemail", "save#RecoveryEmail", [emailAddress: "fresh@example.com", currentPassword: OLD_PASSWORD]).errors)
         Map after = signedIn("pwr.noemail", "get#SessionInfo", [:])
         assertEquals(false, after.out.sessionInfo.recoveryEmailMissing)
         assertEquals("f•••@example.com", after.out.sessionInfo.emailAddressMasked)

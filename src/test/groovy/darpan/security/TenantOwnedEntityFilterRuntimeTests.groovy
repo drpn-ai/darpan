@@ -81,15 +81,16 @@ class TenantOwnedEntityFilterRuntimeTests {
             "darpan.rule.RuleSetCompareSourceFilter"                   : "compareScopeId",
             "darpan.rule.RuleSetConclusionRule"                        : "compareScopeId",
             "darpan.rule.RuleSetConclusionCondition"                   : "compareScopeId",
-            "darpan.monthclose.MonthCloseStatement"                    : "statementId",
-            "darpan.monthclose.MonthCloseCheck"                        : "checkId",
-            "darpan.monthclose.MonthCloseStatementCheck"               : "statementId",
-            "darpan.monthclose.MonthCloseFinding"                          : "findingId",
-            "darpan.monthclose.MonthCloseFindingRecord"                    : "findingId",
-            "darpan.monthclose.MonthCloseFindingCheck"                     : "findingId",
-            "darpan.monthclose.MonthCloseFindingEvent"                     : "findingId",
-            "darpan.monthclose.MonthCloseCheckRun"                         : "checkRunId",
-            "darpan.monthclose.MonthCloseSourceRead"                       : "checkRunId",
+            "darpan.audit.Audit"                                 : "auditId",
+            "darpan.audit.AuditStatement"                    : "statementId",
+            "darpan.audit.AuditCheck"                        : "checkId",
+            "darpan.audit.AuditStatementCheck"               : "statementId",
+            "darpan.audit.AuditFinding"                          : "findingId",
+            "darpan.audit.AuditFindingRecord"                    : "findingId",
+            "darpan.audit.AuditFindingCondition"                     : "findingId",
+            "darpan.audit.AuditFindingEvent"                     : "findingId",
+            "darpan.audit.AuditCheckRun"                         : "checkRunId",
+            "darpan.audit.AuditSourceRead"                       : "checkRunId",
     ].asImmutable()
 
     /** Entities whose companyUserGroupId is not-null: they get no unstamped fixture row. */
@@ -97,15 +98,16 @@ class TenantOwnedEntityFilterRuntimeTests {
             "darpan.reconciliation.SlackOAuthState",
             "darpan.reconciliation.SlackWorkspaceInstall",
             "darpan.reconciliation.SourceConfigEndpointAccess",
-            "darpan.monthclose.MonthCloseStatement",
-            "darpan.monthclose.MonthCloseCheck",
-            "darpan.monthclose.MonthCloseStatementCheck",
-            "darpan.monthclose.MonthCloseFinding",
-            "darpan.monthclose.MonthCloseFindingRecord",
-            "darpan.monthclose.MonthCloseFindingCheck",
-            "darpan.monthclose.MonthCloseFindingEvent",
-            "darpan.monthclose.MonthCloseCheckRun",
-            "darpan.monthclose.MonthCloseSourceRead",
+            "darpan.audit.Audit",
+            "darpan.audit.AuditStatement",
+            "darpan.audit.AuditCheck",
+            "darpan.audit.AuditStatementCheck",
+            "darpan.audit.AuditFinding",
+            "darpan.audit.AuditFindingRecord",
+            "darpan.audit.AuditFindingCondition",
+            "darpan.audit.AuditFindingEvent",
+            "darpan.audit.AuditCheckRun",
+            "darpan.audit.AuditSourceRead",
     ].toSet().asImmutable()
 
     private ExecutionContext ec
@@ -217,28 +219,28 @@ class TenantOwnedEntityFilterRuntimeTests {
     }
 
     @Test
-    void gorjanasMonthCloseCatalogIsSeenByGorjanaOnly() {
+    void gorjanasAuditCatalogIsSeenByGorjanaOnly() {
         // DAR-BE-088: the real catalog file, loaded as an install loads it, read the way a facade service reads it.
-        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/MonthCloseSeedData.xml",
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AuditSeedData.xml",
                 "component://darpan/data/GorjanaMonthCloseCatalogData.xml")
-        Set<String> categoryIds = ec.entity.find("moqui.basic.Enumeration").condition("enumTypeId", "MonthCloseCategory")
+        Set<String> categoryIds = ec.entity.find("moqui.basic.Enumeration").condition("enumTypeId", "AuditCategory")
                 .disableAuthz().useCache(false).list()*.get("enumId") as Set<String>
         assertEquals(4, categoryIds.size(), "test precondition: the four categories are seeded")
 
         actAs(EDITOR_USERNAME, GORJANA)
         List gorjana = []
         underFacadeGrant {
-            gorjana = ec.entity.find("darpan.monthclose.MonthCloseStatement").condition("statementId", "like", "GORJANA_R%")
+            gorjana = ec.entity.find("darpan.audit.AuditStatement").condition("statementId", "like", "GORJANA_R%")
                     .orderBy("sequenceNum").useCache(false).list()
         }
         assertEquals((1..17).collect { "R${it}".toString() }, gorjana*.get("statementCode"), "GORJANA sees R1-R17 in order")
         assertEquals([], gorjana.findAll { !categoryIds.contains(it.get("categoryEnumId")) }*.get("statementCode"),
-                "every statement carries a MonthCloseCategory")
+                "every statement carries an AuditCategory")
 
         actAs(EDITOR_USERNAME, KREWE)
         long krewe = -1L
         underFacadeGrant {
-            krewe = ec.entity.find("darpan.monthclose.MonthCloseStatement").condition("statementId", "like", "GORJANA_R%").count()
+            krewe = ec.entity.find("darpan.audit.AuditStatement").condition("statementId", "like", "GORJANA_R%").count()
         }
         assertEquals(0L, krewe, "another tenant must see none of gorjana's catalog")
     }
@@ -677,15 +679,16 @@ class TenantOwnedEntityFilterRuntimeTests {
             case "darpan.rule.RuleSetCompareSourceFilter": return "SCF"
             case "darpan.rule.RuleSetConclusionRule": return "SCR"
             case "darpan.rule.RuleSetConclusionCondition": return "SCC"
-            case "darpan.monthclose.MonthCloseStatement": return "MCS"
-            case "darpan.monthclose.MonthCloseCheck": return "MCCK"
-            case "darpan.monthclose.MonthCloseStatementCheck": return "MCSC"
-            case "darpan.monthclose.MonthCloseFinding": return "MCF"
-            case "darpan.monthclose.MonthCloseFindingRecord": return "MCFR"
-            case "darpan.monthclose.MonthCloseFindingCheck": return "MCFC"
-            case "darpan.monthclose.MonthCloseFindingEvent": return "MCFE"
-            case "darpan.monthclose.MonthCloseCheckRun": return "MCCR"
-            case "darpan.monthclose.MonthCloseSourceRead": return "MCSRD"
+            case "darpan.audit.Audit": return "AUD"
+            case "darpan.audit.AuditStatement": return "MCS"
+            case "darpan.audit.AuditCheck": return "MCCK"
+            case "darpan.audit.AuditStatementCheck": return "MCSC"
+            case "darpan.audit.AuditFinding": return "MCF"
+            case "darpan.audit.AuditFindingRecord": return "MCFR"
+            case "darpan.audit.AuditFindingCondition": return "MCFC"
+            case "darpan.audit.AuditFindingEvent": return "MCFE"
+            case "darpan.audit.AuditCheckRun": return "MCCR"
+            case "darpan.audit.AuditSourceRead": return "MCSRD"
         }
         throw new IllegalArgumentException(entityName)
     }
@@ -710,23 +713,24 @@ class TenantOwnedEntityFilterRuntimeTests {
             case "darpan.rule.RuleSetConclusionRule": return [compareScopeId: id, sequenceNum: 1L, conclusionEnumId: "UNEXPLAINED"]
             case "darpan.rule.RuleSetConclusionCondition": return [compareScopeId: id, sequenceNum: 1L, conditionSeq: 1L,
                     subject: "x", checkLabel: "y"]
-            case "darpan.monthclose.MonthCloseStatement": return [statementId: id, statementCode: id,
-                    categoryEnumId: "MCC_ORDERS", weightEnumId: "MCSW_FIRM", statementText: "x"]
-            case "darpan.monthclose.MonthCloseCheck": return [checkId: id, checkCode: id, label: "x"]
-            case "darpan.monthclose.MonthCloseStatementCheck": return [statementId: id, checkId: "TOEF_MCCK_${s}".toString()]
-            case "darpan.monthclose.MonthCloseFinding": return [findingId: id, statementId: "TOEF_MCS_${s}".toString(),
-                    checkId: "TOEF_MCCK_${s}".toString(), recordKey: id, stateEnumId: "MCFS_OPEN", headline: "x",
+            case "darpan.audit.Audit": return [auditId: id, auditCode: id, auditName: "x", periodEnumId: "AUDP_MONTH"]
+            case "darpan.audit.AuditStatement": return [statementId: id, auditId: "TOEF_AUD_${s}".toString(), statementCode: id,
+                    categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM", statementText: "x"]
+            case "darpan.audit.AuditCheck": return [checkId: id, checkCode: id, label: "x"]
+            case "darpan.audit.AuditStatementCheck": return [statementId: id, checkId: "TOEF_MCCK_${s}".toString()]
+            case "darpan.audit.AuditFinding": return [findingId: id, statementId: "TOEF_MCS_${s}".toString(),
+                    checkId: "TOEF_MCCK_${s}".toString(), recordKey: id, stateEnumId: "AUDFS_OPEN", headline: "x",
                     firstFoundDate: java.sql.Date.valueOf("2026-10-07"), lastSeenDate: java.sql.Date.valueOf("2026-10-08")]
-            case "darpan.monthclose.MonthCloseFindingRecord": return [findingId: id, recordSeqId: "01", systemEnumId: "OMS",
+            case "darpan.audit.AuditFindingRecord": return [findingId: id, recordSeqId: "01", systemEnumId: "OMS",
                     recordType: "return", recordId: "x"]
-            case "darpan.monthclose.MonthCloseFindingCheck": return [findingId: id, sequenceNum: 1L, label: "x", passed: "N"]
-            case "darpan.monthclose.MonthCloseFindingEvent": return [findingId: id, eventSeqId: "01", eventStamp: FROM_DATE,
-                    eventDate: java.sql.Date.valueOf("2026-10-07"), eventTypeEnumId: "MCFE_FOUND", byTypeEnumId: "MCAT_CHECK"]
-            case "darpan.monthclose.MonthCloseCheckRun": return [checkRunId: id, checkId: "TOEF_MCCK_${s}".toString(),
+            case "darpan.audit.AuditFindingCondition": return [findingId: id, sequenceNum: 1L, label: "x", passed: "N"]
+            case "darpan.audit.AuditFindingEvent": return [findingId: id, eventSeqId: "01", eventStamp: FROM_DATE,
+                    eventDate: java.sql.Date.valueOf("2026-10-07"), eventTypeEnumId: "AUDFE_FOUND", byTypeEnumId: "AUDAT_CHECK"]
+            case "darpan.audit.AuditCheckRun": return [checkRunId: id, checkId: "TOEF_MCCK_${s}".toString(),
                     reportDate: java.sql.Date.valueOf("2026-10-08"), checkedDay: java.sql.Date.valueOf("2026-10-07"),
-                    statusEnumId: "MCCS_RAN", runStamp: FROM_DATE]
-            case "darpan.monthclose.MonthCloseSourceRead": return [checkRunId: id, readSeqId: "01", systemEnumId: "OMS",
-                    statusEnumId: "MCSR_COMPLETE", recordCount: 1L]
+                    statusEnumId: "AUDCS_RAN", runStamp: FROM_DATE]
+            case "darpan.audit.AuditSourceRead": return [checkRunId: id, readSeqId: "01", systemEnumId: "OMS",
+                    statusEnumId: "AUDSR_COMPLETE", recordCount: 1L]
         }
         throw new IllegalArgumentException(entityName)
     }

@@ -1,4 +1,4 @@
-package darpan.monthclose
+package darpan.audit
 
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
@@ -23,27 +23,31 @@ import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
- * DAR-BE-090 — check health (record#CheckRun) and the one assembler for the month-close JSON, against real entities.
+ * DAR-BE-090 — check health (record#CheckRun) and the one assembler for the audit-run JSON, against real entities.
  *
  * One scenario is written once, through the ledger's own writers, and every report test reads it:
  *   2026-10-07  returns check ran over complete reads; finds M258615 (R4) and RX-1 (R8). Invoice check did not run.
  *   2026-10-08  returns check ran; M258615 again (now open), RX-1 looked at and gone (fixed). Invoice check ran and
  *               found INV-552310 (R2, pending).
  *   2026-10-09  returns check ran over a PARTIAL NetSuite read; M258615 again; nothing closes. Invoice check did not run.
- * R5 and R12 have no check. KREWE has its own catalog and finding; TRUN is a third tenant for record#CheckRun alone,
- * so those tests never change the scenario's health.
+ * R5 and R12 have no check. All of that is GORJANA's "Month close" audit. Her second audit, "Daily ops" (period day),
+ * has statement D1 and a check that never runs, with one finding: the month-close report must see none of it.
+ * KREWE has its own audit and finding; TRUN is a third tenant for record#CheckRun alone, so those tests never change
+ * the scenario's health.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-class MonthCloseReportAssemblerSmokeTests {
+class AuditReportAssemblerSmokeTests {
 
-    private static final String LEDGER = "monthclose.MonthCloseLedgerServices"
-    private static final String REPORTS = "monthclose.MonthCloseReportServices"
+    private static final String LEDGER = "audit.AuditLedgerServices"
+    private static final String REPORTS = "audit.AuditReportServices"
     private static final String GORJANA = "GORJANA"
     private static final String KREWE = "KREWE"
     private static final String TRUN = "TRUN"
     private static final ZoneId LA = ZoneId.of("America/Los_Angeles")
     private static final String RET = "TREP_RET"
     private static final String INV = "TREP_INV"
+    private static final String MONTH_CLOSE = "TREP_AUDIT"
+    private static final String DAILY_OPS = "TREP_OPS_AUDIT"
     private static final String R4_TEXT = "Every refund we give a customer is booked in NetSuite at the same amount, to the cent, with nothing left open."
 
     /** Keyed objects: their member names are data, so each member is compared with the golden's first member. */
@@ -54,12 +58,13 @@ class MonthCloseReportAssemblerSmokeTests {
     private String rx1
     private String inv552310
     private String kreweFinding
+    private String opsFinding
 
     @BeforeAll
     void setup() {
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
-        ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "month-close-report")
-        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/MonthCloseSeedData.xml",
+        ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "audit-report")
+        ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AuditSeedData.xml",
                 "component://darpan/data/DarpanSystemSourceSeedData.xml")
         insert("moqui.basic.EnumerationType", [enumTypeId: "DarpanConclusion", description: "Run result conclusion"])
         insert("moqui.basic.Enumeration", [enumId: "CONC_MEMO_SHORT_OF_REFUND", enumTypeId: "DarpanConclusion",
@@ -68,28 +73,35 @@ class MonthCloseReportAssemblerSmokeTests {
             insert("moqui.security.UserGroup", [userGroupId: id, description: name])
         }
         insert("darpan.auth.TenantSetting", [companyUserGroupId: GORJANA, timeZone: "America/Los_Angeles"])
+        audit(GORJANA, MONTH_CLOSE, "month-close", "Month close", "AUDP_MONTH")
+        audit(GORJANA, DAILY_OPS, "daily-ops", "Daily ops", "AUDP_DAY")
+        audit(KREWE, "TREP_K_AUDIT", "month-close", "Month close", "AUDP_MONTH")
+        audit(TRUN, "TREP_T_AUDIT", "month-close", "Month close", "AUDP_MONTH")
 
-        statement(GORJANA, "TREP_R2", "R2", "MCC_ORDERS", "MCSW_FIRM", 2, "Every invoice and credit memo carries the Shopify order id (the Etail id).")
-        statement(GORJANA, "TREP_R4", "R4", "MCC_REFUNDS_CREDITS", "MCSW_DERIVED", 4, R4_TEXT)
-        statement(GORJANA, "TREP_R5", "R5", "MCC_REFUNDS_CREDITS", "MCSW_FIRM", 5, "Store credit given in Shopify is in NetSuite at the same amount.")
-        statement(GORJANA, "TREP_R8", "R8", "MCC_RETURNS", "MCSW_DERIVED", 8, "Every return reaches NetSuite.")
-        statement(GORJANA, "TREP_R12", "R12", "MCC_EXCHANGES_WARRANTY", "MCSW_DERIVED", 12, "A warranty replacement is paid by that claim's own credit.")
-        insert("darpan.monthclose.MonthCloseCheck", [checkId: RET, companyUserGroupId: GORJANA, checkCode: "returns-vs-credit-memos",
+        statement(GORJANA, MONTH_CLOSE, "TREP_R2", "R2", "AUDC_ORDERS", "AUDSW_FIRM", 2, "Every invoice and credit memo carries the Shopify order id (the Etail id).")
+        statement(GORJANA, MONTH_CLOSE, "TREP_R4", "R4", "AUDC_REFUNDS_CREDITS", "AUDSW_DERIVED", 4, R4_TEXT)
+        statement(GORJANA, MONTH_CLOSE, "TREP_R5", "R5", "AUDC_REFUNDS_CREDITS", "AUDSW_FIRM", 5, "Store credit given in Shopify is in NetSuite at the same amount.")
+        statement(GORJANA, MONTH_CLOSE, "TREP_R8", "R8", "AUDC_RETURNS", "AUDSW_DERIVED", 8, "Every return reaches NetSuite.")
+        statement(GORJANA, MONTH_CLOSE, "TREP_R12", "R12", "AUDC_EXCHANGES_WARRANTY", "AUDSW_DERIVED", 12, "A warranty replacement is paid by that claim's own credit.")
+        insert("darpan.audit.AuditCheck", [checkId: RET, companyUserGroupId: GORJANA, checkCode: "returns-vs-credit-memos",
                 label: "OMS returns against NetSuite credit memos", graceDays: 1L, matchedBy: "return id (custbody_hc_return_id)",
                 fixOwner: "HotWax Support", fixWhereEnumId: "NETSUITE",
                 fixActionTemplate: "Correct credit memo {creditMemo} so its total is {expectedAmount} and nothing remains open.",
                 passesWhenTemplate: "Memo total is {expectedAmount} and amount remaining is 0.00."])
-        insert("darpan.monthclose.MonthCloseCheck", [checkId: INV, companyUserGroupId: GORJANA, checkCode: "invoices-without-etail-id",
+        insert("darpan.audit.AuditCheck", [checkId: INV, companyUserGroupId: GORJANA, checkCode: "invoices-without-etail-id",
                 label: "NetSuite invoices and memos with no Etail id", graceDays: 1L])
         link(GORJANA, RET, "TREP_R4", 1)
         link(GORJANA, RET, "TREP_R8", 2)
         link(GORJANA, INV, "TREP_R2", 1)
+        statement(GORJANA, DAILY_OPS, "TREP_D1", "D1", "AUDC_ORDERS", "AUDSW_FIRM", 1, "Every order is released the day it is placed.")
+        insert("darpan.audit.AuditCheck", [checkId: "TREP_OPS", companyUserGroupId: GORJANA, checkCode: "unreleased-orders", label: "OMS orders not released"])
+        link(GORJANA, "TREP_OPS", "TREP_D1", 1)
 
-        statement(KREWE, "TREP_K_R4", "R4", "MCC_REFUNDS_CREDITS", "MCSW_FIRM", 4, "krewe R4")
-        insert("darpan.monthclose.MonthCloseCheck", [checkId: "TREP_K", companyUserGroupId: KREWE, checkCode: "krewe-check", label: "krewe"])
+        statement(KREWE, "TREP_K_AUDIT", "TREP_K_R4", "R4", "AUDC_REFUNDS_CREDITS", "AUDSW_FIRM", 4, "krewe R4")
+        insert("darpan.audit.AuditCheck", [checkId: "TREP_K", companyUserGroupId: KREWE, checkCode: "krewe-check", label: "krewe"])
         link(KREWE, "TREP_K", "TREP_K_R4", 1)
-        statement(TRUN, "TREP_T_R1", "R1", "MCC_ORDERS", "MCSW_FIRM", 1, "trun R1")
-        insert("darpan.monthclose.MonthCloseCheck", [checkId: "TREP_T", companyUserGroupId: TRUN, checkCode: "trun-check", label: "trun"])
+        statement(TRUN, "TREP_T_AUDIT", "TREP_T_R1", "R1", "AUDC_ORDERS", "AUDSW_FIRM", 1, "trun R1")
+        insert("darpan.audit.AuditCheck", [checkId: "TREP_T", companyUserGroupId: TRUN, checkCode: "trun-check", label: "trun"])
         link(TRUN, "TREP_T", "TREP_T_R1", 1)
 
         Map memo = [statementCode: "R4", recordKey: "M258615", headline: "Credit memo is 0.01 less than the refund for return M258615",
@@ -107,7 +119,7 @@ class MonthCloseReportAssemblerSmokeTests {
                 records: [[systemEnumId: "OMS_RETURNS_GQL", recordType: "return", recordId: "RX-1"]]]
         Map invoice = [statementCode: "R2", recordKey: "INV-552310", headline: "Invoice INV-552310 has no Etail id",
                 records: [[systemEnumId: "NETSUITE_SUITEQL", recordType: "invoice", recordId: "INV-552310", internalId: "51000940", recordStatus: "Paid In Full"]]]
-        List complete = [read("OMS_RETURNS_GQL", "MCSR_COMPLETE", 412, "06:02:55"), read("NETSUITE_SUITEQL", "MCSR_COMPLETE", 409, "06:04:11")]
+        List complete = [read("OMS_RETURNS_GQL", "AUDSR_COMPLETE", 412, "06:02:55"), read("NETSUITE_SUITEQL", "AUDSR_COMPLETE", 409, "06:04:11")]
 
         // 2026-10-07
         Map run = checkRun(GORJANA, RET, "2026-10-07", "06:10:02", complete)
@@ -119,15 +131,20 @@ class MonthCloseReportAssemblerSmokeTests {
         run = checkRun(GORJANA, RET, "2026-10-08", "06:12:40", complete)
         record(RET, "2026-10-08", "06:12:40", [memo])
         close(RET, "2026-10-08", "06:12:40", run.checkStatusEnumId as String, ["M258615", "RX-1"])
-        run = checkRun(GORJANA, INV, "2026-10-08", "06:05:00", [read("NETSUITE_SUITEQL", "MCSR_COMPLETE", 2210, "06:04:30")])
+        run = checkRun(GORJANA, INV, "2026-10-08", "06:05:00", [read("NETSUITE_SUITEQL", "AUDSR_COMPLETE", 2210, "06:04:30")])
         inv552310 = (record(INV, "2026-10-08", "06:05:00", [invoice]).findingIds as List)[0]
         close(INV, "2026-10-08", "06:05:00", run.checkStatusEnumId as String, ["INV-552310"])
         // 2026-10-09: a partial NetSuite read
-        run = checkRun(GORJANA, RET, "2026-10-09", "06:11:00", [read("OMS_RETURNS_GQL", "MCSR_COMPLETE", 400, "06:03:00"),
-                read("NETSUITE_SUITEQL", "MCSR_PARTIAL", 300, "06:05:00", "page ceiling reached")])
-        assertEquals("MCCS_PARTIAL", run.checkStatusEnumId)
+        run = checkRun(GORJANA, RET, "2026-10-09", "06:11:00", [read("OMS_RETURNS_GQL", "AUDSR_COMPLETE", 400, "06:03:00"),
+                read("NETSUITE_SUITEQL", "AUDSR_PARTIAL", 300, "06:05:00", "page ceiling reached")])
+        assertEquals("AUDCS_PARTIAL", run.checkStatusEnumId)
         record(RET, "2026-10-09", "06:11:00", [memo])
         assertEquals(0, close(RET, "2026-10-09", "06:11:00", run.checkStatusEnumId as String, ["M258615", "RX-1"]).closedCount)
+
+        opsFinding = (ec.service.sync().name("${LEDGER}.record#CheckFindings").parameters([companyUserGroupId: GORJANA, checkId: "TREP_OPS",
+                reportDate: Date.valueOf("2026-10-08"), checkStamp: at("2026-10-08", "06:01:00"),
+                findings: [[statementCode: "D1", recordKey: "ORD-9", headline: "Order ORD-9 is not released"]]]).call().findingIds as List)[0]
+        noErrors()
 
         Map kfound = ec.service.sync().name("${LEDGER}.record#CheckFindings").parameters([companyUserGroupId: KREWE, checkId: "TREP_K",
                 reportDate: Date.valueOf("2026-10-08"), findings: [[statementCode: "R4", recordKey: "K-1", headline: "krewe finding"]]]).call()
@@ -152,9 +169,11 @@ class MonthCloseReportAssemblerSmokeTests {
         Map doc = report(GORJANA, "2026-10-08")
         assertSameShape(golden("golden-report.json"), doc, '$', null, templates(golden("golden-report.json")))
 
-        assertEquals("darpan.monthClose.report/v1", doc.schema)
-        assertEquals([tenant: [id: GORJANA, name: "Gorjana", timeZone: "America/Los_Angeles"], date: "2026-10-08",
-                      checkedDay: "2026-10-07", month: "2026-10", generatedAt: "2026-10-08T06:12:40-07:00"], doc.report)
+        assertEquals("darpan.audit.report/v1", doc.schema)
+        assertEquals([tenant: [id: GORJANA, name: "Gorjana", timeZone: "America/Los_Angeles"],
+                      audit: [id: "month-close", name: "Month close", period: "month"], date: "2026-10-08",
+                      checkedDay: "2026-10-07", period: "2026-10", generatedAt: "2026-10-08T06:12:40-07:00"], doc.report)
+        assertEquals("Month close audit for Gorjana. Each finding is one record that breaks one of the audit's statements R2 to R12.", doc.about)
         assertEquals(["orders", "refundsAndCredits", "returns", "exchangesAndWarranty"], (doc.categories as Map).keySet() as List)
         assertEquals("Refunds and credits", doc.categories.refundsAndCredits.label)
         assertEquals(["R4", "R5"], (doc.categories.refundsAndCredits.statements as Map).keySet() as List, "catalog order")
@@ -306,22 +325,44 @@ class MonthCloseReportAssemblerSmokeTests {
         assertEquals(["pending", "2026-10-09"], [s.state, s.pendingUntil])
     }
 
+    @Test
+    void twoAuditsOfOneTenantStayApart() {
+        Map month = report(GORJANA, MONTH_CLOSE, "2026-10-08")
+        assertFalse(JsonOutput.toJson(month).contains("D1"), "the month-close report names no daily-ops statement")
+        assertFalse(JsonOutput.toJson(month).contains(opsFinding), "nor its finding")
+        assertEquals(true, month.health.complete, "a daily-ops check that never ran does not touch month-close health")
+
+        Map ops = report(GORJANA, DAILY_OPS, "2026-10-08")
+        assertEquals([id: "daily-ops", name: "Daily ops", period: "day"], ops.report.audit)
+        assertEquals("2026-10-07", ops.report.period, "a daily audit reports its checked day")
+        Map d1 = ops.categories.orders.statements.D1
+        assertEquals([opsFinding], d1.findings*.id)
+        assertEquals("notRun", d1.status)
+        assertEquals([ran: 0, partial: 0, notRun: 1], ops.health.checks)
+        assertEquals(["D1"], (ops.categories as Map).values().collectMany { (it.statements as Map).keySet() as List })
+        assertEquals([id: "daily-ops", name: "Daily ops"], finding(GORJANA, opsFinding).finding.audit)
+    }
+
     // ---- tenant ---------------------------------------------------------------------------------------------------
 
     @Test
     void eachDocumentShowsOneTenantOnly() {
-        Map krewe = report(KREWE, "2026-10-08")
+        Map krewe = report(KREWE, "TREP_K_AUDIT", "2026-10-08")
         assertEquals(["R4"], (krewe.categories as Map).values().collectMany { (it.statements as Map).keySet() as List })
         assertEquals([kreweFinding], krewe.categories.refundsAndCredits.statements.R4.findings*.id)
         assertEquals("UTC", krewe.report.tenant.timeZone, "no tenant setting reads as UTC")
         assertFalse(JsonOutput.toJson(krewe).contains("M258615"))
 
-        ec.service.sync().name("${REPORTS}.assemble#MonthCloseFinding").parameters([companyUserGroupId: KREWE, findingId: m258615]).call()
+        ec.service.sync().name("${REPORTS}.assemble#AuditFinding").parameters([companyUserGroupId: KREWE, findingId: m258615]).call()
         assertTrue(ec.message.errorsString.contains("Finding ${m258615} was not found"), ec.message.errorsString)
         ec.message.clearErrors()
-        ec.service.sync().name("${REPORTS}.assemble#MonthCloseReport").parameters([companyUserGroupId: "NO_SUCH_TENANT",
-                reportDate: Date.valueOf("2026-10-08")]).call()
-        assertTrue(ec.message.errorsString.contains("Tenant NO_SUCH_TENANT was not found"), ec.message.errorsString)
+        ec.service.sync().name("${REPORTS}.assemble#AuditReport").parameters([companyUserGroupId: "NO_SUCH_TENANT",
+                auditId: MONTH_CLOSE, reportDate: Date.valueOf("2026-10-08")]).call()
+        assertTrue(ec.message.errorsString.contains("Audit ${MONTH_CLOSE} was not found for tenant NO_SUCH_TENANT"), ec.message.errorsString)
+        ec.message.clearErrors()
+        ec.service.sync().name("${REPORTS}.assemble#AuditReport").parameters([companyUserGroupId: KREWE,
+                auditId: MONTH_CLOSE, reportDate: Date.valueOf("2026-10-08")]).call()
+        assertTrue(ec.message.errorsString.contains("Audit ${MONTH_CLOSE} was not found for tenant KREWE"), "another tenant's audit reads as not found")
         ec.message.clearErrors()
     }
 
@@ -329,68 +370,68 @@ class MonthCloseReportAssemblerSmokeTests {
 
     @Test
     void aCheckRunTakesItsStatusFromItsReads() {
-        Map ran = checkRun(TRUN, "TREP_T", "2026-11-01", "06:00:00", [read("OMS", "MCSR_COMPLETE", 5, "06:00:00")])
-        assertEquals(["MCCS_RAN", null], [ran.checkStatusEnumId, ran.reason])
+        Map ran = checkRun(TRUN, "TREP_T", "2026-11-01", "06:00:00", [read("OMS", "AUDSR_COMPLETE", 5, "06:00:00")])
+        assertEquals(["AUDCS_RAN", null], [ran.checkStatusEnumId, ran.reason])
 
-        Map partial = checkRun(TRUN, "TREP_T", "2026-11-02", "06:00:00", [read("OMS_RETURNS_GQL", "MCSR_FAILED", null, null, "HTTP 504 after retries"),
-                read("SHOPIFY", "MCSR_PARTIAL", 10, "06:00:00", "past the 60-day window")])
-        assertEquals("MCCS_PARTIAL", partial.checkStatusEnumId)
+        Map partial = checkRun(TRUN, "TREP_T", "2026-11-02", "06:00:00", [read("OMS_RETURNS_GQL", "AUDSR_FAILED", null, null, "HTTP 504 after retries"),
+                read("SHOPIFY", "AUDSR_PARTIAL", 10, "06:00:00", "past the 60-day window")])
+        assertEquals("AUDCS_PARTIAL", partial.checkStatusEnumId)
         assertEquals("The OMS read failed: HTTP 504 after retries. The Shopify read was partial: past the 60-day window.", partial.reason)
-        List reads = ec.entity.find("darpan.monthclose.MonthCloseSourceRead").condition("checkRunId", partial.checkRunId)
+        List reads = ec.entity.find("darpan.audit.AuditSourceRead").condition("checkRunId", partial.checkRunId)
                 .orderBy("readSeqId").useCache(false).list()
         assertEquals([["OMS", "OMS_RETURNS_GQL"], ["SHOPIFY", "SHOPIFY"]], reads.collect { [it.systemEnumId, it.endpointEnumId] },
                 "root system and endpoint both kept")
 
-        assertEquals(["MCCS_NOT_RUN", "The check recorded no source read."],
+        assertEquals(["AUDCS_NOT_RUN", "The check recorded no source read."],
                 checkRun(TRUN, "TREP_T", "2026-11-03", "06:00:00", []).subMap(["checkStatusEnumId", "reason"]).values() as List)
         Map notRun = ec.service.sync().name("${LEDGER}.record#CheckRun").parameters([companyUserGroupId: TRUN, checkId: "TREP_T",
                 reportDate: Date.valueOf("2026-11-04"), notRunReason: "No saved run is configured for this check.",
-                sourceReads: [read("OMS", "MCSR_COMPLETE", 5, null)]]).call()
+                sourceReads: [read("OMS", "AUDSR_COMPLETE", 5, null)]]).call()
         noErrors()
-        assertEquals(["MCCS_NOT_RUN", "No saved run is configured for this check."], [notRun.checkStatusEnumId, notRun.reason])
+        assertEquals(["AUDCS_NOT_RUN", "No saved run is configured for this check."], [notRun.checkStatusEnumId, notRun.reason])
     }
 
     @Test
     void aSecondRunTheSameMorningReplacesTheFirst() {
-        Map first = checkRun(TRUN, "TREP_T", "2026-11-10", "06:00:00", [read("OMS", "MCSR_PARTIAL", 1, "06:00:00", "x"),
-                read("NETSUITE", "MCSR_COMPLETE", 2, "06:00:00")])
-        Map second = checkRun(TRUN, "TREP_T", "2026-11-10", "07:00:00", [read("OMS", "MCSR_COMPLETE", 3, "07:00:00")])
+        Map first = checkRun(TRUN, "TREP_T", "2026-11-10", "06:00:00", [read("OMS", "AUDSR_PARTIAL", 1, "06:00:00", "x"),
+                read("NETSUITE", "AUDSR_COMPLETE", 2, "06:00:00")])
+        Map second = checkRun(TRUN, "TREP_T", "2026-11-10", "07:00:00", [read("OMS", "AUDSR_COMPLETE", 3, "07:00:00")])
         assertEquals(first.checkRunId, second.checkRunId)
-        assertEquals(1L, ec.entity.find("darpan.monthclose.MonthCloseCheckRun").condition("checkId", "TREP_T")
+        assertEquals(1L, ec.entity.find("darpan.audit.AuditCheckRun").condition("checkId", "TREP_T")
                 .condition("reportDate", Date.valueOf("2026-11-10")).count())
-        assertEquals([3L], ec.entity.find("darpan.monthclose.MonthCloseSourceRead").condition("checkRunId", second.checkRunId)
+        assertEquals([3L], ec.entity.find("darpan.audit.AuditSourceRead").condition("checkRunId", second.checkRunId)
                 .useCache(false).list()*.recordCount.collect { it as Long })
-        assertEquals("MCCS_RAN", second.checkStatusEnumId)
+        assertEquals("AUDCS_RAN", second.checkStatusEnumId)
     }
 
     @Test
     void aBadReadOrAnotherTenantsCheckWritesNothing() {
         ec.service.sync().name("${LEDGER}.record#CheckRun").parameters([companyUserGroupId: TRUN, checkId: "TREP_T",
                 reportDate: Date.valueOf("2026-11-20"), sourceReads: [read("OMS", "COMPLETE", 1, "06:00:00")]]).call()
-        assertTrue(ec.message.errorsString.contains("is not a MonthCloseSourceRead status"), ec.message.errorsString)
+        assertTrue(ec.message.errorsString.contains("is not an AuditSourceRead status"), ec.message.errorsString)
         ec.message.clearErrors()
         ec.service.sync().name("${LEDGER}.record#CheckRun").parameters([companyUserGroupId: TRUN, checkId: "TREP_T",
-                reportDate: Date.valueOf("2026-11-20"), sourceReads: [read("NOT_A_SYSTEM", "MCSR_COMPLETE", 1, "06:00:00")]]).call()
+                reportDate: Date.valueOf("2026-11-20"), sourceReads: [read("NOT_A_SYSTEM", "AUDSR_COMPLETE", 1, "06:00:00")]]).call()
         assertTrue(ec.message.errorsString.contains("Unknown system NOT_A_SYSTEM"), ec.message.errorsString)
         ec.message.clearErrors()
         ec.service.sync().name("${LEDGER}.record#CheckRun").parameters([companyUserGroupId: TRUN, checkId: RET,
                 reportDate: Date.valueOf("2026-11-20"), sourceReads: []]).call()
         assertTrue(ec.message.errorsString.contains("does not belong to tenant TRUN"), ec.message.errorsString)
         ec.message.clearErrors()
-        assertEquals(0L, ec.entity.find("darpan.monthclose.MonthCloseCheckRun").condition("reportDate", Date.valueOf("2026-11-20")).count())
+        assertEquals(0L, ec.entity.find("darpan.audit.AuditCheckRun").condition("reportDate", Date.valueOf("2026-11-20")).count())
     }
 
     // ---- pure helpers ---------------------------------------------------------------------------------------------
 
     @Test
     void moneyAndTemplatesFollowTheConventions() {
-        assertEquals([amount: "-0.01", currency: "USD"], MonthCloseReportAssembler.money(new BigDecimal("-0.010000"), "USD"))
-        assertEquals([amount: "1500", currency: "JPY"], MonthCloseReportAssembler.money(new BigDecimal("1500.00"), "JPY"))
-        assertNull(MonthCloseReportAssembler.money(null, "USD"))
+        assertEquals([amount: "-0.01", currency: "USD"], AuditReportAssembler.money(new BigDecimal("-0.010000"), "USD"))
+        assertEquals([amount: "1500", currency: "JPY"], AuditReportAssembler.money(new BigDecimal("1500.00"), "JPY"))
+        assertNull(AuditReportAssembler.money(null, "USD"))
         assertEquals('Fix CM-1 by {unknown}; ${x} stays text',
-                MonthCloseReportAssembler.fillTemplate('Fix {creditMemo} by {unknown}; ${x} stays text', [creditMemo: "CM-1"]))
-        assertEquals("NetSuite", MonthCloseReportAssembler.systemKey("NETSUITE"))
-        assertEquals("AMAZON", MonthCloseReportAssembler.systemKey("AMAZON"), "an unmapped root keeps its enumId")
+                AuditReportAssembler.fillTemplate('Fix {creditMemo} by {unknown}; ${x} stays text', [creditMemo: "CM-1"]))
+        assertEquals("NetSuite", AuditReportAssembler.systemKey("NETSUITE"))
+        assertEquals("AMAZON", AuditReportAssembler.systemKey("AMAZON"), "an unmapped root keeps its enumId")
     }
 
     // -----------------------------------------------------------------------------------------------------------------
@@ -448,19 +489,23 @@ class MonthCloseReportAssemblerSmokeTests {
     }
 
     private static Object golden(String name) {
-        return new JsonSlurper().parse(MonthCloseReportAssemblerSmokeTests.class.getResource("/monthclose/${name}"))
+        return new JsonSlurper().parse(AuditReportAssemblerSmokeTests.class.getResource("/audit/${name}"))
     }
 
     /** The document as a consumer sees it: serialized to JSON and read back. */
     private Map report(String tenant, String day) {
-        Map out = ec.service.sync().name("${REPORTS}.assemble#MonthCloseReport").parameters([companyUserGroupId: tenant,
+        return report(tenant, MONTH_CLOSE, day)
+    }
+
+    private Map report(String tenant, String auditId, String day) {
+        Map out = ec.service.sync().name("${REPORTS}.assemble#AuditReport").parameters([companyUserGroupId: tenant, auditId: auditId,
                 reportDate: Date.valueOf(day), generatedStamp: at(day, "06:12:40")]).call()
         noErrors()
         return new JsonSlurper().parseText(JsonOutput.toJson(out.document)) as Map
     }
 
     private Map finding(String tenant, String findingId) {
-        Map out = ec.service.sync().name("${REPORTS}.assemble#MonthCloseFinding").parameters([companyUserGroupId: tenant, findingId: findingId]).call()
+        Map out = ec.service.sync().name("${REPORTS}.assemble#AuditFinding").parameters([companyUserGroupId: tenant, findingId: findingId]).call()
         noErrors()
         return new JsonSlurper().parseText(JsonOutput.toJson(out.document)) as Map
     }
@@ -500,13 +545,17 @@ class MonthCloseReportAssemblerSmokeTests {
         assertFalse(ec.message.hasError(), ec.message.errorsString)
     }
 
-    private void statement(String tenant, String id, String code, String category, String weight, int seq, String text) {
-        insert("darpan.monthclose.MonthCloseStatement", [statementId: id, companyUserGroupId: tenant, statementCode: code,
+    private void audit(String tenant, String id, String code, String name, String periodEnumId) {
+        insert("darpan.audit.Audit", [auditId: id, companyUserGroupId: tenant, auditCode: code, auditName: name, periodEnumId: periodEnumId])
+    }
+
+    private void statement(String tenant, String auditId, String id, String code, String category, String weight, int seq, String text) {
+        insert("darpan.audit.AuditStatement", [statementId: id, companyUserGroupId: tenant, auditId: auditId, statementCode: code,
                 categoryEnumId: category, weightEnumId: weight, sequenceNum: seq as Long, statementText: text])
     }
 
     private void link(String tenant, String checkId, String statementId, int seq) {
-        insert("darpan.monthclose.MonthCloseStatementCheck", [checkId: checkId, statementId: statementId, companyUserGroupId: tenant, sequenceNum: seq as Long])
+        insert("darpan.audit.AuditStatementCheck", [checkId: checkId, statementId: statementId, companyUserGroupId: tenant, sequenceNum: seq as Long])
     }
 
     private void insert(String entityName, Map<String, Object> fields) {

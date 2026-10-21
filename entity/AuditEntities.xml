@@ -1,33 +1,66 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  DAR-BE-088 / DAR-BE-089. The month-close statement catalog: what a tenant's accounting team needs to be true at
-  month end (statements), the checks that test them, and which check tests which statement. The JSON
-  contract these rows feed is docs/superpowers/specs/2026-10-21-month-close-json-contract.md in the
-  wrapper repo; the findings ledger (DAR-BE-089) hangs off MonthCloseStatement and MonthCloseCheck.
+  DAR-BE-088 / DAR-BE-089 / DAR-BE-090 / DAR-BE-103. The audit run: a kind of run, beside the Sync run and the
+  Lifecycle run, that re-checks a list of what a tenant needs to be true (statements) each period and keeps every
+  record that breaks one (a finding) open from run to run until a later run no longer reports it. gorjana's month
+  close is one Audit ("Month close", period month). The JSON contract these rows feed is
+  docs/superpowers/specs/2026-10-21-audit-run-json-contract.md in the wrapper repo.
 
-  All three entities are tenant-owned and NOT NULL on companyUserGroupId: a catalog row always belongs
-  to one tenant. Each is in the DARPAN_ACTIVE_COMPANY_SCOPE entity filter (SecuritySeedData.xml).
-  The JSON never shows statementId or checkId: it shows statementCode ("R4") and checkCode
-  ("returns-vs-credit-memos"), which are unique within a tenant only.
+  Every entity is tenant-owned and NOT NULL on companyUserGroupId, and each is in the
+  DARPAN_ACTIVE_COMPANY_SCOPE entity filter (SecuritySeedData.xml). The JSON never shows auditId, statementId or
+  checkId: it shows auditCode ("month-close"), statementCode ("R4", unique within its audit) and checkCode
+  ("returns-vs-credit-memos", unique within the tenant). A check is not owned by one audit: it may test
+  statements of several.
 -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
 
-    <entity entity-name="MonthCloseStatement" package="darpan.monthclose" use="configuration">
+    <entity entity-name="Audit" package="darpan.audit" use="configuration">
+        <description>One audit run a tenant has set up, e.g. gorjana's "Month close": its statements, checked each period.</description>
+        <field name="auditId" type="id" is-pk="true">
+            <description>Globally unique row id, e.g. GORJANA_MONTH_CLOSE. Never shown; the JSON uses auditCode.</description>
+        </field>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="auditCode" type="text-short" not-null="true">
+            <description>Kebab-case slug, e.g. month-close. The JSON audit id; unique per tenant.</description>
+        </field>
+        <field name="auditName" type="text-medium" not-null="true">
+            <description>The audit's display name, e.g. Month close.</description>
+        </field>
+        <field name="periodEnumId" type="id" not-null="true">
+            <description>AuditPeriod: the period a run's checked day is reported under (report.period), day, month or
+                quarter.</description>
+        </field>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUD_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <relationship type="one" title="Period" related="moqui.basic.Enumeration" fk-name="AUD_PERIOD">
+            <key-map field-name="periodEnumId" related="enumId"/>
+        </relationship>
+        <index name="AUD_TENANT_CODE" unique="true">
+            <index-field name="companyUserGroupId"/>
+            <index-field name="auditCode"/>
+        </index>
+    </entity>
+
+    <entity entity-name="AuditStatement" package="darpan.audit" use="configuration">
         <description>One thing a tenant needs to be true at month end, in the tenant's own words, e.g. gorjana's
             R4 "Every refund we give a customer is booked in NetSuite at the same amount...".</description>
         <field name="statementId" type="id" is-pk="true">
             <description>Globally unique row id, e.g. GORJANA_R4. Never shown; the JSON uses statementCode.</description>
         </field>
         <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="auditId" type="id" not-null="true">
+            <description>DAR-BE-103. The audit the statement belongs to.</description>
+        </field>
         <field name="statementCode" type="text-short" not-null="true">
-            <description>The tenant's label for the statement, e.g. R4. The JSON statement id; unique per tenant.</description>
+            <description>The tenant's label for the statement, e.g. R4. The JSON statement id; unique within its audit.</description>
         </field>
         <field name="categoryEnumId" type="id" not-null="true">
-            <description>Enumeration of type MonthCloseCategory; its enumCode is the JSON category id.</description>
+            <description>Enumeration of type AuditCategory; its enumCode is the JSON category id.</description>
         </field>
         <field name="weightEnumId" type="id" not-null="true">
-            <description>Enumeration of type MonthCloseStatementWeight: firm (the tenant said it) or derived
+            <description>Enumeration of type AuditStatementWeight: firm (the tenant said it) or derived
                 (inferred from production problems, awaiting the tenant's confirmation).</description>
         </field>
         <field name="statementText" type="text-intermediate" not-null="true">
@@ -36,22 +69,26 @@
         <field name="sequenceNum" type="number-integer">
             <description>Order of statements in the report.</description>
         </field>
-        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="MCSTMT_COMPANY_GRP">
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUDSTMT_COMPANY_GRP">
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>
-        <relationship type="one" title="Category" related="moqui.basic.Enumeration" fk-name="MCSTMT_CATEGORY">
+        <relationship type="one" related="darpan.audit.Audit" fk-name="AUDSTMT_AUDIT">
+            <key-map field-name="auditId"/>
+        </relationship>
+        <relationship type="one" title="Category" related="moqui.basic.Enumeration" fk-name="AUDSTMT_CATEGORY">
             <key-map field-name="categoryEnumId" related="enumId"/>
         </relationship>
-        <relationship type="one" title="Weight" related="moqui.basic.Enumeration" fk-name="MCSTMT_WEIGHT">
+        <relationship type="one" title="Weight" related="moqui.basic.Enumeration" fk-name="AUDSTMT_WEIGHT">
             <key-map field-name="weightEnumId" related="enumId"/>
         </relationship>
-        <index name="MCSTMT_TENANT_CODE" unique="true">
+        <index name="AUDSTMT_AUDIT_CODE" unique="true">
             <index-field name="companyUserGroupId"/>
+            <index-field name="auditId"/>
             <index-field name="statementCode"/>
         </index>
     </entity>
 
-    <entity entity-name="MonthCloseCheck" package="darpan.monthclose" use="configuration">
+    <entity entity-name="AuditCheck" package="darpan.audit" use="configuration">
         <description>One check that tests one or more statements, usually a saved run on a daily schedule. Its
             findings land on the ledger (DAR-BE-089) under this check. The three templates are plain text with
             {name} placeholders, replaced literally from the finding's fields; they are NEVER expanded as Groovy
@@ -93,22 +130,22 @@
         <field name="passesWhenTemplate" type="text-intermediate">
             <description>What the next scheduled check must see for the finding to close.</description>
         </field>
-        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="MCCHK_COMPANY_GRP">
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUDCHK_COMPANY_GRP">
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>
-        <relationship type="one" title="Saved" related="darpan.rule.RuleSet" fk-name="MCCHK_RULE_SET">
+        <relationship type="one" title="Saved" related="darpan.rule.RuleSet" fk-name="AUDCHK_RULE_SET">
             <key-map field-name="savedRunId" related="ruleSetId"/>
         </relationship>
-        <relationship type="one" title="FixWhere" related="moqui.basic.Enumeration" fk-name="MCCHK_FIX_WHERE">
+        <relationship type="one" title="FixWhere" related="moqui.basic.Enumeration" fk-name="AUDCHK_FIX_WHERE">
             <key-map field-name="fixWhereEnumId" related="enumId"/>
         </relationship>
-        <index name="MCCHK_TENANT_CODE" unique="true">
+        <index name="AUDCHK_TENANT_CODE" unique="true">
             <index-field name="companyUserGroupId"/>
             <index-field name="checkCode"/>
         </index>
     </entity>
 
-    <entity entity-name="MonthCloseStatementCheck" package="darpan.monthclose" use="configuration">
+    <entity entity-name="AuditStatementCheck" package="darpan.audit" use="configuration">
         <description>Which check tests which statement. Many-to-many: one comparison serves several statements
             (returns against credit memos covers R4, R6, R7, R8, R9, R14 and R16), and one statement can need two
             checks (R1: invoiced orders and cash sales). Stamped with the tenant like both parents, so the
@@ -119,22 +156,22 @@
         <field name="sequenceNum" type="number-integer">
             <description>Order of a statement's checks in the report.</description>
         </field>
-        <relationship type="one" related="darpan.monthclose.MonthCloseStatement" fk-name="MCSC_STATEMENT">
+        <relationship type="one" related="darpan.audit.AuditStatement" fk-name="AUDSC_STATEMENT">
             <key-map field-name="statementId"/>
         </relationship>
-        <relationship type="one" related="darpan.monthclose.MonthCloseCheck" fk-name="MCSC_CHECK">
+        <relationship type="one" related="darpan.audit.AuditCheck" fk-name="AUDSC_CHECK">
             <key-map field-name="checkId"/>
         </relationship>
-        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="MCSC_COMPANY_GRP">
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUDSC_COMPANY_GRP">
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>
-        <index name="MCSC_TENANT"><index-field name="companyUserGroupId"/></index>
+        <index name="AUDSC_TENANT"><index-field name="companyUserGroupId"/></index>
     </entity>
     <!-- DAR-BE-089. The findings ledger: one row per record that breaks one statement, kept across mornings
          so a finding has a first-found day, a still-open count and a fixed day. Written only by the scheduled
          checks (record#CheckFindings, close#ResolvedFindings); the external API reads it and never writes. The
          four children carry the tenant like their parent so the filter applies to each directly. -->
-    <entity entity-name="MonthCloseFinding" package="darpan.monthclose" use="transactional" sequence-primary-prefix="F-">
+    <entity entity-name="AuditFinding" package="darpan.audit" use="transactional" sequence-primary-prefix="F-">
         <description>One record that breaks one statement, as found by one check. Identity is (tenant, check, statement,
             recordKey): the same record found again on a later morning is the same finding, and one record that breaks two
             statements of one check is two findings.</description>
@@ -148,7 +185,7 @@
             <description>The check's key for the record, e.g. the OMS return id; stable across mornings.</description>
         </field>
         <field name="stateEnumId" type="id" not-null="true">
-            <description>MonthCloseFindingState: MCFS_PENDING inside the check's grace age, MCFS_OPEN after it, MCFS_FIXED
+            <description>AuditFindingState: AUDFS_PENDING inside the check's grace age, AUDFS_OPEN after it, AUDFS_FIXED
                 once a complete check looked at the record and no longer reported it.</description>
         </field>
         <field name="headline" type="text-intermediate" not-null="true"/>
@@ -166,7 +203,7 @@
         </field>
         <field name="closedStamp" type="date-time"/>
         <field name="closedByTypeEnumId" type="id">
-            <description>MonthCloseActorType of what closed it; in v1 always MCAT_CHECK.</description>
+            <description>AuditActorType of what closed it; in v1 always AUDAT_CHECK.</description>
         </field>
         <field name="closedById" type="id">
             <description>The check (checkId) that closed it.</description>
@@ -189,46 +226,46 @@
             <description>DAR-BE-090. One sentence on what the conclusion means for this record; the finding JSON's
                 diagnosis.explanation. Blank falls back to the conclusion's description.</description>
         </field>
-        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="MCF_COMPANY_GRP">
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUDF_COMPANY_GRP">
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>
-        <relationship type="one" related="darpan.monthclose.MonthCloseStatement" fk-name="MCF_STATEMENT">
+        <relationship type="one" related="darpan.audit.AuditStatement" fk-name="AUDF_STATEMENT">
             <key-map field-name="statementId"/>
         </relationship>
-        <relationship type="one" related="darpan.monthclose.MonthCloseCheck" fk-name="MCF_CHECK">
+        <relationship type="one" related="darpan.audit.AuditCheck" fk-name="AUDF_CHECK">
             <key-map field-name="checkId"/>
         </relationship>
-        <relationship type="one" title="State" related="moqui.basic.Enumeration" fk-name="MCF_STATE">
+        <relationship type="one" title="State" related="moqui.basic.Enumeration" fk-name="AUDF_STATE">
             <key-map field-name="stateEnumId" related="enumId"/>
         </relationship>
-        <relationship type="one" title="ClosedByType" related="moqui.basic.Enumeration" fk-name="MCF_CLOSED_BY_TYPE">
+        <relationship type="one" title="ClosedByType" related="moqui.basic.Enumeration" fk-name="AUDF_CLOSED_BY_TYPE">
             <key-map field-name="closedByTypeEnumId" related="enumId"/>
         </relationship>
-        <relationship type="one" title="Conclusion" related="moqui.basic.Enumeration" fk-name="MCF_CONCLUSION">
+        <relationship type="one" title="Conclusion" related="moqui.basic.Enumeration" fk-name="AUDF_CONCLUSION">
             <key-map field-name="conclusionEnumId" related="enumId"/>
         </relationship>
-        <relationship type="many" related="darpan.monthclose.MonthCloseFindingRecord" short-alias="records">
+        <relationship type="many" related="darpan.audit.AuditFindingRecord" short-alias="records">
             <key-map field-name="findingId"/>
         </relationship>
-        <relationship type="many" related="darpan.monthclose.MonthCloseFindingCheck" short-alias="checks">
+        <relationship type="many" related="darpan.audit.AuditFindingCondition" short-alias="checks">
             <key-map field-name="findingId"/>
         </relationship>
-        <relationship type="many" related="darpan.monthclose.MonthCloseFindingEvent" short-alias="events">
+        <relationship type="many" related="darpan.audit.AuditFindingEvent" short-alias="events">
             <key-map field-name="findingId"/>
         </relationship>
-        <index name="MCF_TENANT_KEY" unique="true">
+        <index name="AUDF_TENANT_KEY" unique="true">
             <index-field name="companyUserGroupId"/>
             <index-field name="checkId"/>
             <index-field name="statementId"/>
             <index-field name="recordKey"/>
         </index>
-        <index name="MCF_TENANT_STATE">
+        <index name="AUDF_TENANT_STATE">
             <index-field name="companyUserGroupId"/>
             <index-field name="stateEnumId"/>
         </index>
     </entity>
 
-    <entity entity-name="MonthCloseFindingRecord" package="darpan.monthclose" use="transactional">
+    <entity entity-name="AuditFindingRecord" package="darpan.audit" use="transactional">
         <description>One id of the finding in one system. Replaced on every sighting, so it always shows what the latest
             check read.</description>
         <field name="findingId" type="id" is-pk="true"/>
@@ -250,19 +287,19 @@
         <field name="recordStatus" type="text-medium">
             <description>The record's status in its own system's words, when the check read it.</description>
         </field>
-        <relationship type="one" related="darpan.monthclose.MonthCloseFinding" fk-name="MCFR_FINDING">
+        <relationship type="one" related="darpan.audit.AuditFinding" fk-name="AUDFR_FINDING">
             <key-map field-name="findingId"/>
         </relationship>
-        <relationship type="one" title="System" related="moqui.basic.Enumeration" fk-name="MCFR_SYSTEM">
+        <relationship type="one" title="System" related="moqui.basic.Enumeration" fk-name="AUDFR_SYSTEM">
             <key-map field-name="systemEnumId" related="enumId"/>
         </relationship>
-        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="MCFR_COMPANY_GRP">
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUDFR_COMPANY_GRP">
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>
-        <index name="MCFR_TENANT"><index-field name="companyUserGroupId"/></index>
+        <index name="AUDFR_TENANT"><index-field name="companyUserGroupId"/></index>
     </entity>
 
-    <entity entity-name="MonthCloseFindingCheck" package="darpan.monthclose" use="transactional">
+    <entity entity-name="AuditFindingCondition" package="darpan.audit" use="transactional">
         <description>One sub-condition of the finding's evidence, in order. Replaced on every sighting.</description>
         <field name="findingId" type="id" is-pk="true"/>
         <field name="sequenceNum" type="number-integer" is-pk="true"/>
@@ -272,16 +309,16 @@
         <field name="checkValue" type="text-medium">
             <description>What was seen, e.g. "160.22 vs 160.23".</description>
         </field>
-        <relationship type="one" related="darpan.monthclose.MonthCloseFinding" fk-name="MCFC_FINDING">
+        <relationship type="one" related="darpan.audit.AuditFinding" fk-name="AUDFC_FINDING">
             <key-map field-name="findingId"/>
         </relationship>
-        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="MCFC_COMPANY_GRP">
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUDFC_COMPANY_GRP">
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>
-        <index name="MCFC_TENANT"><index-field name="companyUserGroupId"/></index>
+        <index name="AUDFC_TENANT"><index-field name="companyUserGroupId"/></index>
     </entity>
 
-    <entity entity-name="MonthCloseFindingEvent" package="darpan.monthclose" use="transactional">
+    <entity entity-name="AuditFindingEvent" package="darpan.audit" use="transactional">
         <description>One row of a finding's history: found, stillOpen, fixed or reopened. Append-only.</description>
         <field name="findingId" type="id" is-pk="true"/>
         <field name="eventSeqId" type="id" is-pk="true"/>
@@ -294,19 +331,19 @@
         <field name="eventTypeEnumId" type="id" not-null="true"/>
         <field name="byTypeEnumId" type="id" not-null="true"/>
         <field name="byId" type="id"/>
-        <relationship type="one" related="darpan.monthclose.MonthCloseFinding" fk-name="MCFE_FINDING">
+        <relationship type="one" related="darpan.audit.AuditFinding" fk-name="AUDFE_FINDING">
             <key-map field-name="findingId"/>
         </relationship>
-        <relationship type="one" title="EventType" related="moqui.basic.Enumeration" fk-name="MCFE_EVENT_TYPE">
+        <relationship type="one" title="EventType" related="moqui.basic.Enumeration" fk-name="AUDFE_EVENT_TYPE">
             <key-map field-name="eventTypeEnumId" related="enumId"/>
         </relationship>
-        <relationship type="one" title="ByType" related="moqui.basic.Enumeration" fk-name="MCFE_BY_TYPE">
+        <relationship type="one" title="ByType" related="moqui.basic.Enumeration" fk-name="AUDFE_BY_TYPE">
             <key-map field-name="byTypeEnumId" related="enumId"/>
         </relationship>
-        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="MCFE_COMPANY_GRP">
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUDFE_COMPANY_GRP">
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>
-        <index name="MCFE_TENANT"><index-field name="companyUserGroupId"/></index>
+        <index name="AUDFE_TENANT"><index-field name="companyUserGroupId"/></index>
     </entity>
 
     <!-- DAR-BE-090. Check health: one row per check per morning, and one row per source read under it, so the
@@ -314,7 +351,7 @@
          when the run is recorded (record#CheckRun) and is what close#ResolvedFindings is given. "compared" counts
          and the statements a bad read affects are not stored: they come from the reads' recordCount and the
          statement-to-check join. -->
-    <entity entity-name="MonthCloseCheckRun" package="darpan.monthclose" use="transactional">
+    <entity entity-name="AuditCheckRun" package="darpan.audit" use="transactional">
         <description>One check on one morning. A second run the same morning replaces the first (unique on tenant,
             check and reportDate), so the report always shows the latest run.</description>
         <field name="checkRunId" type="id" is-pk="true"/>
@@ -327,8 +364,8 @@
             <description>The tenant calendar day the check's window covered, normally the day before reportDate.</description>
         </field>
         <field name="statusEnumId" type="id" not-null="true">
-            <description>MonthCloseCheckStatus derived from the reads: MCCS_RAN when every read was complete,
-                MCCS_PARTIAL when any was partial or failed, MCCS_NOT_RUN when the check did not run.</description>
+            <description>AuditCheckStatus derived from the reads: AUDCS_RAN when every read was complete,
+                AUDCS_PARTIAL when any was partial or failed, AUDCS_NOT_RUN when the check did not run.</description>
         </field>
         <field name="reason" type="text-intermediate">
             <description>Why the check was partial or did not run, in plain words; blank when it ran.</description>
@@ -336,26 +373,26 @@
         <field name="runStamp" type="date-time" not-null="true">
             <description>When the run was recorded.</description>
         </field>
-        <relationship type="one" related="darpan.monthclose.MonthCloseCheck" fk-name="MCCR_CHECK">
+        <relationship type="one" related="darpan.audit.AuditCheck" fk-name="AUDCR_CHECK">
             <key-map field-name="checkId"/>
         </relationship>
-        <relationship type="one" title="Status" related="moqui.basic.Enumeration" fk-name="MCCR_STATUS">
+        <relationship type="one" title="Status" related="moqui.basic.Enumeration" fk-name="AUDCR_STATUS">
             <key-map field-name="statusEnumId" related="enumId"/>
         </relationship>
-        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="MCCR_COMPANY_GRP">
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUDCR_COMPANY_GRP">
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>
-        <relationship type="many" related="darpan.monthclose.MonthCloseSourceRead" short-alias="sourceReads">
+        <relationship type="many" related="darpan.audit.AuditSourceRead" short-alias="sourceReads">
             <key-map field-name="checkRunId"/>
         </relationship>
-        <index name="MCCR_TENANT_DAY" unique="true">
+        <index name="AUDCR_TENANT_DAY" unique="true">
             <index-field name="companyUserGroupId"/>
             <index-field name="checkId"/>
             <index-field name="reportDate"/>
         </index>
     </entity>
 
-    <entity entity-name="MonthCloseSourceRead" package="darpan.monthclose" use="transactional">
+    <entity entity-name="AuditSourceRead" package="darpan.audit" use="transactional">
         <description>One extract a check run made from one system, and how it ended.</description>
         <field name="checkRunId" type="id" is-pk="true"/>
         <field name="readSeqId" type="id" is-pk="true"/>
@@ -367,7 +404,7 @@
             <description>The endpoint that read it, e.g. OMS_RETURNS_GQL, as given by the run.</description>
         </field>
         <field name="statusEnumId" type="id" not-null="true">
-            <description>MonthCloseSourceRead: MCSR_COMPLETE, MCSR_PARTIAL or MCSR_FAILED.</description>
+            <description>AuditSourceRead: AUDSR_COMPLETE, AUDSR_PARTIAL or AUDSR_FAILED.</description>
         </field>
         <field name="recordCount" type="number-integer">
             <description>Records read; blank when the read failed before counting.</description>
@@ -378,18 +415,18 @@
         <field name="reason" type="text-intermediate">
             <description>Why the read was partial or failed, in plain words; blank when complete.</description>
         </field>
-        <relationship type="one" related="darpan.monthclose.MonthCloseCheckRun" fk-name="MCSRD_CHECK_RUN">
+        <relationship type="one" related="darpan.audit.AuditCheckRun" fk-name="AUDSRD_CHECK_RUN">
             <key-map field-name="checkRunId"/>
         </relationship>
-        <relationship type="one" title="System" related="moqui.basic.Enumeration" fk-name="MCSRD_SYSTEM">
+        <relationship type="one" title="System" related="moqui.basic.Enumeration" fk-name="AUDSRD_SYSTEM">
             <key-map field-name="systemEnumId" related="enumId"/>
         </relationship>
-        <relationship type="one" title="Status" related="moqui.basic.Enumeration" fk-name="MCSRD_STATUS">
+        <relationship type="one" title="Status" related="moqui.basic.Enumeration" fk-name="AUDSRD_STATUS">
             <key-map field-name="statusEnumId" related="enumId"/>
         </relationship>
-        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="MCSRD_COMPANY_GRP">
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUDSRD_COMPANY_GRP">
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>
-        <index name="MCSRD_TENANT"><index-field name="companyUserGroupId"/></index>
+        <index name="AUDSRD_TENANT"><index-field name="companyUserGroupId"/></index>
     </entity>
 </entities>

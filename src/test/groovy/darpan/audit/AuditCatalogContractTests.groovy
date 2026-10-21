@@ -1,4 +1,4 @@
-package darpan.monthclose
+package darpan.audit
 
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.xml.XmlParser
@@ -10,25 +10,26 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
- * DAR-BE-088 — the month-close vocabulary and gorjana's statement catalog, at parse level (no Moqui boot).
+ * DAR-BE-088 — the audit-run vocabulary and gorjana's statement catalog, at parse level (no Moqui boot).
  *
- * <p>The enum codes are the values the month-close JSON emits, so they are pinned here exactly as the v1
- * contract lists them (docs/superpowers/specs/2026-10-21-month-close-json-contract.md, "Enums", in the
+ * <p>The enum codes are the values the audit-run JSON emits, so they are pinned here exactly as the v1
+ * contract lists them (docs/superpowers/specs/2026-10-21-audit-run-json-contract.md, "Enums", in the
  * wrapper repo). Within v1 a code may be added, never renamed or removed: a rename fails this test on
  * purpose. That the catalog's rows are hidden from another tenant is proven at runtime by
  * {@link darpan.security.TenantOwnedEntityFilterRuntimeTests}.</p>
  */
-class MonthCloseCatalogContractTests {
+class AuditCatalogContractTests {
 
     /** enumTypeId -> JSON codes in sequence order. */
     static final Map<String, List<String>> CODES = [
-            MonthCloseCategory       : ["orders", "refundsAndCredits", "returns", "exchangesAndWarranty"],
-            MonthCloseStatementWeight: ["firm", "derived"],
-            MonthCloseFindingState   : ["open", "pending", "fixed"],
-            MonthCloseCheckStatus    : ["ran", "partial", "notRun"],
-            MonthCloseSourceRead     : ["complete", "partial", "failed"],
-            MonthCloseFindingEvent   : ["found", "stillOpen", "fixed", "reopened"],
-            MonthCloseActorType      : ["check", "user"],
+            AuditCategory       : ["orders", "refundsAndCredits", "returns", "exchangesAndWarranty"],
+            AuditStatementWeight: ["firm", "derived"],
+            AuditFindingState   : ["open", "pending", "fixed"],
+            AuditCheckStatus    : ["ran", "partial", "notRun"],
+            AuditSourceRead     : ["complete", "partial", "failed"],
+            AuditFindingEvent   : ["found", "stillOpen", "fixed", "reopened"],
+            AuditActorType      : ["check", "user"],
+            AuditPeriod         : ["day", "month", "quarter"],
     ].asImmutable()
 
     /** #483 open point 6: every statement not listed there as derived is firm. */
@@ -36,10 +37,10 @@ class MonthCloseCatalogContractTests {
 
     /** #483 "What Gorjana Accounting needs": statement numbers under each heading. */
     static final Map<String, List<Integer>> GORJANA_CATEGORIES = [
-            MCC_ORDERS            : [1, 2, 3],
-            MCC_REFUNDS_CREDITS   : [4, 5, 6, 7],
-            MCC_RETURNS           : [8, 9, 10, 11],
-            MCC_EXCHANGES_WARRANTY: [12, 13, 14, 15, 16, 17],
+            AUDC_ORDERS            : [1, 2, 3],
+            AUDC_REFUNDS_CREDITS   : [4, 5, 6, 7],
+            AUDC_RETURNS           : [8, 9, 10, 11],
+            AUDC_EXCHANGES_WARRANTY: [12, 13, 14, 15, 16, 17],
     ].asImmutable()
 
     private static Path dataDir() {
@@ -53,8 +54,8 @@ class MonthCloseCatalogContractTests {
 
     @Test
     void everyEnumCarriesExactlyTheContractCodesInOrder() {
-        List<Node> enums = rows("MonthCloseSeedData.xml", "moqui.basic.Enumeration")
-        Set<String> types = rows("MonthCloseSeedData.xml", "moqui.basic.EnumerationType")
+        List<Node> enums = rows("AuditSeedData.xml", "moqui.basic.Enumeration")
+        Set<String> types = rows("AuditSeedData.xml", "moqui.basic.EnumerationType")
                 .collect { it.attribute("enumTypeId") as String } as Set<String>
         assertEquals(CODES.keySet(), types, "enum types")
         CODES.each { String type, List<String> codes ->
@@ -69,7 +70,7 @@ class MonthCloseCatalogContractTests {
     void theUpgradePackRestatesTheVocabularyVerbatim() {
         // An existing database only gets darpan-seed rows through the upgrade pack.
         ["moqui.basic.EnumerationType", "moqui.basic.Enumeration"].each { String element ->
-            List<Map> seed = rows("MonthCloseSeedData.xml", element)*.attributes()
+            List<Map> seed = rows("AuditSeedData.xml", element)*.attributes()
             List<Map> pack = rows("upgrade-data.xml", element)*.attributes()
             seed.each { Map row -> assertTrue(pack.contains(row), "upgrade-data.xml is missing ${element} ${row}") }
         }
@@ -85,17 +86,21 @@ class MonthCloseCatalogContractTests {
 
     @Test
     void gorjanasCatalogIsSeventeenStatementsInFourCategories() {
-        List<Node> statements = rows("GorjanaMonthCloseCatalogData.xml", "darpan.monthclose.MonthCloseStatement")
+        List<Map> audits = rows("GorjanaMonthCloseCatalogData.xml", "darpan.audit.Audit")*.attributes()
+        assertEquals([[auditId: "GORJANA_MONTH_CLOSE", companyUserGroupId: "GORJANA", auditCode: "month-close",
+                       auditName: "Month close", periodEnumId: "AUDP_MONTH"]], audits, "gorjana's month close is one audit")
+        List<Node> statements = rows("GorjanaMonthCloseCatalogData.xml", "darpan.audit.AuditStatement")
         assertEquals((1..17).collect { "R${it}".toString() }, statements*.attribute("statementCode"), "R1-R17 in file order")
         statements.each { Node row ->
             String code = row.attribute("statementCode")
             int n = code.substring(1).toInteger()
             assertEquals("GORJANA", row.attribute("companyUserGroupId"), "${code} tenant")
+            assertEquals("GORJANA_MONTH_CLOSE", row.attribute("auditId"), "${code} audit")
             assertEquals("GORJANA_${code}".toString(), row.attribute("statementId"), "${code} id")
             assertEquals(n, (row.attribute("sequenceNum") as String).toInteger(), "${code} sequence")
             String category = GORJANA_CATEGORIES.find { it.value.contains(n) }?.key
             assertEquals(category, row.attribute("categoryEnumId"), "${code} category")
-            assertEquals(GORJANA_FIRM.contains(code) ? "MCSW_FIRM" : "MCSW_DERIVED", row.attribute("weightEnumId"), "${code} weight")
+            assertEquals(GORJANA_FIRM.contains(code) ? "AUDSW_FIRM" : "AUDSW_DERIVED", row.attribute("weightEnumId"), "${code} weight")
             assertTrue((row.attribute("statementText") as String)?.trim()?.length() > 20, "${code} needs its text")
         }
     }
@@ -105,6 +110,7 @@ class MonthCloseCatalogContractTests {
         // An upgrade pack loads on every instance, sm-darpan included; gorjana's statements must not.
         String text = dataDir().resolve("GorjanaMonthCloseCatalogData.xml").toFile().text
         assertTrue(text.contains('<entity-facade-xml type="darpan-tenant-config">'), "catalog file type")
-        assertEquals([], rows("upgrade-data.xml", "darpan.monthclose.MonthCloseStatement"), "no catalog rows in upgrade-data.xml")
+        assertEquals([], rows("upgrade-data.xml", "darpan.audit.AuditStatement"), "no catalog rows in upgrade-data.xml")
+        assertEquals([], rows("upgrade-data.xml", "darpan.audit.Audit"), "no audit rows in upgrade-data.xml")
     }
 }

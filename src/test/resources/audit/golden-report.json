@@ -1,11 +1,12 @@
 {
-  "schema": "darpan.monthClose.report/v1",
-  "about": "Daily month-close checks for Gorjana. Each finding is one record that breaks one of Gorjana Accounting's statements R1 to R17.",
+  "schema": "darpan.audit.report/v1",
+  "about": "Month close audit for Gorjana. Each finding is one record that breaks one of the audit's statements R1 to R17.",
   "report": {
     "tenant": { "id": "GORJANA", "name": "Gorjana", "timeZone": "America/Los_Angeles" },
+    "audit": { "id": "month-close", "name": "Month close", "period": "month" },
     "date": "2026-10-08",
     "checkedDay": "2026-10-07",
-    "month": "2026-10",
+    "period": "2026-10",
     "generatedAt": "2026-10-08T06:12:40-07:00"
   },
   "health": {

@@ -44,7 +44,7 @@
             <parameter name="refreshedCount" type="Integer"/>
         </out-parameters>
         <actions>
-            <service-call name="monthclose.MonthCloseLedgerServices.get#TenantCheck" in-map="[companyUserGroupId:companyUserGroupId, checkId:checkId]" out-map="tenantCheck"/>
+            <service-call name="audit.AuditLedgerServices.get#TenantCheck" in-map="[companyUserGroupId:companyUserGroupId, checkId:checkId]" out-map="tenantCheck"/>
             <if condition="ec.message.hasError()"><return/></if>
             <set field="graceDays" from="(tenantCheck.check.graceDays ?: 0) as int"/>
             <set field="statementIdByCode" from="tenantCheck.statementIdByCode"/>
@@ -74,7 +74,7 @@
             <set field="refreshedCount" from="0" type="Integer"/>
             <iterate list="findings" entry="f">
                 <set field="statementId" from="statementIdByCode[f.statementCode]"/>
-                <entity-find entity-name="darpan.monthclose.MonthCloseFinding" list="existingList" for-update="true">
+                <entity-find entity-name="darpan.audit.AuditFinding" list="existingList" for-update="true">
                     <econdition field-name="companyUserGroupId"/>
                     <econdition field-name="checkId"/>
                     <econdition field-name="statementId"/>
@@ -83,8 +83,8 @@
                 <set field="eventTypeEnumId" from="null"/>
                 <if condition="existingList">
                     <set field="finding" from="existingList[0]"/>
-                    <if condition="finding.stateEnumId == 'MCFS_FIXED'">
-                        <set field="eventTypeEnumId" value="MCFE_REOPENED"/>
+                    <if condition="finding.stateEnumId == 'AUDFS_FIXED'">
+                        <set field="eventTypeEnumId" value="AUDFE_REOPENED"/>
                         <set field="reopenedCount" from="reopenedCount + 1"/>
                         <set field="finding.timesSeen" from="(finding.timesSeen ?: 0) + 1"/>
                         <set field="finding.lastSeenDate" from="reportDate"/>
@@ -92,7 +92,7 @@
                         <set field="finding.closedByTypeEnumId" from="null"/>
                         <set field="finding.closedById" from="null"/>
                         <else-if condition="finding.lastSeenDate &lt; reportDate">
-                            <set field="eventTypeEnumId" value="MCFE_STILL_OPEN"/>
+                            <set field="eventTypeEnumId" value="AUDFE_STILL_OPEN"/>
                             <set field="stillOpenCount" from="stillOpenCount + 1"/>
                             <set field="finding.timesSeen" from="(finding.timesSeen ?: 0) + 1"/>
                             <set field="finding.lastSeenDate" from="reportDate"/>
@@ -100,7 +100,7 @@
                         <else><set field="refreshedCount" from="refreshedCount + 1"/></else>
                     </if>
                     <else>
-                        <entity-make-value value-field="finding" entity-name="darpan.monthclose.MonthCloseFinding"/>
+                        <entity-make-value value-field="finding" entity-name="darpan.audit.AuditFinding"/>
                         <entity-sequenced-id-primary value-field="finding"/>
                         <set field="finding.companyUserGroupId" from="companyUserGroupId"/>
                         <set field="finding.checkId" from="checkId"/>
@@ -109,14 +109,14 @@
                         <set field="finding.firstFoundDate" from="reportDate"/>
                         <set field="finding.lastSeenDate" from="reportDate"/>
                         <set field="finding.timesSeen" from="1"/>
-                        <set field="eventTypeEnumId" value="MCFE_FOUND"/>
+                        <set field="eventTypeEnumId" value="AUDFE_FOUND"/>
                         <set field="foundCount" from="foundCount + 1"/>
                     </else>
                 </if>
 
                 <!-- Grace age: days from first found to this morning, against the check's graceDays. -->
                 <set field="ageDays" from="reportDate.toLocalDate().toEpochDay() - finding.firstFoundDate.toLocalDate().toEpochDay()"/>
-                <set field="finding.stateEnumId" from="ageDays &lt; graceDays ? 'MCFS_PENDING' : 'MCFS_OPEN'"/>
+                <set field="finding.stateEnumId" from="ageDays &lt; graceDays ? 'AUDFS_PENDING' : 'AUDFS_OPEN'"/>
                 <set field="finding.headline" from="f.headline"/>
                 <set field="finding.ruleText" from="f.ruleText"/>
                 <set field="finding.expectedAmount" from="f.expectedAmount != null ? new BigDecimal(f.expectedAmount.toString()) : null"/>
@@ -131,10 +131,10 @@
                 <entity-create value-field="finding" or-update="true"/>
 
                 <!-- The latest read replaces the last one's records and evidence checks. -->
-                <entity-delete-by-condition entity-name="darpan.monthclose.MonthCloseFindingRecord">
+                <entity-delete-by-condition entity-name="darpan.audit.AuditFindingRecord">
                     <econdition field-name="findingId" from="finding.findingId"/>
                     <econdition field-name="companyUserGroupId"/></entity-delete-by-condition>
-                <entity-delete-by-condition entity-name="darpan.monthclose.MonthCloseFindingCheck">
+                <entity-delete-by-condition entity-name="darpan.audit.AuditFindingCondition">
                     <econdition field-name="findingId" from="finding.findingId"/>
                     <econdition field-name="companyUserGroupId"/></entity-delete-by-condition>
                 <set field="recordSeq" from="0"/>
@@ -143,7 +143,7 @@
                     <set field="recordSeq" from="recordSeq + 1"/>
                     <entity-find-one entity-name="moqui.basic.Enumeration" value-field="systemEnum" cache="true">
                         <field-map field-name="enumId" from="r.systemEnumId"/></entity-find-one>
-                    <entity-make-value value-field="findingRecord" entity-name="darpan.monthclose.MonthCloseFindingRecord"
+                    <entity-make-value value-field="findingRecord" entity-name="darpan.audit.AuditFindingRecord"
                             map="[findingId:finding.findingId, recordSeqId:String.format('%02d', recordSeq),
                                   companyUserGroupId:companyUserGroupId, systemEnumId:(systemEnum.parentEnumId ?: systemEnum.enumId),
                                   recordType:r.recordType, recordId:r.recordId?.toString(), internalId:r.internalId?.toString(),
@@ -154,14 +154,14 @@
                 <set field="fChecks" from="f.checks ?: []"/>
                 <iterate list="fChecks" entry="c">
                     <set field="checkSeq" from="checkSeq + 1"/>
-                    <entity-make-value value-field="findingCheck" entity-name="darpan.monthclose.MonthCloseFindingCheck"
+                    <entity-make-value value-field="findingCheck" entity-name="darpan.audit.AuditFindingCondition"
                             map="[findingId:finding.findingId, sequenceNum:checkSeq, companyUserGroupId:companyUserGroupId,
                                   label:c.label, passed:(c.passed ? 'Y' : 'N'), checkValue:c.value?.toString()]"/>
                     <entity-create value-field="findingCheck"/>
                 </iterate>
 
                 <if condition="eventTypeEnumId">
-                    <service-call name="monthclose.MonthCloseLedgerServices.create#FindingEvent"
+                    <service-call name="audit.AuditLedgerServices.create#FindingEvent"
                             in-map="[companyUserGroupId:companyUserGroupId, findingId:finding.findingId, checkId:checkId,
                                      eventTypeEnumId:eventTypeEnumId, eventStamp:checkStamp, eventDate:reportDate]"/>
                 </if>
@@ -181,7 +181,7 @@
             <parameter name="reportDate" type="Date" required="true"/>
             <parameter name="checkStamp" type="Timestamp" default="ec.user.nowTimestamp"/>
             <parameter name="checkStatusEnumId" required="true">
-                <description>MonthCloseCheckStatus of this morning's check; only MCCS_RAN closes anything.</description></parameter>
+                <description>AuditCheckStatus of this morning's check; only AUDCS_RAN closes anything.</description></parameter>
             <parameter name="examinedRecordKeys" type="List">
                 <description>Every record key the check looked at this morning, reported or not.</description></parameter>
         </in-parameters>
@@ -191,32 +191,32 @@
             <parameter name="skippedReason"/>
         </out-parameters>
         <actions>
-            <service-call name="monthclose.MonthCloseLedgerServices.get#TenantCheck" in-map="[companyUserGroupId:companyUserGroupId, checkId:checkId]"/>
+            <service-call name="audit.AuditLedgerServices.get#TenantCheck" in-map="[companyUserGroupId:companyUserGroupId, checkId:checkId]"/>
             <if condition="ec.message.hasError()"><return/></if>
             <set field="closedFindingIds" from="[]"/>
             <set field="closedCount" from="0" type="Integer"/>
-            <if condition="checkStatusEnumId != 'MCCS_RAN'">
+            <if condition="checkStatusEnumId != 'AUDCS_RAN'">
                 <set field="skippedReason" value="Check ${checkId} status is ${checkStatusEnumId}; only a check that ran over complete reads closes findings."/>
                 <return/>
             </if>
             <set field="examined" from="new HashSet((examinedRecordKeys ?: [])*.toString())"/>
-            <entity-find entity-name="darpan.monthclose.MonthCloseFinding" list="candidates" for-update="true">
+            <entity-find entity-name="darpan.audit.AuditFinding" list="candidates" for-update="true">
                 <econdition field-name="companyUserGroupId"/>
                 <econdition field-name="checkId"/>
-                <econdition field-name="stateEnumId" operator="in" from="['MCFS_OPEN', 'MCFS_PENDING']"/>
+                <econdition field-name="stateEnumId" operator="in" from="['AUDFS_OPEN', 'AUDFS_PENDING']"/>
                 <econdition field-name="lastSeenDate" operator="less" from="reportDate"/>
             </entity-find>
             <iterate list="candidates" entry="finding">
                 <if condition="examined.contains(finding.recordKey)">
-                    <set field="finding.stateEnumId" value="MCFS_FIXED"/>
+                    <set field="finding.stateEnumId" value="AUDFS_FIXED"/>
                     <set field="finding.closedStamp" from="checkStamp"/>
-                    <set field="finding.closedByTypeEnumId" value="MCAT_CHECK"/>
+                    <set field="finding.closedByTypeEnumId" value="AUDAT_CHECK"/>
                     <set field="finding.closedById" from="checkId"/>
                     <set field="finding.lastCheckedStamp" from="checkStamp"/>
                     <entity-update value-field="finding"/>
-                    <service-call name="monthclose.MonthCloseLedgerServices.create#FindingEvent"
+                    <service-call name="audit.AuditLedgerServices.create#FindingEvent"
                             in-map="[companyUserGroupId:companyUserGroupId, findingId:finding.findingId, checkId:checkId,
-                                     eventTypeEnumId:'MCFE_FIXED', eventStamp:checkStamp, eventDate:reportDate]"/>
+                                     eventTypeEnumId:'AUDFE_FIXED', eventStamp:checkStamp, eventDate:reportDate]"/>
                     <script>closedFindingIds.add(finding.findingId)</script>
                     <set field="closedCount" from="closedCount + 1"/>
                 </if>
@@ -242,7 +242,7 @@
                     reading). The check is notRun and any reads are kept for the record.</description></parameter>
             <parameter name="sourceReads" type="List">
                 <description>One Map per extract: systemEnumId (an endpoint or a root system), statusEnumId
-                    (MCSR_COMPLETE / MCSR_PARTIAL / MCSR_FAILED), recordCount, readStamp, reason.</description></parameter>
+                    (AUDSR_COMPLETE / AUDSR_PARTIAL / AUDSR_FAILED), recordCount, readStamp, reason.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="checkRunId"/>
@@ -250,7 +250,7 @@
             <parameter name="reason"/>
         </out-parameters>
         <actions>
-            <service-call name="monthclose.MonthCloseLedgerServices.get#TenantCheck" in-map="[companyUserGroupId:companyUserGroupId, checkId:checkId]"/>
+            <service-call name="audit.AuditLedgerServices.get#TenantCheck" in-map="[companyUserGroupId:companyUserGroupId, checkId:checkId]"/>
             <if condition="ec.message.hasError()"><return/></if>
             <set field="sourceReads" from="sourceReads ?: []"/>
             <set field="checkedDay" from="checkedDay ?: java.sql.Date.valueOf(reportDate.toLocalDate().minusDays(1))"/>
@@ -262,43 +262,43 @@
                     <field-map field-name="enumId" from="sr.systemEnumId"/></entity-find-one>
                 <if condition="systemEnum?.enumTypeId != 'DarpanSystemSource'">
                     <return error="true" message="Unknown system ${sr.systemEnumId} on a source read of check ${checkId}"/></if>
-                <if condition="!(sr.statusEnumId in ['MCSR_COMPLETE', 'MCSR_PARTIAL', 'MCSR_FAILED'])">
-                    <return error="true" message="Source read status ${sr.statusEnumId} is not a MonthCloseSourceRead status"/></if>
-                <if condition="sr.statusEnumId != 'MCSR_COMPLETE'">
+                <if condition="!(sr.statusEnumId in ['AUDSR_COMPLETE', 'AUDSR_PARTIAL', 'AUDSR_FAILED'])">
+                    <return error="true" message="Source read status ${sr.statusEnumId} is not an AuditSourceRead status"/></if>
+                <if condition="sr.statusEnumId != 'AUDSR_COMPLETE'">
                     <set field="rootSystemId" from="systemEnum.parentEnumId ?: systemEnum.enumId"/>
-                    <script>badReads.add("The ${darpan.monthclose.MonthCloseReportAssembler.systemKey(rootSystemId)} read ${sr.statusEnumId == 'MCSR_FAILED' ? 'failed' : 'was partial'}: ${sr.reason ?: 'no reason was given'}.".toString())</script>
+                    <script>badReads.add("The ${darpan.audit.AuditReportAssembler.systemKey(rootSystemId)} read ${sr.statusEnumId == 'AUDSR_FAILED' ? 'failed' : 'was partial'}: ${sr.reason ?: 'no reason was given'}.".toString())</script>
                 </if>
             </iterate>
 
             <if condition="notRunReason">
-                <set field="checkStatusEnumId" value="MCCS_NOT_RUN"/>
+                <set field="checkStatusEnumId" value="AUDCS_NOT_RUN"/>
                 <set field="reason" from="notRunReason"/>
                 <else-if condition="!sourceReads">
-                    <set field="checkStatusEnumId" value="MCCS_NOT_RUN"/>
+                    <set field="checkStatusEnumId" value="AUDCS_NOT_RUN"/>
                     <set field="reason" value="The check recorded no source read."/>
                 </else-if>
                 <else-if condition="badReads">
-                    <set field="checkStatusEnumId" value="MCCS_PARTIAL"/>
+                    <set field="checkStatusEnumId" value="AUDCS_PARTIAL"/>
                     <set field="reason" from="badReads.join(' ')"/>
                 </else-if>
                 <else>
-                    <set field="checkStatusEnumId" value="MCCS_RAN"/>
+                    <set field="checkStatusEnumId" value="AUDCS_RAN"/>
                     <set field="reason" from="null"/>
                 </else>
             </if>
 
-            <entity-find entity-name="darpan.monthclose.MonthCloseCheckRun" list="existingRuns" for-update="true">
+            <entity-find entity-name="darpan.audit.AuditCheckRun" list="existingRuns" for-update="true">
                 <econdition field-name="companyUserGroupId"/>
                 <econdition field-name="checkId"/>
                 <econdition field-name="reportDate"/>
             </entity-find>
             <if condition="existingRuns">
                 <set field="checkRun" from="existingRuns[0]"/>
-                <entity-delete-by-condition entity-name="darpan.monthclose.MonthCloseSourceRead">
+                <entity-delete-by-condition entity-name="darpan.audit.AuditSourceRead">
                     <econdition field-name="checkRunId" from="checkRun.checkRunId"/>
                     <econdition field-name="companyUserGroupId"/></entity-delete-by-condition>
                 <else>
-                    <entity-make-value value-field="checkRun" entity-name="darpan.monthclose.MonthCloseCheckRun"/>
+                    <entity-make-value value-field="checkRun" entity-name="darpan.audit.AuditCheckRun"/>
                     <entity-sequenced-id-primary value-field="checkRun"/>
                     <set field="checkRun.companyUserGroupId" from="companyUserGroupId"/>
                     <set field="checkRun.checkId" from="checkId"/>
@@ -317,7 +317,7 @@
                 <set field="readSeq" from="readSeq + 1"/>
                 <entity-find-one entity-name="moqui.basic.Enumeration" value-field="systemEnum" cache="true">
                     <field-map field-name="enumId" from="sr.systemEnumId"/></entity-find-one>
-                <entity-make-value value-field="sourceRead" entity-name="darpan.monthclose.MonthCloseSourceRead"
+                <entity-make-value value-field="sourceRead" entity-name="darpan.audit.AuditSourceRead"
                         map="[checkRunId:checkRunId, readSeqId:String.format('%02d', readSeq), companyUserGroupId:companyUserGroupId,
                               systemEnumId:(systemEnum.parentEnumId ?: systemEnum.enumId), endpointEnumId:systemEnum.enumId,
                               statusEnumId:sr.statusEnumId, recordCount:(sr.recordCount != null ? sr.recordCount as Long : null),
@@ -339,23 +339,28 @@
             <parameter name="statementIdByCode" type="Map"/>
         </out-parameters>
         <actions>
-            <entity-find entity-name="darpan.monthclose.MonthCloseCheck" list="checkList">
+            <entity-find entity-name="darpan.audit.AuditCheck" list="checkList">
                 <econdition field-name="checkId"/>
                 <econdition field-name="companyUserGroupId"/>
             </entity-find>
             <if condition="!checkList">
-                <return error="true" message="Month-close check ${checkId} does not belong to tenant ${companyUserGroupId}"/></if>
+                <return error="true" message="Audit check ${checkId} does not belong to tenant ${companyUserGroupId}"/></if>
             <set field="check" from="checkList[0].getMap()"/>
-            <entity-find entity-name="darpan.monthclose.MonthCloseStatementCheck" list="links">
+            <entity-find entity-name="darpan.audit.AuditStatementCheck" list="links">
                 <econdition field-name="checkId"/>
                 <econdition field-name="companyUserGroupId"/>
             </entity-find>
             <if condition="!links">
-                <return error="true" message="Month-close check ${checkId} tests no statement"/></if>
-            <entity-find entity-name="darpan.monthclose.MonthCloseStatement" list="statements">
+                <return error="true" message="Audit check ${checkId} tests no statement"/></if>
+            <entity-find entity-name="darpan.audit.AuditStatement" list="statements">
                 <econdition field-name="statementId" operator="in" from="links*.statementId"/>
                 <econdition field-name="companyUserGroupId"/>
             </entity-find>
+            <!-- DAR-BE-103. Codes are unique within an audit, so one check testing R4 of two audits could not tell them
+                 apart from a statementCode: refuse it rather than file a finding under the wrong audit. -->
+            <set field="sharedCodes" from="statements*.statementCode.countBy { it }.findAll { it.value &gt; 1 }.keySet()"/>
+            <if condition="sharedCodes">
+                <return error="true" message="Audit check ${checkId} tests two statements coded ${sharedCodes.join(', ')}; a check's statements need distinct codes"/></if>
             <set field="statementIdByCode" from="statements.collectEntries { [(it.statementCode): it.statementId] }"/>
         </actions>
     </service>
@@ -371,9 +376,9 @@
             <parameter name="eventDate" type="Date" required="true"/>
         </in-parameters>
         <actions>
-            <entity-make-value value-field="event" entity-name="darpan.monthclose.MonthCloseFindingEvent"
+            <entity-make-value value-field="event" entity-name="darpan.audit.AuditFindingEvent"
                     map="[findingId:findingId, companyUserGroupId:companyUserGroupId, eventTypeEnumId:eventTypeEnumId,
-                          eventStamp:eventStamp, eventDate:eventDate, byTypeEnumId:'MCAT_CHECK', byId:checkId]"/>
+                          eventStamp:eventStamp, eventDate:eventDate, byTypeEnumId:'AUDAT_CHECK', byId:checkId]"/>
             <entity-sequenced-id-secondary value-field="event"/>
             <entity-create value-field="event"/>
         </actions>

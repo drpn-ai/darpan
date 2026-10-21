@@ -1,4 +1,4 @@
-package darpan.monthclose
+package darpan.audit
 
 import darpan.facade.common.TenantScopedFinder
 import org.moqui.entity.EntityCondition
@@ -12,8 +12,8 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
 /**
- * DAR-BE-090. The one assembler for the month-close JSON: the report (darpan.monthClose.report/v1) and the
- * finding (darpan.monthClose.finding/v1), built to docs/superpowers/specs/2026-10-21-month-close-json-contract.md
+ * DAR-BE-090 / DAR-BE-103. The one assembler for the audit-run JSON: the report (darpan.audit.report/v1) and the
+ * finding (darpan.audit.finding/v1), built to docs/superpowers/specs/2026-10-21-audit-run-json-contract.md
  * in the wrapper repo. GraphQL, the CLI, the app screen and the digest all render these maps; none of them has
  * fields of its own.
  *
@@ -25,24 +25,24 @@ import java.time.temporal.ChronoUnit
  * Determinism: every age and every state is computed from stored rows and the report date, never from when the
  * request ran. The only clock value is report.generatedAt, which the caller can pin.
  */
-class MonthCloseReportAssembler {
+class AuditReportAssembler {
 
-    static final String REPORT_SCHEMA = "darpan.monthClose.report/v1"
-    static final String FINDING_SCHEMA = "darpan.monthClose.finding/v1"
+    static final String REPORT_SCHEMA = "darpan.audit.report/v1"
+    static final String FINDING_SCHEMA = "darpan.audit.finding/v1"
 
     static final Map<String, String> SYSTEM_KEYS = [OMS: "OMS", NETSUITE: "NetSuite", SHOPIFY: "Shopify"].asImmutable()
 
-    static final String OPEN = "MCFS_OPEN"
-    static final String PENDING = "MCFS_PENDING"
-    static final String FIXED = "MCFS_FIXED"
-    static final String RAN = "MCCS_RAN"
-    static final String PARTIAL = "MCCS_PARTIAL"
-    static final String NOT_RUN = "MCCS_NOT_RUN"
-    static final String READ_COMPLETE = "MCSR_COMPLETE"
+    static final String OPEN = "AUDFS_OPEN"
+    static final String PENDING = "AUDFS_PENDING"
+    static final String FIXED = "AUDFS_FIXED"
+    static final String RAN = "AUDCS_RAN"
+    static final String PARTIAL = "AUDCS_PARTIAL"
+    static final String NOT_RUN = "AUDCS_NOT_RUN"
+    static final String READ_COMPLETE = "AUDSR_COMPLETE"
 
     /** Worst last: a statement or system takes the worst status among its checks or reads. */
     static final List<String> CHECK_STATUS_ORDER = [RAN, PARTIAL, NOT_RUN].asImmutable()
-    static final List<String> READ_STATUS_ORDER = [READ_COMPLETE, "MCSR_PARTIAL", "MCSR_FAILED"].asImmutable()
+    static final List<String> READ_STATUS_ORDER = [READ_COMPLETE, "AUDSR_PARTIAL", "AUDSR_FAILED"].asImmutable()
 
     static final int FINDINGS_CAP = 50
     static final String NO_CHECK_REASON = "No check is configured for this statement yet."
@@ -52,9 +52,9 @@ class MonthCloseReportAssembler {
 
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX")
     private static final DateTimeFormatter DATE_TIME_MINUTE = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mmXXX")
-    private static final List<String> ENUM_TYPES = ["MonthCloseCategory", "MonthCloseStatementWeight", "MonthCloseFindingState",
-            "MonthCloseCheckStatus", "MonthCloseSourceRead", "MonthCloseFindingEvent", "MonthCloseActorType"].asImmutable()
-    private static final String WHY = "month-close assembler: explicit companyUserGroupId condition applied"
+    private static final List<String> ENUM_TYPES = ["AuditCategory", "AuditStatementWeight", "AuditFindingState",
+            "AuditCheckStatus", "AuditSourceRead", "AuditFindingEvent", "AuditActorType", "AuditPeriod"].asImmutable()
+    private static final String WHY = "audit assembler: explicit companyUserGroupId condition applied"
 
     /** The JSON key for a ROOT system enum (OMS, NETSUITE, SHOPIFY); an unmapped root uses its enumId. */
     static String systemKey(String rootEnumId) {
@@ -65,32 +65,35 @@ class MonthCloseReportAssembler {
     // The report
     // ---------------------------------------------------------------------------------------------------------
 
-    /** The report for one tenant and one morning, or null when the tenant does not exist. */
-    static Map<String, Object> assembleReport(def ec, String tenantId, Date reportDate, Timestamp generatedStamp) {
+    /** The report for one audit on one morning, or null when the tenant or the audit (in that tenant) does not exist. */
+    static Map<String, Object> assembleReport(def ec, String tenantId, String auditId, Date reportDate, Timestamp generatedStamp) {
         Map tenant = loadTenant(ec, tenantId)
         if (tenant == null) return null
+        Map audit = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.Audit", "auditId", auditId, tenantId, WHY)?.getMap()
+        if (audit == null) return null
         ZoneId zone = tenant.zone as ZoneId
         LocalDate day = reportDate.toLocalDate()
         Map<String, String> codes = enumCodes(ec)
 
-        List<Map> categories = ec.entity.find("moqui.basic.Enumeration").condition("enumTypeId", "MonthCloseCategory")
+        List<Map> categories = ec.entity.find("moqui.basic.Enumeration").condition("enumTypeId", "AuditCategory")
                 .orderBy("sequenceNum").useCache(true).list()*.getMap()
-        List<Map> statements = tenantRows(ec, "darpan.monthclose.MonthCloseStatement", tenantId)
+        List<Map> statements = tenantRows(ec, "darpan.audit.AuditStatement", tenantId).condition("auditId", auditId)
                 .orderBy(["sequenceNum", "statementCode"]).list()*.getMap()
-        Map<String, Map> checksById = tenantRows(ec, "darpan.monthclose.MonthCloseCheck", tenantId).list()
+        Set<String> statementIds = statements*.statementId.toSet() as Set<String>
+        Map<String, Map> checksById = tenantRows(ec, "darpan.audit.AuditCheck", tenantId).list()
                 .collectEntries { [(it.checkId): it.getMap()] }
-        List<Map> links = tenantRows(ec, "darpan.monthclose.MonthCloseStatementCheck", tenantId)
+        List<Map> links = tenantRows(ec, "darpan.audit.AuditStatementCheck", tenantId)
                 .orderBy(["sequenceNum", "checkId"]).list()*.getMap()
         Map<String, List<String>> checkIdsByStatement = [:].withDefault { [] }
-        links.each { if (checksById[it.checkId]) checkIdsByStatement[it.statementId as String] << (it.checkId as String) }
+        links.each { if (checksById[it.checkId] && statementIds.contains(it.statementId)) checkIdsByStatement[it.statementId as String] << (it.checkId as String) }
         Set<String> configuredCheckIds = checkIdsByStatement.values().flatten().toSet() as Set<String>
 
         // This morning's runs and their reads.
-        Map<String, Map> runByCheck = tenantRows(ec, "darpan.monthclose.MonthCloseCheckRun", tenantId)
+        Map<String, Map> runByCheck = tenantRows(ec, "darpan.audit.AuditCheckRun", tenantId)
                 .condition("reportDate", reportDate).list().collectEntries { [(it.checkId): it.getMap()] }
         Map<String, List<Map>> readsByRun = [:].withDefault { [] }
         if (runByCheck) {
-            tenantRows(ec, "darpan.monthclose.MonthCloseSourceRead", tenantId)
+            tenantRows(ec, "darpan.audit.AuditSourceRead", tenantId)
                     .condition("checkRunId", "in", runByCheck.values()*.checkRunId)
                     .orderBy(["checkRunId", "readSeqId"]).list().each { readsByRun[it.checkRunId as String] << it.getMap() }
         }
@@ -103,7 +106,7 @@ class MonthCloseReportAssembler {
         }
 
         // The ledger as of the end of the report date.
-        List<Map> ledger = findingsAsOf(ec, tenantId, day, zone, checksById)
+        List<Map> ledger = findingsAsOf(ec, tenantId, statementIds, day, zone, checksById)
         Map<String, List<Map>> ledgerByStatement = ledger.groupBy { it.row.statementId as String }
 
         Map<String, Map> statementJsonById = [:]
@@ -175,13 +178,15 @@ class MonthCloseReportAssembler {
         String name = tenant.name as String
         List<String> allCodes = statements*.statementCode as List<String>
         String range = allCodes.size() > 1 ? " ${allCodes.first()} to ${allCodes.last()}" : (allCodes ? " ${allCodes[0]}" : "")
+        String periodCode = codes[audit.periodEnumId as String]
 
         return [schema    : REPORT_SCHEMA,
-                about     : "Daily month-close checks for ${name}. Each finding is one record that breaks one of ${name}'s month-close statements${range}.".toString(),
+                about     : "${audit.auditName} audit for ${name}. Each finding is one record that breaks one of the audit's statements${range}.".toString(),
                 report    : [tenant     : [id: tenantId, name: name, timeZone: zone.id],
+                             audit      : [id: audit.auditCode, name: audit.auditName, period: periodCode],
                              date       : day.toString(),
                              checkedDay : checkedDay.toString(),
-                             month      : checkedDay.toString().substring(0, 7),
+                             period     : periodOf(checkedDay, periodCode),
                              generatedAt: isoDateTime(generatedStamp, zone)],
                 health    : health,
                 summary   : summary,
@@ -250,12 +255,15 @@ class MonthCloseReportAssembler {
      * date"), with pending vs open decided by the age at that sighting, as record#CheckFindings decided it.
      * Fixed findings are kept only when they became fixed on {@code day}.
      */
-    private static List<Map> findingsAsOf(def ec, String tenantId, LocalDate day, ZoneId zone, Map<String, Map> checksById) {
+    private static List<Map> findingsAsOf(def ec, String tenantId, Set<String> statementIds, LocalDate day, ZoneId zone,
+                                          Map<String, Map> checksById) {
+        if (!statementIds) return []
         Date dayDate = Date.valueOf(day)
         // A day of margin on the closed stamp; the events decide.
         Timestamp closedFloor = new Timestamp(day.minusDays(1).atStartOfDay(zone).toInstant().toEpochMilli())
         def cf = ec.entity.conditionFactory
-        List<Map> rows = tenantRows(ec, "darpan.monthclose.MonthCloseFinding", tenantId)
+        List<Map> rows = tenantRows(ec, "darpan.audit.AuditFinding", tenantId)
+                .condition("statementId", EntityCondition.IN, statementIds as List)
                 .condition("firstFoundDate", EntityCondition.LESS_THAN_EQUAL_TO, dayDate)
                 .condition(cf.makeCondition([
                         cf.makeCondition("stateEnumId", EntityCondition.IN, [OPEN, PENDING]),
@@ -264,7 +272,7 @@ class MonthCloseReportAssembler {
                 .list()*.getMap()
         Map<String, List<Map>> eventsByFinding = [:].withDefault { [] }
         rows*.findingId.collate(500).each { List chunk ->
-            tenantRows(ec, "darpan.monthclose.MonthCloseFindingEvent", tenantId).condition("findingId", "in", chunk)
+            tenantRows(ec, "darpan.audit.AuditFindingEvent", tenantId).condition("findingId", "in", chunk)
                     .orderBy(["eventStamp", "eventSeqId"]).list().each { eventsByFinding[it.findingId as String] << it.getMap() }
         }
         List<Map> result = []
@@ -275,13 +283,13 @@ class MonthCloseReportAssembler {
             String state
             if (!later) state = row.stateEnumId
             else if (!upToDay) return
-            else if (upToDay.last().eventTypeEnumId == "MCFE_FIXED") state = FIXED
+            else if (upToDay.last().eventTypeEnumId == "AUDFE_FIXED") state = FIXED
             else {
                 int grace = (checksById[row.checkId as String]?.graceDays ?: 0) as int
                 state = days(row.firstFoundDate as Date, (upToDay.last().eventDate as Date).toLocalDate()) < grace ? PENDING : OPEN
             }
             if (state == FIXED) {
-                Map fixedEvent = upToDay.findAll { it.eventTypeEnumId == "MCFE_FIXED" }.with { it ? it.last() : null }
+                Map fixedEvent = upToDay.findAll { it.eventTypeEnumId == "AUDFE_FIXED" }.with { it ? it.last() : null }
                 if (fixedEvent == null || (fixedEvent.eventDate as Date).toLocalDate() != day) return
             }
             result << [row: row, state: state]
@@ -330,7 +338,7 @@ class MonthCloseReportAssembler {
 
     /** The finding document, or null when the finding does not exist or belongs to another tenant. */
     static Map<String, Object> assembleFinding(def ec, String tenantId, String findingId) {
-        def findingValue = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.monthclose.MonthCloseFinding", "findingId",
+        def findingValue = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditFinding", "findingId",
                 findingId, tenantId, WHY)
         if (findingValue == null) return null
         Map f = findingValue.getMap()
@@ -338,23 +346,24 @@ class MonthCloseReportAssembler {
         ZoneId zone = (tenant?.zone ?: ZoneId.of("UTC")) as ZoneId
         Map<String, String> codes = enumCodes(ec)
 
-        Map statement = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.monthclose.MonthCloseStatement", "statementId",
+        Map statement = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditStatement", "statementId",
                 f.statementId, tenantId, WHY)?.getMap()
-        Map check = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.monthclose.MonthCloseCheck", "checkId",
+        Map check = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditCheck", "checkId",
                 f.checkId, tenantId, WHY)?.getMap()
         if (statement == null || check == null) return null
+        Map audit = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.Audit", "auditId", statement.auditId, tenantId, WHY)?.getMap()
         def category = ec.entity.find("moqui.basic.Enumeration").condition("enumId", statement.categoryEnumId).useCache(true).one()
-        List<Map> events = tenantRows(ec, "darpan.monthclose.MonthCloseFindingEvent", tenantId).condition("findingId", findingId)
+        List<Map> events = tenantRows(ec, "darpan.audit.AuditFindingEvent", tenantId).condition("findingId", findingId)
                 .orderBy(["eventStamp", "eventSeqId"]).list()*.getMap()
-        List<Map> evidenceChecks = tenantRows(ec, "darpan.monthclose.MonthCloseFindingCheck", tenantId).condition("findingId", findingId)
+        List<Map> evidenceChecks = tenantRows(ec, "darpan.audit.AuditFindingCondition", tenantId).condition("findingId", findingId)
                 .orderBy("sequenceNum").list()*.getMap()
-        List<Map> recordRows = tenantRows(ec, "darpan.monthclose.MonthCloseFindingRecord", tenantId).condition("findingId", findingId)
+        List<Map> recordRows = tenantRows(ec, "darpan.audit.AuditFindingRecord", tenantId).condition("findingId", findingId)
                 .orderBy("recordSeqId").list()*.getMap()
         Map records = recordsJson(recordRows)
 
         String state = f.stateEnumId
         Date firstFound = f.firstFoundDate as Date
-        Map lastFixed = events.findAll { it.eventTypeEnumId == "MCFE_FIXED" }.with { it ? it.last() : null }
+        Map lastFixed = events.findAll { it.eventTypeEnumId == "AUDFE_FIXED" }.with { it ? it.last() : null }
         LocalDate ageTo = state == FIXED ?
                 ((lastFixed?.eventDate as Date)?.toLocalDate() ?: (f.closedStamp as Timestamp)?.toInstant()?.atZone(zone)?.toLocalDate()) :
                 (f.lastSeenDate as Date).toLocalDate()
@@ -373,6 +382,7 @@ class MonthCloseReportAssembler {
                 finding: [
                         id       : f.findingId,
                         headline : f.headline,
+                        audit    : [id: audit?.auditCode, name: audit?.auditName],
                         category : [id: category?.enumCode, label: category?.description],
                         statement: [id: statement.statementCode, text: statement.statementText, weight: codes[statement.weightEnumId as String]],
                         check    : [id: check.checkCode, label: check.label, matchedBy: check.matchedBy ?: null],
@@ -418,7 +428,7 @@ class MonthCloseReportAssembler {
 
     private static Map actor(String typeEnumId, String byId, Timestamp stamp, ZoneId zone, Map<String, String> checkCodes,
                              Map<String, String> codes) {
-        if (typeEnumId == "MCAT_CHECK") {
+        if (typeEnumId == "AUDAT_CHECK") {
             String when = stamp == null ? "" : ", ${stamp.toInstant().atZone(zone).format(DATE_TIME_MINUTE)}"
             return [type: codes[typeEnumId], id: checkCodes[byId] ?: byId, label: "scheduled check${when}".toString()]
         }
@@ -463,7 +473,7 @@ class MonthCloseReportAssembler {
 
     private static Map<String, Map> recordsFor(def ec, String tenantId, List<String> findingIds) {
         if (!findingIds) return [:]
-        List<Map> rows = tenantRows(ec, "darpan.monthclose.MonthCloseFindingRecord", tenantId).condition("findingId", "in", findingIds)
+        List<Map> rows = tenantRows(ec, "darpan.audit.AuditFindingRecord", tenantId).condition("findingId", "in", findingIds)
                 .orderBy(["findingId", "recordSeqId"]).list()*.getMap()
         return rows.groupBy { it.findingId as String }.collectEntries { k, v -> [(k): recordsJson(v)] }
     }
@@ -506,10 +516,19 @@ class MonthCloseReportAssembler {
         return TenantScopedFinder.findGlobalUnscoped(ec, entityName, WHY).condition("companyUserGroupId", tenantId).useCache(false)
     }
 
-    /** enumId -> enumCode for the month-close vocabulary (the JSON emits the code, never the id). */
+    /** enumId -> enumCode for the audit-run vocabulary (the JSON emits the code, never the id). */
     private static Map<String, String> enumCodes(def ec) {
         return ec.entity.find("moqui.basic.Enumeration").condition("enumTypeId", "in", ENUM_TYPES).useCache(true).list()
                 .collectEntries { [(it.enumId): it.enumCode] }
+    }
+
+    /** report.period: the period the checked day falls in, e.g. 2026-10-07 (day), 2026-10 (month), 2026-Q4 (quarter). */
+    static String periodOf(LocalDate day, String periodCode) {
+        switch (periodCode) {
+            case "day": return day.toString()
+            case "quarter": return "${day.year}-Q${(int) ((day.monthValue - 1) / 3) + 1}".toString()
+            default: return day.toString().substring(0, 7)
+        }
     }
 
     static String isoDate(Date d) { return d?.toLocalDate()?.toString() }

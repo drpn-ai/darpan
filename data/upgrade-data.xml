@@ -704,108 +704,121 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             entityName="darpan.rule.RuleSetConclusionCondition"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
 
-    <!-- 7. DAR-BE-088 / DAR-BE-089 / DAR-BE-090 (after 2.0.0): the month-close vocabulary and the tenant filter on
-         the three catalog entities, the four findings-ledger entities and the two check-health entities. NEEDS
-         the darpan build carrying entity/MonthCloseEntities.xml: the filter rows name entities that build creates. Enum types come before their members (document order is load order).
-         Sources: data/MonthCloseSeedData.xml, data/SecuritySeedData.xml. Gorjana's catalog itself is
+    <!-- 7. DAR-BE-088 / DAR-BE-089 / DAR-BE-090 / DAR-BE-103 (after 2.0.0): the audit-run vocabulary and the tenant
+         filter on the audit and its three catalog entities, the four findings-ledger entities and the two check-health
+         entities. NEEDS
+         the darpan build carrying entity/AuditEntities.xml: the filter rows name entities that build creates. Enum types come before their members (document order is load order).
+         Sources: data/AuditSeedData.xml, data/SecuritySeedData.xml. Gorjana's catalog itself is
          tenant config (data/GorjanaMonthCloseCatalogData.xml) and is deliberately NOT here: it loads per
          tenant, after this pack. -->
-    <moqui.basic.EnumerationType enumTypeId="MonthCloseCategory" description="Month close statement category"/>
-    <moqui.basic.Enumeration enumId="MCC_ORDERS" enumTypeId="MonthCloseCategory" enumCode="orders"
+    <moqui.basic.EnumerationType enumTypeId="AuditCategory" description="Audit statement category"/>
+    <moqui.basic.Enumeration enumId="AUDC_ORDERS" enumTypeId="AuditCategory" enumCode="orders"
             description="Orders" sequenceNum="1"/>
-    <moqui.basic.Enumeration enumId="MCC_REFUNDS_CREDITS" enumTypeId="MonthCloseCategory" enumCode="refundsAndCredits"
+    <moqui.basic.Enumeration enumId="AUDC_REFUNDS_CREDITS" enumTypeId="AuditCategory" enumCode="refundsAndCredits"
             description="Refunds and credits" sequenceNum="2"/>
-    <moqui.basic.Enumeration enumId="MCC_RETURNS" enumTypeId="MonthCloseCategory" enumCode="returns"
+    <moqui.basic.Enumeration enumId="AUDC_RETURNS" enumTypeId="AuditCategory" enumCode="returns"
             description="Returns" sequenceNum="3"/>
-    <moqui.basic.Enumeration enumId="MCC_EXCHANGES_WARRANTY" enumTypeId="MonthCloseCategory" enumCode="exchangesAndWarranty"
+    <moqui.basic.Enumeration enumId="AUDC_EXCHANGES_WARRANTY" enumTypeId="AuditCategory" enumCode="exchangesAndWarranty"
             description="Exchanges and warranty" sequenceNum="4"/>
 
-    <moqui.basic.EnumerationType enumTypeId="MonthCloseStatementWeight" description="Month close statement weight"/>
-    <moqui.basic.Enumeration enumId="MCSW_FIRM" enumTypeId="MonthCloseStatementWeight" enumCode="firm"
+    <moqui.basic.EnumerationType enumTypeId="AuditStatementWeight" description="Audit statement weight"/>
+    <moqui.basic.Enumeration enumId="AUDSW_FIRM" enumTypeId="AuditStatementWeight" enumCode="firm"
             description="Firm: stated by the tenant" sequenceNum="1"/>
-    <moqui.basic.Enumeration enumId="MCSW_DERIVED" enumTypeId="MonthCloseStatementWeight" enumCode="derived"
+    <moqui.basic.Enumeration enumId="AUDSW_DERIVED" enumTypeId="AuditStatementWeight" enumCode="derived"
             description="Derived: awaiting the tenant's confirmation" sequenceNum="2"/>
 
-    <moqui.basic.EnumerationType enumTypeId="MonthCloseFindingState" description="Month close finding state"/>
-    <moqui.basic.Enumeration enumId="MCFS_OPEN" enumTypeId="MonthCloseFindingState" enumCode="open"
+    <moqui.basic.EnumerationType enumTypeId="AuditFindingState" description="Audit finding state"/>
+    <moqui.basic.Enumeration enumId="AUDFS_OPEN" enumTypeId="AuditFindingState" enumCode="open"
             description="Open" sequenceNum="1"/>
-    <moqui.basic.Enumeration enumId="MCFS_PENDING" enumTypeId="MonthCloseFindingState" enumCode="pending"
+    <moqui.basic.Enumeration enumId="AUDFS_PENDING" enumTypeId="AuditFindingState" enumCode="pending"
             description="Pending: inside the check's grace age" sequenceNum="2"/>
-    <moqui.basic.Enumeration enumId="MCFS_FIXED" enumTypeId="MonthCloseFindingState" enumCode="fixed"
+    <moqui.basic.Enumeration enumId="AUDFS_FIXED" enumTypeId="AuditFindingState" enumCode="fixed"
             description="Fixed" sequenceNum="3"/>
 
-    <moqui.basic.EnumerationType enumTypeId="MonthCloseCheckStatus" description="Month close check status"/>
-    <moqui.basic.Enumeration enumId="MCCS_RAN" enumTypeId="MonthCloseCheckStatus" enumCode="ran"
+    <moqui.basic.EnumerationType enumTypeId="AuditCheckStatus" description="Audit check status"/>
+    <moqui.basic.Enumeration enumId="AUDCS_RAN" enumTypeId="AuditCheckStatus" enumCode="ran"
             description="Ran over complete reads" sequenceNum="1"/>
-    <moqui.basic.Enumeration enumId="MCCS_PARTIAL" enumTypeId="MonthCloseCheckStatus" enumCode="partial"
+    <moqui.basic.Enumeration enumId="AUDCS_PARTIAL" enumTypeId="AuditCheckStatus" enumCode="partial"
             description="Partial: a read was partial or failed, nothing closed" sequenceNum="2"/>
-    <moqui.basic.Enumeration enumId="MCCS_NOT_RUN" enumTypeId="MonthCloseCheckStatus" enumCode="notRun"
+    <moqui.basic.Enumeration enumId="AUDCS_NOT_RUN" enumTypeId="AuditCheckStatus" enumCode="notRun"
             description="Not run" sequenceNum="3"/>
 
-    <moqui.basic.EnumerationType enumTypeId="MonthCloseSourceRead" description="Month close source read status"/>
-    <moqui.basic.Enumeration enumId="MCSR_COMPLETE" enumTypeId="MonthCloseSourceRead" enumCode="complete"
+    <moqui.basic.EnumerationType enumTypeId="AuditSourceRead" description="Audit source read status"/>
+    <moqui.basic.Enumeration enumId="AUDSR_COMPLETE" enumTypeId="AuditSourceRead" enumCode="complete"
             description="Complete" sequenceNum="1"/>
-    <moqui.basic.Enumeration enumId="MCSR_PARTIAL" enumTypeId="MonthCloseSourceRead" enumCode="partial"
+    <moqui.basic.Enumeration enumId="AUDSR_PARTIAL" enumTypeId="AuditSourceRead" enumCode="partial"
             description="Partial" sequenceNum="2"/>
-    <moqui.basic.Enumeration enumId="MCSR_FAILED" enumTypeId="MonthCloseSourceRead" enumCode="failed"
+    <moqui.basic.Enumeration enumId="AUDSR_FAILED" enumTypeId="AuditSourceRead" enumCode="failed"
             description="Failed" sequenceNum="3"/>
 
-    <moqui.basic.EnumerationType enumTypeId="MonthCloseFindingEvent" description="Month close finding history event"/>
-    <moqui.basic.Enumeration enumId="MCFE_FOUND" enumTypeId="MonthCloseFindingEvent" enumCode="found"
+    <moqui.basic.EnumerationType enumTypeId="AuditFindingEvent" description="Audit finding history event"/>
+    <moqui.basic.Enumeration enumId="AUDFE_FOUND" enumTypeId="AuditFindingEvent" enumCode="found"
             description="Found" sequenceNum="1"/>
-    <moqui.basic.Enumeration enumId="MCFE_STILL_OPEN" enumTypeId="MonthCloseFindingEvent" enumCode="stillOpen"
+    <moqui.basic.Enumeration enumId="AUDFE_STILL_OPEN" enumTypeId="AuditFindingEvent" enumCode="stillOpen"
             description="Still open" sequenceNum="2"/>
-    <moqui.basic.Enumeration enumId="MCFE_FIXED" enumTypeId="MonthCloseFindingEvent" enumCode="fixed"
+    <moqui.basic.Enumeration enumId="AUDFE_FIXED" enumTypeId="AuditFindingEvent" enumCode="fixed"
             description="Fixed" sequenceNum="3"/>
-    <moqui.basic.Enumeration enumId="MCFE_REOPENED" enumTypeId="MonthCloseFindingEvent" enumCode="reopened"
+    <moqui.basic.Enumeration enumId="AUDFE_REOPENED" enumTypeId="AuditFindingEvent" enumCode="reopened"
             description="Reopened" sequenceNum="4"/>
 
     <!-- No agent type: the external API has no mutations, so an agent can never cause an event. -->
-    <moqui.basic.EnumerationType enumTypeId="MonthCloseActorType" description="Month close event actor type"/>
-    <moqui.basic.Enumeration enumId="MCAT_CHECK" enumTypeId="MonthCloseActorType" enumCode="check"
+    <moqui.basic.EnumerationType enumTypeId="AuditActorType" description="Audit event actor type"/>
+    <moqui.basic.Enumeration enumId="AUDAT_CHECK" enumTypeId="AuditActorType" enumCode="check"
             description="Scheduled check" sequenceNum="1"/>
-    <moqui.basic.Enumeration enumId="MCAT_USER" enumTypeId="MonthCloseActorType" enumCode="user"
+    <moqui.basic.Enumeration enumId="AUDAT_USER" enumTypeId="AuditActorType" enumCode="user"
             description="Darpan user" sequenceNum="2"/>
 
-    <!-- DAR-BE-088 — the month-close statement catalog (entity/MonthCloseEntities.xml). Tenant-owned from day
+    <moqui.basic.EnumerationType enumTypeId="AuditPeriod" description="Audit reporting period"/>
+    <moqui.basic.Enumeration enumId="AUDP_DAY" enumTypeId="AuditPeriod" enumCode="day"
+            description="Day" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDP_MONTH" enumTypeId="AuditPeriod" enumCode="month"
+            description="Month" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="AUDP_QUARTER" enumTypeId="AuditPeriod" enumCode="quarter"
+            description="Quarter" sequenceNum="3"/>
+
+    <!-- DAR-BE-088 — the audit statement catalog (entity/AuditEntities.xml). Tenant-owned from day
          one, so the filter rows land with the entities rather than in a later sweep. -->
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_STATEMENT"
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_AUDIT"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
-            entityName="darpan.monthclose.MonthCloseStatement"
+            entityName="darpan.audit.Audit"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_CHECK"
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_STATEMENT"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
-            entityName="darpan.monthclose.MonthCloseCheck"
+            entityName="darpan.audit.AuditStatement"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_STATEMENT_CHECK"
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_CHECK"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
-            entityName="darpan.monthclose.MonthCloseStatementCheck"
+            entityName="darpan.audit.AuditCheck"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_STATEMENT_CHECK"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.audit.AuditStatementCheck"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <!-- DAR-BE-089 — the findings ledger, filtered from the day its entities were added. -->
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_FINDING"
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_FINDING"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
-            entityName="darpan.monthclose.MonthCloseFinding"
+            entityName="darpan.audit.AuditFinding"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_FINDING_RECORD"
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_FINDING_RECORD"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
-            entityName="darpan.monthclose.MonthCloseFindingRecord"
+            entityName="darpan.audit.AuditFindingRecord"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_FINDING_CHECK"
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_FINDING_CHECK"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
-            entityName="darpan.monthclose.MonthCloseFindingCheck"
+            entityName="darpan.audit.AuditFindingCondition"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_FINDING_EVENT"
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_FINDING_EVENT"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
-            entityName="darpan.monthclose.MonthCloseFindingEvent"
+            entityName="darpan.audit.AuditFindingEvent"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <!-- DAR-BE-090 — check health (one run per check per morning, and its source reads). -->
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_CHECK_RUN"
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_CHECK_RUN"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
-            entityName="darpan.monthclose.MonthCloseCheckRun"
+            entityName="darpan.audit.AuditCheckRun"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_MC_SOURCE_READ"
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_SOURCE_READ"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
-            entityName="darpan.monthclose.MonthCloseSourceRead"
+            entityName="darpan.audit.AuditSourceRead"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
 
 </entity-facade-xml>

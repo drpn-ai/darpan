@@ -44,29 +44,34 @@ class TenantOwnedEntityFilterContractTests {
             "darpan.rule.RuleSetConclusionCondition"                   : "DARPAN_SCOPE_CONCLUSION_CONDITION",
     ].asImmutable()
 
-    /** DAR-BE-088: the month-close statement catalog, filtered from the day its entities were added. */
+    /** DAR-BE-088: the audit statement catalog, filtered from the day its entities were added. */
     static final Map<String, String> DAR_BE_088_FILTERS = [
-            "darpan.monthclose.MonthCloseStatement"                    : "DARPAN_SCOPE_MC_STATEMENT",
-            "darpan.monthclose.MonthCloseCheck"                        : "DARPAN_SCOPE_MC_CHECK",
-            "darpan.monthclose.MonthCloseStatementCheck"               : "DARPAN_SCOPE_MC_STATEMENT_CHECK",
+            "darpan.audit.AuditStatement"                    : "DARPAN_SCOPE_AUD_STATEMENT",
+            "darpan.audit.AuditCheck"                        : "DARPAN_SCOPE_AUD_CHECK",
+            "darpan.audit.AuditStatementCheck"               : "DARPAN_SCOPE_AUD_STATEMENT_CHECK",
     ].asImmutable()
 
     /** DAR-BE-089: the findings ledger. */
     static final Map<String, String> DAR_BE_089_FILTERS = [
-            "darpan.monthclose.MonthCloseFinding"                          : "DARPAN_SCOPE_MC_FINDING",
-            "darpan.monthclose.MonthCloseFindingRecord"                    : "DARPAN_SCOPE_MC_FINDING_RECORD",
-            "darpan.monthclose.MonthCloseFindingCheck"                     : "DARPAN_SCOPE_MC_FINDING_CHECK",
-            "darpan.monthclose.MonthCloseFindingEvent"                     : "DARPAN_SCOPE_MC_FINDING_EVENT",
+            "darpan.audit.AuditFinding"                          : "DARPAN_SCOPE_AUD_FINDING",
+            "darpan.audit.AuditFindingRecord"                    : "DARPAN_SCOPE_AUD_FINDING_RECORD",
+            "darpan.audit.AuditFindingCondition"                     : "DARPAN_SCOPE_AUD_FINDING_CHECK",
+            "darpan.audit.AuditFindingEvent"                     : "DARPAN_SCOPE_AUD_FINDING_EVENT",
+    ].asImmutable()
+
+    /** DAR-BE-103: the audit a statement belongs to. */
+    static final Map<String, String> DAR_BE_103_FILTERS = [
+            "darpan.audit.Audit"                                         : "DARPAN_SCOPE_AUD_AUDIT",
     ].asImmutable()
 
     /** DAR-BE-090: check health. */
     static final Map<String, String> DAR_BE_090_FILTERS = [
-            "darpan.monthclose.MonthCloseCheckRun"                         : "DARPAN_SCOPE_MC_CHECK_RUN",
-            "darpan.monthclose.MonthCloseSourceRead"                       : "DARPAN_SCOPE_MC_SOURCE_READ",
+            "darpan.audit.AuditCheckRun"                         : "DARPAN_SCOPE_AUD_CHECK_RUN",
+            "darpan.audit.AuditSourceRead"                       : "DARPAN_SCOPE_AUD_SOURCE_READ",
     ].asImmutable()
 
     /** Every filter row this class pins by id, with its entity. */
-    static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS).asImmutable()
+    static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS).asImmutable()
 
     /** Entities deliberately NOT in the filter set, each with the reason. */
     static final Map<String, String> EXCLUDED = [

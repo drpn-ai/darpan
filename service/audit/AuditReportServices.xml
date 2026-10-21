@@ -2,22 +2,24 @@
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
-    <!-- DAR-BE-090. The two month-close JSON documents (contract: docs/superpowers/specs/2026-10-21-month-close-json-contract.md
+    <!-- DAR-BE-090 / DAR-BE-103. The two audit-run JSON documents (contract: docs/superpowers/specs/2026-10-21-audit-run-json-contract.md
          in the wrapper repo). Read-only views over the catalog, the ledger and check health; the work is in
-         darpan.monthclose.MonthCloseReportAssembler, because it is nested JSON with zone-aware formatting.
+         darpan.audit.AuditReportAssembler, because it is nested JSON with zone-aware formatting.
 
          Internal only (allow-remote="false"), with the tenant passed explicitly, like the ledger's writers. Every read
          carries an explicit companyUserGroupId condition, so the documents are tenant-pinned on scheduler threads
          (authz off, no active tenant) as well as under a user. The external entry point (GraphQL, DAR-BE-098)
          resolves the tenant from its API key and calls these. -->
 
-    <service verb="assemble" noun="MonthCloseReport" authenticate="false" allow-remote="false">
-        <description>The darpan.monthClose.report/v1 document for one tenant and one morning: report, health, summary,
-            and the four categories with every catalog statement, its checks and its findings (oldest first, at most
+    <service verb="assemble" noun="AuditReport" authenticate="false" allow-remote="false">
+        <description>The darpan.audit.report/v1 document for one audit on one morning: report, health, summary,
+            and the four categories with every statement of the audit, its checks and its findings (oldest first, at most
             50 per statement). State is as of the end of reportDate, so a past morning reads from the findings'
             history.</description>
         <in-parameters>
             <parameter name="companyUserGroupId" required="true"/>
+            <parameter name="auditId" required="true">
+                <description>The audit to report, e.g. GORJANA_MONTH_CLOSE; another tenant's audit reads as not found.</description></parameter>
             <parameter name="reportDate" type="Date" required="true">
                 <description>The morning to describe, as a tenant calendar day.</description></parameter>
             <parameter name="generatedStamp" type="Timestamp" default="ec.user.nowTimestamp">
@@ -27,14 +29,14 @@
             <parameter name="document" type="Map"/>
         </out-parameters>
         <actions>
-            <set field="document" from="darpan.monthclose.MonthCloseReportAssembler.assembleReport(ec, companyUserGroupId, reportDate, generatedStamp)"/>
+            <set field="document" from="darpan.audit.AuditReportAssembler.assembleReport(ec, companyUserGroupId, auditId, reportDate, generatedStamp)"/>
             <if condition="document == null">
-                <return error="true" message="Tenant ${companyUserGroupId} was not found"/></if>
+                <return error="true" message="Audit ${auditId} was not found for tenant ${companyUserGroupId}"/></if>
         </actions>
     </service>
 
-    <service verb="assemble" noun="MonthCloseFinding" authenticate="false" allow-remote="false">
-        <description>The darpan.monthClose.finding/v1 document for one finding: status, records, evidence, diagnosis,
+    <service verb="assemble" noun="AuditFinding" authenticate="false" allow-remote="false">
+        <description>The darpan.audit.finding/v1 document for one finding: status, records, evidence, diagnosis,
             how to fix and verify it, and its history. A finding of another tenant reads as not found.</description>
         <in-parameters>
             <parameter name="companyUserGroupId" required="true"/>
@@ -44,7 +46,7 @@
             <parameter name="document" type="Map"/>
         </out-parameters>
         <actions>
-            <set field="document" from="darpan.monthclose.MonthCloseReportAssembler.assembleFinding(ec, companyUserGroupId, findingId)"/>
+            <set field="document" from="darpan.audit.AuditReportAssembler.assembleFinding(ec, companyUserGroupId, findingId)"/>
             <if condition="document == null">
                 <return error="true" message="Finding ${findingId} was not found"/></if>
         </actions>

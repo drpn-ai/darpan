@@ -59,7 +59,7 @@ class GorjanaMonthCloseChecksDataTests {
         assertEquals(["GORJANA_R4", "GORJANA_R7", "GORJANA_R8", "GORJANA_R9", "GORJANA_R16"] as Set, attr(rows(RETURNS, "darpan.audit.AuditStatementCheck"), "statementId"),
                 "comparison 1 covers R7, R8, R9, R16 and R4's nothing-left-open so far")
         assertEquals(["GORJANA_R13", "GORJANA_R14"] as Set, attr(rows(REPLACEMENT, "darpan.audit.AuditStatementCheck"), "statementId"))
-        assertEquals(["GORJANA_R11"] as Set, attr(rows(RECEIPT, "darpan.audit.AuditStatementCheck"), "statementId"))
+        assertEquals(["GORJANA_R11", "GORJANA_R15"] as Set, attr(rows(RECEIPT, "darpan.audit.AuditStatementCheck"), "statementId"))
         assertEquals(["GORJANA_R12"] as Set, attr(rows(CLAIM, "darpan.audit.AuditStatementCheck"), "statementId"))
     }
 
@@ -154,7 +154,7 @@ class GorjanaMonthCloseChecksDataTests {
 
     @Test
     void storedReplacementDrlIsExactlyWhatTheGeneratorMakes() {
-        [REPLACEMENT, CLAIM, RETURNS].each { storedDrlIsExactlyWhatTheGeneratorMakes(it) }
+        [REPLACEMENT, CLAIM, RETURNS, RECEIPT].each { storedDrlIsExactlyWhatTheGeneratorMakes(it) }
     }
 
     private static void storedDrlIsExactlyWhatTheGeneratorMakes(String file) {

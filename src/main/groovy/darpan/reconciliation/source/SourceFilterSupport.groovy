@@ -28,6 +28,12 @@ class SourceFilterSupport {
 
     static final String OPERATOR_EXCLUDE_IN = "EXCLUDE_IN"
     static final String OPERATOR_INCLUDE_IN = "INCLUDE_IN"
+    /**
+     * DAR-BE-097 (gorjana R15). Keep only records whose value STARTS WITH one of the listed values, e.g. order names
+     * "EXC-" (an exchange order: EXC-#GOR195591082-2), which share every type, flow and store with an ordinary order.
+     * Same include semantics as INCLUDE_IN: no usable value is rejected.
+     */
+    static final String OPERATOR_INCLUDE_PREFIX = "INCLUDE_PREFIX"
 
     /** Rejected because the record carried a value this rule does not allow. */
     static final String REASON_VALUE = "VALUE"
@@ -81,7 +87,7 @@ class SourceFilterSupport {
                 throw new IllegalArgumentException("Source filter ${sequenceNum} has no field to test.".toString())
             }
             String operator = (normalize(row.get("operator")) ?: OPERATOR_EXCLUDE_IN).toUpperCase(Locale.ROOT)
-            if (operator != OPERATOR_EXCLUDE_IN && operator != OPERATOR_INCLUDE_IN) {
+            if (operator != OPERATOR_EXCLUDE_IN && operator != OPERATOR_INCLUDE_IN && operator != OPERATOR_INCLUDE_PREFIX) {
                 throw new IllegalArgumentException(
                         "Source filter ${sequenceNum} uses unsupported operator '${operator}'.".toString())
             }
@@ -162,6 +168,7 @@ class SourceFilterSupport {
      *   EXCLUDE_IN — reject when the record's value is listed. No value, no rejection.
      *   INCLUDE_IN — reject when the record's value is NOT listed, and reject when there is no
      *                usable value at all. "Only these values" is not satisfied by silence.
+     *   INCLUDE_PREFIX — as INCLUDE_IN, with "listed" meaning the value starts with a listed value.
      */
     static Map<String, Object> evaluate(Object record, List<Map<String, Object>> rules) {
         if (!rules || !(record instanceof Map)) return null
@@ -171,7 +178,8 @@ class SourceFilterSupport {
             // Same top-level, trimmed, case-sensitive key scan as OmsRestSourceSupport.isSalesOrder.
             Object rawValue = row.find { key, ignored -> normalize(key) == fieldExpression }?.value
             String candidate = normalize(rawValue)
-            boolean includeMode = OPERATOR_INCLUDE_IN == rule.get("operator")
+            boolean prefixMode = OPERATOR_INCLUDE_PREFIX == rule.get("operator")
+            boolean includeMode = prefixMode || OPERATOR_INCLUDE_IN == rule.get("operator")
             if (!candidate) {
                 // normalize() answers null for a missing key and "" for a blank one; both are falsy
                 // here, and that conflation is right in both modes. No usable value cannot be in an
@@ -179,7 +187,9 @@ class SourceFilterSupport {
                 if (includeMode) return [rule: rule, reason: REASON_FIELD_ABSENT]
                 continue
             }
-            boolean listed = ((Set<String>) rule.get("matchValues")).contains(candidate.toUpperCase(Locale.ROOT))
+            String upper = candidate.toUpperCase(Locale.ROOT)
+            Set<String> matchValues = (Set<String>) rule.get("matchValues")
+            boolean listed = prefixMode ? matchValues.any { upper.startsWith(it) } : matchValues.contains(upper)
             if (includeMode ? !listed : listed) return [rule: rule, reason: REASON_VALUE]
         }
         return null

@@ -253,6 +253,17 @@ class SourceFilterSupportTests {
         assertEquals(1, ((Map) verdict.get("rule")).get("sequenceNum"))
     }
 
+    // DAR-BE-097 (gorjana R15): an exchange order is named EXC-#<original>-<n> and differs from an ordinary one in nothing else.
+    @Test
+    void includePrefixKeepsOnlyValuesStartingWithAListedOne() {
+        List<Map<String, Object>> rules = statusRule("INCLUDE_PREFIX", "EXC-")
+        assertNull(SourceFilterSupport.evaluate([status: "EXC-#GOR195591082-2"], rules))
+        assertNull(SourceFilterSupport.evaluate([status: "exc-#gor1"], rules), "case-insensitive, as every value test")
+        assertEquals("VALUE", SourceFilterSupport.evaluate([status: "#GOR195591082"], rules).get("reason"))
+        assertEquals("VALUE", SourceFilterSupport.evaluate([status: "WTY-EXC-1"], rules).get("reason"), "a prefix, not a substring")
+        assertEquals("FIELD_ABSENT", SourceFilterSupport.evaluate([orderId: "M1"], rules).get("reason"))
+    }
+
     @Test
     void includeModeDropsARecordThatHasNoSuchFieldAndSaysWhy() {
         Map<String, Object> verdict = SourceFilterSupport.evaluate([orderId: "M1"], statusRule("INCLUDE_IN", "A"))

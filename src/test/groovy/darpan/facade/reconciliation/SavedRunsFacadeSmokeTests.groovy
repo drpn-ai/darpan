@@ -2287,6 +2287,37 @@ end'''
     }
 
     @Test
+    void resolveExtractKeepFieldsKeepsTheFieldsConclusionConditionsRead() {
+        // DAR-BE-097: a conclusion that reads a field projection drops sees a blank, so it never fires, and a BLANK
+        // condition fires on every record. The top-level field each side's conditions read must survive.
+        String savedRunId = createRuleSetRun([file1PrimaryIdExpression: '$.records[*].orderId', file2PrimaryIdExpression: 'order_id'])
+        Map<String, Object> sourceBySide = (Map<String, Object>) ReconciliationSavedRunSupport.resolveRuleSetRun(ec, savedRunId).sourceBySide
+        def file1Source = sourceBySide[ReconciliationSavedRunSupport.FILE_SIDE_1]
+        def file2Source = sourceBySide[ReconciliationSavedRunSupport.FILE_SIDE_2]
+        String scope = file1Source.compareScopeId as String
+        String tenant = file1Source.companyUserGroupId as String
+        ec.entity.makeValue("moqui.basic.EnumerationType").setAll([enumTypeId: "DarpanConclusion", description: "Conclusion"]).createOrUpdate()
+        ec.entity.makeValue("moqui.basic.Enumeration").setAll([enumId: "CONC_KEEP_TEST", enumTypeId: "DarpanConclusion",
+                enumCode: "CONC_KEEP_TEST", description: "Keep test"]).createOrUpdate()
+        ec.entity.makeValue("darpan.rule.RuleSetConclusionRule").setAll([compareScopeId: scope, sequenceNum: 10L,
+                conclusionEnumId: "CONC_KEEP_TEST", appliesToBucket: "MISSING_FROM_FILE_2", companyUserGroupId: tenant]).create()
+        [[1L, "FILE_1", "items.receivedQuantity"], [2L, "FILE_1", "returnChannelEnumId"], [3L, "FILE_2", "lineState"]].each { List c ->
+            ec.entity.makeValue("darpan.rule.RuleSetConclusionCondition").setAll([compareScopeId: scope, sequenceNum: 10L,
+                    conditionSeq: c[0], subject: c[1], fieldExpression: c[2], operator: "NOT_BLANK", checkLabel: "keep", companyUserGroupId: tenant]).create()
+        }
+        try {
+            assertEquals(["externalId", "orderId", "items", "returnChannelEnumId"],
+                    ReconciliationSavedRunSupport.resolveExtractKeepFields(ec, file1Source, "externalId"))
+            assertEquals(["externalId", "order_id", "lineState"],
+                    ReconciliationSavedRunSupport.resolveExtractKeepFields(ec, file2Source, "externalId"))
+        } finally {
+            // The class's cleanup deletes the run's scope; these rows would hold it.
+            ec.entity.find("darpan.rule.RuleSetConclusionCondition").condition("compareScopeId", scope).disableAuthz().deleteAll()
+            ec.entity.find("darpan.rule.RuleSetConclusionRule").condition("compareScopeId", scope).disableAuthz().deleteAll()
+        }
+    }
+
+    @Test
     void resolveExtractKeepFieldsDisablesProjectionOnlyForTheSideWithAnUnresolvableRulePath() {
         // $.shipGroups[*].facilityId is a genuinely nested per-record wildcard relative to
         // file1PrimaryIdExpression's records[*] boundary below — see task-7-report.md Fix Report.

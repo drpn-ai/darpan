@@ -2,7 +2,7 @@ package darpan.audit
 
 import darpan.facade.reconciliation.RunConclusionStep
 import reconciliation.rule.FieldComparisonRuleLogicGenerator
-import darpan.reconciliation.conclusion.FlatEvaluatorOracle
+import darpan.reconciliation.conclusion.ConclusionTreeEngine
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.xml.XmlParser
 import org.junit.jupiter.api.Test
@@ -25,6 +25,8 @@ class GorjanaMonthCloseChecksDataTests {
     private static final String RETURNS = "GorjanaMonthCloseReturnsChecksData.xml"
     /** DAR-BE-094 R14 / DAR-BE-095 R13: exchange credit memos against their replacement orders. */
     private static final String REPLACEMENT = "GorjanaMonthCloseReplacementChecksData.xml"
+    /** DAR-BE-097 R11: warranty arrivals against NetSuite item receipts. */
+    private static final String RECEIPT = "GorjanaMonthCloseReceiptChecksData.xml"
 
     private static Path dataDir() {
         return ReconciliationSmokeTestSupport.resolveBackendRoot().resolve("runtime/component/darpan/data")
@@ -44,17 +46,32 @@ class GorjanaMonthCloseChecksDataTests {
 
     @Test
     void theFileIsTenantConfigurationNotSeed() {
-        [FILE, RETURNS, REPLACEMENT].each { assertEquals("darpan-tenant-config", doc(it).attribute("type"), it) }
+        [FILE, RETURNS, REPLACEMENT, RECEIPT].each { assertEquals("darpan-tenant-config", doc(it).attribute("type"), it) }
     }
 
     @Test
     void everyReferenceResolves() {
-        [FILE, RETURNS, REPLACEMENT].each { everyReferenceResolvesIn(it) }
+        [FILE, RETURNS, REPLACEMENT, RECEIPT].each { everyReferenceResolvesIn(it) }
         assertEquals(["GORJANA_R1", "GORJANA_R2", "GORJANA_R3"] as Set, attr(rows(FILE, "darpan.audit.AuditStatementCheck"), "statementId"),
                 "comparison 2 covers R1-R3")
         assertEquals(["GORJANA_R9"] as Set, attr(rows(RETURNS, "darpan.audit.AuditStatementCheck"), "statementId"),
                 "comparison 1 covers R9 so far")
         assertEquals(["GORJANA_R13", "GORJANA_R14"] as Set, attr(rows(REPLACEMENT, "darpan.audit.AuditStatementCheck"), "statementId"))
+        assertEquals(["GORJANA_R11"] as Set, attr(rows(RECEIPT, "darpan.audit.AuditStatementCheck"), "statementId"))
+    }
+
+    @Test
+    void anR11RowIsAWarrantyPieceTheOmsReceivedThatNetSuiteNeverDid() {
+        String scope = "GORJANA_WARRANTY_RECEIPT_SCOPE"
+        Map arrived = [returnId: "M247365", returnChannelEnumId: "AFTSHP_OL_WTY",
+                       items: [[returnItemSeqId: "00001", receivedQuantity: 0], [returnItemSeqId: "00002", receivedQuantity: 1]]]
+        assertEquals("CONC_ARRIVED_NOT_BOOKED", conclude(RECEIPT, scope, arrived, "MISSING_FROM_FILE_2"), "one item received is enough")
+        assertEquals("UNEXPLAINED", conclude(RECEIPT, scope, arrived + [items: [[receivedQuantity: 0]]], "MISSING_FROM_FILE_2"),
+                "nothing has arrived yet: not R11's")
+        assertEquals("UNEXPLAINED", conclude(RECEIPT, scope, arrived + [returnChannelEnumId: "POS_RTN_CHANNEL"], "MISSING_FROM_FILE_2"),
+                "a store return is not a warranty piece")
+        assertEquals("UNEXPLAINED", conclude(RECEIPT, scope, arrived - [items: arrived.items], "MISSING_FROM_FILE_2"),
+                "no items read (projected away) must never read as received")
     }
 
     @Test
@@ -153,7 +170,7 @@ class GorjanaMonthCloseChecksDataTests {
         return conclude(FILE, scope, record)
     }
 
-    private static String conclude(String file, String scope, Map record) {
+    private static String conclude(String file, String scope, Map record, String bucket = "FINDING") {
         Closure<List<Map>> scoped = { String name ->
             rows(file, name).findAll { it.attribute("compareScopeId") == scope }.collect { Node node ->
                 Map m = new LinkedHashMap(node.attributes())
@@ -167,6 +184,12 @@ class GorjanaMonthCloseChecksDataTests {
                 scoped("darpan.rule.RuleSetConclusionCondition"), labels)
         Map side = [presence: "KEPT", record: record, firstFieldPresence: "KEPT", firstFieldRecord: record]
         Map absent = [presence: "ABSENT", record: null, firstFieldPresence: "ABSENT", firstFieldRecord: null]
-        return FlatEvaluatorOracle.evaluate(rules, "FINDING", [FILE_1: side, FILE_2: absent]).code
+        // The production engine, not the frozen flat oracle: R11 reads a nested list field with quantifier ANY.
+        ConclusionTreeEngine engine = ConclusionTreeEngine.compile(rules)
+        try {
+            return engine.conclude([[bucket: bucket, sides: [FILE_1: side, FILE_2: absent]]])[0].code
+        } finally {
+            engine.close()
+        }
     }
 }

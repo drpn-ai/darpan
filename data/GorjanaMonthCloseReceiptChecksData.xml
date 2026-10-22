@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-097 — gorjana month close, comparison 5 (receipts): R11. R15 (store handovers) waits for the team (their Q6).
+
+  R11 "A warranty piece that arrives is booked, even when the claim is closed."
+     OMS warranty returns (OMS_RETURNS_GQL, by entry date) against NetSuite RMAs that HAVE a linked item receipt
+     (tools/netsuite-chain-config/gorjana-month-close-queries.xml, NS_RMA_RECEIVED), keyed by the HC return id. A return
+     missing on the NetSuite side whose items show a received quantity, on a warranty channel, is a piece that arrived
+     and was never booked: CONC_ARRIVED_NOT_BOOKED.
+
+  WHAT THIS CANNOT SEE. The cases behind R11 (gorjana-maarg prod-issues-scenarios.json iarr1-iarr4: M225164, M222926,
+  M222992, M247365) are arrivals AfterShip reported whose quantity the OMS never saved; neither the OMS nor NetSuite
+  knows the piece came back, and Darpan does not read AfterShip. This check catches the other half: the OMS saved the
+  arrival and NetSuite has no receipt (the item receipt failed, e.g. "Status change not allowed from Completed to
+  Authorized" after the claim closed).
+
+  The warranty channels are the HotWax return channels HotWax writes to NetSuite's custbody_hc_return_channel
+  (AfterShip warranty and Happiness Guarantee); a plain AfterShip, POS or admin return is not R11's.
+
+  automationId is blank on purpose: one automation per environment, two sources (FILE_1 OMS_RETURNS_GQL with
+  omsRestSourceConfigId gorjana_prod, FILE_2 NETSUITE_SUITEQL with nsSuiteQlSourceQueryId NS_RMA_RECEIVED).
+
+  NOT seed data - tenant configuration. Load per install, AFTER AuditSeedData.xml, GorjanaMonthCloseCatalogData.xml and
+  tools/netsuite-chain-config/gorjana-month-close-queries.xml:
+
+      ec.entity.makeDataLoader().location("component://darpan/data/GorjanaMonthCloseReceiptChecksData.xml").load()
+-->
+<entity-facade-xml type="darpan-tenant-config">
+
+    <moqui.basic.Enumeration enumId="CONC_ARRIVED_NOT_BOOKED" enumTypeId="DarpanConclusion" enumCode="CONC_ARRIVED_NOT_BOOKED" description="Arrived in the OMS, no item receipt in NetSuite"/>
+
+    <darpan.rule.RuleSet ruleSetId="GORJANA_WARRANTY_RECEIPT_RS" ruleSetName="Warranty arrivals - NetSuite item receipts"
+            description="Every warranty piece the OMS received has an item receipt on its NetSuite RMA."
+            version="1.0" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_WARRANTY_RECEIPT_SCOPE" ruleSetId="GORJANA_WARRANTY_RECEIPT_RS"
+            objectType="RETURN" scopeMode="COMPARE" description="Every warranty piece the OMS received has an item receipt on its NetSuite RMA."
+            companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_WARRANTY_RECEIPT_SCOPE" fileSide="FILE_1"
+            systemEnumId="OMS_RETURNS_GQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="returnId"
+            sourceConfigId="gorjana_prod" sourceConfigType="HOTWAX_OMS_GQL_RETURNS" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_WARRANTY_RECEIPT_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="returnId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_WARRANTY_RECEIPT_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="returnId"
+            sourceConfigId="NS_RMA_RECEIVED" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_WARRANTY_RECEIPT_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="returnId" companyUserGroupId="GORJANA"/>
+
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_WARRANTY_RECEIPT_SCOPE" sequenceNum="10" conclusionEnumId="CONC_ARRIVED_NOT_BOOKED" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_WARRANTY_RECEIPT_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="returnChannelEnumId" operator="IN" conditionValues="AFTSHP_HG_LOSS,AFTSHP_OL_WTY,AFTSHP_NO_POP,AFTSHP_HG_EMPL,AFTSHP_SCE_WTY,HAPPINESS_GUARANTEE" checkLabel="A warranty claim" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_WARRANTY_RECEIPT_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="items.receivedQuantity" operator="GT_ZERO" quantifier="ANY" checkLabel="The OMS received the piece" companyUserGroupId="GORJANA"/>
+
+    <darpan.audit.AuditCheck checkId="GORJANA_CHK_WARRANTY_RECEIPT" companyUserGroupId="GORJANA" checkCode="warranty-arrivals-without-receipt"
+            label="Warranty pieces the OMS received with no NetSuite item receipt" savedRunId="GORJANA_WARRANTY_RECEIPT_RS"
+            file1RecordType="return" graceDays="2"
+            matchedBy="return id (custbody_hc_return_id on the RMA; the receipt by link)"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Warranty return {return} arrived in the OMS and has no NetSuite item receipt"
+            fixActionTemplate="Receive return {return}'s piece in NetSuite (an item receipt on its RMA, at the damage location with QC), even if the claim is closed."
+            passesWhenTemplate="Return {return}'s RMA carries an item receipt."/>
+    <darpan.audit.AuditStatementCheck statementId="GORJANA_R11" checkId="GORJANA_CHK_WARRANTY_RECEIPT" companyUserGroupId="GORJANA"
+            sequenceNum="1" diffTypes="MISSING_IN_FILE_2" conclusionCodes="CONC_ARRIVED_NOT_BOOKED"/>
+
+</entity-facade-xml>

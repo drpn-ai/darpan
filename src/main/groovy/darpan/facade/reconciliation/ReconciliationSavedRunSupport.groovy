@@ -831,6 +831,13 @@ class ReconciliationSavedRunSupport {
             if (fieldName) keepFields.add(fieldName)
         }
         keepFields.addAll(ruleKeepFields)
+        // DAR-BE-097: the fields this side's conclusion conditions read. Projected away, a condition sees a blank: a
+        // NOT_BLANK / IN never fires and a BLANK fires on every record.
+        TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetConclusionCondition")
+                .condition("compareScopeId", compareScopeId).condition("subject", fileSide).useCache(false).list().each { Object row ->
+            String fieldName = topLevelRecordField(normalize(row.fieldExpression))
+            if (fieldName) keepFields.add(fieldName)
+        }
         return keepFields ? new ArrayList<String>(keepFields) : null
     }
 

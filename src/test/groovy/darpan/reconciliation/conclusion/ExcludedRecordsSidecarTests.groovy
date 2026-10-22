@@ -81,4 +81,22 @@ class ExcludedRecordsSidecarTests {
         ExcludedRecordsSidecar.merge(into, null)
         assertEquals(0, into.total)
     }
+
+    // Security review 2026-10-22: the spill holds customer records, so it is owner-only and gone once written.
+    @Test
+    void theSpillIsOwnerOnlyAndDeletedOnceWritten() {
+        Map c = ExcludedRecordsSidecar.newCollector()
+        ExcludedRecordsSidecar.collect(c, [orderId: "M1"], RULE)
+        File spill = (File) c.spill
+        if (java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
+            assertEquals("rw-------", java.nio.file.attribute.PosixFilePermissions.toString(java.nio.file.Files.getPosixFilePermissions(spill.toPath())))
+        }
+        ExcludedRecordsSidecar.write(new File(dir, "ns.excluded.json"), c, "ns.json")
+        assertFalse(spill.exists(), "written, then deleted")
+        Map other = ExcludedRecordsSidecar.newCollector()
+        ExcludedRecordsSidecar.collect(other, [orderId: "M2"], RULE)
+        File otherSpill = (File) other.spill
+        ExcludedRecordsSidecar.discard(other)
+        assertFalse(otherSpill.exists(), "an extract that fails discards it")
+    }
 }

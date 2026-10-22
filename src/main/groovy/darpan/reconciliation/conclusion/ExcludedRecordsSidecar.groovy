@@ -180,7 +180,9 @@ class ExcludedRecordsSidecar {
     private static void appendLine(Map collector, String line) {
         Writer writer = (Writer) collector.writer
         if (writer == null) {
-            File spill = File.createTempFile("excluded-", ".jsonl")
+            // Owner-only (0600 on POSIX): the spill holds customer records. Deleted when written or discarded; every
+            // extract path discards its collector in a finally, deleteOnExit is the last resort.
+            File spill = Files.createTempFile("excluded-", ".jsonl").toFile()
             spill.deleteOnExit()
             collector.spill = spill
             writer = Files.newBufferedWriter(spill.toPath(), StandardCharsets.UTF_8)

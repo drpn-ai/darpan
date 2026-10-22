@@ -202,6 +202,11 @@
             <description>DAR-BE-092. Narrows the rows to these conclusion codes (comma-separated). Blank: any conclusion,
                 or none.</description>
         </field>
+        <field name="ruleIds" type="text-medium">
+            <description>DAR-BE-095. Narrows the rows to those these rules raised (comma-separated rule ids, the
+                FIELD_MISMATCH row's ruleId), so one compare with several field rules serves several statements. Blank:
+                any rule, or none.</description>
+        </field>
         <relationship type="one" related="darpan.audit.AuditStatement" fk-name="AUDSC_STATEMENT">
             <key-map field-name="statementId"/>
         </relationship>

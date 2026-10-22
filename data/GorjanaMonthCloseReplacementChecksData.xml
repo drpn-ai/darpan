@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-094 (R14) and DAR-BE-095 (R13) — gorjana month close: an exchange or warranty credit memo against its
+  replacement order. One compare, two field rules, two checks (one per statement, each with its own headline).
+
+  The pair. HotWax writes the replacement SalesOrd (otherrefnum EXC-#<order>-n for an exchange, WTY-#<order>-n for a
+  warranty claim) with custbody_hc_exchange_credit_memo_id = the credit memo's internal id. So FILE_1 is every exchange
+  credit memo (custbody_hc_outcome Exchange, warranty claims included) keyed by its id, FILE_2 every SalesOrd that
+  names a memo, keyed by that id (tools/netsuite-chain-config/gorjana-month-close-queries.xml, NS_EXCHANGE_MEMO /
+  NS_REPLACEMENT_ORDER). Only a pair both sides hold is judged: a memo whose replacement falls outside the window is a
+  missing row, which no statement links, never a finding.
+
+  R14 "Every exchange credit belongs to a customer. When the shopper gave none, it belongs to the store's own customer."
+     Case i406 (memo CM7653568 on a real shopper, the exchange SO on the store customer) and i408a (memo on the original
+     buyer, the replacement under a new customer): the memo and its replacement order have ONE customer. Rule
+     GORJANA_MR_SAME_CUSTOMER, customerId = customerId.
+  R13 "A return is never treated as replaced by the order it came from." Case i472 (M247232 got its own original order
+     M1077985 as replacement). Rule GORJANA_MR_NOT_OWN_ORIGINAL: the memo's order (the return's original order) differs
+     from the replacement's. Each side projects NVL(custbody_hc_order_id, <a sentinel of its own>), so two blanks never
+     compare equal; a memo with no order id (3,196 of 12,361 exchange memos, Oct 1-20) cannot be judged and is not.
+
+  Measured on gorjana production, September RMAs (tools/live-probes/NsMonthCloseOrdersProbe.groovy, warrantySizing):
+     exchange memo + replacement pairs 17,954: other customer 4, own original order 1
+     warranty memo + replacement pairs 10,443: other customer 4, own original order 1
+  A memo two replacement orders name (5 in September, e.g. memo 79461661) is a DUPLICATE_IN_FILE_2 row
+  (duplicateKeyHandling FINDING): kept in the run's document, never compared field by field, and linked to no statement
+  here. One credit paying two replacements belongs with R12 once its value rule exists.
+  R12 (the claim's value) is NOT here: memo != claim on 1,510 of 13,313 warranty claims and replacement total != memo on
+  4,633 of 10,443, far too many to be defects, so the value rule waits until the claim's value is pinned (DAR-BE-095).
+
+  A FIELD_MISMATCH row carries its key, the field and both values but NO record (RuleDiffSupport.normalizeDiff leaves
+  data empty), so these findings name the memo by its NetSuite internal id (the compare key), not its tranId. Filling
+  data on mismatch rows is a change to the shared compare (follow-up, DAR-BE-095).
+
+  automationId is blank on purpose: ONE automation per environment runs this compare and carries both checks (prod-owed).
+
+  NOT seed data - tenant configuration. Load per install, AFTER AuditSeedData.xml, GorjanaMonthCloseCatalogData.xml and
+  tools/netsuite-chain-config/gorjana-month-close-queries.xml (the rule set names those query rows):
+
+      ec.entity.makeDataLoader().location("component://darpan/data/GorjanaMonthCloseReplacementChecksData.xml").load()
+-->
+<entity-facade-xml type="darpan-tenant-config">
+
+    <darpan.rule.RuleSet ruleSetId="GORJANA_MEMO_REPLACEMENT_RS" ruleSetName="Exchange credit memos - replacement orders"
+            description="Every exchange or warranty credit memo against the replacement order that names it: one customer, and not the return's own original order."
+            version="1.0" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_MEMO_REPLACEMENT_SCOPE" ruleSetId="GORJANA_MEMO_REPLACEMENT_RS"
+            objectType="CREDIT_MEMO" scopeMode="COMPARE"
+            description="Every exchange or warranty credit memo against the replacement order that names it: one customer, and not the return's own original order."
+            companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_MEMO_REPLACEMENT_SCOPE" fileSide="FILE_1"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="memoId"
+            sourceConfigId="NS_EXCHANGE_MEMO" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_MEMO_REPLACEMENT_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="memoId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_MEMO_REPLACEMENT_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="memoId"
+            sourceConfigId="NS_REPLACEMENT_ORDER" sourceConfigType="NETSUITE_SUITEQL" duplicateKeyHandling="FINDING" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_MEMO_REPLACEMENT_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="memoId" companyUserGroupId="GORJANA"/>
+
+    <!-- Structured FIELD_COMPARISONs whose ruleLogic is EXACTLY FieldComparisonRuleLogicGenerator's output
+         (GorjanaMonthCloseChecksDataTests pins it). -->
+    <darpan.rule.Rule ruleId="GORJANA_MR_SAME_CUSTOMER" ruleSetId="GORJANA_MEMO_REPLACEMENT_RS" sequenceNum="10"
+            ruleText="customerId = customerId" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN"
+            companyUserGroupId="GORJANA">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"customerId","file2FieldPath":"customerId","operator":"="}</expression>
+        <ruleLogic><![CDATA[rule "GORJANA_MR_SAME_CUSTOMER"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(!java.util.Objects.equals(((Map) $m.get("file1")).get("customerId"), ((Map) $m.get("file2")).get("customerId")))
+then
+    Object _file1Value = ((Map) $m.get("file1")).get("customerId");
+    Object _file2Value = ((Map) $m.get("file2")).get("customerId");
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "customerId = customerId",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: customerId = customerId"
+    );
+end]]></ruleLogic>
+    </darpan.rule.Rule>
+    <darpan.rule.Rule ruleId="GORJANA_MR_NOT_OWN_ORIGINAL" ruleSetId="GORJANA_MEMO_REPLACEMENT_RS" sequenceNum="20"
+            ruleText="orderId != orderId" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN"
+            companyUserGroupId="GORJANA">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"orderId","file2FieldPath":"orderId","operator":"!="}</expression>
+        <ruleLogic><![CDATA[rule "GORJANA_MR_NOT_OWN_ORIGINAL"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(java.util.Objects.equals(((Map) $m.get("file1")).get("orderId"), ((Map) $m.get("file2")).get("orderId")))
+then
+    Object _file1Value = ((Map) $m.get("file1")).get("orderId");
+    Object _file2Value = ((Map) $m.get("file2")).get("orderId");
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "orderId != orderId",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: orderId != orderId"
+    );
+end]]></ruleLogic>
+    </darpan.rule.Rule>
+
+    <!-- R13, second shape: the "replacement" is a pre-existing order more than a year older than the memo (the memo id
+         written onto an old order). Day numbers: the memo's date minus 365 days <= the order's date, else a mismatch. -->
+    <darpan.rule.Rule ruleId="GORJANA_MR_NOT_YEAR_OLDER" ruleSetId="GORJANA_MEMO_REPLACEMENT_RS" sequenceNum="30"
+            ruleText="yearBeforeDay &lt;= dayNumber" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN"
+            companyUserGroupId="GORJANA">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"yearBeforeDay","file2FieldPath":"dayNumber","operator":"&lt;=","preActions":[{"fieldSide":"file1","action":"STRING_TO_INT"},{"fieldSide":"file2","action":"STRING_TO_INT"}]}</expression>
+        <ruleLogic><![CDATA[rule "GORJANA_MR_NOT_YEAR_OLDER"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get("file1")).get("yearBeforeDay"), java.util.Arrays.asList("STRING_TO_INT")), reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get("file2")).get("dayNumber"), java.util.Arrays.asList("STRING_TO_INT")), "<="))
+then
+    Object _file1Value = reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get("file1")).get("yearBeforeDay"), java.util.Arrays.asList("STRING_TO_INT"));
+    Object _file2Value = reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get("file2")).get("dayNumber"), java.util.Arrays.asList("STRING_TO_INT"));
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "yearBeforeDay <= dayNumber",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: yearBeforeDay <= dayNumber"
+    );
+end]]></ruleLogic>
+    </darpan.rule.Rule>
+
+    <!-- ================================================================ The checks: one compare, one automation -->
+    <darpan.audit.AuditCheck checkId="GORJANA_CHK_REPLACEMENT_CUSTOMER" companyUserGroupId="GORJANA" checkCode="exchange-credits-on-another-customer"
+            label="Exchange credit memos whose replacement order is under another customer" savedRunId="GORJANA_MEMO_REPLACEMENT_RS"
+            file1RecordType="creditMemo" graceDays="1"
+            matchedBy="credit memo id (custbody_hc_exchange_credit_memo_id on the replacement order)"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Credit memo id {creditMemo} and its replacement order are under different customers"
+            fixActionTemplate="Move the credit memo with internal id {creditMemo} to its replacement order's customer (the store's own customer when the shopper gave none)."
+            passesWhenTemplate="The credit memo with internal id {creditMemo} and its replacement order have the same customer."/>
+    <darpan.audit.AuditCheck checkId="GORJANA_CHK_REPLACEMENT_NOT_ORIGINAL" companyUserGroupId="GORJANA" checkCode="returns-replaced-by-their-own-order"
+            label="Exchange credit memos whose replacement is an existing order (its own original, or a year older)" savedRunId="GORJANA_MEMO_REPLACEMENT_RS"
+            file1RecordType="creditMemo" graceDays="1"
+            matchedBy="credit memo id (custbody_hc_exchange_credit_memo_id on the replacement order)"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Credit memo id {creditMemo} names an existing order as its replacement"
+            fixActionTemplate="Unlink the credit memo with internal id {creditMemo} from the original order and apply it to the return's own replacement order."
+            passesWhenTemplate="The replacement of the credit memo with internal id {creditMemo} is a new order, not the one the return came from."/>
+
+    <darpan.audit.AuditStatementCheck statementId="GORJANA_R14" checkId="GORJANA_CHK_REPLACEMENT_CUSTOMER" companyUserGroupId="GORJANA"
+            sequenceNum="1" diffTypes="FIELD_MISMATCH" ruleIds="GORJANA_MR_SAME_CUSTOMER"/>
+    <darpan.audit.AuditStatementCheck statementId="GORJANA_R13" checkId="GORJANA_CHK_REPLACEMENT_NOT_ORIGINAL" companyUserGroupId="GORJANA"
+            sequenceNum="1" diffTypes="FIELD_MISMATCH" ruleIds="GORJANA_MR_NOT_OWN_ORIGINAL,GORJANA_MR_NOT_YEAR_OLDER"/>
+
+</entity-facade-xml>

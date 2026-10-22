@@ -1,0 +1,6 @@
+{"records": [
+  {"memoId": "81000101", "tranId": "CM9000101", "internalId": "81000101", "returnId": "M300101", "customerId": "5001", "orderId": "GR1000101", "status": "Credit Memo : Fully Applied", "tranDate": "2026-10-13", "yearBeforeDay": "2460962"},
+  {"memoId": "81000102", "tranId": "CM9000102", "internalId": "81000102", "returnId": "M300102", "customerId": "5002", "orderId": "GR1000102", "status": "Credit Memo : Fully Applied", "tranDate": "2026-10-13", "yearBeforeDay": "2460962"},
+  {"memoId": "81000103", "tranId": "CM9000103", "internalId": "81000103", "returnId": "M300103", "customerId": "5003", "orderId": "NO_ORDER_ON_MEMO", "status": "Credit Memo : Open", "tranDate": "2026-10-14", "yearBeforeDay": "2460963"},
+  {"memoId": "81000104", "tranId": "CM9000104", "internalId": "81000104", "returnId": "M300104", "customerId": "5004", "orderId": "GR1000104", "status": "Credit Memo : Fully Applied", "tranDate": "2026-10-14", "yearBeforeDay": "2460963"}
+]}

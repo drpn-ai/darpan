@@ -190,7 +190,8 @@ class AuditAutomationSupport {
 
     /**
      * The check's findings in one diff document: a row breaks a statement when its type is in the link's diffTypes
-     * (blank: any) and its conclusion code is in the link's conclusionCodes (blank: any). One finding per statement and
+     * (blank: any), its conclusion code is in the link's conclusionCodes (blank: any) and the rule that raised it is in
+     * the link's ruleIds (blank: any; DAR-BE-095). One finding per statement and
      * record; the row's record lives on the side(s) its type names.
      */
     static List<Map> findingsFrom(def ec, String tenantId, Map check, File diff, def file1Source, def file2Source) {
@@ -209,21 +210,24 @@ class AuditAutomationSupport {
                        conclusionLabel: raw.conclusion instanceof Map ? normalize(((Map) raw.conclusion).label) : null]
             String type = row.type as String
             String code = (raw.conclusion instanceof Map ? ((Map) raw.conclusion).code : null) as String
+            String ruleId = normalize(raw.ruleId)
             links.each { Map link ->
                 // Qualified: from a closure nested in a closure, Groovy resolves a bare static call through the outer
                 // closure's metaclass and fails with "argument type mismatch".
                 if (!AuditAutomationSupport.matches(link.diffTypes as String, type) ||
-                        !AuditAutomationSupport.matches(link.conclusionCodes as String, code)) return
+                        !AuditAutomationSupport.matches(link.conclusionCodes as String, code) ||
+                        !AuditAutomationSupport.matches(link.ruleIds as String, ruleId)) return
                 String statementCode = codeById[link.statementId as String]
                 String recordKey = row.id as String
                 if (!statementCode || !recordKey) return
+                List<Map> records = AuditAutomationSupport.recordsOf(check, row, file1Source, file2Source)
                 byKey.putIfAbsent("${statementCode}|${recordKey}".toString(), [
                         statementCode   : statementCode,
                         recordKey       : recordKey,
-                        headline        : AuditAutomationSupport.headline(check, row),
+                        headline        : AuditAutomationSupport.headline(check, row, records),
                         ruleText        : row.note,
                         conclusionEnumId: AuditAutomationSupport.conclusionEnumId(ec, code),
-                        records         : AuditAutomationSupport.recordsOf(check, row, file1Source, file2Source)])
+                        records         : records])
             }
         }
         return byKey.values() as List<Map>
@@ -235,9 +239,11 @@ class AuditAutomationSupport {
     }
 
     /**
-     * The row's record in each system it names. internalId is the system's own key from the record the row carries
-     * (its `internalId` field, when it differs from the id a person searches by); the row carries ONE record, on the
-     * side RunConclusionSupport reads it from. recordStatus is the conclusion step's evidence state for that side:
+     * The row's record in each system it names. The row carries ONE record, on the side RunConclusionSupport reads it
+     * from: there the id is the one a person searches by (its `tranId`, when the record has one and the compare keyed on
+     * something else; DAR-BE-095) and internalId is the system's own key (its `internalId`, else the compare key) when it
+     * differs. A check that names a record type for one side only lists that side: the other side's own id is not on the
+     * row. recordStatus is the conclusion step's evidence state for that side:
      * the connector's state field in its labels, so it reads in that system's words. A check with no conclusions
      * has no evidence, and its records no status.
      */
@@ -248,17 +254,22 @@ class AuditAutomationSupport {
                 type?.startsWith("DUPLICATE_IN_FILE_1") ? ["FILE_1"] :
                 type?.startsWith("DUPLICATE_IN_FILE_2") ? ["FILE_2"] : ["FILE_1", "FILE_2"]
         String dataSide = type == "MISSING_IN_FILE_1" || type?.startsWith("DUPLICATE_IN_FILE_2") ? "FILE_2" : "FILE_1"
-        String recordId = AuditReportAssembler.displayKey(row.id as String)
+        String key = AuditReportAssembler.displayKey(row.id as String)
+        boolean typed = normalize(check.file1RecordType) || normalize(check.file2RecordType)
         return sides.collect { String side ->
             def source = side == "FILE_1" ? file1Source : file2Source
-            String internalId = side == dataSide ? normalize(((Map) row.data)?.get("internalId")) : null
+            String recordType = normalize(side == "FILE_1" ? check.file1RecordType : check.file2RecordType)
+            if (typed && !recordType) return null
+            Map data = side == dataSide ? (Map) row.data : null
+            String recordId = normalize(data?.get("tranId")) ?: key
+            String internalId = normalize(data?.get("internalId")) ?: (recordId != key ? key : null)
             Map evidence = ((row.systems ?: []) as List).find { it instanceof Map && it.side == side } as Map
             [systemEnumId: normalize(readField(source, "systemEnumId")),
-             recordType  : normalize(side == "FILE_1" ? check.file1RecordType : check.file2RecordType) ?: "record",
+             recordType  : recordType ?: "record",
              recordId    : recordId,
              internalId  : internalId == recordId ? null : internalId,
              recordStatus: normalize(evidence?.state)]
-        }.findAll { it.systemEnumId }
+        }.findAll { it?.systemEnumId }
     }
 
     /** A row's `data` is the record as a JSON string on disk, a Map in memory; anything else reads as no record. */
@@ -275,12 +286,15 @@ class AuditAutomationSupport {
 
     /**
      * The check's headline template filled from the row ({recordKey}, {note}, {type}, and {conclusion}: the row's
-     * conclusion label), else the row's own note; one line, at most 120 characters.
+     * conclusion label) and its records ({<recordType>}: that record's id, as fix texts take them), else the row's own
+     * note; one line, at most 120 characters.
      */
-    static String headline(Map check, Map row) {
-        String filled = AuditReportAssembler.fillTemplate(check.headlineTemplate as String,
-                [recordKey: AuditReportAssembler.displayKey(row.id as String), note: normalize(row.note), type: row.type as String,
-                 conclusion: normalize(row.conclusionLabel)])
+    static String headline(Map check, Map row, List<Map> records = []) {
+        Map<String, String> values = [:]
+        (records ?: []).each { Map r -> values.putIfAbsent(r.recordType as String, r.recordId as String) }
+        values.putAll([recordKey: AuditReportAssembler.displayKey(row.id as String), note: normalize(row.note), type: row.type as String,
+                       conclusion: normalize(row.conclusionLabel)])
+        String filled = AuditReportAssembler.fillTemplate(check.headlineTemplate as String, values)
         String text = filled ?: "${AuditReportAssembler.displayKey(row.id as String)}: ${normalize(row.note) ?: row.type}".toString()
         text = text.replaceAll(/\s+/, " ").trim().replaceAll(/\.+$/, "")
         return text.length() > 120 ? text.take(119).trim() + "…" : text

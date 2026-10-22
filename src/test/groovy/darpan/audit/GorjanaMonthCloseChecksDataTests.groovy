@@ -1,6 +1,7 @@
 package darpan.audit
 
 import darpan.facade.reconciliation.RunConclusionStep
+import reconciliation.rule.FieldComparisonRuleLogicGenerator
 import darpan.reconciliation.conclusion.FlatEvaluatorOracle
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.xml.XmlParser
@@ -22,6 +23,8 @@ class GorjanaMonthCloseChecksDataTests {
     private static final String FILE = "GorjanaMonthCloseChecksData.xml"
     /** DAR-BE-094: comparison 1, the returns checks (R9 so far). */
     private static final String RETURNS = "GorjanaMonthCloseReturnsChecksData.xml"
+    /** DAR-BE-094 R14 / DAR-BE-095 R13: exchange credit memos against their replacement orders. */
+    private static final String REPLACEMENT = "GorjanaMonthCloseReplacementChecksData.xml"
 
     private static Path dataDir() {
         return ReconciliationSmokeTestSupport.resolveBackendRoot().resolve("runtime/component/darpan/data")
@@ -41,16 +44,44 @@ class GorjanaMonthCloseChecksDataTests {
 
     @Test
     void theFileIsTenantConfigurationNotSeed() {
-        [FILE, RETURNS].each { assertEquals("darpan-tenant-config", doc(it).attribute("type"), it) }
+        [FILE, RETURNS, REPLACEMENT].each { assertEquals("darpan-tenant-config", doc(it).attribute("type"), it) }
     }
 
     @Test
     void everyReferenceResolves() {
-        [FILE, RETURNS].each { everyReferenceResolvesIn(it) }
+        [FILE, RETURNS, REPLACEMENT].each { everyReferenceResolvesIn(it) }
         assertEquals(["GORJANA_R1", "GORJANA_R2", "GORJANA_R3"] as Set, attr(rows(FILE, "darpan.audit.AuditStatementCheck"), "statementId"),
                 "comparison 2 covers R1-R3")
         assertEquals(["GORJANA_R9"] as Set, attr(rows(RETURNS, "darpan.audit.AuditStatementCheck"), "statementId"),
                 "comparison 1 covers R9 so far")
+        assertEquals(["GORJANA_R13", "GORJANA_R14"] as Set, attr(rows(REPLACEMENT, "darpan.audit.AuditStatementCheck"), "statementId"))
+    }
+
+    @Test
+    void eachReplacementStatementTakesOnlyItsOwnRulesMismatches() {
+        Set<String> rules = attr(rows(REPLACEMENT, "darpan.rule.Rule"), "ruleId")
+        Map<String, String> byStatement = rows(REPLACEMENT, "darpan.audit.AuditStatementCheck")
+                .collectEntries { [(it.attribute("statementId")): it.attribute("ruleIds")] }
+        assertEquals([GORJANA_R14: "GORJANA_MR_SAME_CUSTOMER", GORJANA_R13: "GORJANA_MR_NOT_OWN_ORIGINAL,GORJANA_MR_NOT_YEAR_OLDER"], byStatement)
+        assertTrue(rules.containsAll(byStatement.values().collectMany { it.split(",") as List }), "a link names rules the rule set has")
+        rows(REPLACEMENT, "darpan.audit.AuditStatementCheck").each { assertEquals("FIELD_MISMATCH", it.attribute("diffTypes")) }
+        // Both checks are one compare, so one automation runs them.
+        assertEquals(["GORJANA_MEMO_REPLACEMENT_RS"] as Set, attr(rows(REPLACEMENT, "darpan.audit.AuditCheck"), "savedRunId"))
+    }
+
+    @Test
+    void storedReplacementDrlIsExactlyWhatTheGeneratorMakes() {
+        List<Node> sources = rows(REPLACEMENT, "darpan.rule.RuleSetCompareSource")
+        String key1 = sources.find { it.attribute("fileSide") == "FILE_1" }.attribute("primaryIdExpression")
+        String key2 = sources.find { it.attribute("fileSide") == "FILE_2" }.attribute("primaryIdExpression")
+        rows(REPLACEMENT, "darpan.rule.Rule").eachWithIndex { Node rule, int i ->
+            String expression = (rule.children().find { it instanceof Node && it.name() == "expression" } as Node).text()
+            String stored = (rule.children().find { it instanceof Node && it.name() == "ruleLogic" } as Node).text().trim()
+            String expected = FieldComparisonRuleLogicGenerator.generate(expression, key1, key2, rule.attribute("ruleId") as String,
+                    rule.attribute("severity") as String, i)
+            if (expected != stored) println "EXPECTED_DRL|${rule.attribute('ruleId')}|" + expected.bytes.encodeBase64().toString()
+            assertEquals(expected, stored, rule.attribute("ruleId") as String)
+        }
     }
 
     private static void everyReferenceResolvesIn(String file) {
@@ -67,7 +98,9 @@ class GorjanaMonthCloseChecksDataTests {
             assertEquals("GORJANA", c.attribute("companyUserGroupId"), "${id} tenant")
             assertTrue(ruleSets.contains(c.attribute("savedRunId") as String), "${id} names an unknown saved run")
             assertTrue(c.attribute("fixWhereEnumId") in ["OMS", "NETSUITE", "SHOPIFY"], "${id} fixWhere must be a root system")
-            assertTrue((c.attribute("headlineTemplate") as String).contains("{recordKey}"), "${id} headline names the record")
+            String headline = c.attribute("headlineTemplate") as String
+            List<String> names = ["{recordKey}"] + ["file1RecordType", "file2RecordType"].collect { c.attribute(it) }.findAll { it }.collect { "{${it}}".toString() }
+            assertTrue(names.any { headline.contains(it) }, "${id} headline names the record (${names})")
             // Automations are created per environment; an id here would be a dangling FK on load.
             assertEquals(null, c.attribute("automationId"), "${id} must not carry an automationId")
             assertFalse(links.findAll { it.attribute("checkId") == id }.isEmpty(), "${id} tests no statement")

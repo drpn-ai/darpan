@@ -197,6 +197,42 @@ class AuditAutomationSmokeTests {
     }
 
     @Test
+    void aLinkCanNameTheRulesWhoseMismatchesBreakItsStatement() {
+        // DAR-BE-095: one compare, two field rules, two statements. A link's ruleIds picks its rule's FIELD_MISMATCH rows.
+        statement("TAUTO_R14", AUDIT, "R14")
+        statement("TAUTO_R13", AUDIT, "R13")
+        insert("darpan.audit.AuditCheck", [checkId: "TAUTO_PAIR", companyUserGroupId: TENANT, checkCode: "memo-vs-replacement",
+                label: "memo against replacement", file1RecordType: "creditMemo", file2RecordType: "salesOrder"])
+        insert("darpan.audit.AuditStatementCheck", [checkId: "TAUTO_PAIR", statementId: "TAUTO_R14", companyUserGroupId: TENANT,
+                sequenceNum: 1L, diffTypes: "FIELD_MISMATCH", ruleIds: "RULE_SAME_CUSTOMER"])
+        insert("darpan.audit.AuditStatementCheck", [checkId: "TAUTO_PAIR", statementId: "TAUTO_R13", companyUserGroupId: TENANT,
+                sequenceNum: 2L, diffTypes: "FIELD_MISMATCH", ruleIds: "RULE_NOT_OWN_ORIGINAL, RULE_OTHER"])
+        Map customer = row("FIELD_MISMATCH", "80443722", "customer differs") + [ruleId: "RULE_SAME_CUSTOMER"]
+        Map original = row("FIELD_MISMATCH", "80443999", "replacement is the original order") + [ruleId: "RULE_NOT_OWN_ORIGINAL"]
+        Map amount = row("FIELD_MISMATCH", "80443000", "amount differs") + [ruleId: "RULE_AMOUNT"]
+        List<Map> found = AuditAutomationSupport.findingsFrom(ec, TENANT, [checkId: "TAUTO_PAIR", file1RecordType: "creditMemo",
+                file2RecordType: "salesOrder"], new File(diff("pair", [customer, original, amount])), nsSource, nsSource)
+        assertEquals([["R14", "80443722"], ["R13", "80443999"]], found.collect { [it.statementCode, it.recordKey] },
+                "each rule's rows break only its statement; a rule no link names breaks nothing")
+        assertEquals(true, AuditAutomationSupport.matches(null, "ANY_RULE"), "a blank ruleIds takes every rule")
+    }
+
+    @Test
+    void aRecordIsNamedByTheIdAPersonSearchesByAndOnlyOnTheSidesTheCheckNames() {
+        // DAR-BE-095: the compare's key is the memo's internal id; the memo is CM7650999 to a person. The replacement
+        // order's own id is not on the row, so a check that names no FILE_2 record type lists the memo alone.
+        Map check = [checkId: "X", file1RecordType: "creditMemo", headlineTemplate: "Credit memo {creditMemo} and its replacement differ"]
+        Map row = [type: "FIELD_MISMATCH", id: "80443722", data: [tranId: "CM7650999", internalId: "80443722"],
+                   systems: [[side: "FILE_1", state: "Credit Memo : Fully Applied"]]]
+        List<Map> recs = AuditAutomationSupport.recordsOf(check, row, nsSource, nsSource)
+        assertEquals([["creditMemo", "CM7650999", "80443722", "Credit Memo : Fully Applied"]],
+                recs.collect { [it.recordType, it.recordId, it.internalId, it.recordStatus] })
+        assertEquals("Credit memo CM7650999 and its replacement differ", AuditAutomationSupport.headline(check, row, recs))
+        // A check with no record types at all still lists both sides, as before.
+        assertEquals(["record", "record"], AuditAutomationSupport.recordsOf([checkId: "Y"], [type: "RULE", id: "K1"], omsSource, nsSource)*.recordType)
+    }
+
+    @Test
     void aHeadlineCanNameTheRowsConclusion() {
         Map check = [checkId: "X", headlineTemplate: "RMA {recordKey}: {conclusion}"]
         assertEquals("RMA RMA348610: No address it came from", AuditAutomationSupport.headline(check,

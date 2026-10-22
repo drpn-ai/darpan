@@ -1,0 +1,6 @@
+{"records": [
+  {"memoId": "81000101", "tranId": "SO9000101", "otherRef": "EXC-#GOR100101-1", "customerId": "7777", "orderId": "M1000101", "status": "Sales Order : Billed", "tranDate": "2026-10-13", "dayNumber": "2461327"},
+  {"memoId": "81000102", "tranId": "SO9000102", "otherRef": "WTY-#GOR100102-1", "customerId": "5002", "orderId": "GR1000102", "status": "Sales Order : Billed", "tranDate": "2026-10-13", "dayNumber": "2461327"},
+  {"memoId": "81000103", "tranId": "SO9000103", "otherRef": "EXC-#GOR100103-1", "customerId": "5003", "orderId": "NO_ORDER_ON_REPLACEMENT", "status": "Sales Order : Pending Fulfillment", "tranDate": "2026-10-14", "dayNumber": "2461328"},
+  {"memoId": "81000104", "tranId": "SO1000104", "otherRef": "#GOR777104", "customerId": "5004", "orderId": "M0777104", "status": "Sales Order : Billed", "tranDate": "2023-03-02", "dayNumber": "2460006"}
+]}

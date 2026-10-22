@@ -55,7 +55,8 @@ class GorjanaMonthCloseMorningsSmokeTests {
                 "component://darpan/data/TriSystemOrderRunsRuleSetData.xml",
                 "component://darpan/data/GorjanaConclusionRulesData.xml",
                 "component://darpan/data/GorjanaMonthCloseCatalogData.xml",
-                "component://darpan/data/GorjanaMonthCloseChecksData.xml")
+                "component://darpan/data/GorjanaMonthCloseChecksData.xml",
+                "component://darpan/data/GorjanaMonthCloseReplacementChecksData.xml")
         // The loader rolls a file back on a referential failure and still reports a count: prove the rows.
         assertEquals("GORJANA_INVOICE_ETAIL_RS", find("darpan.audit.AuditCheck", [checkId: CHECK])?.savedRunId)
         assertEquals(TENANT, find("darpan.rule.RuleSetConclusionRule",
@@ -142,6 +143,64 @@ class GorjanaMonthCloseMorningsSmokeTests {
                     scheduledFireTime: Timestamp.from(LocalDateTime.parse("2026-10-14T06:00:00").atZone(LA).toInstant())])
         }
         assertTrue(refused.message.contains("EVALUATE scope, which takes one source"), refused.message)
+    }
+
+    /**
+     * DAR-BE-094 / DAR-BE-095: one two-sided compare (exchange credit memos against the replacement orders that name
+     * them), two field rules, two checks on ONE automation. Each statement takes only its own rule's mismatches.
+     *   memo 81000101  replacement under another customer           -> R14
+     *   memo 81000102  replacement is the return's original order   -> R13
+     *   memo 81000103  neither side has an order id (two sentinels) -> nothing
+     *   memo 81000104  its "replacement" is a 2023 order               -> R13 (the year-older rule)
+     */
+    @Test
+    void oneCompareServesR14AndR13ThroughTheirOwnRules() {
+        String auto = "GORJANA_AUTO_MEMO_REPLACEMENT"
+        Timestamp now = ec.user.nowTimestamp
+        upsert("darpan.reconciliation.ReconciliationAutomation", [automationId: auto], [automationId: auto,
+                automationName: "Month close: exchange credits against replacements", companyUserGroupId: TENANT,
+                inputModeEnumId: AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE,
+                savedRunId: "GORJANA_MEMO_REPLACEMENT_RS", savedRunType: "ruleset", ruleSetId: "GORJANA_MEMO_REPLACEMENT_RS",
+                compareScopeId: "GORJANA_MEMO_REPLACEMENT_SCOPE", relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
+                relativeWindowCount: 1, windowTimeZone: "America/Los_Angeles", isActive: "Y", createdDate: now, lastUpdatedDate: now])
+        ["FILE_1", "FILE_2"].each { String side ->
+            upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: auto, fileSide: side], [
+                    automationId: auto, fileSide: side, companyUserGroupId: TENANT,
+                    sourceTypeEnumId: AutomationExecutionSupport.AUTOMATION_SOURCE_API, systemEnumId: "NETSUITE_SUITEQL",
+                    fileTypeEnumId: "DftJson", createdDate: now, lastUpdatedDate: now])
+        }
+        ["GORJANA_CHK_REPLACEMENT_CUSTOMER", "GORJANA_CHK_REPLACEMENT_NOT_ORIGINAL"].each { String id ->
+            def c = ec.entity.find("darpan.audit.AuditCheck").condition("checkId", id).disableAuthz().useCache(false).one()
+            c.set("automationId", auto); c.update()
+        }
+        AutomationExecutionSupport.resetExecutionHooks()
+        AutomationExecutionSupport.setSourceExtractor { def ignoredEc, def ignoredAutomation, def source,
+                Map<String, Object> ignoredWindow, Map<String, Object> ignoredParams ->
+            boolean memos = source.get("fileSide") == "FILE_1"
+            return [dataAvailable: true, fileTypeEnumId: "DftJson", recordCount: 4,
+                    fileLocation: "component://darpan/data/test/gorjana-${memos ? 'exchange-memos' : 'replacement-orders'}.json".toString(),
+                    fileName: "${memos ? 'memos' : 'orders'}.json".toString()]
+        }
+        Timestamp fire = Timestamp.from(LocalDateTime.parse("2026-10-14T06:00:00").atZone(LA).toInstant())
+        Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: auto, scheduledFireTime: fire,
+                sparkMaster: "local[1]", sparkAppName: "GorjanaMonthCloseMorningsSmokeTests"])
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertEquals(1, result.executedCount, "${result}")
+
+        Closure<List<Map>> findingsOf = { String checkId ->
+            ec.entity.find("darpan.audit.AuditFinding").condition("checkId", checkId).disableAuthz().useCache(false).list()*.getMap()
+        }
+        List<Map> r14 = findingsOf("GORJANA_CHK_REPLACEMENT_CUSTOMER")
+        List<Map> r13 = findingsOf("GORJANA_CHK_REPLACEMENT_NOT_ORIGINAL")
+        assertEquals([["GORJANA_R14", "81000101", "Credit memo id 81000101 and its replacement order are under different customers"]],
+                r14.collect { [it.statementId, it.recordKey, it.headline] })
+        assertEquals([["GORJANA_R13", "81000102", "Credit memo id 81000102 names an existing order as its replacement"],
+                      ["GORJANA_R13", "81000104", "Credit memo id 81000104 names an existing order as its replacement"]],
+                r13.sort { it.recordKey }.collect { [it.statementId, it.recordKey, it.headline] })
+        // A FIELD_MISMATCH row carries no record, so the memo is named by the compare key (its internal id), and with no
+        // conclusion rules there is no evidence state either.
+        assertEquals([["NETSUITE", "creditMemo", "81000101", null, null]], records(r14[0].findingId as String),
+                "one record, the memo; the replacement's id is not on the row")
     }
 
     /** One scheduled morning at 06:00 in Los Angeles; the NetSuite read returns that morning's fixture. */

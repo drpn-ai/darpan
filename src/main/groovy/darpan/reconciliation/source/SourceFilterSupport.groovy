@@ -154,6 +154,7 @@ class SourceFilterSupport {
                     excludedCount   : exclusionCounts.get(key) ?: 0,
                     fieldAbsentCount: fieldAbsentCounts.get(key) ?: 0] as Map<String, Object>
         }
+        ExcludedRecordsSidecar.flush(excludedCollector)
         return [records: kept, configuredExclusions: configuredExclusions, excludedCollector: excludedCollector]
     }
 

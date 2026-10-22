@@ -24,10 +24,10 @@ class ExcludedRecordsSidecarTests {
     void collectorCapsButKeepsCounting() {
         Map c = ExcludedRecordsSidecar.newCollector()
         (ExcludedRecordsSidecar.MAX_ENTRIES + 3).times { int i -> ExcludedRecordsSidecar.collect(c, [id: i], RULE) }
-        assertEquals(ExcludedRecordsSidecar.MAX_ENTRIES, ((List) c.records).size())
+        assertEquals(ExcludedRecordsSidecar.MAX_ENTRIES, ExcludedRecordsSidecar.records(c).size())
         assertTrue(c.truncated as boolean)
         assertEquals(ExcludedRecordsSidecar.MAX_ENTRIES + 3, c.total)
-        assertEquals("1:quantityShipped", ((Map) ((List) c.records)[0])._excludedBy)
+        assertEquals("1:quantityShipped", ((Map) ExcludedRecordsSidecar.records(c)[0])._excludedBy)
     }
 
     @Test
@@ -69,10 +69,10 @@ class ExcludedRecordsSidecarTests {
         (ExcludedRecordsSidecar.MAX_ENTRIES - 1).times { int i -> ExcludedRecordsSidecar.collect(into, [id: i], RULE) }
         3.times { int i -> ExcludedRecordsSidecar.collect(page, [id: "p${i}"], RULE) }
         ExcludedRecordsSidecar.merge(into, page)
-        assertEquals(ExcludedRecordsSidecar.MAX_ENTRIES, ((List) into.records).size())
+        assertEquals(ExcludedRecordsSidecar.MAX_ENTRIES, ExcludedRecordsSidecar.records(into).size())
         assertEquals(ExcludedRecordsSidecar.MAX_ENTRIES + 2, into.total)
         assertTrue(into.truncated as boolean)
-        assertEquals("1:quantityShipped", ((Map) ((List) into.records).last())._excludedBy, "merged rows keep their rule tag")
+        assertEquals("1:quantityShipped", ((Map) ExcludedRecordsSidecar.records(into).last())._excludedBy, "merged rows keep their rule tag")
     }
 
     @Test

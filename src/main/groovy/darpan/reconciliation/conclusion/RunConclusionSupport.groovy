@@ -14,10 +14,11 @@ import groovy.json.JsonSlurper
  * whose sidecar is missing or truncated cannot tell excluded from absent, so its presence is UNKNOWN,
  * which no rule accepts: the finding reads Unexplained rather than a false "Not found".
  *
- * Streams the result document (it reaches GB scale). A side's extract is parsed whole, so an extract
- * over {@link #maxIndexedExtractBytes} is not indexed at all and its side reads UNKNOWN; of a parsed
- * extract only records whose key a finding needs are kept in memory. A side whose key this pass cannot
- * rebuild the way the compare built it (spec.keyReliable false) is UNKNOWN for the same reason.
+ * Streams everything it reads (DAR-BE-095, Aditi 2026-10-22: production runs on limited resources): the result
+ * document row by row, and each side's extract and excluded-records sidecar record by record
+ * (JsonRecordStream), keeping in memory only the records whose key a finding needs. Before, an extract was
+ * parsed whole, and a month of gorjana invoices with its sidecar ran a 512 MB JVM out of heap. A side whose
+ * key this pass cannot rebuild the way the compare built it (spec.keyReliable false) reads UNKNOWN.
  *
  * Conclusions come from ConclusionTreeEngine (DAR-BE-063): a rule tree fired by Drools; a flat catalogue
  * is a tree of roots and concludes exactly as the DAR-UI-044 evaluator did.
@@ -27,9 +28,6 @@ class RunConclusionSupport {
     static final String TMP_SUFFIX = "conclude-tmp"
     /** Records kept per key: enough to judge "every record under this key", bounded for a hot key. */
     static final int MAX_RECORDS_PER_KEY = 1000
-    /** A parsed JSON graph costs several times its file size; above this a side is not indexed. */
-    static long maxIndexedExtractBytes = 200L * 1024 * 1024
-
     static Map concludeRun(Map args) {
         List<Map> rules = (List<Map>) (args.rules ?: [])
         if (!rules) return [ran: false]
@@ -159,15 +157,14 @@ class RunConclusionSupport {
         List<String> keyFields = (List<String>) (spec.keyFields ?: [])
         String normalizer = (String) spec.idNormalizer
         Map keptFull = [:], keptFirst = [:], excludedFull = [:], excludedFirst = [:]
-        boolean readable = extractFile?.exists() && spec.keyReliable != false && extractFile.length() <= maxIndexedExtractBytes
+        boolean readable = extractFile?.exists() && spec.keyReliable != false
         if (readable) {
-            Object parsed = new JsonSlurper().parse(extractFile, "UTF-8")
-            Map doc = parsed instanceof Map ? (Map) parsed : [records: parsed instanceof List ? parsed : []]
-            List exclusions = configuredExclusions((Map) (doc.metadata ?: [:]))
-            addAll(keptFull, keptFirst, (List) (doc.records ?: []), keyFields, normalizer, neededKeys, neededFirstFields)
-            Map sidecar = ExcludedRecordsSidecar.read(extractFile)
-            if (sidecar.present) {
-                addAll(excludedFull, excludedFirst, (List) sidecar.records, keyFields, normalizer, neededKeys, neededFirstFields)
+            Map head = JsonRecordStream.forEachRecord(extractFile, "records") { Map record ->
+                add(keptFull, keptFirst, record, keyFields, normalizer, neededKeys, neededFirstFields)
+            }
+            List exclusions = configuredExclusions((Map) (head.metadata instanceof Map ? head.metadata : [:]))
+            Map sidecar = ExcludedRecordsSidecar.forEachRecord(extractFile) { Map record ->
+                add(excludedFull, excludedFirst, record, keyFields, normalizer, neededKeys, neededFirstFields)
             }
             // Extractors write no sidecar when nothing was excluded, so a missing one is only unknown
             // when the side's own metadata does not prove that every rule dropped nothing.
@@ -175,7 +172,7 @@ class RunConclusionSupport {
             return [keptFull: keptFull, keptFirst: keptFirst, excludedFull: excludedFull,
                     excludedFirst: excludedFirst, unknownWhenAbsent: unknown]
         }
-        // No extract, one too large to parse, or a key this pass cannot rebuild: nothing can be claimed absent.
+        // No extract, or a key this pass cannot rebuild: nothing can be claimed absent.
         return [keptFull: keptFull, keptFirst: keptFirst, excludedFull: excludedFull,
                 excludedFirst: excludedFirst, unknownWhenAbsent: true]
     }
@@ -204,19 +201,17 @@ class RunConclusionSupport {
         }
     }
 
-    private static void addAll(Map full, Map first, List records, List<String> keyFields, String normalizer,
-                               Set<String> neededKeys, Set<String> neededFirstFields) {
-        for (Object raw : records) {
-            if (!(raw instanceof Map)) continue
-            String key = ConclusionKeySupport.compareKey((Map) raw, keyFields, normalizer)
-            if (key == null) continue
-            if (neededKeys.contains(key)) {
-                List underKey = (List) full.computeIfAbsent(key) { [] }
-                if (underKey.size() < MAX_RECORDS_PER_KEY) underKey.add(raw)
-            }
-            String firstField = ConclusionKeySupport.firstField(key)
-            if (neededFirstFields.contains(firstField) && !first.containsKey(firstField)) first.put(firstField, raw)
+    /** One streamed record: kept only when a finding needs its key (or its first key field). */
+    private static void add(Map full, Map first, Map record, List<String> keyFields, String normalizer,
+                            Set<String> neededKeys, Set<String> neededFirstFields) {
+        String key = ConclusionKeySupport.compareKey(record, keyFields, normalizer)
+        if (key == null) return
+        if (neededKeys.contains(key)) {
+            List underKey = (List) full.computeIfAbsent(key) { [] }
+            if (underKey.size() < MAX_RECORDS_PER_KEY) underKey.add(record)
         }
+        String firstField = ConclusionKeySupport.firstField(key)
+        if (neededFirstFields.contains(firstField) && !first.containsKey(firstField)) first.put(firstField, record)
     }
 
     private static Map lookup(Map sideIndex, String key) {

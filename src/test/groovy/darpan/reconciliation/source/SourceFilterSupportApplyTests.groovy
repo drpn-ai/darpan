@@ -1,5 +1,7 @@
 package darpan.reconciliation.source
 
+import darpan.reconciliation.conclusion.ExcludedRecordsSidecar
+
 import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.assertEquals
@@ -31,7 +33,7 @@ class SourceFilterSupportApplyTests {
         Map r = SourceFilterSupport.applyToRecords(records, rules("s", "INCLUDE_IN", "FULFILLED"))
         assertEquals(["1"], r.records*.id)
         assertEquals(2, r.excludedCollector.total)
-        assertEquals(["2", "3"], r.excludedCollector.records*.id)
+        assertEquals(["2", "3"], ExcludedRecordsSidecar.records(r.excludedCollector)*.id)
         Map entry = r.configuredExclusions[0]
         assertEquals(1, entry.excludedCount)
         assertEquals(1, entry.fieldAbsentCount)

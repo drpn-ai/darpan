@@ -242,20 +242,18 @@ class RunConclusionSupportTests {
         assertEquals(["_NA_"], onlyConclusion(doc).checks*.value)
     }
 
-    // Final review I4: an extract too large to parse whole is not indexed; its side reads unknown.
+    // DAR-BE-095: an extract is streamed, never parsed whole, so a large one is indexed rather than read as unknown, and
+    // only the records a finding needs stay in memory (a month of invoices once ran a 512 MB JVM out of heap here).
     @Test
-    void anExtractOverTheSizeCeilingIsNotParsedAndReadsUnknown() {
-        File doc = writeDiffDocument([missingRow("M5${SEP}01", FILE1, FILE2)])
-        File ns = extract("ns-big.json", [[orderId: "M6", orderLineId: "01"]])
-        long saved = RunConclusionSupport.maxIndexedExtractBytes
-        RunConclusionSupport.maxIndexedExtractBytes = 8L
-        try {
-            Map result = RunConclusionSupport.concludeRun(args(doc, NEVER_REACHED_RULES, ns))
-            assertEquals("UNEXPLAINED", onlyConclusion(doc).code)
-            assertTrue(((List) result.unknownSides).contains("FILE_2"))
-        } finally {
-            RunConclusionSupport.maxIndexedExtractBytes = saved
-        }
+    void aLargeExtractIsStreamedAndIndexed() {
+        File doc = writeDiffDocument([missingRow("M5${SEP}01", FILE1, FILE2), missingRow("M6${SEP}02", FILE1, FILE2)])
+        List<Map> lines = (1..100000).collect { int i -> [orderId: "N${i}".toString(), orderLineId: "01"] } + [[orderId: "M6", orderLineId: "01"]]
+        File ns = extract("ns-big.json", lines)
+        Map result = RunConclusionSupport.concludeRun(args(doc, NEVER_REACHED_RULES, ns))
+        assertFalse(((List) result.unknownSides).contains("FILE_2"), "a large extract is read, not given up on")
+        List rows = (List) parse(doc).differences
+        assertEquals("CONC_NEVER_REACHED_NS", ((Map) ((Map) rows[0]).conclusion).code, "M5: NetSuite has no line for the order")
+        assertEquals("UNEXPLAINED", ((Map) ((Map) rows[1]).conclusion).code, "M6: NetSuite has the order, on another line")
     }
 
     @Test

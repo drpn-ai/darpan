@@ -56,11 +56,23 @@ class GorjanaMonthCloseChecksDataTests {
         [FILE, RETURNS, REPLACEMENT, RECEIPT, CLAIM].each { everyReferenceResolvesIn(it) }
         assertEquals(["GORJANA_R1", "GORJANA_R2", "GORJANA_R3"] as Set, attr(rows(FILE, "darpan.audit.AuditStatementCheck"), "statementId"),
                 "comparison 2 covers R1-R3")
-        assertEquals(["GORJANA_R4", "GORJANA_R9"] as Set, attr(rows(RETURNS, "darpan.audit.AuditStatementCheck"), "statementId"),
-                "comparison 1 covers R9 and R4's nothing-left-open so far")
+        assertEquals(["GORJANA_R4", "GORJANA_R8", "GORJANA_R9"] as Set, attr(rows(RETURNS, "darpan.audit.AuditStatementCheck"), "statementId"),
+                "comparison 1 covers R8, R9 and R4's nothing-left-open so far")
         assertEquals(["GORJANA_R13", "GORJANA_R14"] as Set, attr(rows(REPLACEMENT, "darpan.audit.AuditStatementCheck"), "statementId"))
         assertEquals(["GORJANA_R11"] as Set, attr(rows(RECEIPT, "darpan.audit.AuditStatementCheck"), "statementId"))
         assertEquals(["GORJANA_R12"] as Set, attr(rows(CLAIM, "darpan.audit.AuditStatementCheck"), "statementId"))
+    }
+
+    @Test
+    void anR8RowIsACompletedOrReceivedReturnWithNoRma() {
+        String scope = "GORJANA_RETURN_IN_NETSUITE_SCOPE"
+        Map done = [returnId: "M256735", statusId: "RETURN_COMPLETED", orderExternalId: "7186636636291"]
+        assertEquals("CONC_RETURN_NOT_IN_NETSUITE", conclude(RETURNS, scope, done, "MISSING_FROM_FILE_2"))
+        assertEquals("CONC_RETURN_NOT_IN_NETSUITE", conclude(RETURNS, scope, done + [statusId: "RETURN_RECEIVED"], "MISSING_FROM_FILE_2"))
+        assertEquals("CONC_RETURN_NO_ORDER_NOT_SYNCED", conclude(RETURNS, scope, [returnId: "602501", statusId: "RETURN_COMPLETED"], "MISSING_FROM_FILE_2"),
+                "the OMS's own numeric return with no order: the sync skips it")
+        assertEquals("UNEXPLAINED", conclude(RETURNS, scope, done + [statusId: "RETURN_REQUESTED"], "MISSING_FROM_FILE_2"),
+                "a requested return is not judged")
     }
 
     @Test
@@ -195,7 +207,11 @@ class GorjanaMonthCloseChecksDataTests {
         // never be examined, and its finding could never close.
         [FILE, RETURNS].each { String file ->
             assertTrue(rows(file, "darpan.rule.RuleSetCompareSourceFilter").isEmpty(), file)
-            rows(file, "darpan.rule.RuleSetCompareScope").each { assertEquals("EVALUATE", it.attribute("scopeMode"), file) }
+            // A one-sided scope reads every record; a two-sided one (R8) closes a finding when the other side shows up.
+            Set<String> twoSided = attr(rows(file, "darpan.rule.RuleSetCompareSource").findAll { it.attribute("fileSide") == "FILE_2" }, "compareScopeId")
+            rows(file, "darpan.rule.RuleSetCompareScope").each {
+                assertEquals(twoSided.contains(it.attribute("compareScopeId")) ? "COMPARE" : "EVALUATE", it.attribute("scopeMode"), file)
+            }
         }
     }
 

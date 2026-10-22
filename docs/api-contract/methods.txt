@@ -23,6 +23,9 @@ admin.UserAdminServices.get#UserDetail
 admin.UserAdminServices.get#UserList
 admin.UserAdminServices.reset#Password
 admin.UserAdminServices.update#UserAccount
+facade.AuditFacadeServices.get#AuditFinding
+facade.AuditFacadeServices.get#AuditReport
+facade.AuditFacadeServices.get#Audits
 facade.AuthFacadeServices.change#ExpiredPassword
 facade.AuthFacadeServices.change#OwnPassword
 facade.AuthFacadeServices.complete#PasswordReset

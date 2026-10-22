@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- DAR-UI-058. The app's audit run, in the active tenant. The report and the finding are the assembler's JSON
+         unchanged (darpan.audit.report/v1, darpan.audit.finding/v1): the same documents GraphQL and the CLI read, so
+         the screen has no fields of its own. Another tenant's audit or finding reads as not found. -->
+
+    <service verb="get" noun="Audits" authz-action="view" allow-remote="true" authenticate="true">
+        <description>The active tenant's audits: id (the audit's code), name and the period it reports by.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="audits" type="List"><parameter name="audit" type="Map">
+                <parameter name="id"/><parameter name="name"/><parameter name="period"/></parameter></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="audits" from="[]"/>
+            <if condition="tenantId">
+                <entity-find entity-name="darpan.audit.Audit" list="auditList">
+                    <econdition field-name="companyUserGroupId" from="tenantId"/>
+                    <order-by field-name="auditName"/>
+                </entity-find>
+                <iterate list="auditList" entry="auditRow">
+                    <entity-find-one entity-name="moqui.basic.Enumeration" value-field="periodEnum" cache="true">
+                        <field-map field-name="enumId" from="auditRow.periodEnumId"/></entity-find-one>
+                    <script>audits.add([id: auditRow.auditCode, name: auditRow.auditName, period: periodEnum?.enumCode])</script>
+                </iterate>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="AuditReport" authz-action="view" allow-remote="true" authenticate="true">
+        <description>An audit's report for one morning (darpan.audit.report/v1), as the assembler writes it.</description>
+        <in-parameters>
+            <parameter name="audit" required="true"><description>The audit's code, e.g. month-close.</description></parameter>
+            <parameter name="date"><description>The morning, YYYY-MM-DD; blank is today in the tenant's zone.</description></parameter>
+            <parameter name="period"><description>Which period's run, e.g. 2026-09 while September is extended.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="report" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="auditId" from="tenantId ? darpan.audit.AuditReportGraph.auditIdFor(ec, tenantId, audit) : null"/>
+            <if condition="!auditId"><return error="true" message="Audit ${audit} was not found"/></if>
+            <script>
+                try {
+                    reportDate = darpan.audit.AuditReportGraph.reportDateFor(ec, tenantId, date)
+                } catch (IllegalArgumentException e) {
+                    ec.message.addError(e.message)
+                }
+            </script>
+            <if condition="!ec.message.hasError()">
+                <service-call name="audit.AuditReportServices.assemble#AuditReport" out-map="assembled"
+                        in-map="[companyUserGroupId:tenantId, auditId:auditId, reportDate:reportDate, period:period]"/>
+                <set field="report" from="assembled?.document"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="AuditFinding" authz-action="view" allow-remote="true" authenticate="true">
+        <description>One finding (darpan.audit.finding/v1): records, evidence, fix and history, as the assembler writes it.</description>
+        <in-parameters>
+            <parameter name="findingId" required="true"><description>The finding's id, e.g. F-20761.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="finding" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId || !darpan.audit.AuditReportGraph.ownsFinding(ec, tenantId, findingId)">
+                <return error="true" message="Finding ${findingId} was not found"/></if>
+            <service-call name="audit.AuditReportServices.assemble#AuditFinding" out-map="assembled"
+                    in-map="[companyUserGroupId:tenantId, findingId:findingId]"/>
+            <set field="finding" from="assembled?.document"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+</services>

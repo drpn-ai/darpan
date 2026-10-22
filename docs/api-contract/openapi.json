@@ -99,6 +99,15 @@
                                         "$ref": "#/components/schemas/UpdateUserAccountRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetAuditFindingRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetAuditReportRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetAuditsRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ChangeExpiredPasswordRequest"
                                     },
                                     {
@@ -490,6 +499,9 @@
                                         "admin.UserAdminServices.get#UserList": "#/components/schemas/GetUserListRequest",
                                         "admin.UserAdminServices.reset#Password": "#/components/schemas/ResetPasswordRequest",
                                         "admin.UserAdminServices.update#UserAccount": "#/components/schemas/UpdateUserAccountRequest",
+                                        "facade.AuditFacadeServices.get#AuditFinding": "#/components/schemas/GetAuditFindingRequest",
+                                        "facade.AuditFacadeServices.get#AuditReport": "#/components/schemas/GetAuditReportRequest",
+                                        "facade.AuditFacadeServices.get#Audits": "#/components/schemas/GetAuditsRequest",
                                         "facade.AuthFacadeServices.change#ExpiredPassword": "#/components/schemas/ChangeExpiredPasswordRequest",
                                         "facade.AuthFacadeServices.change#OwnPassword": "#/components/schemas/ChangeOwnPasswordRequest",
                                         "facade.AuthFacadeServices.complete#PasswordReset": "#/components/schemas/CompletePasswordResetRequest",
@@ -701,6 +713,15 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/UpdateUserAccountResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetAuditFindingResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetAuditReportResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetAuditsResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ChangeExpiredPasswordResponse"
@@ -3657,6 +3678,315 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/UpdateUserAccountResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetAuditFindingParams": {
+                "type": "object",
+                "properties": {
+                    "findingId": {
+                        "type": "string",
+                        "description": "The finding's id, e.g. F-20761."
+                    }
+                },
+                "required": [
+                    "findingId"
+                ],
+                "description": "One finding (darpan.audit.finding/v1): records, evidence, fix and history, as the assembler writes it."
+            },
+            "GetAuditFindingResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "finding": {
+                        "type": "object"
+                    }
+                }
+            },
+            "GetAuditFindingRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.get#AuditFinding",
+                "x-darpan-method": "facade.AuditFacadeServices.get#AuditFinding",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuditFacadeServices.get#AuditFinding"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAuditFindingParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAuditFindingResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.get#AuditFinding. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAuditFindingResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetAuditReportParams": {
+                "type": "object",
+                "properties": {
+                    "audit": {
+                        "type": "string",
+                        "description": "The audit's code, e.g. month-close."
+                    },
+                    "date": {
+                        "type": "string",
+                        "description": "The morning, YYYY-MM-DD; blank is today in the tenant's zone."
+                    },
+                    "period": {
+                        "type": "string",
+                        "description": "Which period's run, e.g. 2026-09 while September is extended."
+                    }
+                },
+                "required": [
+                    "audit"
+                ],
+                "description": "An audit's report for one morning (darpan.audit.report/v1), as the assembler writes it."
+            },
+            "GetAuditReportResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "report": {
+                        "type": "object"
+                    }
+                }
+            },
+            "GetAuditReportRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.get#AuditReport",
+                "x-darpan-method": "facade.AuditFacadeServices.get#AuditReport",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuditFacadeServices.get#AuditReport"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAuditReportParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAuditReportResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.get#AuditReport. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAuditReportResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetAuditsParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "The active tenant's audits: id (the audit's code), name and the period it reports by."
+            },
+            "GetAuditsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "audits": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "audit": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {
+                                            "type": "string"
+                                        },
+                                        "name": {
+                                            "type": "string"
+                                        },
+                                        "period": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "GetAuditsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.get#Audits",
+                "x-darpan-method": "facade.AuditFacadeServices.get#Audits",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuditFacadeServices.get#Audits"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAuditsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAuditsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.get#Audits. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAuditsResult"
                     }
                 },
                 "required": [
@@ -21267,6 +21597,9 @@
         "admin.UserAdminServices.get#UserList": "GetUserList",
         "admin.UserAdminServices.reset#Password": "ResetPassword",
         "admin.UserAdminServices.update#UserAccount": "UpdateUserAccount",
+        "facade.AuditFacadeServices.get#AuditFinding": "GetAuditFinding",
+        "facade.AuditFacadeServices.get#AuditReport": "GetAuditReport",
+        "facade.AuditFacadeServices.get#Audits": "GetAudits",
         "facade.AuthFacadeServices.change#ExpiredPassword": "ChangeExpiredPassword",
         "facade.AuthFacadeServices.change#OwnPassword": "ChangeOwnPassword",
         "facade.AuthFacadeServices.complete#PasswordReset": "CompletePasswordReset",

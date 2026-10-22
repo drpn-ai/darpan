@@ -29,6 +29,8 @@ class GorjanaMonthCloseChecksDataTests {
     private static final String RECEIPT = "GorjanaMonthCloseReceiptChecksData.xml"
     /** DAR-BE-095 R12: warranty claims against their credit memos. */
     private static final String CLAIM = "GorjanaMonthCloseWarrantyClaimChecksData.xml"
+    /** DAR-BE-113, R19: a paid Shopify order has its payment in HotWax. */
+    private static final String PAYMENTS = "GorjanaMonthClosePaymentsChecksData.xml"
 
     private static Path dataDir() {
         return ReconciliationSmokeTestSupport.resolveBackendRoot().resolve("runtime/component/darpan/data")
@@ -48,12 +50,12 @@ class GorjanaMonthCloseChecksDataTests {
 
     @Test
     void theFileIsTenantConfigurationNotSeed() {
-        [FILE, RETURNS, REPLACEMENT, RECEIPT, CLAIM].each { assertEquals("darpan-tenant-config", doc(it).attribute("type"), it) }
+        [FILE, RETURNS, REPLACEMENT, RECEIPT, CLAIM, PAYMENTS].each { assertEquals("darpan-tenant-config", doc(it).attribute("type"), it) }
     }
 
     @Test
     void everyReferenceResolves() {
-        [FILE, RETURNS, REPLACEMENT, RECEIPT, CLAIM].each { everyReferenceResolvesIn(it) }
+        [FILE, RETURNS, REPLACEMENT, RECEIPT, CLAIM, PAYMENTS].each { everyReferenceResolvesIn(it) }
         assertEquals(["GORJANA_R1", "GORJANA_R2", "GORJANA_R3"] as Set, attr(rows(FILE, "darpan.audit.AuditStatementCheck"), "statementId"),
                 "comparison 2 covers R1-R3")
         assertEquals(["GORJANA_R4", "GORJANA_R7", "GORJANA_R8", "GORJANA_R9", "GORJANA_R16"] as Set, attr(rows(RETURNS, "darpan.audit.AuditStatementCheck"), "statementId"),
@@ -61,6 +63,7 @@ class GorjanaMonthCloseChecksDataTests {
         assertEquals(["GORJANA_R13", "GORJANA_R14"] as Set, attr(rows(REPLACEMENT, "darpan.audit.AuditStatementCheck"), "statementId"))
         assertEquals(["GORJANA_R11", "GORJANA_R15"] as Set, attr(rows(RECEIPT, "darpan.audit.AuditStatementCheck"), "statementId"))
         assertEquals(["GORJANA_R12"] as Set, attr(rows(CLAIM, "darpan.audit.AuditStatementCheck"), "statementId"))
+        assertEquals(["GORJANA_R19"] as Set, attr(rows(PAYMENTS, "darpan.audit.AuditStatementCheck"), "statementId"))
     }
 
     @Test
@@ -152,9 +155,18 @@ class GorjanaMonthCloseChecksDataTests {
         assertEquals(["GORJANA_MEMO_REPLACEMENT_RS"] as Set, attr(rows(REPLACEMENT, "darpan.audit.AuditCheck"), "savedRunId"))
     }
 
+    // DAR-BE-113 R19: Y/N against Y/N with "<=" breaks only when Shopify was paid (Y) and HotWax has no payment (N).
+    @Test
+    void r19FiresOnlyOnAPaidShopifyOrderWithNoPaymentInHotWax() {
+        Map<List<String>, Boolean> cases = [["Y", "N"]: true, ["Y", "Y"]: false, ["N", "N"]: false, ["N", "Y"]: false]
+        cases.each { List<String> pair, Boolean fires ->
+            assertEquals(fires, reconciliation.rule.RuleDiffSupport.violatesOperator(pair[0], pair[1], "<="), "Shopify ${pair[0]}, HotWax ${pair[1]}")
+        }
+    }
+
     @Test
     void storedReplacementDrlIsExactlyWhatTheGeneratorMakes() {
-        [REPLACEMENT, CLAIM, RETURNS, RECEIPT].each { storedDrlIsExactlyWhatTheGeneratorMakes(it) }
+        [REPLACEMENT, CLAIM, RETURNS, RECEIPT, PAYMENTS].each { storedDrlIsExactlyWhatTheGeneratorMakes(it) }
     }
 
     private static void storedDrlIsExactlyWhatTheGeneratorMakes(String file) {

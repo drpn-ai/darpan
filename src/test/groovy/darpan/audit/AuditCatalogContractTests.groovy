@@ -39,7 +39,7 @@ class AuditCatalogContractTests {
 
     /** #483 "What Gorjana Accounting needs": statement numbers under each heading. */
     static final Map<String, List<Integer>> GORJANA_CATEGORIES = [
-            AUDC_ORDERS            : [1, 2, 3, 18],
+            AUDC_ORDERS            : [1, 2, 3, 18, 19],
             AUDC_REFUNDS_CREDITS   : [4, 5, 6, 7],
             AUDC_RETURNS           : [8, 9, 10, 11],
             AUDC_EXCHANGES_WARRANTY: [12, 13, 14, 15, 16, 17],
@@ -87,13 +87,13 @@ class AuditCatalogContractTests {
     }
 
     @Test
-    void gorjanasCatalogIsEighteenStatementsInFourCategories() {
+    void gorjanasCatalogIsNineteenStatementsInFourCategories() {
         List<Map> audits = rows("GorjanaMonthCloseCatalogData.xml", "darpan.audit.Audit")*.attributes()
         assertEquals([[auditId: "GORJANA_MONTH_CLOSE", companyUserGroupId: "GORJANA", auditCode: "month-close",
                        auditName: "Month close", periodEnumId: "AUDP_MONTH"]], audits, "gorjana's month close is one audit")
         List<Node> statements = rows("GorjanaMonthCloseCatalogData.xml", "darpan.audit.AuditStatement")
-        // R18 (DAR-BE-111) is Aditi's, after the seventeen from #483.
-        assertEquals((1..18).collect { "R${it}".toString() }, statements*.attribute("statementCode"), "R1-R18 in file order")
+        // R18 (DAR-BE-111) and R19 (DAR-BE-113) are Aditi's, after the seventeen from #483.
+        assertEquals((1..19).collect { "R${it}".toString() }, statements*.attribute("statementCode"), "R1-R19 in file order")
         statements.each { Node row ->
             String code = row.attribute("statementCode")
             int n = code.substring(1).toInteger()

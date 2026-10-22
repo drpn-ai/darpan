@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-113 — gorjana month close R19, "Every order paid in Shopify has its payment in HotWax." (Aditi, 2026-10-22; weight derived). A payment taken in
+  Shopify that never reached HotWax leaves the HotWax order with no OrderPaymentPreference (OPP). The check is DAR-BE-064's
+  rule on the Shopify <-> HotWax order presence compare: every Shopify order against its HotWax order (Shopify order id =
+  HotWax externalId), and a FIELD_COMPARISON that fires when Shopify has a successful payment (hasPaymentTransaction Y:
+  SUCCESS + SALE, CAPTURE or AUTHORIZATION) and HotWax has no OPP (hasPaymentPreference N). Every channel, POS and app
+  included (DAR-BE-064's run kept sourceName=web only). An order HotWax does not have at all stays a presence row and is
+  not this statement's.
+  A COMPARE reads both sides in full, so a fixed order is read again and its finding closes. The HotWax side reads over
+  GraphQL (OMS_GQL), ~5 cost units an order; a gorjana day of ~6,000 orders reads in about 10 minutes (DAR-BE-064).
+  Live (DAR-BE-064, 2026-10-01, a 15-minute gorjana window): 21 paid web orders, 0 without an OPP.
+  NOT seed data - tenant configuration. Load per install, AFTER AuditSeedData.xml and GorjanaMonthCloseCatalogData.xml (R19).
+  sourceConfigId="gorjana_prod" names the TARGET environment's ShopifyAuthConfig and HotWaxOmsRestSourceConfig rows; check
+  both before loading:
+      ec.entity.makeDataLoader().location("component://darpan/data/GorjanaMonthClosePaymentsChecksData.xml").load()
+-->
+<entity-facade-xml type="darpan-tenant-config">
+    <darpan.rule.RuleSet ruleSetId="GORJANA_PAID_HAS_OPP_RS" ruleSetName="Paid in Shopify - payment in HotWax"
+            description="Every Shopify order against its HotWax order; a paid Shopify order whose HotWax order has no payment preference is a finding."
+            version="1.0" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_PAID_HAS_OPP_SCOPE" ruleSetId="GORJANA_PAID_HAS_OPP_RS"
+            objectType="ORDER" scopeMode="COMPARE" description="Every Shopify order against its HotWax order; a paid Shopify order whose HotWax order has no payment preference is a finding."
+            companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_PAID_HAS_OPP_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="legacyResourceId"
+            sourceConfigId="gorjana_prod" sourceConfigType="SHOPIFY_AUTH" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_PAID_HAS_OPP_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="legacyResourceId" companyUserGroupId="GORJANA"/>
+    <!-- Two HotWax orders naming one Shopify order is its own finding, never a silent pick (spec D7). -->
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_PAID_HAS_OPP_SCOPE" fileSide="FILE_2"
+            systemEnumId="OMS_GQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="externalId"
+            sourceConfigId="gorjana_prod" sourceConfigType="HOTWAX_OMS_GQL" duplicateKeyHandling="FINDING" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_PAID_HAS_OPP_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="externalId" companyUserGroupId="GORJANA"/>
+
+    <!-- A structured FIELD_COMPARISON whose ruleLogic is EXACTLY FieldComparisonRuleLogicGenerator's output
+         (GorjanaMonthCloseChecksDataTests pins it). Y/N on both sides: only Y (paid in Shopify) against N (no OPP in HotWax)
+         breaks "<=". -->
+    <darpan.rule.Rule ruleId="GORJANA_PAID_HAS_OPP" ruleSetId="GORJANA_PAID_HAS_OPP_RS" sequenceNum="10"
+            ruleText="hasPaymentTransaction &lt;= hasPaymentPreference" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN"
+            companyUserGroupId="GORJANA">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"hasPaymentTransaction","file2FieldPath":"hasPaymentPreference","operator":"&lt;="}</expression>
+        <ruleLogic><![CDATA[rule "GORJANA_PAID_HAS_OPP"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get("file1")).get("hasPaymentTransaction"), ((Map) $m.get("file2")).get("hasPaymentPreference"), "<="))
+then
+    Object _file1Value = ((Map) $m.get("file1")).get("hasPaymentTransaction");
+    Object _file2Value = ((Map) $m.get("file2")).get("hasPaymentPreference");
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "hasPaymentTransaction <= hasPaymentPreference",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: hasPaymentTransaction <= hasPaymentPreference"
+    );
+end]]></ruleLogic>
+    </darpan.rule.Rule>
+
+    <!-- graceDays 1: HotWax writes the OPP when it imports the order, so a day covers an import still in flight. -->
+    <darpan.audit.AuditCheck checkId="GORJANA_CHK_PAID_NO_OPP" companyUserGroupId="GORJANA" checkCode="paid-orders-without-a-payment-in-hotwax"
+            label="Shopify orders paid whose HotWax order has no payment" savedRunId="GORJANA_PAID_HAS_OPP_RS"
+            file1RecordType="shopifyOrder" file2RecordType="order" graceDays="1"
+            matchedBy="Shopify order id = HotWax externalId"
+            fixOwner="HotWax Support" fixWhereEnumId="OMS"
+            headlineTemplate="Shopify order {recordKey} is paid and its HotWax order has no payment"
+            fixActionTemplate="Sync the Shopify payment for order {recordKey} to HotWax, so the HotWax order carries its payment preference."
+            passesWhenTemplate="The HotWax order for Shopify order {recordKey} carries a payment."/>
+    <darpan.audit.AuditStatementCheck statementId="GORJANA_R19" checkId="GORJANA_CHK_PAID_NO_OPP" companyUserGroupId="GORJANA"
+            sequenceNum="1" diffTypes="FIELD_MISMATCH" ruleIds="GORJANA_PAID_HAS_OPP"/>
+</entity-facade-xml>

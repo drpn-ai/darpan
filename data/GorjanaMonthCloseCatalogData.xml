@@ -74,4 +74,8 @@
     <darpan.audit.AuditStatement statementId="GORJANA_R18" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R18"
             categoryEnumId="AUDC_ORDERS" weightEnumId="AUDSW_DERIVED" sequenceNum="18"
             statementText="An order HotWax completed or cancelled does not stay open in NetSuite."/>
+    <!-- DAR-BE-113: R19 is Aditi's (2026-10-22), not from #483, so derived until Gorjana Accounting confirms it. -->
+    <darpan.audit.AuditStatement statementId="GORJANA_R19" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R19"
+            categoryEnumId="AUDC_ORDERS" weightEnumId="AUDSW_DERIVED" sequenceNum="19"
+            statementText="Every order paid in Shopify has its payment in HotWax."/>
 </entity-facade-xml>

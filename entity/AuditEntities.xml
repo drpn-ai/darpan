@@ -514,8 +514,13 @@
         <field name="auditDigestId" type="id" is-pk="true"/>
         <field name="companyUserGroupId" type="id" not-null="true"/>
         <field name="auditId" type="id" not-null="true"/>
-        <field name="chatSpaceId" type="id" not-null="true">
-            <description>The tenant's chat space it posts to (TenantChatSpace); another tenant's space is never used.</description>
+        <field name="chatSpaceId" type="id">
+            <description>The tenant's chat space it posts to (TenantChatSpace); another tenant's space is never used.
+                Blank: email only.</description>
+        </field>
+        <field name="emailAddresses" type="text-medium">
+            <description>Comma-separated addresses it is emailed to (template DARPAN_AUDIT_DIGEST). A digest needs a chat
+                space, addresses, or both (Aditi, 2026-10-22: "either email or chat alerts").</description>
         </field>
         <field name="kindEnumId" type="id" not-null="true">
             <description>AuditDigestKind: daily (open, new and fixed today) or weekly (where things stand against a week

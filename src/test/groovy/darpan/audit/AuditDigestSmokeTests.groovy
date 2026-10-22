@@ -42,11 +42,15 @@ class AuditDigestSmokeTests {
 
     private ExecutionContext ec
     private final List<Map> posts = []
+    private final List<Map> mails = []
+    private Closure realSendEmail
 
     @BeforeAll
     void setup() {
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "audit-digest")
+        realSendEmail = AuditDigestSupport.sendEmail
+        AuditDigestSupport.sendEmail = { def ignoredEc, String to, Map body -> mails << [to: to, subject: body.digestSubject, text: body.digestText] }
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AuditSeedData.xml",
                 "component://darpan/data/DarpanSystemSourceSeedData.xml")
         [(GORJANA): "Gorjana", (KREWE): "Krewe"].each { String id, String name ->
@@ -78,6 +82,7 @@ class AuditDigestSmokeTests {
     @AfterAll
     void cleanup() {
         TenantNotificationSupport.resetDeliveryHook()
+        AuditDigestSupport.sendEmail = realSendEmail
         ReconciliationSmokeTestSupport.cleanupMoqui(ec)
     }
 
@@ -85,6 +90,7 @@ class AuditDigestSmokeTests {
     void catchPosts() {
         ec.message.clearErrors()
         posts.clear()
+        mails.clear()
         TenantNotificationSupport.setDeliveryHook { String ref, Map payload -> posts << [ref: ref, text: payload.text]; return [ok: true, statusCode: 200] }
         ec.entity.find("darpan.audit.AuditDigest").deleteAll()
     }
@@ -163,6 +169,29 @@ class AuditDigestSmokeTests {
         assertEquals("DELIVERY_FAILED", outcome(send("2026-10-21", "07:05"), "TDG_DAILY").reason)
         assertEquals("SENT_TODAY", outcome(send("2026-10-21", "07:20"), "TDG_DAILY").reason, "no retry storm on a dead webhook")
         assertEquals(1, posts.size())
+    }
+
+    @Test
+    void aDigestCanGoByEmailAloneOrByEmailAndChat() {
+        digest("TDG_MAIL", null, "AUDDK_DAILY", "07:00", [emailAddresses: "close@gorjana.example, not-an-address; ops@gorjana.example"])
+        assertEquals(true, outcome(send("2026-10-21", "07:05"), "TDG_MAIL").sent)
+        assertEquals([], posts, "no chat space, no post")
+        assertEquals(1, mails.size())
+        assertEquals("close@gorjana.example,ops@gorjana.example", mails[0].to, "a malformed address is dropped")
+        assertEquals("Month close · 2026-10 · Wed 21 Oct", mails[0].subject, "the subject is the digest's first line")
+        assertTrue(mails[0].text.contains("Invoice INV-1 has no Etail id"), mails[0].text)
+
+        digest("TDG_BOTH", SPACE, "AUDDK_DAILY", "07:00", [emailAddresses: "close@gorjana.example"])
+        assertEquals(true, outcome(send("2026-10-21", "07:06"), "TDG_BOTH").sent)
+        assertEquals(1, posts.size())
+        assertEquals(2, mails.size())
+    }
+
+    @Test
+    void aDigestWithNoUsableDestinationIsNotSent() {
+        digest("TDG_NONE", null, "AUDDK_DAILY", "07:00", [emailAddresses: "nobody"])
+        assertEquals("NO_DESTINATION", outcome(send("2026-10-21", "07:05"), "TDG_NONE").reason)
+        assertEquals([], mails)
     }
 
     private void digest(String id, String space, String kind, String time, Map extra = [:]) {

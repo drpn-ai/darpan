@@ -34,6 +34,14 @@ class AuditDigestSupport {
     static final int MESSAGE_LIMIT = 3600
     static final int OLDEST_SHOWN = 5
     private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("EEE d MMM", Locale.ENGLISH)
+    static final String EMAIL_TEMPLATE = "DARPAN_AUDIT_DIGEST"
+    private static final java.util.regex.Pattern EMAIL = ~/[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+/
+
+    /** Every digest email goes through here, so tests record sends instead of making them (as PasswordResetSupport). */
+    static Closure sendEmail = { def ec, String toAddresses, Map bodyParameters ->
+        AutomationExecutionSupport.dispatchInternalService(ec, "org.moqui.impl.EmailServices.send#EmailTemplate",
+                [emailTemplateId: EMAIL_TEMPLATE, toAddresses: toAddresses, bodyParameters: bodyParameters])
+    }
 
     /**
      * The digest text. weekAgo is the report of seven mornings before, for a weekly summary; null for a daily one.
@@ -181,26 +189,38 @@ class AuditDigestSupport {
         if (!claim(ec, digest, tenantId, today)) return [sent: false, reason: "SENT_TODAY"]
 
         String chatSpaceId = normalize(digest.chatSpaceId)
-        def space = TenantScopedFinder.findOneOwnedByTenant(ec, DarpanEntityConstants.TENANT_CHAT_SPACE,
-                "chatSpaceId", chatSpaceId, tenantId, "audit digest destination — owner checked against the digest's tenant")
-        Map destination = TenantNotificationSupport.describeDestination(ec, tenantId, chatSpaceId, space)
-        if (destination == null) {
-            logger.warn("Audit digest {}: chat space {} cannot be used (missing, another tenant's, inactive or without a webhook); not sent",
+        Map destination = null
+        if (chatSpaceId) {
+            def space = TenantScopedFinder.findOneOwnedByTenant(ec, DarpanEntityConstants.TENANT_CHAT_SPACE,
+                    "chatSpaceId", chatSpaceId, tenantId, "audit digest destination — owner checked against the digest's tenant")
+            destination = TenantNotificationSupport.describeDestination(ec, tenantId, chatSpaceId, space)
+            if (destination == null) logger.warn("Audit digest {}: chat space {} cannot be used (missing, another tenant's, inactive or without a webhook)",
                     digest.auditDigestId, chatSpaceId)
-            return [sent: false, reason: "NO_DESTINATION"]
         }
+        List<String> emails = emailsOf(digest.emailAddresses)
+        if (destination == null && !emails) return [sent: false, reason: "NO_DESTINATION"]
         Map report = assemble(ec, tenantId, digest.auditId as String, today)
         if (report == null) return [sent: false, reason: "NO_REPORT"]
         Map weekAgo = weekly ? assemble(ec, tenantId, digest.auditId as String, today.minusDays(7)) : null
         String text = render(report, digest.kindEnumId as String, digest.fullList == "Y", weekAgo, reportUrl(ec, report))
-        Map delivery = TenantNotificationSupport.deliverToDestination(destination, [text: text])
-        if (delivery?.ok != true) {
+        boolean delivered = false
+        if (destination != null) {
+            Map delivery = TenantNotificationSupport.deliverToDestination(destination, [text: text])
+            if (delivery?.ok == true) delivered = true
             // A failed post keeps the day's claim, as a run notification does: no retry storm on a dead webhook.
-            logger.warn("Audit digest {} to space {} returned status {}{}", digest.auditDigestId, chatSpaceId,
+            else logger.warn("Audit digest {} to space {} returned status {}{}", digest.auditDigestId, chatSpaceId,
                     delivery?.statusCode, delivery?.providerMessage ? " (${delivery.providerMessage})" : "")
-            return [sent: false, reason: "DELIVERY_FAILED"]
         }
-        return [sent: true, reason: null]
+        if (emails) {
+            sendEmail.call(ec, emails.join(","), [digestSubject: text.readLines()[0], digestText: text])
+            if (ec.message.hasError()) {
+                logger.warn("Audit digest {} email refused: {}", digest.auditDigestId, ec.message.errorsString)
+                ec.message.clearErrors()
+            } else {
+                delivered = true
+            }
+        }
+        return delivered ? [sent: true, reason: null] : [sent: false, reason: "DELIVERY_FAILED"]
     }
 
     private static boolean claim(def ec, Map digest, String tenantId, LocalDate today) {
@@ -225,6 +245,11 @@ class AuditDigestSupport {
             return null
         }
         return out?.document as Map
+    }
+
+    /** The digest's addresses: comma- or semicolon-separated, each shaped like an address; anything else is dropped. */
+    static List<String> emailsOf(Object raw) {
+        return (raw?.toString() ?: "").split(/[,;]/)*.trim().findAll { it && it.length() <= 254 && EMAIL.matcher(it).matches() }.unique()
     }
 
     /** The app's audit page for that morning; null when the app's address is not configured (the line drops). */

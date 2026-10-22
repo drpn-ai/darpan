@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DAR-BE-102 email body: the digest's text as it goes to chat, one block, escaped. Plain on purpose: no bold. -->
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+        require-authentication="false">
+    <widgets>
+        <render-mode><text type="html"><![CDATA[<html><body>]]></text></render-mode>
+        <label text="${digestText}" type="pre"/>
+        <render-mode><text type="html"><![CDATA[</body></html>]]></text></render-mode>
+    </widgets>
+</screen>

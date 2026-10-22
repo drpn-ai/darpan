@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- No copyright or license for configuration file, details here are not considered a creative work. -->
+<entity-facade-xml type="darpan-seed">
+    <!-- DAR-BE-102 — the audit digest by email, beside chat (Aditi, 2026-10-22: "either email or chat alerts"). The same
+         text a chat space gets; the subject is its first line. From support@drpn.ai like Darpan's other mail
+         (PasswordResetEmailSeedData.xml), overridable with DARPAN_MAIL_FROM. The SYSTEM EmailServer row is seeded by id
+         alone so the template loads anywhere; with no smtpHost the framework logs "SMTP Host is empty" and sends nothing.
+         Loaded on an existing database by loading this file (prod-owed on DAR-BE-102). -->
+    <moqui.basic.email.EmailServer emailServerId="SYSTEM"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="DARPAN_AUDIT_DIGEST" description="Darpan audit digest"
+            emailServerId="SYSTEM" webappName="webroot" sendPartial="Y" subject="${digestSubject}"
+            fromAddress="${System.getenv('DARPAN_MAIL_FROM') ?: 'support@drpn.ai'}" fromName="Darpan"
+            bodyScreenLocation="component://darpan/screen/email/AuditDigest.xml"/>
+</entity-facade-xml>

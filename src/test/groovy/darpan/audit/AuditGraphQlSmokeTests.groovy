@@ -147,6 +147,19 @@ class AuditGraphQlSmokeTests {
     }
 
     @Test
+    void oneCategoryAndOneStatementReadByIdAndAnUnknownIdIsNull() {
+        Map out = gql(A, """{ auditReport(audit: "month-close", date: "2026-10-08") {
+            category(id: "orders") { id label statement(id: "R2") { id findings { headline } } missing: statement(id: "R99") { id } }
+            none: category(id: "nowhere") { id } } }""")
+        assertEquals([], out.errors, "errors")
+        Map orders = (Map) out.data.auditReport.category
+        assertEquals(["orders", "Orders"], [orders.id, orders.label])
+        assertEquals(["R2", ["Invoice INV-A1 has no Etail id"]], [orders.statement.id, (orders.statement.findings as List<Map>)*.headline])
+        assertNull(orders.missing, "a statement the category does not have")
+        assertNull(out.data.auditReport.none, "an id that is not a category")
+    }
+
+    @Test
     void anotherKeyWithTheSameAuditCodeSeesOnlyItsOwnTenant() {
         Map b = statementR2((Map) gql(B, REPORT).data)
         assertEquals(["Invoice INV-B1 has no Etail id"], (b.findings as List<Map>)*.headline)

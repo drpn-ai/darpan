@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   DAR-BE-094 — gorjana month close, comparison 1 (returns against credit memos and RMAs): the checks that need no
-  answer from the team yet: R9, R8, and R4's "nothing left open". R4's amount and R6 wait on a Shopify read; R7 and R16 are
+  answer from the team yet: R9, R8, R7, and R4's "nothing left open". R4's amount and R6 wait on a Shopify read; R16 is
   next.
+
+  R7 "A Happiness Guarantee claim is booked to the Happiness Guarantee account, 42065." Aditi, 2026-10-22: the "Is HG"
+     flag (custbody_hc_close_rma) marks HotWax-sourced Happiness Guarantee returns and AfterShip warranty. One single-
+     sided run over every credit memo (NS_CREDIT_MEMO_HG_ACCOUNT, with ACCOUNT_USED(42065)); a flagged memo that posts to
+     no 42065 line is the finding. 1-22 Oct: 12,938 flagged memos, 12,916 on 42065, so ~22 findings.
 
   R8 "Every return reaches NetSuite." OMS returns (OMS_RETURNS_GQL with includeReturnsWithoutShopifyRef, so the OMS's own
      numeric-id Happiness Guarantee and sellable returns are read too) against NetSuite RMAs keyed by the HC return id
@@ -56,6 +61,24 @@
 
     <moqui.basic.Enumeration enumId="CONC_RETURN_NO_ORDER_NOT_SYNCED" enumTypeId="DarpanConclusion" enumCode="CONC_RETURN_NO_ORDER_NOT_SYNCED" description="Completed return with no order, never synced"/>
     <moqui.basic.Enumeration enumId="CONC_RETURN_NOT_IN_NETSUITE" enumTypeId="DarpanConclusion" enumCode="CONC_RETURN_NOT_IN_NETSUITE" description="Return not in NetSuite"/>
+
+    <moqui.basic.Enumeration enumId="CONC_HG_NOT_ON_42065" enumTypeId="DarpanConclusion" enumCode="CONC_HG_NOT_ON_42065" description="Happiness Guarantee credit not on 42065"/>
+
+    <!-- ================================================================ R7: Happiness Guarantee credits on 42065 -->
+    <darpan.rule.RuleSet ruleSetId="GORJANA_HG_ACCOUNT_RS" ruleSetName="Credit memos - Happiness Guarantee account"
+            description="Every credit memo flagged Is HG posts to 42065 Happiness Guarantee. Reads every credit memo so a corrected one is seen and closes."
+            version="1.0" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_HG_ACCOUNT_SCOPE" ruleSetId="GORJANA_HG_ACCOUNT_RS"
+            objectType="CREDIT_MEMO" scopeMode="EVALUATE" description="Every credit memo flagged Is HG posts to 42065 Happiness Guarantee. Reads every credit memo so a corrected one is seen and closes."
+            companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_HG_ACCOUNT_SCOPE" fileSide="FILE_1"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="tranId"
+            sourceConfigId="NS_CREDIT_MEMO_HG_ACCOUNT" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_HG_ACCOUNT_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="tranId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_HG_ACCOUNT_SCOPE" sequenceNum="10" conclusionEnumId="CONC_HG_NOT_ON_42065" appliesToBucket="FINDING" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_HG_ACCOUNT_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="isHg" operator="IN" conditionValues="T" checkLabel="The credit memo is flagged Is HG (a Happiness Guarantee or AfterShip warranty credit)" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_HG_ACCOUNT_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="onHgAccount" operator="IN" conditionValues="F" checkLabel="No line posts to 42065 Happiness Guarantee" companyUserGroupId="GORJANA"/>
 
     <!-- ================================================================ R8: every return reaches NetSuite -->
     <darpan.rule.RuleSet ruleSetId="GORJANA_RETURN_IN_NETSUITE_RS" ruleSetName="OMS returns - NetSuite RMAs"
@@ -154,6 +177,16 @@
             headlineTemplate="Credit memo {recordKey}: {conclusion}"
             fixActionTemplate="Set the customer's name, the shipping address and the billing address on credit memo {recordKey}, as the Shopify return shows them."
             passesWhenTemplate="Credit memo {recordKey} carries the customer's name, a shipping address and a billing address."/>
+
+    <darpan.audit.AuditCheck checkId="GORJANA_CHK_HG_ACCOUNT" companyUserGroupId="GORJANA" checkCode="hg-credits-not-on-42065"
+            label="Happiness Guarantee credit memos that do not post to 42065" savedRunId="GORJANA_HG_ACCOUNT_RS"
+            file1RecordType="creditMemo" graceDays="1"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Credit memo {recordKey} is a Happiness Guarantee credit not on 42065"
+            fixActionTemplate="Book credit memo {recordKey} to 42065 Happiness Guarantee, and check the sync's account mapping for its return channel."
+            passesWhenTemplate="Credit memo {recordKey} posts to 42065 Happiness Guarantee."/>
+    <darpan.audit.AuditStatementCheck statementId="GORJANA_R7" checkId="GORJANA_CHK_HG_ACCOUNT" companyUserGroupId="GORJANA"
+            sequenceNum="1" diffTypes="FINDING" conclusionCodes="CONC_HG_NOT_ON_42065"/>
 
     <darpan.audit.AuditCheck checkId="GORJANA_CHK_RETURN_IN_NETSUITE" companyUserGroupId="GORJANA" checkCode="returns-not-in-netsuite"
             label="Completed or received OMS returns with no NetSuite RMA" savedRunId="GORJANA_RETURN_IN_NETSUITE_RS"

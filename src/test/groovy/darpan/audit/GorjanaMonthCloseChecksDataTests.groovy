@@ -56,11 +56,20 @@ class GorjanaMonthCloseChecksDataTests {
         [FILE, RETURNS, REPLACEMENT, RECEIPT, CLAIM].each { everyReferenceResolvesIn(it) }
         assertEquals(["GORJANA_R1", "GORJANA_R2", "GORJANA_R3"] as Set, attr(rows(FILE, "darpan.audit.AuditStatementCheck"), "statementId"),
                 "comparison 2 covers R1-R3")
-        assertEquals(["GORJANA_R4", "GORJANA_R8", "GORJANA_R9"] as Set, attr(rows(RETURNS, "darpan.audit.AuditStatementCheck"), "statementId"),
-                "comparison 1 covers R8, R9 and R4's nothing-left-open so far")
+        assertEquals(["GORJANA_R4", "GORJANA_R7", "GORJANA_R8", "GORJANA_R9"] as Set, attr(rows(RETURNS, "darpan.audit.AuditStatementCheck"), "statementId"),
+                "comparison 1 covers R7, R8, R9 and R4's nothing-left-open so far")
         assertEquals(["GORJANA_R13", "GORJANA_R14"] as Set, attr(rows(REPLACEMENT, "darpan.audit.AuditStatementCheck"), "statementId"))
         assertEquals(["GORJANA_R11"] as Set, attr(rows(RECEIPT, "darpan.audit.AuditStatementCheck"), "statementId"))
         assertEquals(["GORJANA_R12"] as Set, attr(rows(CLAIM, "darpan.audit.AuditStatementCheck"), "statementId"))
+    }
+
+    @Test
+    void anR7RowIsAnHgFlaggedMemoThatDoesNotPostTo42065() {
+        String scope = "GORJANA_HG_ACCOUNT_SCOPE"
+        Map memo = [tranId: "CM7657884", returnId: "HG-628096", isHg: "T", onHgAccount: "F"]
+        assertEquals("CONC_HG_NOT_ON_42065", conclude(RETURNS, scope, memo))
+        assertEquals("UNEXPLAINED", conclude(RETURNS, scope, memo + [onHgAccount: "T"]), "on 42065")
+        assertEquals("UNEXPLAINED", conclude(RETURNS, scope, memo + [isHg: "F"]), "not a Happiness Guarantee credit")
     }
 
     @Test

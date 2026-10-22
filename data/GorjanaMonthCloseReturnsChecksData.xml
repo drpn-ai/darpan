@@ -1,8 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   DAR-BE-094 — gorjana month close, comparison 1 (returns against credit memos and RMAs): the checks that need no
-  answer from the team yet: R9, R8, R7, and R4's "nothing left open". R4's amount and R6 wait on a Shopify read; R16 is
-  next.
+  answer from the team yet: R9, R8, R7, R16, and R4's "nothing left open". R4's amount and R6 wait on a Shopify read.
+
+  R16 "A cancelled exchange leaves nothing open in NetSuite." NetSuite never cancels an exchange RMA (none of 30,123
+     exchange RMAs since Sep 1): the OMS cancels the return. So FILE_1 is the returns the OMS cancelled (OMS_RETURNS_GQL
+     with onlyCancelledReturns, asked of the OMS by status) and FILE_2 the RMAs still OPEN (NS_OPEN_RMA), keyed by return
+     id. A pair is the finding: rule GORJANA_R16_STATUS ("statusId = status") never holds between a cancelled return and an
+     open RMA, so every pair is a FIELD_MISMATCH row naming the RMA's status. Any cancelled return counts, not only an
+     exchange: an open RMA for a cancelled refund is as wrong. Measured: of 183 exchanges the OMS cancelled Oct 1-22, 2
+     have an open RMA (Pending Receipt); none has a memo or replacement order.
 
   R7 "A Happiness Guarantee claim is booked to the Happiness Guarantee account, 42065." Aditi, 2026-10-22: the "Is HG"
      flag (custbody_hc_close_rma) marks HotWax-sourced Happiness Guarantee returns and AfterShip warranty. One single-
@@ -79,6 +86,46 @@
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_HG_ACCOUNT_SCOPE" sequenceNum="10" conclusionEnumId="CONC_HG_NOT_ON_42065" appliesToBucket="FINDING" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_HG_ACCOUNT_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="isHg" operator="IN" conditionValues="T" checkLabel="The credit memo is flagged Is HG (a Happiness Guarantee or AfterShip warranty credit)" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_HG_ACCOUNT_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="onHgAccount" operator="IN" conditionValues="F" checkLabel="No line posts to 42065 Happiness Guarantee" companyUserGroupId="GORJANA"/>
+
+    <!-- ================================================================ R16: nothing open for a cancelled return -->
+    <darpan.rule.RuleSet ruleSetId="GORJANA_CANCELLED_RETURN_RS" ruleSetName="Cancelled OMS returns - open NetSuite RMAs"
+            description="A return the OMS cancelled has no RMA left open in NetSuite."
+            version="1.0" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_CANCELLED_RETURN_SCOPE" ruleSetId="GORJANA_CANCELLED_RETURN_RS"
+            objectType="RETURN" scopeMode="COMPARE" description="A return the OMS cancelled has no RMA left open in NetSuite."
+            companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_CANCELLED_RETURN_SCOPE" fileSide="FILE_1"
+            systemEnumId="OMS_RETURNS_GQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="returnId"
+            sourceConfigId="gorjana_prod" sourceConfigType="HOTWAX_OMS_GQL_RETURNS" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_CANCELLED_RETURN_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="returnId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_CANCELLED_RETURN_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="returnId"
+            sourceConfigId="NS_OPEN_RMA" sourceConfigType="NETSUITE_SUITEQL" duplicateKeyHandling="FINDING" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_CANCELLED_RETURN_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="returnId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.Rule ruleId="GORJANA_R16_STATUS" ruleSetId="GORJANA_CANCELLED_RETURN_RS" sequenceNum="10"
+            ruleText="statusId = status" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN"
+            companyUserGroupId="GORJANA">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"statusId","file2FieldPath":"status","operator":"="}</expression>
+        <ruleLogic><![CDATA[rule "GORJANA_R16_STATUS"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(!java.util.Objects.equals(((Map) $m.get("file1")).get("statusId"), ((Map) $m.get("file2")).get("status")))
+then
+    Object _file1Value = ((Map) $m.get("file1")).get("statusId");
+    Object _file2Value = ((Map) $m.get("file2")).get("status");
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "statusId = status",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: statusId = status"
+    );
+end]]></ruleLogic>
+    </darpan.rule.Rule>
 
     <!-- ================================================================ R8: every return reaches NetSuite -->
     <darpan.rule.RuleSet ruleSetId="GORJANA_RETURN_IN_NETSUITE_RS" ruleSetName="OMS returns - NetSuite RMAs"
@@ -187,6 +234,17 @@
             passesWhenTemplate="Credit memo {recordKey} posts to 42065 Happiness Guarantee."/>
     <darpan.audit.AuditStatementCheck statementId="GORJANA_R7" checkId="GORJANA_CHK_HG_ACCOUNT" companyUserGroupId="GORJANA"
             sequenceNum="1" diffTypes="FINDING" conclusionCodes="CONC_HG_NOT_ON_42065"/>
+
+    <darpan.audit.AuditCheck checkId="GORJANA_CHK_CANCELLED_RETURN_OPEN" companyUserGroupId="GORJANA" checkCode="cancelled-returns-left-open"
+            label="Returns the OMS cancelled whose NetSuite RMA is still open" savedRunId="GORJANA_CANCELLED_RETURN_RS"
+            file1RecordType="return" graceDays="1"
+            matchedBy="return id (custbody_hc_return_id on the RMA, without its HG- prefix)"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Return {recordKey} is cancelled in the OMS; its RMA is {file2Value}"
+            fixActionTemplate="Close the RMA of return {recordKey} in NetSuite, with anything open behind it: the OMS cancelled the return."
+            passesWhenTemplate="The RMA of return {recordKey} is no longer open."/>
+    <darpan.audit.AuditStatementCheck statementId="GORJANA_R16" checkId="GORJANA_CHK_CANCELLED_RETURN_OPEN" companyUserGroupId="GORJANA"
+            sequenceNum="1" diffTypes="FIELD_MISMATCH" ruleIds="GORJANA_R16_STATUS"/>
 
     <darpan.audit.AuditCheck checkId="GORJANA_CHK_RETURN_IN_NETSUITE" companyUserGroupId="GORJANA" checkCode="returns-not-in-netsuite"
             label="Completed or received OMS returns with no NetSuite RMA" savedRunId="GORJANA_RETURN_IN_NETSUITE_RS"

@@ -57,7 +57,8 @@ class GorjanaMonthCloseMorningsSmokeTests {
                 "component://darpan/data/GorjanaMonthCloseCatalogData.xml",
                 "component://darpan/data/GorjanaMonthCloseChecksData.xml",
                 "component://darpan/data/GorjanaMonthCloseReplacementChecksData.xml",
-                "component://darpan/data/GorjanaMonthCloseWarrantyClaimChecksData.xml")
+                "component://darpan/data/GorjanaMonthCloseWarrantyClaimChecksData.xml",
+                "component://darpan/data/GorjanaMonthCloseReturnsChecksData.xml")
         // The loader rolls a file back on a referential failure and still reports a count: prove the rows.
         assertEquals("GORJANA_INVOICE_ETAIL_RS", find("darpan.audit.AuditCheck", [checkId: CHECK])?.savedRunId)
         assertEquals(TENANT, find("darpan.rule.RuleSetConclusionRule",
@@ -260,6 +261,51 @@ class GorjanaMonthCloseMorningsSmokeTests {
         assertEquals([75.44, 75.43, -0.01], [amount[1].expectedAmount, amount[1].actualAmount, amount[1].differenceAmount]
                 .collect { (it as BigDecimal).setScale(2) })
         assertEquals(["Warranty claim (RMA total)", "NetSuite credit memo total"], [amount[0].expectedSource, amount[0].actualSource])
+    }
+
+    /**
+     * R16: a return the OMS cancelled whose NetSuite RMA is still open. Three cancelled returns: one with an open RMA, a
+     * numeric Happiness Guarantee one whose RMA ("HG-628301", keyed without the prefix) is open, one with none; and an open
+     * RMA for a return nobody cancelled, which no statement takes.
+     */
+    @Test
+    void r16FindsACancelledReturnWhoseRmaIsStillOpen() {
+        String auto = "GORJANA_AUTO_CANCELLED_RETURN"
+        Timestamp now = ec.user.nowTimestamp
+        upsert("darpan.reconciliation.ReconciliationAutomation", [automationId: auto], [automationId: auto,
+                automationName: "Month close: cancelled returns left open", companyUserGroupId: TENANT,
+                inputModeEnumId: AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE,
+                savedRunId: "GORJANA_CANCELLED_RETURN_RS", savedRunType: "ruleset", ruleSetId: "GORJANA_CANCELLED_RETURN_RS",
+                compareScopeId: "GORJANA_CANCELLED_RETURN_SCOPE", relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
+                relativeWindowCount: 1, windowTimeZone: "America/Los_Angeles", isActive: "Y", createdDate: now, lastUpdatedDate: now])
+        upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: auto, fileSide: "FILE_1"], [
+                automationId: auto, fileSide: "FILE_1", companyUserGroupId: TENANT,
+                sourceTypeEnumId: AutomationExecutionSupport.AUTOMATION_SOURCE_API, systemEnumId: "OMS_RETURNS_GQL",
+                fileTypeEnumId: "DftJson", createdDate: now, lastUpdatedDate: now])
+        upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: auto, fileSide: "FILE_2"], [
+                automationId: auto, fileSide: "FILE_2", companyUserGroupId: TENANT,
+                sourceTypeEnumId: AutomationExecutionSupport.AUTOMATION_SOURCE_API, systemEnumId: "NETSUITE_SUITEQL",
+                fileTypeEnumId: "DftJson", createdDate: now, lastUpdatedDate: now])
+        def c = ec.entity.find("darpan.audit.AuditCheck").condition("checkId", "GORJANA_CHK_CANCELLED_RETURN_OPEN").disableAuthz().useCache(false).one()
+        c.set("automationId", auto); c.update()
+        AutomationExecutionSupport.resetExecutionHooks()
+        AutomationExecutionSupport.setSourceExtractor { def ignoredEc, def ignoredAutomation, def source,
+                Map<String, Object> ignoredWindow, Map<String, Object> ignoredParams ->
+            boolean oms = source.get("fileSide") == "FILE_1"
+            return [dataAvailable: true, fileTypeEnumId: "DftJson", recordCount: 3,
+                    fileLocation: "component://darpan/data/test/gorjana-${oms ? 'cancelled-returns' : 'open-rmas'}.json".toString(),
+                    fileName: "${oms ? 'returns' : 'rmas'}.json".toString()]
+        }
+        Timestamp fire = Timestamp.from(LocalDateTime.parse("2026-10-14T06:00:00").atZone(LA).toInstant())
+        Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: auto, scheduledFireTime: fire,
+                sparkMaster: "local[1]", sparkAppName: "GorjanaMonthCloseMorningsSmokeTests"])
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertEquals(1, result.executedCount, "${result}")
+        List<Map> found = ec.entity.find("darpan.audit.AuditFinding").condition("checkId", "GORJANA_CHK_CANCELLED_RETURN_OPEN")
+                .disableAuthz().useCache(false).list()*.getMap().sort { it.recordKey }
+        assertEquals([["GORJANA_R16", "628301", "Return 628301 is cancelled in the OMS; its RMA is Return Authorization : Pending Refund"],
+                      ["GORJANA_R16", "M500101", "Return M500101 is cancelled in the OMS; its RMA is Return Authorization : Pending Receipt"]],
+                found.collect { [it.statementId, it.recordKey, it.headline] }, "the cancelled one with no RMA and the uncancelled RMA are not findings")
     }
 
     /** One scheduled morning at 06:00 in Los Angeles; the NetSuite read returns that morning's fixture. */

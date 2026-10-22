@@ -1,0 +1,5 @@
+{"records": [
+  {"returnId": "M500101", "statusId": "RETURN_CANCELLED", "returnChannelEnumId": "AFTSHIP_RTN_CHANNEL", "orderExternalId": "7186636636291"},
+  {"returnId": "628301", "statusId": "RETURN_CANCELLED", "returnChannelEnumId": "HAPPINESS_GUARANTEE"},
+  {"returnId": "M500103", "statusId": "RETURN_CANCELLED", "returnChannelEnumId": "AFTSHIP_RTN_CHANNEL"}
+]}

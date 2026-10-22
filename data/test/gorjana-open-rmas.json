@@ -1,0 +1,5 @@
+{"records": [
+  {"returnId": "M500101", "tranId": "RMA910101", "internalId": "84000101", "status": "Return Authorization : Pending Receipt", "tranDate": "2026-10-12"},
+  {"returnId": "628301", "tranId": "RMA910102", "internalId": "84000102", "status": "Return Authorization : Pending Refund", "tranDate": "2026-10-12"},
+  {"returnId": "M500199", "tranId": "RMA910199", "internalId": "84000199", "status": "Return Authorization : Pending Receipt", "tranDate": "2026-10-12"}
+]}

@@ -92,6 +92,7 @@ class TenantOwnedEntityFilterRuntimeTests {
             "darpan.audit.AuditFindingEvent"                     : "findingId",
             "darpan.audit.AuditCheckRun"                         : "checkRunId",
             "darpan.audit.AuditSourceRead"                       : "checkRunId",
+            "darpan.audit.AuditDigest"                           : "auditDigestId",
     ].asImmutable()
 
     /** Entities whose companyUserGroupId is not-null: they get no unstamped fixture row. */
@@ -110,6 +111,7 @@ class TenantOwnedEntityFilterRuntimeTests {
             "darpan.audit.AuditFindingEvent",
             "darpan.audit.AuditCheckRun",
             "darpan.audit.AuditSourceRead",
+            "darpan.audit.AuditDigest",
     ].toSet().asImmutable()
 
     private ExecutionContext ec
@@ -692,6 +694,7 @@ class TenantOwnedEntityFilterRuntimeTests {
             case "darpan.audit.AuditFindingEvent": return "MCFE"
             case "darpan.audit.AuditCheckRun": return "MCCR"
             case "darpan.audit.AuditSourceRead": return "MCSRD"
+            case "darpan.audit.AuditDigest": return "AUDDG"
         }
         throw new IllegalArgumentException(entityName)
     }
@@ -736,6 +739,8 @@ class TenantOwnedEntityFilterRuntimeTests {
                     statusEnumId: "AUDCS_RAN", runStamp: FROM_DATE]
             case "darpan.audit.AuditSourceRead": return [checkRunId: id, readSeqId: "01", systemEnumId: "OMS",
                     statusEnumId: "AUDSR_COMPLETE", recordCount: 1L]
+            case "darpan.audit.AuditDigest": return [auditDigestId: id, auditId: "TOEF_AUD_${s}".toString(),
+                    chatSpaceId: "TOEF_SPACE_${s}".toString(), kindEnumId: "AUDDK_DAILY", sendTime: "07:00"]
         }
         throw new IllegalArgumentException(entityName)
     }

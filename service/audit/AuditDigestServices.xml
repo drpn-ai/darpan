@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- DAR-BE-102. The audit run's scheduled chat digests (AuditDigest), rendered from the morning's report JSON by
+         darpan.audit.AuditDigestSupport. Run by the send_AuditDigests_15m job; not callable from outside. -->
+
+    <service verb="send" noun="DueAuditDigests" authenticate="false" allow-remote="false" transaction="ignore">
+        <description>Sends every active digest that is due now in its tenant's zone (past its send time, on its weekday
+            when weekly, not sent yet that day), each claimed first so it goes out once a day.</description>
+        <in-parameters>
+            <parameter name="nowStamp" type="Timestamp" default="ec.user.nowTimestamp">
+                <description>The moment to judge "due" at; pinned by tests, now otherwise.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="outcomes" type="List"><description>Per digest: auditDigestId, sent, and the reason when
+                not sent (NOT_YET, NOT_TODAY, SENT_TODAY, NO_DESTINATION, NO_REPORT, DELIVERY_FAILED, BAD_SEND_TIME,
+                FAILED).</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="outcomes" from="darpan.audit.AuditDigestSupport.sendDue(ec, nowStamp.toInstant())"/>
+        </actions>
+    </service>
+</services>

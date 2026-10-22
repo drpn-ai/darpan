@@ -495,4 +495,47 @@
         </relationship>
         <index name="AUDSRD_TENANT"><index-field name="companyUserGroupId"/></index>
     </entity>
+
+    <entity entity-name="AuditDigest" package="darpan.audit" use="configuration">
+        <description>DAR-BE-102. One chat message an audit sends on a schedule, rendered from that morning's report JSON
+            and nothing else: a daily digest for the team that fixes records, a weekly summary for the team that closes
+            the books. A tenant may have several per audit, each to its own chat space.</description>
+        <field name="auditDigestId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="auditId" type="id" not-null="true"/>
+        <field name="chatSpaceId" type="id" not-null="true">
+            <description>The tenant's chat space it posts to (TenantChatSpace); another tenant's space is never used.</description>
+        </field>
+        <field name="kindEnumId" type="id" not-null="true">
+            <description>AuditDigestKind: daily (open, new and fixed today) or weekly (where things stand against a week
+                before).</description>
+        </field>
+        <field name="sendTime" type="text-short" not-null="true">
+            <description>HH:mm in the tenant's zone, after the morning's checks, e.g. 07:00 for checks at 06:00.</description>
+        </field>
+        <field name="dayOfWeek" type="number-integer">
+            <description>Weekly only: ISO day, 1 Monday to 7 Sunday.</description>
+        </field>
+        <field name="fullList" type="text-indicator">
+            <description>Y lists every open and pending finding, as far as one message holds, for the days before a
+                close; otherwise only the oldest open ones.</description>
+        </field>
+        <field name="isActive" type="text-indicator"/>
+        <field name="lastSentDate" type="date">
+            <description>The tenant's day it last went out; at most one message a day, claimed before it is sent.</description>
+        </field>
+        <relationship type="one" related="darpan.audit.Audit" fk-name="AUDDG_AUDIT">
+            <key-map field-name="auditId"/>
+        </relationship>
+        <relationship type="one" related="darpan.reconciliation.TenantChatSpace" fk-name="AUDDG_SPACE">
+            <key-map field-name="chatSpaceId"/>
+        </relationship>
+        <relationship type="one" title="Kind" related="moqui.basic.Enumeration" fk-name="AUDDG_KIND">
+            <key-map field-name="kindEnumId" related="enumId"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUDDG_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <index name="AUDDG_TENANT"><index-field name="companyUserGroupId"/></index>
+    </entity>
 </entities>

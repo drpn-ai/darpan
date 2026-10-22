@@ -69,6 +69,7 @@ class TenantOwnedEntityFilterContractTests {
     static final Map<String, String> DAR_BE_090_FILTERS = [
             "darpan.audit.AuditCheckRun"                         : "DARPAN_SCOPE_AUD_CHECK_RUN",
             "darpan.audit.AuditSourceRead"                       : "DARPAN_SCOPE_AUD_SOURCE_READ",
+            "darpan.audit.AuditDigest"                           : "DARPAN_SCOPE_AUD_DIGEST",
     ].asImmutable()
 
     /** Every filter row this class pins by id, with its entity. */

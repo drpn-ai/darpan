@@ -30,6 +30,8 @@ class AuditCatalogContractTests {
             AuditFindingEvent   : ["found", "stillOpen", "fixed", "reopened"],
             AuditActorType      : ["check", "user"],
             AuditPeriod         : ["day", "month", "quarter"],
+            // DAR-BE-102: not in the JSON (the digest is rendered from it), but it rides the same seed and upgrade pack.
+            AuditDigestKind     : ["daily", "weekly"],
     ].asImmutable()
 
     /** #483 open point 6: every statement not listed there as derived is firm. */

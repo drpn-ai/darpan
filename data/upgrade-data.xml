@@ -825,4 +825,23 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             entityName="darpan.audit.AuditSourceRead"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
 
+    <!-- DAR-BE-102. What a scheduled digest says. -->
+    <moqui.basic.EnumerationType enumTypeId="AuditDigestKind" description="Audit digest kind"/>
+    <moqui.basic.Enumeration enumId="AUDDK_DAILY" enumTypeId="AuditDigestKind" enumCode="daily"
+            description="Daily digest" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="AUDDK_WEEKLY" enumTypeId="AuditDigestKind" enumCode="weekly"
+            description="Weekly summary" sequenceNum="2"/>
+    <!-- DAR-BE-102 — scheduled digests, filtered from the day the entity was added. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_DIGEST"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.audit.AuditDigest"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+
+    <!-- DAR-BE-102. Audit digests: each is due once a day at its own time in its tenant's zone; a 15-minute scan
+         sends it within a quarter hour of that time. -->
+    <moqui.service.job.ServiceJob jobName="send_AuditDigests_15m"
+            description="Send the audit run digests that are due."
+            serviceName="audit.AuditDigestServices.send#DueAuditDigests"
+            cronExpression="0 0/15 * * * ?" paused="N"/>
+
 </entity-facade-xml>

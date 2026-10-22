@@ -70,4 +70,8 @@
     <darpan.audit.AuditStatement statementId="GORJANA_R17" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R17"
             categoryEnumId="AUDC_EXCHANGES_WARRANTY" weightEnumId="AUDSW_DERIVED" sequenceNum="17"
             statementText="A store floor damage is booked in NetSuite, or reported with its reason."/>
+    <!-- DAR-BE-111: R18 is Aditi's (2026-10-22), not from #483, so derived until Gorjana Accounting confirms it. -->
+    <darpan.audit.AuditStatement statementId="GORJANA_R18" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R18"
+            categoryEnumId="AUDC_ORDERS" weightEnumId="AUDSW_DERIVED" sequenceNum="18"
+            statementText="An order HotWax completed or cancelled does not stay open in NetSuite."/>
 </entity-facade-xml>

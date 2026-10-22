@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-111 — RAILS's audit (an audit run, period month), with one statement so far, R1: "An order HotWax completed or cancelled does not stay open in NetSuite."
+  (Aditi, 2026-10-22). The check behind it: every sales order HotWax sent, read single-sided with whether NetSuite
+  shipped and billed it and its HotWax status (tools/netsuite-chain-config/rails-audit-queries.xml,
+  RAILS_NS_SO_OPEN_OMS_STATUS). An order NetSuite never shipped or billed is a finding when HotWax completed it, when
+  HotWax cancelled it and NetSuite still has it open, or when HotWax has no order with its HC Order Id. Approved,
+  created or held in HotWax is correct: still open in both.
+  Live 2026-10-22, Oct 1-19 (tools/live-probes/run-open-orders-oms-status.sh): 12 findings, all completed in HotWax and
+  Pending Fulfillment in NetSuite (e.g. SO8432201 / HC 145059); the 86 cancelled are all Closed in NetSuite.
+  NOT seed data - tenant configuration. Load per install, AFTER the backend carrying NsSuiteQlSourceQuery.omsStatusConfigId
+  (DAR-BE-111), AuditSeedData.xml, rails-audit-queries.xml, and once the RAILS tenant exists:
+      ec.entity.makeDataLoader().location("component://darpan/data/RailsAuditData.xml").load()
+-->
+<entity-facade-xml type="darpan-tenant-config">
+    <darpan.audit.Audit auditId="RAILS_MONTH_CLOSE" companyUserGroupId="RAILS" auditCode="month-close"
+            auditName="Month close" periodEnumId="AUDP_MONTH"/>
+    <darpan.audit.AuditStatement statementId="RAILS_R1" auditId="RAILS_MONTH_CLOSE" companyUserGroupId="RAILS" statementCode="R1"
+            categoryEnumId="AUDC_ORDERS" weightEnumId="AUDSW_FIRM" sequenceNum="1"
+            statementText="An order HotWax completed or cancelled does not stay open in NetSuite."/>
+    <moqui.basic.Enumeration enumId="CONC_OMS_COMPLETED_NS_OPEN" enumTypeId="DarpanConclusion" enumCode="CONC_OMS_COMPLETED_NS_OPEN" description="Completed in HotWax, never shipped or billed in NetSuite"/>
+    <moqui.basic.Enumeration enumId="CONC_OMS_CANCELLED_NS_OPEN" enumTypeId="DarpanConclusion" enumCode="CONC_OMS_CANCELLED_NS_OPEN" description="Cancelled in HotWax, still open in NetSuite"/>
+    <moqui.basic.Enumeration enumId="CONC_NS_ORDER_NOT_IN_OMS" enumTypeId="DarpanConclusion" enumCode="CONC_NS_ORDER_NOT_IN_OMS" description="HotWax has no order with this HC Order Id"/>
+    <darpan.rule.RuleSet ruleSetId="RAILS_OPEN_OMS_STATUS_RS" ruleSetName="Open in NetSuite - HotWax status"
+            description="Sales orders NetSuite never shipped or billed, against HotWax: completed, cancelled while still open in NetSuite, or not in HotWax. Reads every HotWax order so a fixed one closes."
+            version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_OPEN_OMS_STATUS_SCOPE" ruleSetId="RAILS_OPEN_OMS_STATUS_RS"
+            objectType="ORDER" scopeMode="EVALUATE" description="Sales orders NetSuite never shipped or billed, against HotWax: completed, cancelled while still open in NetSuite, or not in HotWax. Reads every HotWax order so a fixed one closes."
+            companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_OPEN_OMS_STATUS_SCOPE" fileSide="FILE_1"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="tranId"
+            sourceConfigId="RAILS_NS_SO_OPEN_OMS_STATUS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_OPEN_OMS_STATUS_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="tranId" companyUserGroupId="RAILS"/>
+    <!-- An order with no HC Order Id is not HotWax's: not read at all (Aditi, 2026-10-22). -->
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_OPEN_OMS_STATUS_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="orderOrigin" operator="INCLUDE_IN" filterValues="HOTWAX" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_OPEN_OMS_STATUS_SCOPE" sequenceNum="10" conclusionEnumId="CONC_OMS_COMPLETED_NS_OPEN" appliesToBucket="FINDING" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OPEN_OMS_STATUS_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="shipped" operator="IN" conditionValues="F" checkLabel="NetSuite never shipped it" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OPEN_OMS_STATUS_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="billed" operator="IN" conditionValues="F" checkLabel="NetSuite never billed it" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OPEN_OMS_STATUS_SCOPE" sequenceNum="10" conditionSeq="3" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="omsStatusId" operator="IN" conditionValues="ORDER_COMPLETED" checkLabel="HotWax completed it" companyUserGroupId="RAILS"/>
+    <!-- Cancelled in HotWax is a finding only while NetSuite keeps the order open: Closed (H) or Cancelled (C) means the
+         cancellation reached NetSuite (all 86 RAILS and 625 of 629 gorjana cancellations, Oct 1-19). -->
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_OPEN_OMS_STATUS_SCOPE" sequenceNum="20" conclusionEnumId="CONC_OMS_CANCELLED_NS_OPEN" appliesToBucket="FINDING" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OPEN_OMS_STATUS_SCOPE" sequenceNum="20" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="shipped" operator="IN" conditionValues="F" checkLabel="NetSuite never shipped it" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OPEN_OMS_STATUS_SCOPE" sequenceNum="20" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="billed" operator="IN" conditionValues="F" checkLabel="NetSuite never billed it" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OPEN_OMS_STATUS_SCOPE" sequenceNum="20" conditionSeq="3" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="omsStatusId" operator="IN" conditionValues="ORDER_CANCELLED" checkLabel="HotWax cancelled it" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OPEN_OMS_STATUS_SCOPE" sequenceNum="20" conditionSeq="4" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="status" operator="NOT_IN" conditionValues="C,H" checkLabel="NetSuite keeps it open" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_OPEN_OMS_STATUS_SCOPE" sequenceNum="30" conclusionEnumId="CONC_NS_ORDER_NOT_IN_OMS" appliesToBucket="FINDING" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OPEN_OMS_STATUS_SCOPE" sequenceNum="30" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="shipped" operator="IN" conditionValues="F" checkLabel="NetSuite never shipped it" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OPEN_OMS_STATUS_SCOPE" sequenceNum="30" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="billed" operator="IN" conditionValues="F" checkLabel="NetSuite never billed it" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OPEN_OMS_STATUS_SCOPE" sequenceNum="30" conditionSeq="3" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="omsStatusId" operator="IN" conditionValues="NOT_IN_OMS" checkLabel="HotWax has no order with its HC Order Id" companyUserGroupId="RAILS"/>
+    <!-- Two checks over the one run, each with its own headline: done in HotWax, and not in HotWax at all. graceDays 4: a
+         fulfillment and an invoice follow HotWax by p95 4 days (the invoice lag behind R1), so an order is pending, not
+         open, until it has had that long. automationId is set per environment once the automation exists. -->
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_OPEN_OMS_DONE" companyUserGroupId="RAILS" checkCode="open-in-netsuite-done-in-hotwax"
+            label="NetSuite orders never shipped or billed that HotWax completed or cancelled" savedRunId="RAILS_OPEN_OMS_STATUS_RS"
+            file1RecordType="salesOrder" graceDays="4"
+            matchedBy="HC Order Id (custbody_hc_order_id) = HotWax order id"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Order {recordKey} is done in HotWax and still open in NetSuite"
+            fixActionTemplate="Ship and bill order {recordKey} in NetSuite as HotWax completed it, or close it if HotWax cancelled it."
+            passesWhenTemplate="NetSuite has shipped, billed or closed order {recordKey}."/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_OPEN_NOT_IN_OMS" companyUserGroupId="RAILS" checkCode="open-in-netsuite-not-in-hotwax"
+            label="NetSuite orders never shipped or billed whose HC Order Id HotWax does not have" savedRunId="RAILS_OPEN_OMS_STATUS_RS"
+            file1RecordType="salesOrder" graceDays="4"
+            matchedBy="HC Order Id (custbody_hc_order_id) = HotWax order id"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Order {recordKey} names a HotWax order HotWax does not have"
+            fixActionTemplate="Find the HotWax order for {recordKey}, or close the NetSuite order if it never came from HotWax."
+            passesWhenTemplate="HotWax has the order NetSuite order {recordKey} names, or NetSuite has moved it on."/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R1" checkId="RAILS_CHK_OPEN_OMS_DONE" companyUserGroupId="RAILS"
+            sequenceNum="1" diffTypes="FINDING" conclusionCodes="CONC_OMS_COMPLETED_NS_OPEN,CONC_OMS_CANCELLED_NS_OPEN"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R1" checkId="RAILS_CHK_OPEN_NOT_IN_OMS" companyUserGroupId="RAILS"
+            sequenceNum="2" diffTypes="FINDING" conclusionCodes="CONC_NS_ORDER_NOT_IN_OMS"/>
+</entity-facade-xml>

@@ -36,7 +36,8 @@ class LifecycleSupport {
                                                ["status", "BUILTIN.DF(status) AS status"], ["customer", "BUILTIN.DF(entity) AS customer"],
                                                ["total", "foreigntotal"], ["shippingMethod", "BUILTIN.DF(shipmethod) AS shipmethod"],
                                                ["reference", "otherrefnum"],
-                                               ["itemsBackordered", "LINE_SUM(quantitybackordered) AS backordered"]]
+                                               ["itemsBackordered", "LINE_ITEMS(quantitybackordered) AS backordered"],
+                                               ["customerDeposit", "DEPOSIT_WHEN(SalesOrd, F, 0) AS deposit"]]
     /** A detail a person chose (a custom field) is selected under its own alias, apart from a leave-out rule's column. */
     static final String DETAIL_ALIAS = "detail"
 

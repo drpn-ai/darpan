@@ -239,12 +239,13 @@ class LifecycleRuleSmokeTests {
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())
         assertEquals([[fieldId: "custbody_hc_order_id", key: "hcOrderId"], [fieldId: "custbody_celigo_etail_order_id", key: "etailOrderId"]], out.details)
 
-        List<String> shown = ["internalId", "order", "date", "status", "customer", "total", "shippingMethod", "reference", "itemsBackordered", "hcOrderId", "etailOrderId"]
+        List<String> shown = ["internalId", "order", "date", "status", "customer", "total", "shippingMethod", "reference", "itemsBackordered", "customerDeposit", "hcOrderId", "etailOrderId"]
         columnsOfChecks(recId).each { List<List<String>> cols -> assertEquals(shown, cols*.get(0).findAll { it != "custbody_hc_order_id" }, cols.toString()) }
         List<List<String>> start = columnsOfChecks(recId).find { cols -> cols.any { it[0] == "custbody_hc_order_id" } }
         assertNotNull(start, "the leave-out rule's column is kept")
         assertEquals(["custbody_hc_order_id", "NVL(custbody_hc_order_id, 'NO_VALUE') AS custbody_hc_order_id"], start.last())
         assertTrue(start.contains(["hcOrderId", "custbody_hc_order_id AS detail1"]), start.toString())
+        assertTrue(start.contains(["itemsBackordered", "LINE_ITEMS(quantitybackordered) AS backordered"]), start.toString())
         assertTrue(start.contains(["status", "BUILTIN.DF(status) AS status"]), start.toString())
 
         call("facade.ReconciliationFacadeServices.save#LifecycleStages", [reconciliationId: recId, stageRecordTypes: ["CustInvc", "ItemShip"]])

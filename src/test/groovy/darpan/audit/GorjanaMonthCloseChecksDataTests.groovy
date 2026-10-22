@@ -200,15 +200,17 @@ class GorjanaMonthCloseChecksDataTests {
     }
 
     @Test
-    void anR9RowIsAFindingWhenTheCustomerNameOrTheReturnAddressIsMissing() {
-        Map whole = [tranId: "RMA1", returnId: "M258615", customerName: "Ada Lovelace", shipAddressId: "9001"]
+    void anR9RowIsAFindingWhenTheCustomerNameTheReturnAddressOrTheBillingAddressIsMissing() {
+        Map whole = [tranId: "RMA1", returnId: "M258615", customerName: "Ada Lovelace", shipAddressId: "9001", billAddressId: "9002"]
         ["GORJANA_RMA_CUSTOMER_SCOPE", "GORJANA_RETURN_CREDIT_CUSTOMER_SCOPE"].each { String scope ->
             assertEquals("UNEXPLAINED", conclude(RETURNS, scope, whole), "${scope}: name and address")
             assertEquals("CONC_NO_CUSTOMER_NAME", conclude(RETURNS, scope, whole - [customerName: "Ada Lovelace"]), "${scope}: no name")
             assertEquals("CONC_NO_CUSTOMER_NAME", conclude(RETURNS, scope, whole + [customerName: " "]), "${scope}: blank name")
             assertEquals("CONC_NO_RETURN_ADDRESS", conclude(RETURNS, scope, whole - [shipAddressId: "9001"]), "${scope}: no address")
-            // A billing address is not the address it came from: its absence alone is no R9 finding (open question).
-            assertEquals("UNEXPLAINED", conclude(RETURNS, scope, whole + [billAddressId: null]), "${scope}: no billing address")
+            // Aditi, 2026-10-22: billing is required too. After the name and the return address, so those still name it.
+            assertEquals("CONC_NO_BILLING_ADDRESS", conclude(RETURNS, scope, whole + [billAddressId: null]), "${scope}: no billing address")
+            assertEquals("CONC_NO_RETURN_ADDRESS", conclude(RETURNS, scope, whole - [shipAddressId: "9001"] + [billAddressId: null]),
+                    "${scope}: no address at all reads as the return address first")
         }
         // A credit memo that is not a return's (no HC return id) is not R9's to judge.
         assertEquals("UNEXPLAINED", conclude(RETURNS, "GORJANA_RETURN_CREDIT_CUSTOMER_SCOPE",

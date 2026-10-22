@@ -22,8 +22,9 @@
      returnsCustomerColumns / returnsCustomerSplits, 2026-10-21):
        RtnAuth with an HC return id    29,090: customer with no name 0, no shipping address 34, no billing address 146
        CustCred with an HC return id   28,673: customer with no name 0, no shipping address 0, no BILLING address 17,625
-     The billing address is NOT tested: 61% of return credits have none, on every channel, so it is a systemic question
-     for Gorjana Accounting (does a credit memo need one?), not 17,625 findings a month. Every address that exists has
+     The billing address IS tested since 2026-10-22 (Aditi: "billing is required too"): CONC_NO_BILLING_ADDRESS, after
+     the name and the return address (a record takes its first matching conclusion). Expect about 17,600 credit memos
+     and ~150 RMAs a month at first: 61% of return credits have none, on every channel. Every address that exists has
      text, and no customer on these records lacks a name, so the name rule guards against a regression.
 
   Every record is read, not only the bad ones, so a fixed one is examined and its finding closes (as for R2).
@@ -40,6 +41,7 @@
 
     <moqui.basic.Enumeration enumId="CONC_NO_CUSTOMER_NAME" enumTypeId="DarpanConclusion" enumCode="CONC_NO_CUSTOMER_NAME" description="No customer name"/>
     <moqui.basic.Enumeration enumId="CONC_NO_RETURN_ADDRESS" enumTypeId="DarpanConclusion" enumCode="CONC_NO_RETURN_ADDRESS" description="No address it came from"/>
+    <moqui.basic.Enumeration enumId="CONC_NO_BILLING_ADDRESS" enumTypeId="DarpanConclusion" enumCode="CONC_NO_BILLING_ADDRESS" description="No billing address"/>
 
     <moqui.basic.Enumeration enumId="CONC_MEMO_LEFT_OPEN" enumTypeId="DarpanConclusion" enumCode="CONC_MEMO_LEFT_OPEN" description="Credit memo left open"/>
 
@@ -76,6 +78,9 @@
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_RMA_CUSTOMER_SCOPE" sequenceNum="20" conclusionEnumId="CONC_NO_RETURN_ADDRESS" appliesToBucket="FINDING" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RMA_CUSTOMER_SCOPE" sequenceNum="20" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="returnId" operator="NOT_BLANK" checkLabel="A return's RMA (it has an HC return id)" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RMA_CUSTOMER_SCOPE" sequenceNum="20" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="shipAddressId" operator="BLANK" checkLabel="The RMA has no shipping address" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_RMA_CUSTOMER_SCOPE" sequenceNum="30" conclusionEnumId="CONC_NO_BILLING_ADDRESS" appliesToBucket="FINDING" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RMA_CUSTOMER_SCOPE" sequenceNum="30" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="returnId" operator="NOT_BLANK" checkLabel="A return's RMA (it has an HC return id)" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RMA_CUSTOMER_SCOPE" sequenceNum="30" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="billAddressId" operator="BLANK" checkLabel="The RMA has no billing address" companyUserGroupId="GORJANA"/>
 
     <!-- ================================================================ R9: return credit memos -->
     <darpan.rule.RuleSet ruleSetId="GORJANA_RETURN_CREDIT_CUSTOMER_RS" ruleSetName="Return credit memos - customer name and address"
@@ -95,22 +100,25 @@
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_RETURN_CREDIT_CUSTOMER_SCOPE" sequenceNum="20" conclusionEnumId="CONC_NO_RETURN_ADDRESS" appliesToBucket="FINDING" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RETURN_CREDIT_CUSTOMER_SCOPE" sequenceNum="20" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="returnId" operator="NOT_BLANK" checkLabel="A return's credit memo (it has an HC return id)" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RETURN_CREDIT_CUSTOMER_SCOPE" sequenceNum="20" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="shipAddressId" operator="BLANK" checkLabel="The credit memo has no shipping address" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_RETURN_CREDIT_CUSTOMER_SCOPE" sequenceNum="30" conclusionEnumId="CONC_NO_BILLING_ADDRESS" appliesToBucket="FINDING" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RETURN_CREDIT_CUSTOMER_SCOPE" sequenceNum="30" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="returnId" operator="NOT_BLANK" checkLabel="A return's credit memo (it has an HC return id)" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RETURN_CREDIT_CUSTOMER_SCOPE" sequenceNum="30" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="billAddressId" operator="BLANK" checkLabel="The credit memo has no billing address" companyUserGroupId="GORJANA"/>
 
     <!-- ================================================================ The checks -->
     <darpan.audit.AuditCheck checkId="GORJANA_CHK_RMA_CUSTOMER" companyUserGroupId="GORJANA" checkCode="rmas-without-customer-name-or-address"
-            label="NetSuite RMAs with no customer name or return address" savedRunId="GORJANA_RMA_CUSTOMER_RS"
+            label="NetSuite RMAs with no customer name, return address or billing address" savedRunId="GORJANA_RMA_CUSTOMER_RS"
             file1RecordType="rma" graceDays="1"
             fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
             headlineTemplate="RMA {recordKey}: {conclusion}"
-            fixActionTemplate="Set the customer's name and the shipping address on RMA {recordKey}, as the Shopify return shows them."
-            passesWhenTemplate="RMA {recordKey} carries the customer's name and a shipping address."/>
+            fixActionTemplate="Set the customer's name, the shipping address and the billing address on RMA {recordKey}, as the Shopify return shows them."
+            passesWhenTemplate="RMA {recordKey} carries the customer's name, a shipping address and a billing address."/>
     <darpan.audit.AuditCheck checkId="GORJANA_CHK_RETURN_CREDIT_CUSTOMER" companyUserGroupId="GORJANA" checkCode="return-credits-without-customer-name-or-address"
-            label="NetSuite return credit memos with no customer name or return address" savedRunId="GORJANA_RETURN_CREDIT_CUSTOMER_RS"
+            label="NetSuite return credit memos with no customer name, return address or billing address" savedRunId="GORJANA_RETURN_CREDIT_CUSTOMER_RS"
             file1RecordType="creditMemo" graceDays="1"
             fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
             headlineTemplate="Credit memo {recordKey}: {conclusion}"
-            fixActionTemplate="Set the customer's name and the shipping address on credit memo {recordKey}, as the Shopify return shows them."
-            passesWhenTemplate="Credit memo {recordKey} carries the customer's name and a shipping address."/>
+            fixActionTemplate="Set the customer's name, the shipping address and the billing address on credit memo {recordKey}, as the Shopify return shows them."
+            passesWhenTemplate="Credit memo {recordKey} carries the customer's name, a shipping address and a billing address."/>
 
     <darpan.audit.AuditCheck checkId="GORJANA_CHK_CREDIT_LEFT_OPEN" companyUserGroupId="GORJANA" checkCode="credit-memos-left-open"
             label="NetSuite credit memos left open" savedRunId="GORJANA_CREDIT_OPEN_RS"
@@ -123,8 +131,8 @@
             sequenceNum="1" diffTypes="FINDING" conclusionCodes="CONC_MEMO_LEFT_OPEN"/>
 
     <darpan.audit.AuditStatementCheck statementId="GORJANA_R9" checkId="GORJANA_CHK_RMA_CUSTOMER" companyUserGroupId="GORJANA"
-            sequenceNum="1" diffTypes="FINDING" conclusionCodes="CONC_NO_CUSTOMER_NAME,CONC_NO_RETURN_ADDRESS"/>
+            sequenceNum="1" diffTypes="FINDING" conclusionCodes="CONC_NO_CUSTOMER_NAME,CONC_NO_RETURN_ADDRESS,CONC_NO_BILLING_ADDRESS"/>
     <darpan.audit.AuditStatementCheck statementId="GORJANA_R9" checkId="GORJANA_CHK_RETURN_CREDIT_CUSTOMER" companyUserGroupId="GORJANA"
-            sequenceNum="2" diffTypes="FINDING" conclusionCodes="CONC_NO_CUSTOMER_NAME,CONC_NO_RETURN_ADDRESS"/>
+            sequenceNum="2" diffTypes="FINDING" conclusionCodes="CONC_NO_CUSTOMER_NAME,CONC_NO_RETURN_ADDRESS,CONC_NO_BILLING_ADDRESS"/>
 
 </entity-facade-xml>

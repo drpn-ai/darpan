@@ -754,6 +754,74 @@
         </actions>
     </service>
 
+    <service verb="delete" noun="NsAuthConfig" allow-remote="true" authenticate="true">
+        <description>Delete one tenant-owned NetSuite auth profile (DAR-BE-114). Refused, naming what is in the way,
+            while anything still signs in with it: RESTlet endpoints, NetSuite checks, saved runs. nsAuthConfigId is
+            referenced without a cascading FK, so deleting under them would surface later as a confusing "not found"
+            at run time. Owner-only, and never while shared with another tenant — the same rules as the Shopify and
+            HotWax deletes.</description>
+        <in-parameters>
+            <parameter name="nsAuthConfigId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="deleted" type="Boolean"/>
+            <parameter name="deletedNsAuthConfigId"/>
+        </out-parameters>
+        <actions>
+            <set field="deleted" from="false"/>
+            <set field="nsAuthConfigIdValue" from="((nsAuthConfigId)?.toString()?.trim())"/>
+            <if condition="!nsAuthConfigIdValue">
+                <message error="true">Auth Config ID is required.</message>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="existingAuth" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsAuthConfig', 'delete#NsAuthConfig existence check; TenantAccessSupport.canAccessTenantRecord gates owner-only access on the next line (DAR-BE-114)').condition('nsAuthConfigId', nsAuthConfigIdValue).useCache(false).one()"/>
+                <set field="isOwner" from="existingAuth != null &amp;&amp; darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, existingAuth)"/>
+                <if condition="existingAuth != null &amp;&amp; !isOwner &amp;&amp; darpan.facade.common.SharedConfigAccessSupport.canActiveTenantUseConfig(ec, darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_AUTH, existingAuth)">
+                    <message error="true">NS Auth config '${nsAuthConfigIdValue}' is shared from another tenant. Stop sharing it instead of deleting it.</message>
+                    <else-if condition="!isOwner">
+                        <!-- One message for missing and foreign, as save#NsAuthConfig: no cross-tenant existence oracle. -->
+                        <message error="true">NS Auth config '${nsAuthConfigIdValue}' was not found.</message>
+                    </else-if>
+                    <else-if condition="darpan.facade.common.SharedConfigGrantSupport.hasActiveGrants(ec, darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_AUTH, nsAuthConfigIdValue)">
+                        <message error="true">NS Auth config '${nsAuthConfigIdValue}' is shared with other tenants. Stop sharing it with every tenant before deleting it.</message>
+                    </else-if>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for NetSuite auth settings.')"/>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <!-- Counted past the tenant filter on purpose: a user anywhere is a reason to refuse, and the
+                     owner-only and not-shared gates above already mean only this tenant can be holding one. -->
+                <set field="restletCount" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsRestletConfig', 'delete#NsAuthConfig dependent count; owner gate above (DAR-BE-114)').condition('nsAuthConfigId', nsAuthConfigIdValue).count()"/>
+                <set field="checkCount" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsSuiteQlSourceQuery', 'delete#NsAuthConfig dependent count; owner gate above (DAR-BE-114)').condition('nsAuthConfigId', nsAuthConfigIdValue).count()"/>
+                <set field="runCount" from="(darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.rule.RuleSetCompareSource', 'delete#NsAuthConfig dependent count; owner gate above (DAR-BE-114)').condition('sourceConfigType', 'NETSUITE_AUTH').condition('sourceConfigId', nsAuthConfigIdValue).selectField('compareScopeId').list()*.compareScopeId).unique().size()"/>
+                <set field="usedBy" from="[restletCount ? (restletCount + (restletCount == 1 ? ' RESTlet endpoint' : ' RESTlet endpoints')) : null, checkCount ? (checkCount + (checkCount == 1 ? ' NetSuite check' : ' NetSuite checks')) : null, runCount ? (runCount + (runCount == 1 ? ' saved run' : ' saved runs')) : null].findAll()"/>
+                <if condition="usedBy">
+                    <message error="true">NS Auth config '${nsAuthConfigIdValue}' is still used by ${usedBy.join(', ')}. Move them to another auth profile or delete them first.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <!-- SourceConfigEndpointAccess.configId is polymorphic, so nothing cascades: a later profile reusing
+                     this id would otherwise inherit this one's endpoint decisions. -->
+                <entity-delete-by-condition entity-name="darpan.reconciliation.SourceConfigEndpointAccess">
+                    <econdition field-name="configTypeEnumId" from="darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_AUTH"/>
+                    <econdition field-name="configId" from="nsAuthConfigIdValue"/>
+                </entity-delete-by-condition>
+                <service-call name="delete#darpan.reconciliation.NsAuthConfig" in-map="[nsAuthConfigId: nsAuthConfigIdValue]"/>
+                <set field="deleted" from="true"/>
+                <set field="deletedNsAuthConfigId" from="nsAuthConfigIdValue"/>
+                <message>Deleted NS Auth config ${nsAuthConfigIdValue}.</message>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
     <service verb="list" noun="NsRestletConfigs" authz-action="view" allow-remote="true" authenticate="true">
         <description>List NetSuite endpoint configs joined with auth metadata.</description>
         <in-parameters>

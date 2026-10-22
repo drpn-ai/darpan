@@ -390,6 +390,9 @@
                                         "$ref": "#/components/schemas/SearchNavigationTargetsRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/DeleteNsAuthConfigRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/DeleteTenantChatSpaceRequest"
                                     },
                                     {
@@ -599,6 +602,7 @@
                                         "facade.ReconciliationFacadeServices.sync#Automation": "#/components/schemas/SyncAutomationRequest",
                                         "facade.ReconciliationFacadeServices.unsubscribe#RunNotification": "#/components/schemas/UnsubscribeRunNotificationRequest",
                                         "facade.SearchFacadeServices.search#NavigationTargets": "#/components/schemas/SearchNavigationTargetsRequest",
+                                        "facade.SettingsFacadeServices.delete#NsAuthConfig": "#/components/schemas/DeleteNsAuthConfigRequest",
                                         "facade.SettingsFacadeServices.delete#TenantChatSpace": "#/components/schemas/DeleteTenantChatSpaceRequest",
                                         "facade.SettingsFacadeServices.get#LlmSettings": "#/components/schemas/GetLlmSettingsRequest",
                                         "facade.SettingsFacadeServices.get#TenantSettings": "#/components/schemas/GetTenantSettingsRequest",
@@ -1008,6 +1012,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/SearchNavigationTargetsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/DeleteNsAuthConfigResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/DeleteTenantChatSpaceResponse"
@@ -18062,6 +18069,104 @@
                     "result"
                 ]
             },
+            "DeleteNsAuthConfigParams": {
+                "type": "object",
+                "properties": {
+                    "nsAuthConfigId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "nsAuthConfigId"
+                ],
+                "description": "Delete one tenant-owned NetSuite auth profile (DAR-BE-114). Refused, naming what is in the way,\n            while anything still signs in with it: RESTlet endpoints, NetSuite checks, saved runs. nsAuthConfigId is\n            referenced without a cascading FK, so deleting under them would surface later as a confusing \"not found\"\n            at run time. Owner-only, and never while shared with another tenant \u2014 the same rules as the Shopify and\n            HotWax deletes."
+            },
+            "DeleteNsAuthConfigResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "deleted": {
+                        "type": "boolean"
+                    },
+                    "deletedNsAuthConfigId": {
+                        "type": "string"
+                    }
+                }
+            },
+            "DeleteNsAuthConfigRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.SettingsFacadeServices.delete#NsAuthConfig",
+                "x-darpan-method": "facade.SettingsFacadeServices.delete#NsAuthConfig",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.SettingsFacadeServices.delete#NsAuthConfig"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DeleteNsAuthConfigParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DeleteNsAuthConfigResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.SettingsFacadeServices.delete#NsAuthConfig. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DeleteNsAuthConfigResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "DeleteTenantChatSpaceParams": {
                 "type": "object",
                 "properties": {
@@ -21817,6 +21922,7 @@
         "facade.ReconciliationFacadeServices.sync#Automation": "SyncAutomation",
         "facade.ReconciliationFacadeServices.unsubscribe#RunNotification": "UnsubscribeRunNotification",
         "facade.SearchFacadeServices.search#NavigationTargets": "SearchNavigationTargets",
+        "facade.SettingsFacadeServices.delete#NsAuthConfig": "DeleteNsAuthConfig",
         "facade.SettingsFacadeServices.delete#TenantChatSpace": "DeleteTenantChatSpace",
         "facade.SettingsFacadeServices.get#LlmSettings": "GetLlmSettings",
         "facade.SettingsFacadeServices.get#TenantSettings": "GetTenantSettings",

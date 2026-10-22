@@ -104,11 +104,6 @@ class SourceConnectionDiagnosticsFacadeSmokeTests {
         Map<String, Object> result = call("DIAGSYS_NOPROBE", "DIAG_OWNED")
         assertTrue(result.ok as boolean)
         assertFalse(result.available as boolean)
-
-        // The shipped NETSUITE row is the real-world instance of this: registered, but no probe.
-        Map<String, Object> netsuite = call("NETSUITE", "DIAG_OWNED")
-        assertTrue(netsuite.ok as boolean)
-        assertFalse(netsuite.available as boolean)
     }
 
     @Test

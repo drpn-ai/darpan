@@ -83,10 +83,15 @@
 
     <!-- NETSUITE has no automation extractor; this row exists so the saved-run path resolves its
          expectedSourceConfigType (NETSUITE_AUTH) + aliases from the registry (config over code).
-         No extractServiceName / configParameterName / remote fields on purpose. -->
+         No extractServiceName / remote fields on purpose. configParameterName, configEntityName and
+         healthCheckServiceName are there for connection diagnostics alone (DAR-BE-114): test#SourceConnection
+         finds the auth profile through them, and with no extractServiceName no run path reads them. -->
     <darpan.reconciliation.SourceSystemConnector
             systemEnumId="NETSUITE"
             expectedSourceConfigType="NETSUITE_AUTH"
+            configParameterName="nsAuthConfigId"
+            configEntityName="darpan.reconciliation.NsAuthConfig"
+            healthCheckServiceName="facade.NetSuiteSettingsFacadeServices.probe#NsAuthConnection"
             systemAliases="NETSUITE,DAR_SYS_NETSUITE"
             preserveWindowInstants="N"
             enabled="Y"/>

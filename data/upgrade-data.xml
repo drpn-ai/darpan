@@ -249,6 +249,17 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
 
     <!-- 4. Connectors. SHOPIFY and SHOPIFY_RETURN_REFS are MODIFIED rows (restated whole); the rest are new.
          Source: data/SourceSystemConnectorSeedData.xml -->
+    <!-- DAR-BE-114 (after 2.0.0): NETSUITE is MODIFIED, restated whole, to carry the diagnostics probe fields.
+         Its probe service ships in netsuite-darpan; without it the Diagnose button reports a failed diagnostic. -->
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="NETSUITE"
+            expectedSourceConfigType="NETSUITE_AUTH"
+            configParameterName="nsAuthConfigId"
+            configEntityName="darpan.reconciliation.NsAuthConfig"
+            healthCheckServiceName="facade.NetSuiteSettingsFacadeServices.probe#NsAuthConnection"
+            systemAliases="NETSUITE,DAR_SYS_NETSUITE"
+            preserveWindowInstants="N"
+            enabled="Y"/>
     <darpan.reconciliation.SourceSystemConnector
             systemEnumId="NETSUITE_SUITEQL"
             extractServiceName="reconciliation.NetSuiteOrderExtractionServices.extract#NetSuiteOrders"

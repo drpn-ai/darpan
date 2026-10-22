@@ -120,6 +120,7 @@ facade.ReconciliationFacadeServices.subscribe#RunNotification
 facade.ReconciliationFacadeServices.sync#Automation
 facade.ReconciliationFacadeServices.unsubscribe#RunNotification
 facade.SearchFacadeServices.search#NavigationTargets
+facade.SettingsFacadeServices.delete#NsAuthConfig
 facade.SettingsFacadeServices.delete#TenantChatSpace
 facade.SettingsFacadeServices.get#LlmSettings
 facade.SettingsFacadeServices.get#TenantSettings

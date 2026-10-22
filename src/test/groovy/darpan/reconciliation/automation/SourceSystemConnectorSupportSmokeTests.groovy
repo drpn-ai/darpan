@@ -213,11 +213,13 @@ class SourceSystemConnectorSupportSmokeTests {
         assertEquals("facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection", oms.healthCheckServiceName)
         assertTrue(SourceSystemConnectorSupport.isAllowedProbeServiceShape((String) oms.healthCheckServiceName))
 
-        // NETSUITE declares no probe: diagnostics are unavailable for it, which is a reported
-        // state rather than an error.
+        // DAR-BE-114: NETSUITE gained a probe, and the fields test#SourceConnection finds the auth profile by.
         Map<String, Object> netsuite = SourceSystemConnectorSupport.resolve(ec, "NETSUITE")
         assertNotNull(netsuite, "NETSUITE connector row should resolve")
-        assertNull(netsuite.healthCheckServiceName)
+        assertEquals("facade.NetSuiteSettingsFacadeServices.probe#NsAuthConnection", netsuite.healthCheckServiceName)
+        assertTrue(SourceSystemConnectorSupport.isAllowedProbeServiceShape((String) netsuite.healthCheckServiceName))
+        assertEquals("nsAuthConfigId", netsuite.configParameterName)
+        assertEquals("darpan.reconciliation.NsAuthConfig", netsuite.configEntityName)
     }
 
     @Test

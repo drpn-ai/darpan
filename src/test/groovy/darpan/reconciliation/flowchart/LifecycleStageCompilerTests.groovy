@@ -90,4 +90,20 @@ class LifecycleStageCompilerTests {
         assertThrows(IllegalArgumentException) { LifecycleStageCompiler.compile("SalesOrd", ["X' OR 1=1"]) }
         assertThrows(IllegalArgumentException) { LifecycleStageCompiler.compile("Bogus", ["ItemShip"]) }
     }
+
+    /** DAR-UI-050. The settings page draws a new order's places before it is saved, from the questions a save would make. */
+    @Test
+    void aPlanReadsBackAsTheQuestionsASaveWouldMake() {
+        List<Map> qs = LifecycleStageCompiler.planQuestions("SalesOrd", ["ItemShip", "CustInvc"])
+        assertEquals(LifecycleStageCompiler.compile("SalesOrd", ["ItemShip", "CustInvc"])*.key, qs*.reconciliationRunId)
+        assertEquals((1..qs.size()).toList(), qs*.runSequence)
+        assertTrue(qs.every { it.isActive == "Y" })
+        // Reordered, the places are named for the new order: shipping is asked first.
+        assertEquals(["s0", "NO", "PRESENT", "Billed, never shipped"],
+                qs.find { it.reconciliationRunId == "s0.has1" }.with { [it.parentReconciliationRunId, it.parentBranch, it.check, it.noOutcomeLabel] })
+        assertEquals("Never shipped, never billed", qs.find { it.reconciliationRunId == "s0.not1" }.noOutcomeLabel)
+        assertEquals(["START", null], qs[0].with { [it.questionRole, it.parentReconciliationRunId] })
+        assertEquals("EXCUSED", qs.find { it.reconciliationRunId == "x0" }.questionRole)
+    }
 }
+

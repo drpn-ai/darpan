@@ -2532,6 +2532,27 @@
         </actions>
     </service>
 
+    <service verb="get" noun="LifecyclePlan" allow-remote="true" authenticate="true">
+        <description>DAR-UI-050. The places a lifecycle's stages in this order would make, named as save#LifecycleStages
+            names them, without saving: the settings page shows them while the order is being changed. Reads nothing.</description>
+        <in-parameters>
+            <parameter name="recordType" required="true"><description>The lifecycle's start record type.</description></parameter>
+            <parameter name="stageRecordTypes" type="List" required="true"><parameter name="stageRecordType"/></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="questions" type="List"><parameter name="question" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="questions" from="darpan.reconciliation.flowchart.LifecycleSupport.planQuestions(ec, context)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
     <service verb="import" noun="NetSuiteChecksAsRuns" allow-remote="true" authenticate="true">
         <description>DAR-UI-048. Turns the active tenant's NetSuite checks that are not yet in a run into runs: one
             START per population (account, record type, and how the key is built), each check a yes question under

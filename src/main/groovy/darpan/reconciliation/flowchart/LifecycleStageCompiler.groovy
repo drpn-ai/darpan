@@ -107,6 +107,18 @@ class LifecycleStageCompiler {
         return out
     }
 
+    /**
+     * DAR-UI-050. The plan as the questions a saved lifecycle reads back as, nothing saved: the settings page draws the
+     * places a new stage order makes while the order is being changed, named here as a save would name them.
+     */
+    static List<Map> planQuestions(String startRecordType, List<String> stages) {
+        return compile(startRecordType, stages).withIndex().collect { Map q, int i ->
+            [reconciliationRunId: q.key, parentReconciliationRunId: q.parentKey, parentBranch: q.parentBranch,
+             questionRole: q.questionRole, runSequence: i + 1, isActive: "Y", runName: q.runName,
+             stageRecordType: q.stageRecordType, check: q.check, noOutcomeLabel: q.noOutcomeLabel]
+        }
+    }
+
     /** A lifecycle is named for its records ("Sales Orders"); its stages and their order are on its page. */
     static String lifecycleName(String startRecordType) {
         return words(startRecordType).plural.split(' ').collect { it.capitalize() }.join(' ')

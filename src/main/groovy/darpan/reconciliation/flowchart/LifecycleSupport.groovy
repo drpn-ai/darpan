@@ -168,6 +168,16 @@ class LifecycleSupport {
         return true
     }
 
+    /** DAR-UI-050. The questions a lifecycle of these records and stages, in this order, would have; nothing is read or saved. */
+    static List<Map> planQuestions(def ec, Map params) {
+        List<String> stages = ((params.stageRecordTypes ?: []) as List).collect { normalize(it) }.findAll { it }
+        try {
+            return LifecycleStageCompiler.planQuestions(normalize(params.recordType), stages)
+        } catch (IllegalArgumentException e) {
+            ec.message.addError(e.message); return []
+        }
+    }
+
     /**
      * DAR-UI-050. Changes a lifecycle's stages (their order, or which they are). The old stage questions are turned off,
      * not deleted, so past runs stay readable; the new ones are compiled from the list under the same START, so the

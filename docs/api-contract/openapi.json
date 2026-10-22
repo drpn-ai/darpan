@@ -264,6 +264,9 @@
                                         "$ref": "#/components/schemas/GetGeneratedOutputDifferencesRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetLifecyclePlanRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetMappingRequest"
                                     },
                                     {
@@ -554,6 +557,7 @@
                                         "facade.ReconciliationFacadeServices.get#Automation": "#/components/schemas/GetAutomationRequest",
                                         "facade.ReconciliationFacadeServices.get#GeneratedOutput": "#/components/schemas/GetGeneratedOutputRequest",
                                         "facade.ReconciliationFacadeServices.get#GeneratedOutputDifferences": "#/components/schemas/GetGeneratedOutputDifferencesRequest",
+                                        "facade.ReconciliationFacadeServices.get#LifecyclePlan": "#/components/schemas/GetLifecyclePlanRequest",
                                         "facade.ReconciliationFacadeServices.get#Mapping": "#/components/schemas/GetMappingRequest",
                                         "facade.ReconciliationFacadeServices.get#Reconciliation": "#/components/schemas/GetReconciliationRequest",
                                         "facade.ReconciliationFacadeServices.get#ReconciliationExecution": "#/components/schemas/GetReconciliationExecutionRequest",
@@ -878,6 +882,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetGeneratedOutputDifferencesResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetLifecyclePlanResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetMappingResponse"
@@ -11283,6 +11290,113 @@
                     "result"
                 ]
             },
+            "GetLifecyclePlanParams": {
+                "type": "object",
+                "properties": {
+                    "recordType": {
+                        "type": "string",
+                        "description": "The lifecycle's start record type."
+                    },
+                    "stageRecordTypes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "required": [
+                    "recordType",
+                    "stageRecordTypes"
+                ],
+                "description": "DAR-UI-050. The places a lifecycle's stages in this order would make, named as save#LifecycleStages\n            names them, without saving: the settings page shows them while the order is being changed. Reads nothing."
+            },
+            "GetLifecyclePlanResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "questions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        }
+                    }
+                }
+            },
+            "GetLifecyclePlanRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.get#LifecyclePlan",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.get#LifecyclePlan",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.get#LifecyclePlan"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetLifecyclePlanParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetLifecyclePlanResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.get#LifecyclePlan. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetLifecyclePlanResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "GetMappingParams": {
                 "type": "object",
                 "properties": {
@@ -21661,6 +21775,7 @@
         "facade.ReconciliationFacadeServices.get#Automation": "GetAutomation",
         "facade.ReconciliationFacadeServices.get#GeneratedOutput": "GetGeneratedOutput",
         "facade.ReconciliationFacadeServices.get#GeneratedOutputDifferences": "GetGeneratedOutputDifferences",
+        "facade.ReconciliationFacadeServices.get#LifecyclePlan": "GetLifecyclePlan",
         "facade.ReconciliationFacadeServices.get#Mapping": "GetMapping",
         "facade.ReconciliationFacadeServices.get#Reconciliation": "GetReconciliation",
         "facade.ReconciliationFacadeServices.get#ReconciliationExecution": "GetReconciliationExecution",

@@ -1,0 +1,6 @@
+{"records": [
+  {"returnId": "M400101", "tranId": "CM9100101", "internalId": "83000101", "amount": "65.00", "status": "Credit Memo : Fully Applied", "tranDate": "2026-10-13"},
+  {"returnId": "M400102", "tranId": "CM9100102", "internalId": "83000102", "amount": "70.77", "status": "Credit Memo : Fully Applied", "tranDate": "2026-10-13"},
+  {"returnId": "M400104", "tranId": "CM9100104", "internalId": "83000104", "amount": "75.43", "status": "Credit Memo : Open", "tranDate": "2026-10-13"},
+  {"returnId": "M400199", "tranId": "CM9100199", "internalId": "83000199", "amount": "40.00", "status": "Credit Memo : Fully Applied", "tranDate": "2026-10-13"}
+]}

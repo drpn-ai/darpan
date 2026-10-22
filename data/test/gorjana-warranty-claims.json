@@ -1,0 +1,6 @@
+{"records": [
+  {"returnId": "M400101", "tranId": "RMA900101", "internalId": "82000101", "amount": "65", "warrantyNumber": "WTY-1", "channel": "AFTSHP_OL_WTY", "status": "Return Authorization : Closed", "tranDate": "2026-10-13"},
+  {"returnId": "M400102", "tranId": "RMA900102", "internalId": "82000102", "amount": "65", "warrantyNumber": "WTY-2", "channel": "AFTSHP_NO_POP", "status": "Return Authorization : Closed", "tranDate": "2026-10-13"},
+  {"returnId": "M400103", "tranId": "RMA900103", "internalId": "82000103", "amount": "113.67", "warrantyNumber": "WTY-3", "channel": "AFTSHP_OL_WTY", "status": "Return Authorization : Pending Receipt", "tranDate": "2026-10-13"},
+  {"returnId": "M400104", "tranId": "RMA900104", "internalId": "82000104", "amount": "75.44", "warrantyNumber": "WTY-4", "channel": "AFTSHIP_RTN_CHANNEL", "status": "Return Authorization : Pending Refund", "tranDate": "2026-10-13"}
+]}

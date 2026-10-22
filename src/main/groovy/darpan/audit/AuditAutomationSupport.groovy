@@ -206,6 +206,7 @@ class AuditAutomationSupport {
             // type / id / note. Read either.
             Map row = [type: (raw.diffType ?: raw.type) as String, id: (raw.primaryId ?: raw.id) as String,
                        note: normalize(raw.message ?: raw.note), data: AuditAutomationSupport.rowData(raw.data),
+                       file1Value: normalize(raw.file1Value), file2Value: normalize(raw.file2Value),
                        systems: raw.conclusion instanceof Map ? ((Map) raw.conclusion).systems : null,
                        conclusionLabel: raw.conclusion instanceof Map ? normalize(((Map) raw.conclusion).label) : null]
             String type = row.type as String
@@ -227,10 +228,34 @@ class AuditAutomationSupport {
                         headline        : AuditAutomationSupport.headline(check, row, records),
                         ruleText        : row.note,
                         conclusionEnumId: AuditAutomationSupport.conclusionEnumId(ec, code),
-                        records         : records])
+                        records         : records] + AuditAutomationSupport.amountsOf(check, row))
             }
         }
         return byKey.values() as List<Map>
+    }
+
+    /**
+     * DAR-BE-095. A money check's mismatch as the finding's evidence: file 1's value expected, file 2's actual, in the
+     * check's currency. Nothing for a check that declares no currency, another row type, or a value that is not a number.
+     */
+    static Map amountsOf(Map check, Map row) {
+        String currency = normalize(check.amountCurrencyUomId)
+        if (!currency || row.type != "FIELD_MISMATCH") return [:]
+        BigDecimal expected = decimalOf(row.file1Value)
+        BigDecimal actual = decimalOf(row.file2Value)
+        if (expected == null || actual == null) return [:]
+        return [expectedAmount: expected, actualAmount: actual, currencyUomId: currency,
+                expectedSource: normalize(check.expectedSource), actualSource: normalize(check.actualSource)]
+    }
+
+    /** A mismatch value for a headline: money to the cent on a money check ("64.80", not "64.8"), as it came otherwise. */
+    static String valueText(Map check, Object value) {
+        BigDecimal amount = normalize(check.amountCurrencyUomId) ? decimalOf(value) : null
+        return amount != null ? amount.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString() : normalize(value)
+    }
+
+    private static BigDecimal decimalOf(Object value) {
+        try { return value == null ? null : new BigDecimal(value.toString().trim()) } catch (NumberFormatException ignored) { return null }
     }
 
     static boolean matches(String allowed, String value) {
@@ -285,15 +310,16 @@ class AuditAutomationSupport {
     }
 
     /**
-     * The check's headline template filled from the row ({recordKey}, {note}, {type}, and {conclusion}: the row's
-     * conclusion label) and its records ({<recordType>}: that record's id, as fix texts take them), else the row's own
+     * The check's headline template filled from the row ({recordKey}, {note}, {type}, {conclusion}: the row's
+     * conclusion label, and {file1Value} / {file2Value}: a mismatch's two values) and its records ({<recordType>}: that record's id, as fix texts take them), else the row's own
      * note; one line, at most 120 characters.
      */
     static String headline(Map check, Map row, List<Map> records = []) {
         Map<String, String> values = [:]
         (records ?: []).each { Map r -> values.putIfAbsent(r.recordType as String, r.recordId as String) }
         values.putAll([recordKey: AuditReportAssembler.displayKey(row.id as String), note: normalize(row.note), type: row.type as String,
-                       conclusion: normalize(row.conclusionLabel)])
+                       conclusion: normalize(row.conclusionLabel), file1Value: AuditAutomationSupport.valueText(check, row.file1Value),
+                       file2Value: AuditAutomationSupport.valueText(check, row.file2Value)])
         String filled = AuditReportAssembler.fillTemplate(check.headlineTemplate as String, values)
         String text = filled ?: "${AuditReportAssembler.displayKey(row.id as String)}: ${normalize(row.note) ?: row.type}".toString()
         text = text.replaceAll(/\s+/, " ").trim().replaceAll(/\.+$/, "")

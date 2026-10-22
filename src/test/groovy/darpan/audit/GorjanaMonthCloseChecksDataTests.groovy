@@ -27,6 +27,8 @@ class GorjanaMonthCloseChecksDataTests {
     private static final String REPLACEMENT = "GorjanaMonthCloseReplacementChecksData.xml"
     /** DAR-BE-097 R11: warranty arrivals against NetSuite item receipts. */
     private static final String RECEIPT = "GorjanaMonthCloseReceiptChecksData.xml"
+    /** DAR-BE-095 R12: warranty claims against their credit memos. */
+    private static final String CLAIM = "GorjanaMonthCloseWarrantyClaimChecksData.xml"
 
     private static Path dataDir() {
         return ReconciliationSmokeTestSupport.resolveBackendRoot().resolve("runtime/component/darpan/data")
@@ -46,18 +48,33 @@ class GorjanaMonthCloseChecksDataTests {
 
     @Test
     void theFileIsTenantConfigurationNotSeed() {
-        [FILE, RETURNS, REPLACEMENT, RECEIPT].each { assertEquals("darpan-tenant-config", doc(it).attribute("type"), it) }
+        [FILE, RETURNS, REPLACEMENT, RECEIPT, CLAIM].each { assertEquals("darpan-tenant-config", doc(it).attribute("type"), it) }
     }
 
     @Test
     void everyReferenceResolves() {
-        [FILE, RETURNS, REPLACEMENT, RECEIPT].each { everyReferenceResolvesIn(it) }
+        [FILE, RETURNS, REPLACEMENT, RECEIPT, CLAIM].each { everyReferenceResolvesIn(it) }
         assertEquals(["GORJANA_R1", "GORJANA_R2", "GORJANA_R3"] as Set, attr(rows(FILE, "darpan.audit.AuditStatementCheck"), "statementId"),
                 "comparison 2 covers R1-R3")
         assertEquals(["GORJANA_R9"] as Set, attr(rows(RETURNS, "darpan.audit.AuditStatementCheck"), "statementId"),
                 "comparison 1 covers R9 so far")
         assertEquals(["GORJANA_R13", "GORJANA_R14"] as Set, attr(rows(REPLACEMENT, "darpan.audit.AuditStatementCheck"), "statementId"))
         assertEquals(["GORJANA_R11"] as Set, attr(rows(RECEIPT, "darpan.audit.AuditStatementCheck"), "statementId"))
+        assertEquals(["GORJANA_R12"] as Set, attr(rows(CLAIM, "darpan.audit.AuditStatementCheck"), "statementId"))
+    }
+
+    @Test
+    void r12IsAClaimWithNoMemoOrAMemoNotAtTheClaimedAmount() {
+        Map<String, Node> links = rows(CLAIM, "darpan.audit.AuditStatementCheck").collectEntries { [(it.attribute("checkId")): it] }
+        assertEquals("MISSING_IN_FILE_2", links.GORJANA_CHK_WARRANTY_NO_MEMO.attribute("diffTypes"))
+        assertEquals(["FIELD_MISMATCH", "GORJANA_WC_MEMO_AT_CLAIM"],
+                ["diffTypes", "ruleIds"].collect { links.GORJANA_CHK_WARRANTY_MEMO_AMOUNT.attribute(it) })
+        Map<String, Node> checks = rows(CLAIM, "darpan.audit.AuditCheck").collectEntries { [(it.attribute("checkId")): it] }
+        assertEquals("USD", checks.GORJANA_CHK_WARRANTY_MEMO_AMOUNT.attribute("amountCurrencyUomId"), "the amount check's values are money")
+        assertEquals(null, checks.GORJANA_CHK_WARRANTY_NO_MEMO.attribute("amountCurrencyUomId"))
+        rows(CLAIM, "darpan.rule.RuleSetCompareSource").each {
+            assertEquals("returnId", it.attribute("primaryIdExpression"), "both sides keyed by the HC return id")
+        }
     }
 
     @Test
@@ -106,10 +123,14 @@ class GorjanaMonthCloseChecksDataTests {
 
     @Test
     void storedReplacementDrlIsExactlyWhatTheGeneratorMakes() {
-        List<Node> sources = rows(REPLACEMENT, "darpan.rule.RuleSetCompareSource")
+        [REPLACEMENT, CLAIM].each { storedDrlIsExactlyWhatTheGeneratorMakes(it) }
+    }
+
+    private static void storedDrlIsExactlyWhatTheGeneratorMakes(String file) {
+        List<Node> sources = rows(file, "darpan.rule.RuleSetCompareSource")
         String key1 = sources.find { it.attribute("fileSide") == "FILE_1" }.attribute("primaryIdExpression")
         String key2 = sources.find { it.attribute("fileSide") == "FILE_2" }.attribute("primaryIdExpression")
-        rows(REPLACEMENT, "darpan.rule.Rule").eachWithIndex { Node rule, int i ->
+        rows(file, "darpan.rule.Rule").eachWithIndex { Node rule, int i ->
             String expression = (rule.children().find { it instanceof Node && it.name() == "expression" } as Node).text()
             String stored = (rule.children().find { it instanceof Node && it.name() == "ruleLogic" } as Node).text().trim()
             String expected = FieldComparisonRuleLogicGenerator.generate(expression, key1, key2, rule.attribute("ruleId") as String,

@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-BE-095 (R12) — gorjana month close: every warranty claim has a credit memo for the amount claimed.
+
+  R12 "A warranty replacement is paid by that claim's own credit, at the claim's value. The credit and the replacement
+  invoice close each other out." The claim's value, as Aditi set it on 2026-10-22: "there should be a credit memo for the
+  amount claimed". The claim is the RMA (it carries a warranty number); its credit memo carries the same HC return id and
+  is standalone, never linked to the RMA. So FILE_1 is every warranty claim RMA keyed by return id, FILE_2 every credit
+  memo carrying a return id, keyed by it (tools/netsuite-chain-config/gorjana-month-close-queries.xml, NS_WARRANTY_CLAIM /
+  NS_RETURN_MEMO; amounts absolute, NetSuite signs both negative). Two checks, one compare:
+    a claim no memo names (MISSING_IN_FILE_2)          -> warranty-claims-without-a-credit-memo
+    a memo whose amount is not the claim's (rule)     -> warranty-memos-not-at-the-claimed-amount, with both amounts as
+                                                         the finding's evidence (AuditCheck.amountCurrencyUomId)
+  A memo with no claim in the window (any other return's memo) is a MISSING_IN_FILE_1 row no statement links.
+
+  Measured on gorjana production, September (tools/live-probes/NsMonthCloseOrdersProbe.groovy, r12Sizing): 14,231
+  warranty claims; memo = claim 11,803; memo above the claim 1,014; below 496; no memo 918 (709 Pending Receipt, 117
+  Closed, 92 Pending Refund). Never two memos or two claim RMAs for one return id. Many "above" differences are a few
+  percent (65.00 claimed, 70.77 credited) and look like tax on the memo; they are findings until Gorjana says otherwise.
+
+  The other half of R12 (the replacement invoice paid by that memo, both closed) is not here yet.
+
+  automationId is blank on purpose: ONE automation per environment runs this compare and carries both checks (prod-owed).
+
+  NOT seed data - tenant configuration. Load per install, AFTER AuditSeedData.xml, GorjanaMonthCloseCatalogData.xml and
+  tools/netsuite-chain-config/gorjana-month-close-queries.xml (the rule set names those query rows):
+
+      ec.entity.makeDataLoader().location("component://darpan/data/GorjanaMonthCloseWarrantyClaimChecksData.xml").load()
+-->
+<entity-facade-xml type="darpan-tenant-config">
+
+    <darpan.rule.RuleSet ruleSetId="GORJANA_WARRANTY_CLAIM_RS" ruleSetName="Warranty claims - credit memos"
+            description="Every warranty claim against the credit memo that carries its return id: there is one, for the amount claimed."
+            version="1.0" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_WARRANTY_CLAIM_SCOPE" ruleSetId="GORJANA_WARRANTY_CLAIM_RS"
+            objectType="RETURN" scopeMode="COMPARE"
+            description="Every warranty claim against the credit memo that carries its return id: there is one, for the amount claimed."
+            companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_WARRANTY_CLAIM_SCOPE" fileSide="FILE_1"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="returnId"
+            sourceConfigId="NS_WARRANTY_CLAIM" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_WARRANTY_CLAIM_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="returnId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_WARRANTY_CLAIM_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="returnId"
+            sourceConfigId="NS_RETURN_MEMO" sourceConfigType="NETSUITE_SUITEQL" duplicateKeyHandling="FINDING" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_WARRANTY_CLAIM_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="returnId" companyUserGroupId="GORJANA"/>
+
+    <!-- A structured FIELD_COMPARISON whose ruleLogic is EXACTLY FieldComparisonRuleLogicGenerator's output
+         (GorjanaMonthCloseChecksDataTests pins it). Numbers on both sides, so 65 and 65.00 are one amount. -->
+    <darpan.rule.Rule ruleId="GORJANA_WC_MEMO_AT_CLAIM" ruleSetId="GORJANA_WARRANTY_CLAIM_RS" sequenceNum="10"
+            ruleText="amount = amount" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN"
+            companyUserGroupId="GORJANA">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"amount","file2FieldPath":"amount","operator":"=","preActions":[{"fieldSide":"file1","action":"STRING_TO_NUMBER"},{"fieldSide":"file2","action":"STRING_TO_NUMBER"}]}</expression>
+        <ruleLogic><![CDATA[rule "GORJANA_WC_MEMO_AT_CLAIM"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get("file1")).get("amount"), java.util.Arrays.asList("STRING_TO_NUMBER")), reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get("file2")).get("amount"), java.util.Arrays.asList("STRING_TO_NUMBER")), "="))
+then
+    Object _file1Value = reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get("file1")).get("amount"), java.util.Arrays.asList("STRING_TO_NUMBER"));
+    Object _file2Value = reconciliation.rule.RuleDiffSupport.applyPreActions(((Map) $m.get("file2")).get("amount"), java.util.Arrays.asList("STRING_TO_NUMBER"));
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "amount = amount",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: amount = amount"
+    );
+end]]></ruleLogic>
+    </darpan.rule.Rule>
+
+    <!-- ================================================================ The checks: one compare, one automation -->
+    <darpan.audit.AuditCheck checkId="GORJANA_CHK_WARRANTY_NO_MEMO" companyUserGroupId="GORJANA" checkCode="warranty-claims-without-a-credit-memo"
+            label="Warranty claims with no credit memo" savedRunId="GORJANA_WARRANTY_CLAIM_RS"
+            file1RecordType="warrantyClaim" graceDays="2"
+            matchedBy="return id (custbody_hc_return_id on the RMA and the credit memo)"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Warranty claim {warrantyClaim} has no credit memo"
+            fixActionTemplate="Create the credit memo for warranty claim {warrantyClaim}, for the amount claimed, with return id {recordKey}."
+            passesWhenTemplate="A credit memo with return id {recordKey} exists for warranty claim {warrantyClaim}."/>
+    <darpan.audit.AuditCheck checkId="GORJANA_CHK_WARRANTY_MEMO_AMOUNT" companyUserGroupId="GORJANA" checkCode="warranty-memos-not-at-the-claimed-amount"
+            label="Warranty credit memos not at the amount claimed" savedRunId="GORJANA_WARRANTY_CLAIM_RS"
+            file1RecordType="warrantyClaim" graceDays="1"
+            matchedBy="return id (custbody_hc_return_id on the RMA and the credit memo)"
+            amountCurrencyUomId="USD" expectedSource="Warranty claim (RMA total)" actualSource="NetSuite credit memo total"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Credit memo for return {recordKey} is {file2Value}; the claim is {file1Value}"
+            fixActionTemplate="Correct the credit memo for return {recordKey} to the amount claimed, {expectedAmount}."
+            passesWhenTemplate="The credit memo for return {recordKey} totals {expectedAmount}."/>
+
+    <darpan.audit.AuditStatementCheck statementId="GORJANA_R12" checkId="GORJANA_CHK_WARRANTY_NO_MEMO" companyUserGroupId="GORJANA"
+            sequenceNum="1" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="GORJANA_R12" checkId="GORJANA_CHK_WARRANTY_MEMO_AMOUNT" companyUserGroupId="GORJANA"
+            sequenceNum="2" diffTypes="FIELD_MISMATCH" ruleIds="GORJANA_WC_MEMO_AT_CLAIM"/>
+</entity-facade-xml>

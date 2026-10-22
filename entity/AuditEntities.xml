@@ -164,6 +164,17 @@
         <field name="passesWhenTemplate" type="text-intermediate">
             <description>What the next scheduled check must see for the finding to close.</description>
         </field>
+        <field name="amountCurrencyUomId" type="id">
+            <description>DAR-BE-095. Set when this check's rule compares money: a FIELD_MISMATCH row's file 1 value is the
+                finding's expected amount and its file 2 value the actual one, in this currency (evidence.expected,
+                .actual, .difference). Blank: the values are not money (a customer id, a day number).</description>
+        </field>
+        <field name="expectedSource" type="text-medium">
+            <description>Where the expected amount comes from, e.g. "Warranty claim (RMA total)".</description>
+        </field>
+        <field name="actualSource" type="text-medium">
+            <description>Where the actual amount comes from, e.g. "NetSuite credit memo total".</description>
+        </field>
         <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUDCHK_COMPANY_GRP">
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>

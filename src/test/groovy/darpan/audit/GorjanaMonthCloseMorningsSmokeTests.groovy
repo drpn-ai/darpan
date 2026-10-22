@@ -56,7 +56,8 @@ class GorjanaMonthCloseMorningsSmokeTests {
                 "component://darpan/data/GorjanaConclusionRulesData.xml",
                 "component://darpan/data/GorjanaMonthCloseCatalogData.xml",
                 "component://darpan/data/GorjanaMonthCloseChecksData.xml",
-                "component://darpan/data/GorjanaMonthCloseReplacementChecksData.xml")
+                "component://darpan/data/GorjanaMonthCloseReplacementChecksData.xml",
+                "component://darpan/data/GorjanaMonthCloseWarrantyClaimChecksData.xml")
         // The loader rolls a file back on a referential failure and still reports a count: prove the rows.
         assertEquals("GORJANA_INVOICE_ETAIL_RS", find("darpan.audit.AuditCheck", [checkId: CHECK])?.savedRunId)
         assertEquals(TENANT, find("darpan.rule.RuleSetConclusionRule",
@@ -201,6 +202,64 @@ class GorjanaMonthCloseMorningsSmokeTests {
         // conclusion rules there is no evidence state either.
         assertEquals([["NETSUITE", "creditMemo", "81000101", null, null]], records(r14[0].findingId as String),
                 "one record, the memo; the replacement's id is not on the row")
+    }
+
+    /**
+     * R12 as Aditi set it: every warranty claim has a credit memo for the amount claimed. Four claims: one credited at
+     * its amount (65 against 65.00: one amount), one credited above it, one credited a cent below, one with no memo;
+     * plus a memo for a return that is no warranty claim, which no statement takes.
+     */
+    @Test
+    void r12FindsAClaimWithNoMemoAndMemosNotAtTheClaimedAmount() {
+        String auto = "GORJANA_AUTO_WARRANTY_CLAIM"
+        Timestamp now = ec.user.nowTimestamp
+        upsert("darpan.reconciliation.ReconciliationAutomation", [automationId: auto], [automationId: auto,
+                automationName: "Month close: warranty claims against credit memos", companyUserGroupId: TENANT,
+                inputModeEnumId: AutomationExecutionSupport.AUTOMATION_INPUT_API_RANGE,
+                savedRunId: "GORJANA_WARRANTY_CLAIM_RS", savedRunType: "ruleset", ruleSetId: "GORJANA_WARRANTY_CLAIM_RS",
+                compareScopeId: "GORJANA_WARRANTY_CLAIM_SCOPE", relativeWindowTypeEnumId: AutomationExecutionSupport.WINDOW_PREVIOUS_DAY,
+                relativeWindowCount: 1, windowTimeZone: "America/Los_Angeles", isActive: "Y", createdDate: now, lastUpdatedDate: now])
+        ["FILE_1", "FILE_2"].each { String side ->
+            upsert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: auto, fileSide: side], [
+                    automationId: auto, fileSide: side, companyUserGroupId: TENANT,
+                    sourceTypeEnumId: AutomationExecutionSupport.AUTOMATION_SOURCE_API, systemEnumId: "NETSUITE_SUITEQL",
+                    fileTypeEnumId: "DftJson", createdDate: now, lastUpdatedDate: now])
+        }
+        ["GORJANA_CHK_WARRANTY_NO_MEMO", "GORJANA_CHK_WARRANTY_MEMO_AMOUNT"].each { String id ->
+            def c = ec.entity.find("darpan.audit.AuditCheck").condition("checkId", id).disableAuthz().useCache(false).one()
+            c.set("automationId", auto); c.update()
+        }
+        AutomationExecutionSupport.resetExecutionHooks()
+        AutomationExecutionSupport.setSourceExtractor { def ignoredEc, def ignoredAutomation, def source,
+                Map<String, Object> ignoredWindow, Map<String, Object> ignoredParams ->
+            boolean claims = source.get("fileSide") == "FILE_1"
+            return [dataAvailable: true, fileTypeEnumId: "DftJson", recordCount: 4,
+                    fileLocation: "component://darpan/data/test/gorjana-warranty-${claims ? 'claims' : 'claim-memos'}.json".toString(),
+                    fileName: "${claims ? 'claims' : 'memos'}.json".toString()]
+        }
+        Timestamp fire = Timestamp.from(LocalDateTime.parse("2026-10-14T06:00:00").atZone(LA).toInstant())
+        Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: auto, scheduledFireTime: fire,
+                sparkMaster: "local[1]", sparkAppName: "GorjanaMonthCloseMorningsSmokeTests"])
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertEquals(1, result.executedCount, "${result}")
+
+        Closure<List<Map>> findingsOf = { String checkId ->
+            ec.entity.find("darpan.audit.AuditFinding").condition("checkId", checkId).disableAuthz().useCache(false).list()
+                    *.getMap().sort { it.recordKey }
+        }
+        List<Map> noMemo = findingsOf("GORJANA_CHK_WARRANTY_NO_MEMO")
+        assertEquals([["GORJANA_R12", "M400103", "Warranty claim RMA900103 has no credit memo"]],
+                noMemo.collect { [it.statementId, it.recordKey, it.headline] }, "only the claim with no memo; not the stray memo")
+        assertEquals([["NETSUITE", "warrantyClaim", "RMA900103", "82000103", null]], records(noMemo[0].findingId as String))
+
+        List<Map> amount = findingsOf("GORJANA_CHK_WARRANTY_MEMO_AMOUNT")
+        assertEquals(["M400102", "M400104"], amount*.recordKey, "65 and 65.00 are one amount; above and a cent below are not")
+        assertEquals("Credit memo for return M400102 is 70.77; the claim is 65.00", amount[0].headline, "money to the cent")
+        assertEquals([65.00, 70.77, 5.77, "USD"], [amount[0].expectedAmount, amount[0].actualAmount, amount[0].differenceAmount,
+                amount[0].currencyUomId].collect { it instanceof BigDecimal ? (it as BigDecimal).setScale(2) : it })
+        assertEquals([75.44, 75.43, -0.01], [amount[1].expectedAmount, amount[1].actualAmount, amount[1].differenceAmount]
+                .collect { (it as BigDecimal).setScale(2) })
+        assertEquals(["Warranty claim (RMA total)", "NetSuite credit memo total"], [amount[0].expectedSource, amount[0].actualSource])
     }
 
     /** One scheduled morning at 06:00 in Los Angeles; the NetSuite read returns that morning's fixture. */

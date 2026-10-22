@@ -74,6 +74,24 @@ class GorjanaMonthCloseChecksDataTests {
                 "no items read (projected away) must never read as received")
     }
 
+    /**
+     * A kit, as the OMS holds it (probed live 2026-10-22, run-oms-kit-return.sh: 9 of 600 returns since 13 Oct): ONE
+     * return line for the kit product (MARKETING_PKG_PICK) carrying receivedQuantity; its pieces appear only in the
+     * shipment receipts, which the extract does not read. So a received warranty kit is R11's like any piece, and a
+     * kit whose NetSuite receipt failed (i441's "cannot create an inventory detail") has no ItemRcpt and is a finding.
+     */
+    @Test
+    void aReceivedWarrantyKitIsOneLineAndR11TakesIt() {
+        String scope = "GORJANA_WARRANTY_RECEIPT_SCOPE"
+        Map kit = [returnId: "M263532", returnChannelEnumId: "AFTSHP_OL_WTY",
+                   items: [[returnItemSeqId: "01", productId: "M100870", returnItemTypeId: "RET_FPROD_ITEM", receivedQuantity: 1],
+                           [returnItemSeqId: "02", productId: "HG_CREDIT", returnItemTypeId: "RET_NPROD_ITEM", receivedQuantity: null]]]
+        assertEquals("CONC_ARRIVED_NOT_BOOKED", conclude(RECEIPT, scope, kit, "MISSING_FROM_FILE_2"),
+                "the kit line's receipt is the arrival; the credit line never has one")
+        assertEquals("UNEXPLAINED", conclude(RECEIPT, scope, kit + [returnChannelEnumId: "POS_RTN_CHANNEL"], "MISSING_FROM_FILE_2"),
+                "i441's store kit returns are received at the store: R8's, not a warranty arrival")
+    }
+
     @Test
     void eachReplacementStatementTakesOnlyItsOwnRulesMismatches() {
         Set<String> rules = attr(rows(REPLACEMENT, "darpan.rule.Rule"), "ruleId")

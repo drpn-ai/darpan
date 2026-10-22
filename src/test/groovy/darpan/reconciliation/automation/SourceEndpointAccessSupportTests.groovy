@@ -183,7 +183,7 @@ class SourceEndpointAccessSupportTests {
         // DAR-BE-050 added OMS_ORDER_LINE_UNITS; the tri-system runs (DAR-BE-062) added OMS_ORDER_ITEMS; DAR-BE-064 added OMS_GQL; DAR-BE-040 added OMS_RETURNS_GQL.
         assertEquals(["OMS", "OMS_GQL", "OMS_ORDER_ITEMS", "OMS_ORDER_LINE_UNITS", "OMS_RECON_ORDERS", "OMS_RETURNS", "OMS_RETURNS_GQL", "OMS_TRANSFER_ORDERS"],
                 endpoints.collect { it.systemEnumId }.sort())
-        assertEquals("Refunded returns",
+        assertEquals("Refunded returns (REST)",
                 endpoints.find { it.systemEnumId == "OMS_RETURNS" }.endpointLabel)
     }
 

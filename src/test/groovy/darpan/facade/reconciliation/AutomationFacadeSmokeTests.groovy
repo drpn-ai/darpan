@@ -374,7 +374,7 @@ class AutomationFacadeSmokeTests {
             }
             assertNotNull(omsSourceOption)
             assertEquals("HOTWAX_ORDERS_API", omsSourceOption.systemMessageRemoteId)
-            assertEquals("Orders", omsSourceOption.label)
+            assertEquals("Orders (REST)", omsSourceOption.label)
             assertEquals("KREWE_OMS", omsSourceOption.sourceConfigId)
             assertEquals("HOTWAX_OMS_REST", omsSourceOption.sourceConfigType)
             assertEquals(AutomationFacadeSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE,
@@ -491,7 +491,7 @@ class AutomationFacadeSmokeTests {
         }
         assertNotNull(omsSourceOption)
         assertEquals("HOTWAX_ORDERS_API", omsSourceOption.systemMessageRemoteId)
-        assertEquals("Orders", omsSourceOption.label)
+        assertEquals("Orders (REST)", omsSourceOption.label)
         assertEquals("KREWE_OMS", omsSourceOption.sourceConfigId)
         assertEquals("HOTWAX_OMS_REST", omsSourceOption.sourceConfigType)
         assertEquals(AutomationFacadeSupport.HOTWAX_OMS_ORDERS_EXTRACT_SERVICE,

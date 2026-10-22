@@ -129,7 +129,7 @@ class AutomationFacadeSupportTests {
     void reconciliationOrdersSystemLabelsItsOwnEndpoint() {
         String label = AutomationFacadeSupport.endpointLabelForSystem(
                 "OMS_RECON_ORDERS", "HOTWAX_ORDERS_API", null)
-        assertEquals("Sales orders", label,
+        assertEquals("Sales orders (REST)", label,
                 "the shared remoteId must not make this source display as the plain Orders endpoint")
     }
 

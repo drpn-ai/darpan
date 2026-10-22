@@ -659,14 +659,19 @@ class TenantNotificationSupport {
         // assert on anyway.
         String destinationRef = botDelivery ?
                 ((destination.slackChannelId)?.toString()) : ((destination.webhookUrl)?.toString())
+        // DAR-BE-108: a streak celebration is provider-neutral until here. Shaped before the hook so
+        // tests see exactly what each provider would be sent; a payload without one passes unchanged.
+        boolean slack = botDelivery || resolveChatProvider(destination.chatProviderEnumId) == PROVIDER_SLACK
+        Map<String, Object> shaped = slack ?
+                StreakCelebrationSupport.forSlackWebhook(payload) : StreakCelebrationSupport.forGoogleChat(payload)
         if (deliveryHook != null) {
-            return (deliveryHook.call(destinationRef, payload) ?: [:]) as Map<String, Object>
+            return (deliveryHook.call(destinationRef, shaped) ?: [:]) as Map<String, Object>
         }
 
         if (botDelivery) {
             Map<String, Object> outcome = SlackApiClient.postMessage(
                     (String) destination.botToken, (String) destination.slackChannelId,
-                    ((payload?.text)?.toString()) ?: "")
+                    ((shaped?.text)?.toString()) ?: "", shaped?.blocks as List)
             // Normalized onto the shape the notify loop already logs, so the Google Chat and webhook
             // paths keep reading identically.
             return [ok             : outcome.ok,
@@ -677,8 +682,7 @@ class TenantNotificationSupport {
                     ts             : outcome.ts,
                     slackChannelId : outcome.channelId]
         }
-        return resolveChatProvider(destination.chatProviderEnumId) == PROVIDER_SLACK ?
-                deliverSlack(destinationRef, payload) : deliverGoogleChat(destinationRef, payload)
+        return slack ? deliverSlack(destinationRef, shaped) : deliverGoogleChat(destinationRef, shaped)
     }
 
     protected static Map<String, Object> deliverGoogleChat(String webhookUrl, Map<String, Object> payload) {

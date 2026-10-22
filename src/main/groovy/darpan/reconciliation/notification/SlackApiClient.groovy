@@ -1,5 +1,6 @@
 package darpan.reconciliation.notification
 
+import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 
 import java.net.URI
@@ -63,9 +64,12 @@ class SlackApiClient {
      *
      * @return {@code [ok, channelId, ts, errorCode, transient, operatorMessage, statusCode]}
      */
-    static Map<String, Object> postMessage(String botToken, String channelId, String text) {
-        Map<String, Object> response = call("chat.postMessage", botToken,
-                [channel: channelId, text: text])
+    static Map<String, Object> postMessage(String botToken, String channelId, String text, List blocks = null) {
+        Map<String, Object> params = [channel: channelId, text: text]
+        // Form encoding (see formEncode) takes blocks as a JSON-encoded string, never a nested
+        // structure. Added only when present, so a text-only message is sent exactly as before.
+        if (blocks) params.blocks = JsonOutput.toJson(blocks)
+        Map<String, Object> response = call("chat.postMessage", botToken, params)
         Map<String, Object> outcome = interpretResponse(
                 (int) response.statusCode, (String) response.body)
         if (outcome.ok == true) {

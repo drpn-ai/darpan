@@ -254,8 +254,17 @@ class AuditAutomationSupport {
         return amount != null ? amount.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString() : normalize(value)
     }
 
-    private static BigDecimal decimalOf(Object value) {
-        try { return value == null ? null : new BigDecimal(value.toString().trim()) } catch (NumberFormatException ignored) { return null }
+    /**
+     * A plausible amount, or null. The values come from another system's rows, so the text is bounded before it is
+     * trusted: "1e999999999" parses, and scaling or printing it would build a billion-digit string.
+     */
+    static BigDecimal decimalOf(Object value) {
+        String text = value?.toString()?.trim()
+        if (!text || text.length() > 40) return null
+        BigDecimal amount
+        try { amount = new BigDecimal(text) } catch (NumberFormatException ignored) { return null }
+        if (Math.abs(amount.scale()) > 10 || amount.precision() - amount.scale() > 20) return null
+        return amount
     }
 
     static boolean matches(String allowed, String value) {

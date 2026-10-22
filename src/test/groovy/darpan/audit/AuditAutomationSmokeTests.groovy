@@ -367,4 +367,17 @@ class AuditAutomationSmokeTests {
     private void insert(String entityName, Map<String, Object> fields) {
         ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
     }
+
+    @Test
+    void aMismatchValueIsOnlyAnAmountWhenItIsAPlausibleOne() {
+        Map money = [amountCurrencyUomId: "USD"]
+        assertEquals("64.80", AuditAutomationSupport.valueText(money, "64.8"))
+        assertEquals("1e999999999", AuditAutomationSupport.valueText(money, "1e999999999"), "a huge exponent stays text, never expanded")
+        assertEquals("abc", AuditAutomationSupport.valueText(money, "abc"))
+        assertEquals("64.8", AuditAutomationSupport.valueText([:], "64.8"), "not a money check: as it came")
+        assertEquals([:], AuditAutomationSupport.amountsOf(money, [type: "FIELD_MISMATCH", file1Value: "65", file2Value: "1E+500"]),
+                "no evidence from an implausible value")
+        assertEquals(new BigDecimal("65"), AuditAutomationSupport.amountsOf(money + [expectedSource: "a"],
+                [type: "FIELD_MISMATCH", file1Value: "65", file2Value: "70.77"]).expectedAmount)
+    }
 }

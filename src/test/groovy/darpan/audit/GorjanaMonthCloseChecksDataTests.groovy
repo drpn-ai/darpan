@@ -56,11 +56,21 @@ class GorjanaMonthCloseChecksDataTests {
         [FILE, RETURNS, REPLACEMENT, RECEIPT, CLAIM].each { everyReferenceResolvesIn(it) }
         assertEquals(["GORJANA_R1", "GORJANA_R2", "GORJANA_R3"] as Set, attr(rows(FILE, "darpan.audit.AuditStatementCheck"), "statementId"),
                 "comparison 2 covers R1-R3")
-        assertEquals(["GORJANA_R9"] as Set, attr(rows(RETURNS, "darpan.audit.AuditStatementCheck"), "statementId"),
-                "comparison 1 covers R9 so far")
+        assertEquals(["GORJANA_R4", "GORJANA_R9"] as Set, attr(rows(RETURNS, "darpan.audit.AuditStatementCheck"), "statementId"),
+                "comparison 1 covers R9 and R4's nothing-left-open so far")
         assertEquals(["GORJANA_R13", "GORJANA_R14"] as Set, attr(rows(REPLACEMENT, "darpan.audit.AuditStatementCheck"), "statementId"))
         assertEquals(["GORJANA_R11"] as Set, attr(rows(RECEIPT, "darpan.audit.AuditStatementCheck"), "statementId"))
         assertEquals(["GORJANA_R12"] as Set, attr(rows(CLAIM, "darpan.audit.AuditStatementCheck"), "statementId"))
+    }
+
+    @Test
+    void anOpenCreditMemoIsAnR4RowAndAnAppliedOneIsNot() {
+        String scope = "GORJANA_CREDIT_OPEN_SCOPE"
+        Map memo = [tranId: "CM7657927", returnId: "M247238", status: "Credit Memo : Open"]
+        assertEquals("CONC_MEMO_LEFT_OPEN", conclude(RETURNS, scope, memo, "FINDING"))
+        assertEquals("UNEXPLAINED", conclude(RETURNS, scope, memo + [status: "Credit Memo : Fully Applied"], "FINDING"))
+        assertEquals("CONC_MEMO_LEFT_OPEN", conclude(RETURNS, scope, memo - [returnId: "M247238"], "FINDING"),
+                "any credit memo: there should never be an open one")
     }
 
     @Test

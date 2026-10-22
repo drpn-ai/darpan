@@ -1,7 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   DAR-BE-094 — gorjana month close, comparison 1 (returns against credit memos and RMAs): the checks that need no
-  answer from the team yet. R9 so far; R8, R4, R6, R7 and R16 wait for DAR-UI-052's answers, R14 for what case i406 was.
+  answer from the team yet: R9, and R4's "nothing left open". R4's amount, R8, R6, R7 and R16 wait for answers.
+
+  R4 "Every refund we give a customer is booked in NetSuite at the same amount, to the cent, with nothing left open."
+     The "nothing left open" half, as Aditi set it on 2026-10-22: "there should never be an open credit memo", and Darpan
+     does nothing in NetSuite about it (it lists the memo; Gorjana Accounting decides). One single-sided run over EVERY
+     credit memo in the window (NS_CREDIT_MEMO_STATUS), so an applied one is examined and its finding closes; the
+     conclusion CONC_MEMO_LEFT_OPEN takes the memos whose status is Open. 1-22 Oct 2026: about 1,760 open (AfterShip
+     returns 1,051, Happiness Guarantee 276, POS 222, warranty channels ~200). The amount remaining is not read:
+     transaction.foreignamountremaining fails the whole SuiteQL query with a 500.
 
   R9 "Every return carries the customer's full name and the address it came from." (FIRM: name, address; DERIVED: the
      origin address). Two single-sided runs over every RtnAuth and every CustCred in the window
@@ -32,6 +40,23 @@
 
     <moqui.basic.Enumeration enumId="CONC_NO_CUSTOMER_NAME" enumTypeId="DarpanConclusion" enumCode="CONC_NO_CUSTOMER_NAME" description="No customer name"/>
     <moqui.basic.Enumeration enumId="CONC_NO_RETURN_ADDRESS" enumTypeId="DarpanConclusion" enumCode="CONC_NO_RETURN_ADDRESS" description="No address it came from"/>
+
+    <moqui.basic.Enumeration enumId="CONC_MEMO_LEFT_OPEN" enumTypeId="DarpanConclusion" enumCode="CONC_MEMO_LEFT_OPEN" description="Credit memo left open"/>
+
+    <!-- ================================================================ R4: credit memos left open -->
+    <darpan.rule.RuleSet ruleSetId="GORJANA_CREDIT_OPEN_RS" ruleSetName="Credit memos - left open"
+            description="No NetSuite credit memo is left open. Reads every credit memo so an applied one is seen and closes."
+            version="1.0" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_CREDIT_OPEN_SCOPE" ruleSetId="GORJANA_CREDIT_OPEN_RS"
+            objectType="CREDIT_MEMO" scopeMode="EVALUATE" description="No NetSuite credit memo is left open. Reads every credit memo so an applied one is seen and closes."
+            companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_CREDIT_OPEN_SCOPE" fileSide="FILE_1"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="tranId"
+            sourceConfigId="NS_CREDIT_MEMO_STATUS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_CREDIT_OPEN_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="tranId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_CREDIT_OPEN_SCOPE" sequenceNum="10" conclusionEnumId="CONC_MEMO_LEFT_OPEN" appliesToBucket="FINDING" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_CREDIT_OPEN_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="status" operator="IN" conditionValues="Credit Memo : Open" checkLabel="The credit memo is open" companyUserGroupId="GORJANA"/>
 
     <!-- ================================================================ R9: RMAs -->
     <darpan.rule.RuleSet ruleSetId="GORJANA_RMA_CUSTOMER_RS" ruleSetName="RMAs - customer name and address"
@@ -86,6 +111,16 @@
             headlineTemplate="Credit memo {recordKey}: {conclusion}"
             fixActionTemplate="Set the customer's name and the shipping address on credit memo {recordKey}, as the Shopify return shows them."
             passesWhenTemplate="Credit memo {recordKey} carries the customer's name and a shipping address."/>
+
+    <darpan.audit.AuditCheck checkId="GORJANA_CHK_CREDIT_LEFT_OPEN" companyUserGroupId="GORJANA" checkCode="credit-memos-left-open"
+            label="NetSuite credit memos left open" savedRunId="GORJANA_CREDIT_OPEN_RS"
+            file1RecordType="creditMemo" graceDays="2"
+            fixOwner="Gorjana Accounting" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Credit memo {recordKey} is still open"
+            fixActionTemplate="Close credit memo {recordKey}: apply it to the refund or exchange it was made for. Darpan does not change NetSuite."
+            passesWhenTemplate="Credit memo {recordKey} is no longer open."/>
+    <darpan.audit.AuditStatementCheck statementId="GORJANA_R4" checkId="GORJANA_CHK_CREDIT_LEFT_OPEN" companyUserGroupId="GORJANA"
+            sequenceNum="1" diffTypes="FINDING" conclusionCodes="CONC_MEMO_LEFT_OPEN"/>
 
     <darpan.audit.AuditStatementCheck statementId="GORJANA_R9" checkId="GORJANA_CHK_RMA_CUSTOMER" companyUserGroupId="GORJANA"
             sequenceNum="1" diffTypes="FINDING" conclusionCodes="CONC_NO_CUSTOMER_NAME,CONC_NO_RETURN_ADDRESS"/>

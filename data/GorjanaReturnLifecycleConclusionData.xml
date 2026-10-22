@@ -11,6 +11,12 @@
     - AfterShip returns never shipped back: 61 a week; the client decides whether to close or cancel them.
     - Refund returns received but never credited: 19 a week; warranty ones may still be in progress.
     - Credited but never settled (no refund, no store-credit invoice, no replacement order): 10 a week.
+  From Cindy's store-credit workbook (698 Shopify store credits with no NetSuite invoice, 2026-10-22) and gorjana prod:
+    - A store credit in NetSuite is a CustInvc carrying the return's HC return id ("HG-" prefixed on no-proof-of-
+      purchase Happiness Guarantee claims), which uses up the return's credit memo. Matching it by return id, never by
+      customer, is right: 205 of her AfterShip credits already had their invoice, under the original buyer.
+    - An RMA whose outcome is Store Credit, with nothing after it, was already credited in Shopify: the sync stopped
+      after the RMA (CONC_RTN_STORE_CREDIT_NOT_BOOKED), 80 of 5,388 store-credit RMAs in September.
 
   NOT seed data — tenant configuration. Load per install AFTER ConclusionCatalogSeedData.xml (the enum type):
 
@@ -24,6 +30,7 @@
     <moqui.basic.Enumeration enumId="CONC_RTN_WARRANTY_IN_PROGRESS" enumTypeId="DarpanConclusion" enumCode="CONC_RTN_WARRANTY_IN_PROGRESS" description="Warranty claim in progress"/>
     <moqui.basic.Enumeration enumId="CONC_RTN_REFUND_NOT_CREDITED" enumTypeId="DarpanConclusion" enumCode="CONC_RTN_REFUND_NOT_CREDITED" description="Refund owed, not credited"/>
     <moqui.basic.Enumeration enumId="CONC_RTN_REFUND_NOT_PAID" enumTypeId="DarpanConclusion" enumCode="CONC_RTN_REFUND_NOT_PAID" description="Refund credited, not paid"/>
+    <moqui.basic.Enumeration enumId="CONC_RTN_STORE_CREDIT_NOT_BOOKED" enumTypeId="DarpanConclusion" enumCode="CONC_RTN_STORE_CREDIT_NOT_BOOKED" description="Store credit given, NetSuite stopped at the RMA"/>
     <moqui.basic.Enumeration enumId="CONC_RTN_STORE_CREDIT_NOT_ISSUED" enumTypeId="DarpanConclusion" enumCode="CONC_RTN_STORE_CREDIT_NOT_ISSUED" description="Store credit not invoiced"/>
     <moqui.basic.Enumeration enumId="CONC_RTN_EXCHANGE_NO_ORDER" enumTypeId="DarpanConclusion" enumCode="CONC_RTN_EXCHANGE_NO_ORDER" description="Exchange with no replacement order"/>
 </entity-facade-xml>

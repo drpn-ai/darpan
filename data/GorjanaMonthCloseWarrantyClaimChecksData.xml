@@ -18,7 +18,11 @@
   Closed, 92 Pending Refund). Never two memos or two claim RMAs for one return id. Many "above" differences are a few
   percent (65.00 claimed, 70.77 credited) and look like tax on the memo; they are findings until Gorjana says otherwise.
 
-  The other half of R12 (the replacement invoice paid by that memo, both closed) is not here yet.
+  The other half of R12, "the credit and the replacement invoice close each other out": a warranty replacement's invoice
+  (reference WTY-..., the replacement order's) must end Paid In Full. One single-sided run over every invoice of the window
+  (NS_INVOICE_REFERENCE, which asks SuiteQL for WTY- references only), so a paid one is examined and closes;
+  CONC_WTY_INVOICE_NOT_PAID on status Open. Measured 1-22 Oct: 1,099 warranty replacement orders; their invoices 2,344 Paid In Full and 340
+  Open; the warranty memo is what paid it in 2,678 of 2,684. An open warranty memo is R4's (credit-memos-left-open).
 
   automationId is blank on purpose: ONE automation per environment runs this compare and carries both checks (prod-owed).
 
@@ -72,6 +76,23 @@ then
 end]]></ruleLogic>
     </darpan.rule.Rule>
 
+    <!-- ================================================================ R12 second half: the replacement invoice is paid -->
+    <moqui.basic.Enumeration enumId="CONC_WTY_INVOICE_NOT_PAID" enumTypeId="DarpanConclusion" enumCode="CONC_WTY_INVOICE_NOT_PAID" description="Warranty replacement invoice not paid"/>
+    <darpan.rule.RuleSet ruleSetId="GORJANA_WTY_INVOICE_RS" ruleSetName="Warranty replacement invoices - paid"
+            description="Every warranty replacement's invoice (reference WTY-) is Paid In Full: the claim's credit and the replacement invoice close each other out. Reads every such invoice so a paid one is seen and closes."
+            version="1.0" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_WTY_INVOICE_SCOPE" ruleSetId="GORJANA_WTY_INVOICE_RS"
+            objectType="INVOICE" scopeMode="EVALUATE"
+            description="Every warranty replacement's invoice (reference WTY-) is Paid In Full. Reads every such invoice so a paid one is seen and closes."
+            companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_WTY_INVOICE_SCOPE" fileSide="FILE_1"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="tranId"
+            sourceConfigId="NS_INVOICE_REFERENCE" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_WTY_INVOICE_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="tranId" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_WTY_INVOICE_SCOPE" sequenceNum="10" conclusionEnumId="CONC_WTY_INVOICE_NOT_PAID" appliesToBucket="FINDING" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_WTY_INVOICE_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="status" operator="IN" conditionValues="Invoice : Open" checkLabel="The warranty replacement's invoice is open" companyUserGroupId="GORJANA"/>
+
     <!-- ================================================================ The checks: one compare, one automation -->
     <darpan.audit.AuditCheck checkId="GORJANA_CHK_WARRANTY_NO_MEMO" companyUserGroupId="GORJANA" checkCode="warranty-claims-without-a-credit-memo"
             label="Warranty claims with no credit memo" savedRunId="GORJANA_WARRANTY_CLAIM_RS"
@@ -91,8 +112,17 @@ end]]></ruleLogic>
             fixActionTemplate="Correct the credit memo for return {recordKey} to the amount claimed, {expectedAmount}."
             passesWhenTemplate="The credit memo for return {recordKey} totals {expectedAmount}."/>
 
+    <darpan.audit.AuditCheck checkId="GORJANA_CHK_WARRANTY_INVOICE_OPEN" companyUserGroupId="GORJANA" checkCode="warranty-replacement-invoices-not-paid"
+            label="Warranty replacement invoices not paid by the claim's credit" savedRunId="GORJANA_WTY_INVOICE_RS"
+            file1RecordType="invoice" graceDays="2"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Warranty replacement invoice {recordKey} is still open"
+            fixActionTemplate="Apply the warranty claim's credit memo to invoice {recordKey} so both close."
+            passesWhenTemplate="Invoice {recordKey} is Paid In Full."/>
     <darpan.audit.AuditStatementCheck statementId="GORJANA_R12" checkId="GORJANA_CHK_WARRANTY_NO_MEMO" companyUserGroupId="GORJANA"
             sequenceNum="1" diffTypes="MISSING_IN_FILE_2"/>
     <darpan.audit.AuditStatementCheck statementId="GORJANA_R12" checkId="GORJANA_CHK_WARRANTY_MEMO_AMOUNT" companyUserGroupId="GORJANA"
             sequenceNum="2" diffTypes="FIELD_MISMATCH" ruleIds="GORJANA_WC_MEMO_AT_CLAIM"/>
+    <darpan.audit.AuditStatementCheck statementId="GORJANA_R12" checkId="GORJANA_CHK_WARRANTY_INVOICE_OPEN" companyUserGroupId="GORJANA"
+            sequenceNum="3" diffTypes="FINDING" conclusionCodes="CONC_WTY_INVOICE_NOT_PAID"/>
 </entity-facade-xml>

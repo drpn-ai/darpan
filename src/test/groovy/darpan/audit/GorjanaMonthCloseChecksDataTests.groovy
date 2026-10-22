@@ -88,6 +88,16 @@ class GorjanaMonthCloseChecksDataTests {
     }
 
     @Test
+    void anOpenWarrantyReplacementInvoiceIsAnR12Row() {
+        String scope = "GORJANA_WTY_INVOICE_SCOPE"
+        Map invoice = [tranId: "INV8408424", otherRef: "WTY-#GOR196407286-4", status: "Invoice : Open"]
+        assertEquals("CONC_WTY_INVOICE_NOT_PAID", conclude(CLAIM, scope, invoice))
+        assertEquals("UNEXPLAINED", conclude(CLAIM, scope, invoice + [status: "Invoice : Paid In Full"]))
+        assertTrue(rows(CLAIM, "darpan.rule.RuleSetCompareSourceFilter").every { it.attribute("compareScopeId") != scope },
+                "the WTY- narrowing is SuiteQL's (NS_INVOICE_REFERENCE STARTS_WITH), never a filter over every invoice")
+    }
+
+    @Test
     void anOpenCreditMemoIsAnR4RowAndAnAppliedOneIsNot() {
         String scope = "GORJANA_CREDIT_OPEN_SCOPE"
         Map memo = [tranId: "CM7657927", returnId: "M247238", status: "Credit Memo : Open"]
@@ -106,7 +116,7 @@ class GorjanaMonthCloseChecksDataTests {
         Map<String, Node> checks = rows(CLAIM, "darpan.audit.AuditCheck").collectEntries { [(it.attribute("checkId")): it] }
         assertEquals("USD", checks.GORJANA_CHK_WARRANTY_MEMO_AMOUNT.attribute("amountCurrencyUomId"), "the amount check's values are money")
         assertEquals(null, checks.GORJANA_CHK_WARRANTY_NO_MEMO.attribute("amountCurrencyUomId"))
-        rows(CLAIM, "darpan.rule.RuleSetCompareSource").each {
+        rows(CLAIM, "darpan.rule.RuleSetCompareSource").findAll { it.attribute("compareScopeId") == "GORJANA_WARRANTY_CLAIM_SCOPE" }.each {
             assertEquals("returnId", it.attribute("primaryIdExpression"), "both sides keyed by the HC return id")
         }
     }

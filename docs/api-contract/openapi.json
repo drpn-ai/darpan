@@ -18198,6 +18198,10 @@
                             "timeZone": {
                                 "type": "string"
                             },
+                            "streaksChatSpaceId": {
+                                "type": "string",
+                                "description": "DAR-BE-108. Chat space for tenant-wide streak messages; null when unset or when the space was deactivated."
+                            },
                             "createdByUserId": {
                                 "type": "string"
                             },
@@ -19862,12 +19866,13 @@
                 "properties": {
                     "timeZone": {
                         "type": "string",
-                        "description": "Timezone identifier for the active tenant, such as UTC or America/Los_Angeles."
+                        "description": "Timezone identifier for the active tenant, such as UTC or America/Los_Angeles. Absent leaves it unchanged."
+                    },
+                    "streaksChatSpaceId": {
+                        "type": "string",
+                        "description": "DAR-BE-108. Chat space (owned by the active tenant, active) for tenant-wide streak messages. Empty string clears it; absent leaves it unchanged."
                     }
                 },
-                "required": [
-                    "timeZone"
-                ],
                 "description": "Save active-tenant settings shared by users in the tenant."
             },
             "SaveTenantSettingsResult": {
@@ -19899,6 +19904,10 @@
                             },
                             "timeZone": {
                                 "type": "string"
+                            },
+                            "streaksChatSpaceId": {
+                                "type": "string",
+                                "description": "DAR-BE-108. Chat space for tenant-wide streak messages; null when unset or when the space was deactivated."
                             },
                             "createdByUserId": {
                                 "type": "string"

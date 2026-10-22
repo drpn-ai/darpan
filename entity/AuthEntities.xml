@@ -79,9 +79,17 @@
                 Set only by admin.TenantAdminServices deactivate/reactivate. Deactivation is a flag,
                 never a delete — run history and settings keep their FK targets.</description>
         </field>
+        <field name="streaksChatSpaceId" type="id">
+            <description>DAR-BE-108. The TenantChatSpace that receives tenant-wide streak messages: side
+                quests every automation has to earn together. Quests one automation earns post to that
+                automation's own space instead. Null = no tenant-wide streak messages.</description>
+        </field>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>
 
+        <relationship type="one" title="StreaksChatSpace" related="darpan.reconciliation.TenantChatSpace" fk-name="TENSET_STREAKS_SPACE">
+            <key-map field-name="streaksChatSpaceId" related-field-name="chatSpaceId"/>
+        </relationship>
         <relationship type="one" title="Company" related="moqui.security.UserGroup" fk-name="TENSET_COMPANY">
             <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
         </relationship>

@@ -24,6 +24,7 @@ class TenantAccessSupport {
     static final String ACTIVE_TENANT_PREFERENCE_KEY = "darpan.auth.activeTenantUserGroupId"
     static final String DISPLAY_NAME_PREFERENCE_KEY = "darpan.user.displayName"
     static final String TENANT_SETTING_ENTITY_NAME = DarpanEntityConstants.TENANT_SETTING
+    static final String CHAT_SPACE_ENTITY_NAME = DarpanEntityConstants.TENANT_CHAT_SPACE
     static final String DEFAULT_TIME_ZONE = "UTC"
     static final String DARPAN_COMPANY_GROUP_TYPE_ENUM_ID = "UgtDarpanCompany"
     static final String DARPAN_PERMISSION_GROUP_TYPE_ENUM_ID = "UgtDarpanPermission"
@@ -435,7 +436,12 @@ class TenantAccessSupport {
         return buildTenantSettingsResponse(ec, findTenantSettingsForTenant(ec, tenantId), tenantId)
     }
 
-    static Map<String, Object> saveActiveTenantSettings(def ec, Object rawTimeZone) {
+    /**
+     * Each setting is optional and follows save#UserSettings: null means the caller did not send it,
+     * so it is left alone; an empty streaksChatSpaceId clears the space. A timezone, once sent, must
+     * still be a valid id — there is no "clear" for it, the tenant always has one.
+     */
+    static Map<String, Object> saveActiveTenantSettings(def ec, Object rawTimeZone, Object rawStreaksChatSpaceId = null) {
         String tenantId = currentActiveTenantUserGroupId(ec)
         if (!tenantId) {
             ec?.message?.addError("Active tenant is required for tenant settings.")
@@ -446,19 +452,39 @@ class TenantAccessSupport {
         def existing = findTenantSettingsForTenant(ec, tenantId)
         if (ec?.message?.hasError()) return buildTenantSettingsResponse(ec, existing, tenantId)
 
-        String timeZone = normalizeTimeZoneId(rawTimeZone)
-        String validationError = validateTimeZone(timeZone)
-        if (validationError) ec?.message?.addError(validationError)
+        boolean timeZoneProvided = rawTimeZone != null
+        boolean streaksSpaceProvided = rawStreaksChatSpaceId != null
+        if (!timeZoneProvided && !streaksSpaceProvided) ec?.message?.addError("No tenant setting was sent to save.")
+
+        String timeZone = timeZoneProvided ? normalizeTimeZoneId(rawTimeZone) : normalizeTimeZoneId(existing?.timeZone)
+        if (timeZoneProvided) {
+            String validationError = validateTimeZone(timeZone)
+            if (validationError) ec?.message?.addError(validationError)
+        }
+
+        String streaksChatSpaceId = streaksSpaceProvided ? normalize(rawStreaksChatSpaceId) : null
+        if (streaksChatSpaceId) {
+            def spaceRow = TenantScopedFinder.findOneOwnedByTenant(ec, CHAT_SPACE_ENTITY_NAME, "chatSpaceId",
+                    streaksChatSpaceId, tenantId, "streaks chat space verified against the active tenant after a primary-key read")
+            if (spaceRow == null) {
+                ec?.message?.addError("Chat space '${streaksChatSpaceId}' was not found.".toString())
+            } else if (normalize(spaceRow.isActive) == "N") {
+                ec?.message?.addError("Chat space '${normalize(spaceRow.spaceName) ?: streaksChatSpaceId}' is inactive.".toString())
+            }
+        }
         if (ec?.message?.hasError()) return buildTenantSettingsResponse(ec, existing, tenantId)
 
         def nowTs = ec?.user?.nowTimestamp
         Map<String, Object> tenantSettingsMap = [
                 companyUserGroupId: tenantId,
                 createdByUserId   : normalize(existing?.createdByUserId) ?: currentUserId(ec),
-                timeZone          : timeZone,
                 createdDate       : existing?.createdDate ?: nowTs,
                 lastUpdatedDate   : nowTs,
         ]
+        // A first save that only names the streaks space has no timezone yet: leave the key out so
+        // the entity default applies instead of writing a null.
+        if (timeZone) tenantSettingsMap.timeZone = timeZone
+        if (streaksSpaceProvided) tenantSettingsMap.streaksChatSpaceId = streaksChatSpaceId
 
         ec?.service?.sync()
                 ?.name("store#${TENANT_SETTING_ENTITY_NAME}".toString())
@@ -513,6 +539,27 @@ class TenantAccessSupport {
                 ?.one()
     }
 
+    /**
+     * The tenant's streaks space id exactly as stored, without checking it still resolves. Chat-space
+     * delete and list ask this to treat the space as in use; a delete has to see the pointer even when
+     * the space has since been deactivated.
+     */
+    static String readStoredStreaksChatSpaceId(def ec, String tenantId) {
+        return tenantId ? normalize(findTenantSettingsForTenant(ec, tenantId)?.streaksChatSpaceId) : null
+    }
+
+    /**
+     * The streaks space to deliver to, or null. Like get#UserNotificationDefault, a pointer at a space
+     * that was deactivated or no longer belongs to the tenant reads as not configured.
+     */
+    static String resolveStreaksChatSpaceId(def ec, def tenantSettings, String tenantId) {
+        String spaceId = normalize(tenantSettings?.streaksChatSpaceId)
+        if (!spaceId || !tenantId) return null
+        def spaceRow = TenantScopedFinder.findOneOwnedByTenant(ec, CHAT_SPACE_ENTITY_NAME, "chatSpaceId", spaceId,
+                tenantId, "streaks chat space read verified against the active tenant after a primary-key read")
+        return (spaceRow != null && normalize(spaceRow.isActive) != "N") ? spaceId : null
+    }
+
     protected static Map<String, Object> buildTenantSettingsResponse(def ec, def tenantSettings, String tenantId,
             Map<String, Object> fallbackSettings = null) {
         String resolvedTenantId = tenantId ?: normalize(fallbackSettings?.companyUserGroupId)
@@ -520,6 +567,7 @@ class TenantAccessSupport {
                 companyUserGroupId: resolvedTenantId,
                 companyLabel      : resolveTenantLabelForUserGroupId(ec, resolvedTenantId),
                 timeZone          : resolveTenantSettingsTimeZone(tenantSettings ?: fallbackSettings, ec),
+                streaksChatSpaceId: resolveStreaksChatSpaceId(ec, tenantSettings ?: fallbackSettings, resolvedTenantId),
                 createdByUserId   : normalize(tenantSettings?.createdByUserId ?: fallbackSettings?.createdByUserId),
                 createdDate       : tenantSettings?.createdDate ?: fallbackSettings?.createdDate,
                 lastUpdatedDate   : tenantSettings?.lastUpdatedDate ?: fallbackSettings?.lastUpdatedDate,

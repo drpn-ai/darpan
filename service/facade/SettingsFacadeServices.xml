@@ -127,6 +127,9 @@
                 <parameter name="companyUserGroupId"/>
                 <parameter name="companyLabel"/>
                 <parameter name="timeZone"/>
+                <parameter name="streaksChatSpaceId">
+                    <description>DAR-BE-108. Chat space for tenant-wide streak messages; null when unset or when the space was deactivated.</description>
+                </parameter>
                 <parameter name="createdByUserId"/>
                 <parameter name="createdDate" type="Timestamp"/>
                 <parameter name="lastUpdatedDate" type="Timestamp"/>
@@ -143,8 +146,11 @@
     <service verb="save" noun="TenantSettings" allow-remote="true" authenticate="true">
         <description>Save active-tenant settings shared by users in the tenant.</description>
         <in-parameters>
-            <parameter name="timeZone" required="true">
-                <description>Timezone identifier for the active tenant, such as UTC or America/Los_Angeles.</description>
+            <parameter name="timeZone">
+                <description>Timezone identifier for the active tenant, such as UTC or America/Los_Angeles. Absent leaves it unchanged.</description>
+            </parameter>
+            <parameter name="streaksChatSpaceId">
+                <description>DAR-BE-108. Chat space (owned by the active tenant, active) for tenant-wide streak messages. Empty string clears it; absent leaves it unchanged.</description>
             </parameter>
         </in-parameters>
         <out-parameters>
@@ -155,13 +161,16 @@
                 <parameter name="companyUserGroupId"/>
                 <parameter name="companyLabel"/>
                 <parameter name="timeZone"/>
+                <parameter name="streaksChatSpaceId">
+                    <description>DAR-BE-108. Chat space for tenant-wide streak messages; null when unset or when the space was deactivated.</description>
+                </parameter>
                 <parameter name="createdByUserId"/>
                 <parameter name="createdDate" type="Timestamp"/>
                 <parameter name="lastUpdatedDate" type="Timestamp"/>
             </parameter>
         </out-parameters>
         <actions>
-            <set field="tenantSettings" from="darpan.facade.common.TenantAccessSupport.saveActiveTenantSettings(ec, timeZone)"/>
+            <set field="tenantSettings" from="darpan.facade.common.TenantAccessSupport.saveActiveTenantSettings(ec, timeZone, streaksChatSpaceId)"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
@@ -197,7 +206,8 @@
             <set field="spaceRows" from="tenantId ? (ec.entity.find('darpan.reconciliation.TenantChatSpace').condition('companyUserGroupId', tenantId).orderBy('spaceName').disableAuthz().useCache(false).list() ?: []) : []"/>
             <set field="automationSpaceIds" from="tenantId ? (ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('companyUserGroupId', tenantId).disableAuthz().useCache(false).list().collect { ((it.chatSpaceId)?.toString()?.trim()) }.findAll { it } as Set) : ([] as Set)"/>
             <set field="subscriptionSpaceIds" from="spaceRows ? (ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('chatSpaceId', 'in', spaceRows.collect { it.chatSpaceId }).disableAuthz().useCache(false).list().collect { ((it.chatSpaceId)?.toString()?.trim()) }.findAll { it } as Set) : ([] as Set)"/>
-            <set field="chatSpaces" from="spaceRows.collect { row -> darpan.facade.settings.ChatSpaceFacadeSupport.toChatSpaceMap(ec, row, automationSpaceIds.contains(row.chatSpaceId) || subscriptionSpaceIds.contains(row.chatSpaceId)) }"/>
+            <set field="streaksSpaceId" from="darpan.facade.common.TenantAccessSupport.readStoredStreaksChatSpaceId(ec, tenantId)"/>
+            <set field="chatSpaces" from="spaceRows.collect { row -> darpan.facade.settings.ChatSpaceFacadeSupport.toChatSpaceMap(ec, row, automationSpaceIds.contains(row.chatSpaceId) || subscriptionSpaceIds.contains(row.chatSpaceId) || row.chatSpaceId == streaksSpaceId) }"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
@@ -350,7 +360,8 @@
             <if condition="!ec.message.hasError()">
                 <set field="automationRefCount" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomation').condition('chatSpaceId', chatSpaceIdValue).disableAuthz().useCache(false).count()"/>
                 <set field="subscriptionRefCount" from="ec.entity.find('darpan.reconciliation.ReconciliationRunNotifySubscription').condition('chatSpaceId', chatSpaceIdValue).disableAuthz().useCache(false).count()"/>
-                <if condition="automationRefCount &gt; 0 || subscriptionRefCount &gt; 0">
+                <set field="streaksSpaceRef" from="darpan.facade.common.TenantAccessSupport.readStoredStreaksChatSpaceId(ec, tenantId) == chatSpaceIdValue"/>
+                <if condition="automationRefCount &gt; 0 || subscriptionRefCount &gt; 0 || streaksSpaceRef">
                     <message error="true">Chat space '${spaceRow.spaceName}' is in use; deactivate it instead of deleting.</message>
                 </if>
             </if>

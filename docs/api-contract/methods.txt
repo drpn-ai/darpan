@@ -23,11 +23,15 @@ admin.UserAdminServices.get#UserDetail
 admin.UserAdminServices.get#UserList
 admin.UserAdminServices.reset#Password
 admin.UserAdminServices.update#UserAccount
+facade.AuditFacadeServices.delete#AuditCheck
+facade.AuditFacadeServices.get#AuditCheck
+facade.AuditFacadeServices.get#AuditCheckOptions
 facade.AuditFacadeServices.get#AuditFinding
 facade.AuditFacadeServices.get#AuditReport
 facade.AuditFacadeServices.get#AuditSettings
 facade.AuditFacadeServices.get#Audits
 facade.AuditFacadeServices.run#Audit
+facade.AuditFacadeServices.save#AuditCheck
 facade.AuditFacadeServices.save#AuditSettings
 facade.AuthFacadeServices.change#ExpiredPassword
 facade.AuthFacadeServices.change#OwnPassword
@@ -60,8 +64,10 @@ facade.JsonSchemaFacadeServices.save#RefinedSchema
 facade.JsonSchemaFacadeServices.validate#JsonTextAgainstSchema
 facade.NetSuiteLifecycleFacadeServices.get#LifecycleOptions
 facade.NetSuiteLifecycleFacadeServices.get#LifecycleRuleOptions
+facade.NetSuiteQueryFacadeServices.get#NsSuiteQlQueryOptions
 facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery
 facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries
+facade.NetSuiteQueryFacadeServices.preview#NsSuiteQlSourceQuery
 facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery
 facade.ReconciliationFacadeServices.archive#Automation
 facade.ReconciliationFacadeServices.archive#SavedRun
@@ -122,6 +128,9 @@ facade.ReconciliationFacadeServices.save#SavedRunName
 facade.ReconciliationFacadeServices.subscribe#RunNotification
 facade.ReconciliationFacadeServices.sync#Automation
 facade.ReconciliationFacadeServices.unsubscribe#RunNotification
+facade.RunConclusionFacadeServices.create#RunConclusionCode
+facade.RunConclusionFacadeServices.get#RunConclusions
+facade.RunConclusionFacadeServices.save#RunConclusions
 facade.SearchFacadeServices.search#NavigationTargets
 facade.SettingsFacadeServices.delete#NsAuthConfig
 facade.SettingsFacadeServices.delete#TenantChatSpace

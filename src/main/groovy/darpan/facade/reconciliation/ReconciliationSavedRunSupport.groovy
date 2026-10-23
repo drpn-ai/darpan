@@ -1286,6 +1286,9 @@ class ReconciliationSavedRunSupport {
                     nsRestletConfigLabel    : normalize(nsRestletConfig?.description) ?: normalize(nsRestletConfig?.nsRestletConfigId),
                     sourceConfigId          : normalize(source.sourceConfigId),
                     sourceConfigType        : normalize(source.sourceConfigType),
+                    // DAR-UI-064: the side's own choices, so a run's settings can show what it reads.
+                    duplicateKeyHandling    : normalize(source instanceof Map ? ((Map) source).get("duplicateKeyHandling") : source?.duplicateKeyHandling),
+                    extractParametersJson   : normalize(darpan.reconciliation.automation.SourceExtractOptionsSupport.storedOn(source)),
             ]
         }.findAll { it != null } as List<Map<String, Object>>
     }

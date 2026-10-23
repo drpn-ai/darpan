@@ -10,6 +10,7 @@ import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.AutomationRuntimeSupport
 import darpan.reconciliation.automation.SftpAutomationSupport
 import darpan.reconciliation.automation.SourceEndpointAccessSupport
+import darpan.reconciliation.automation.SourceExtractOptionsSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.source.SourceFilterSupport
 import groovy.json.JsonOutput
@@ -499,6 +500,12 @@ class AutomationFacadeSupport {
             // prepareAutomationSave. Never stored — sourceCreateMap does not list it.
             String sourceConfigId = normalize(readField(runSource, "sourceConfigId"))
             if (sourceConfigId) derived.put("sourceConfigId", sourceConfigId)
+            // DAR-UI-064: the run side's extract options (R8, R16) are the run's too. Without them a sync rebuilt the
+            // source's parameters from the config id alone and an R16 automation went back to reading every return.
+            Map<String, Object> options = SourceExtractOptionsSupport.runtimeOptions(
+                    SourceSystemConnectorSupport.resolve(ec, normalize(readField(runSource, "systemEnumId"))),
+                    SourceExtractOptionsSupport.storedOn(runSource))
+            if (options) derived.put("safeMetadataJson", JsonOutput.toJson([parameters: options]))
             sourcesByFileSide.put(fileSide, derived)
             filtersByFileSide.put(fileSide, seedFromRuleSet(ec, compareScopeId, fileSide))
         }
@@ -954,12 +961,20 @@ class AutomationFacadeSupport {
 
     protected static void validateSources(def ec, String inputModeEnumId, List<Map<String, Object>> sources,
             Map<String, Object> savedRun) {
-        if (sources.size() != 2) {
+        // DAR-UI-064: a one-system (EVALUATE) run has one side, FILE_1 (DAR-BE-049). Requiring two made every automation
+        // over such a run unsavable, and Sync failed on each audit check that reads one system (R2, R4, R7, R9, R12).
+        boolean oneSystem = "EVALUATE".equalsIgnoreCase(normalize(savedRun?.get("scopeMode")))
+        if (oneSystem) {
+            if (sources.size() != 1 || (sources[0].fileSide as String) != "FILE_1") {
+                ec.message.addError("A run that reads one system takes exactly one source, FILE_1.")
+                return
+            }
+        } else if (sources.size() != 2) {
             ec.message.addError("sources must include exactly FILE_1 and FILE_2")
             return
         }
         Set<String> fileSides = sources.collect { it.fileSide as String }.toSet()
-        if (fileSides != FILE_SIDES.toSet()) {
+        if (!oneSystem && fileSides != FILE_SIDES.toSet()) {
             ec.message.addError("sources must include FILE_1 and FILE_2")
             return
         }
@@ -1059,8 +1074,22 @@ class AutomationFacadeSupport {
     }
 
     protected static void validateApiSource(def ec, Map<String, Object> source) {
+        // DAR-UI-064: a side the connector registry knows (an extract service and a config parameter: NetSuite SuiteQL,
+        // the OMS GraphQL and order-line endpoints) is identified by its config id, not by a remote or a RESTlet. Holding
+        // it to the remote rule made every such automation unsavable, so Sync failed on each one the audit made.
+        Map<String, Object> connector = SourceSystemConnectorSupport.resolve(ec, normalize(source.systemEnumId))
+        String configParam = normalize(connector?.configParameterName)
+        boolean registryDriven = normalize(connector?.extractServiceName) && configParam
         if (!source.systemMessageRemoteId && !source.nsRestletConfigId) {
-            ec.message.addError("${source.fileSide} API source requires systemMessageRemoteId or nsRestletConfigId")
+            if (!registryDriven) {
+                ec.message.addError("${source.fileSide} API source requires systemMessageRemoteId or nsRestletConfigId")
+            } else {
+                Map metadata = parseJsonMap(source.safeMetadataJson)
+                Map parameters = metadata.parameters instanceof Map ? (Map) metadata.parameters : [:]
+                if (!normalize(parameters[configParam])) {
+                    ec.message.addError("${source.fileSide} ${connector.endpointLabel ?: source.systemEnumId} source requires its ${configParam}.")
+                }
+            }
         }
         if (source.systemMessageRemoteId) {
             def remote = TenantScopedFinder.findGlobalUnscoped(ec, "moqui.service.message.SystemMessageRemote",
@@ -1370,6 +1399,8 @@ class AutomationFacadeSupport {
                     dateToParameterName  : connector.dateToParameterName,
                     safeMetadataJson: safeMetadataJsonForConnector(connector, pkField, configId),
                     label           : label,
+                    // DAR-UI-064: the extract options a run side over this endpoint may set; absent when it takes none.
+                    extractOptions  : SourceExtractOptionsSupport.declaredOptions(connector) ?: null,
             ] as Map<String, Object>).findAll { it.value != null } as Map<String, Object>
         } as List<Map<String, Object>>
     }
@@ -1437,7 +1468,43 @@ class AutomationFacadeSupport {
                     dateFromParameterName: connector.dateFromParameterName,
                     dateToParameterName  : connector.dateToParameterName,
                     label                : label,
+                    // DAR-UI-064: a query's own projection is its field list, for the key card and the rules board
+                    // (the shape SourceSystemConnectorField pills take for connector endpoints).
+                    primaryIdOptions     : suiteQlQueryFields(ec, configId, readString(item, "queryTemplate")),
+                    fieldOptions         : suiteQlQueryFields(ec, configId, readString(item, "queryTemplate"), readString(item, "originFieldName")),
+                    supportsExcludeFilters: supportsExcludeFiltersForSystem(ec, NETSUITE_SUITEQL_SYSTEM_ENUM_ID),
             ].findAll { it.value != null } as Map<String, Object>
+        } as List<Map<String, Object>>
+    }
+
+    /**
+     * The record fields a SuiteQL template adds itself, beside the operator's projection (netsuite-darpan
+     * NsSuiteQlOrderSupport.TEMPLATE_RECORD_COLUMNS; darpan cannot import it, so NsSuiteQlTemplateFieldsSyncTests there
+     * keeps the two equal). SALES_LINES makes one record per item line.
+     */
+    static final Map<String, List<String>> SUITEQL_TEMPLATE_FIELDS = [
+            SALES_LINES        : ["orderLineId", "lineId", "lineState", "lineLocation", "itemType", "quantityShipped",
+                                  "quantityBilled", "quantityBackordered", "lineClosed"],
+            STATE_CONTRADICTION: ["contradiction", "contradictionBrief"],
+    ].asImmutable()
+
+    /**
+     * A SuiteQL query's record fields as pills ($.records[*].<field>): its projection, what its template adds, and its
+     * origin field (HOTWAX or NETSUITE_NATIVE, stamped from the join key) — the field a "only HotWax's records" filter
+     * reads, as the lifecycle checks do (gorjana: an invoice with no HC Order ID is not ours).
+     */
+    protected static List<Map<String, Object>> suiteQlQueryFields(def ec, String queryId, String queryTemplate = null,
+                                                                  String originFieldName = null) {
+        // The projection has no tenant column; it is reached only through a query the caller already scoped.
+        List<String> names = TenantScopedFinder.findGlobalUnscoped(ec, "darpan.reconciliation.NsSuiteQlSourceQueryField",
+                "projection of a tenant-scoped NsSuiteQlSourceQuery")
+                .condition("nsSuiteQlSourceQueryId", queryId).orderBy("sequenceNum").useCache(false).list()
+                .collect { readString(it, "recordFieldName") }
+        names.addAll((SUITEQL_TEMPLATE_FIELDS[normalize(queryTemplate)] ?: []).findAll { !names.contains(it) })
+        String origin = normalize(originFieldName)
+        if (origin && !names.contains(origin)) names.add(origin)
+        return names.collect { String name ->
+            [fieldPath: "\$.records[*].${name}".toString(), label: name, type: "string"] as Map<String, Object>
         } as List<Map<String, Object>>
     }
 
@@ -1586,6 +1653,8 @@ class AutomationFacadeSupport {
                             dateToParameterName     : readString(row, "dateToParameterName"),
                             remoteId                : readString(row, "remoteId"),
                             configParameterName     : readString(row, "configParameterName"),
+                            // DAR-UI-064: carried so each option row can say which extract options its side may set.
+                            extractOptionsJson      : readString(row, "extractOptionsJson"),
                     ] as Map<String, Object>)
                 } as List<Map<String, Object>>
     }

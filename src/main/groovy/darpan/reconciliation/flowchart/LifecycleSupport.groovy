@@ -354,8 +354,9 @@ class LifecycleSupport {
         for (Object o : ((params.conclusions ?: []) as List)) {
             Map c = (Map) o
             String enumId = normalize(c.conclusionEnumId)
-            def conclusion = enumId ? FacadeSupport.findEnum(ec, enumId) : null
-            if (conclusion == null || conclusion.get("enumTypeId") != "DarpanConclusion") {
+            // DAR-UI-064: a shared code, or the tenant's own; another tenant's code reads as not a conclusion.
+            def conclusion = darpan.reconciliation.conclusion.ConclusionCatalogSupport.visibleConclusion(ec, enumId)
+            if (conclusion == null) {
                 ec.message.addError("'${enumId}' is not a conclusion."); return [:]
             }
             List<String> at = ((c.places ?: []) as List).collect { normalize(it) }.findAll { it }.unique() as List<String>

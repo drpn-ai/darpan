@@ -1,6 +1,7 @@
 package darpan.facade.reconciliation
 
 import darpan.facade.common.DataManagerSupport
+import darpan.reconciliation.automation.SourceExtractOptionsSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 
 import java.sql.Timestamp
@@ -225,6 +226,10 @@ class RunExtractSupport {
                 // The zone the window was anchored in. preserveExactWindow and normalizeCalendarWindow
                 // have both always returned it on this map; only a date-granular connector reads it.
                 apiWindow?.timeZone)
+        // DAR-UI-064: the run side's own extract options (gorjana R8 / R16), under everything above so they never displace
+        // the config id, window or filters; only names the connector declares.
+        SourceExtractOptionsSupport.mergeUnder(extractParams,
+                SourceExtractOptionsSupport.runtimeOptions(connector, SourceExtractOptionsSupport.storedOn(source)))
 
         Map extraction = (serviceCaller.call(extractServiceName, extractParams) ?: [:]) as Map
         ((List) (extraction.errors ?: [])).each { Object error -> ec.message.addError("${label}: ${error}") }

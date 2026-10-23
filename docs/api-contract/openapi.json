@@ -99,13 +99,34 @@
                                         "$ref": "#/components/schemas/UpdateUserAccountRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/DeleteAuditCheckRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetAuditCheckRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetAuditCheckOptionsRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetAuditFindingRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/GetAuditReportRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetAuditSettingsRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetAuditsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RunAuditRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveAuditCheckRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveAuditSettingsRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/ChangeExpiredPasswordRequest"
@@ -201,10 +222,16 @@
                                         "$ref": "#/components/schemas/GetLifecycleRuleOptionsRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetNsSuiteQlQueryOptionsRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetNsSuiteQlSourceQueryRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/ListNsSuiteQlSourceQueriesRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/PreviewNsSuiteQlSourceQueryRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/SaveNsSuiteQlSourceQueryRequest"
@@ -387,6 +414,15 @@
                                         "$ref": "#/components/schemas/UnsubscribeRunNotificationRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/CreateRunConclusionCodeRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetRunConclusionsRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/SaveRunConclusionsRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/SearchNavigationTargetsRequest"
                                     },
                                     {
@@ -505,9 +541,16 @@
                                         "admin.UserAdminServices.get#UserList": "#/components/schemas/GetUserListRequest",
                                         "admin.UserAdminServices.reset#Password": "#/components/schemas/ResetPasswordRequest",
                                         "admin.UserAdminServices.update#UserAccount": "#/components/schemas/UpdateUserAccountRequest",
+                                        "facade.AuditFacadeServices.delete#AuditCheck": "#/components/schemas/DeleteAuditCheckRequest",
+                                        "facade.AuditFacadeServices.get#AuditCheck": "#/components/schemas/GetAuditCheckRequest",
+                                        "facade.AuditFacadeServices.get#AuditCheckOptions": "#/components/schemas/GetAuditCheckOptionsRequest",
                                         "facade.AuditFacadeServices.get#AuditFinding": "#/components/schemas/GetAuditFindingRequest",
                                         "facade.AuditFacadeServices.get#AuditReport": "#/components/schemas/GetAuditReportRequest",
+                                        "facade.AuditFacadeServices.get#AuditSettings": "#/components/schemas/GetAuditSettingsRequest",
                                         "facade.AuditFacadeServices.get#Audits": "#/components/schemas/GetAuditsRequest",
+                                        "facade.AuditFacadeServices.run#Audit": "#/components/schemas/RunAuditRequest",
+                                        "facade.AuditFacadeServices.save#AuditCheck": "#/components/schemas/SaveAuditCheckRequest",
+                                        "facade.AuditFacadeServices.save#AuditSettings": "#/components/schemas/SaveAuditSettingsRequest",
                                         "facade.AuthFacadeServices.change#ExpiredPassword": "#/components/schemas/ChangeExpiredPasswordRequest",
                                         "facade.AuthFacadeServices.change#OwnPassword": "#/components/schemas/ChangeOwnPasswordRequest",
                                         "facade.AuthFacadeServices.complete#PasswordReset": "#/components/schemas/CompletePasswordResetRequest",
@@ -539,8 +582,10 @@
                                         "facade.JsonSchemaFacadeServices.validate#JsonTextAgainstSchema": "#/components/schemas/ValidateJsonTextAgainstSchemaRequest",
                                         "facade.NetSuiteLifecycleFacadeServices.get#LifecycleOptions": "#/components/schemas/GetLifecycleOptionsRequest",
                                         "facade.NetSuiteLifecycleFacadeServices.get#LifecycleRuleOptions": "#/components/schemas/GetLifecycleRuleOptionsRequest",
+                                        "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlQueryOptions": "#/components/schemas/GetNsSuiteQlQueryOptionsRequest",
                                         "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery": "#/components/schemas/GetNsSuiteQlSourceQueryRequest",
                                         "facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries": "#/components/schemas/ListNsSuiteQlSourceQueriesRequest",
+                                        "facade.NetSuiteQueryFacadeServices.preview#NsSuiteQlSourceQuery": "#/components/schemas/PreviewNsSuiteQlSourceQueryRequest",
                                         "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery": "#/components/schemas/SaveNsSuiteQlSourceQueryRequest",
                                         "facade.ReconciliationFacadeServices.archive#Automation": "#/components/schemas/ArchiveAutomationRequest",
                                         "facade.ReconciliationFacadeServices.archive#SavedRun": "#/components/schemas/ArchiveSavedRunRequest",
@@ -601,6 +646,9 @@
                                         "facade.ReconciliationFacadeServices.subscribe#RunNotification": "#/components/schemas/SubscribeRunNotificationRequest",
                                         "facade.ReconciliationFacadeServices.sync#Automation": "#/components/schemas/SyncAutomationRequest",
                                         "facade.ReconciliationFacadeServices.unsubscribe#RunNotification": "#/components/schemas/UnsubscribeRunNotificationRequest",
+                                        "facade.RunConclusionFacadeServices.create#RunConclusionCode": "#/components/schemas/CreateRunConclusionCodeRequest",
+                                        "facade.RunConclusionFacadeServices.get#RunConclusions": "#/components/schemas/GetRunConclusionsRequest",
+                                        "facade.RunConclusionFacadeServices.save#RunConclusions": "#/components/schemas/SaveRunConclusionsRequest",
                                         "facade.SearchFacadeServices.search#NavigationTargets": "#/components/schemas/SearchNavigationTargetsRequest",
                                         "facade.SettingsFacadeServices.delete#NsAuthConfig": "#/components/schemas/DeleteNsAuthConfigRequest",
                                         "facade.SettingsFacadeServices.delete#TenantChatSpace": "#/components/schemas/DeleteTenantChatSpaceRequest",
@@ -723,13 +771,34 @@
                                             "$ref": "#/components/schemas/UpdateUserAccountResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/DeleteAuditCheckResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetAuditCheckResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetAuditCheckOptionsResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/GetAuditFindingResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetAuditReportResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/GetAuditSettingsResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/GetAuditsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RunAuditResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveAuditCheckResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveAuditSettingsResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ChangeExpiredPasswordResponse"
@@ -825,10 +894,16 @@
                                             "$ref": "#/components/schemas/GetLifecycleRuleOptionsResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/GetNsSuiteQlQueryOptionsResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/GetNsSuiteQlSourceQueryResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/ListNsSuiteQlSourceQueriesResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/PreviewNsSuiteQlSourceQueryResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/SaveNsSuiteQlSourceQueryResponse"
@@ -1009,6 +1084,15 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/UnsubscribeRunNotificationResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/CreateRunConclusionCodeResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetRunConclusionsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/SaveRunConclusionsResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/SearchNavigationTargetsResponse"
@@ -3699,6 +3783,299 @@
                     "result"
                 ]
             },
+            "DeleteAuditCheckParams": {
+                "type": "object",
+                "properties": {
+                    "audit": {
+                        "type": "string"
+                    },
+                    "check": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "audit",
+                    "check"
+                ],
+                "description": "Unlinks a check from this audit's statements; the check itself goes too when no other audit links it\n            and no finding names it (the ledger keeps its history)."
+            },
+            "DeleteAuditCheckResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "result": {
+                        "type": "object"
+                    }
+                }
+            },
+            "DeleteAuditCheckRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.delete#AuditCheck",
+                "x-darpan-method": "facade.AuditFacadeServices.delete#AuditCheck",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuditFacadeServices.delete#AuditCheck"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/DeleteAuditCheckParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "DeleteAuditCheckResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.delete#AuditCheck. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/DeleteAuditCheckResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetAuditCheckParams": {
+                "type": "object",
+                "properties": {
+                    "audit": {
+                        "type": "string"
+                    },
+                    "check": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "audit",
+                    "check"
+                ],
+                "description": "One check of an audit as the editor shows it, with its links to that audit's statements."
+            },
+            "GetAuditCheckResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "check": {
+                        "type": "object"
+                    }
+                }
+            },
+            "GetAuditCheckRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.get#AuditCheck",
+                "x-darpan-method": "facade.AuditFacadeServices.get#AuditCheck",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuditFacadeServices.get#AuditCheck"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAuditCheckParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAuditCheckResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.get#AuditCheck. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAuditCheckResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetAuditCheckOptionsParams": {
+                "type": "object",
+                "properties": {
+                    "audit": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "audit"
+                ],
+                "description": "What the add-a-check editor offers for one audit: its statements, the tenant's runs with their rules\n            and conclusions, the row types and fix systems a check may name, and the audit's checks."
+            },
+            "GetAuditCheckOptionsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "options": {
+                        "type": "object"
+                    }
+                }
+            },
+            "GetAuditCheckOptionsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.get#AuditCheckOptions",
+                "x-darpan-method": "facade.AuditFacadeServices.get#AuditCheckOptions",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuditFacadeServices.get#AuditCheckOptions"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAuditCheckOptionsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAuditCheckOptionsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.get#AuditCheckOptions. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAuditCheckOptionsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "GetAuditFindingParams": {
                 "type": "object",
                 "properties": {
@@ -4209,6 +4586,112 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/RunAuditResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SaveAuditCheckParams": {
+                "type": "object",
+                "properties": {
+                    "audit": {
+                        "type": "string"
+                    },
+                    "check": {
+                        "type": "object"
+                    },
+                    "statements": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "[{id: statement code, diffTypes, conclusionCodes,\n                ruleIds}], at least one (refused in words when empty)."
+                    }
+                },
+                "required": [
+                    "audit",
+                    "check"
+                ],
+                "description": "Creates or updates a check (check.id is its code) and replaces its links to this audit's statements.\n            All or nothing; refused in words for a statement outside the audit, a run the tenant does not own, a rule not\n            in that run, or a row type the ledger does not write. A new check, or one whose run changed, has no automation\n            until the audit's play or settings makes one."
+            },
+            "SaveAuditCheckResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "savedCheck": {
+                        "type": "object"
+                    }
+                }
+            },
+            "SaveAuditCheckRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.save#AuditCheck",
+                "x-darpan-method": "facade.AuditFacadeServices.save#AuditCheck",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuditFacadeServices.save#AuditCheck"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveAuditCheckParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveAuditCheckResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.save#AuditCheck. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveAuditCheckResult"
                     }
                 },
                 "required": [
@@ -8689,6 +9172,90 @@
                     "result"
                 ]
             },
+            "GetNsSuiteQlQueryOptionsParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "DAR-UI-064. What the SuiteQL query editor offers: templates, date columns, common record types, the\n            fields and operators a match rule may use, and the NetSuite accounts the active tenant may read."
+            },
+            "GetNsSuiteQlQueryOptionsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "options": {
+                        "type": "object"
+                    }
+                }
+            },
+            "GetNsSuiteQlQueryOptionsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.NetSuiteQueryFacadeServices.get#NsSuiteQlQueryOptions",
+                "x-darpan-method": "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlQueryOptions",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlQueryOptions"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetNsSuiteQlQueryOptionsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetNsSuiteQlQueryOptionsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.NetSuiteQueryFacadeServices.get#NsSuiteQlQueryOptions. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetNsSuiteQlQueryOptionsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "GetNsSuiteQlSourceQueryParams": {
                 "type": "object",
                 "properties": {
@@ -8930,6 +9497,145 @@
                     "result"
                 ]
             },
+            "PreviewNsSuiteQlSourceQueryParams": {
+                "type": "object",
+                "properties": {
+                    "nsSuiteQlSourceQueryId": {
+                        "type": "string"
+                    },
+                    "nsAuthConfigId": {
+                        "type": "string"
+                    },
+                    "day": {
+                        "type": "string",
+                        "description": "YYYY-MM-DD; default yesterday in the tenant's zone."
+                    },
+                    "recordType": {
+                        "type": "string"
+                    },
+                    "fromTable": {
+                        "type": "string"
+                    },
+                    "dateColumn": {
+                        "type": "string"
+                    },
+                    "queryTemplate": {
+                        "type": "string"
+                    },
+                    "joinKeyFieldName": {
+                        "type": "string"
+                    },
+                    "originFieldName": {
+                        "type": "string"
+                    },
+                    "matchRules": {
+                        "type": "string",
+                        "description": "Moqui type Object"
+                    },
+                    "fields": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "field": {
+                                    "type": "object",
+                                    "properties": {
+                                        "recordFieldName": {
+                                            "type": "string"
+                                        },
+                                        "sourceColumn": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "required": [
+                    "nsAuthConfigId",
+                    "recordType",
+                    "fields"
+                ],
+                "description": "DAR-UI-064. Runs a query as submitted (nothing is saved) against NetSuite for one day and answers its\n            first rows as records with the SuiteQL sent. Read-only, one page. Same validation as save."
+            },
+            "PreviewNsSuiteQlSourceQueryResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "preview": {
+                        "type": "object"
+                    }
+                }
+            },
+            "PreviewNsSuiteQlSourceQueryRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.NetSuiteQueryFacadeServices.preview#NsSuiteQlSourceQuery",
+                "x-darpan-method": "facade.NetSuiteQueryFacadeServices.preview#NsSuiteQlSourceQuery",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.NetSuiteQueryFacadeServices.preview#NsSuiteQlSourceQuery"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/PreviewNsSuiteQlSourceQueryParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "PreviewNsSuiteQlSourceQueryResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.NetSuiteQueryFacadeServices.preview#NsSuiteQlSourceQuery. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/PreviewNsSuiteQlSourceQueryResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "SaveNsSuiteQlSourceQueryParams": {
                 "type": "object",
                 "properties": {
@@ -8998,6 +9704,10 @@
                     },
                     "lineKeyColumn": {
                         "type": "string"
+                    },
+                    "matchRules": {
+                        "type": "string",
+                        "description": "Moqui type Object. DAR-UI-064. RECORDS_MATCHING conditions: a list (or its\n                JSON) of {fieldId, op IN/GT/NOT_EMPTY/STARTS_WITH, values}. Validated by normalizeSpec like every other field."
                     },
                     "isActive": {
                         "type": "boolean"
@@ -9827,6 +10537,14 @@
                             
                         }
                     },
+                    "file1DuplicateKeyHandling": {
+                        "type": "string",
+                        "description": "DAR-UI-064. Blank, or FINDING: every record under a key\n                that repeats on this side is a finding (DAR-BE-063)."
+                    },
+                    "file1ExtractOptions": {
+                        "type": "object",
+                        "description": "DAR-UI-064. This side's extract options, only the\n                names its connector declares (SourceSystemConnector.extractOptionsJson), e.g. {\"onlyCancelledReturns\": true}."
+                    },
                     "file2SystemEnumId": {
                         "type": "string"
                     },
@@ -9862,6 +10580,14 @@
                         "items": {
                             
                         }
+                    },
+                    "file2DuplicateKeyHandling": {
+                        "type": "string",
+                        "description": "DAR-UI-064. Blank, or FINDING: every record under a key\n                that repeats on this side is a finding (DAR-BE-063)."
+                    },
+                    "file2ExtractOptions": {
+                        "type": "object",
+                        "description": "DAR-UI-064. This side's extract options, only the\n                names its connector declares (SourceSystemConnector.extractOptionsJson), e.g. {\"onlyCancelledReturns\": true}."
                     },
                     "rules": {
                         "type": "array",
@@ -13969,6 +14695,14 @@
                                             },
                                             "sourceConfigType": {
                                                 "type": "string"
+                                            },
+                                            "duplicateKeyHandling": {
+                                                "type": "string",
+                                                "description": "DAR-UI-064. Blank, or FINDING."
+                                            },
+                                            "extractParametersJson": {
+                                                "type": "string",
+                                                "description": "DAR-UI-064. The side's extract options, as stored."
                                             }
                                         }
                                     }
@@ -17286,7 +18020,8 @@
                         }
                     },
                     "file2SystemEnumId": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Required unless the run reads one system (EVALUATE)."
                     },
                     "file2SourceTypeEnumId": {
                         "type": "string"
@@ -17409,8 +18144,7 @@
                 "required": [
                     "savedRunId",
                     "runName",
-                    "file1SystemEnumId",
-                    "file2SystemEnumId"
+                    "file1SystemEnumId"
                 ],
                 "description": "Update configuration and, when provided, the executable rules for a tenant-scoped RuleSet-backed saved run."
             },
@@ -18224,6 +18958,297 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/UnsubscribeRunNotificationResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "CreateRunConclusionCodeParams": {
+                "type": "object",
+                "properties": {
+                    "label": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "label"
+                ],
+                "description": "Makes a conclusion code of the active tenant's own, named by label; only that tenant's catalog lists\n            it. Refused when the catalog already has the label."
+            },
+            "CreateRunConclusionCodeResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "conclusionCode": {
+                        "type": "object"
+                    }
+                }
+            },
+            "CreateRunConclusionCodeRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.RunConclusionFacadeServices.create#RunConclusionCode",
+                "x-darpan-method": "facade.RunConclusionFacadeServices.create#RunConclusionCode",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.RunConclusionFacadeServices.create#RunConclusionCode"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/CreateRunConclusionCodeParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "CreateRunConclusionCodeResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.RunConclusionFacadeServices.create#RunConclusionCode. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/CreateRunConclusionCodeResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetRunConclusionsParams": {
+                "type": "object",
+                "properties": {
+                    "savedRunId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "savedRunId"
+                ],
+                "description": "A run's conclusion tree in order, the conclusion catalog, and the condition vocabulary (buckets,\n            operators, presence, key scopes, quantifiers)."
+            },
+            "GetRunConclusionsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "conclusions": {
+                        "type": "object"
+                    }
+                }
+            },
+            "GetRunConclusionsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.RunConclusionFacadeServices.get#RunConclusions",
+                "x-darpan-method": "facade.RunConclusionFacadeServices.get#RunConclusions",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.RunConclusionFacadeServices.get#RunConclusions"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetRunConclusionsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetRunConclusionsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.RunConclusionFacadeServices.get#RunConclusions. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetRunConclusionsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SaveRunConclusionsParams": {
+                "type": "object",
+                "properties": {
+                    "savedRunId": {
+                        "type": "string"
+                    },
+                    "conclusions": {
+                        "type": "array",
+                        "items": {
+                            
+                        }
+                    }
+                },
+                "required": [
+                    "savedRunId"
+                ],
+                "description": "Replaces a run's conclusion tree: [{key, parent, conclusion, bucket, question, conditions: [{subject,\n            presence, keyScope, quantifier, field, operator, values, checkLabel}]}]. All or nothing; an empty list clears it."
+            },
+            "SaveRunConclusionsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "savedConclusions": {
+                        "type": "object"
+                    }
+                }
+            },
+            "SaveRunConclusionsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.RunConclusionFacadeServices.save#RunConclusions",
+                "x-darpan-method": "facade.RunConclusionFacadeServices.save#RunConclusions",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.RunConclusionFacadeServices.save#RunConclusions"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveRunConclusionsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveRunConclusionsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.RunConclusionFacadeServices.save#RunConclusions. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveRunConclusionsResult"
                     }
                 },
                 "required": [
@@ -22146,11 +23171,15 @@
         "admin.UserAdminServices.get#UserList": "GetUserList",
         "admin.UserAdminServices.reset#Password": "ResetPassword",
         "admin.UserAdminServices.update#UserAccount": "UpdateUserAccount",
+        "facade.AuditFacadeServices.delete#AuditCheck": "DeleteAuditCheck",
+        "facade.AuditFacadeServices.get#AuditCheck": "GetAuditCheck",
+        "facade.AuditFacadeServices.get#AuditCheckOptions": "GetAuditCheckOptions",
         "facade.AuditFacadeServices.get#AuditFinding": "GetAuditFinding",
         "facade.AuditFacadeServices.get#AuditReport": "GetAuditReport",
         "facade.AuditFacadeServices.get#AuditSettings": "GetAuditSettings",
         "facade.AuditFacadeServices.get#Audits": "GetAudits",
         "facade.AuditFacadeServices.run#Audit": "RunAudit",
+        "facade.AuditFacadeServices.save#AuditCheck": "SaveAuditCheck",
         "facade.AuditFacadeServices.save#AuditSettings": "SaveAuditSettings",
         "facade.AuthFacadeServices.change#ExpiredPassword": "ChangeExpiredPassword",
         "facade.AuthFacadeServices.change#OwnPassword": "ChangeOwnPassword",
@@ -22183,8 +23212,10 @@
         "facade.JsonSchemaFacadeServices.validate#JsonTextAgainstSchema": "ValidateJsonTextAgainstSchema",
         "facade.NetSuiteLifecycleFacadeServices.get#LifecycleOptions": "GetLifecycleOptions",
         "facade.NetSuiteLifecycleFacadeServices.get#LifecycleRuleOptions": "GetLifecycleRuleOptions",
+        "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlQueryOptions": "GetNsSuiteQlQueryOptions",
         "facade.NetSuiteQueryFacadeServices.get#NsSuiteQlSourceQuery": "GetNsSuiteQlSourceQuery",
         "facade.NetSuiteQueryFacadeServices.list#NsSuiteQlSourceQueries": "ListNsSuiteQlSourceQueries",
+        "facade.NetSuiteQueryFacadeServices.preview#NsSuiteQlSourceQuery": "PreviewNsSuiteQlSourceQuery",
         "facade.NetSuiteQueryFacadeServices.save#NsSuiteQlSourceQuery": "SaveNsSuiteQlSourceQuery",
         "facade.ReconciliationFacadeServices.archive#Automation": "ArchiveAutomation",
         "facade.ReconciliationFacadeServices.archive#SavedRun": "ArchiveSavedRun",
@@ -22245,6 +23276,9 @@
         "facade.ReconciliationFacadeServices.subscribe#RunNotification": "SubscribeRunNotification",
         "facade.ReconciliationFacadeServices.sync#Automation": "SyncAutomation",
         "facade.ReconciliationFacadeServices.unsubscribe#RunNotification": "UnsubscribeRunNotification",
+        "facade.RunConclusionFacadeServices.create#RunConclusionCode": "CreateRunConclusionCode",
+        "facade.RunConclusionFacadeServices.get#RunConclusions": "GetRunConclusions",
+        "facade.RunConclusionFacadeServices.save#RunConclusions": "SaveRunConclusions",
         "facade.SearchFacadeServices.search#NavigationTargets": "SearchNavigationTargets",
         "facade.SettingsFacadeServices.delete#NsAuthConfig": "DeleteNsAuthConfig",
         "facade.SettingsFacadeServices.delete#TenantChatSpace": "DeleteTenantChatSpace",

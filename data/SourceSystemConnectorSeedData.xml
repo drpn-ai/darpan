@@ -331,6 +331,7 @@
             lookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsReturnsByExternalId"
             lookupIdsParameterName="externalIds"
             lookupMaxIds="10000"
+            extractOptionsJson='[{"name":"includeReturnsWithoutShopifyRef","label":"Include returns with no Shopify reference","type":"boolean"},{"name":"onlyCancelledReturns","label":"Only cancelled returns","type":"boolean"}]'
             enabled="Y"/>
 
     <!-- Shopify per-EVENT (refund or return) records for returns reconciliation (DAR-BE-018;

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- DAR-UI-064. A run's conclusion tree from the app (RunConclusionAuthoringSupport), in the active tenant: which
+         DarpanConclusion names a finding, by conditions on either side's record. Another tenant's run reads as not found. -->
+
+    <service verb="get" noun="RunConclusions" authz-action="view" allow-remote="true" authenticate="true">
+        <description>A run's conclusion tree in order, the conclusion catalog, and the condition vocabulary (buckets,
+            operators, presence, key scopes, quantifiers).</description>
+        <in-parameters><parameter name="savedRunId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="conclusions" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="conclusions" from="darpan.reconciliation.conclusion.RunConclusionAuthoringSupport.get(ec, savedRunId)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="RunConclusions" allow-remote="true" authenticate="true">
+        <description>Replaces a run's conclusion tree: [{key, parent, conclusion, bucket, question, conditions: [{subject,
+            presence, keyScope, quantifier, field, operator, values, checkLabel}]}]. All or nothing; an empty list clears it.</description>
+        <in-parameters>
+            <parameter name="savedRunId" required="true"/>
+            <parameter name="conclusions" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="savedConclusions" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="savedConclusions" from="darpan.reconciliation.conclusion.RunConclusionAuthoringSupport.save(ec, savedRunId, conclusions)"/>
+            <if condition="ec.message.hasError()"><return error="true"/></if>
+            <set field="ok" from="true"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="[]"/>
+        </actions>
+    </service>
+
+    <service verb="create" noun="RunConclusionCode" allow-remote="true" authenticate="true">
+        <description>Makes a conclusion code of the active tenant's own, named by label; only that tenant's catalog lists
+            it. Refused when the catalog already has the label.</description>
+        <in-parameters><parameter name="label" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="conclusionCode" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="conclusionCode" from="darpan.reconciliation.conclusion.ConclusionCatalogSupport.create(ec, label)"/>
+            <if condition="ec.message.hasError()"><return error="true"/></if>
+            <set field="ok" from="true"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="[]"/>
+        </actions>
+    </service>
+</services>

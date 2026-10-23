@@ -246,4 +246,34 @@
                 nothing, so a consumer can tell 'extract predates the field' from 'Shopify said nothing'.
                 Exclude IN_PROGRESS to drop orders whose return has not finished yet."/>
 
+
+    <!-- DAR-UI-064: OMS_ORDER_ITEMS, one record per order-item unit (darpan-hotwax OmsOrderLineUnitSupport). Declared so
+         the run builder's key card and rules board can offer them; R15 keys on omsOrderId + orderItemSeqId and compares
+         facilityId, after filtering unitState, omsOrderName and facilityId. -->
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].omsOrderId"
+            label="OMS order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].orderItemSeqId"
+            label="Order item seq ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].omsOrderName"
+            label="Order name" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].shopifyOrderId"
+            label="Shopify order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="4"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].shopifyLineId"
+            label="Shopify line ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="5"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].netsuiteOrderId"
+            label="NetSuite order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="6"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].unitOrdinal"
+            label="Unit" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="7"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].productId"
+            label="Product" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="8"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].statusId"
+            label="Item status" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="9"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].unitState"
+            label="Unit state" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="10"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].facilityId"
+            label="Facility" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="11"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].omsOrderStatusId"
+            label="Order status" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="12"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].salesChannelEnumId"
+            label="Sales channel" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="13"/>
 </entity-facade-xml>

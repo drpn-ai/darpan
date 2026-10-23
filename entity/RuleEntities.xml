@@ -157,6 +157,12 @@
                 under a repeated key becomes a DUPLICATE_IN_FILE_n finding, and the key is left out of the
                 compare on both sides, so the other side's record is not reported missing.</description>
         </field>
+        <field name="extractParametersJson" type="text-medium">
+            <description>DAR-UI-064. This side's extract options, a JSON object of extract-service parameters limited to
+                what its connector declares (SourceSystemConnector.extractOptionsJson), e.g. {"onlyCancelledReturns":true}.
+                Read by the manual run and copied into an automation source's parameters, so both read the same
+                population. Blank: the extract's defaults.</description>
+        </field>
         <field name="systemMessageRemoteId" type="id">
             <description>Optional SystemMessageRemote endpoint used when the source is API-backed.</description>
         </field>
@@ -336,6 +342,23 @@
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>
         <index name="RSCONC_TENANT"><index-field name="companyUserGroupId"/></index>
+    </entity>
+
+    <entity entity-name="TenantConclusion" package="darpan.rule" use="configuration">
+        <description>DAR-UI-064. A conclusion code a tenant made in the app. The code itself stays a DarpanConclusion
+            Enumeration (the conclude step and every reader key on it); this row says whose it is, so only that tenant's
+            catalog lists it and only its runs may name it. A DarpanConclusion with no row here is shared (seed data).</description>
+        <field name="enumId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="moqui.basic.Enumeration" fk-name="TENCONC_ENUM">
+            <key-map field-name="enumId"/>
+        </relationship>
+        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="TENCONC_COMPANY_GRP">
+            <key-map field-name="companyUserGroupId" related="userGroupId"/>
+        </relationship>
+        <index name="TENCONC_TENANT"><index-field name="companyUserGroupId"/></index>
     </entity>
 
     <entity entity-name="RuleSetConclusionCondition" package="darpan.rule" use="configuration">

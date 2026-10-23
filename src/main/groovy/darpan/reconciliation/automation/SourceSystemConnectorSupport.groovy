@@ -210,6 +210,8 @@ class SourceSystemConnectorSupport {
                 orderStateLookupServiceName    : readString(record, "orderStateLookupServiceName"),
                 returnLinesLookupServiceName   : readString(record, "returnLinesLookupServiceName"),
                 healthCheckServiceName     : readString(record, "healthCheckServiceName"),
+                // DAR-UI-064: the extract options a run side may set, [{name, label, type}] (SourceExtractOptionsSupport).
+                extractOptionsJson         : readString(record, "extractOptionsJson"),
                 enabled                    : isEnabled(record),
         ] as Map<String, Object>
     }

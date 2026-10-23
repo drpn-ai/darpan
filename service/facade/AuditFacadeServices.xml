@@ -192,4 +192,85 @@
         </actions>
     </service>
 
+    <!-- DAR-UI-064: adding a check to an audit from the app (AuditCheckAuthoringSupport). Appended, not woven in: the
+         audit settings services above are DAR-UI-063's. -->
+    <service verb="get" noun="AuditCheckOptions" authz-action="view" allow-remote="true" authenticate="true">
+        <description>What the add-a-check editor offers for one audit: its statements, the tenant's runs with their rules
+            and conclusions, the row types and fix systems a check may name, and the audit's checks.</description>
+        <in-parameters><parameter name="audit" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="options" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="options" from="darpan.audit.AuditCheckAuthoringSupport.options(ec, audit)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="AuditCheck" authz-action="view" allow-remote="true" authenticate="true">
+        <description>One check of an audit as the editor shows it, with its links to that audit's statements.</description>
+        <in-parameters><parameter name="audit" required="true"/><parameter name="check" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="check" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="check" from="darpan.audit.AuditCheckAuthoringSupport.getCheck(ec, audit, check)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="AuditCheck" allow-remote="true" authenticate="true">
+        <description>Creates or updates a check (check.id is its code) and replaces its links to this audit's statements.
+            All or nothing; refused in words for a statement outside the audit, a run the tenant does not own, a rule not
+            in that run, or a row type the ledger does not write. A new check, or one whose run changed, has no automation
+            until the audit's play or settings makes one.</description>
+        <in-parameters>
+            <parameter name="audit" required="true"/>
+            <parameter name="check" type="Map" required="true"/>
+            <parameter name="statements" type="List"><description>[{id: statement code, diffTypes, conclusionCodes,
+                ruleIds}], at least one (refused in words when empty).</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="savedCheck" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="savedCheck" from="darpan.audit.AuditCheckAuthoringSupport.saveCheck(ec, audit, check, statements)"/>
+            <if condition="ec.message.hasError()"><return error="true"/></if>
+            <set field="ok" from="true"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="[]"/>
+        </actions>
+    </service>
+
+    <service verb="delete" noun="AuditCheck" allow-remote="true" authenticate="true">
+        <description>Unlinks a check from this audit's statements; the check itself goes too when no other audit links it
+            and no finding names it (the ledger keeps its history).</description>
+        <in-parameters><parameter name="audit" required="true"/><parameter name="check" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="darpan.audit.AuditCheckAuthoringSupport.deleteCheck(ec, audit, check)"/>
+            <if condition="ec.message.hasError()"><return error="true"/></if>
+            <set field="ok" from="true"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="[]"/>
+        </actions>
+    </service>
 </services>

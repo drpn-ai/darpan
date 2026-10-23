@@ -3,6 +3,7 @@ package darpan.audit
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.AutomationRuntimeSupport
+import darpan.reconciliation.automation.SourceExtractOptionsSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import org.moqui.entity.EntityCondition
 
@@ -191,7 +192,9 @@ class AuditSettingsSupport {
             // without it the extract falls back to "the tenant's single active config", which a tenant with several has none of.
             Map connector = SourceSystemConnectorSupport.resolve(ec, source.systemEnumId as String)
             String configParameter = normalize(connector?.configParameterName)
-            Map parameters = [:]
+            // DAR-UI-064's per-side extract options (R8 includeReturnsWithoutShopifyRef, R16 onlyCancelledReturns), under the
+            // config id: a stored option never displaces it.
+            Map parameters = new LinkedHashMap(SourceExtractOptionsSupport.runtimeOptions(connector, SourceExtractOptionsSupport.storedOn(source)) ?: [:])
             if (configParameter && normalize(source.sourceConfigId)) parameters[configParameter] = normalize(source.sourceConfigId)
             Map metadata = parameters ? [parameters: parameters] : [:]
             ec.entity.makeValue("darpan.reconciliation.ReconciliationAutomationSource").setAll([

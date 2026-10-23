@@ -97,7 +97,7 @@ class RunConclusionStep {
 
     /**
      * DAR-BE-118. One lookup call: the lookup's connector reads its config for these ids only. A connector whose extract
-     * does not declare lookupIds is never called (it would read a whole window). A failed lookup is a warning and
+     * does not declare lookupKeys is never called (it would read a whole window). A failed lookup is a warning and
      * attaches nothing, so those findings keep the conclusion they reach without it.
      */
     static Map<String, Map> fetchLookup(def ec, Map lookup, List<String> ids, String tenantId, List<String> warnings) {
@@ -105,10 +105,10 @@ class RunConclusionStep {
             Map connector = SourceSystemConnectorSupport.resolveBySystemEnumId(ec, (String) lookup.systemEnumId)
             String service = normalize(connector?.extractServiceName)
             String configParameter = normalize(connector?.configParameterName)
-            if (!service || !configParameter || !ec.service.getServiceDefinition(service)?.inParameterNameList?.contains("lookupIds")) {
+            if (!service || !configParameter || !ec.service.getServiceDefinition(service)?.inParameterNameList?.contains("lookupKeys")) {
                 throw new IllegalStateException("${lookup.systemEnumId} cannot be asked by id")
             }
-            Map out = ec.service.sync().name(service).parameters([(configParameter): lookup.sourceConfigId, lookupIds: ids,
+            Map out = ec.service.sync().name(service).parameters([(configParameter): lookup.sourceConfigId, lookupKeys: ids, lookupKeyField: lookup.keyField,
                     companyUserGroupId: tenantId, fileName: "lookup-${lookup.name}-${System.currentTimeMillis()}.json".toString()]).call()
             List errors = (List) (out?.errors ?: (ec.message.hasError() ? ec.message.errors : []))
             if (errors) throw new IllegalStateException(errors.join("; "))

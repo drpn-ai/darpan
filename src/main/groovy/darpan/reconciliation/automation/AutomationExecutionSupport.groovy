@@ -3,6 +3,7 @@ package darpan.reconciliation.automation
 import darpan.facade.reconciliation.ReconciliationApiWindowSupport
 
 import darpan.audit.AuditAutomationSupport
+import darpan.audit.AuditRecheckSupport
 import darpan.common.DarpanEntityConstants
 import darpan.common.TransactionDetachSupport
 import darpan.facade.common.DataManagerSupport
@@ -533,6 +534,15 @@ class AutomationExecutionSupport {
                             sourceExtractor.call(ec, automation, file2Source, window, windowParams), file2Source)
                     RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [recordCount: file2Result.recordCount])
                     openStep = null
+                }
+                // DAR-BE-119: the audit's open findings the recent read did not reach, read again by key on both sides and
+                // appended, so they close or are concluded again from today's facts.
+                AuditRecheckSupport.appendOpenFindings(ec, automation, auditChecks, window,
+                        [[source: file1Source, result: file1Result], [source: file2Source, result: file2Result]]) { def source, List<String> keys, String keyField ->
+                    Map<String, Object> byKey = new LinkedHashMap<String, Object>(windowParams) + [lookupKeys: keys, lookupKeyField: keyField,
+                            sideOutputLocation: DataManagerSupport.resolveReconciliationRunLocation(ec, windowParams?.automationExecutionId,
+                                    DataManagerSupport.formatRunTimestamp(ec) + "-" + normalize(readField(source, "fileSide")) + "-recheck")]
+                    return normalizeSourceResult(sourceExtractor.call(ec, automation, source, window, byKey), source)
                 }
                 // Task 2c: after source-2 extraction too — a NO_DATA window returns just below without
                 // ever reaching the reconcile heartbeat, so this is the last one it gets before its own
@@ -1912,6 +1922,15 @@ class AutomationExecutionSupport {
                         normalize(readField(source, "fileSide"))))
         applyStatusParameter(serviceParams, connectorForService, source)
         applyWindowFieldParameter(serviceParams, connectorForService)
+        // DAR-BE-119: a read by key (an audit re-checking its older open findings), sent only to an extractor that
+        // declares it: any other would ignore the keys and read the whole window.
+        if (params?.lookupKeys) {
+            if (!ec.service.getServiceDefinition(serviceName)?.inParameterNameList?.contains("lookupKeys")) {
+                throw new IllegalStateException("${serviceName} cannot read by key")
+            }
+            serviceParams.lookupKeys = params.lookupKeys
+            serviceParams.lookupKeyField = params.lookupKeyField
+        }
 
         def call = ec.service.sync().name(serviceName).parameters(serviceParams)
         if (call?.metaClass?.respondsTo(call, "disableAuthz")) call = call.disableAuthz()

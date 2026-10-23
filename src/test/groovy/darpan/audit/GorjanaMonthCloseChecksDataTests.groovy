@@ -69,10 +69,12 @@ class GorjanaMonthCloseChecksDataTests {
     @Test
     void anR7RowIsAnHgFlaggedMemoThatDoesNotPostTo42065() {
         String scope = "GORJANA_HG_ACCOUNT_SCOPE"
-        Map memo = [tranId: "CM7657884", returnId: "HG-628096", isHg: "T", onHgAccount: "F"]
+        Map memo = [tranId: "CM7657884", returnId: "HG-628096", isHg: "T", onHgAccount: "F", amount: "64.80"]
         assertEquals("CONC_HG_NOT_ON_42065", conclude(RETURNS, scope, memo))
         assertEquals("UNEXPLAINED", conclude(RETURNS, scope, memo + [onHgAccount: "T"]), "on 42065")
         assertEquals("UNEXPLAINED", conclude(RETURNS, scope, memo + [isHg: "F"]), "not a Happiness Guarantee credit")
+        // CM7665367 (2026-10-21): a $0 memo posts no accounting line at all, so it is on no account; nothing to book.
+        assertEquals("UNEXPLAINED", conclude(RETURNS, scope, memo + [amount: "0"]), "a \$0 memo credits nothing")
     }
 
     @Test

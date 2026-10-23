@@ -14,7 +14,9 @@
   R7 "A Happiness Guarantee claim is booked to the Happiness Guarantee account, 42065." Aditi, 2026-10-22: the "Is HG"
      flag (custbody_hc_close_rma) marks HotWax-sourced Happiness Guarantee returns and AfterShip warranty. One single-
      sided run over every credit memo (NS_CREDIT_MEMO_HG_ACCOUNT, with ACCOUNT_USED(42065)); a flagged memo that posts to
-     no 42065 line is the finding. 1-22 Oct: 12,938 flagged memos, 12,916 on 42065, so ~22 findings.
+     no 42065 line is the finding. 1-22 Oct: 12,938 flagged memos, 12,916 on 42065, so ~22 findings. A $0 memo posts no
+     accounting line to any account (CM7665367, 2026-10-21, an AfterShip return at 0), so the finding also needs an amount
+     above zero.
 
   R8 "Every return reaches NetSuite." OMS returns (OMS_RETURNS_GQL with includeReturnsWithoutShopifyRef, so the OMS's own
      numeric-id Happiness Guarantee and sellable returns are read too) against NetSuite RMAs keyed by the HC return id
@@ -89,6 +91,7 @@
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_HG_ACCOUNT_SCOPE" sequenceNum="10" conclusionEnumId="CONC_HG_NOT_ON_42065" appliesToBucket="FINDING" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_HG_ACCOUNT_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="isHg" operator="IN" conditionValues="T" checkLabel="The credit memo is flagged Is HG (a Happiness Guarantee or AfterShip warranty credit)" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_HG_ACCOUNT_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="onHgAccount" operator="IN" conditionValues="F" checkLabel="No line posts to 42065 Happiness Guarantee" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_HG_ACCOUNT_SCOPE" sequenceNum="10" conditionSeq="3" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="amount" operator="GT_ZERO" checkLabel="The memo credits an amount" companyUserGroupId="GORJANA"/>
 
     <!-- ================================================================ R16: nothing open for a cancelled return -->
     <darpan.rule.RuleSet ruleSetId="GORJANA_CANCELLED_RETURN_RS" ruleSetName="Cancelled OMS returns - open NetSuite RMAs"

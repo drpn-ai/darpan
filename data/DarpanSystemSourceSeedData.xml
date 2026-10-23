@@ -131,6 +131,15 @@
             sequenceNum="13"
             parentEnumId="OMS"/>
 
+    <!-- DAR-BE-116: the OMS order-items unit extract over GraphQL (every OMS read goes through GraphQL). -->
+    <moqui.basic.Enumeration
+            enumId="OMS_ORDER_ITEMS_GQL"
+            enumTypeId="DarpanSystemSource"
+            enumCode="HOTWAX_GQL_ORDER_ITEMS"
+            description="HotWax order lines (NetSuite)"
+            sequenceNum="13"
+            parentEnumId="OMS"/>
+
     <!-- DAR-BE-053: the NETSUITE_SUITEQL connector shipped in DAR-BE-044 with no matching system enum,
          so RuleSetCompareSource.systemEnumId could not reference it at all — its FK to Enumeration
          rejected every row (23506). No compare source could be created against the connector, which is

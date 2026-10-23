@@ -190,6 +190,30 @@
             evidenceFieldsJson='{"system":"HotWax","state":"statusId","stateLabels":{"ITEM_COMPLETED":"Completed","ITEM_APPROVED":"Approved","ITEM_CREATED":"Created","ITEM_CANCELLED":"Cancelled"},"facts":["facilityId","orderItemSeqId","omsOrderId"]}'
             enabled="Y"/>
 
+    <!-- DAR-BE-116: OMS_ORDER_ITEMS over GraphQL. Same unit record (OmsOrderLineUnitSupport), same options (exchange
+         exclusion off, unkeyed items kept); orders come with their NetSuite identification and ship groups and the
+         items are read by orderId in batches. salesChannelEnumId is NOT carried: gorjana's GraphQL Order type has no
+         such field (SDL 2026-10-23), so a run that filters or concludes on it stays on OMS_ORDER_ITEMS. -->
+    <darpan.reconciliation.SourceSystemConnector
+            systemEnumId="OMS_ORDER_ITEMS_GQL"
+            extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrderItems"
+            dateFromParameterName="windowStart"
+            dateToParameterName="windowEnd"
+            expectedSourceConfigType="HOTWAX_OMS_GQL_ORDER_ITEMS"
+            configParameterName="omsRestSourceConfigId"
+            configEntityName="darpan.hotwax.HotWaxOmsRestSourceConfig"
+            remoteId="HOTWAX_ORDERS_API"
+            endpointLabel="Order lines for NetSuite"
+            sendUrlTemplate="{baseUrl}/rest/s1/graphql"
+            remoteSendServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrderItems"
+            systemAliases="OMS_ORDER_ITEMS_GQL,HOTWAX_GQL_ORDER_ITEMS,DAR_SYS_OMS_ORDER_ITEMS_GQL"
+            preserveWindowInstants="N"
+            filterParameterName="sourceFilters"
+            windowFieldName="orderDate"
+            healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"
+            evidenceFieldsJson='{"system":"HotWax","state":"statusId","stateLabels":{"ITEM_COMPLETED":"Completed","ITEM_APPROVED":"Approved","ITEM_CREATED":"Created","ITEM_CANCELLED":"Cancelled"},"facts":["facilityId","orderItemSeqId","omsOrderId"]}'
+            enabled="Y"/>
+
     <darpan.reconciliation.SourceSystemConnector
             systemEnumId="OMS_TRANSFER_ORDERS"
             extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsTransferOrders"

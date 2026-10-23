@@ -97,7 +97,8 @@ class AuditAutomationSupport {
              childWindowEndDate  : end,
              auditId             : audit.auditId,
              auditPeriod         : run.period,
-             auditReportDate     : Date.valueOf(reportDay)] as Map<String, Object>
+             auditReportDate     : Date.valueOf(reportDay),
+             auditRecentReadStartDate: AuditRecentReadSupport.recentStart(start, end, audit.recentReadDays as Integer, zone)] as Map<String, Object>
         }
     }
 
@@ -131,7 +132,9 @@ class AuditAutomationSupport {
                          auditPeriod         : period,
                          auditReportDate     : Date.valueOf(reportDay),
                          auditWindowFromDate : Date.valueOf(day),
-                         auditWindowThruDate : Date.valueOf(last)] as Map<String, Object>)
+                         auditWindowThruDate : Date.valueOf(last),
+                         auditRecentReadStartDate: AuditRecentReadSupport.recentStart(Timestamp.from(day.atStartOfDay(zone).toInstant()),
+                                 Timestamp.from(last.plusDays(1).atStartOfDay(zone).toInstant()), audit.recentReadDays as Integer, zone)] as Map<String, Object>)
             day = last.plusDays(1)
         }
         return windows
@@ -176,7 +179,9 @@ class AuditAutomationSupport {
             File diff = reconcileResult && failure == null ? AutomationExecutionSupport.resolveDiffFile(ec, reconcileResult) : null
             List<String> examined = readKeys(window.auditFile1KeysOut as String) + readKeys(window.auditFile2KeysOut as String)
             checks.each { Map check ->
-                recordCheck(ec, tenantId, check, window, reads, notRunReason, diff, file1Source, file2Source, examined.unique(), now)
+                Set<String> unjudged = unjudgedKeys(ec, automation, check, window, diff, file1Source, file2Source)
+                recordCheck(ec, tenantId, check, window, reads, notRunReason, diff, file1Source, file2Source,
+                        (examined.unique() - unjudged) as List<String>, now, unjudged)
             }
         } catch (Exception e) {
             logger.error("Audit ledger write failed for automation ${readField(automation, 'automationId')} window ${window.auditPeriod}: ${sanitizeErrorDetail(e)}")
@@ -186,15 +191,44 @@ class AuditAutomationSupport {
         }
     }
 
+    /**
+     * DAR-BE-116 phase 1. The keys of rows only the NON-OMS side holds whose own date is before the judged days (the recent
+     * OMS read plus AuditRecentReadSupport.EDGE_SLACK_DAYS): their OMS twin may simply be older than the read, so they raise
+     * no finding and, being left out of the examined keys, close none. Empty when OMS was read for the whole window, or
+     * both or neither side is OMS.
+     */
+    static Set<String> unjudgedKeys(def ec, def automation, Map check, Map window, File diff, def file1Source, def file2Source) {
+        Timestamp recent = window?.auditRecentReadStartDate as Timestamp
+        if (recent == null || diff == null) return [] as Set
+        boolean oms1 = AuditRecentReadSupport.readsRecentOnly(ec, normalize(readField(file1Source, "systemEnumId")))
+        boolean oms2 = AuditRecentReadSupport.readsRecentOnly(ec, normalize(readField(file2Source, "systemEnumId")))
+        if (oms1 == oms2) return [] as Set
+        // Only the other side holds it: OMS is FILE_1, so the row is missing in FILE_1, and the reverse.
+        String otherSideOnly = oms1 ? "MISSING_IN_FILE_1" : "MISSING_IN_FILE_2"
+        ZoneId zone = zoneOf(automation)
+        Timestamp judgedFrom = AuditRecentReadSupport.judgedFrom(recent)
+        String dateField = normalize(check.otherSideDateField)
+        Set<String> keys = new LinkedHashSet<>()
+        DiffDocumentStreamSupport.forEachRow(diff) { Map raw ->
+            if (((raw.diffType ?: raw.type) as String) != otherSideOnly) return
+            String id = (raw.primaryId ?: raw.id) as String
+            if (id && !AuditRecentReadSupport.judged(AuditAutomationSupport.rowData(raw.data), dateField, judgedFrom, zone)) keys.add(id)
+        }
+        if (keys) logger.info("Audit check ${check.checkCode}: ${keys.size()} record(s) only the other system holds are dated before ${judgedFrom} (recent OMS read from ${recent}); not judged this run")
+        return keys
+    }
+
     private static void recordCheck(def ec, String tenantId, Map check, Map window, List<Map> reads, String notRunReason,
-                                    File diff, def file1Source, def file2Source, List<String> examined, Timestamp now) {
+                                    File diff, def file1Source, def file2Source, List<String> examined, Timestamp now,
+                                    Set<String> unjudged = [] as Set) {
         Map base = [companyUserGroupId: tenantId, checkId: check.checkId, reportDate: window.auditReportDate,
                     period: window.auditPeriod]
         // DAR-UI-063. Played days keep their own dates; the morning run's are the period to date (the ledger's default).
         Map dates = window.auditWindowFromDate ? [windowFromDate: window.auditWindowFromDate, windowThruDate: window.auditWindowThruDate] : [:]
         Map run = call(ec, "${LEDGER}.record#CheckRun", base + dates + [runStamp: now, sourceReads: reads, notRunReason: notRunReason])
         if (run == null || run.checkStatusEnumId == "AUDCS_NOT_RUN") return
-        List<Map> findings = diff != null ? findingsFrom(ec, tenantId, check, diff, file1Source, file2Source) : []
+        List<Map> findings = diff != null ? findingsFrom(ec, tenantId, check, diff, file1Source, file2Source)
+                .findAll { !unjudged.contains(it.recordKey as String) } : []
         if (call(ec, "${LEDGER}.record#CheckFindings", base + [checkStamp: now, findings: findings]) == null) return
         call(ec, "${LEDGER}.close#ResolvedFindings", base + [checkStamp: now, checkStatusEnumId: run.checkStatusEnumId,
                                                             examinedRecordKeys: examined])

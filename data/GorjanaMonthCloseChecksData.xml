@@ -63,7 +63,7 @@
     <!-- graceDays 1: Aditi 2026-10-23, "any fulfilled order is expected to be invoiced 24 hours after its fulfillment", so
          a completed item is pending, not open, for one day. (Measured lag was p95 4 days, SalesOrd -> CustInvc,
          gorjana-chain-pairs.xml: past a day, the late invoices are the finding.) -->
-    <darpan.audit.AuditCheck checkId="GORJANA_CHK_COMPLETED_BILLED" companyUserGroupId="GORJANA" checkCode="completed-not-billed"
+    <darpan.audit.AuditCheck checkId="GORJANA_CHK_COMPLETED_BILLED" otherSideDateField="tranDate" companyUserGroupId="GORJANA" checkCode="completed-not-billed"
             label="HotWax completed items against NetSuite billed lines" savedRunId="GORJANA_OMS_NS_LINE_RS"
             file1RecordType="orderItem" file2RecordType="salesOrderLine" graceDays="1"
             matchedBy="OMS order id + item seq id (custbody_hc_order_id + custcol_hc_order_line_id)"
@@ -71,7 +71,7 @@
             headlineTemplate="Item {recordKey} is completed in HotWax and not billed in NetSuite"
             fixActionTemplate="Bill the NetSuite line for item {recordKey}, or sync the order if NetSuite does not have it."
             passesWhenTemplate="NetSuite has billed the line for item {recordKey}."/>
-    <darpan.audit.AuditCheck checkId="GORJANA_CHK_LINE_LOCATION" companyUserGroupId="GORJANA" checkCode="lines-without-location"
+    <darpan.audit.AuditCheck checkId="GORJANA_CHK_LINE_LOCATION" otherSideDateField="tranDate" companyUserGroupId="GORJANA" checkCode="lines-without-location"
             label="Completed items whose NetSuite line has no location" savedRunId="GORJANA_OMS_NS_LINE_RS"
             file1RecordType="orderItem" file2RecordType="salesOrderLine" graceDays="1"
             matchedBy="OMS order id + item seq id (custbody_hc_order_id + custcol_hc_order_line_id)"

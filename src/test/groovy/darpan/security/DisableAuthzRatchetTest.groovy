@@ -90,7 +90,9 @@ class DisableAuthzRatchetTest {
      * collapsed onto one audited {@code dispatchInternalService} seam — net -1 site, and one place to
      * audit instead of three.</p>
      */
-    static final int BASELINE = 14
+    // 15 since DAR-BE-116: AutomationExecutionSupport.startParallelSourceExtract's worker mirrors the run thread's authz
+    // state (disables only when the caller already has it disabled), so side 2 reads the connector registry as side 1 does.
+    static final int BASELINE = 15
 
     /**
      * Allowlisted files matched by their path <em>relative to srcRoot</em>

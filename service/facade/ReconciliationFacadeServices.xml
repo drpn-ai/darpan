@@ -1119,6 +1119,18 @@
                 <set field="resolvedFile2PrimaryIdExpressionValue" from="file2UsesJson ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.normalizeJsonPrimaryIdExpression(file2PrimaryIdExpressionValue) : file2PrimaryIdExpressionValue"/>
                 <set field="resolvedFile1PrimaryIdExpressionsValue" from="file1PrimaryIdExpressionsValue.collect { file1UsesJson ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.normalizeJsonPrimaryIdExpression(it) : it }"/>
                 <set field="resolvedFile2PrimaryIdExpressionsValue" from="file2PrimaryIdExpressionsValue.collect { file2UsesJson ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.normalizeJsonPrimaryIdExpression(it) : it }"/>
+                <!-- DAR-BE-115: a connector source's record root is nulled below, so fold it (sent, else the saved
+                     row's) into the ids; a seeded root "records" + bare "tranId" otherwise compares the envelope. -->
+                <if condition="file1UsesConnectorSource">
+                    <set field="file1ConnectorRoot" from="file1RecordRootExpressionValue ?: file1Source?.recordRootExpression"/>
+                    <set field="resolvedFile1PrimaryIdExpressionValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.foldConnectorRecordRoot(file1ConnectorRoot, resolvedFile1PrimaryIdExpressionValue)"/>
+                    <set field="resolvedFile1PrimaryIdExpressionsValue" from="resolvedFile1PrimaryIdExpressionsValue.collect { darpan.facade.reconciliation.ReconciliationSavedRunSupport.foldConnectorRecordRoot(file1ConnectorRoot, it) }"/>
+                </if>
+                <if condition="file2UsesConnectorSource">
+                    <set field="file2ConnectorRoot" from="file2RecordRootExpressionValue ?: file2Source?.recordRootExpression"/>
+                    <set field="resolvedFile2PrimaryIdExpressionValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.foldConnectorRecordRoot(file2ConnectorRoot, resolvedFile2PrimaryIdExpressionValue)"/>
+                    <set field="resolvedFile2PrimaryIdExpressionsValue" from="resolvedFile2PrimaryIdExpressionsValue.collect { darpan.facade.reconciliation.ReconciliationSavedRunSupport.foldConnectorRecordRoot(file2ConnectorRoot, it) }"/>
+                </if>
             </if>
 
             <!-- Cross-side count guard (ET1): mirrors create#RuleSetRun's guard. -->

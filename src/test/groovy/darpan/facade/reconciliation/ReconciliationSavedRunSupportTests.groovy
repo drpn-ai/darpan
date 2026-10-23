@@ -266,4 +266,21 @@ class ReconciliationSavedRunSupportTests {
         assertNull(ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, "FILE_3", TEST_PRIMARY_ID_EXPRESSION))
         assertNull(ReconciliationSavedRunSupport.ruleKeepFieldsForSide(ruleRows, null, TEST_PRIMARY_ID_EXPRESSION))
     }
+    /**
+     * DAR-BE-115: save#RuleSetRun drops a connector source's record root, so a seeded root "records" + bare
+     * "tranId" was saved back as bare "tranId" and Spark compared the {metadata, records} envelope. The root
+     * is folded into the id instead, the form app-created runs already store.
+     */
+    @Test
+    void aConnectorRootIsFoldedIntoABareIdExpression() {
+        assertEquals('$.records[*].tranId', ReconciliationSavedRunSupport.foldConnectorRecordRoot("records", "tranId"))
+        assertEquals('$.records[*].tranId|trim', ReconciliationSavedRunSupport.foldConnectorRecordRoot("records", "tranId|trim"))
+    }
+
+    @Test
+    void anAbsoluteIdOrAMissingRootIsLeftAsItIs() {
+        assertEquals('$.records[*].tranId', ReconciliationSavedRunSupport.foldConnectorRecordRoot("records", '$.records[*].tranId'))
+        assertEquals("tranId", ReconciliationSavedRunSupport.foldConnectorRecordRoot(null, "tranId"))
+        assertNull(ReconciliationSavedRunSupport.foldConnectorRecordRoot("records", null))
+    }
 }

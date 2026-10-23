@@ -24,6 +24,7 @@ import org.apache.spark.sql.Dataset
 import org.moqui.impl.service.ScheduledJobRunner
 
 import java.sql.Timestamp
+import java.util.concurrent.Future
 import java.time.DayOfWeek
 import java.time.Duration
 import java.time.Instant
@@ -161,6 +162,14 @@ class AutomationExecutionSupport {
             "was not found",
             "not available in your active tenant",
             "is not configured",
+            // DAR-BE-116: Spark could not analyse the compare (the run's own key/rule names a column the
+            // extract does not have). The same file fails the same way on every retry.
+            "[unresolved_column",
+            "[unresolved_field",
+            "[field_not_found",
+            "[datatype_mismatch",
+            // DAR-BE-116: the source answered the same key twice (gorjana R15, NetSuite lines); the data is the data.
+            "produced duplicate primary",
     ]
 
     static final String WINDOW_PREVIOUS_DAY = "AUT_WIN_PREV_DAY"
@@ -284,6 +293,56 @@ class AutomationExecutionSupport {
             executionResults << [automationExecutionId: automationExecutionId, statusEnumId: status]
         }
         return [automationId: automationId, executionResults: executionResults]
+    }
+
+    /** DAR-BE-116: off with -Ddarpan.reconciliation.automation.parallelSourceExtracts=false. */
+    static final String PARALLEL_SOURCE_EXTRACTS_PROPERTY = "darpan.reconciliation.automation.parallelSourceExtracts"
+    private static final java.util.concurrent.ExecutorService SIDE_EXTRACT_POOL = java.util.concurrent.Executors.newFixedThreadPool(8, { Runnable r ->
+        Thread t = new Thread(r, "automation-side2-extract"); t.daemon = true; t
+    } as java.util.concurrent.ThreadFactory)
+
+    /**
+     * Side 2's extract on its own thread and ExecutionContext: the same user, the run's system tenant, and the same
+     * extractor (whose service call relaxes authz at its one audited seam). Null, so the caller reads side 2 after side 1
+     * as before, when switched off or when a test has injected its own extractor (it may lean on the caller's ec).
+     */
+    protected static Future<Map<String, Object>> startParallelSourceExtract(def ec, def automation, def source,
+                                                                         Map<String, Object> window, Map windowParams) {
+        if (source == null || !sourceExtractor.is(DEFAULT_SOURCE_EXTRACTOR)) return null
+        if ("false".equalsIgnoreCase(System.getProperty(PARALLEL_SOURCE_EXTRACTS_PROPERTY) ?: "true")) return null
+        def factory = ec.factory
+        String username = normalize(ec.user?.username)
+        String systemTenant = TenantAccessSupport.activeSystemTenantUserGroupId()
+        // The worker carries the run thread's authz state, no more: a scheduled run reads the connector registry with authz
+        // already relaxed on its own thread, and side 1 does exactly that there (live 2026-10-23: side 2 without it was
+        // refused View on SourceSystemConnector).
+        boolean callerAuthzDisabled = ec.artifactExecution.authzDisabled
+        // Its own folder: the run folder is a millisecond timestamp and the file is named by system and window, so two
+        // same-system sides starting together (an NS-vs-NS check) would write one file (DAR-BE-117 report, 2026-10-23).
+        Map<String, Object> sideParams = new LinkedHashMap<String, Object>(windowParams ?: [:])
+        sideParams.sideOutputLocation = DataManagerSupport.resolveReconciliationRunLocation(ec, windowParams?.automationExecutionId,
+                DataManagerSupport.formatRunTimestamp(ec) + "-" + normalize(readField(source, "fileSide")))
+        return SIDE_EXTRACT_POOL.submit({ ->
+            def sideEc = factory.getExecutionContext()
+            try {
+                if (username) sideEc.user.internalLoginUser(username)
+                if (callerAuthzDisabled) sideEc.artifactExecution.disableAuthz()
+                return (Map<String, Object>) TenantAccessSupport.withSystemTenant(systemTenant) { ->
+                    sourceExtractor.call(sideEc, automation, source, window, sideParams)
+                }
+            } finally {
+                sideEc.destroy()
+            }
+        } as java.util.concurrent.Callable<Map<String, Object>>)
+    }
+
+    /** Side 2's result, or the very exception its extract threw, so the run fails and classifies exactly as before. */
+    protected static Map<String, Object> joinParallelSourceExtract(Future<Map<String, Object>> side) {
+        try {
+            return side.get()
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw e.cause ?: e
+        }
     }
 
     private static Map<String, Object> executeAutomationForTenant(def ec, Map<String, Object> input, def automation) {
@@ -435,8 +494,26 @@ class AutomationExecutionSupport {
                 RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [:])
                 openStep = null
 
+                // DAR-BE-116: side 2 is read while side 1 is, so a check costs its slower read, not the sum of both
+                // (an audit's 10-minute OMS read then waited 12 more for the NetSuite lines).
+                // DAR-BE-116: on a check pairing OMS with another system, the other side reads the audit's recent days
+                // too, with slack (a month of NetSuite lines took 12 minutes); checks between other systems keep the window.
+                Object recentRead = window?.auditRecentReadStartDate
+                if (recentRead != null && file2Source != null) {
+                    boolean oms1 = darpan.audit.AuditRecentReadSupport.readsRecentOnly(ec, normalize(readField(file1Source, "systemEnumId")))
+                    boolean oms2 = darpan.audit.AuditRecentReadSupport.readsRecentOnly(ec, normalize(readField(file2Source, "systemEnumId")))
+                    if (oms1 != oms2) window.auditOtherSideStartDate = darpan.audit.AuditRecentReadSupport.otherSideStart(
+                            (java.sql.Timestamp) recentRead, (java.sql.Timestamp) window.childWindowStartDate)
+                }
+                Future<Map<String, Object>> parallelSide2 = evaluateMode ? null :
+                        startParallelSourceExtract(ec, automation, file2Source, window, windowParams)
                 openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE1)
-                file1Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file1Source, window, windowParams), file1Source)
+                try {
+                    file1Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file1Source, window, windowParams), file1Source)
+                } catch (Throwable side1Failure) {
+                    parallelSide2?.cancel(true)
+                    throw side1Failure
+                }
                 RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [recordCount: file1Result.recordCount])
                 openStep = null
                 // Task 2c: refresh the clock after source-1 extraction, a real (possibly slow) I/O call —
@@ -452,7 +529,8 @@ class AutomationExecutionSupport {
                 RunObservability.checkpointCancel(ec, mintedRunResultId)
                 if (!evaluateMode) {
                     openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE2)
-                    file2Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file2Source, window, windowParams), file2Source)
+                    file2Result = normalizeSourceResult(parallelSide2 != null ? joinParallelSourceExtract(parallelSide2) :
+                            sourceExtractor.call(ec, automation, file2Source, window, windowParams), file2Source)
                     RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [recordCount: file2Result.recordCount])
                     openStep = null
                 }
@@ -1804,10 +1882,20 @@ class AutomationExecutionSupport {
         // Every extract service declares this ("Automation execution id used to choose the default
         // data-manager output folder"); it is what keeps one run's extract file off another run's path.
         serviceParams.automationExecutionId = normalize(params?.automationExecutionId)
+        if (params?.sideOutputLocation) serviceParams.outputLocation = params.sideOutputLocation
         serviceParams.companyUserGroupId = normalize(readField(automation, "companyUserGroupId"))
         serviceParams.fileSide = normalize(readField(source, "fileSide"))
         serviceParams.systemEnumId = normalize(readField(source, "systemEnumId"))
         serviceParams.sourceTypeEnumId = normalize(readField(source, "sourceTypeEnumId"))
+        // DAR-BE-116 phase 1: an audit reads HotWax OMS (rate-limited) for its recent days only; other systems keep
+        // the whole window (AuditRecentReadSupport).
+        Object recentStart = window?.auditRecentReadStartDate
+        if (recentStart != null && darpan.audit.AuditRecentReadSupport.readsRecentOnly(ec, normalize(readField(source, "systemEnumId")))) {
+            window = new LinkedHashMap<String, Object>(window) + [childWindowStartDate: recentStart] as Map<String, Object>
+        } else if (window?.auditOtherSideStartDate != null) {
+            // The other side of an OMS-paired check: a little earlier than OMS, so a twin dated just before is read.
+            window = new LinkedHashMap<String, Object>(window) + [childWindowStartDate: window.auditOtherSideStartDate] as Map<String, Object>
+        }
         serviceParams.windowStartDate = window.childWindowStartDate
         serviceParams.windowEndDate = window.childWindowEndDate
 

@@ -61,7 +61,7 @@ end]]></ruleLogic>
     </darpan.rule.Rule>
 
     <!-- graceDays 1: HotWax writes the OPP when it imports the order, so a day covers an import still in flight. -->
-    <darpan.audit.AuditCheck checkId="GORJANA_CHK_PAID_NO_OPP" companyUserGroupId="GORJANA" checkCode="paid-orders-without-a-payment-in-hotwax"
+    <darpan.audit.AuditCheck checkId="GORJANA_CHK_PAID_NO_OPP" otherSideDateField="createdAt" companyUserGroupId="GORJANA" checkCode="paid-orders-without-a-payment-in-hotwax"
             label="Shopify orders paid whose HotWax order has no payment" savedRunId="GORJANA_PAID_HAS_OPP_RS"
             file1RecordType="shopifyOrder" file2RecordType="order" graceDays="1"
             matchedBy="Shopify order id = HotWax externalId"

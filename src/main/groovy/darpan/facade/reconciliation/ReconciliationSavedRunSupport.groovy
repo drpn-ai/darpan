@@ -249,6 +249,23 @@ class ReconciliationSavedRunSupport {
         return normalizeInt(rawValue, null)
     }
 
+    /**
+     * DAR-BE-115. A connector (API/DB) source keeps no record root of its own once saved (save#RuleSetRun nulls
+     * it), so the root is folded into the id: "records" + "tranId" -> "$.records[*].tranId", the form runs made
+     * in the app store. An id that is already absolute, or no root, is returned unchanged; a "|normalizer"
+     * suffix rides along.
+     */
+    static String foldConnectorRecordRoot(Object recordRootExpression, Object idExpression) {
+        String expr = normalize(idExpression)
+        String root = normalize(recordRootExpression)
+        if (!expr || !root || expr.startsWith('$')) return expr
+        int bar = expr.indexOf("|")
+        String base = bar >= 0 ? normalize(expr.substring(0, bar)) : expr
+        String suffix = bar >= 0 ? normalize(expr.substring(bar + 1)) : null
+        String folded = darpan.reconciliation.core.RuleSetCompareScopeAdapter.combineJsonRootAndPrimaryExpression(root, base)
+        return suffix ? "${folded}|${suffix}".toString() : folded
+    }
+
     static String normalizeJsonPrimaryIdExpression(Object rawExpression) {
         String normalized = normalize(rawExpression)
         if (!normalized) return null

@@ -168,6 +168,9 @@
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].fromPartyId"
             label="From party" fieldType="string" sequenceNum="11"
             description="DAR-BE-094 R8: who the return is from (DISCONTINUED on gorjana's discontinued-stock returns). GraphQL only. NOT in keepFieldsBase: filters run before projection, so the pill filters without being compared."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].orderNetsuiteId"
+            label="Order in NetSuite" fieldType="string" sequenceNum="12"
+            description="DAR-BE-116 R8: the origin order's NETSUITE_ORDER_ID in HotWax, blank when that order never reached NetSuite. GraphQL only. NOT in keepFieldsBase: filters and conclusions read it, the compare does not."/>
 
     <!-- Shopify orders. The two primary-ID candidates, then (DAR-BE-063) the order fields the bulk
          extract always selects (ShopifySourceCatalog ORDER_SOURCE defaultBulkSelectedFieldPaths) that a
@@ -279,4 +282,27 @@
             label="Order status" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="12"/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].salesChannelEnumId"
             label="Sales channel" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="13"/>
+    <!-- DAR-BE-116: OMS_ORDER_ITEMS_GQL carries the same unit record except salesChannelEnumId (absent from GraphQL) and netsuiteOrderId (not read, to keep the page lean). -->
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS_GQL" fieldPath="$.records[*].omsOrderId"
+            label="OMS order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS_GQL" fieldPath="$.records[*].orderItemSeqId"
+            label="Order item seq ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS_GQL" fieldPath="$.records[*].omsOrderName"
+            label="Order name" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS_GQL" fieldPath="$.records[*].shopifyOrderId"
+            label="Shopify order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="4"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS_GQL" fieldPath="$.records[*].shopifyLineId"
+            label="Shopify line ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="5"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS_GQL" fieldPath="$.records[*].unitOrdinal"
+            label="Unit" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="7"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS_GQL" fieldPath="$.records[*].productId"
+            label="Product" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="8"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS_GQL" fieldPath="$.records[*].statusId"
+            label="Item status" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="9"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS_GQL" fieldPath="$.records[*].unitState"
+            label="Unit state" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="10"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS_GQL" fieldPath="$.records[*].facilityId"
+            label="Facility" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="11"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS_GQL" fieldPath="$.records[*].omsOrderStatusId"
+            label="Order status" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="12"/>
 </entity-facade-xml>

@@ -259,6 +259,7 @@ class AuditAutomationSupport {
                        note: normalize(raw.message ?: raw.note), data: AuditAutomationSupport.rowData(raw.data),
                        file1Value: normalize(raw.file1Value), file2Value: normalize(raw.file2Value),
                        systems: raw.conclusion instanceof Map ? ((Map) raw.conclusion).systems : null,
+                       checks: raw.conclusion instanceof Map ? ((Map) raw.conclusion).checks : null,
                        conclusionLabel: raw.conclusion instanceof Map ? normalize(((Map) raw.conclusion).label) : null]
             String type = row.type as String
             String code = (raw.conclusion instanceof Map ? ((Map) raw.conclusion).code : null) as String
@@ -279,10 +280,22 @@ class AuditAutomationSupport {
                         headline        : AuditAutomationSupport.headline(check, row, records),
                         ruleText        : row.note,
                         conclusionEnumId: AuditAutomationSupport.conclusionEnumId(ec, code),
-                        records         : records] + AuditAutomationSupport.amountsOf(check, row))
+                        records         : records,
+                        checks          : AuditAutomationSupport.checksOf(row.checks)] + AuditAutomationSupport.amountsOf(check, row))
             }
         }
         return byKey.values() as List<Map>
+    }
+
+    /**
+     * The conclusion's checks as the finding's evidence (AuditFindingCondition): each label, whether it held, and the value
+     * it read, so R4 shows the memo's unapplied amount. Bounded: the values are another system's data.
+     */
+    static List<Map> checksOf(Object checks) {
+        return ((checks instanceof List ? checks : []) as List).findAll { it instanceof Map && normalize(((Map) it).label) }
+                .take(20).collect { Map c ->
+                    [label: truncate(normalize(c.label), 255), passed: c.passed == true, value: truncate(normalize(c.value), 255)]
+                }
     }
 
     /**

@@ -167,7 +167,7 @@ class AuditAutomationSmokeTests {
         AuditAutomationSupport.recordWindow(ec, automation, checks(), day1, omsSource, nsSource,
                 [recordCount: 3, fileLocation: "x"], [recordCount: 3, fileLocation: "y"],
                 [diffLocation: diff("d1", [row("MISSING_IN_FILE_2", "A1", "missing in NetSuite"),
-                                           row("MISSING_IN_FILE_1", "B1", "missing in HotWax", "CONC_X"),
+                                           withChecks(row("MISSING_IN_FILE_1", "B1", "missing in HotWax", "CONC_X")),
                                            row("MISSING_IN_FILE_1", "B2", "missing in HotWax", "CONC_OTHER")])], null)
         assertFalse(ec.message.hasError(), ec.message.errorsString)
         Map run = checkRun("2026-10-07")
@@ -183,6 +183,10 @@ class AuditAutomationSmokeTests {
         assertEquals(["TAUTO_R8", "CONC_X"], [b1.statementId, b1.conclusionEnumId])
         assertEquals([["NETSUITE", "creditMemo", "B1"]], records(b1.findingId as String).collect { [it.systemEnumId, it.recordType, it.recordId] })
         assertEquals(0L, count("B2"), "a conclusion the link does not name breaks nothing")
+        // The conclusion's checks are the finding's evidence, each with the value it read (R4: the memo's unapplied amount).
+        assertEquals([["The credit memo is open", "Y", "Credit Memo : Open"], ["More than \$5 unapplied", "Y", "6.19"]],
+                ec.entity.find("darpan.audit.AuditFindingCondition").condition("findingId", b1.findingId).orderBy("sequenceNum")
+                        .disableAuthz().list().collect { [it.label, it.passed, it.checkValue] })
 
         // Oct 8: A1 is gone from the diff but both sides still held it (examined), so it closes; B1 is still reported.
         AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-10-08", ["A1", "B1"], ["A1", "B1"]), omsSource, nsSource,
@@ -346,6 +350,12 @@ class AuditAutomationSmokeTests {
         Map r = [diffType: type, compareScopeId: "S", objectType: "ORDER", primaryId: id, presentIn: "x", missingIn: "y",
                  data: "{}", message: note]
         if (conclusion) r.conclusion = [code: conclusion, label: conclusion]
+        return r
+    }
+
+    private static Map withChecks(Map r) {
+        ((Map) r.conclusion).checks = [[label: "The credit memo is open", value: "Credit Memo : Open", passed: true],
+                                       [label: "More than \$5 unapplied", value: "6.19", passed: true]]
         return r
     }
 

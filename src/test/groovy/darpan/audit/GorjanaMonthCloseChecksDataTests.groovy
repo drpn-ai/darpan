@@ -100,8 +100,8 @@ class GorjanaMonthCloseChecksDataTests {
     @Test
     void anOpenCreditMemoIsAnR4RowAndAnAppliedOneIsNot() {
         String scope = "GORJANA_CREDIT_OPEN_SCOPE"
-        // unappliedOverFive is NS_CREDIT_MEMO_STATUS's SIGN(foreignpaymentamountunused - 5): 1 above $5, else 0 or -1.
-        Map memo = [tranId: "CM7657927", returnId: "M247238", status: "Credit Memo : Open", unapplied: "6.19", unappliedOverFive: "1"]
+        // unapplied is NS_CREDIT_MEMO_STATUS's foreignpaymentamountunused.
+        Map memo = [tranId: "CM7657927", returnId: "M247238", status: "Credit Memo : Open", unapplied: "6.19"]
         assertEquals("CONC_MEMO_LEFT_OPEN", conclude(RETURNS, scope, memo, "FINDING"))
         assertEquals("UNEXPLAINED", conclude(RETURNS, scope, memo + [status: "Credit Memo : Fully Applied"], "FINDING"))
         assertEquals("CONC_MEMO_LEFT_OPEN", conclude(RETURNS, scope, memo - [returnId: "M247238"], "FINDING"),
@@ -112,9 +112,9 @@ class GorjanaMonthCloseChecksDataTests {
     void anOpenCreditMemoWithFiveDollarsOrLessUnappliedIsNotAnR4Row() {
         String scope = "GORJANA_CREDIT_OPEN_SCOPE"
         Map memo = [tranId: "CM7665207", status: "Credit Memo : Open"]
-        assertEquals("UNEXPLAINED", conclude(RETURNS, scope, memo + [unapplied: "1.61", unappliedOverFive: "-1"], "FINDING"),
+        assertEquals("UNEXPLAINED", conclude(RETURNS, scope, memo + [unapplied: "1.61"], "FINDING"),
                 "Aditi 2026-10-23: an open memo with up to \$5 unapplied is ignored")
-        assertEquals("UNEXPLAINED", conclude(RETURNS, scope, memo + [unapplied: "5", unappliedOverFive: "0"], "FINDING"),
+        assertEquals("UNEXPLAINED", conclude(RETURNS, scope, memo + [unapplied: "5.00"], "FINDING"),
                 "exactly \$5 is still up to \$5")
     }
 

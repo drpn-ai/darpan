@@ -20,7 +20,7 @@ class RunConclusionAuthoringSupport {
     static final String RULE = "darpan.rule.RuleSetConclusionRule"
     static final String CONDITION = "darpan.rule.RuleSetConclusionCondition"
     static final List<String> BUCKETS = ["MISSING_FROM_FILE_1", "MISSING_FROM_FILE_2", "RULE", "FINDING"].asImmutable()
-    static final List<String> OPERATORS = ["IN", "NOT_IN", "GT_ZERO", "BLANK", "NOT_BLANK"].asImmutable()
+    static final List<String> OPERATORS = ["IN", "NOT_IN", "GT", "GT_ZERO", "BLANK", "NOT_BLANK"].asImmutable()
     static final List<String> PRESENCE = ["ANY", "KEPT", "EXCLUDED", "ABSENT"].asImmutable()
     static final List<String> KEY_SCOPES = ["FULL", "FIRST_FIELD"].asImmutable()
     static final List<String> QUANTIFIERS = ["ALL", "ANY"].asImmutable()
@@ -135,7 +135,10 @@ class RunConclusionAuthoringSupport {
             if (operator in ["IN", "NOT_IN"] && (!values || values.any { it.contains(",") || it.length() > 100 })) {
                 ec.message.addError("'${label}': '${field}' ${operator == 'IN' ? 'is' : 'is not'} needs values without commas."); return null
             }
-            if (!(operator in ["IN", "NOT_IN"]) && values) { ec.message.addError("'${label}': ${operator ?: 'a presence check'} takes no values."); return null }
+            if (operator == "GT" && !(values.size() == 1 && values[0] ==~ /-?[0-9]{1,15}(\.[0-9]{1,6})?/)) {
+                ec.message.addError("'${label}': '${field}' is more than needs one number."); return null
+            }
+            if (!(operator in ["IN", "NOT_IN", "GT"]) && values) { ec.message.addError("'${label}': ${operator ?: 'a presence check'} takes no values."); return null }
             String checkLabel = normalize(c.checkLabel)
             if (!checkLabel) { ec.message.addError("'${label}': every condition says what it checks."); return null }
             out << [subject: subject, presence: presence, keyScope: keyScope, quantifier: quantifier, fieldExpression: field,

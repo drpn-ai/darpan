@@ -32,8 +32,8 @@
      returns 1,051, Happiness Guarantee 276, POS 222, warranty channels ~200). Aditi 2026-10-23: "credit memos open with
      unapplied balance up to $5 is ignored", so the conclusion also needs more than $5 unapplied. The unapplied balance is
      transaction.foreignpaymentamountunused (total less applied; foreignamountremaining fails the whole SuiteQL query with
-     a 500), and the query flags it as SIGN(foreignpaymentamountunused - 5): 1 above $5. A flag, not a filter, so every
-     memo is still read and a finding closes once its balance is applied.
+     a 500), read as `unapplied`; the condition is unapplied GT 5, so the finding's evidence shows the amount. A condition,
+     not a query filter, so every memo is still read and a finding closes once its balance is applied.
 
   R9 "Every return carries the customer's full name and the address it came from." (FIRM: name, address; DERIVED: the
      origin address). Two single-sided runs over every RtnAuth and every CustCred in the window
@@ -167,7 +167,7 @@ end]]></ruleLogic>
     <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_CREDIT_OPEN_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="tranId" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_CREDIT_OPEN_SCOPE" sequenceNum="10" conclusionEnumId="CONC_MEMO_LEFT_OPEN" appliesToBucket="FINDING" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_CREDIT_OPEN_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="status" operator="IN" conditionValues="Credit Memo : Open" checkLabel="The credit memo is open" companyUserGroupId="GORJANA"/>
-    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_CREDIT_OPEN_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="unappliedOverFive" operator="IN" conditionValues="1" checkLabel="More than $5 of it is unapplied" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_CREDIT_OPEN_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="unapplied" operator="GT" conditionValues="5" checkLabel="More than $5 unapplied" companyUserGroupId="GORJANA"/>
 
     <!-- ================================================================ R9: RMAs -->
     <darpan.rule.RuleSet ruleSetId="GORJANA_RMA_CUSTOMER_RS" ruleSetName="RMAs - customer name and address"

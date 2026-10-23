@@ -39,6 +39,19 @@ class ConclusionConditionSupportTests {
         assertFalse(ConclusionConditionSupport.check(noQuantifier, side).passed)
     }
 
+    /** Aditi 2026-10-23: an open credit memo is R4's only with more than $5 unapplied. */
+    @Test
+    void gtHoldsAboveItsNumberAndReportsTheAmountRead() {
+        Map over = ConclusionConditionSupport.check(cond(fieldExpression: "unapplied", operator: "GT", conditionValues: ["5"]),
+                [presence: "KEPT", record: [unapplied: "6.19"]])
+        assertTrue(over.passed)
+        assertEquals("6.19", over.value)
+        ["5", "5.00", "1.61", "0", "", null, "n/a"].each { String v ->
+            assertFalse(ConclusionConditionSupport.check(cond(fieldExpression: "unapplied", operator: "GT", conditionValues: ["5"]),
+                    [presence: "KEPT", record: [unapplied: v]]).passed, "${v} is not more than 5")
+        }
+    }
+
     @Test
     void anyHoldsWhenOneRecordDoes() {
         Map side = [presence: "KEPT", record: [q: "0"], records: [[q: "0"], [q: "2"]]]

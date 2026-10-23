@@ -71,7 +71,8 @@ class RunConclusionAuthoringSmokeTests {
         Map out = facade("save#RunConclusions", [savedRunId: "TCON_RS", conclusions: [
                 [key: "a", conclusion: "CONC_TCON_OPEN", bucket: "RULE", conditions: [
                         [subject: "FILE_1", field: "statusId", operator: "IN", values: ["RETURN_CANCELLED"], checkLabel: "Cancelled in HotWax"],
-                        [subject: "FILE_2", presence: "KEPT", checkLabel: "An open RMA"]]],
+                        [subject: "FILE_2", presence: "KEPT", checkLabel: "An open RMA"],
+                        [subject: "FILE_1", field: "refundAmount", operator: "gt", values: ["5"], checkLabel: "More than \$5"]]],
                 [key: "b", parent: "a", conclusion: "CONC_TCON_PENDING", conditions: [
                         [subject: "FILE_2", field: "status", operator: "IN", values: ["Return Authorization : Pending Receipt"],
                          checkLabel: "Pending receipt"]]]]])
@@ -80,7 +81,8 @@ class RunConclusionAuthoringSmokeTests {
         assertEquals(["10", "20"], nodes*.key)
         assertEquals([null, "10"], nodes*.parent)
         assertEquals("RMA still open", nodes[0].label)
-        assertEquals([["RETURN_CANCELLED"], []], nodes[0].conditions*.values)
+        assertEquals([["RETURN_CANCELLED"], [], ["5"]], nodes[0].conditions*.values)
+        assertEquals("GT", nodes[0].conditions[2].operator)
         assertEquals("KEPT", nodes[0].conditions[1].presence)
 
         Map read = (Map) facade("get#RunConclusions", [savedRunId: "TCON_RS"]).conclusions
@@ -102,6 +104,9 @@ class RunConclusionAuthoringSmokeTests {
                 [tree: [ok + [conditions: [[field: "status) OR (1", operator: "IN", values: ["x"], checkLabel: "x"]]]], says: "not a record field"],
                 [tree: [ok + [conditions: [[field: "status", operator: "IN", values: ["a,b"], checkLabel: "x"]]]], says: "without commas"],
                 [tree: [ok + [conditions: [[field: "status", operator: "NOT_BLANK"]]]], says: "says what it checks"],
+                [tree: [ok + [conditions: [[field: "unapplied", operator: "GT", checkLabel: "x"]]]], says: "one number"],
+                [tree: [ok + [conditions: [[field: "unapplied", operator: "GT", values: ["five"], checkLabel: "x"]]]], says: "one number"],
+                [tree: [ok + [conditions: [[field: "unapplied", operator: "GT", values: ["5", "6"], checkLabel: "x"]]]], says: "one number"],
                 [tree: [ok, ok + [key: "b", parent: "a"], ok + [key: "c", parent: "b"], ok + [key: "d", parent: "c"]], says: "levels deep"],
                 [tree: [ok, ok], says: "share the key"],
         ].each { Map c ->

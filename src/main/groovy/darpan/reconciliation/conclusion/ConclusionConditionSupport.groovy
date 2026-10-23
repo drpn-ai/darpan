@@ -68,9 +68,20 @@ class ConclusionConditionSupport {
             case "IN": return value != null && wanted.contains(value.toUpperCase())
             case "NOT_IN": return value == null || !wanted.contains(value.toUpperCase())
             case "GT_ZERO": return isPositive(value)
+            // DAR-BE-094 R4: more than the condition's one number ("more than $5 unapplied"); a blank or non-number is not.
+            case "GT": return isAbove(value, wanted ? wanted[0] : null)
             case "BLANK": return !value
             case "NOT_BLANK": return value as boolean
             default: throw new IllegalArgumentException("Unsupported conclusion operator '${operator}'")
+        }
+    }
+
+    private static boolean isAbove(String value, String floor) {
+        if (!value || !floor) return false
+        try {
+            return new BigDecimal(value) > new BigDecimal(floor)
+        } catch (NumberFormatException ignored) {
+            return false
         }
     }
 

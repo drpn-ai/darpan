@@ -676,6 +676,9 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].orderNetsuiteId"
             label="Order in NetSuite" fieldType="string" sequenceNum="12"
             description="DAR-BE-116 R8: the origin order's NETSUITE_ORDER_ID in HotWax, blank when that order never reached NetSuite. GraphQL only. NOT in keepFieldsBase: filters and conclusions read it, the compare does not."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].daysBeforeEntry"
+            label="Days made before OMS entry" fieldType="number" sequenceNum="13"
+            description="DAR-BE-116 R8: whole days between the return's own date (returnDate) and when OMS recorded it (entryDate); large for an old return recorded late. GraphQL only. NOT in keepFieldsBase."/>
 
     <!-- DAR-BE-069: label renames restated (create-or-update by primary key, whole row). -->
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].externalId"

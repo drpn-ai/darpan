@@ -886,4 +886,10 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             serviceName="audit.AuditDigestServices.send#DueAuditDigests"
             cronExpression="0 0/15 * * * ?" paused="N"/>
 
+    <!-- DAR-BE-107 — the stored automation streak, filtered from the day the entity was added. -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUTOMATION_STREAK"
+            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
+            entityName="darpan.reconciliation.AutomationStreak"
+            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+
 </entity-facade-xml>

@@ -93,6 +93,7 @@ class TenantOwnedEntityFilterRuntimeTests {
             "darpan.audit.AuditCheckRun"                         : "checkRunId",
             "darpan.audit.AuditSourceRead"                       : "checkRunId",
             "darpan.audit.AuditDigest"                           : "auditDigestId",
+            "darpan.reconciliation.AutomationStreak"             : "automationId",
     ].asImmutable()
 
     /** Entities whose companyUserGroupId is not-null: they get no unstamped fixture row. */
@@ -112,6 +113,7 @@ class TenantOwnedEntityFilterRuntimeTests {
             "darpan.audit.AuditCheckRun",
             "darpan.audit.AuditSourceRead",
             "darpan.audit.AuditDigest",
+            "darpan.reconciliation.AutomationStreak",
     ].toSet().asImmutable()
 
     private ExecutionContext ec
@@ -677,6 +679,7 @@ class TenantOwnedEntityFilterRuntimeTests {
             case "darpan.reconciliation.Reconciliation": return "REC"
             case "darpan.reconciliation.ReconciliationRun": return "RUN"
             case "darpan.reconciliation.ReconciliationAutomationSourceFilter": return "AUTO"
+            case "darpan.reconciliation.AutomationStreak": return "STRK"
             case "darpan.reconciliation.ReconciliationRunStep": return "STEP"
             case "darpan.reconciliation.SlackOAuthState": return "STATE"
             case "darpan.reconciliation.SlackWorkspaceInstall": return "SWI"
@@ -740,6 +743,7 @@ class TenantOwnedEntityFilterRuntimeTests {
                     statusEnumId: "AUDCS_RAN", runStamp: FROM_DATE]
             case "darpan.audit.AuditSourceRead": return [checkRunId: id, readSeqId: "01", systemEnumId: "OMS",
                     statusEnumId: "AUDSR_COMPLETE", recordCount: 1L]
+            case "darpan.reconciliation.AutomationStreak": return [automationId: id, streakStartDate: FROM_DATE, bestDays: 12L]
             case "darpan.audit.AuditDigest": return [auditDigestId: id, auditId: "TOEF_AUD_${s}".toString(),
                     chatSpaceId: "TOEF_SPACE_${s}".toString(), kindEnumId: "AUDDK_DAILY", sendTime: "07:00"]
         }

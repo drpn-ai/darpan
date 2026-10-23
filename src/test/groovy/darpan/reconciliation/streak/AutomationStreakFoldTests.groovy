@@ -230,6 +230,32 @@ class AutomationStreakFoldTests {
         assertEquals(AutomationStreakFold.REASON_MISSED, missed.lastBreakReason)
     }
 
+    // ---- the stored row ---------------------------------------------------------------------
+
+    @Test
+    void aStateSurvivesTheRoundTripThroughItsRow() {
+        Map state = fold([:], cleanDays(3, 1, 3) + [slot(daily(3, 4), "AUT_STAT_FAILED", null)] + cleanDays(3, 5, 6))
+        Map row = AutomationStreakFold.rowFromState(state)
+        assertTrue(row.streakStartDate instanceof java.sql.Timestamp)
+        assertEquals(3L, row.bestDays)
+        assertEquals(state, AutomationStreakFold.stateFromRow(row))
+        // The fold resumes from a stored row exactly as from the live state.
+        assertEquals(fold(state, cleanDays(3, 7, 8)), fold(AutomationStreakFold.stateFromRow(row), cleanDays(3, 7, 8)))
+    }
+
+    @Test
+    void aWriteCarriesEveryColumnSoABreakClearsTheStoredStart() {
+        Map row = AutomationStreakFold.rowFromState(fold([:], [slot(daily(3, 1), "AUT_STAT_FAILED", null)]))
+        assertEquals(AutomationStreakFold.STATE_FIELDS.toSet(), row.keySet())
+        assertTrue(row.containsKey("streakStartDate"))
+        assertNull(row.streakStartDate)
+    }
+
+    @Test
+    void noRowReadsAsAFreshState() {
+        assertEquals([:], AutomationStreakFold.stateFromRow(null))
+    }
+
     @Test
     void bestDaysIncludesTheLiveStreakOnceItOvertakesTheRecord() {
         Map state = fold([:], cleanDays(3, 1, 3) + [slot(daily(3, 4), "AUT_STAT_FAILED", null)] + cleanDays(3, 5, 12))

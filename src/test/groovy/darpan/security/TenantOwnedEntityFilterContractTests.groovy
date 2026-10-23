@@ -72,8 +72,13 @@ class TenantOwnedEntityFilterContractTests {
             "darpan.audit.AuditDigest"                           : "DARPAN_SCOPE_AUD_DIGEST",
     ].asImmutable()
 
+    /** DAR-BE-107: the stored automation streak. */
+    static final Map<String, String> DAR_BE_107_FILTERS = [
+            "darpan.reconciliation.AutomationStreak"             : "DARPAN_SCOPE_AUTOMATION_STREAK",
+    ].asImmutable()
+
     /** Every filter row this class pins by id, with its entity. */
-    static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS).asImmutable()
+    static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS + DAR_BE_107_FILTERS).asImmutable()
 
     /** Entities deliberately NOT in the filter set, each with the reason. */
     static final Map<String, String> EXCLUDED = [

@@ -765,6 +765,51 @@
         </index>
     </entity>
 
+    <entity entity-name="AutomationStreak" package="darpan.reconciliation" use="transactional" cache="never">
+        <description>DAR-BE-107. One automation's clean-day streak, folded forward one finished scheduled slot at a
+            time by AutomationStreakFold, so it never re-reads run history and has no ceiling (the Chat line it
+            replaces recomputed from history and stopped at 20).
+
+            Its own row rather than columns on ReconciliationAutomation on purpose: a streak write on every run
+            would move the automation's lastUpdatedDate, which is how a config edit is told apart from a run,
+            and would race an operator saving the automation.</description>
+        <field name="automationId" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="streakStartDate" type="date-time">
+            <description>Completion of the clean slot that started the live streak; null = no live streak. Days are
+                counted from its date in the check's own zone, so a zone change carries the streak.</description>
+        </field>
+        <field name="lastSlotDate" type="date-time">
+            <description>The fold cursor: scheduledDate of the last slot folded. A slot at or before it never
+                counts again, which is what keeps re-runs from adding.</description>
+        </field>
+        <field name="lastScheduledSlotDate" type="date-time">
+            <description>The gap anchor: last ON-schedule slot folded. Off-schedule runs (Run now) never move it.
+                Null after a pause, so the first slot after resuming is not judged against the gap.</description>
+        </field>
+        <field name="scheduleKey" type="text-medium">
+            <description>scheduleExpr and windowTimeZone the anchor was fired under. A change skips one gap check,
+                so the slot a schedule or zone change skips is not a miss.</description>
+        </field>
+        <field name="bestDays" type="number-integer">
+            <description>Longest CLOSED streak in days; the live one is compared at read time.</description>
+        </field>
+        <field name="bestStartDate" type="date-time"/>
+        <field name="bestEndDate" type="date-time"/>
+        <field name="lastBreakDate" type="date-time"/>
+        <field name="lastBreakReason" type="text-short">
+            <description>What ended the last streak: the slot's status (AUT_STAT_FAILED, AUT_STAT_NO_DATA,
+                AUT_STAT_CANCELLED ...), DIFFERENCES, MISSED (a scheduled slot never fired) or UNCOUNTED.</description>
+        </field>
+
+        <relationship type="one" related="darpan.reconciliation.ReconciliationAutomation" fk-name="AUTSTRK_AUT">
+            <key-map field-name="automationId"/>
+        </relationship>
+        <relationship type="one" title="Company" related="moqui.security.UserGroup" fk-name="AUTSTRK_COMPANY">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+    </entity>
+
     <entity entity-name="RunDataDocument" package="darpan.reconciliation" use="configuration">
         <description>Associates DataDocuments with a reconciliation run.</description>
         <field name="reconciliationRunId" type="id" is-pk="true"/>

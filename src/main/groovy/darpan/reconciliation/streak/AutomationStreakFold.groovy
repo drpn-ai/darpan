@@ -157,6 +157,42 @@ class AutomationStreakFold {
         return expected != null && expected.plus(OVERDUE_GRACE).isBefore(now)
     }
 
+    /** The AutomationStreak date-time columns, which the fold holds as Instants. */
+    static final List<String> DATE_FIELDS = ["streakStartDate", "lastSlotDate", "lastScheduledSlotDate",
+            "bestStartDate", "bestEndDate", "lastBreakDate"].asImmutable()
+
+    /** Every AutomationStreak column the fold owns (the row adds automationId and companyUserGroupId). */
+    static final List<String> STATE_FIELDS = (DATE_FIELDS + ["scheduleKey", "bestDays", "lastBreakReason"]).asImmutable()
+
+    /** Fold state from a stored AutomationStreak row (an EntityValue or a plain Map); null = a fresh state. */
+    static Map stateFromRow(Map row) {
+        if (row == null) return [:]
+        Map state = [:]
+        STATE_FIELDS.each { String field ->
+            Object value = row.get(field)
+            if (value == null) return
+            if (DATE_FIELDS.contains(field)) state[field] = ((Date) value).toInstant()
+            else if (field == "bestDays") state[field] = toInt(value)
+            else state[field] = value.toString()
+        }
+        return state
+    }
+
+    /**
+     * Column values for an AutomationStreak write. Every column is present, nulls included: a broken streak
+     * must CLEAR streakStartDate on update, and a field left out of the map would keep the old value.
+     */
+    static Map<String, Object> rowFromState(Map state) {
+        Map<String, Object> row = [:]
+        STATE_FIELDS.each { String field ->
+            Object value = state?.get(field)
+            if (DATE_FIELDS.contains(field)) row[field] = value == null ? null : new java.sql.Timestamp(((Instant) value).toEpochMilli())
+            else if (field == "bestDays") row[field] = value == null ? null : (Long) toLong(value)
+            else row[field] = value
+        }
+        return row
+    }
+
     private static void closeStreak(Map state, Instant brokenAt, String reason, ZoneId zone) {
         Instant start = state.streakStartDate as Instant
         if (start != null) {

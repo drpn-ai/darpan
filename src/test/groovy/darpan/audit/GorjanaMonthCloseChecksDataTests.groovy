@@ -97,8 +97,11 @@ class GorjanaMonthCloseChecksDataTests {
     @Test
     void anOpenWarrantyReplacementInvoiceIsAnR12Row() {
         String scope = "GORJANA_WTY_INVOICE_SCOPE"
-        Map invoice = [tranId: "INV8408424", otherRef: "WTY-#GOR196407286-4", status: "Invoice : Open"]
+        // amountDue is NS_INVOICE_REFERENCE's foreignamountunpaid.
+        Map invoice = [tranId: "INV8408424", otherRef: "WTY-#GOR196407286-4", status: "Invoice : Open", amountDue: "65.00"]
         assertEquals("CONC_WTY_INVOICE_NOT_PAID", conclude(CLAIM, scope, invoice))
+        assertEquals("UNEXPLAINED", conclude(CLAIM, scope, invoice + [amountDue: "5.00"]),
+                "Aditi 2026-10-23 (F-100511): an open invoice with up to \$5 due is not unpaid, as R4's memos")
         assertEquals("UNEXPLAINED", conclude(CLAIM, scope, invoice + [status: "Invoice : Paid In Full"]))
         assertTrue(rows(CLAIM, "darpan.rule.RuleSetCompareSourceFilter").every { it.attribute("compareScopeId") != scope },
                 "the WTY- narrowing is SuiteQL's (NS_INVOICE_REFERENCE STARTS_WITH), never a filter over every invoice")

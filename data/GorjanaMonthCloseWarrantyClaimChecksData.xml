@@ -21,7 +21,7 @@
   The other half of R12, "the credit and the replacement invoice close each other out": a warranty replacement's invoice
   (reference WTY-..., the replacement order's) must end Paid In Full. One single-sided run over every invoice of the window
   (NS_INVOICE_REFERENCE, which asks SuiteQL for WTY- references only), so a paid one is examined and closes;
-  CONC_WTY_INVOICE_NOT_PAID on status Open. Measured 1-22 Oct: 1,099 warranty replacement orders; their invoices 2,344 Paid In Full and 340
+  CONC_WTY_INVOICE_NOT_PAID on status Open with more than $5 due (amountDue, foreignamountunpaid; Aditi 2026-10-23, as R4). Measured 1-22 Oct: 1,099 warranty replacement orders; their invoices 2,344 Paid In Full and 340
   Open; the warranty memo is what paid it in 2,678 of 2,684. An open warranty memo is R4's (credit-memos-left-open).
 
   automationId is blank on purpose: ONE automation per environment runs this compare and carries both checks (prod-owed).
@@ -92,6 +92,7 @@ end]]></ruleLogic>
     <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="GORJANA_WTY_INVOICE_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="tranId" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_WTY_INVOICE_SCOPE" sequenceNum="10" conclusionEnumId="CONC_WTY_INVOICE_NOT_PAID" appliesToBucket="FINDING" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_WTY_INVOICE_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="status" operator="IN" conditionValues="Invoice : Open" checkLabel="The warranty replacement's invoice is open" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_WTY_INVOICE_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="amountDue" operator="GT" conditionValues="5" checkLabel="More than $5 due" companyUserGroupId="GORJANA"/>
 
     <!-- ================================================================ The checks: one compare, one automation -->
     <darpan.audit.AuditCheck checkId="GORJANA_CHK_WARRANTY_NO_MEMO" companyUserGroupId="GORJANA" checkCode="warranty-claims-without-a-credit-memo"

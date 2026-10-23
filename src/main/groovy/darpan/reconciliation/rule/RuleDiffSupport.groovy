@@ -25,6 +25,15 @@ class RuleDiffSupport {
             "TO_NUMBER"        : "STRING_TO_NUMBER"
     ])
 
+    /**
+     * DAR-BE-117. The fields of a record a person navigates by, under the names Darpan's sources give them: its own
+     * ids (tranId, internalId) and the ids it names in other systems (a NetSuite record's HotWax order and return, a
+     * HotWax record's Shopify and NetSuite orders). A diff raised on a matched pair carries these from both records in
+     * `ids`, so a finding on it can name every record, not only the compare key. Only these, to keep the document small.
+     */
+    static final List<String> RECORD_ID_FIELDS = ["tranId", "internalId", "otherRef", "orderName", "orderId", "returnId",
+            "etailOrderId", "shopifyOrderId", "orderExternalId", "externalId", "netsuiteOrderId"].asImmutable()
+
     static boolean valuesDiffer(Object file1Value, Object file2Value) {
         return ValueSupport.valuesDiffer(file1Value, file2Value)
     }
@@ -223,9 +232,23 @@ class RuleDiffSupport {
                 presentIn     : normalize(diff.presentIn),
                 missingIn     : normalize(diff.missingIn),
                 data          : stringify(diff.data),
+                ids           : stringify(diff.ids) ?: pairIds(fact),
                 ruleId        : normalize(diff.ruleId),
                 severity      : normalize(diff.severity),
                 message       : normalize(diff.message)
         ]
+    }
+
+    /** {"file1": {..}, "file2": {..}}: the RECORD_ID_FIELDS each side of a matched pair holds, as JSON; null when neither has any. */
+    static String pairIds(Map fact) {
+        Map ids = [:]
+        ["file1", "file2"].each { String side ->
+            Object record = fact?.get(side)
+            if (!(record instanceof Map)) return
+            Map picked = RECORD_ID_FIELDS.collectEntries { String field -> [(field): normalize(((Map) record).get(field))] }
+                    .findAll { it.value }
+            if (picked) ids.put(side, picked)
+        }
+        return ids ? groovy.json.JsonOutput.toJson(ids) : null
     }
 }

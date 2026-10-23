@@ -291,6 +291,7 @@ class AuditAutomationSupport {
             // type / id / note. Read either.
             Map row = [type: (raw.diffType ?: raw.type) as String, id: (raw.primaryId ?: raw.id) as String,
                        note: normalize(raw.message ?: raw.note), data: AuditAutomationSupport.rowData(raw.data),
+                       ids: AuditAutomationSupport.rowData(raw.ids),
                        file1Value: normalize(raw.file1Value), file2Value: normalize(raw.file2Value),
                        systems: raw.conclusion instanceof Map ? ((Map) raw.conclusion).systems : null,
                        checks: raw.conclusion instanceof Map ? ((Map) raw.conclusion).checks : null,
@@ -371,13 +372,28 @@ class AuditAutomationSupport {
     }
 
     /**
+     * DAR-BE-117. The records in OTHER systems a row's record names, under the field names Darpan's sources give them
+     * (RuleDiffSupport.RECORD_ID_FIELDS): a NetSuite record's HotWax order (otherrefnum is its name, custbody_hc_order_id
+     * its id) and HotWax return, a HotWax record's Shopify and NetSuite orders. `id` is tried in order; `internalId`
+     * is kept when it differs. A HotWax return's externalId is its Shopify RETURN, so it names no Shopify order there.
+     */
+    static final List<Map> RELATED_IDS = [
+            [system: "OMS", recordType: "order", id: ["otherRef", "orderName", "orderId"], internalId: "orderId"],
+            [system: "OMS", recordType: "return", id: ["returnId"]],
+            [system: "SHOPIFY", recordType: "order", id: ["etailOrderId", "shopifyOrderId", "orderExternalId", "externalId"]],
+            [system: "NETSUITE", recordType: "salesOrder", id: ["netsuiteOrderId"]],
+    ].asImmutable()
+
+    /**
      * The row's record in each system it names. The row carries ONE record, on the side RunConclusionSupport reads it
      * from: there the id is the one a person searches by (its `tranId`, when the record has one and the compare keyed on
      * something else; DAR-BE-095) and internalId is the system's own key (its `internalId`, else the compare key) when it
-     * differs. A check that names a record type for one side only lists that side: the other side's own id is not on the
-     * row. recordStatus is the conclusion step's evidence state for that side:
+     * differs. A diff on a matched pair (a rule's FIELD_MISMATCH) carries both records' ids in `ids` instead (DAR-BE-117).
+     * A check that names a record type for one side only lists that side unless the row holds the other side's ids.
+     * recordStatus is the conclusion step's evidence state for that side:
      * the connector's state field in its labels, so it reads in that system's words. A check with no conclusions
-     * has no evidence, and its records no status.
+     * has no evidence, and its records no status. After them, the records in other systems those records name
+     * (RELATED_IDS), each once.
      */
     static List<Map> recordsOf(Map check, Map row, def file1Source, def file2Source) {
         String type = row.type as String
@@ -388,20 +404,50 @@ class AuditAutomationSupport {
         String dataSide = type == "MISSING_IN_FILE_1" || type?.startsWith("DUPLICATE_IN_FILE_2") ? "FILE_2" : "FILE_1"
         String key = AuditReportAssembler.displayKey(row.id as String)
         boolean typed = normalize(check.file1RecordType) || normalize(check.file2RecordType)
-        return sides.collect { String side ->
+        List<Map> own = []
+        List<Map> related = []
+        sides.each { String side ->
             def source = side == "FILE_1" ? file1Source : file2Source
+            String systemEnumId = normalize(readField(source, "systemEnumId"))
             String recordType = normalize(side == "FILE_1" ? check.file1RecordType : check.file2RecordType)
-            if (typed && !recordType) return null
-            Map data = side == dataSide ? (Map) row.data : null
+            Map ids = row.ids instanceof Map ? (Map) ((Map) row.ids).get(side == "FILE_1" ? "file1" : "file2") : null
+            Map data = (side == dataSide ? (Map) row.data : null) ?: ids
+            if (!systemEnumId || (typed && !recordType && !ids)) return
+            related.addAll(relatedRecords(data, systemEnumId))
             String recordId = normalize(data?.get("tranId")) ?: key
-            String internalId = normalize(data?.get("internalId")) ?: (recordId != key ? key : null)
+            // The key stands in for the internal id only on the row's own record: on a pair's other side it is the
+            // shared join value (R13's memo id on the replacement order), not that record's key.
+            String internalId = normalize(data?.get("internalId")) ?: (recordId != key && (row.data || !ids) ? key : null)
             Map evidence = ((row.systems ?: []) as List).find { it instanceof Map && it.side == side } as Map
-            [systemEnumId: normalize(readField(source, "systemEnumId")),
-             recordType  : recordType ?: "record",
-             recordId    : recordId,
-             internalId  : internalId == recordId ? null : internalId,
-             recordStatus: normalize(evidence?.state)]
-        }.findAll { it?.systemEnumId }
+            own << [systemEnumId: systemEnumId,
+                    recordType  : recordType ?: "record",
+                    recordId    : recordId,
+                    internalId  : internalId == recordId ? null : internalId,
+                    recordStatus: normalize(evidence?.state)]
+        }
+        Set<String> seen = own.collect { "${rootSystem(it.systemEnumId as String)}|${it.recordType}|${it.recordId}".toString() } as Set
+        return own + related.findAll { seen.add("${it.systemEnumId}|${it.recordType}|${it.recordId}".toString()) }
+    }
+
+    /** The records in other systems one record names (RELATED_IDS); a "NO_..." value is a query's sentinel for none. */
+    static List<Map> relatedRecords(Map data, String systemEnumId) {
+        if (!data) return []
+        String own = rootSystem(systemEnumId)
+        Closure<String> value = { String field ->
+            String v = normalize(data.get(field))
+            v && !v.startsWith("NO_") && !(field == "externalId" && normalize(data.get("returnId"))) ? v : null
+        }
+        return RELATED_IDS.findAll { it.system != own }.collect { Map spec ->
+            String id = (spec.id as List<String>).findResult { value(it) }
+            String internalId = spec.internalId ? value(spec.internalId as String) : null
+            id ? [systemEnumId: spec.system, recordType: spec.recordType, recordId: id,
+                  internalId: internalId == id ? null : internalId, recordStatus: null] : null
+        }.findAll()
+    }
+
+    /** NETSUITE_SUITEQL -> NETSUITE, OMS_RETURNS_GQL -> OMS: an endpoint's system is the code before its first "_". */
+    static String rootSystem(String systemEnumId) {
+        return systemEnumId?.split("_")?.first()
     }
 
     /** A row's `data` is the record as a JSON string on disk, a Map in memory; anything else reads as no record. */

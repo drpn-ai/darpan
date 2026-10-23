@@ -235,6 +235,7 @@ class CompareDatasetSupport {
                 col("presentIn").alias("presentIn"),
                 col("missingIn").alias("missingIn"),
                 col("data").alias("data"),
+                lit(null).cast(DataTypes.StringType).alias("ids"),
                 lit(null).cast(DataTypes.StringType).alias("ruleId"),
                 lit(null).cast(DataTypes.StringType).alias("severity"),
                 col("note").alias("message")
@@ -267,6 +268,7 @@ class CompareDatasetSupport {
                     normalize(diff.presentIn),
                     normalize(diff.missingIn),
                     normalize(diff.data),
+                    normalize(diff.ids),
                     normalize(diff.ruleId),
                     normalize(diff.severity),
                     normalize(diff.message)

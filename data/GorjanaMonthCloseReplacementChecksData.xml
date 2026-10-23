@@ -134,7 +134,7 @@ end]]></ruleLogic>
     <!-- ================================================================ The checks: one compare, one automation -->
     <darpan.audit.AuditCheck checkId="GORJANA_CHK_REPLACEMENT_CUSTOMER" companyUserGroupId="GORJANA" checkCode="exchange-credits-on-another-customer"
             label="Exchange credit memos whose replacement order is under another customer" savedRunId="GORJANA_MEMO_REPLACEMENT_RS"
-            file1RecordType="creditMemo" graceDays="1"
+            file1RecordType="creditMemo" file2RecordType="replacementOrder" graceDays="1"
             matchedBy="credit memo id (custbody_hc_exchange_credit_memo_id on the replacement order)"
             fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
             headlineTemplate="Credit memo id {creditMemo} and its replacement order are under different customers"
@@ -142,7 +142,7 @@ end]]></ruleLogic>
             passesWhenTemplate="The credit memo with internal id {creditMemo} and its replacement order have the same customer."/>
     <darpan.audit.AuditCheck checkId="GORJANA_CHK_REPLACEMENT_NOT_ORIGINAL" companyUserGroupId="GORJANA" checkCode="returns-replaced-by-their-own-order"
             label="Exchange credit memos whose replacement is an existing order (its own original, or a year older)" savedRunId="GORJANA_MEMO_REPLACEMENT_RS"
-            file1RecordType="creditMemo" graceDays="1"
+            file1RecordType="creditMemo" file2RecordType="replacementOrder" graceDays="1"
             matchedBy="credit memo id (custbody_hc_exchange_credit_memo_id on the replacement order)"
             fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
             headlineTemplate="Credit memo id {creditMemo} names an existing order as its replacement"

@@ -62,6 +62,7 @@ class ReconciliationServices {
             .add("presentIn", DataTypes.StringType, true)
             .add("missingIn", DataTypes.StringType, true)
             .add("data", DataTypes.StringType, true)
+            .add("ids", DataTypes.StringType, true)
             .add("ruleId", DataTypes.StringType, true)
             .add("severity", DataTypes.StringType, true)
             .add("message", DataTypes.StringType, true)

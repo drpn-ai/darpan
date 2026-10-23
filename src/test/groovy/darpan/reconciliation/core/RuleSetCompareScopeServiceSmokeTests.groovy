@@ -566,6 +566,9 @@ class RuleSetCompareScopeServiceSmokeTests {
         assertEquals("SKU-B-ALT", skuDiff.file2Value)
         assertEquals("WARN", skuDiff.severity)
         assertEquals("SKU mismatch", skuDiff.message)
+        // DAR-BE-117: the pair's ids ride an `ids` column through Spark; these products carry no id fields, so it is empty.
+        assertTrue(((Dataset) result.diffDf).columns().contains("ids"))
+        assertEquals(null, skuDiff.ids)
 
         Map<String, Object> priceDiff = diffs.find { Map<String, Object> row ->
             row.diffType == "FIELD_MISMATCH" && row.primaryId == "P400" && row.field == "price"

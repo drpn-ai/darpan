@@ -270,6 +270,34 @@ class AuditAutomationSmokeTests {
     }
 
     @Test
+    void aFindingNamesEveryRecordItsRowsIdsReach() {
+        // DAR-BE-117: R13's mismatch row carries both records' ids. The memo and its replacement order are named by
+        // their document numbers; the HotWax order each names follows once, the replacement's sentinel names none.
+        Map check = [checkId: "X", file1RecordType: "creditMemo", file2RecordType: "replacementOrder"]
+        Map row = [type: "FIELD_MISMATCH", id: "80852690", ids: AuditAutomationSupport.rowData(
+                '{"file1":{"tranId":"CM7647980","internalId":"80852690","orderId":"M1085548"},' +
+                '"file2":{"tranId":"SO761841","orderId":"NO_ORDER_ON_REPLACEMENT"}}')]
+        assertEquals([["NETSUITE_SUITEQL", "creditMemo", "CM7647980", "80852690"],
+                      ["NETSUITE_SUITEQL", "replacementOrder", "SO761841", null],
+                      ["OMS", "order", "M1085548", null]],
+                AuditAutomationSupport.recordsOf(check, row, nsSource, nsSource).collect { [it.systemEnumId, it.recordType, it.recordId, it.internalId] })
+
+        // A NetSuite order names its HotWax order by name and id, its HotWax return, and its eTail (Shopify) order.
+        List<Map> fromNs = AuditAutomationSupport.recordsOf([checkId: "Y", file2RecordType: "salesOrder"], [type: "MISSING_IN_FILE_1",
+                id: "SO1", data: [tranId: "SO1", otherRef: "#GOR1", orderId: "M1", returnId: "M9", etailOrderId: "7156795932803"]],
+                omsSource, nsSource)
+        assertEquals([["NETSUITE_SUITEQL", "salesOrder", "SO1"], ["OMS", "order", "#GOR1"], ["OMS", "return", "M9"], ["SHOPIFY", "order", "7156795932803"]],
+                fromNs.collect { [it.systemEnumId, it.recordType, it.recordId] })
+        assertEquals("M1", fromNs[1].internalId)
+
+        // A HotWax return names no HotWax record again, and its externalId is its Shopify RETURN, not an order.
+        List<Map> fromOms = AuditAutomationSupport.recordsOf([checkId: "Z", file1RecordType: "return"], [type: "MISSING_IN_FILE_2",
+                id: "M7", data: [returnId: "M7", externalId: "SR1", orderExternalId: "7156"]], omsSource, nsSource)
+        assertEquals([["OMS_RETURNS_GQL", "return", "M7"], ["SHOPIFY", "order", "7156"]], fromOms.collect { [it.systemEnumId, it.recordType, it.recordId] })
+        assertEquals([], AuditAutomationSupport.relatedRecords([returnId: "M7", externalId: "SR1"], "OMS_RETURNS_GQL"))
+    }
+
+    @Test
     void aHeadlineCanNameTheRowsConclusion() {
         Map check = [checkId: "X", headlineTemplate: "RMA {recordKey}: {conclusion}"]
         assertEquals("RMA RMA348610: No address it came from", AuditAutomationSupport.headline(check,

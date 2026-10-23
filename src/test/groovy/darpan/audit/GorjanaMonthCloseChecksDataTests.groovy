@@ -250,6 +250,13 @@ class GorjanaMonthCloseChecksDataTests {
         }
     }
 
+    /** Aditi 2026-10-23: "any fulfilled order is expected to be invoiced 24 hours after its fulfillment". */
+    @Test
+    void aCompletedItemHasOneDayToBillBeforeItIsOpen() {
+        Node check = rows(FILE, "darpan.audit.AuditCheck").find { it.attribute("checkCode") == "completed-not-billed" }
+        assertEquals("1", check.attribute("graceDays"))
+    }
+
     @Test
     void theR2RunsReadEveryRecordSoAFixedOneCloses() {
         // A source filter runs in the getter, before the examined-keys file is written: a filtered-out record would

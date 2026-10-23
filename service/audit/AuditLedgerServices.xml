@@ -196,6 +196,13 @@
                 <description>AuditCheckStatus of this morning's check; only AUDCS_RAN closes anything.</description></parameter>
             <parameter name="examinedRecordKeys" type="List">
                 <description>Every record key the check looked at this morning, reported or not.</description></parameter>
+            <parameter name="reportedRecordKeys" type="List">
+                <description>DAR-BE-118. The record keys this run reported (record#CheckFindings). Given: a finding closes when
+                    this run examined its record and did not report it, so a later run the same morning closes what an
+                    earlier one raised. Blank: "not reported" is read as lastSeenDate before reportDate.</description></parameter>
+            <parameter name="explanations" type="Map">
+                <description>DAR-BE-118. recordKey -> {conclusionEnumId, diagnosisText, headline}: why this run did not report
+                    it (a conclusion the statement does not count). The closed finding keeps it.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="closedFindingIds" type="List"/>
@@ -217,15 +224,22 @@
                 <return/>
             </if>
             <set field="examined" from="new HashSet((examinedRecordKeys ?: [])*.toString())"/>
+            <set field="reported" from="new HashSet((reportedRecordKeys ?: [])*.toString())"/>
             <entity-find entity-name="darpan.audit.AuditFinding" list="candidates" for-update="true">
                 <econdition field-name="companyUserGroupId"/>
                 <econdition field-name="checkId"/>
                 <econdition field-name="period"/>
                 <econdition field-name="stateEnumId" operator="in" from="['AUDFS_OPEN', 'AUDFS_PENDING']"/>
-                <econdition field-name="lastSeenDate" operator="less" from="reportDate"/>
+                <econdition field-name="lastSeenDate" operator="less" from="reportDate" ignore="reportedRecordKeys != null"/>
             </entity-find>
             <iterate list="candidates" entry="finding">
-                <if condition="examined.contains(finding.recordKey)">
+                <if condition="examined.contains(finding.recordKey) &amp;&amp; !reported.contains(finding.recordKey)">
+                    <set field="why" from="explanations?.get(finding.recordKey)"/>
+                    <if condition="why">
+                        <set field="finding.conclusionEnumId" from="why.conclusionEnumId"/>
+                        <set field="finding.diagnosisText" from="why.diagnosisText"/>
+                        <set field="finding.headline" from="why.headline ?: finding.headline"/>
+                    </if>
                     <set field="finding.stateEnumId" value="AUDFS_FIXED"/>
                     <set field="finding.closedStamp" from="checkStamp"/>
                     <set field="finding.closedByTypeEnumId" value="AUDAT_CHECK"/>

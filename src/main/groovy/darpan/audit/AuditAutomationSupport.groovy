@@ -3,6 +3,7 @@ package darpan.audit
 import darpan.facade.common.TenantScopedFinder
 import darpan.facade.reconciliation.DiffDocumentStreamSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
+import darpan.reconciliation.conclusion.ConclusionTreeSupport
 import groovy.json.JsonSlurper
 import org.moqui.entity.EntityCondition
 import org.slf4j.Logger
@@ -227,11 +228,15 @@ class AuditAutomationSupport {
         Map dates = window.auditWindowFromDate ? [windowFromDate: window.auditWindowFromDate, windowThruDate: window.auditWindowThruDate] : [:]
         Map run = call(ec, "${LEDGER}.record#CheckRun", base + dates + [runStamp: now, sourceReads: reads, notRunReason: notRunReason])
         if (run == null || run.checkStatusEnumId == "AUDCS_NOT_RUN") return
-        List<Map> findings = diff != null ? findingsFrom(ec, tenantId, check, diff, file1Source, file2Source)
+        Map<String, Map> explained = [:]
+        List<Map> findings = diff != null ? findingsFrom(ec, tenantId, check, diff, file1Source, file2Source, explained)
                 .findAll { !unjudged.contains(it.recordKey as String) } : []
         if (call(ec, "${LEDGER}.record#CheckFindings", base + [checkStamp: now, findings: findings]) == null) return
+        // DAR-BE-118: closes what THIS run examined and did not report, so a later run the same morning closes too.
         call(ec, "${LEDGER}.close#ResolvedFindings", base + [checkStamp: now, checkStatusEnumId: run.checkStatusEnumId,
-                                                            examinedRecordKeys: examined])
+                                                            examinedRecordKeys: examined,
+                                                            reportedRecordKeys: findings*.recordKey.unique(),
+                                                            explanations: explained])
     }
 
     /** One ledger call; on an error, log it and answer null so the next step for this check is skipped. */
@@ -276,7 +281,12 @@ class AuditAutomationSupport {
      * the link's ruleIds (blank: any; DAR-BE-095). One finding per statement and
      * record; the row's record lives on the side(s) its type names.
      */
-    static List<Map> findingsFrom(def ec, String tenantId, Map check, File diff, def file1Source, def file2Source) {
+    /**
+     * `explained`, when given, gets recordKey -> {conclusionEnumId, diagnosisText, headline} for each row of a linked diff type
+     * that reached a conclusion the statement does not count (DAR-BE-118): why it raised no finding, kept on the closed one.
+     */
+    static List<Map> findingsFrom(def ec, String tenantId, Map check, File diff, def file1Source, def file2Source,
+                                  Map<String, Map> explained = null) {
         List<Map> links = tenantRows(ec, "darpan.audit.AuditStatementCheck", tenantId).condition("checkId", check.checkId)
                 .orderBy("sequenceNum").list()*.getMap()
         // DAR-UI-063. A statement turned off records no findings.
@@ -302,6 +312,13 @@ class AuditAutomationSupport {
             links.each { Map link ->
                 // Qualified: from a closure nested in a closure, Groovy resolves a bare static call through the outer
                 // closure's metaclass and fails with "argument type mismatch".
+                if (explained != null && code && code != ConclusionTreeSupport.UNEXPLAINED && row.id &&
+                        AuditAutomationSupport.matches(link.diffTypes as String, type) &&
+                        !AuditAutomationSupport.matches(link.conclusionCodes as String, code)) {
+                    explained.putIfAbsent(row.id as String, [conclusionEnumId: AuditAutomationSupport.conclusionEnumId(ec, code),
+                            diagnosisText: row.conclusionLabel,
+                            headline: AuditAutomationSupport.headline(check, row, AuditAutomationSupport.recordsOf(check, row, file1Source, file2Source))])
+                }
                 if (!AuditAutomationSupport.matches(link.diffTypes as String, type) ||
                         !AuditAutomationSupport.matches(link.conclusionCodes as String, code) ||
                         !AuditAutomationSupport.matches(link.ruleIds as String, ruleId)) return

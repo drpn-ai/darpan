@@ -107,6 +107,7 @@
             version="1.0" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetCompareScope compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" ruleSetId="GORJANA_OMS_NS_LINE_RS"
             objectType="ORDER_LINE_UNIT" scopeMode="COMPARE" description="Every item HotWax completed must be billed on its NetSuite sales order line, and every billed NetSuite line must be completed in HotWax. Keyed (OMS order id, OMS order item seq id)."
+            conclusionLookupsJson='[{"name":"orderInNetsuite","subject":"FILE_2","idField":"internalId","systemEnumId":"NETSUITE_SUITEQL","sourceConfigId":"NS_SO_BACKORDER","keyField":"internalId"}]'
             companyUserGroupId="GORJANA"/>
     <!-- DAR-BE-116: OMS order items over GraphQL; no rule here reads salesChannelEnumId. -->
     <darpan.rule.RuleSetCompareSource compareScopeId="GORJANA_OMS_NS_LINE_SCOPE" fileSide="FILE_1"

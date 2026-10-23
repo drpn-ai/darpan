@@ -155,6 +155,29 @@ class AuditLedgerServicesSmokeTests {
         assertEquals(["CM-2"], records(id)*.recordId, "the latest read replaces the records")
     }
 
+    /**
+     * DAR-BE-118 (Aditi 2026-10-23, "i dont see the enhanced comments"): a later run the same morning that looked at the
+     * record and did not report it closes the finding, and when the run named why (a conclusion the statement does not
+     * count, e.g. a lost warranty credited in NetSuite) the closed finding says so.
+     */
+    @Test
+    void aLaterRunTheSameMorningClosesWhatItNoLongerReportsAndSaysWhy() {
+        insert("moqui.basic.EnumerationType", [enumTypeId: "DarpanConclusion", description: "Conclusion"])
+        insert("moqui.basic.Enumeration", [enumId: "CONC_TEST_EXPLAINED", enumTypeId: "DarpanConclusion",
+                                           description: "Lost warranty, credited in NetSuite"])
+        String id = (record(CHECK, "2026-10-07", [finding("R4", "SAME-1"), finding("R4", "SAME-2")]).findingIds as List)[0]
+        Map out = ec.service.sync().name("${SVC}.close#ResolvedFindings").parameters([companyUserGroupId: GORJANA, checkId: CHECK,
+                reportDate: Date.valueOf("2026-10-07"), checkStamp: Timestamp.valueOf("2026-10-07 18:30:00"), checkStatusEnumId: "AUDCS_RAN",
+                examinedRecordKeys: ["SAME-1", "SAME-2"], reportedRecordKeys: ["SAME-2"],
+                explanations: ["SAME-1": [conclusionEnumId: "CONC_TEST_EXPLAINED", diagnosisText: "Lost warranty, credited in NetSuite",
+                                          headline: "Return SAME-1: Lost warranty, credited in NetSuite"]]]).call()
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertEquals([id], out.closedFindingIds, "SAME-2 was reported again by this run, so it stays")
+        Map f = row(id)
+        assertEquals(["AUDFS_FIXED", "CONC_TEST_EXPLAINED", "Lost warranty, credited in NetSuite", "Return SAME-1: Lost warranty, credited in NetSuite"],
+                [f.stateEnumId, f.conclusionEnumId, f.diagnosisText, f.headline])
+    }
+
     @Test
     void recordsStoreTheRootSystemAndTheEvidenceIsKept() {
         Map f = finding("R4", "EVID-1") + [expectedAmount: "160.23", actualAmount: "160.22", currencyUomId: "USD",

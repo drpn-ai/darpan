@@ -25,6 +25,8 @@
      returns are not judged: an RMA is made when HotWax syncs the return, not when the shopper asks. Measured 6-12 Oct:
      of the OMS's numeric returns, 1,439 completed ones are in NetSuite under "HG-<id>" and 94 completed are not (91
      with no channel, 3 Happiness Guarantee). Aditi, 2026-10-22: they should be in NetSuite.
+     Aditi, 2026-10-23: a return from DISCONTINUED (fromPartyId) is not R8's. A conclusion condition, not a source filter,
+     so the return is still read and examined.
 
   R4 "Every refund we give a customer is booked in NetSuite at the same amount, to the cent, with nothing left open."
      The "nothing left open" half, as Aditi set it on 2026-10-22: "there should never be an open credit memo", and Darpan
@@ -153,8 +155,10 @@ end]]></ruleLogic>
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" sequenceNum="10" conclusionEnumId="CONC_RETURN_NO_ORDER_NOT_SYNCED" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="statusId" operator="IN" conditionValues="RETURN_COMPLETED,RETURN_RECEIVED" checkLabel="The return is completed or received in the OMS" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="orderExternalId" operator="BLANK" checkLabel="The return names no order" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" sequenceNum="10" conditionSeq="3" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="fromPartyId" operator="NOT_IN" conditionValues="DISCONTINUED" checkLabel="The return is not from DISCONTINUED" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" sequenceNum="20" conclusionEnumId="CONC_RETURN_NOT_IN_NETSUITE" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" sequenceNum="20" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="statusId" operator="IN" conditionValues="RETURN_COMPLETED,RETURN_RECEIVED" checkLabel="The return is completed or received in the OMS" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" sequenceNum="20" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="fromPartyId" operator="NOT_IN" conditionValues="DISCONTINUED" checkLabel="The return is not from DISCONTINUED" companyUserGroupId="GORJANA"/>
 
     <!-- ================================================================ R4: credit memos left open -->
     <darpan.rule.RuleSet ruleSetId="GORJANA_CREDIT_OPEN_RS" ruleSetName="Credit memos - left open"

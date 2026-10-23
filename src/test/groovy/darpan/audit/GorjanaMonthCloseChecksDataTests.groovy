@@ -87,6 +87,11 @@ class GorjanaMonthCloseChecksDataTests {
                 "the OMS's own numeric return with no order: the sync skips it")
         assertEquals("UNEXPLAINED", conclude(RETURNS, scope, done + [statusId: "RETURN_REQUESTED"], "MISSING_FROM_FILE_2"),
                 "a requested return is not judged")
+        // Aditi 2026-10-23: "exclude returns with fromPartyId: DISCONTINUED from R8"; still read, never a finding.
+        assertEquals("UNEXPLAINED", conclude(RETURNS, scope, done + [fromPartyId: "DISCONTINUED"], "MISSING_FROM_FILE_2"))
+        assertEquals("UNEXPLAINED", conclude(RETURNS, scope, [returnId: "602501", statusId: "RETURN_COMPLETED", fromPartyId: "DISCONTINUED"],
+                "MISSING_FROM_FILE_2"), "nor the no-order one")
+        assertEquals("CONC_RETURN_NOT_IN_NETSUITE", conclude(RETURNS, scope, done + [fromPartyId: "10456"], "MISSING_FROM_FILE_2"))
     }
 
     @Test

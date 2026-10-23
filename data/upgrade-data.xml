@@ -416,6 +416,7 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             lookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsReturnsByExternalId"
             lookupIdsParameterName="externalIds"
             lookupMaxIds="10000"
+            extractOptionsJson='[{"name":"includeReturnsWithoutShopifyRef","label":"Include returns with no Shopify reference","type":"boolean"},{"name":"onlyCancelledReturns","label":"Only cancelled returns","type":"boolean"}]'
             enabled="Y"/>
 
     <!-- DAR-BE-069: restated for the source-name renames (create-or-update by primary key, whole row). -->
@@ -563,6 +564,33 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             label="Needs shipping" fieldType="Boolean" sequenceNum="6" description="false on orders with nothing to ship (gorjana's digital gift cards, POS carry-outs)."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].sourceName"
             label="Sales channel" fieldType="String" sequenceNum="5" description="web, pos, shopify_draft_order, or an app id."/>
+    <!-- DAR-UI-064: OMS_ORDER_ITEMS field pills (the run builder and rules board read them). -->
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].omsOrderId"
+            label="OMS order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="1"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].orderItemSeqId"
+            label="Order item seq ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="2"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].omsOrderName"
+            label="Order name" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="3"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].shopifyOrderId"
+            label="Shopify order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="4"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].shopifyLineId"
+            label="Shopify line ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="5"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].netsuiteOrderId"
+            label="NetSuite order ID" fieldType="string" isPrimaryIdCandidate="Y" sequenceNum="6"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].unitOrdinal"
+            label="Unit" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="7"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].productId"
+            label="Product" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="8"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].statusId"
+            label="Item status" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="9"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].unitState"
+            label="Unit state" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="10"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].facilityId"
+            label="Facility" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="11"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].omsOrderStatusId"
+            label="Order status" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="12"/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_ORDER_ITEMS" fieldPath="$.records[*].salesChannelEnumId"
+            label="Sales channel" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="13"/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].returnId"
             label="Return ID" fieldType="string" isPrimaryIdCandidate="N" sequenceNum="1"
             description="OMS return identity. Not offered as the ID (DAR-BE-071): HotWax-only, so it never joins to Shopify."/>
@@ -589,6 +617,9 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].orderProductStoreId"
             label="Store" fieldType="string" sequenceNum="10"
             description="DAR-BE-068: the product store of the return's ORIGIN order (Return.productStoreId is unpopulated). GraphQL only — REST's record has no order id to reach it. NOT in keepFieldsBase: filters run before projection, so the pill filters without being compared. Absent on a return with no items, so an include rule drops those."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_RETURNS_GQL" fieldPath="$.records[*].fromPartyId"
+            label="From party" fieldType="string" sequenceNum="11"
+            description="DAR-BE-094 R8: who the return is from (DISCONTINUED on gorjana's discontinued-stock returns). GraphQL only. NOT in keepFieldsBase: filters run before projection, so the pill filters without being compared."/>
 
     <!-- DAR-BE-069: label renames restated (create-or-update by primary key, whole row). -->
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS" fieldPath="$.records[*].externalId"

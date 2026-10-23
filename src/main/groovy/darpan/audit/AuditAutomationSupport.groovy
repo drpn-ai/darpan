@@ -73,9 +73,13 @@ class AuditAutomationSupport {
      * The windows of one morning, in the automation's zone, each end exclusive: [period start, the day after the
      * run's last day). Each window carries its audit period and report day for the ledger.
      */
-    static List<Map<String, Object>> resolveWindows(def ec, def automation, Map audit, Timestamp scheduledFireTime) {
+    static List<Map<String, Object>> resolveWindows(def ec, def automation, Map audit, Timestamp scheduledFireTime,
+                                                   Map explicit = null) {
         ZoneId zone = zoneOf(automation)
         LocalDate reportDay = scheduledFireTime.toInstant().atZone(zone).toLocalDate()
+        if (explicit?.auditWindowFromDate && explicit?.auditWindowThruDate) {
+            return pickedWindows(ec, audit, zone, reportDay, toLocalDate(explicit.auditWindowFromDate), toLocalDate(explicit.auditWindowThruDate))
+        }
         Map out = AutomationExecutionSupport.dispatchInternalService(ec, "audit.AuditReportServices.get#AuditWindow",
                 [companyUserGroupId: audit.companyUserGroupId, auditId: audit.auditId, reportDate: Date.valueOf(reportDay)])
         if (ec.message.hasError()) {
@@ -95,6 +99,48 @@ class AuditAutomationSupport {
              auditPeriod         : run.period,
              auditReportDate     : Date.valueOf(reportDay)] as Map<String, Object>
         }
+    }
+
+    /**
+     * DAR-UI-063. The days a person picked to play, first to last inclusive, in the automation's zone: one window per audit
+     * period they cross, each dated as picked and reported on the run's own morning. Every period must still be running
+     * that morning (its own, or ended and extended); otherwise the run is refused before anything is read, because the
+     * ledger would refuse each check's write and the run would record nothing.
+     */
+    static List<Map<String, Object>> pickedWindows(def ec, Map audit, ZoneId zone, LocalDate reportDay, LocalDate from, LocalDate thru) {
+        if (from > thru) throw new IllegalArgumentException("The days run backwards: ${from} to ${thru}.")
+        if (thru > reportDay) throw new IllegalArgumentException("${thru} has not ended yet; pick days up to ${reportDay}.")
+        String periodCode = AuditReportAssembler.enumCodes(ec)[audit.periodEnumId as String]
+        String tenantId = audit.companyUserGroupId as String
+        List<Map<String, Object>> windows = []
+        LocalDate day = from
+        while (day <= thru) {
+            String period = AuditReportAssembler.periodOf(day, periodCode)
+            Map w = AuditReportAssembler.periodWindow(ec, tenantId, audit, period, reportDay)
+            if (w == null || !w.running) {
+                throw new IllegalStateException("${period} ended${w?.end ? ' on ' + w.end : ''} and is not extended to ${reportDay}; " +
+                        "extend it to run its days.")
+            }
+            LocalDate last = [thru, w.end as LocalDate].min()
+            windows << ([sequenceNum         : windows.size() + 1,
+                         windowStartDate     : Timestamp.from(day.atStartOfDay(zone).toInstant()),
+                         windowEndDate       : Timestamp.from(last.plusDays(1).atStartOfDay(zone).toInstant()),
+                         childWindowStartDate: Timestamp.from(day.atStartOfDay(zone).toInstant()),
+                         childWindowEndDate  : Timestamp.from(last.plusDays(1).atStartOfDay(zone).toInstant()),
+                         auditId             : audit.auditId,
+                         auditPeriod         : period,
+                         auditReportDate     : Date.valueOf(reportDay),
+                         auditWindowFromDate : Date.valueOf(day),
+                         auditWindowThruDate : Date.valueOf(last)] as Map<String, Object>)
+            day = last.plusDays(1)
+        }
+        return windows
+    }
+
+    private static LocalDate toLocalDate(Object value) {
+        if (value instanceof Date) return ((Date) value).toLocalDate()
+        if (value instanceof java.util.Date) return new Date(((java.util.Date) value).time).toLocalDate()
+        return LocalDate.parse(value.toString().trim().substring(0, 10))
     }
 
     /** Two key files for one window's compare; the caller deletes them with {@link #discardKeyFiles}. */
@@ -144,7 +190,9 @@ class AuditAutomationSupport {
                                     File diff, def file1Source, def file2Source, List<String> examined, Timestamp now) {
         Map base = [companyUserGroupId: tenantId, checkId: check.checkId, reportDate: window.auditReportDate,
                     period: window.auditPeriod]
-        Map run = call(ec, "${LEDGER}.record#CheckRun", base + [runStamp: now, sourceReads: reads, notRunReason: notRunReason])
+        // DAR-UI-063. Played days keep their own dates; the morning run's are the period to date (the ledger's default).
+        Map dates = window.auditWindowFromDate ? [windowFromDate: window.auditWindowFromDate, windowThruDate: window.auditWindowThruDate] : [:]
+        Map run = call(ec, "${LEDGER}.record#CheckRun", base + dates + [runStamp: now, sourceReads: reads, notRunReason: notRunReason])
         if (run == null || run.checkStatusEnumId == "AUDCS_NOT_RUN") return
         List<Map> findings = diff != null ? findingsFrom(ec, tenantId, check, diff, file1Source, file2Source) : []
         if (call(ec, "${LEDGER}.record#CheckFindings", base + [checkStamp: now, findings: findings]) == null) return
@@ -197,9 +245,12 @@ class AuditAutomationSupport {
     static List<Map> findingsFrom(def ec, String tenantId, Map check, File diff, def file1Source, def file2Source) {
         List<Map> links = tenantRows(ec, "darpan.audit.AuditStatementCheck", tenantId).condition("checkId", check.checkId)
                 .orderBy("sequenceNum").list()*.getMap()
-        Map<String, String> codeById = tenantRows(ec, "darpan.audit.AuditStatement", tenantId)
+        // DAR-UI-063. A statement turned off records no findings.
+        List statementRows = tenantRows(ec, "darpan.audit.AuditStatement", tenantId)
                 .condition("statementId", EntityCondition.IN, links*.statementId).list()
-                .collectEntries { [(it.statementId): it.statementCode] }
+                .findAll { (it.isActive ?: "Y") != "N" }
+        links = links.findAll { link -> statementRows.any { it.statementId == link.statementId } }
+        Map<String, String> codeById = statementRows.collectEntries { [(it.statementId): it.statementCode] }
         Map<String, Map> byKey = new LinkedHashMap<>()
         DiffDocumentStreamSupport.forEachRow(diff) { Map raw ->
             // The document on disk names a row diffType / primaryId / message; the compare's in-memory rows say

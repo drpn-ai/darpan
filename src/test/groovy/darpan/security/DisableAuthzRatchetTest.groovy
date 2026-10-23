@@ -150,7 +150,10 @@ class DisableAuthzRatchetTest {
             "shopify-darpan Groovy .disableAuthz("                : 1,
             "shopify-darpan service+screen XML .disableAuthz("    : 0,
             "shopify-darpan service+screen XML disable-authz=\"true\"": 0,
-            "netsuite-darpan Groovy .disableAuthz("               : 4,
+            // 5 since DAR-BE-111: extractNetSuiteOrders asks lookup#HotWaxOmsOrderStatuses for each page's HotWax status. A
+            // service-call bypass, tenant-pinned by the query row's own companyUserGroupId (the trusted run owner, checked by
+            // the lookup's config gate); a scheduled extract may run with no signed-in user to authorize it.
+            "netsuite-darpan Groovy .disableAuthz("               : 5,
             "netsuite-darpan service+screen XML .disableAuthz("   : 0,
             "netsuite-darpan service+screen XML disable-authz=\"true\"": 0,
             "database-darpan Groovy .disableAuthz("               : 10,

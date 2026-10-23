@@ -189,7 +189,8 @@ class AuditReportAssemblerSmokeTests {
         Map r4 = doc.categories.refundsAndCredits.statements.R4
         assertEquals([id: "R4", text: R4_TEXT, weight: "derived", status: "ran", reason: null], r4.subMap(["id", "text", "weight", "status", "reason"]))
         assertEquals([[id: "returns-vs-credit-memos", label: "OMS returns against NetSuite credit memos", status: "ran", reason: null,
-                       matchedBy: "return id (custbody_hc_return_id)", graceDays: 1, compared: [OMS: 412, NetSuite: 409]]], r4.checks)
+                       matchedBy: "return id (custbody_hc_return_id)", graceDays: 1, compared: [OMS: 412, NetSuite: 409],
+                       window: [from: "2026-10-01", thru: "2026-10-08"]]], r4.checks)
         assertEquals([open: 1, pending: 0, newToday: 0, fixedToday: 0], r4.counts)
         Map brief = (r4.findings as List)[0]
         assertEquals([id: m258615, headline: "Credit memo is 0.01 less than the refund for return M258615", state: "open",

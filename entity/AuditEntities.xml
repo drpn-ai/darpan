@@ -89,6 +89,10 @@
         <field name="statementText" type="text-intermediate" not-null="true">
             <description>The statement verbatim, in the tenant's words.</description>
         </field>
+        <field name="isActive" type="text-indicator">
+            <description>DAR-UI-063. N turns the statement off: it leaves the report and its checks record no findings for it.
+                Blank or Y is on, so rows from before the field read on.</description>
+        </field>
         <field name="sequenceNum" type="number-integer">
             <description>Order of statements in the report.</description>
         </field>

@@ -90,8 +90,9 @@ class AuditReportAssembler {
 
         List<Map> categories = ec.entity.find("moqui.basic.Enumeration").condition("enumTypeId", "AuditCategory")
                 .orderBy("sequenceNum").useCache(true).list()*.getMap()
+        // DAR-UI-063. A statement turned off is not part of the report.
         List<Map> statements = tenantRows(ec, "darpan.audit.AuditStatement", tenantId).condition("auditId", auditId)
-                .orderBy(["sequenceNum", "statementCode"]).list()*.getMap()
+                .orderBy(["sequenceNum", "statementCode"]).list()*.getMap().findAll { (it.isActive ?: "Y") != "N" }
         Set<String> statementIds = statements*.statementId.toSet() as Set<String>
         Map<String, Map> checksById = tenantRows(ec, "darpan.audit.AuditCheck", tenantId).list()
                 .collectEntries { [(it.checkId): it.getMap()] }
@@ -138,7 +139,9 @@ class AuditReportAssembler {
                  reason   : status == RAN ? null : checkReason[checkId],
                  matchedBy: check.matchedBy ?: null,
                  graceDays: (check.graceDays ?: 0) as int,
-                 compared : status == NOT_RUN || run == null ? null : compared(readsByRun[run.checkRunId as String])]
+                 compared : status == NOT_RUN || run == null ? null : compared(readsByRun[run.checkRunId as String]),
+                 // DAR-UI-063. The days this morning's run read: the period to date, or the days a person played.
+                 window   : run == null ? null : [from: isoDate(run.windowFromDate as Date), thru: isoDate(run.windowThruDate as Date)]]
             }
             String worst = stChecks ? stChecks.collect { checkStatus[it] }.max { CHECK_STATUS_ORDER.indexOf(it) } : NOT_RUN
             String reason = null
@@ -227,7 +230,10 @@ class AuditReportAssembler {
         Map<String, Object> sources = new LinkedHashMap<>()
         readsBySystem.each { String key, List<Map> reads ->
             String worst = reads*.statusEnumId.max { READ_STATUS_ORDER.indexOf(it) } as String
-            List counted = reads*.recordCount.findAll { it != null }
+            // DAR-UI-063. Checks run by one automation share one read per window (same stamp, same count): count it once,
+            // or two checks on one run show twice the records read.
+            List counted = reads.unique(false) { [it.systemEnumId, it.endpointEnumId, it.readStamp, it.recordCount] }
+                    *.recordCount.findAll { it != null }
             List<Timestamp> stamps = reads*.readStamp.findAll { it != null } as List<Timestamp>
             Set<String> badChecks = badChecksBySystem[key]
             sources[key] = [
@@ -370,6 +376,7 @@ class AuditReportAssembler {
         Map<String, String> auditCodes = tenantRows(ec, "darpan.audit.Audit", tenantId).list()
                 .collectEntries { [(it.auditId): it.auditCode] }
         List<Map> statements = tenantRows(ec, "darpan.audit.AuditStatement", tenantId).list()*.getMap()
+                .findAll { (it.isActive ?: "Y") != "N" }
         def cf = ec.entity.conditionFactory
         List conditions = []
         for (Map t in (terms ?: [])) {
@@ -675,7 +682,7 @@ class AuditReportAssembler {
     }
 
     /** enumId -> enumCode for the audit-run vocabulary (the JSON emits the code, never the id). */
-    private static Map<String, String> enumCodes(def ec) {
+    static Map<String, String> enumCodes(def ec) {
         return ec.entity.find("moqui.basic.Enumeration").condition("enumTypeId", "in", ENUM_TYPES).useCache(true).list()
                 .collectEntries { [(it.enumId): it.enumCode] }
     }

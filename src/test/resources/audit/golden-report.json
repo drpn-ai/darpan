@@ -43,7 +43,7 @@
           "status": "ran",
           "reason": null,
           "checks": [
-            { "id": "invoices-without-etail-id", "label": "NetSuite invoices and memos with no Etail id", "status": "ran", "reason": null, "matchedBy": null, "graceDays": 1, "compared": { "NetSuite": 2210 } }
+            { "id": "invoices-without-etail-id", "label": "NetSuite invoices and memos with no Etail id", "status": "ran", "reason": null, "matchedBy": null, "graceDays": 1, "compared": { "NetSuite": 2210 }, "window": { "from": "2026-10-01", "thru": "2026-10-08" } }
           ],
           "counts": { "open": 0, "pending": 1, "newToday": 1, "fixedToday": 0 },
           "findings": [
@@ -75,7 +75,7 @@
           "status": "ran",
           "reason": null,
           "checks": [
-            { "id": "returns-vs-credit-memos", "label": "OMS returns against NetSuite credit memos", "status": "ran", "reason": null, "matchedBy": "return id (custbody_hc_return_id)", "graceDays": 1, "compared": { "OMS": 412, "NetSuite": 409 } }
+            { "id": "returns-vs-credit-memos", "label": "OMS returns against NetSuite credit memos", "status": "ran", "reason": null, "matchedBy": "return id (custbody_hc_return_id)", "graceDays": 1, "compared": { "OMS": 412, "NetSuite": 409 }, "window": { "from": "2026-10-01", "thru": "2026-10-08" } }
           ],
           "counts": { "open": 1, "pending": 0, "newToday": 0, "fixedToday": 0 },
           "findings": [

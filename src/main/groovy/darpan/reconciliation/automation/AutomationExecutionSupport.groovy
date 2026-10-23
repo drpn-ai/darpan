@@ -336,7 +336,7 @@ class AutomationExecutionSupport {
         List<Map> auditChecks = AuditAutomationSupport.checksFor(ec, automation)
         Map audit = auditChecks ? AuditAutomationSupport.auditFor(ec, normalize(readField(automation, "companyUserGroupId")), auditChecks) : null
         List<Map<String, Object>> windows = audit ?
-                AuditAutomationSupport.resolveWindows(ec, automation, audit, scheduledFireTime) :
+                AuditAutomationSupport.resolveWindows(ec, automation, audit, scheduledFireTime, input) :
                 resolveWindows(automation, input + [scheduledFireTime: scheduledFireTime])
         Map<String, Object> sourcesBySide = loadAutomationSources(ec, automationId)
         // DAR-BE-093: an EVALUATE scope reads ONE source (DAR-BE-049), as runSavedRunDiff already runs it: no FILE_2

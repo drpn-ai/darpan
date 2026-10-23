@@ -192,6 +192,13 @@
             <parameter name="windowEndDate" type="Timestamp">
                 <description>Required only for AUT_WIN_CUSTOM backfill runs.</description>
             </parameter>
+            <parameter name="auditWindowFromDate" type="Date">
+                <description>DAR-UI-063. An audit run played over picked days: the first day (the automation's zone). With
+                    auditWindowThruDate it replaces the audit's period-to-date windows.</description>
+            </parameter>
+            <parameter name="auditWindowThruDate" type="Date">
+                <description>DAR-UI-063. The last picked day, inclusive.</description>
+            </parameter>
             <parameter name="nowTimestamp" type="Timestamp"/>
             <parameter name="hasHeader" type="Boolean" default-value="true"/>
             <parameter name="outputLocation"/>

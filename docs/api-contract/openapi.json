@@ -3899,6 +3899,103 @@
                     "result"
                 ]
             },
+            "GetAuditSettingsParams": {
+                "type": "object",
+                "properties": {
+                    "audit": {
+                        "type": "string",
+                        "description": "The audit's code."
+                    }
+                },
+                "required": [
+                    "audit"
+                ],
+                "description": "An audit's settings: its name, the daily schedule its checks run on, and each statement with its\n            checks and the run each check reads."
+            },
+            "GetAuditSettingsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "settings": {
+                        "type": "object",
+                        "description": "{audit: {id, name, period}, playableFrom: YYYY-MM-DD (the earliest\n                day play can record today), schedule: {active, time HH:mm,\n                timeZone, mixed, automations, checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label,\n                savedRunId, runName}]}]}"
+                    }
+                }
+            },
+            "GetAuditSettingsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.get#AuditSettings",
+                "x-darpan-method": "facade.AuditFacadeServices.get#AuditSettings",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuditFacadeServices.get#AuditSettings"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAuditSettingsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAuditSettingsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.get#AuditSettings. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAuditSettingsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "GetAuditsParams": {
                 "type": "object",
                 "properties": {
@@ -4001,6 +4098,230 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/GetAuditsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RunAuditParams": {
+                "type": "object",
+                "properties": {
+                    "audit": {
+                        "type": "string",
+                        "description": "The audit's code."
+                    },
+                    "fromDate": {
+                        "type": "string",
+                        "description": "First day, YYYY-MM-DD."
+                    },
+                    "thruDate": {
+                        "type": "string",
+                        "description": "Last day, YYYY-MM-DD, inclusive."
+                    }
+                },
+                "required": [
+                    "audit",
+                    "fromDate",
+                    "thruDate"
+                ],
+                "description": "Play: runs every check of the audit now over the days picked, first to last inclusive (the tenant's zone),\n            recording findings as the morning run does. Submitted to the background, one automation per run; the audit page\n            shows the results as each finishes. Refused up front for days in the future or in a period that ended and was\n            not extended."
+            },
+            "RunAuditResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "runs": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        },
+                        "description": "[{automationId, savedRunId, submitted, error}]"
+                    }
+                }
+            },
+            "RunAuditRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.run#Audit",
+                "x-darpan-method": "facade.AuditFacadeServices.run#Audit",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuditFacadeServices.run#Audit"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RunAuditParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RunAuditResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.run#Audit. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RunAuditResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "SaveAuditSettingsParams": {
+                "type": "object",
+                "properties": {
+                    "audit": {
+                        "type": "string",
+                        "description": "The audit's code."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "New name; blank keeps it."
+                    },
+                    "statements": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "description": "Moqui type Map"
+                        },
+                        "description": "[{id, text, active}], only those that changed."
+                    },
+                    "schedule": {
+                        "type": "object",
+                        "description": "{active, time HH:mm, timeZone}; absent keeps it."
+                    }
+                },
+                "required": [
+                    "audit"
+                ],
+                "description": "Changes an audit's name, statements (text, on/off) and the daily schedule of every check it runs. A check\n            whose run has no automation gets one (paused) when the schedule is saved. Answers the settings as saved."
+            },
+            "SaveAuditSettingsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "settings": {
+                        "type": "object",
+                        "description": "{audit: {id, name, period}, playableFrom: YYYY-MM-DD (the earliest\n                day play can record today), schedule: {active, time HH:mm,\n                timeZone, mixed, automations, checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label,\n                savedRunId, runName}]}]}"
+                    }
+                }
+            },
+            "SaveAuditSettingsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.save#AuditSettings",
+                "x-darpan-method": "facade.AuditFacadeServices.save#AuditSettings",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuditFacadeServices.save#AuditSettings"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/SaveAuditSettingsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "SaveAuditSettingsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.save#AuditSettings. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/SaveAuditSettingsResult"
                     }
                 },
                 "required": [
@@ -21827,7 +22148,10 @@
         "admin.UserAdminServices.update#UserAccount": "UpdateUserAccount",
         "facade.AuditFacadeServices.get#AuditFinding": "GetAuditFinding",
         "facade.AuditFacadeServices.get#AuditReport": "GetAuditReport",
+        "facade.AuditFacadeServices.get#AuditSettings": "GetAuditSettings",
         "facade.AuditFacadeServices.get#Audits": "GetAudits",
+        "facade.AuditFacadeServices.run#Audit": "RunAudit",
+        "facade.AuditFacadeServices.save#AuditSettings": "SaveAuditSettings",
         "facade.AuthFacadeServices.change#ExpiredPassword": "ChangeExpiredPassword",
         "facade.AuthFacadeServices.change#OwnPassword": "ChangeOwnPassword",
         "facade.AuthFacadeServices.complete#PasswordReset": "CompletePasswordReset",

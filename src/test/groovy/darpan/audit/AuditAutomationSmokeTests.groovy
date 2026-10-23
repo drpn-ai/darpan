@@ -115,6 +115,39 @@ class AuditAutomationSmokeTests {
         extend("2026-09", null)
     }
 
+    // DAR-UI-063: play runs the days a person picks, not the period to date. Each period's days are their own window,
+    // dated as picked, reported on the run's own morning; a period that ended and was not extended is refused up front.
+    @Test
+    void picksDaysAreSplitByPeriodAndKeepTheirOwnDates() {
+        List<Map> checks = AuditAutomationSupport.checksFor(ec, automation)
+        Map audit = AuditAutomationSupport.auditFor(ec, TENANT, checks)
+        Map explicit = [auditWindowFromDate: Date.valueOf("2026-10-10"), auditWindowThruDate: Date.valueOf("2026-10-14")]
+        List<Map> windows = AuditAutomationSupport.resolveWindows(ec, automation, audit, at("2026-10-22", "16:00:00"), explicit)
+        assertEquals(1, windows.size())
+        assertEquals([at("2026-10-10", "00:00:00"), at("2026-10-15", "00:00:00"), "2026-10", Date.valueOf("2026-10-22"),
+                      Date.valueOf("2026-10-10"), Date.valueOf("2026-10-14")],
+                [windows[0].childWindowStartDate, windows[0].childWindowEndDate, windows[0].auditPeriod, windows[0].auditReportDate,
+                 windows[0].auditWindowFromDate, windows[0].auditWindowThruDate])
+
+        extend("2026-09", "2026-10-25")
+        List<Map> both = AuditAutomationSupport.resolveWindows(ec, automation, audit, at("2026-10-22", "16:00:00"),
+                [auditWindowFromDate: Date.valueOf("2026-09-28"), auditWindowThruDate: Date.valueOf("2026-10-02")])
+        assertEquals(["2026-09", "2026-10"], both*.auditPeriod, "one window per period")
+        assertEquals([Date.valueOf("2026-09-28"), Date.valueOf("2026-09-30")], [both[0].auditWindowFromDate, both[0].auditWindowThruDate])
+        assertEquals([at("2026-10-01", "00:00:00"), at("2026-10-03", "00:00:00")], [both[1].childWindowStartDate, both[1].childWindowEndDate])
+        extend("2026-09", null)
+
+        IllegalStateException ended = assertThrows(IllegalStateException) {
+            AuditAutomationSupport.resolveWindows(ec, automation, audit, at("2026-10-22", "16:00:00"),
+                    [auditWindowFromDate: Date.valueOf("2026-09-28"), auditWindowThruDate: Date.valueOf("2026-10-02")])
+        }
+        assertTrue(ended.message.contains("2026-09"), ended.message)
+        assertThrows(IllegalArgumentException) {
+            AuditAutomationSupport.resolveWindows(ec, automation, audit, at("2026-10-22", "16:00:00"),
+                    [auditWindowFromDate: Date.valueOf("2026-10-14"), auditWindowThruDate: Date.valueOf("2026-10-23")])
+        }
+    }
+
     @Test
     void aCheckReportingToTwoAuditsIsAConfigError() {
         // A check whose statements belong to two audits (or none) cannot pick its windows.

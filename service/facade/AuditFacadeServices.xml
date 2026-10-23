@@ -93,4 +93,103 @@
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
+    <!-- DAR-UI-063. The audit page's settings gear and play button. Writes need the active tenant's edit access. -->
+    <service verb="get" noun="AuditSettings" authz-action="view" allow-remote="true" authenticate="true">
+        <description>An audit's settings: its name, the daily schedule its checks run on, and each statement with its
+            checks and the run each check reads.</description>
+        <in-parameters><parameter name="audit" required="true"><description>The audit's code.</description></parameter></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="settings" type="Map"><description>{audit: {id, name, period}, playableFrom: YYYY-MM-DD (the earliest
+                day play can record today), schedule: {active, time HH:mm,
+                timeZone, mixed, automations, checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label,
+                savedRunId, runName}]}]}</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="auditRow" from="darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit)"/>
+            <if condition="!auditRow"><return error="true" message="Audit ${audit} was not found"/></if>
+            <set field="settings" from="darpan.audit.AuditSettingsSupport.settings(ec, tenantId, auditRow)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="save" noun="AuditSettings" allow-remote="true" authenticate="true">
+        <description>Changes an audit's name, statements (text, on/off) and the daily schedule of every check it runs. A check
+            whose run has no automation gets one (paused) when the schedule is saved. Answers the settings as saved.</description>
+        <in-parameters>
+            <parameter name="audit" required="true"><description>The audit's code.</description></parameter>
+            <parameter name="name"><description>New name; blank keeps it.</description></parameter>
+            <parameter name="statements" type="List"><description>[{id, text, active}], only those that changed.</description>
+                <parameter name="statement" type="Map"/></parameter>
+            <parameter name="schedule" type="Map"><description>{active, time HH:mm, timeZone}; absent keeps it.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="settings" type="Map"><description>{audit: {id, name, period}, playableFrom: YYYY-MM-DD (the earliest
+                day play can record today), schedule: {active, time HH:mm,
+                timeZone, mixed, automations, checksWithoutRun}, statements: [{id, code, text, active, checks: [{id, label,
+                savedRunId, runName}]}]}</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for audit changes.')"/>
+            <if condition="!ec.message.hasError()">
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="auditRow" from="darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit)"/>
+            <if condition="!auditRow"><return error="true" message="Audit ${audit} was not found"/></if>
+                <script>darpan.audit.AuditSettingsSupport.save(ec, tenantId, auditRow, name, statements as List, schedule as Map)</script>
+                <if condition="!ec.message.hasError()">
+                    <set field="settings" from="darpan.audit.AuditSettingsSupport.settings(ec, tenantId, darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit))"/>
+                </if>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="run" noun="Audit" allow-remote="true" authenticate="true">
+        <description>Play: runs every check of the audit now over the days picked, first to last inclusive (the tenant's zone),
+            recording findings as the morning run does. Submitted to the background, one automation per run; the audit page
+            shows the results as each finishes. Refused up front for days in the future or in a period that ended and was
+            not extended.</description>
+        <in-parameters>
+            <parameter name="audit" required="true"><description>The audit's code.</description></parameter>
+            <parameter name="fromDate" required="true"><description>First day, YYYY-MM-DD.</description></parameter>
+            <parameter name="thruDate" required="true"><description>Last day, YYYY-MM-DD, inclusive.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="runs" type="List"><description>[{automationId, savedRunId, submitted, error}]</description>
+                <parameter name="run" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for running audits.')"/>
+            <if condition="!ec.message.hasError()">
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="auditRow" from="darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit)"/>
+            <if condition="!auditRow"><return error="true" message="Audit ${audit} was not found"/></if>
+                <script>
+                    try {
+                        runs = darpan.audit.AuditSettingsSupport.run(ec, tenantId, auditRow, java.time.LocalDate.parse(fromDate.trim()),
+                                java.time.LocalDate.parse(thruDate.trim()))
+                    } catch (java.time.format.DateTimeParseException e) {
+                        ec.message.addError("The days must be YYYY-MM-DD.")
+                    }
+                </script>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
 </services>

@@ -2,7 +2,10 @@ package darpan.facade.reconciliation
 
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.TenantScopedFinder
+import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.conclusion.ConclusionKeySupport
+import darpan.reconciliation.conclusion.ConclusionLookupSupport
+import darpan.reconciliation.conclusion.JsonRecordStream
 import darpan.reconciliation.conclusion.RunConclusionSupport
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
@@ -56,7 +59,20 @@ class RunConclusionStep {
 
             Map documentLabels = documentLabels(diffFile)
             boolean singleSided = documentLabels.file2Label == null || args.get("file2Result") == null
+            def scope = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareScope")
+                    .condition("compareScopeId", compareScopeId).useCache(false).one()
+            List<String> lookupWarnings = []
+            List<Map> lookups = []
+            try {
+                lookups = ConclusionLookupSupport.parse(scope?.conclusionLookupsJson)
+            } catch (Exception e) {
+                lookupWarnings.add("Lookups not read: ${e.message}".toString())
+            }
             Map result = RunConclusionSupport.concludeRun([
+                    lookups    : lookups,
+                    fetchLookup: { Map lookup, List<String> ids ->
+                        fetchLookup(ec, lookup, ids, normalize(scope?.companyUserGroupId), lookupWarnings)
+                    },
                     diffFile   : diffFile,
                     file1Label : documentLabels.file1Label,
                     file2Label : documentLabels.file2Label,
@@ -68,13 +84,46 @@ class RunConclusionStep {
             int concluded = ((Map) (result.counts ?: [:])).values().sum(0) as int
             RunObservability.endStep(ec, step, RunObservability.STATUS_SUCCESS,
                     [recordCount: concluded,
-                     metricsJson: JsonOutput.toJson([counts: result.counts, unknownSides: result.unknownSides])])
-            return result
+                     metricsJson: JsonOutput.toJson([counts: result.counts, unknownSides: result.unknownSides,
+                                                     lookupWarnings: lookupWarnings ?: null])])
+            return result + (lookupWarnings ? [warning: lookupWarnings.join("; ")] : [:])
         } catch (Throwable t) {
             if (ec?.message?.hasError()) ec.message.clearErrors()
             RunObservability.endStep(ec, step, RunObservability.STATUS_FAILED,
                     [errorMessage: "Conclusions not drawn: ${normalize(t.message) ?: t.class.simpleName}".toString()])
             return [ran: false, warning: t.message]
+        }
+    }
+
+    /**
+     * DAR-BE-118. One lookup call: the lookup's connector reads its config for these ids only. A connector whose extract
+     * does not declare lookupIds is never called (it would read a whole window). A failed lookup is a warning and
+     * attaches nothing, so those findings keep the conclusion they reach without it.
+     */
+    static Map<String, Map> fetchLookup(def ec, Map lookup, List<String> ids, String tenantId, List<String> warnings) {
+        try {
+            Map connector = SourceSystemConnectorSupport.resolveBySystemEnumId(ec, (String) lookup.systemEnumId)
+            String service = normalize(connector?.extractServiceName)
+            String configParameter = normalize(connector?.configParameterName)
+            if (!service || !configParameter || !ec.service.getServiceDefinition(service)?.inParameterNameList?.contains("lookupIds")) {
+                throw new IllegalStateException("${lookup.systemEnumId} cannot be asked by id")
+            }
+            Map out = ec.service.sync().name(service).parameters([(configParameter): lookup.sourceConfigId, lookupIds: ids,
+                    companyUserGroupId: tenantId, fileName: "lookup-${lookup.name}-${System.currentTimeMillis()}.json".toString()]).call()
+            List errors = (List) (out?.errors ?: (ec.message.hasError() ? ec.message.errors : []))
+            if (errors) throw new IllegalStateException(errors.join("; "))
+            File file = RunVerificationSupport.resolveLocationFile(ec, normalize(out?.fileLocation))
+            Map<String, Map> found = [:]
+            if (file?.isFile()) JsonRecordStream.forEachRecord(file, "records") { Map r ->
+                String key = normalize(r.get(lookup.keyField))
+                if (key) found.put(key, r)
+            }
+            ec.logger.info("conclusion lookup ${lookup.name}: asked ${ids.size()} ids of ${lookup.systemEnumId}, found ${found.size()}")
+            return found
+        } catch (Throwable t) {
+            if (ec?.message?.hasError()) ec.message.clearErrors()
+            warnings.add("Lookup ${lookup.name} not answered: ${normalize(t.message) ?: t.class.simpleName}".toString())
+            return [:]
         }
     }
 

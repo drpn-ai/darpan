@@ -46,14 +46,16 @@ class ConclusionTreeSupport {
 
     static Map result(Map fact) {
         Map node = (Map) fact.get("_reached")
-        if (node == null) return [code: UNEXPLAINED, label: UNEXPLAINED_LABEL, checks: [], question: null, path: []]
+        if (node == null) return [code: UNEXPLAINED, label: UNEXPLAINED_LABEL, checks: [], question: null, path: [], nodeId: null]
         List<Map> path = (List<Map>) fact.get("_path")
         String questionText = text(node.get("questionText"))
         return [code    : node.get("conclusionEnumId"),
                 label   : node.get("label"),
                 checks  : path.collectMany { Map step -> (List) step.checks },
                 question: questionText ? [text: questionText, suggestedFilter: node.get("suggestedFilter")] : null,
-                path    : path]
+                path    : path,
+                // DAR-BE-118: which node concluded it, so a lookup can tell which rules it tried. Not written to the document.
+                nodeId  : node.get("nodeId")]
     }
 
     private static Map sideFor(Map fact, Map condition) {

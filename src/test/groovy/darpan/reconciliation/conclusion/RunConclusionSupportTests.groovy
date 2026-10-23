@@ -94,6 +94,39 @@ class RunConclusionSupportTests {
         return (Map) new JsonSlurper().parseText(f.getText("UTF-8"))
     }
 
+    /**
+     * DAR-BE-118 (gorjana R8, F-104609): a return whose order is backordered in NetSuite. Only the findings that reach the
+     * rule reading the lookup are asked about, each id once, in one call; a found record names the cause, a miss falls through.
+     */
+    @Test
+    void aLookupAsksOnlyForTheFindingsThatReachItsRuleAndConcludesWithTheAnswer() {
+        List rules = [
+                [conclusionEnumId: "C_NO_ORDER", label: "Its order never reached NetSuite", appliesToBucket: "MISSING_FROM_FILE_2",
+                 conditions: [cond(subject: "FILE_1", fieldExpression: "orderNetsuiteId", operator: "BLANK", checkLabel: "No order id")]],
+                [conclusionEnumId: "C_BACKORDER", label: "Its order is backordered in NetSuite", appliesToBucket: "MISSING_FROM_FILE_2",
+                 conditions: [cond(subject: "FILE_1", fieldExpression: "orderInNetsuite.backordered", operator: "GT", conditionValues: ["0"],
+                                   checkLabel: "Units backordered")]],
+                [conclusionEnumId: "C_NOT_IN_NS", label: "Return not in NetSuite", appliesToBucket: "MISSING_FROM_FILE_2",
+                 conditions: [cond(subject: "FILE_1", fieldExpression: "statusId", operator: "IN", conditionValues: ["RETURN_COMPLETED"],
+                                   checkLabel: "Completed")]]]
+        Closure row = { String id, String orderNs -> [diffType: "missing_in_${FILE2}".toString(), primaryId: id, presentIn: FILE1,
+                missingIn: FILE2, data: JsonOutput.toJson([returnId: id, statusId: "RETURN_COMPLETED", orderNetsuiteId: orderNs])] }
+        File doc = writeDiffDocument([row("R1", null), row("R2", "81"), row("R3", "82"), row("R4", "81")])
+        List<List<String>> asked = []
+        Map a = args(doc, rules)
+        a.file1 = [extractFile: extract("oms-r.json", []), keyFields: ["returnId"], idNormalizer: null, evidence: HOTWAX_EVIDENCE]
+        a.lookups = [[name: "orderInNetsuite", subject: "FILE_1", idField: "orderNetsuiteId", keyField: "internalId"]]
+        a.fetchLookup = { Map lookup, List<String> ids -> asked.add(ids); return ["81": [internalId: "81", backordered: "2"]] }
+
+        Map result = RunConclusionSupport.concludeRun(a)
+
+        assertEquals([["81", "82"]], asked, "R1 is explained first; 81 and 82 are asked once, together")
+        Map byId = ((List<Map>) parse(doc).differences).collectEntries { [(it.primaryId): it.conclusion] }
+        assertEquals(["C_NO_ORDER", "C_BACKORDER", "C_NOT_IN_NS", "C_BACKORDER"], ["R1", "R2", "R3", "R4"].collect { byId[it].code })
+        assertEquals("2", ((List<Map>) byId.R2.checks).find { it.label == "Units backordered" }.value)
+        assertEquals(2, result.counts.C_BACKORDER)
+    }
+
     @Test
     void noRulesLeavesTheDocumentByteIdentical() {
         File doc = writeDiffDocument([missingRow("M1${SEP}01", FILE1, FILE2)])

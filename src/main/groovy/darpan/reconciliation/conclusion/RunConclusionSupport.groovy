@@ -28,6 +28,8 @@ class RunConclusionSupport {
     static final String TMP_SUFFIX = "conclude-tmp"
     /** Records kept per key: enough to judge "every record under this key", bounded for a hot key. */
     static final int MAX_RECORDS_PER_KEY = 1000
+    /** DAR-BE-118: ids per lookup call. */
+    static final int LOOKUP_BATCH = 500
     static Map concludeRun(Map args) {
         List<Map> rules = (List<Map>) (args.rules ?: [])
         if (!rules) return [ran: false]
@@ -81,7 +83,7 @@ class RunConclusionSupport {
         labels.put(ConclusionTreeSupport.UNEXPLAINED, ConclusionTreeSupport.UNEXPLAINED_LABEL)
 
         JsonSlurper slurper = new JsonSlurper()
-        DiffDocumentStreamSupport.rewriteDocument(diffFile, TMP_SUFFIX, { Map row ->
+        Closure<Map> finding = { Map row ->
             String bucket = singleSided ? "FINDING" : bucketOf(row, file1Label, file2Label)
             String key = row.get("primaryId")?.toString()
             String presentSide = singleSided ? "FILE_1" :
@@ -101,7 +103,18 @@ class RunConclusionSupport {
                     sides.put(side, lookup((Map) index.get(side), key))
                 }
             }
-            Map conclusion = engine.conclude([[bucket: bucket, sides: sides]])[0]
+            return [bucket: bucket, sides: sides]
+        }
+        Map<String, Map<String, Map>> answers = lookUp(engine, rules, args, diffFile, finding)
+
+        DiffDocumentStreamSupport.rewriteDocument(diffFile, TMP_SUFFIX, { Map row ->
+            Map f = finding(row)
+            Map sides = (Map) f.sides
+            ((List<Map>) (args.lookups ?: [])).each { Map l ->
+                Map found = answers.get(l.name)
+                if (found && sides.get(l.subject) != null) sides.put(l.subject, ConclusionLookupSupport.attach((Map) sides.get(l.subject), l, found))
+            }
+            Map conclusion = engine.conclude([f])[0]
             String code = conclusion.code?.toString()
             if (!counts.containsKey(code)) {
                 counts.put(code, 0)
@@ -128,6 +141,33 @@ class RunConclusionSupport {
                                             }]]
         })
         return [ran: true, counts: counts, unknownSides: unknownSides]
+    }
+
+    /**
+     * DAR-BE-118. Concludes every finding once without the lookups, then asks each lookup source, in batches of
+     * LOOKUP_BATCH, for only the ids named by findings that reached a rule reading it: name -> (id -> record).
+     */
+    private static Map<String, Map<String, Map>> lookUp(ConclusionTreeEngine engine, List<Map> rules, Map args, File diffFile,
+                                                        Closure<Map> finding) {
+        List<Map> lookups = (List<Map>) (args.lookups ?: [])
+        Closure fetch = (Closure) args.fetchLookup
+        if (!lookups || fetch == null) return [:]
+        Map plan = ConclusionLookupSupport.plan(ConclusionRuleLogicGenerator.assignNodes(rules), lookups)
+        Map<String, Set<String>> wanted = lookups.collectEntries { [(it.name): new LinkedHashSet<String>()] }
+        DiffDocumentStreamSupport.forEachRow(diffFile) { Map row ->
+            Map f = finding(row)
+            String reached = engine.conclude([f])[0].nodeId
+            lookups.each { Map l ->
+                if (ConclusionLookupSupport.reaches(plan, (String) l.name, reached, (String) f.bucket, (Map) f.sides)) {
+                    wanted.get(l.name).addAll(ConclusionLookupSupport.idsOf((Map) ((Map) f.sides).get(l.subject), l))
+                }
+            }
+        }
+        return lookups.collectEntries { Map l ->
+            Map<String, Map> found = [:]
+            wanted.get(l.name).toList().collate(LOOKUP_BATCH).each { List<String> ids -> found.putAll((Map) fetch.call(l, ids) ?: [:]) }
+            [(l.name): found]
+        }
     }
 
     private static String bucketOf(Map row, String file1Label, String file2Label) {

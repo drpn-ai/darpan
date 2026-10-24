@@ -58,6 +58,9 @@ class ConclusionLookupSupportTests {
         assertThrows(IllegalArgumentException) { ConclusionLookupSupport.parse('[{"name":"x"}]') }
         assertThrows(IllegalArgumentException) { ConclusionLookupSupport.parse(groovy.json.JsonOutput.toJson([LOOKUP + [subject: "FILE_3"]])) }
         assertThrows(IllegalArgumentException) { ConclusionLookupSupport.parse(groovy.json.JsonOutput.toJson([LOOKUP + [name: "a.b"]])) }
+        assertEquals([keepRecordFields: ["orderId", "notes"]],
+                ConclusionLookupSupport.parse(groovy.json.JsonOutput.toJson([LOOKUP + [parameters: [keepRecordFields: ["orderId", "notes"]]]]))[0].parameters)
+        assertThrows(IllegalArgumentException) { ConclusionLookupSupport.parse(groovy.json.JsonOutput.toJson([LOOKUP + [parameters: "x"]])) }
     }
 
     @Test

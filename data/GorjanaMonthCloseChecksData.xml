@@ -96,8 +96,11 @@
 
     <!-- Which rows break which statement. R1 is every completed item NetSuite did not bill, whatever the reason; R3 is the
          ones whose reason is the missing location, so such an item breaks both. -->
+    <!-- Aditi 2026-10-23/24 ("split by cause"): R1 counts the causes that need fixing; an expected one (a duplicate order,
+         a partial payment, neither sent to NetSuite by design) closes with its reason. Unexplained still counts. -->
     <darpan.audit.AuditStatementCheck statementId="GORJANA_R1" checkId="GORJANA_CHK_COMPLETED_BILLED" companyUserGroupId="GORJANA"
-            sequenceNum="1" diffTypes="MISSING_IN_FILE_2"/>
+            sequenceNum="1" diffTypes="MISSING_IN_FILE_2"
+            conclusionCodes="CONC_COMPLETED_CLOSED_IN_NS,CONC_NS_NO_LINE_LOCATION,CONC_NS_BACKORDERED,CONC_ORDER_BACKORDER_HOLDS_BILLING,CONC_SHIPPED_NOT_BILLED,CONC_NEVER_REACHED_NS,UNEXPLAINED"/>
     <darpan.audit.AuditStatementCheck statementId="GORJANA_R3" checkId="GORJANA_CHK_LINE_LOCATION" companyUserGroupId="GORJANA"
             sequenceNum="1" diffTypes="MISSING_IN_FILE_2" conclusionCodes="CONC_NS_NO_LINE_LOCATION"/>
     <darpan.audit.AuditStatementCheck statementId="GORJANA_R2" checkId="GORJANA_CHK_INVOICE_ETAIL" companyUserGroupId="GORJANA"

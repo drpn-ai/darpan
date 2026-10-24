@@ -108,11 +108,21 @@ class RunConclusionStep {
             if (!service || !configParameter || !ec.service.getServiceDefinition(service)?.inParameterNameList?.contains("lookupKeys")) {
                 throw new IllegalStateException("${lookup.systemEnumId} cannot be asked by id")
             }
-            Map out = ec.service.sync().name(service).parameters([(configParameter): lookup.sourceConfigId, lookupKeys: ids, lookupKeyField: lookup.keyField,
-                    companyUserGroupId: tenantId, fileName: "lookup-${lookup.name}-${System.currentTimeMillis()}.json".toString()]).call()
+            Map options = lookup.parameters instanceof Map ? (Map) lookup.parameters : [:]
+            // A read by key has no window, but an extract's contract may still require one: send all time, under the
+            // connector's own names; the keys bound the read (lookupKeys).
+            Map window = [(normalize(connector.dateFromParameterName) ?: "windowStart"): new java.sql.Timestamp(0L),
+                          (normalize(connector.dateToParameterName) ?: "windowEnd")  : ec.user.nowTimestamp]
+            Map out = ec.service.sync().name(service).parameters(options + window + [(configParameter): lookup.sourceConfigId,
+                    lookupKeys: ids, lookupKeyField: lookup.keyField, companyUserGroupId: tenantId,
+                    fileName: "lookup-${lookup.name}-${System.currentTimeMillis()}.json".toString()]).call()
             List errors = (List) (out?.errors ?: (ec.message.hasError() ? ec.message.errors : []))
             if (errors) throw new IllegalStateException(errors.join("; "))
             File file = RunVerificationSupport.resolveLocationFile(ec, normalize(out?.fileLocation))
+            // An answer with no file is a failed lookup, never "none found" (a refused call answers nothing at all).
+            if (!file?.isFile() && out?.dataAvailable != false) {
+                throw new IllegalStateException("${service} answered no file${ec.message.validationErrors ? ': ' + ec.message.validationErrors.join('; ') : ''}")
+            }
             Map<String, Map> found = [:]
             if (file?.isFile()) JsonRecordStream.forEachRecord(file, "records") { Map r ->
                 String key = normalize(r.get(lookup.keyField))

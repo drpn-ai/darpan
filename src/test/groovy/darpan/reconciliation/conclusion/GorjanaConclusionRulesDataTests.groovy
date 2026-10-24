@@ -50,7 +50,7 @@ class GorjanaConclusionRulesDataTests {
         Set<String> scopes = load("data/TriSystemOrderRunsRuleSetData.xml").'**'
                 .findAll { it.name() == 'darpan.rule.RuleSetCompareScope' }.collect { it.@compareScopeId.toString() } as Set
 
-        assertEquals(20, rules.size(), "the catalogue for runs A-open, B, C and C-cancel (DAR-BE-118: +2 causes on run C)")
+        assertEquals(21, rules.size(), "the catalogue for runs A-open, B, C and C-cancel (DAR-BE-118: +2 causes on run C, +1 duplicate)")
         Set<String> seen = []
         rules.each { rule ->
             String key = "${rule.@compareScopeId}/${rule.@sequenceNum}".toString()
@@ -139,6 +139,10 @@ class GorjanaConclusionRulesDataTests {
                 [presence: "KEPT", record: [orderGrandTotal: 0]], [presence: "ABSENT", record: null]))
         assertEquals("CONC_NEVER_REACHED_NS", conclude("GORJANA_OMS_NS_LINE_SCOPE", "MISSING_FROM_FILE_2",
                 [presence: "KEPT", record: [orderGrandTotal: 140]], [presence: "ABSENT", record: null]))
+        // Aditi 2026-10-24 (F-100794): HotWax notes the order as a duplicate; it is never sent to NetSuite by design.
+        assertEquals("CONC_DUPLICATE_ORDER_NO_NS", conclude("GORJANA_OMS_NS_LINE_SCOPE", "MISSING_FROM_FILE_2",
+                [presence: "KEPT", record: [orderGrandTotal: 44, omsOrder: [orderId: "M1168007",
+                        notes: [[note: [noteInfo: "fashion"]], [note: [noteInfo: "duplicate order"]]]]]], [presence: "ABSENT", record: null]))
     }
 
     /**

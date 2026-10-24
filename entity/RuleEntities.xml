@@ -103,7 +103,7 @@
                 the column needs NO upgrade data and cannot reclassify a live reconciliation. A stored
                 value that is neither mode throws rather than falling back.</description>
         </field>
-        <field name="conclusionLookupsJson" type="text-medium">
+        <field name="conclusionLookupsJson" type="text-long">
             <description>DAR-BE-118. Records in another system a conclusion rule may read, looked up only for the
                 findings that reach such a rule: a JSON list of {name, subject (FILE_1|FILE_2), idField, systemEnumId,
                 sourceConfigId, keyField}. A finding's subject record names the other record by idField; the connector

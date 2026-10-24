@@ -239,7 +239,8 @@ class GorjanaMonthCloseChecksDataTests {
             assertTrue(statements.contains(l.attribute("statementId") as String), "unknown statement ${l.attribute('statementId')}")
             assertTrue(attr(checks, "checkId").contains(l.attribute("checkId") as String), "unknown check ${l.attribute('checkId')}")
             ((l.attribute("conclusionCodes") ?: "") as String).split(",")*.trim().findAll { it }.each { String code ->
-                assertTrue(conclusions.contains(code), "undeclared conclusion ${code}")
+                // UNEXPLAINED is the engine's own code for "no rule matched" (R1 still counts those, DAR-BE-120).
+                assertTrue(conclusions.contains(code) || code == "UNEXPLAINED", "undeclared conclusion ${code}")
             }
         }
     }

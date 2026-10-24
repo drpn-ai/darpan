@@ -6,7 +6,8 @@ import groovy.json.JsonSlurper
  * DAR-BE-118. A conclusion lookup: a finding's record names a record in another system (an OMS return names its order's
  * NetSuite id), and a rule reads that record, attached under the lookup's name (orderInNetsuite.backordered).
  * Configured on the compare scope (RuleSetCompareScope.conclusionLookupsJson) as
- * [{name, subject (FILE_1|FILE_2), idField, systemEnumId, sourceConfigId, keyField}].
+ * [{name, subject (FILE_1|FILE_2), idField, systemEnumId, sourceConfigId, keyField, parameters?}]; parameters are extract
+ * options the connector reads, e.g. {keepRecordFields: [orderId, notes]} to ask OMS for an order's notes.
  *
  * Asked as little as possible (Aditi 2026-10-23): only for findings whose first evaluation REACHED a rule reading the
  * name, each id once. Siblings are tried in sequence and the first match wins, so a finding reached rule L when L's
@@ -29,6 +30,9 @@ class ConclusionLookupSupport {
             if (missing) throw new IllegalArgumentException("Conclusion lookup ${lookup.name ?: ''} needs ${missing.join(', ')}")
             if (!(lookup.subject in ["FILE_1", "FILE_2"])) throw new IllegalArgumentException("A lookup's subject is FILE_1 or FILE_2, got: ${lookup.subject}")
             if (!(lookup.name ==~ /[A-Za-z][A-Za-z0-9_]{0,59}/)) throw new IllegalArgumentException("A lookup's name is one word, got: ${lookup.name}")
+            if (lookup.parameters != null && !(lookup.parameters instanceof Map)) {
+                throw new IllegalArgumentException("A lookup's parameters are an object of extract options, got: ${lookup.parameters}")
+            }
             return lookup
         }
     }

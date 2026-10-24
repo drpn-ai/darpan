@@ -43,29 +43,6 @@
         </index>
     </entity>
 
-    <entity entity-name="AuditPeriodExtension" package="darpan.audit" use="configuration">
-        <description>DAR-BE-091. A user's ask that one ended period of an audit keeps running: each morning through
-            continueThruDate, that period's checks re-read the whole period beside the new period's own run, so its open
-            findings can still close. No row: the period stops at its last day and its findings stay as they are.</description>
-        <field name="auditId" type="id" is-pk="true"/>
-        <field name="period" type="text-short" is-pk="true">
-            <description>The period kept running, in the audit's period form: 2026-10 (month), 2026-Q4, 2026-10-14 (day).</description>
-        </field>
-        <field name="companyUserGroupId" type="id" not-null="true"/>
-        <field name="continueThruDate" type="date" not-null="true">
-            <description>The last morning the period still runs, after the period's own last day.</description>
-        </field>
-        <field name="requestedByUserId" type="id"/>
-        <field name="requestedStamp" type="date-time"/>
-        <relationship type="one" related="darpan.audit.Audit" fk-name="AUDPX_AUDIT">
-            <key-map field-name="auditId"/>
-        </relationship>
-        <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUDPX_COMPANY_GRP">
-            <key-map field-name="companyUserGroupId" related="userGroupId"/>
-        </relationship>
-        <index name="AUDPX_TENANT"><index-field name="companyUserGroupId"/></index>
-    </entity>
-
     <entity entity-name="AuditStatement" package="darpan.audit" use="configuration">
         <description>One thing a tenant needs to be true at month end, in the tenant's own words, e.g. gorjana's
             R4 "Every refund we give a customer is booked in NetSuite at the same amount...".</description>
@@ -135,7 +112,7 @@
         </field>
         <field name="automationId" type="id">
             <description>DAR-BE-092. The scheduled automation that runs this check. When set, that automation reads the
-                audit's windows (get#AuditWindow: the period to date, plus any extended period) instead of its own, and
+                audit's windows (get#AuditWindow: the period to date) instead of its own, and
                 after each window writes the check's health, findings and closings to the ledger.</description>
         </field>
         <field name="file1RecordType" type="text-short">
@@ -258,7 +235,7 @@
         </field>
         <field name="period" type="text-short" not-null="true">
             <description>DAR-BE-091. The period whose run found it, e.g. 2026-10: each period of an audit is its own run and
-                report, and an extended October keeps running beside November.</description>
+                report.</description>
         </field>
         <field name="stateEnumId" type="id" not-null="true">
             <description>AuditFindingState: AUDFS_PENDING inside the check's grace age, AUDFS_OPEN after it, AUDFS_FIXED
@@ -438,8 +415,7 @@
             <description>The morning the check ran, as a tenant calendar day.</description>
         </field>
         <field name="period" type="text-short" not-null="true">
-            <description>DAR-BE-091. The period this run checked, e.g. 2026-10. On Nov 3 an extended October and November
-                are two runs of one check.</description>
+            <description>DAR-BE-091. The period this run checked, e.g. 2026-10.</description>
         </field>
         <field name="windowFromDate" type="date" not-null="true">
             <description>DAR-BE-091. First day the check's window covered (tenant calendar day): the start of the audit's

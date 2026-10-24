@@ -23,7 +23,7 @@
             <parameter name="reportDate" type="Date" required="true">
                 <description>The morning to describe, as a tenant calendar day.</description></parameter>
             <parameter name="period">
-                <description>DAR-BE-091. Which period's run to describe, e.g. 2026-10 on Nov 3 while October is extended.
+                <description>DAR-BE-091. Which period's run to describe, e.g. 2026-10.
                     Blank: the morning's own period.</description></parameter>
             <parameter name="generatedStamp" type="Timestamp" default="ec.user.nowTimestamp">
                 <description>report.generatedAt; pinned by tests, now otherwise.</description></parameter>
@@ -57,7 +57,7 @@
             <parameter name="companyUserGroupId" required="true"/>
             <parameter name="audit" required="true"><description>The audit's code, e.g. month-close.</description></parameter>
             <parameter name="date"><description>The morning, YYYY-MM-DD; blank is today in the tenant's zone.</description></parameter>
-            <parameter name="period"><description>Which period's run, e.g. 2026-10 while October is extended.</description></parameter>
+            <parameter name="period"><description>Which period's run, e.g. 2026-10.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="report" type="Map"/>
@@ -142,8 +142,7 @@
             <parameter name="windowThruDate" type="Date"/>
             <parameter name="period"/>
             <parameter name="runs" type="List">
-                <description>Every run the morning owes, current period first: [period, windowFromDate, windowThruDate,
-                    extendedThru]. An ended period appears while a user's extension still covers the morning.</description></parameter>
+                <description>The run the morning owes: [[period, windowFromDate, windowThruDate]].</description></parameter>
         </out-parameters>
         <actions>
             <entity-find entity-name="darpan.audit.Audit" list="audits">
@@ -157,52 +156,8 @@
             <set field="windowThruDate" from="reportDate"/>
             <set field="windowFromDate" from="java.sql.Date.valueOf(darpan.audit.AuditReportAssembler.periodStart(reportDate.toLocalDate(), periodEnum?.enumCode))"/>
             <set field="period" from="darpan.audit.AuditReportAssembler.periodOf(reportDate.toLocalDate(), periodEnum?.enumCode)"/>
-            <set field="runs" from="darpan.audit.AuditReportAssembler.auditRuns(ec, companyUserGroupId, audits[0].getMap(), reportDate.toLocalDate())
-                    .collect { [period: it.period, windowFromDate: java.sql.Date.valueOf(it.from), windowThruDate: java.sql.Date.valueOf(it.thru),
-                                extendedThru: it.extendedThru ? java.sql.Date.valueOf(it.extendedThru) : null] }"/>
-        </actions>
-    </service>
-
-    <service verb="set" noun="AuditPeriodExtension" authenticate="false" allow-remote="false">
-        <description>DAR-BE-091. A user's choice after a period ends: keep that period's audit running each morning through
-            continueThruDate (its checks re-read the whole period beside the new period's run, so its open findings can
-            still close), or stop it (blank continueThruDate removes the extension). Internal: the app's facade (DAR-UI-058)
-            resolves the tenant and the user before calling it.</description>
-        <in-parameters>
-            <parameter name="companyUserGroupId" required="true"/>
-            <parameter name="auditId" required="true"/>
-            <parameter name="period" required="true">
-                <description>In the audit's period form: 2026-10 (month), 2026-Q4 (quarter), 2026-10-14 (day).</description></parameter>
-            <parameter name="continueThruDate" type="Date">
-                <description>The last morning the period still runs; must be after the period's last day. Blank: stop.</description></parameter>
-        </in-parameters>
-        <actions>
-            <entity-find entity-name="darpan.audit.Audit" list="audits">
-                <econdition field-name="auditId"/>
-                <econdition field-name="companyUserGroupId"/>
-            </entity-find>
-            <if condition="!audits">
-                <return error="true" message="Audit ${auditId} was not found for tenant ${companyUserGroupId}"/></if>
-            <entity-find-one entity-name="moqui.basic.Enumeration" value-field="periodEnum" cache="true">
-                <field-map field-name="enumId" from="audits[0].periodEnumId"/></entity-find-one>
-            <set field="bounds" from="darpan.audit.AuditReportAssembler.periodBounds(period, periodEnum?.enumCode)"/>
-            <if condition="bounds == null">
-                <return error="true" message="${period} is not a ${periodEnum?.enumCode} period of audit ${audits[0].auditCode}"/></if>
-            <entity-find entity-name="darpan.audit.AuditPeriodExtension" list="existing" for-update="true">
-                <econdition field-name="auditId"/>
-                <econdition field-name="period"/>
-                <econdition field-name="companyUserGroupId"/>
-            </entity-find>
-            <if condition="!continueThruDate">
-                <iterate list="existing" entry="row"><entity-delete value-field="row"/></iterate>
-                <return/>
-            </if>
-            <if condition="!continueThruDate.toLocalDate().isAfter(bounds[1])">
-                <return error="true" message="An extension of ${period} must run past its last day, ${bounds[1]}"/></if>
-            <entity-make-value value-field="extension" entity-name="darpan.audit.AuditPeriodExtension"
-                    map="[auditId:auditId, period:period, companyUserGroupId:companyUserGroupId, continueThruDate:continueThruDate,
-                          requestedByUserId:ec.user.userId, requestedStamp:ec.user.nowTimestamp]"/>
-            <entity-create value-field="extension" or-update="true"/>
+            <set field="run" from="darpan.audit.AuditReportAssembler.auditRun(ec, audits[0].getMap(), reportDate.toLocalDate())"/>
+            <set field="runs" from="[[period: run.period, windowFromDate: java.sql.Date.valueOf(run.from), windowThruDate: java.sql.Date.valueOf(run.thru)]]"/>
         </actions>
     </service>
 

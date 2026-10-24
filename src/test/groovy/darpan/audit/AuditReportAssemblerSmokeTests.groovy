@@ -179,7 +179,7 @@ class AuditReportAssemblerSmokeTests {
         assertEquals("darpan.audit.report/v1", doc.schema)
         assertEquals([tenant: [id: GORJANA, name: "Gorjana", timeZone: "America/Los_Angeles"],
                       audit: [id: "month-close", name: "Month close", period: "month"], date: "2026-10-08", period: "2026-10",
-                      window: [from: "2026-10-01", thru: "2026-10-08"], running: true, extendedThru: null,
+                      window: [from: "2026-10-01", thru: "2026-10-08"], running: true,
                       generatedAt: "2026-10-08T06:12:40-07:00"], doc.report, "month to date, the report day included")
         assertEquals("Month close audit for Gorjana, 2026-10. Each finding is one record that breaks one of the audit's statements R2 to R12.", doc.about)
         assertEquals(["orders", "refundsAndCredits", "returns", "exchangesAndWarranty"], (doc.categories as Map).keySet() as List)
@@ -483,41 +483,18 @@ class AuditReportAssemblerSmokeTests {
     }
 
     @Test
-    void anExtendedPeriodRunsBesideTheNewOneUntilItsDate() {
+    void anEndedPeriodStopsAndKeepsWhatItHad() {
         // An October finding first seen on Oct 20 and still open when October ends.
         checkRunFor(RET, "2026-10-20", null, [read("OMS_RETURNS_GQL", "AUDSR_COMPLETE", 5, "06:01:00")])
         String ext1 = (recordFor(RET, "2026-10-20", null, [[statementCode: "R4", recordKey: "EXT-1", headline: "Late October memo"]])
                 .findingIds as List)[0]
 
-        // Nov 3, not extended: October's run is refused, November's runs alone.
+        // Nov 3: October's run is refused, November's runs alone.
         ec.service.sync().name("${LEDGER}.record#CheckRun").parameters([companyUserGroupId: GORJANA, checkId: RET,
                 reportDate: Date.valueOf("2026-11-03"), period: "2026-10", sourceReads: []]).call()
-        assertTrue(ec.message.errorsString.contains("Period 2026-10 ended on 2026-10-31 and is not extended to 2026-11-03"), ec.message.errorsString)
+        assertTrue(ec.message.errorsString.contains("Period 2026-10 ended on 2026-10-31"), ec.message.errorsString)
         ec.message.clearErrors()
-        assertEquals(["2026-11"], runsOn("2026-11-03")*.period)
-
-        // The user asks October to keep running through Nov 5.
-        extend(GORJANA, MONTH_CLOSE, "2026-10", "2026-11-05")
-        assertEquals([[period: "2026-11", from: "2026-11-01", thru: "2026-11-03", extendedThru: null],
-                      [period: "2026-10", from: "2026-10-01", thru: "2026-10-31", extendedThru: "2026-11-05"]], runsOn("2026-11-03"),
-                "the new month's run and October's, side by side")
-        Map octRun = checkRunFor(RET, "2026-11-03", "2026-10", [read("OMS_RETURNS_GQL", "AUDSR_COMPLETE", 5, "06:01:00")])
-        Map octStored = ec.entity.find("darpan.audit.AuditCheckRun").condition("checkRunId", octRun.checkRunId).useCache(false).one().getMap()
-        assertEquals([Date.valueOf("2026-10-01"), Date.valueOf("2026-10-31")], [octStored.windowFromDate, octStored.windowThruDate],
-                "an extended period re-reads its whole span")
-        recordFor(RET, "2026-11-03", "2026-10", [])
-        Map closed = ec.service.sync().name("${LEDGER}.close#ResolvedFindings").parameters([companyUserGroupId: GORJANA, checkId: RET,
-                reportDate: Date.valueOf("2026-11-03"), checkStamp: at("2026-11-03", "06:10:00"), period: "2026-10",
-                checkStatusEnumId: octRun.checkStatusEnumId, examinedRecordKeys: ["EXT-1"]]).call()
-        noErrors()
-        assertEquals([ext1], closed.closedFindingIds, "October's own run closes October's finding in November")
-
-        Map october = report(GORJANA, MONTH_CLOSE, "2026-11-03", "2026-10")
-        assertEquals([period: "2026-10", window: [from: "2026-10-01", thru: "2026-10-31"], running: true, extendedThru: "2026-11-05"],
-                october.report.subMap(["period", "window", "running", "extendedThru"]))
-        assertEquals([[ext1, "fixed"]], october.categories.refundsAndCredits.statements.R4.findings
-                .findAll { it.id == ext1 }.collect { [it.id, it.state] })
-        assertEquals("ran", october.categories.refundsAndCredits.statements.R4.checks[0].status)
+        assertEquals([[period: "2026-11", from: "2026-11-01", thru: "2026-11-03"]], runsOn("2026-11-03"))
 
         Map november = report(GORJANA, MONTH_CLOSE, "2026-11-03", null)
         assertEquals("2026-11", november.report.period)
@@ -525,29 +502,15 @@ class AuditReportAssemblerSmokeTests {
                 "October's findings are October's report's, not November's")
         assertEquals("The check did not run on the morning of 2026-11-03.", november.categories.refundsAndCredits.statements.R4.checks[0].reason)
 
-        // Nov 6: past the extension, October stops and keeps what it had.
-        assertEquals(["2026-11"], runsOn("2026-11-06")*.period)
-        ec.service.sync().name("${LEDGER}.record#CheckFindings").parameters([companyUserGroupId: GORJANA, checkId: RET,
-                reportDate: Date.valueOf("2026-11-06"), period: "2026-10", findings: []]).call()
-        assertTrue(ec.message.errorsString.contains("is not extended to 2026-11-06"), ec.message.errorsString)
-        ec.message.clearErrors()
-        Map stopped = report(GORJANA, MONTH_CLOSE, "2026-11-06", "2026-10")
-        assertEquals(false, stopped.report.running)
-        assertEquals("The 2026-10 audit ended on 2026-11-05 and was not extended to 2026-11-06.",
-                stopped.categories.refundsAndCredits.statements.R4.checks[0].reason)
+        Map october = report(GORJANA, MONTH_CLOSE, "2026-11-03", "2026-10")
+        assertEquals([period: "2026-10", window: [from: "2026-10-01", thru: "2026-10-31"], running: false],
+                october.report.subMap(["period", "window", "running"]))
+        assertEquals("The 2026-10 audit ended on 2026-10-31.", october.categories.refundsAndCredits.statements.R4.checks[0].reason)
         assertEquals("2026-10", finding(GORJANA, ext1).finding.period)
-        extend(GORJANA, MONTH_CLOSE, "2026-10", null)
     }
 
     @Test
-    void anExtensionIsAPeriodOfTheAuditThatRunsPastItsEnd() {
-        extendExpectingError(GORJANA, MONTH_CLOSE, "2026-Q4", "2026-11-05", "2026-Q4 is not a month period of audit month-close")
-        extendExpectingError(GORJANA, MONTH_CLOSE, "2026-09", "2026-09-30", "must run past its last day, 2026-09-30")
-        extendExpectingError(KREWE, MONTH_CLOSE, "2026-09", "2026-10-03", "was not found for tenant KREWE")
-        extend(GORJANA, MONTH_CLOSE, "2026-09", "2026-10-03")
-        assertEquals(1L, extensionRows("2026-09"))
-        extend(GORJANA, MONTH_CLOSE, "2026-09", null)
-        assertEquals(0L, extensionRows("2026-09"), "a blank date stops it")
+    void aReportIsOfAPeriodThatHasStarted() {
         ec.service.sync().name("${REPORTS}.assemble#AuditReport").parameters([companyUserGroupId: GORJANA, auditId: MONTH_CLOSE,
                 reportDate: Date.valueOf("2026-10-08"), period: "2026-12"]).call()
         assertTrue(ec.message.errorsString.contains("2026-12 is not a month period of audit month-close that has started by 2026-10-08"),
@@ -729,25 +692,7 @@ class AuditReportAssemblerSmokeTests {
         Map out = ec.service.sync().name("${REPORTS}.get#AuditWindow").parameters([companyUserGroupId: GORJANA, auditId: MONTH_CLOSE,
                 reportDate: Date.valueOf(day)]).call()
         noErrors()
-        return (out.runs as List<Map>).collect { [period: it.period, from: it.windowFromDate?.toString(), thru: it.windowThruDate?.toString(),
-                                                  extendedThru: it.extendedThru?.toString()] }
-    }
-
-    private void extend(String tenant, String auditId, String period, String thru) {
-        ec.service.sync().name("${REPORTS}.set#AuditPeriodExtension").parameters([companyUserGroupId: tenant, auditId: auditId,
-                period: period, continueThruDate: thru ? Date.valueOf(thru) : null]).call()
-        noErrors()
-    }
-
-    private void extendExpectingError(String tenant, String auditId, String period, String thru, String expected) {
-        ec.service.sync().name("${REPORTS}.set#AuditPeriodExtension").parameters([companyUserGroupId: tenant, auditId: auditId,
-                period: period, continueThruDate: Date.valueOf(thru)]).call()
-        assertTrue(ec.message.errorsString.contains(expected), "${expected} / ${ec.message.errorsString}")
-        ec.message.clearErrors()
-    }
-
-    private long extensionRows(String period) {
-        return ec.entity.find("darpan.audit.AuditPeriodExtension").condition("auditId", MONTH_CLOSE).condition("period", period).count()
+        return (out.runs as List<Map>).collect { [period: it.period, from: it.windowFromDate?.toString(), thru: it.windowThruDate?.toString()] }
     }
 
     private Map checkRunFor(String checkId, String day, String period, List reads) {

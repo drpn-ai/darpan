@@ -31,8 +31,8 @@
                 <description>The morning the check ran, as a tenant calendar day.</description></parameter>
             <parameter name="checkStamp" type="Timestamp" default="ec.user.nowTimestamp"/>
             <parameter name="period">
-                <description>DAR-BE-091. The period whose run this is, e.g. 2026-10 on Nov 3 while October is extended. Blank:
-                    the report day's own period. A past period must still be running (extended).</description></parameter>
+                <description>DAR-BE-091. The period whose run this is, e.g. 2026-10. Blank:
+                    the report day's own period. A past period is refused.</description></parameter>
             <parameter name="findings" type="List">
                 <description>One Map per (statement, record): statementCode, recordKey, headline (all required);
                     ruleText, expectedAmount, actualAmount, currencyUomId, expectedSource, actualSource,
@@ -190,8 +190,8 @@
             <parameter name="reportDate" type="Date" required="true"/>
             <parameter name="checkStamp" type="Timestamp" default="ec.user.nowTimestamp"/>
             <parameter name="period">
-                <description>DAR-BE-091. The period whose run this is, e.g. 2026-10 on Nov 3 while October is extended. Blank:
-                    the report day's own period. A past period must still be running (extended).</description></parameter>
+                <description>DAR-BE-091. The period whose run this is, e.g. 2026-10. Blank:
+                    the report day's own period. A past period is refused.</description></parameter>
             <parameter name="checkStatusEnumId" required="true">
                 <description>AuditCheckStatus of this morning's check; only AUDCS_RAN closes anything.</description></parameter>
             <parameter name="examinedRecordKeys" type="List">
@@ -287,8 +287,8 @@
             <parameter name="checkId" required="true"/>
             <parameter name="reportDate" type="Date" required="true"/>
             <parameter name="period">
-                <description>DAR-BE-091. The period whose run this is, e.g. 2026-10 on Nov 3 while October is extended. Blank:
-                    the report day's own period. A past period must still be running (extended).</description></parameter>
+                <description>DAR-BE-091. The period whose run this is, e.g. 2026-10. Blank:
+                    the report day's own period. A past period is refused.</description></parameter>
             <parameter name="windowFromDate" type="Date">
                 <description>First day the window covered. Blank: the period's first day (the 1st for a monthly audit), so
                     the run re-examines every open finding of the period.</description></parameter>

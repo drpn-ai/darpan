@@ -296,10 +296,6 @@
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.audit.Audit"
             filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
-    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_PERIOD_EXT"
-            entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
-            entityName="darpan.audit.AuditPeriodExtension"
-            filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
     <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUD_STATEMENT"
             entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE"
             entityName="darpan.audit.AuditStatement"

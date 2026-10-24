@@ -172,33 +172,6 @@ class AuditFacadeSmokeTests {
         assertTrue((out.errorText as String).contains("date must be YYYY-MM-DD"), out.errorText as String)
     }
 
-    // DAR-UI-070. The board's "N more": a statement's open and pending findings past the report's 50, a page at a time.
-    @Test
-    void aStatementsFindingsPageIsTheActiveTenantsOnly() {
-        Map out = call("get#AuditFindings", [audit: "month-close", statement: "R2", period: "2026-10"])
-        assertFalse(out.hadError as boolean, out.errorText as String)
-        assertEquals([myFinding], (out.findings as List<Map>)*.id, "KREWE's R2 finding, not the other tenant's")
-        assertEquals("Invoice INV-K1 has no Etail id", (out.findings as List<Map>)[0].headline)
-        assertTrue((out.findings as List<Map>)[0].records instanceof Map, "records keyed, as the report's findings are")
-        assertFalse(out.hasNextPage as boolean)
-        assertTrue(out.endCursor as boolean, "a cursor to ask for the page after")
-
-        assertEquals([], call("get#AuditFindings", [audit: "month-close", statement: "R9", period: "2026-10"]).findings)
-        assertEquals([], call("get#AuditFindings", [audit: "other-only", statement: "R2"]).findings, "another tenant's audit")
-    }
-
-    // DAR-UI-073. The board's filters read the whole audit's findings for the period, each with its cause, by state.
-    @Test
-    void aFindingsPageSpansTheAuditCarriesTheCauseAndNarrowsByState() {
-        Map all = call("get#AuditFindings", [audit: "month-close", period: "2026-10"])
-        assertFalse(all.hadError as boolean, all.errorText as String)
-        assertEquals([[id: myFinding, statement: "R2", cause: "Backordered in NetSuite"]],
-                (all.findings as List<Map>).collect { [id: it.id, statement: it.statement, cause: it.cause] })
-        // Found on Oct 8 with a day's grace, the finding is pending, not open.
-        assertEquals([myFinding], (call("get#AuditFindings", [audit: "month-close", period: "2026-10", state: "pending"]).findings as List<Map>)*.id)
-        assertEquals([], call("get#AuditFindings", [audit: "month-close", period: "2026-10", state: "open"]).findings)
-    }
-
     // DAR-UI-075. The board's "more", filters and export read the findings as the report lists them: one per order.
     @Test
     void theFindingsByOrderAreTheReportsUnitsForAStatementOrTheWholeAudit() {
@@ -239,13 +212,6 @@ class AuditFacadeSmokeTests {
         assertEquals([], call("get#AuditFindingsByOrder", [audit: "by-order", period: "2026-10", state: "pending"]).findings)
         Map other = call("get#AuditFindingsByOrder", [audit: "other-only", period: "2026-10"])
         assertTrue((other.errorText as String).contains("Audit other-only was not found"), other.errorText as String)
-    }
-
-    @Test
-    void aFindingsPageRefusesABadCursorInWords() {
-        Map out = call("get#AuditFindings", [audit: "month-close", statement: "R2", after: "not-a-cursor"])
-        assertTrue(out.hadError as boolean)
-        assertTrue((out.errorText as String).contains("after is not a cursor"), out.errorText as String)
     }
 
     // DAR-UI-072. What each system's read wrote for a check's morning, to download beside the report.

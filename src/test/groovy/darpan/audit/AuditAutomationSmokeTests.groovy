@@ -108,16 +108,10 @@ class AuditAutomationSmokeTests {
         assertEquals([at("2026-10-01", "00:00:00"), at("2026-10-15", "00:00:00"), "2026-10", Date.valueOf("2026-10-14")],
                 [windows[0].childWindowStartDate, windows[0].childWindowEndDate, windows[0].auditPeriod, windows[0].auditReportDate],
                 "on the 14th the window is the 1st to the end of the 14th, in Los Angeles")
-
-        extend("2026-09", "2026-10-03")
-        List<Map> both = AuditAutomationSupport.resolveWindows(ec, automation, audit, at("2026-10-02", "06:00:00"))
-        assertEquals(["2026-10", "2026-09"], both*.auditPeriod, "the new month and the extended September")
-        assertEquals([at("2026-09-01", "00:00:00"), at("2026-10-01", "00:00:00")], [both[1].childWindowStartDate, both[1].childWindowEndDate])
-        extend("2026-09", null)
     }
 
     // DAR-UI-063: play runs the days a person picks, not the period to date. Each period's days are their own window,
-    // dated as picked, reported on the run's own morning; a period that ended and was not extended is refused up front.
+    // dated as picked, reported on the run's own morning; a period that has ended is refused up front.
     @Test
     void picksDaysAreSplitByPeriodAndKeepTheirOwnDates() {
         List<Map> checks = AuditAutomationSupport.checksFor(ec, automation)
@@ -130,13 +124,6 @@ class AuditAutomationSmokeTests {
                 [windows[0].childWindowStartDate, windows[0].childWindowEndDate, windows[0].auditPeriod, windows[0].auditReportDate,
                  windows[0].auditWindowFromDate, windows[0].auditWindowThruDate])
 
-        extend("2026-09", "2026-10-25")
-        List<Map> both = AuditAutomationSupport.resolveWindows(ec, automation, audit, at("2026-10-22", "16:00:00"),
-                [auditWindowFromDate: Date.valueOf("2026-09-28"), auditWindowThruDate: Date.valueOf("2026-10-02")])
-        assertEquals(["2026-09", "2026-10"], both*.auditPeriod, "one window per period")
-        assertEquals([Date.valueOf("2026-09-28"), Date.valueOf("2026-09-30")], [both[0].auditWindowFromDate, both[0].auditWindowThruDate])
-        assertEquals([at("2026-10-01", "00:00:00"), at("2026-10-03", "00:00:00")], [both[1].childWindowStartDate, both[1].childWindowEndDate])
-        extend("2026-09", null)
 
         IllegalStateException ended = assertThrows(IllegalStateException) {
             AuditAutomationSupport.resolveWindows(ec, automation, audit, at("2026-10-22", "16:00:00"),
@@ -213,10 +200,10 @@ class AuditAutomationSmokeTests {
                 [recordCount: 1], [recordCount: 0], [diffLocation: diff("v1", [row("MISSING_IN_FILE_2", "V1", "missing in NetSuite")])], null)
         assertEquals("AUDFS_OPEN", finding("V1").stateEnumId)
 
-        // DAR-BE-124: a partial by-key read closes nothing.
+        // DAR-BE-124: a by-key read that failed closes nothing.
         AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-10-16", ["V1"], ["V1"]) + [auditVerifyKeys: ["V1"]],
-                omsSource, nsSource, [recordCount: 1], [recordCount: 1, partial: true], [diffLocation: diff("v2p", [])], null)
-        assertEquals("AUDFS_OPEN", finding("V1").stateEnumId, "a partial read cannot say it is fixed")
+                omsSource, nsSource, [recordCount: 1], null, null, new IllegalStateException("NetSuite timed out"))
+        assertEquals("AUDFS_OPEN", finding("V1").stateEnumId, "a failed read cannot say it is fixed")
 
         Map verify = window("2026-10-16", ["V1"], ["V1"]) + [auditVerifyKeys: ["V1"]]
         AuditAutomationSupport.recordWindow(ec, automation, checks(), verify, omsSource, nsSource,
@@ -470,12 +457,6 @@ class AuditAutomationSmokeTests {
         lines << "}"
         f.text = lines.join("\n")
         return f.absolutePath
-    }
-
-    private void extend(String period, String thru) {
-        ec.service.sync().name("audit.AuditReportServices.set#AuditPeriodExtension").parameters([companyUserGroupId: TENANT,
-                auditId: AUDIT, period: period, continueThruDate: thru ? Date.valueOf(thru) : null]).call()
-        assertFalse(ec.message.hasError(), ec.message.errorsString)
     }
 
     private Map checkRun(String day) {

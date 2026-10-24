@@ -27,8 +27,8 @@ import static darpan.reconciliation.automation.AutomationRuntimeSupport.truncate
  * reads the audit's windows instead of its own, and after each window writes the ledger: health (record#CheckRun),
  * then findings (record#CheckFindings), then closings (close#ResolvedFindings), in that order.
  *
- * Windows: one per run the audit owes that morning (audit.AuditReportServices.get#AuditWindow): the current period to
- * date, plus each ended period a user extended. "On the 14th it reconciles 1-14."
+ * Windows: the run the audit owes that morning (audit.AuditReportServices.get#AuditWindow): the current period to
+ * date. "On the 14th it reconciles 1-14."
  *
  * Findings: each row of the run's diff document is matched to the statements the check tests, through the
  * statement-to-check link's diffTypes and conclusionCodes (configuration, not code). Examined records are the keys
@@ -109,42 +109,32 @@ class AuditAutomationSupport {
     }
 
     /**
-     * DAR-UI-063. The days a person picked to play, first to last inclusive, in the automation's zone: one window per audit
-     * period they cross, each dated as picked and reported on the run's own morning. Every period must still be running
-     * that morning (its own, or ended and extended); otherwise the run is refused before anything is read, because the
-     * ledger would refuse each check's write and the run would record nothing.
+     * DAR-UI-063. The days a person picked to play, first to last inclusive, in the automation's zone: one window, dated as
+     * picked and reported on the run's own morning. The days must lie in that morning's period; otherwise the run is
+     * refused before anything is read, because the ledger would refuse each check's write and the run would record nothing.
      */
     static List<Map<String, Object>> pickedWindows(def ec, Map audit, ZoneId zone, LocalDate reportDay, LocalDate from, LocalDate thru,
                                                    List<String> checkIds = null) {
         if (from > thru) throw new IllegalArgumentException("The days run backwards: ${from} to ${thru}.")
         if (thru > reportDay) throw new IllegalArgumentException("${thru} has not ended yet; pick days up to ${reportDay}.")
         String periodCode = AuditReportAssembler.enumCodes(ec)[audit.periodEnumId as String]
-        String tenantId = audit.companyUserGroupId as String
-        List<Map<String, Object>> windows = []
-        LocalDate day = from
-        while (day <= thru) {
-            String period = AuditReportAssembler.periodOf(day, periodCode)
-            Map w = AuditReportAssembler.periodWindow(ec, tenantId, audit, period, reportDay)
-            if (w == null || !w.running) {
-                throw new IllegalStateException("${period} ended${w?.end ? ' on ' + w.end : ''} and is not extended to ${reportDay}; " +
-                        "extend it to run its days.")
-            }
-            LocalDate last = [thru, w.end as LocalDate].min()
-            windows << ([sequenceNum         : windows.size() + 1,
-                         windowStartDate     : Timestamp.from(day.atStartOfDay(zone).toInstant()),
-                         windowEndDate       : Timestamp.from(last.plusDays(1).atStartOfDay(zone).toInstant()),
-                         childWindowStartDate: Timestamp.from(day.atStartOfDay(zone).toInstant()),
-                         childWindowEndDate  : Timestamp.from(last.plusDays(1).atStartOfDay(zone).toInstant()),
-                         auditId             : audit.auditId,
-                         auditPeriod         : period,
-                         auditReportDate     : Date.valueOf(reportDay),
-                         auditWindowFromDate : Date.valueOf(day),
-                         auditWindowThruDate : Date.valueOf(last),
-                         auditRecentReadStartDate: readStart(ec, audit, checkIds, period, Timestamp.from(day.atStartOfDay(zone).toInstant()),
-                                 Timestamp.from(last.plusDays(1).atStartOfDay(zone).toInstant()), zone)] as Map<String, Object>)
-            day = last.plusDays(1)
+        Map w = AuditReportAssembler.auditRun(ec, audit, reportDay)
+        if (from < (w.from as LocalDate)) {
+            throw new IllegalStateException("${AuditReportAssembler.periodOf(from, periodCode)} has ended; pick days in ${w.period}.")
         }
-        return windows
+        Timestamp start = Timestamp.from(from.atStartOfDay(zone).toInstant())
+        Timestamp end = Timestamp.from(thru.plusDays(1).atStartOfDay(zone).toInstant())
+        return [[sequenceNum         : 1,
+                 windowStartDate     : start,
+                 windowEndDate       : end,
+                 childWindowStartDate: start,
+                 childWindowEndDate  : end,
+                 auditId             : audit.auditId,
+                 auditPeriod         : w.period,
+                 auditReportDate     : Date.valueOf(reportDay),
+                 auditWindowFromDate : Date.valueOf(from),
+                 auditWindowThruDate : Date.valueOf(thru),
+                 auditRecentReadStartDate: readStart(ec, audit, checkIds, w.period as String, start, end, zone)] as Map<String, Object>]
     }
 
     /** DAR-BE-122. A window's read start from its checks' last complete runs in the period (null: read the whole window). */
@@ -292,11 +282,8 @@ class AuditAutomationSupport {
             return [systemEnumId: systemEnumId, statusEnumId: "AUDSR_FAILED", recordCount: null, readStamp: null,
                     reason: failureReason ?: "The read did not finish."]
         }
-        // Forward-compatible: a connector that reports a partial read (DAR-BE-092 follow-up) says so here.
-        boolean partial = result.partial == true
-        return [systemEnumId: systemEnumId, statusEnumId: partial ? "AUDSR_PARTIAL" : "AUDSR_COMPLETE",
-                recordCount: result.recordCount != null ? (result.recordCount as Long) : null, readStamp: now,
-                reason: partial ? (truncate(sanitizeText(normalize(result.partialReason)), REASON_MAX) ?: "The connector reported a partial read.") : null]
+        return [systemEnumId: systemEnumId, statusEnumId: "AUDSR_COMPLETE",
+                recordCount: result.recordCount != null ? (result.recordCount as Long) : null, readStamp: now, reason: null]
     }
 
     /**

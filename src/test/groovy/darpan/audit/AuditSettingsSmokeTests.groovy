@@ -161,7 +161,7 @@ class AuditSettingsSmokeTests {
         String lastMonthDay = java.time.LocalDate.parse(today).withDayOfMonth(1).minusDays(1).toString()
         Map ended = facade("run#Audit", [audit: "system-health", fromDate: lastMonthDay, thruDate: lastMonthDay])
         assertTrue(ended.hadError as boolean)
-        assertTrue((ended.errorText as String).contains("is not extended"), ended.errorText as String)
+        assertTrue((ended.errorText as String).contains("has ended"), ended.errorText as String)
         Map backwards = facade("run#Audit", [audit: "system-health", fromDate: today, thruDate: lastMonthDay])
         assertTrue(backwards.hadError as boolean)
     }
@@ -176,6 +176,45 @@ class AuditSettingsSmokeTests {
             assertTrue((out.errorText as String).contains("was not found"), "${svc}: ${out.errorText}")
         }
         assertEquals("Other only", row("darpan.audit.Audit", "auditId", "${OTHER}_ONLY").auditName, "the other tenant's audit is untouched")
+    }
+
+    // DAR-UI-078 (Aditi: "is it possible to create these audits from UI.. if not we need to be able to").
+    @Test
+    @Order(7)
+    void anAuditIsMadeInTheAppByNameAndPeriod() {
+        Map out = facade("create#Audit", [name: "Month close 2", period: "month"])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        assertEquals([id: "month-close-2", name: "Month close 2", period: "month"], out.audit)
+        def made = ec.entity.find("darpan.audit.Audit").condition("auditCode", "month-close-2").disableAuthz().useCache(false).list()
+        assertEquals([[MINE, "AUDP_MONTH"]], made.collect { [it.companyUserGroupId, it.periodEnumId] }, "the active tenant's own")
+        assertTrue(facade("get#Audits").audits*.id.contains("month-close-2"))
+
+        Map again = facade("create#Audit", [name: "month close 2", period: "day"])
+        assertTrue(again.hadError as boolean, "one code per tenant")
+        assertTrue(facade("create#Audit", [name: "Weekly", period: "week"]).hadError as boolean, "day, month or quarter")
+        assertTrue(facade("create#Audit", [name: " -- ", period: "day"]).hadError as boolean, "a name with no letters or digits")
+        assertTrue(facade("create#Audit", [name: "New", period: "day"]).hadError as boolean, "/audits/new is the create page")
+    }
+
+    @Test
+    @Order(8)
+    void aStatementIsAddedWithTheNextCodeAndCanTakeACheck() {
+        Map first = facade("add#AuditStatement", [audit: "month-close-2", text: "Every order that is fulfilled is in NetSuite.",
+                category: "orders", weight: "firm"])
+        assertFalse(first.hadError as boolean, first.errorText as String)
+        assertEquals([code: "R1", text: "Every order that is fulfilled is in NetSuite.", active: true, checks: []],
+                first.statement.subMap(["code", "text", "active", "checks"]))
+        Map second = facade("add#AuditStatement", [audit: "month-close-2", text: "Every return reaches NetSuite.", category: "returns"])
+        assertEquals("R2", second.statement.code, "the next code")
+        def row = ec.entity.find("darpan.audit.AuditStatement").condition("statementId", second.statement.id).disableAuthz().useCache(false).one()
+        assertEquals([MINE, "AUDC_RETURNS", "AUDSW_DERIVED", 2L], [row.companyUserGroupId, row.categoryEnumId, row.weightEnumId, row.sequenceNum],
+                "weight derived unless said firm")
+        assertEquals(["R1", "R2"], (facade("get#AuditSettings", [audit: "month-close-2"]).settings as Map).statements*.code)
+
+        assertTrue(facade("add#AuditStatement", [audit: "month-close-2", text: " ", category: "orders"]).hadError as boolean, "needs text")
+        assertTrue(facade("add#AuditStatement", [audit: "month-close-2", text: "x", category: "inventory"]).hadError as boolean, "a known category")
+        assertTrue(facade("add#AuditStatement", [audit: "other-only", text: "x", category: "orders"]).hadError as boolean,
+                "another tenant's audit is not found")
     }
 
     private Map facade(String verbNoun, Map params = [:]) {

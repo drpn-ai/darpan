@@ -99,10 +99,10 @@
                                         "$ref": "#/components/schemas/UpdateUserAccountRequest"
                                     },
                                     {
-                                        "$ref": "#/components/schemas/DeleteAuditCheckRequest"
+                                        "$ref": "#/components/schemas/AddAuditStatementRequest"
                                     },
                                     {
-                                        "$ref": "#/components/schemas/GetAuditCheckRequest"
+                                        "$ref": "#/components/schemas/CreateAuditRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/GetAuditCheckExtractsRequest"
@@ -112,9 +112,6 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/GetAuditFindingRequest"
-                                    },
-                                    {
-                                        "$ref": "#/components/schemas/GetAuditFindingsRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/GetAuditFindingsByOrderRequest"
@@ -553,12 +550,11 @@
                                         "admin.UserAdminServices.get#UserList": "#/components/schemas/GetUserListRequest",
                                         "admin.UserAdminServices.reset#Password": "#/components/schemas/ResetPasswordRequest",
                                         "admin.UserAdminServices.update#UserAccount": "#/components/schemas/UpdateUserAccountRequest",
-                                        "facade.AuditFacadeServices.delete#AuditCheck": "#/components/schemas/DeleteAuditCheckRequest",
-                                        "facade.AuditFacadeServices.get#AuditCheck": "#/components/schemas/GetAuditCheckRequest",
+                                        "facade.AuditFacadeServices.add#AuditStatement": "#/components/schemas/AddAuditStatementRequest",
+                                        "facade.AuditFacadeServices.create#Audit": "#/components/schemas/CreateAuditRequest",
                                         "facade.AuditFacadeServices.get#AuditCheckExtracts": "#/components/schemas/GetAuditCheckExtractsRequest",
                                         "facade.AuditFacadeServices.get#AuditCheckOptions": "#/components/schemas/GetAuditCheckOptionsRequest",
                                         "facade.AuditFacadeServices.get#AuditFinding": "#/components/schemas/GetAuditFindingRequest",
-                                        "facade.AuditFacadeServices.get#AuditFindings": "#/components/schemas/GetAuditFindingsRequest",
                                         "facade.AuditFacadeServices.get#AuditFindingsByOrder": "#/components/schemas/GetAuditFindingsByOrderRequest",
                                         "facade.AuditFacadeServices.get#AuditReport": "#/components/schemas/GetAuditReportRequest",
                                         "facade.AuditFacadeServices.get#AuditSettings": "#/components/schemas/GetAuditSettingsRequest",
@@ -787,10 +783,10 @@
                                             "$ref": "#/components/schemas/UpdateUserAccountResponse"
                                         },
                                         {
-                                            "$ref": "#/components/schemas/DeleteAuditCheckResponse"
+                                            "$ref": "#/components/schemas/AddAuditStatementResponse"
                                         },
                                         {
-                                            "$ref": "#/components/schemas/GetAuditCheckResponse"
+                                            "$ref": "#/components/schemas/CreateAuditResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetAuditCheckExtractsResponse"
@@ -800,9 +796,6 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetAuditFindingResponse"
-                                        },
-                                        {
-                                            "$ref": "#/components/schemas/GetAuditFindingsResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetAuditFindingsByOrderResponse"
@@ -3811,23 +3804,34 @@
                     "result"
                 ]
             },
-            "DeleteAuditCheckParams": {
+            "AddAuditStatementParams": {
                 "type": "object",
                 "properties": {
                     "audit": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "The audit's code."
                     },
-                    "check": {
-                        "type": "string"
+                    "text": {
+                        "type": "string",
+                        "description": "What must be true, in the tenant's words."
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "orders, refundsAndCredits, returns or\n                exchangesAndWarranty."
+                    },
+                    "weight": {
+                        "type": "string",
+                        "description": "firm (the tenant said it) or derived (awaiting the\n                tenant's confirmation)."
                     }
                 },
                 "required": [
                     "audit",
-                    "check"
+                    "text",
+                    "category"
                 ],
-                "description": "Unlinks a check from this audit's statements; the check itself goes too when no other audit links it\n            and no finding names it (the ledger keeps its history)."
+                "description": "DAR-UI-078. Adds a statement to the active tenant's audit, coded R and the next number, last in order and\n            on. Saved at once, so a check can be added to it."
             },
-            "DeleteAuditCheckResult": {
+            "AddAuditStatementResult": {
                 "type": "object",
                 "properties": {
                     "ok": {
@@ -3845,15 +3849,16 @@
                             "type": "string"
                         }
                     },
-                    "result": {
-                        "type": "object"
+                    "statement": {
+                        "type": "object",
+                        "description": "{id, code, text, active, checks}, as get#AuditSettings lists\n                it."
                     }
                 }
             },
-            "DeleteAuditCheckRequest": {
+            "AddAuditStatementRequest": {
                 "type": "object",
-                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.delete#AuditCheck",
-                "x-darpan-method": "facade.AuditFacadeServices.delete#AuditCheck",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.add#AuditStatement",
+                "x-darpan-method": "facade.AuditFacadeServices.add#AuditStatement",
                 "properties": {
                     "jsonrpc": {
                         "type": "string",
@@ -3871,10 +3876,10 @@
                     },
                     "method": {
                         "type": "string",
-                        "const": "facade.AuditFacadeServices.delete#AuditCheck"
+                        "const": "facade.AuditFacadeServices.add#AuditStatement"
                     },
                     "params": {
-                        "$ref": "#/components/schemas/DeleteAuditCheckParams"
+                        "$ref": "#/components/schemas/AddAuditStatementParams"
                     }
                 },
                 "required": [
@@ -3883,9 +3888,9 @@
                     "method"
                 ]
             },
-            "DeleteAuditCheckResponse": {
+            "AddAuditStatementResponse": {
                 "type": "object",
-                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.delete#AuditCheck. Check result.ok / result.errors for business failures.",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.add#AuditStatement. Check result.ok / result.errors for business failures.",
                 "properties": {
                     "jsonrpc": {
                         "type": "string",
@@ -3902,7 +3907,7 @@
                         ]
                     },
                     "result": {
-                        "$ref": "#/components/schemas/DeleteAuditCheckResult"
+                        "$ref": "#/components/schemas/AddAuditStatementResult"
                     }
                 },
                 "required": [
@@ -3910,23 +3915,24 @@
                     "result"
                 ]
             },
-            "GetAuditCheckParams": {
+            "CreateAuditParams": {
                 "type": "object",
                 "properties": {
-                    "audit": {
+                    "name": {
                         "type": "string"
                     },
-                    "check": {
-                        "type": "string"
+                    "period": {
+                        "type": "string",
+                        "description": "day, month or quarter: what one report covers."
                     }
                 },
                 "required": [
-                    "audit",
-                    "check"
+                    "name",
+                    "period"
                 ],
-                "description": "One check of an audit as the editor shows it, with its links to that audit's statements."
+                "description": "DAR-UI-078. Makes an audit of the active tenant's own. Its id (the code every audit page and service names\n            it by) is the name in lower case with dashes, one per tenant. Statements and checks are added on its settings."
             },
-            "GetAuditCheckResult": {
+            "CreateAuditResult": {
                 "type": "object",
                 "properties": {
                     "ok": {
@@ -3944,15 +3950,16 @@
                             "type": "string"
                         }
                     },
-                    "check": {
-                        "type": "object"
+                    "audit": {
+                        "type": "object",
+                        "description": "{id, name, period}, as get#Audits lists it."
                     }
                 }
             },
-            "GetAuditCheckRequest": {
+            "CreateAuditRequest": {
                 "type": "object",
-                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.get#AuditCheck",
-                "x-darpan-method": "facade.AuditFacadeServices.get#AuditCheck",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.create#Audit",
+                "x-darpan-method": "facade.AuditFacadeServices.create#Audit",
                 "properties": {
                     "jsonrpc": {
                         "type": "string",
@@ -3970,10 +3977,10 @@
                     },
                     "method": {
                         "type": "string",
-                        "const": "facade.AuditFacadeServices.get#AuditCheck"
+                        "const": "facade.AuditFacadeServices.create#Audit"
                     },
                     "params": {
-                        "$ref": "#/components/schemas/GetAuditCheckParams"
+                        "$ref": "#/components/schemas/CreateAuditParams"
                     }
                 },
                 "required": [
@@ -3982,9 +3989,9 @@
                     "method"
                 ]
             },
-            "GetAuditCheckResponse": {
+            "CreateAuditResponse": {
                 "type": "object",
-                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.get#AuditCheck. Check result.ok / result.errors for business failures.",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.create#Audit. Check result.ok / result.errors for business failures.",
                 "properties": {
                     "jsonrpc": {
                         "type": "string",
@@ -4001,7 +4008,7 @@
                         ]
                     },
                     "result": {
-                        "$ref": "#/components/schemas/GetAuditCheckResult"
+                        "$ref": "#/components/schemas/CreateAuditResult"
                     }
                 },
                 "required": [
@@ -4307,128 +4314,6 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/GetAuditFindingResult"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "result"
-                ]
-            },
-            "GetAuditFindingsParams": {
-                "type": "object",
-                "properties": {
-                    "audit": {
-                        "type": "string",
-                        "description": "The audit's code, e.g. month-close."
-                    },
-                    "statement": {
-                        "type": "string",
-                        "description": "The statement's code, e.g. R2; blank is every statement of the audit\n                (DAR-UI-073, the board's filters)."
-                    },
-                    "state": {
-                        "type": "string",
-                        "description": "open or pending; blank is both."
-                    },
-                    "period": {
-                        "type": "string",
-                        "description": "The report's period, e.g. 2026-10; blank is every period."
-                    },
-                    "after": {
-                        "type": "string",
-                        "description": "The endCursor of the page before; blank is the first page."
-                    }
-                },
-                "required": [
-                    "audit"
-                ],
-                "description": "One page of a statement's open and pending findings, oldest first, each as the report's finding\n            summary (DAR-BE-098's findings page, narrowed to one audit, statement and period). State is as of today."
-            },
-            "GetAuditFindingsResult": {
-                "type": "object",
-                "properties": {
-                    "ok": {
-                        "type": "boolean"
-                    },
-                    "messages": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "errors": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "findings": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "description": "Moqui type Map"
-                        }
-                    },
-                    "endCursor": {
-                        "type": "string"
-                    },
-                    "hasNextPage": {
-                        "type": "boolean"
-                    }
-                }
-            },
-            "GetAuditFindingsRequest": {
-                "type": "object",
-                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.get#AuditFindings",
-                "x-darpan-method": "facade.AuditFacadeServices.get#AuditFindings",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "method": {
-                        "type": "string",
-                        "const": "facade.AuditFacadeServices.get#AuditFindings"
-                    },
-                    "params": {
-                        "$ref": "#/components/schemas/GetAuditFindingsParams"
-                    }
-                },
-                "required": [
-                    "jsonrpc",
-                    "id",
-                    "method"
-                ]
-            },
-            "GetAuditFindingsResponse": {
-                "type": "object",
-                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.get#AuditFindings. Check result.ok / result.errors for business failures.",
-                "properties": {
-                    "jsonrpc": {
-                        "type": "string",
-                        "const": "2.0"
-                    },
-                    "id": {
-                        "oneOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "number"
-                            }
-                        ]
-                    },
-                    "result": {
-                        "$ref": "#/components/schemas/GetAuditFindingsResult"
                     }
                 },
                 "required": [
@@ -23647,12 +23532,11 @@
         "admin.UserAdminServices.get#UserList": "GetUserList",
         "admin.UserAdminServices.reset#Password": "ResetPassword",
         "admin.UserAdminServices.update#UserAccount": "UpdateUserAccount",
-        "facade.AuditFacadeServices.delete#AuditCheck": "DeleteAuditCheck",
-        "facade.AuditFacadeServices.get#AuditCheck": "GetAuditCheck",
+        "facade.AuditFacadeServices.add#AuditStatement": "AddAuditStatement",
+        "facade.AuditFacadeServices.create#Audit": "CreateAudit",
         "facade.AuditFacadeServices.get#AuditCheckExtracts": "GetAuditCheckExtracts",
         "facade.AuditFacadeServices.get#AuditCheckOptions": "GetAuditCheckOptions",
         "facade.AuditFacadeServices.get#AuditFinding": "GetAuditFinding",
-        "facade.AuditFacadeServices.get#AuditFindings": "GetAuditFindings",
         "facade.AuditFacadeServices.get#AuditFindingsByOrder": "GetAuditFindingsByOrder",
         "facade.AuditFacadeServices.get#AuditReport": "GetAuditReport",
         "facade.AuditFacadeServices.get#AuditSettings": "GetAuditSettings",

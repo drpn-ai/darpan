@@ -85,7 +85,7 @@ class AuditReportAssembler {
         Map<String, String> codes = enumCodes(ec)
         String periodCode = codes[audit.periodEnumId as String]
         period = period ?: periodOf(day, periodCode)
-        Map window = periodWindow(ec, tenantId, audit, period, day)
+        Map window = periodWindow(ec, audit, period, day)
         if (window == null) throw new IllegalArgumentException("${period} is not a ${periodCode} period of audit ${audit.auditCode} that has started by ${day}")
 
         List<Map> categories = ec.entity.find("moqui.basic.Enumeration").condition("enumTypeId", "AuditCategory")
@@ -118,7 +118,7 @@ class AuditReportAssembler {
             checkStatus[checkId] = (run?.statusEnumId ?: NOT_RUN) as String
             checkReason[checkId] = run ? (run.reason as String) : (window.running ?
                     "The check did not run on the morning of ${day}." :
-                    "The ${period} audit ended on ${window.extendedThru ?: window.end} and was not extended to ${day}.").toString()
+                    "The ${period} audit ended on ${window.end}.").toString()
         }
 
         // The ledger as of the end of the report date.
@@ -208,7 +208,6 @@ class AuditReportAssembler {
                              // DAR-BE-091: the period to date, the report day included; a past period's whole span.
                              window      : [from: (window.from as LocalDate).toString(), thru: (window.thru as LocalDate).toString()],
                              running     : window.running,
-                             extendedThru: (window.extendedThru as LocalDate)?.toString(),
                              generatedAt : isoDateTime(generatedStamp, zone)],
                 health    : health,
                 summary   : summary,
@@ -914,42 +913,25 @@ class AuditReportAssembler {
 
     /**
      * DAR-BE-091. One period of an audit as of one morning: its window (first day to the earlier of its last day and
-     * the morning), the extension a user asked for, and whether the period still runs that morning — inside its own
-     * span, or after it while extended. Null when the period does not parse or has not started by that morning.
+     * the morning) and whether the period still runs that morning. Null when the period does not parse or has not
+     * started by that morning.
      */
-    static Map periodWindow(def ec, String tenantId, Map audit, String period, LocalDate day) {
+    static Map periodWindow(def ec, Map audit, String period, LocalDate day) {
         String periodCode = enumCodes(ec)[audit.periodEnumId as String]
         List<LocalDate> bounds = periodBounds(period, periodCode)
         if (bounds == null || day < bounds[0]) return null
-        def extension = tenantRows(ec, "darpan.audit.AuditPeriodExtension", tenantId).condition("auditId", audit.auditId)
-                .condition("period", period).list().find()
-        LocalDate extendedThru = (extension?.continueThruDate as Date)?.toLocalDate()
-        boolean running = day <= bounds[1] || (extendedThru != null && day <= extendedThru)
-        return [period: period, from: bounds[0], thru: day < bounds[1] ? day : bounds[1], end: bounds[1],
-                extendedThru: extendedThru, running: running]
+        return [period: period, from: bounds[0], thru: day < bounds[1] ? day : bounds[1], end: bounds[1], running: day <= bounds[1]]
     }
 
-    /**
-     * DAR-BE-091. Every run an audit owes on one morning: its current period, from the period's first day to the
-     * morning, then each ended period a user extended past that morning, over the period's whole span. "Meanwhile the
-     * new month audit will start": on Nov 3 an October extended to Nov 5 and November both run.
-     */
-    static List<Map> auditRuns(def ec, String tenantId, Map audit, LocalDate day) {
-        String periodCode = enumCodes(ec)[audit.periodEnumId as String]
-        List<Map> runs = [periodWindow(ec, tenantId, audit, periodOf(day, periodCode), day)]
-        tenantRows(ec, "darpan.audit.AuditPeriodExtension", tenantId).condition("auditId", audit.auditId)
-                .condition("continueThruDate", EntityCondition.GREATER_THAN_EQUAL_TO, Date.valueOf(day))
-                .orderBy("period").list().each { ext ->
-            Map w = periodWindow(ec, tenantId, audit, ext.period as String, day)
-            if (w != null && w.end < day) runs << w
-        }
-        return runs
+    /** DAR-BE-091. The run an audit owes on one morning: its current period, from the period's first day to the morning. */
+    static Map auditRun(def ec, Map audit, LocalDate day) {
+        return periodWindow(ec, audit, periodOf(day, enumCodes(ec)[audit.periodEnumId as String]), day)
     }
 
     /**
      * DAR-BE-091. The period and window of one check's run on one morning, for the ledger writers. A blank period is
      * the morning's own period, which needs the check's audits to share one kind of period. A past period must still
-     * be running (extended). Returns [period, from, thru, ...] or [error: why].
+     * be running. Returns [period, from, thru, ...] or [error: why].
      */
     static Map resolveCheckRun(def ec, String tenantId, List auditIds, LocalDate day, String period) {
         List<Map> audits = auditIds ? tenantRows(ec, "darpan.audit.Audit", tenantId).condition("auditId", EntityCondition.IN, auditIds)
@@ -960,14 +942,14 @@ class AuditReportAssembler {
             if (kinds.size() != 1) return [error: "The check serves audits of ${kinds.size() ?: 'no'} kinds of period; pass the period".toString()]
             period = periodOf(day, kinds[0])
         }
-        List<Map> windows = audits.collect { periodWindow(ec, tenantId, it, period, day) }.findAll { it != null }
+        List<Map> windows = audits.collect { periodWindow(ec, it, period, day) }.findAll { it != null }
         Map running = windows.find { it.running }
         if (running != null) return running
         if (!audits.any { periodBounds(period, codes[it.periodEnumId as String]) != null }) {
             return [error: "${period} is not a period of the check's audits".toString()]
         }
         if (!windows) return [error: "Period ${period} has not started on ${day}".toString()]
-        return [error: "Period ${period} ended on ${windows[0].end} and is not extended to ${day}".toString()]
+        return [error: "Period ${period} ended on ${windows[0].end}".toString()]
     }
 
     /**

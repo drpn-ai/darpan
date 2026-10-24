@@ -86,13 +86,6 @@ class ExcludedRecordsSidecar {
         return spill.readLines("UTF-8").findAll { it }.collect { (Map) slurper.parseText(it) }
     }
 
-    /** The sidecar document as text. For tests; the file itself is written by {@link #write}, streamed. */
-    static String toJson(Map collector, String sourceFileName) {
-        StringWriter out = new StringWriter()
-        writeTo(out, collector, sourceFileName)
-        return out.toString()
-    }
-
     /** Streams the sidecar document out of the spill, then deletes the spill. */
     static void write(File target, Map collector, String sourceFileName) {
         target.withWriter("UTF-8") { Writer out -> writeTo(out, collector, sourceFileName) }
@@ -120,16 +113,17 @@ class ExcludedRecordsSidecar {
             discard(collector)
             return null
         }
-        File work = outputDirectory != null
-                ? File.createTempFile("excluded-", ".partial", outputDirectory)
-                : File.createTempFile("excluded-", ".partial")
+        File work = null
         try {
+            work = outputDirectory != null
+                    ? File.createTempFile("excluded-", ".partial", outputDirectory)
+                    : File.createTempFile("excluded-", ".partial")
             write(work, collector, outputFileName)
             String location = DataManagerSupport.childLocation(outputBaseLocation, fileNameFor(outputFileName))
             DataManagerSupport.moveIntoLocation(ec, work, location as String)
             return location
         } finally {
-            if (work.exists()) work.delete()
+            work?.delete()
             discard(collector)
         }
     }

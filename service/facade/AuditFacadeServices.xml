@@ -182,42 +182,6 @@
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
-    <!-- DAR-UI-070. The report lists 50 findings a statement; the board's "N more" pages through the rest here. -->
-    <service verb="get" noun="AuditFindings" authz-action="view" allow-remote="true" authenticate="true">
-        <description>One page of a statement's open and pending findings, oldest first, each as the report's finding
-            summary (DAR-BE-098's findings page, narrowed to one audit, statement and period). State is as of today.</description>
-        <in-parameters>
-            <parameter name="audit" required="true"><description>The audit's code, e.g. month-close.</description></parameter>
-            <parameter name="statement"><description>The statement's code, e.g. R2; blank is every statement of the audit
-                (DAR-UI-073, the board's filters).</description></parameter>
-            <parameter name="state"><description>open or pending; blank is both.</description></parameter>
-            <parameter name="period"><description>The report's period, e.g. 2026-10; blank is every period.</description></parameter>
-            <parameter name="after"><description>The endCursor of the page before; blank is the first page.</description></parameter>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="ok" type="Boolean"/>
-            <parameter name="messages" type="List"><parameter name="message"/></parameter>
-            <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="findings" type="List"><parameter name="finding" type="Map"/></parameter>
-            <parameter name="endCursor"/>
-            <parameter name="hasNextPage" type="Boolean"/>
-        </out-parameters>
-        <actions>
-            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
-            <if condition="!tenantId"><return error="true" message="Audit ${audit} was not found"/></if>
-            <set field="terms" from="[[key: 'audit', values: [audit]],
-                    [key: 'state', values: state in ['open', 'pending'] ? [state] : ['open', 'pending']]] +
-                    (statement ? [[key: 'statement', values: [statement]]] : []) + (period ? [[key: 'period', values: [period]]] : [])"/>
-            <set field="result" from="darpan.audit.AuditReportAssembler.findingsPage(ec, tenantId, terms, null, false, 100, after ?: null)"/>
-            <if condition="result.publicError"><return error="true" message="${result.publicError}"/></if>
-            <set field="findings" from="result.page.edges*.node"/>
-            <set field="endCursor" from="result.page.pageInfo.endCursor"/>
-            <set field="hasNextPage" from="result.page.pageInfo.hasNextPage"/>
-            <set field="ok" from="!ec.message.hasError()"/>
-            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
-            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
-        </actions>
-    </service>
     <!-- DAR-UI-063. The audit page's settings gear and play button. Writes need the active tenant's edit access. -->
     <service verb="get" noun="AuditSettings" authz-action="view" allow-remote="true" authenticate="true">
         <description>An audit's settings: its name, the daily schedule its checks run on, and each statement with its
@@ -240,6 +204,107 @@
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="create" noun="Audit" allow-remote="true" authenticate="true">
+        <description>DAR-UI-078. Makes an audit of the active tenant's own. Its id (the code every audit page and service names
+            it by) is the name in lower case with dashes, one per tenant. Statements and checks are added on its settings.</description>
+        <in-parameters>
+            <parameter name="name" required="true"/>
+            <parameter name="period" required="true"><description>day, month or quarter: what one report covers.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="audit" type="Map"><description>{id, name, period}, as get#Audits lists it.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access, so it cannot make an audit.')"/>
+            <if condition="ec.message.hasError()"><return error="true"/></if>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="auditName" from="name?.trim()"/>
+            <set field="auditCode" from="auditName?.toLowerCase()?.replaceAll('[^a-z0-9]+', '-')?.replaceAll('^-+|-+$', '')"/>
+            <if condition="!auditCode"><return error="true" message="Name the audit with a letter or a digit."/></if>
+            <!-- /audits/new is the page that makes one. -->
+            <if condition="auditCode == 'new'"><return error="true" message="Call the audit something other than new."/></if>
+            <entity-find entity-name="moqui.basic.Enumeration" list="periodList" cache="true">
+                <econdition field-name="enumTypeId" value="AuditPeriod"/>
+                <econdition field-name="enumCode" from="period"/>
+            </entity-find>
+            <if condition="!periodList"><return error="true" message="An audit's period is day, month or quarter, not ${period}."/></if>
+            <entity-find-count entity-name="darpan.audit.Audit" count-field="sameCode">
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+                <econdition field-name="auditCode" from="auditCode"/>
+            </entity-find-count>
+            <if condition="sameCode"><return error="true" message="There is already an audit by that name."/></if>
+            <entity-make-value entity-name="darpan.audit.Audit" value-field="auditValue"
+                    map="[auditId: tenantId + '_' + auditCode.toUpperCase().replace('-', '_'), companyUserGroupId: tenantId,
+                          auditCode: auditCode, auditName: auditName, periodEnumId: periodList[0].enumId]"/>
+            <entity-create value-field="auditValue"/>
+            <set field="audit" from="[id: auditCode, name: auditName, period: period]"/>
+            <set field="ok" from="true"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="[]"/>
+        </actions>
+    </service>
+
+    <service verb="add" noun="AuditStatement" allow-remote="true" authenticate="true">
+        <description>DAR-UI-078. Adds a statement to the active tenant's audit, coded R and the next number, last in order and
+            on. Saved at once, so a check can be added to it.</description>
+        <in-parameters>
+            <parameter name="audit" required="true"><description>The audit's code.</description></parameter>
+            <parameter name="text" required="true"><description>What must be true, in the tenant's words.</description></parameter>
+            <parameter name="category" required="true"><description>orders, refundsAndCredits, returns or
+                exchangesAndWarranty.</description></parameter>
+            <parameter name="weight" default-value="derived"><description>firm (the tenant said it) or derived (awaiting the
+                tenant's confirmation).</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="statement" type="Map"><description>{id, code, text, active, checks}, as get#AuditSettings lists
+                it.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access, so it cannot change an audit.')"/>
+            <if condition="ec.message.hasError()"><return error="true"/></if>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <entity-find entity-name="darpan.audit.Audit" list="auditList">
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+                <econdition field-name="auditCode" from="audit"/>
+            </entity-find>
+            <if condition="!auditList"><return error="true" message="Audit ${audit} was not found"/></if>
+            <set field="statementText" from="text?.trim()"/>
+            <if condition="!statementText"><return error="true" message="Say what must be true."/></if>
+            <entity-find entity-name="moqui.basic.Enumeration" list="categoryList" cache="true">
+                <econdition field-name="enumTypeId" value="AuditCategory"/>
+                <econdition field-name="enumCode" from="category"/>
+            </entity-find>
+            <if condition="!categoryList"><return error="true"
+                    message="${category} is not a category: orders, refundsAndCredits, returns or exchangesAndWarranty."/></if>
+            <entity-find entity-name="moqui.basic.Enumeration" list="weightList" cache="true">
+                <econdition field-name="enumTypeId" value="AuditStatementWeight"/>
+                <econdition field-name="enumCode" from="weight"/>
+            </entity-find>
+            <if condition="!weightList"><return error="true" message="A statement's weight is firm or derived, not ${weight}."/></if>
+            <entity-find entity-name="darpan.audit.AuditStatement" list="statementList">
+                <econdition field-name="companyUserGroupId" from="tenantId"/>
+                <econdition field-name="auditId" from="auditList[0].auditId"/>
+            </entity-find>
+            <set field="statementCode" from="'R' + ((statementList*.statementCode.collect { String c -> c ==~ /R\d+/ ? (c.substring(1) as int) : 0 } + [0]).max() + 1)"/>
+            <set field="sequenceNum" from="(statementList*.sequenceNum.findAll { it != null }.collect { it as long } + [0L]).max() + 1"/>
+            <entity-make-value entity-name="darpan.audit.AuditStatement" value-field="statementValue"
+                    map="[statementId: auditList[0].auditId + '_' + statementCode, companyUserGroupId: tenantId,
+                          auditId: auditList[0].auditId, statementCode: statementCode, categoryEnumId: categoryList[0].enumId,
+                          weightEnumId: weightList[0].enumId, statementText: statementText, isActive: 'Y', sequenceNum: sequenceNum]"/>
+            <entity-create value-field="statementValue"/>
+            <set field="statement" from="[id: statementValue.statementId, code: statementCode, text: statementText, active: true, checks: []]"/>
+            <set field="ok" from="true"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="[]"/>
         </actions>
     </service>
 
@@ -340,23 +405,6 @@
         </actions>
     </service>
 
-    <service verb="get" noun="AuditCheck" authz-action="view" allow-remote="true" authenticate="true">
-        <description>One check of an audit as the editor shows it, with its links to that audit's statements.</description>
-        <in-parameters><parameter name="audit" required="true"/><parameter name="check" required="true"/></in-parameters>
-        <out-parameters>
-            <parameter name="ok" type="Boolean"/>
-            <parameter name="messages" type="List"><parameter name="message"/></parameter>
-            <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="check" type="Map"/>
-        </out-parameters>
-        <actions>
-            <set field="check" from="darpan.audit.AuditCheckAuthoringSupport.getCheck(ec, audit, check)"/>
-            <set field="ok" from="!ec.message.hasError()"/>
-            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
-            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
-        </actions>
-    </service>
-
     <service verb="save" noun="AuditCheck" allow-remote="true" authenticate="true">
         <description>Creates or updates a check (check.id is its code) and replaces its links to this audit's statements.
             All or nothing; refused in words for a statement outside the audit, a run the tenant does not own, a rule not
@@ -376,25 +424,6 @@
         </out-parameters>
         <actions>
             <set field="savedCheck" from="darpan.audit.AuditCheckAuthoringSupport.saveCheck(ec, audit, check, statements)"/>
-            <if condition="ec.message.hasError()"><return error="true"/></if>
-            <set field="ok" from="true"/>
-            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
-            <set field="errors" from="[]"/>
-        </actions>
-    </service>
-
-    <service verb="delete" noun="AuditCheck" allow-remote="true" authenticate="true">
-        <description>Unlinks a check from this audit's statements; the check itself goes too when no other audit links it
-            and no finding names it (the ledger keeps its history).</description>
-        <in-parameters><parameter name="audit" required="true"/><parameter name="check" required="true"/></in-parameters>
-        <out-parameters>
-            <parameter name="ok" type="Boolean"/>
-            <parameter name="messages" type="List"><parameter name="message"/></parameter>
-            <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="result" type="Map"/>
-        </out-parameters>
-        <actions>
-            <set field="result" from="darpan.audit.AuditCheckAuthoringSupport.deleteCheck(ec, audit, check)"/>
             <if condition="ec.message.hasError()"><return error="true"/></if>
             <set field="ok" from="true"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

@@ -45,11 +45,24 @@ class AuditCheckAuthoringSupport {
             String ruleSetId = rs.ruleSetId as String
             def scope = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareScope")
                     .condition("ruleSetId", ruleSetId).useCache(false).list().find()
+            // DAR-UI-078: what the editor names each side by and fills a new check's records and "matched by" from.
+            String recordType = recordTypeOf(scope == null ? null : scope.getString("objectType"))
+            List<Map> sides = []
+            if (scope != null) {
+                TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSource")
+                        .condition("compareScopeId", scope.getString("compareScopeId")).orderBy("fileSide").useCache(false).list()
+                        .each { source ->
+                            String system = source.getString("systemEnumId")
+                            sides.add([side: source.getString("fileSide"), system: system ? system.tokenize("_")[0] : null,
+                                       key : source.getString("primaryIdExpression")])
+                        }
+            }
             [savedRunId : ruleSetId, runName: rs.ruleSetName ?: ruleSetId,
              scopeMode  : (scope?.scopeMode ?: "COMPARE") as String,
              rules      : TenantScopedFinder.findTenantScoped(ec, "darpan.rule.Rule").condition("ruleSetId", ruleSetId)
                      .orderBy("sequenceNum").useCache(false).list().collect { [ruleId: it.ruleId, ruleText: it.ruleText] },
-             conclusions: scope == null ? [] : conclusionsOf(ec, scope.compareScopeId as String)] as Map<String, Object>
+             conclusions: scope == null ? [] : conclusionsOf(ec, scope.compareScopeId as String),
+             recordType : recordType, sides: sides] as Map<String, Object>
         }
         return [audit     : [id: audit.auditCode, name: audit.auditName],
                 statements: statements.collect { [id: it.statementCode, text: it.statementText] },
@@ -57,16 +70,10 @@ class AuditCheckAuthoringSupport {
                 checks    : checksOf(ec, audit, statements).collect { [id: it.checkCode, label: it.label] }] as Map<String, Object>
     }
 
-    /** One check as the editor shows it, with its links to THIS audit's statements. */
-    static Map<String, Object> getCheck(def ec, String auditCode, String checkCode) {
-        Map audit = auditFor(ec, auditCode)
-        if (audit == null) return null
-        def check = checkFor(ec, checkCode)
-        if (check == null) {
-            ec.message.addError("Check '${checkCode}' was not found.")
-            return null
-        }
-        return describe(ec, check, statementsOf(ec, audit))
+    /** A run's object as a finding's record type: RETURN -> return, CREDIT_MEMO -> creditMemo. */
+    static String recordTypeOf(String objectType) {
+        List<String> words = (objectType ?: "").toLowerCase().split("_").findAll { it } as List<String>
+        return words ? words[0] + words.drop(1).collect { it.capitalize() }.join("") : null
     }
 
     /**
@@ -161,27 +168,6 @@ class AuditCheckAuthoringSupport {
                     sequenceNum: nextSequence(ec, l.statementId as String, checkId)]).create()
         }
         return describe(ec, row, statements)
-    }
-
-    /** Unlinks the check from this audit; the row goes too when nothing else links it and no finding names it. */
-    static Map<String, Object> deleteCheck(def ec, String auditCode, String checkCode) {
-        if (!TenantAccessSupport.requireActiveTenantWriteAccess(ec, "Your active tenant only has view access, so it cannot change an audit.")) return null
-        Map audit = auditFor(ec, auditCode)
-        if (audit == null) return null
-        def row = checkFor(ec, checkCode)
-        if (row == null) {
-            ec.message.addError("Check '${checkCode}' was not found.")
-            return null
-        }
-        String checkId = row.checkId as String
-        Set<String> auditStatementIds = statementsOf(ec, audit)*.statementId.collect { it as String } as Set<String>
-        List links = TenantScopedFinder.findTenantScoped(ec, "darpan.audit.AuditStatementCheck").condition("checkId", checkId).useCache(false).list()
-        links.findAll { (it.statementId as String) in auditStatementIds }.each { it.delete() }
-        boolean linkedElsewhere = links.any { !((it.statementId as String) in auditStatementIds) }
-        boolean hasFindings = TenantScopedFinder.findTenantScoped(ec, "darpan.audit.AuditFinding").condition("checkId", checkId).useCache(false).count() > 0
-        boolean removed = !linkedElsewhere && !hasFindings
-        if (removed) row.delete()
-        return [id: checkCode, removed: removed, unlinked: true] as Map<String, Object>
     }
 
     private static Map<String, Object> describe(def ec, def check, List<Map> statements) {

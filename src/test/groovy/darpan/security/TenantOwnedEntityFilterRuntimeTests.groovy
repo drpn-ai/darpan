@@ -82,7 +82,6 @@ class TenantOwnedEntityFilterRuntimeTests {
             "darpan.rule.RuleSetConclusionRule"                        : "compareScopeId",
             "darpan.rule.RuleSetConclusionCondition"                   : "compareScopeId",
             "darpan.audit.Audit"                                 : "auditId",
-            "darpan.audit.AuditPeriodExtension"                  : "auditId",
             "darpan.audit.AuditStatement"                    : "statementId",
             "darpan.audit.AuditCheck"                        : "checkId",
             "darpan.audit.AuditStatementCheck"               : "statementId",
@@ -102,7 +101,6 @@ class TenantOwnedEntityFilterRuntimeTests {
             "darpan.reconciliation.SlackWorkspaceInstall",
             "darpan.reconciliation.SourceConfigEndpointAccess",
             "darpan.audit.Audit",
-            "darpan.audit.AuditPeriodExtension",
             "darpan.audit.AuditStatement",
             "darpan.audit.AuditCheck",
             "darpan.audit.AuditStatementCheck",
@@ -688,7 +686,6 @@ class TenantOwnedEntityFilterRuntimeTests {
             case "darpan.rule.RuleSetConclusionRule": return "SCR"
             case "darpan.rule.RuleSetConclusionCondition": return "SCC"
             case "darpan.audit.Audit": return "AUD"
-            case "darpan.audit.AuditPeriodExtension": return "AUDPX"
             case "darpan.audit.AuditStatement": return "MCS"
             case "darpan.audit.AuditCheck": return "MCCK"
             case "darpan.audit.AuditStatementCheck": return "MCSC"
@@ -724,7 +721,6 @@ class TenantOwnedEntityFilterRuntimeTests {
             case "darpan.rule.RuleSetConclusionCondition": return [compareScopeId: id, sequenceNum: 1L, conditionSeq: 1L,
                     subject: "x", checkLabel: "y"]
             case "darpan.audit.Audit": return [auditId: id, auditCode: id, auditName: "x", periodEnumId: "AUDP_MONTH"]
-            case "darpan.audit.AuditPeriodExtension": return [auditId: id, period: "2026-09", continueThruDate: java.sql.Date.valueOf("2026-10-05")]
             case "darpan.audit.AuditStatement": return [statementId: id, auditId: "TOEF_AUD_${s}".toString(), statementCode: id,
                     categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM", statementText: "x"]
             case "darpan.audit.AuditCheck": return [checkId: id, checkCode: id, label: "x"]

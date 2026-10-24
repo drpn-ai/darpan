@@ -51,10 +51,8 @@ class AuditSettingsSupport {
         List<String> times = automations.collect { timeOf(it.scheduleExpr as String) }.unique()
         List<String> zones = automations.collect { it.windowTimeZone as String }.unique()
         LocalDate today = LocalDate.now(ZoneId.of(tenantZone(ec)))
-        // The earliest day play can record this morning: the current period's first day, or an ended period's while it
-        // is extended. The run page offers nothing before it.
-        LocalDate playableFrom = AuditReportAssembler.auditRuns(ec, tenantId, audit, today).findAll { it != null }
-                .collect { it.from as LocalDate }.min()
+        // The earliest day play can record this morning: the current period's first day. The run page offers nothing before it.
+        LocalDate playableFrom = (LocalDate) AuditReportAssembler.auditRun(ec, audit, today)?.from
         return [audit     : [id: audit.auditCode, name: audit.auditName, period: periods[audit.periodEnumId as String]],
                 playableFrom: playableFrom?.toString(),
                 schedule  : [active          : automations.any { it.isActive == "Y" },
@@ -119,7 +117,7 @@ class AuditSettingsSupport {
 
     /**
      * Play: every check of the audit over [from, thru], days inclusive in the tenant's zone. Refused before anything runs
-     * when the days cannot be recorded (in the future, backwards, or in a period that ended and was not extended).
+     * when the days cannot be recorded (in the future, backwards, or in a period that has ended).
      * Answers the automations submitted.
      */
     static List<Map> run(def ec, String tenantId, Map audit, LocalDate from, LocalDate thru, boolean fullRead) {

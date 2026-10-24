@@ -23,12 +23,11 @@ admin.UserAdminServices.get#UserDetail
 admin.UserAdminServices.get#UserList
 admin.UserAdminServices.reset#Password
 admin.UserAdminServices.update#UserAccount
-facade.AuditFacadeServices.delete#AuditCheck
-facade.AuditFacadeServices.get#AuditCheck
+facade.AuditFacadeServices.add#AuditStatement
+facade.AuditFacadeServices.create#Audit
 facade.AuditFacadeServices.get#AuditCheckExtracts
 facade.AuditFacadeServices.get#AuditCheckOptions
 facade.AuditFacadeServices.get#AuditFinding
-facade.AuditFacadeServices.get#AuditFindings
 facade.AuditFacadeServices.get#AuditFindingsByOrder
 facade.AuditFacadeServices.get#AuditReport
 facade.AuditFacadeServices.get#AuditSettings

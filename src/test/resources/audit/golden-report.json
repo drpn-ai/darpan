@@ -7,7 +7,6 @@
     "date": "2026-10-08",
     "window": { "from": "2026-10-01", "thru": "2026-10-08" },
     "running": true,
-    "extendedThru": null,
     "period": "2026-10",
     "generatedAt": "2026-10-08T06:12:40-07:00"
   },

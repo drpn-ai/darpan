@@ -15,7 +15,6 @@ import java.nio.file.Path
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
-import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -30,7 +29,6 @@ class AuditCheckAuthoringSmokeTests {
     private static final String FACADE = "facade.AuditFacadeServices"
     private static final String MINE = "KREWE"
     private static final String OTHER = "TCHK_OTHER"
-    private static final String FINDING_OPEN = "AUDFS_OPEN"
     private ExecutionContext ec
 
     @BeforeAll
@@ -38,7 +36,8 @@ class AuditCheckAuthoringSmokeTests {
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "audit-check-authoring")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AuditSeedData.xml",
-                "component://darpan/data/DarpanSystemSourceSeedData.xml", "component://darpan/data/AutomationSeedData.xml")
+                "component://darpan/data/DarpanSystemSourceSeedData.xml", "component://darpan/data/AutomationSeedData.xml",
+                "component://darpan/data/MappingSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)   // signs in a KREWE editor, KREWE active
         boolean wasDisabled = ec.artifactExecution.disableAuthz()
         try {
@@ -56,6 +55,15 @@ class AuditCheckAuthoringSmokeTests {
                     auditName: "Other only", periodEnumId: "AUDP_MONTH"])
             run("TCHK_RS1", MINE, "TCHK_RULE_A")
             run("TCHK_RS2", MINE, "TCHK_RULE_B")
+            // DAR-UI-078: live has runs with no compare scope yet, and multi-word objects.
+            insert("darpan.rule.RuleSet", [ruleSetId: "TCHK_RS_BARE", ruleSetName: "bare run", version: "1.0", companyUserGroupId: MINE])
+            insert("darpan.rule.RuleSet", [ruleSetId: "TCHK_RS_UNITS", ruleSetName: "units run", version: "1.0", companyUserGroupId: MINE])
+            insert("darpan.rule.RuleSetCompareScope", [compareScopeId: "TCHK_RS_UNITS_SCOPE", ruleSetId: "TCHK_RS_UNITS",
+                    scopeMode: "COMPARE", objectType: "ORDER_LINE_UNIT", companyUserGroupId: MINE])
+            // DAR-UI-078: a run's sides, so the editor names the systems and fills what it can.
+            insert("darpan.rule.RuleSetCompareSource", [compareScopeId: "TCHK_RS1_SCOPE", fileSide: "FILE_1", systemEnumId: "NETSUITE_SUITEQL",
+                    sourceTypeEnumId: "AUT_SRC_API", fileTypeEnumId: "DftJson", recordRootExpression: "records",
+                    primaryIdExpression: "tranId", sourceConfigId: "cfg", companyUserGroupId: MINE])
             run("TCHK_RS_OTHER", OTHER, "TCHK_RULE_O")
             insert("moqui.basic.EnumerationType", [enumTypeId: "DarpanConclusion", description: "Conclusion"])
             insert("moqui.basic.Enumeration", [enumId: "CONC_TCHK_OPEN", enumTypeId: "DarpanConclusion", enumCode: "CONC_TCHK_OPEN",
@@ -90,6 +98,10 @@ class AuditCheckAuthoringSmokeTests {
         Map rs1 = (Map) runs.find { it.savedRunId == "TCHK_RS1" }
         assertEquals(["TCHK_RULE_A"], rs1.rules*.ruleId)
         assertEquals([[code: "CONC_TCHK_OPEN", label: "Memo left open"]], rs1.conclusions)
+        assertEquals("return", rs1.recordType, "the run's object, as a record type")
+        assertEquals([[side: "FILE_1", system: "NETSUITE", key: "tranId"]], rs1.sides, "each side's root system and key")
+        assertEquals([null, []], runs.find { it.savedRunId == "TCHK_RS_BARE" }.subMap(["recordType", "sides"]).values() as List)
+        assertEquals("orderLineUnit", runs.find { it.savedRunId == "TCHK_RS_UNITS" }.recordType)
         assertTrue(facade("get#AuditCheckOptions", [audit: "other-only"]).hadError as boolean, "another tenant's audit is not found")
     }
 
@@ -113,10 +125,6 @@ class AuditCheckAuthoringSmokeTests {
         assertEquals("FINDING", link(row.checkId, "${MINE}_R4").diffTypes)
         assertEquals("CONC_TCHK_OPEN", link(row.checkId, "${MINE}_R4").conclusionCodes)
 
-        Map again = (Map) facade("get#AuditCheck", [audit: "month-close-t", check: "credit-memos-left-open"]).check
-        assertEquals(saved.statements, again.statements)
-        assertEquals(saved.findAll { it.key != "statements" }.collectEntries { k, v -> [(k): v?.toString()] },
-                again.findAll { it.key != "statements" }.collectEntries { k, v -> [(k): v?.toString()] })
         assertTrue((facade("get#AuditCheckOptions", [audit: "month-close-t"]).options as Map).checks*.id.contains("credit-memos-left-open"))
     }
 
@@ -169,34 +177,6 @@ class AuditCheckAuthoringSmokeTests {
                 savedRunId: "TCHK_RS2"], statements: [[id: "R4"]]])
         assertFalse(moved.hadError as boolean, moved.errorText as String)
         assertNull(checkRow("credit-memos-left-open").automationId, "a new run needs a new automation")
-    }
-
-    @Test
-    @Order(5)
-    void deletingKeepsACheckThatFindingsName() {
-        Map made = facade("save#AuditCheck", [audit: "month-close-t", check: [id: "gone-check", label: "Gone", savedRunId: "TCHK_RS1"],
-                statements: [[id: "R4"]]])
-        assertFalse(made.hadError as boolean, made.errorText as String)
-        Map out = facade("delete#AuditCheck", [audit: "month-close-t", check: "gone-check"])
-        assertFalse(out.hadError as boolean, out.errorText as String)
-        assertEquals(true, (out.result as Map).removed)
-        assertNull(checkRow("gone-check"))
-
-        def kept = checkRow("credit-memos-left-open")
-        boolean wasDisabled = ec.artifactExecution.disableAuthz()
-        try {
-            ec.entity.makeValue("darpan.audit.AuditFinding").setAll([companyUserGroupId: MINE, checkId: kept.checkId,
-                    statementId: "${MINE}_R4".toString(), recordKey: "CM-1", period: "2026-10", stateEnumId: FINDING_OPEN,
-                    headline: "Credit memo CM-1 is open", firstFoundDate: java.sql.Date.valueOf("2026-10-21"),
-                    lastSeenDate: java.sql.Date.valueOf("2026-10-21")]).setSequencedIdPrimary().create()
-        } finally {
-            if (!wasDisabled) ec.artifactExecution.enableAuthz()
-        }
-        Map keep = facade("delete#AuditCheck", [audit: "month-close-t", check: "credit-memos-left-open"])
-        assertFalse(keep.hadError as boolean, keep.errorText as String)
-        assertEquals(false, (keep.result as Map).removed)
-        assertNotNull(checkRow("credit-memos-left-open"), "the ledger names it, so the row stays")
-        assertNull(link(kept.checkId, "${MINE}_R4"), "but it no longer tests R4")
     }
 
     private Map facade(String verbNoun, Map params = [:]) {

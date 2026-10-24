@@ -62,7 +62,6 @@ class TenantOwnedEntityFilterContractTests {
     /** DAR-BE-103: the audit a statement belongs to. */
     static final Map<String, String> DAR_BE_103_FILTERS = [
             "darpan.audit.Audit"                                         : "DARPAN_SCOPE_AUD_AUDIT",
-            "darpan.audit.AuditPeriodExtension"                          : "DARPAN_SCOPE_AUD_PERIOD_EXT",
     ].asImmutable()
 
     /** DAR-BE-090: check health. */

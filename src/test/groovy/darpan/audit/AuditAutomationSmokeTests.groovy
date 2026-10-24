@@ -359,6 +359,18 @@ class AuditAutomationSmokeTests {
     }
 
     @Test
+    void aShopifyAgainstHotWaxOrderFindingNamesTheShopifyIdTheOrderNameAndTheHcId() {
+        // DAR-BE-125 (R20 F-120757, Aditi: "there should be a Order ID, Order Name, and HC ID"): the HotWax order is named
+        // by its own name and id, not by the Shopify key the compare joined on, and the Shopify order is listed once.
+        Map check = [checkId: "X", file1RecordType: "order", file2RecordType: "order"]
+        Map row = [type: "FIELD_MISMATCH", id: "18957262782595", ids: AuditAutomationSupport.rowData(
+                '{"file2":{"orderName":"#GOR197395235","orderId":"M1173432","externalId":"18957262782595"}}')]
+        assertEquals([["SHOPIFY", "order", "18957262782595", null], ["OMS_GQL", "order", "#GOR197395235", "M1173432"]],
+                AuditAutomationSupport.recordsOf(check, row, [systemEnumId: "SHOPIFY"], [systemEnumId: "OMS_GQL"])
+                        .collect { [it.systemEnumId, it.recordType, it.recordId, it.internalId] })
+    }
+
+    @Test
     void aHeadlineCanNameTheRowsConclusion() {
         Map check = [checkId: "X", headlineTemplate: "RMA {recordKey}: {conclusion}"]
         assertEquals("RMA RMA348610: No address it came from", AuditAutomationSupport.headline(check,

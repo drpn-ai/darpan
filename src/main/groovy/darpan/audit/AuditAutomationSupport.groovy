@@ -455,10 +455,14 @@ class AuditAutomationSupport {
             Map data = (side == dataSide ? (Map) row.data : null) ?: ids
             if (!systemEnumId || (typed && !recordType && !ids)) return
             related.addAll(relatedRecords(data, systemEnumId))
-            String recordId = normalize(data?.get("tranId")) ?: key
+            // DAR-BE-125: a HotWax order joined on its Shopify id is named by its own name and id (RELATED_IDS), not the key.
+            Map ownIds = RELATED_IDS.find { it.system == rootSystem(systemEnumId) && it.recordType == recordType }
+            String recordId = normalize(data?.get("tranId")) ?: ownIds?.with { relatedValue(data, it.id as List<String>) } ?: key
             // The key stands in for the internal id only on the row's own record: on a pair's other side it is the
             // shared join value (R13's memo id on the replacement order), not that record's key.
-            String internalId = normalize(data?.get("internalId")) ?: (recordId != key && (row.data || !ids) ? key : null)
+            String internalId = normalize(data?.get("internalId")) ?:
+                    (ownIds?.internalId ? relatedValue(data, [ownIds.internalId as String]) : null) ?:
+                    (recordId != key && (row.data || !ids) ? key : null)
             Map evidence = ((row.systems ?: []) as List).find { it instanceof Map && it.side == side } as Map
             own << [systemEnumId: systemEnumId,
                     recordType  : recordType ?: "record",
@@ -477,16 +481,21 @@ class AuditAutomationSupport {
     static List<Map> relatedRecords(Map data, String systemEnumId) {
         if (!data) return []
         String own = rootSystem(systemEnumId)
-        Closure<String> value = { String field ->
-            String v = normalize(data.get(field))
-            v && !v.startsWith("NO_") && v != "NONE" && !(field == "externalId" && normalize(data.get("returnId"))) ? v : null
-        }
         return RELATED_IDS.findAll { it.system != own }.collect { Map spec ->
-            String id = (spec.id as List<String>).findResult { value(it) }
-            String internalId = spec.internalId ? value(spec.internalId as String) : null
+            String id = relatedValue(data, spec.id as List<String>)
+            String internalId = spec.internalId ? relatedValue(data, [spec.internalId as String]) : null
             id ? [systemEnumId: spec.system, recordType: spec.recordType, recordId: id,
                   internalId: internalId == id ? null : internalId, recordStatus: null] : null
         }.findAll()
+    }
+
+    /** The first of fields with a value; "NO_..."/"NONE" is none, and a return's externalId is its Shopify RETURN. */
+    static String relatedValue(Map data, List<String> fields) {
+        if (!data) return null
+        return fields.findResult { String field ->
+            String v = normalize(data.get(field))
+            v && !v.startsWith("NO_") && v != "NONE" && !(field == "externalId" && normalize(data.get("returnId"))) ? v : null
+        }
     }
 
     /** NETSUITE_SUITEQL -> NETSUITE, OMS_RETURNS_GQL -> OMS: an endpoint's system is the code before its first "_". */

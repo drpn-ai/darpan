@@ -77,7 +77,7 @@ end]]></ruleLogic>
     </darpan.rule.Rule>
 
     <!-- ================================================================ R12 second half: the replacement invoice is paid -->
-    <moqui.basic.Enumeration enumId="CONC_WTY_INVOICE_NOT_PAID" enumTypeId="DarpanConclusion" enumCode="CONC_WTY_INVOICE_NOT_PAID" description="Warranty replacement invoice not paid"/>
+    <moqui.basic.Enumeration enumId="CONC_WTY_INVOICE_NOT_PAID" enumTypeId="DarpanConclusion" enumCode="CONC_WTY_INVOICE_NOT_PAID" description="Invoice unpaid"/>
     <darpan.rule.RuleSet ruleSetId="GORJANA_WTY_INVOICE_RS" ruleSetName="Warranty replacement invoices - paid"
             description="Every warranty replacement's invoice (reference WTY-) is Paid In Full: the claim's credit and the replacement invoice close each other out. Reads every such invoice so a paid one is seen and closes."
             version="1.0" companyUserGroupId="GORJANA"/>

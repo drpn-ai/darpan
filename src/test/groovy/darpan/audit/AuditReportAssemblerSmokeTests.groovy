@@ -195,7 +195,8 @@ class AuditReportAssemblerSmokeTests {
         Map brief = (r4.findings as List)[0]
         assertEquals([id: m258615, headline: "Credit memo is 0.01 less than the refund for return M258615", state: "open",
                       firstFound: "2026-10-07", ageDays: 1, difference: [amount: "-0.01", currency: "USD"],
-                      next: "darpan findings show ${m258615}".toString()], brief.findAll { it.key != "records" })
+                      cause: "Memo short of the refund", next: "darpan findings show ${m258615}".toString()],
+                brief.findAll { it.key != "records" })
         assertEquals([Shopify : [order: [[id: "7187000000000", internalId: null, status: null]]],
                       OMS     : ["return": [[id: "M258615", internalId: null, status: "Completed"]]],
                       NetSuite: [creditMemo: [[id: "CM-88213", internalId: "51000002", status: "Open"]]]], brief.records,
@@ -361,6 +362,14 @@ class AuditReportAssemblerSmokeTests {
 
     // DAR-BE-120 / DAR-BE-124. A cause with a fix of its own: the finding's fix is that one, its fact filled from the
     // evidence its conditions read (the rule rows are read as Moqui EntityLists, whose own find() wants a Boolean).
+    // DAR-BE-125 (Aditi: "these are more sentences than headings"). The board heads findings by cause; a finding's headline is
+    // written when it is seen, so a cause renamed since reads in its new words only from the catalog.
+    @Test
+    void aListedFindingCarriesItsCauseInTheCatalogsWords() {
+        Map r4 = report(GORJANA, "2026-10-08").categories.refundsAndCredits.statements.R4 as Map
+        assertEquals("Memo short of the refund", (r4.findings as List<Map>).find { it.id == m258615 }?.cause)
+    }
+
     @Test
     void aFindingsFixIsItsCausesNamingTheFactItFound() {
         withoutForeignKeys {

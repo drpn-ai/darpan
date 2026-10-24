@@ -395,7 +395,8 @@ class AuditReportAssembler {
             briefFinding(e, day, recordsByFinding[e.row.findingId as String] ?: [:], codes) +
                     [cause: cause?.label ?: null, held: cause?.heldBy != null]
         }
-        if (!unit.order) return line((unit.entries as List<Map>)[0]).findAll { k, v -> !(k in ["cause", "held"]) }
+        // DAR-BE-125: a lone finding keeps its cause in the catalog's words, which the board heads its findings by.
+        if (!unit.order) return line((unit.entries as List<Map>)[0]).findAll { k, v -> k != "held" }
         String order = unit.order as String
         List<Map> lines = (unit.entries as List<Map>).collect(line)
         List<Map> stuck = lines.any { it.held } ? lines.findAll { !it.held && it.cause } : []

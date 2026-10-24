@@ -548,6 +548,9 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].hasPaymentPreference"
             label="Has payment" fieldType="string" sequenceNum="8"
             description="Y when the order carries at least one OrderPaymentPreference, else N. Compared against Shopify hasPaymentTransaction by the presence OPP rule (operator &lt;=)."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].isCompleted"
+            label="Completed" fieldType="string" sequenceNum="10"
+            description="DAR-BE-125: Y when statusId is ORDER_COMPLETED, else N. Compared against Shopify isFulfilled (operator &gt;=)."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].orderDate"
             label="Order date" fieldType="string" sequenceNum="5"
             description="In keepFieldsBase. Epoch millis, as on the REST connector."/>
@@ -591,6 +594,8 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             label="Fulfillment status" fieldType="String" sequenceNum="3" description="FULFILLED, UNFULFILLED, PARTIALLY_FULFILLED, RESTOCKED, ..."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].hasPaymentTransaction"
             label="Has payment" fieldType="String" sequenceNum="8" description="DAR-BE-064: Y when any SUCCESS SALE, CAPTURE or AUTHORIZATION transaction exists, else N."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].isFulfilled"
+            label="Fulfilled" fieldType="String" sequenceNum="9" description="DAR-BE-125: Y when displayFulfillmentStatus is FULFILLED, else N (partial is N)."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].requiresShipping"
             label="Needs shipping" fieldType="Boolean" sequenceNum="6" description="false on orders with nothing to ship (gorjana's digital gift cards, POS carry-outs)."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].sourceName"

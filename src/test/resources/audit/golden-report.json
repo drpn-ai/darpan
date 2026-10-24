@@ -57,6 +57,7 @@
                 "NetSuite": { "invoice": [ { "id": "INV-552310", "internalId": "51000940", "status": "Paid In Full" } ] }
               },
               "difference": null,
+              "cause": null,
               "next": "darpan findings show F-20790"
             }
           ],
@@ -90,6 +91,7 @@
                 "NetSuite": { "creditMemo": [ { "id": "CM-88213", "internalId": "51000002", "status": "Open" } ] }
               },
               "difference": { "amount": "-0.01", "currency": "USD" },
+              "cause": null,
               "next": "darpan findings show F-20761"
             }
           ],

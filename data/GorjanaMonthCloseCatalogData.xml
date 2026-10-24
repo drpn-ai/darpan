@@ -11,6 +11,9 @@
   No checks yet. A statement with no AuditStatementCheck row reports status notRun and is listed in
   health.notCovered. The first checks (comparison 2: R1, R2, R3) arrive with DAR-BE-093.
 
+  DAR-BE-125 (Aditi, 2026-10-24): "keep R1 R8 R12 R19" - the audit reports only the statements she has verified, plus her
+  R20. The other fifteen carry isActive="N": off the report, and their checks record nothing. Their checks stay as config.
+
   NOT seed data — tenant configuration, like GorjanaConclusionRulesData.xml. Load per install, AFTER
   AuditSeedData.xml (the enums) and once the GORJANA tenant exists:
 
@@ -24,60 +27,64 @@
     <darpan.audit.AuditStatement statementId="GORJANA_R1" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R1"
             categoryEnumId="AUDC_ORDERS" weightEnumId="AUDSW_FIRM" sequenceNum="1"
             statementText="Every order that is fulfilled, in store or online, is in NetSuite with its invoice. This includes digital gift cards."/>
-    <darpan.audit.AuditStatement statementId="GORJANA_R2" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R2"
+    <darpan.audit.AuditStatement statementId="GORJANA_R2" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R2" isActive="N"
             categoryEnumId="AUDC_ORDERS" weightEnumId="AUDSW_FIRM" sequenceNum="2"
             statementText="Every invoice and credit memo carries the Shopify order id (the Etail id)."/>
-    <darpan.audit.AuditStatement statementId="GORJANA_R3" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R3"
+    <darpan.audit.AuditStatement statementId="GORJANA_R3" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R3" isActive="N"
             categoryEnumId="AUDC_ORDERS" weightEnumId="AUDSW_DERIVED" sequenceNum="3"
             statementText="Every store sale carries its store in NetSuite."/>
-    <darpan.audit.AuditStatement statementId="GORJANA_R4" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R4"
+    <darpan.audit.AuditStatement statementId="GORJANA_R4" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R4" isActive="N"
             categoryEnumId="AUDC_REFUNDS_CREDITS" weightEnumId="AUDSW_DERIVED" sequenceNum="4"
             statementText="Every refund we give a customer is booked in NetSuite at the same amount, to the cent, with nothing left open."/>
-    <darpan.audit.AuditStatement statementId="GORJANA_R5" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R5"
+    <darpan.audit.AuditStatement statementId="GORJANA_R5" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R5" isActive="N"
             categoryEnumId="AUDC_REFUNDS_CREDITS" weightEnumId="AUDSW_FIRM" sequenceNum="5"
             statementText="Store credit given in Shopify is in NetSuite at the same amount."/>
-    <darpan.audit.AuditStatement statementId="GORJANA_R6" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R6"
+    <darpan.audit.AuditStatement statementId="GORJANA_R6" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R6" isActive="N"
             categoryEnumId="AUDC_REFUNDS_CREDITS" weightEnumId="AUDSW_DERIVED" sequenceNum="6"
             statementText="A gift card refund is booked as a gift card, even when it comes weeks after the return."/>
-    <darpan.audit.AuditStatement statementId="GORJANA_R7" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R7"
+    <darpan.audit.AuditStatement statementId="GORJANA_R7" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R7" isActive="N"
             categoryEnumId="AUDC_REFUNDS_CREDITS" weightEnumId="AUDSW_FIRM" sequenceNum="7"
             statementText="A Happiness Guarantee claim is booked to the Happiness Guarantee account, 42065."/>
     <darpan.audit.AuditStatement statementId="GORJANA_R8" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R8"
             categoryEnumId="AUDC_RETURNS" weightEnumId="AUDSW_DERIVED" sequenceNum="8"
             statementText="Every return reaches NetSuite."/>
-    <darpan.audit.AuditStatement statementId="GORJANA_R9" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R9"
+    <darpan.audit.AuditStatement statementId="GORJANA_R9" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R9" isActive="N"
             categoryEnumId="AUDC_RETURNS" weightEnumId="AUDSW_FIRM" sequenceNum="9"
             statementText="Every return carries the customer's full name and the address it came from."/>
-    <darpan.audit.AuditStatement statementId="GORJANA_R10" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R10"
+    <darpan.audit.AuditStatement statementId="GORJANA_R10" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R10" isActive="N"
             categoryEnumId="AUDC_RETURNS" weightEnumId="AUDSW_DERIVED" sequenceNum="10"
             statementText="A returned piece goes back into stock as Good when it is resold, and as QC when it is damaged."/>
-    <darpan.audit.AuditStatement statementId="GORJANA_R11" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R11"
+    <darpan.audit.AuditStatement statementId="GORJANA_R11" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R11" isActive="N"
             categoryEnumId="AUDC_RETURNS" weightEnumId="AUDSW_DERIVED" sequenceNum="11"
             statementText="A warranty piece that arrives is booked, even when the claim is already closed."/>
     <darpan.audit.AuditStatement statementId="GORJANA_R12" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R12"
             categoryEnumId="AUDC_EXCHANGES_WARRANTY" weightEnumId="AUDSW_DERIVED" sequenceNum="12"
             statementText="A warranty replacement is paid by that claim's own credit, at the claim's value. The credit and the replacement invoice close each other out."/>
-    <darpan.audit.AuditStatement statementId="GORJANA_R13" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R13"
+    <darpan.audit.AuditStatement statementId="GORJANA_R13" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R13" isActive="N"
             categoryEnumId="AUDC_EXCHANGES_WARRANTY" weightEnumId="AUDSW_DERIVED" sequenceNum="13"
             statementText="A return is never treated as replaced by the order it came from."/>
-    <darpan.audit.AuditStatement statementId="GORJANA_R14" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R14"
+    <darpan.audit.AuditStatement statementId="GORJANA_R14" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R14" isActive="N"
             categoryEnumId="AUDC_EXCHANGES_WARRANTY" weightEnumId="AUDSW_DERIVED" sequenceNum="14"
             statementText="Every exchange credit belongs to a customer. When the shopper gave none, it belongs to the store's own customer."/>
-    <darpan.audit.AuditStatement statementId="GORJANA_R15" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R15"
+    <darpan.audit.AuditStatement statementId="GORJANA_R15" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R15" isActive="N"
             categoryEnumId="AUDC_EXCHANGES_WARRANTY" weightEnumId="AUDSW_DERIVED" sequenceNum="15"
             statementText="An exchange piece handed over at a store is booked at that store."/>
-    <darpan.audit.AuditStatement statementId="GORJANA_R16" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R16"
+    <darpan.audit.AuditStatement statementId="GORJANA_R16" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R16" isActive="N"
             categoryEnumId="AUDC_EXCHANGES_WARRANTY" weightEnumId="AUDSW_DERIVED" sequenceNum="16"
             statementText="A cancelled exchange leaves nothing open in NetSuite."/>
-    <darpan.audit.AuditStatement statementId="GORJANA_R17" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R17"
+    <darpan.audit.AuditStatement statementId="GORJANA_R17" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R17" isActive="N"
             categoryEnumId="AUDC_EXCHANGES_WARRANTY" weightEnumId="AUDSW_DERIVED" sequenceNum="17"
             statementText="A store floor damage is booked in NetSuite, or reported with its reason."/>
     <!-- DAR-BE-111: R18 is Aditi's (2026-10-22), not from #483, so derived until Gorjana Accounting confirms it. -->
-    <darpan.audit.AuditStatement statementId="GORJANA_R18" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R18"
+    <darpan.audit.AuditStatement statementId="GORJANA_R18" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R18" isActive="N"
             categoryEnumId="AUDC_ORDERS" weightEnumId="AUDSW_DERIVED" sequenceNum="18"
             statementText="An order HotWax completed or cancelled does not stay open in NetSuite."/>
     <!-- DAR-BE-113: R19 is Aditi's (2026-10-22), not from #483, so derived until Gorjana Accounting confirms it. -->
     <darpan.audit.AuditStatement statementId="GORJANA_R19" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R19"
             categoryEnumId="AUDC_ORDERS" weightEnumId="AUDSW_DERIVED" sequenceNum="19"
             statementText="Every order paid in Shopify has its payment in HotWax."/>
+    <!-- DAR-BE-125: R20 is Aditi's (2026-10-24), not from #483, so derived until Gorjana Accounting confirms it. -->
+    <darpan.audit.AuditStatement statementId="GORJANA_R20" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R20"
+            categoryEnumId="AUDC_ORDERS" weightEnumId="AUDSW_DERIVED" sequenceNum="20"
+            statementText="Every order HotWax completed is fulfilled in Shopify."/>
 </entity-facade-xml>

@@ -27,6 +27,8 @@
      with no channel, 3 Happiness Guarantee). Aditi, 2026-10-22: they should be in NetSuite.
      Aditi, 2026-10-23: a return from DISCONTINUED (fromPartyId) is not R8's. A conclusion condition, not a source filter,
      so the return is still read and examined.
+     Aditi, 2026-10-24 (DAR-BE-125): a Happiness Guarantee return (fromPartyId HAPPINESS_GUARANTEE) has no order by design,
+     so "no order, never synced" is not its cause; one missing from NetSuite reads "Return not in NetSuite".
 
   R4 "Every refund we give a customer is booked in NetSuite at the same amount, to the cent, with nothing left open."
      The "nothing left open" half, as Aditi set it on 2026-10-22: "there should never be an open credit memo", and Darpan
@@ -73,7 +75,7 @@
 
     <moqui.basic.Enumeration enumId="CONC_MEMO_LEFT_OPEN" enumTypeId="DarpanConclusion" enumCode="CONC_MEMO_LEFT_OPEN" description="Credit memo left open"/>
 
-    <moqui.basic.Enumeration enumId="CONC_RETURN_NO_ORDER_NOT_SYNCED" enumTypeId="DarpanConclusion" enumCode="CONC_RETURN_NO_ORDER_NOT_SYNCED" description="Completed return with no order, never synced"/>
+    <moqui.basic.Enumeration enumId="CONC_RETURN_NO_ORDER_NOT_SYNCED" enumTypeId="DarpanConclusion" enumCode="CONC_RETURN_NO_ORDER_NOT_SYNCED" description="No order"/>
     <moqui.basic.Enumeration enumId="CONC_RETURN_NOT_IN_NETSUITE" enumTypeId="DarpanConclusion" enumCode="CONC_RETURN_NOT_IN_NETSUITE" description="Return not in NetSuite"/>
 
     <moqui.basic.Enumeration enumId="CONC_HG_NOT_ON_42065" enumTypeId="DarpanConclusion" enumCode="CONC_HG_NOT_ON_42065" description="Happiness Guarantee credit not on 42065"/>
@@ -155,7 +157,7 @@ end]]></ruleLogic>
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" sequenceNum="10" conclusionEnumId="CONC_RETURN_NO_ORDER_NOT_SYNCED" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="statusId" operator="IN" conditionValues="RETURN_COMPLETED,RETURN_RECEIVED" checkLabel="The return is completed or received in the OMS" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="orderExternalId" operator="BLANK" checkLabel="The return names no order" companyUserGroupId="GORJANA"/>
-    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" sequenceNum="10" conditionSeq="3" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="fromPartyId" operator="NOT_IN" conditionValues="DISCONTINUED" checkLabel="The return is not from DISCONTINUED" companyUserGroupId="GORJANA"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" sequenceNum="10" conditionSeq="3" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="fromPartyId" operator="NOT_IN" conditionValues="DISCONTINUED,HAPPINESS_GUARANTEE" checkLabel="The return is not from DISCONTINUED or Happiness Guarantee" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionRule compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" sequenceNum="20" conclusionEnumId="CONC_RETURN_NOT_IN_NETSUITE" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" sequenceNum="20" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="statusId" operator="IN" conditionValues="RETURN_COMPLETED,RETURN_RECEIVED" checkLabel="The return is completed or received in the OMS" companyUserGroupId="GORJANA"/>
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_RETURN_IN_NETSUITE_SCOPE" sequenceNum="20" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="fromPartyId" operator="NOT_IN" conditionValues="DISCONTINUED" checkLabel="The return is not from DISCONTINUED" companyUserGroupId="GORJANA"/>

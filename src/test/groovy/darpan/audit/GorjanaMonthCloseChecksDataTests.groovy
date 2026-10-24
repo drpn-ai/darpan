@@ -63,7 +63,7 @@ class GorjanaMonthCloseChecksDataTests {
         assertEquals(["GORJANA_R13", "GORJANA_R14"] as Set, attr(rows(REPLACEMENT, "darpan.audit.AuditStatementCheck"), "statementId"))
         assertEquals(["GORJANA_R11", "GORJANA_R15"] as Set, attr(rows(RECEIPT, "darpan.audit.AuditStatementCheck"), "statementId"))
         assertEquals(["GORJANA_R12"] as Set, attr(rows(CLAIM, "darpan.audit.AuditStatementCheck"), "statementId"))
-        assertEquals(["GORJANA_R19"] as Set, attr(rows(PAYMENTS, "darpan.audit.AuditStatementCheck"), "statementId"))
+        assertEquals(["GORJANA_R19", "GORJANA_R20"] as Set, attr(rows(PAYMENTS, "darpan.audit.AuditStatementCheck"), "statementId"))
     }
 
     @Test
@@ -92,6 +92,10 @@ class GorjanaMonthCloseChecksDataTests {
         assertEquals("UNEXPLAINED", conclude(RETURNS, scope, [returnId: "602501", statusId: "RETURN_COMPLETED", fromPartyId: "DISCONTINUED"],
                 "MISSING_FROM_FILE_2"), "nor the no-order one")
         assertEquals("CONC_RETURN_NOT_IN_NETSUITE", conclude(RETURNS, scope, done + [fromPartyId: "10456"], "MISSING_FROM_FILE_2"))
+        // Aditi 2026-10-24: "this can happen for HG returns, no order will be available for that" (630637): no order is not
+        // a Happiness Guarantee return's cause; still a finding, as a return not in NetSuite.
+        assertEquals("CONC_RETURN_NOT_IN_NETSUITE", conclude(RETURNS, scope, [returnId: "630637", statusId: "RETURN_COMPLETED",
+                fromPartyId: "HAPPINESS_GUARANTEE"], "MISSING_FROM_FILE_2"))
     }
 
     @Test
@@ -193,6 +197,19 @@ class GorjanaMonthCloseChecksDataTests {
         cases.each { List<String> pair, Boolean fires ->
             assertEquals(fires, reconciliation.rule.RuleDiffSupport.violatesOperator(pair[0], pair[1], "<="), "Shopify ${pair[0]}, HotWax ${pair[1]}")
         }
+    }
+
+    // DAR-BE-125 R20: Shopify isFulfilled ">=" HotWax isCompleted breaks only when HotWax completed it (Y) and Shopify has not
+    // fulfilled all of it (N); the extract makes PARTIALLY_FULFILLED an N.
+    @Test
+    void r20FiresOnlyOnACompletedHotWaxOrderShopifyHasNotFulfilled() {
+        Map<List<String>, Boolean> cases = [["N", "Y"]: true, ["Y", "Y"]: false, ["N", "N"]: false, ["Y", "N"]: false]
+        cases.each { List<String> pair, Boolean fires ->
+            assertEquals(fires, reconciliation.rule.RuleDiffSupport.violatesOperator(pair[0], pair[1], ">="), "Shopify ${pair[0]}, HotWax ${pair[1]}")
+        }
+        List<Node> links = rows(PAYMENTS, "darpan.audit.AuditStatementCheck")
+        assertEquals(["GORJANA_R19": "GORJANA_PAID_HAS_OPP", "GORJANA_R20": "GORJANA_COMPLETED_FULFILLED"],
+                links.collectEntries { [(it.attribute("statementId")): it.attribute("ruleIds")] })
     }
 
     @Test

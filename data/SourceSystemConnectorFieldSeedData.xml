@@ -69,6 +69,9 @@
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].hasPaymentPreference"
             label="Has payment" fieldType="string" sequenceNum="8"
             description="Y when the order carries at least one OrderPaymentPreference, else N. Compared against Shopify hasPaymentTransaction by the presence OPP rule (operator &lt;=)."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].isCompleted"
+            label="Completed" fieldType="string" sequenceNum="10"
+            description="DAR-BE-125: Y when statusId is ORDER_COMPLETED, else N. Compared against Shopify isFulfilled (operator &gt;=)."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].paymentMethodTypeIds"
             label="Payment methods" fieldType="string" sequenceNum="9"
             description="Comma-joined OPP paymentMethodTypeIds from the first two OPPs (detail, not a key)."/>
@@ -197,6 +200,8 @@
             label="Cancelled on" fieldType="DateTime" sequenceNum="7" description="Set on a cancelled order."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].hasPaymentTransaction"
             label="Has payment" fieldType="String" sequenceNum="8" description="DAR-BE-064: Y when any SUCCESS SALE, CAPTURE or AUTHORIZATION transaction exists, else N."/>
+    <darpan.reconciliation.SourceSystemConnectorField systemEnumId="SHOPIFY" fieldPath="$.records[*].isFulfilled"
+            label="Fulfilled" fieldType="String" sequenceNum="9" description="DAR-BE-125: Y when displayFulfillmentStatus is FULFILLED, else N (partial is N)."/>
 
     <!-- Shopify return references (DAR-BE-018 task 9; 2026-08-17 returns-refund-grain-alignment plan,
          Task 2, REVISION 2026-08-18). Derived from the EMITTED record shape pinned at

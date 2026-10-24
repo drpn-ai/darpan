@@ -39,7 +39,7 @@ class AuditCatalogContractTests {
 
     /** #483 "What Gorjana Accounting needs": statement numbers under each heading. */
     static final Map<String, List<Integer>> GORJANA_CATEGORIES = [
-            AUDC_ORDERS            : [1, 2, 3, 18, 19],
+            AUDC_ORDERS            : [1, 2, 3, 18, 19, 20],
             AUDC_REFUNDS_CREDITS   : [4, 5, 6, 7],
             AUDC_RETURNS           : [8, 9, 10, 11],
             AUDC_EXCHANGES_WARRANTY: [12, 13, 14, 15, 16, 17],
@@ -87,13 +87,13 @@ class AuditCatalogContractTests {
     }
 
     @Test
-    void gorjanasCatalogIsNineteenStatementsInFourCategories() {
+    void gorjanasCatalogIsTwentyStatementsInFourCategories() {
         List<Map> audits = rows("GorjanaMonthCloseCatalogData.xml", "darpan.audit.Audit")*.attributes()
         assertEquals([[auditId: "GORJANA_MONTH_CLOSE", companyUserGroupId: "GORJANA", auditCode: "month-close",
                        auditName: "Month close", periodEnumId: "AUDP_MONTH"]], audits, "gorjana's month close is one audit")
         List<Node> statements = rows("GorjanaMonthCloseCatalogData.xml", "darpan.audit.AuditStatement")
-        // R18 (DAR-BE-111) and R19 (DAR-BE-113) are Aditi's, after the seventeen from #483.
-        assertEquals((1..19).collect { "R${it}".toString() }, statements*.attribute("statementCode"), "R1-R19 in file order")
+        // R18 (DAR-BE-111), R19 (DAR-BE-113) and R20 (DAR-BE-125) are Aditi's, after the seventeen from #483.
+        assertEquals((1..20).collect { "R${it}".toString() }, statements*.attribute("statementCode"), "R1-R20 in file order")
         statements.each { Node row ->
             String code = row.attribute("statementCode")
             int n = code.substring(1).toInteger()
@@ -106,6 +106,15 @@ class AuditCatalogContractTests {
             assertEquals(GORJANA_FIRM.contains(code) ? "AUDSW_FIRM" : "AUDSW_DERIVED", row.attribute("weightEnumId"), "${code} weight")
             assertTrue((row.attribute("statementText") as String)?.trim()?.length() > 20, "${code} needs its text")
         }
+    }
+
+    /** DAR-BE-125 (Aditi, 2026-10-24): "keep R1 R8 R12 R19", plus her R20; every other statement is off. */
+    @Test
+    void gorjanasAuditReportsOnlyTheStatementsAditiVerified() {
+        List<Node> statements = rows("GorjanaMonthCloseCatalogData.xml", "darpan.audit.AuditStatement")
+        List<String> on = statements.findAll { (it.attribute("isActive") ?: "Y") != "N" }*.attribute("statementCode")
+        assertEquals(["R1", "R8", "R12", "R19", "R20"], on)
+        assertEquals(["N"] as Set, statements.findAll { !on.contains(it.attribute("statementCode")) }*.attribute("isActive") as Set)
     }
 
     @Test

@@ -59,6 +59,10 @@ class GorjanaMonthCloseMorningsSmokeTests {
                 "component://darpan/data/GorjanaMonthCloseReplacementChecksData.xml",
                 "component://darpan/data/GorjanaMonthCloseWarrantyClaimChecksData.xml",
                 "component://darpan/data/GorjanaMonthCloseReturnsChecksData.xml")
+        // DAR-BE-125 turned gorjana's statements off but R1 R8 R12 R19 R20; these mornings prove each check's mechanics, so
+        // every statement is on here.
+        ec.entity.find("darpan.audit.AuditStatement").condition("auditId", "GORJANA_MONTH_CLOSE").disableAuthz().useCache(false)
+                .list().each { it.set("isActive", "Y"); it.update() }
         // The loader rolls a file back on a referential failure and still reports a count: prove the rows.
         assertEquals("GORJANA_INVOICE_ETAIL_RS", find("darpan.audit.AuditCheck", [checkId: CHECK])?.savedRunId)
         assertEquals(TENANT, find("darpan.rule.RuleSetConclusionRule",

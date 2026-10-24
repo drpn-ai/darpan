@@ -197,6 +197,15 @@ class AuditAutomationSmokeTests {
         assertEquals(["AUDFS_OPEN", 2L], [finding("B1").stateEnumId, finding("B1").timesSeen as Long])
     }
 
+    // DAR-UI-072. The run keeps the automation execution that read it, so the audit can hand out what each system's read wrote.
+    @Test
+    void aCheckRunKeepsTheAutomationExecutionThatReadIt() {
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-10-20", [], []), omsSource, nsSource,
+                [recordCount: 0], [recordCount: 0], null, null, "TAUTO_EX1")
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertEquals("TAUTO_EX1", checkRun("2026-10-20").automationExecutionId)
+    }
+
     // DAR-BE-123. A verify reads one finding's record; it closes or keeps the finding but writes no check run.
     @Test
     void aVerifyClosesItsFindingAndWritesNoCheckRun() {

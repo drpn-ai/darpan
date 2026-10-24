@@ -37,7 +37,7 @@ class AuditFacadeSmokeTests {
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "audit-facade")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AuditSeedData.xml",
-                "component://darpan/data/DarpanSystemSourceSeedData.xml")
+                "component://darpan/data/DarpanSystemSourceSeedData.xml", "component://darpan/data/AutomationSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)   // signs in a KREWE editor, KREWE active
         boolean wasDisabled = ec.artifactExecution.disableAuthz()
         try {
@@ -54,9 +54,28 @@ class AuditFacadeSmokeTests {
                 insert("darpan.audit.AuditStatementCheck", [checkId: "${t}_INV".toString(), statementId: "${t}_R2".toString(),
                         companyUserGroupId: t, sequenceNum: 1L])
             }
+            // DAR-UI-072. Each tenant's morning ran in an automation execution that kept one extract per side.
+            [MINE, OTHER].each { String t ->
+                String automationId = "${t}_AUTO".toString()
+                insert("darpan.reconciliation.ReconciliationAutomation", [automationId: automationId, automationName: automationId,
+                        companyUserGroupId: t, inputModeEnumId: "AUT_IN_API_RANGE", savedRunId: "${t}_RUN".toString()])
+                insert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: automationId, fileSide: "FILE_1",
+                        companyUserGroupId: t, sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "NETSUITE_SUITEQL"])
+                insert("darpan.reconciliation.ReconciliationAutomationSource", [automationId: automationId, fileSide: "FILE_2",
+                        companyUserGroupId: t, sourceTypeEnumId: "AUT_SRC_API", systemEnumId: "OMS_RETURNS_GQL"])
+                insert("darpan.reconciliation.ReconciliationAutomationExecution", [automationExecutionId: "${t}_EX".toString(),
+                        automationId: automationId, companyUserGroupId: t, statusEnumId: "AUT_STAT_SUCCESS",
+                        file1DataManagerPath: "reconciliation-runs/${t}/ns.json".toString(), file1RecordCount: 10L,
+                        file2DataManagerPath: "reconciliation-runs/${t}/oms.json".toString(), file2RecordCount: 9L])
+            }
             insert("darpan.audit.Audit", [auditId: "${OTHER}_ONLY".toString(), companyUserGroupId: OTHER, auditCode: "other-only",
                     auditName: "Other only", periodEnumId: "AUDP_MONTH"])
             myFinding = morning(MINE, "INV-K1")
+            // DAR-UI-073. A cause explains KREWE's finding, so the findings page can filter by it.
+            insert("moqui.basic.EnumerationType", [enumTypeId: "DarpanConclusion", description: "Run result conclusion"])
+            insert("moqui.basic.Enumeration", [enumId: "TFAC_CONC", enumTypeId: "DarpanConclusion", enumCode: "TFAC_CONC",
+                    description: "Backordered in NetSuite"])
+            ec.entity.find("darpan.audit.AuditFinding").condition("findingId", myFinding).one().set("conclusionEnumId", "TFAC_CONC").update()
             otherFinding = morning(OTHER, "INV-O1")
         } finally {
             if (!wasDisabled) ec.artifactExecution.enableAuthz()
@@ -65,7 +84,7 @@ class AuditFacadeSmokeTests {
 
     private String morning(String tenant, String invoice) {
         Map base = [companyUserGroupId: tenant, checkId: "${tenant}_INV".toString(), reportDate: Date.valueOf("2026-10-08")]
-        ec.service.sync().name("${LEDGER}.record#CheckRun").parameters(base + [sourceReads: [[systemEnumId: "NETSUITE_SUITEQL",
+        ec.service.sync().name("${LEDGER}.record#CheckRun").parameters(base + [automationExecutionId: "${tenant}_EX".toString(), sourceReads: [[systemEnumId: "NETSUITE_SUITEQL",
                 statusEnumId: "AUDSR_COMPLETE", recordCount: 10L, readStamp: new java.sql.Timestamp(System.currentTimeMillis())]]]).call()
         Map found = ec.service.sync().name("${LEDGER}.record#CheckFindings").parameters(base + [findings: [[statementCode: "R2",
                 recordKey: invoice, headline: "Invoice ${invoice} has no Etail id".toString(),
@@ -151,6 +170,99 @@ class AuditFacadeSmokeTests {
     void aMalformedDateIsRefusedInWords() {
         Map out = call("get#AuditReport", [audit: "month-close", date: "2026-13-45"])
         assertTrue((out.errorText as String).contains("date must be YYYY-MM-DD"), out.errorText as String)
+    }
+
+    // DAR-UI-070. The board's "N more": a statement's open and pending findings past the report's 50, a page at a time.
+    @Test
+    void aStatementsFindingsPageIsTheActiveTenantsOnly() {
+        Map out = call("get#AuditFindings", [audit: "month-close", statement: "R2", period: "2026-10"])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        assertEquals([myFinding], (out.findings as List<Map>)*.id, "KREWE's R2 finding, not the other tenant's")
+        assertEquals("Invoice INV-K1 has no Etail id", (out.findings as List<Map>)[0].headline)
+        assertTrue((out.findings as List<Map>)[0].records instanceof Map, "records keyed, as the report's findings are")
+        assertFalse(out.hasNextPage as boolean)
+        assertTrue(out.endCursor as boolean, "a cursor to ask for the page after")
+
+        assertEquals([], call("get#AuditFindings", [audit: "month-close", statement: "R9", period: "2026-10"]).findings)
+        assertEquals([], call("get#AuditFindings", [audit: "other-only", statement: "R2"]).findings, "another tenant's audit")
+    }
+
+    // DAR-UI-073. The board's filters read the whole audit's findings for the period, each with its cause, by state.
+    @Test
+    void aFindingsPageSpansTheAuditCarriesTheCauseAndNarrowsByState() {
+        Map all = call("get#AuditFindings", [audit: "month-close", period: "2026-10"])
+        assertFalse(all.hadError as boolean, all.errorText as String)
+        assertEquals([[id: myFinding, statement: "R2", cause: "Backordered in NetSuite"]],
+                (all.findings as List<Map>).collect { [id: it.id, statement: it.statement, cause: it.cause] })
+        // Found on Oct 8 with a day's grace, the finding is pending, not open.
+        assertEquals([myFinding], (call("get#AuditFindings", [audit: "month-close", period: "2026-10", state: "pending"]).findings as List<Map>)*.id)
+        assertEquals([], call("get#AuditFindings", [audit: "month-close", period: "2026-10", state: "open"]).findings)
+    }
+
+    // DAR-UI-075. The board's "more", filters and export read the findings as the report lists them: one per order.
+    @Test
+    void theFindingsByOrderAreTheReportsUnitsForAStatementOrTheWholeAudit() {
+        // Its own audit, so the other tests' statements and audit-wide reads stay as they are.
+        boolean wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            insert("darpan.audit.Audit", [auditId: "${MINE}_BYO".toString(), companyUserGroupId: MINE, auditCode: "by-order",
+                    auditName: "By order", periodEnumId: "AUDP_MONTH"])
+            insert("darpan.audit.AuditStatement", [statementId: "${MINE}_R7".toString(), companyUserGroupId: MINE, auditId: "${MINE}_BYO".toString(),
+                    statementCode: "R7", categoryEnumId: "AUDC_ORDERS", weightEnumId: "AUDSW_FIRM", sequenceNum: 7L, statementText: "Every line is billed."])
+            insert("darpan.audit.AuditCheck", [checkId: "${MINE}_BYO_C".toString(), companyUserGroupId: MINE, checkCode: "lines-billed", label: "Lines billed"])
+            insert("darpan.audit.AuditStatementCheck", [checkId: "${MINE}_BYO_C".toString(), statementId: "${MINE}_R7".toString(),
+                    companyUserGroupId: MINE, sequenceNum: 1L])
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+        Closure<Map> line = { String item ->
+            [statementCode: "R7", recordKey: item, headline: "Item ${item} is not billed".toString(),
+             records: [[systemEnumId: "OMS_RETURNS_GQL", recordType: "orderItem", recordId: item]]]
+        }
+        Map found = ec.service.sync().name("${LEDGER}.record#CheckFindings").parameters([companyUserGroupId: MINE,
+                checkId: "${MINE}_BYO_C".toString(), reportDate: Date.valueOf("2026-10-08"),
+                findings: [line("M7/01"), line("M9/01"), line("M9/02")]]).call()
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        List<String> ids = found.findingIds as List<String>
+
+        Map out = call("get#AuditFindingsByOrder", [audit: "by-order", statement: "R7", period: "2026-10"])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        List<Map> units = out.findings as List<Map>
+        assertEquals(["M7", "M9"], units*.id, "M7's one line, then order M9's two lines as one: each an order")
+        assertEquals(["order", "order"], units*.kind)
+        assertEquals(ids[1..2], (units[1].lines as List<Map>)*.id)
+        assertEquals([["R7", "orders"], ["R7", "orders"]], units.collect { [it.statement, it.category] })
+        assertEquals(units*.id, (call("get#AuditFindingsByOrder", [audit: "by-order", period: "2026-10"]).findings as List<Map>)*.id,
+                "the whole audit: every statement's units")
+        // No grace on this check: every line is open, so both units are open and none pending.
+        assertEquals(units*.id, (call("get#AuditFindingsByOrder", [audit: "by-order", period: "2026-10", state: "open"]).findings as List<Map>)*.id)
+        assertEquals([], call("get#AuditFindingsByOrder", [audit: "by-order", period: "2026-10", state: "pending"]).findings)
+        Map other = call("get#AuditFindingsByOrder", [audit: "other-only", period: "2026-10"])
+        assertTrue((other.errorText as String).contains("Audit other-only was not found"), other.errorText as String)
+    }
+
+    @Test
+    void aFindingsPageRefusesABadCursorInWords() {
+        Map out = call("get#AuditFindings", [audit: "month-close", statement: "R2", after: "not-a-cursor"])
+        assertTrue(out.hadError as boolean)
+        assertTrue((out.errorText as String).contains("after is not a cursor"), out.errorText as String)
+    }
+
+    // DAR-UI-072. What each system's read wrote for a check's morning, to download beside the report.
+    @Test
+    void aChecksExtractsAreWhatItsAutomationRunReadPerSystem() {
+        Map out = call("get#AuditCheckExtracts", [audit: "month-close", check: "invoices-without-etail-id", date: "2026-10-08", period: "2026-10"])
+        assertFalse(out.hadError as boolean, out.errorText as String)
+        assertEquals([[system: "NetSuite", records: 10L, filePath: "reconciliation-runs/KREWE/ns.json"],
+                      [system: "OMS", records: 9L, filePath: "reconciliation-runs/KREWE/oms.json"]],
+                (out.extracts as List<Map>).collect { [system: it.system, records: it.records as Long, filePath: it.filePath] })
+
+        assertEquals([], call("get#AuditCheckExtracts", [audit: "month-close", check: "invoices-without-etail-id", date: "2026-10-09", period: "2026-10"]).extracts,
+                "no run that morning")
+        Map other = call("get#AuditCheckExtracts", [audit: "other-only", check: "invoices-without-etail-id", date: "2026-10-08", period: "2026-10"])
+        assertTrue((other.errorText as String).contains("Audit other-only was not found"), other.errorText as String)
+        assertFalse(call("get#AuditCheckExtracts", [audit: "month-close", check: "invoices-without-etail-id", date: "2026-10-08", period: "2026-10"])
+                .toString().contains("TFAC_OTHER"), "nothing of the other tenant")
     }
 
     private void insert(String entityName, Map<String, Object> fields) {

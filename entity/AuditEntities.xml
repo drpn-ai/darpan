@@ -459,6 +459,10 @@
         <field name="runStamp" type="date-time" not-null="true">
             <description>When the run was recorded.</description>
         </field>
+        <field name="automationExecutionId" type="id">
+            <description>DAR-UI-072. The automation execution whose reads this run is (ReconciliationAutomationExecution),
+                so the audit can hand out each system's extract. Empty on runs recorded before it was kept.</description>
+        </field>
         <relationship type="one" related="darpan.audit.AuditCheck" fk-name="AUDCR_CHECK">
             <key-map field-name="checkId"/>
         </relationship>

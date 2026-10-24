@@ -187,7 +187,7 @@ class AuditAutomationSupport {
      */
     static void recordWindow(def ec, def automation, List<Map> checks, Map<String, Object> window,
                              def file1Source, def file2Source, Map file1Result, Map file2Result,
-                             Map reconcileResult, Throwable failure) {
+                             Map reconcileResult, Throwable failure, String automationExecutionId = null) {
         if (!checks || !window?.auditPeriod) return
         List<String> priorErrors = ec.message.hasError() ? new ArrayList<String>(ec.message.errors) : []
         ec.message.clearErrors()
@@ -202,7 +202,7 @@ class AuditAutomationSupport {
             checks.each { Map check ->
                 Set<String> unjudged = unjudgedKeys(ec, automation, check, window, diff, file1Source, file2Source)
                 recordCheck(ec, tenantId, check, window, reads, notRunReason, diff, file1Source, file2Source,
-                        (examined.unique() - unjudged) as List<String>, now, unjudged)
+                        (examined.unique() - unjudged) as List<String>, now, unjudged, automationExecutionId)
             }
         } catch (Exception e) {
             logger.error("Audit ledger write failed for automation ${readField(automation, 'automationId')} window ${window.auditPeriod}: ${sanitizeErrorDetail(e)}")
@@ -241,7 +241,7 @@ class AuditAutomationSupport {
 
     private static void recordCheck(def ec, String tenantId, Map check, Map window, List<Map> reads, String notRunReason,
                                     File diff, def file1Source, def file2Source, List<String> examined, Timestamp now,
-                                    Set<String> unjudged) {
+                                    Set<String> unjudged, String automationExecutionId) {
         Map base = [companyUserGroupId: tenantId, checkId: check.checkId, reportDate: window.auditReportDate,
                     period: window.auditPeriod]
         // DAR-UI-063. Played days keep their own dates; the morning run's are the period to date (the ledger's default).
@@ -249,7 +249,7 @@ class AuditAutomationSupport {
         // DAR-BE-123: a verify writes no check run: it moves neither the check's health nor its incremental read. As
         // record#CheckRun would, a read not complete makes it partial, which closes nothing (DAR-BE-124).
         Map run = !window.auditVerifyKeys ? call(ec, "${LEDGER}.record#CheckRun", base + dates + [runStamp: now, sourceReads: reads,
-                notRunReason: notRunReason]) : notRunReason || !reads ? null :
+                notRunReason: notRunReason, automationExecutionId: automationExecutionId]) : notRunReason || !reads ? null :
                 [checkStatusEnumId: reads.every { it.statusEnumId == "AUDSR_COMPLETE" } ? "AUDCS_RAN" : "AUDCS_PARTIAL"]
         if (run == null || run.checkStatusEnumId == "AUDCS_NOT_RUN") return
         Map<String, Map> explained = [:]

@@ -575,7 +575,7 @@ class AutomationExecutionSupport {
                     // its chat space against deletion forever, so purge it here.
                     TenantNotificationSupport.purgeSubscriptionsForUnnotifiedRun(ec, mintedRunResultId)
                     AuditAutomationSupport.recordWindow(ec, automation, auditChecks, window, file1Source, file2Source,
-                            file1Result, file2Result, null, null)
+                            file1Result, file2Result, null, null, automationExecutionId)
                     executionResults << noDataFields + [
                             automationExecutionId: automationExecutionId,
                             childWindowStartDate : window.childWindowStartDate,
@@ -682,7 +682,7 @@ class AutomationExecutionSupport {
                 // makes the check notRun, so nothing closes on a compare that did not fully evaluate.
                 AuditAutomationSupport.recordWindow(ec, automation, auditChecks, window, file1Source, file2Source,
                         file1Result, file2Result, reconcileResult,
-                        ruleExecutionFailed ? new IllegalStateException("A rule failed to build or evaluate.") : null)
+                        ruleExecutionFailed ? new IllegalStateException("A rule failed to build or evaluate.") : null, automationExecutionId)
                 // DAR-BE-123: a verify answers the person who asked, on the finding; the run's space is not told.
                 if (!window?.auditVerifyKeys) notifyRunCompletedWithStage(ec, mintedRunResultId, stepCtx, [
                         reconciliationRunResultId: reconciliationRunResultId,
@@ -742,7 +742,7 @@ class AutomationExecutionSupport {
                 updateAutomationExecution(ec, execution, failureFields)
                 // DAR-BE-092: the failed read (or compare) is recorded, so the check is partial or notRun and closes nothing.
                 AuditAutomationSupport.recordWindow(ec, automation, auditChecks, window, file1Source, file2Source,
-                        file1Result, file2Result, reconcileResult, t)
+                        file1Result, file2Result, reconcileResult, t, automationExecutionId)
                 // Task 2b terminal guarantee: close the row minted at RUNNING on EVERY failure exit,
                 // including a transient one that requeues the execution to PENDING. Left RUNNING it would
                 // be an active run nobody is running, which the reaper turns into a spurious FAILED alert

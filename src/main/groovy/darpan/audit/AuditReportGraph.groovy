@@ -37,6 +37,34 @@ class AuditReportGraph {
         return TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.audit.AuditFinding", "findingId", findingId, tenantId, WHY) != null
     }
 
+    /**
+     * DAR-UI-072. What each system's read wrote for one check's morning: a row per side of the automation execution the
+     * run recorded that kept a file, file 1 first. Empty when the check did not run that morning, or ran before the
+     * execution was kept. Every read is the tenant's own.
+     */
+    static List<Map> checkExtracts(def ec, String tenantId, String checkCode, Date reportDate, String period) {
+        if (!tenantId || !checkCode || !reportDate || !period) return []
+        String checkId = tenantRows(ec, "darpan.audit.AuditCheck", tenantId).condition("checkCode", checkCode).list().find()?.get("checkId")
+        String executionId = checkId ? tenantRows(ec, "darpan.audit.AuditCheckRun", tenantId).condition("checkId", checkId)
+                .condition("reportDate", reportDate).condition("period", period).list().find()?.get("automationExecutionId") : null
+        def execution = executionId ? tenantRows(ec, "darpan.reconciliation.ReconciliationAutomationExecution", tenantId)
+                .condition("automationExecutionId", executionId).list().find() : null
+        if (execution == null) return []
+        Map<String, String> systemBySide = tenantRows(ec, "darpan.reconciliation.ReconciliationAutomationSource", tenantId)
+                .condition("automationId", execution.get("automationId")).list().collectEntries { [(it.fileSide): it.systemEnumId] }
+        return [["FILE_1", "file1"], ["FILE_2", "file2"]].collect { String side, String field ->
+            String path = execution.get("${field}DataManagerPath".toString()) as String
+            String system = systemBySide[side]
+            path ? [system  : system ? AuditReportAssembler.systemKey(AuditAutomationSupport.rootSystem(system)) : null,
+                    records : execution.get("${field}RecordCount".toString()),
+                    filePath: path] : null
+        }.findAll() as List<Map>
+    }
+
+    private static def tenantRows(def ec, String entityName, String tenantId) {
+        return TenantScopedFinder.findGlobalUnscoped(ec, entityName, WHY).condition("companyUserGroupId", tenantId).useCache(false)
+    }
+
     /** The morning to report: date as YYYY-MM-DD, or blank for today in the tenant's zone. Throws on a malformed date. */
     static Date reportDateFor(def ec, String tenantId, String date) {
         if (date?.trim()) {

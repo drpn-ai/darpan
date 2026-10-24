@@ -38,7 +38,8 @@
     <moqui.basic.Enumeration enumId="CONC_OPEN_CLOSED_IN_NS" enumTypeId="DarpanConclusion" enumCode="CONC_OPEN_CLOSED_IN_NS" description="Open in HotWax, closed in NetSuite"/>
     <moqui.basic.Enumeration enumId="CONC_CANCEL_NOT_IN_SHOPIFY" enumTypeId="DarpanConclusion" enumCode="CONC_CANCEL_NOT_IN_SHOPIFY" description="Cancel not synced to Shopify"/>
     <!-- DAR-BE-118, Aditi 2026-10-23 on R1 (F-100799, F-100767). -->
-    <moqui.basic.Enumeration enumId="CONC_ORDER_BACKORDER_HOLDS_BILLING" enumTypeId="DarpanConclusion" enumCode="CONC_ORDER_BACKORDER_HOLDS_BILLING" description="Shipped, not billed: another line of its order is backordered in NetSuite"/>
+    <!-- DAR-UI-075. Held by another line's backorder: relatedEnumId names that cause, so the audit's order finding names the line. -->
+    <moqui.basic.Enumeration enumId="CONC_ORDER_BACKORDER_HOLDS_BILLING" enumTypeId="DarpanConclusion" enumCode="CONC_ORDER_BACKORDER_HOLDS_BILLING" description="Shipped, not billed: another line of its order is backordered in NetSuite" relatedEnumId="CONC_NS_BACKORDERED"/>
     <moqui.basic.Enumeration enumId="CONC_PARTIAL_PAYMENT_NO_NS" enumTypeId="DarpanConclusion" enumCode="CONC_PARTIAL_PAYMENT_NO_NS" description="Partial payment: the order was never sent to NetSuite"/>
     <moqui.basic.Enumeration enumId="CONC_DUPLICATE_ORDER_NO_NS" enumTypeId="DarpanConclusion" enumCode="CONC_DUPLICATE_ORDER_NO_NS" description="Duplicate order: not sent to NetSuite"/>
     <moqui.basic.Enumeration enumId="CONC_FULFILLED_WITHIN_DAY" enumTypeId="DarpanConclusion" enumCode="CONC_FULFILLED_WITHIN_DAY" description="Fulfilled in HotWax under 24 hours ago: NetSuite bills it within a day"/>

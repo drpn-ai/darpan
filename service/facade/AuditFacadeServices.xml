@@ -120,6 +120,104 @@
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
+    <!-- DAR-UI-075. The findings as the report lists them, one per order, past its 50: the board's "more", filters, export. -->
+    <service verb="get" noun="AuditFindingsByOrder" authz-action="view" allow-remote="true" authenticate="true">
+        <description>Every open and pending finding of one audit and period, one per order (an order's lines under it, the
+            line holding it up named), each with its statement and category. State is as of today.</description>
+        <in-parameters>
+            <parameter name="audit" required="true"><description>The audit's code, e.g. month-close.</description></parameter>
+            <parameter name="statement"><description>The statement's code, e.g. R1; blank is every statement.</description></parameter>
+            <parameter name="period"><description>The report's period, e.g. 2026-10; blank is every period.</description></parameter>
+            <parameter name="state"><description>open or pending; blank is both.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="findings" type="List"><parameter name="finding" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="auditId" from="tenantId ? darpan.audit.AuditReportGraph.auditIdFor(ec, tenantId, audit) : null"/>
+            <if condition="!auditId"><return error="true" message="Audit ${audit} was not found"/></if>
+            <set field="findings" from="darpan.audit.AuditReportAssembler.findingsByOrder(ec, tenantId, auditId, statement ?: null,
+                    period ?: null, state in ['open', 'pending'] ? [state] : null)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+    <!-- DAR-UI-072. A check's extracts beside the report: the files the board's download reads through get#GeneratedOutput. -->
+    <service verb="get" noun="AuditCheckExtracts" authz-action="view" allow-remote="true" authenticate="true">
+        <description>What each system's read wrote for one check's morning: a row per side of the automation run, with the
+            system, how many records it read and the file's data-manager path. Empty when the check did not run that morning,
+            or ran before the run was kept.</description>
+        <in-parameters>
+            <parameter name="audit" required="true"><description>The audit's code, e.g. month-close.</description></parameter>
+            <parameter name="check" required="true"><description>The check's code, e.g. invoices-without-etail-id.</description></parameter>
+            <parameter name="date"><description>The morning, YYYY-MM-DD; blank is today in the tenant's zone.</description></parameter>
+            <parameter name="period" required="true"><description>The report's period, e.g. 2026-10.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="extracts" type="List"><parameter name="extract" type="Map"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="auditId" from="tenantId ? darpan.audit.AuditReportGraph.auditIdFor(ec, tenantId, audit) : null"/>
+            <if condition="!auditId"><return error="true" message="Audit ${audit} was not found"/></if>
+            <script>
+                try {
+                    reportDate = darpan.audit.AuditReportGraph.reportDateFor(ec, tenantId, date)
+                } catch (IllegalArgumentException e) {
+                    ec.message.addError(e.message)
+                }
+            </script>
+            <if condition="ec.message.hasError()"><return/></if>
+            <set field="extracts" from="darpan.audit.AuditReportGraph.checkExtracts(ec, tenantId, check, reportDate, period)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+    <!-- DAR-UI-070. The report lists 50 findings a statement; the board's "N more" pages through the rest here. -->
+    <service verb="get" noun="AuditFindings" authz-action="view" allow-remote="true" authenticate="true">
+        <description>One page of a statement's open and pending findings, oldest first, each as the report's finding
+            summary (DAR-BE-098's findings page, narrowed to one audit, statement and period). State is as of today.</description>
+        <in-parameters>
+            <parameter name="audit" required="true"><description>The audit's code, e.g. month-close.</description></parameter>
+            <parameter name="statement"><description>The statement's code, e.g. R2; blank is every statement of the audit
+                (DAR-UI-073, the board's filters).</description></parameter>
+            <parameter name="state"><description>open or pending; blank is both.</description></parameter>
+            <parameter name="period"><description>The report's period, e.g. 2026-10; blank is every period.</description></parameter>
+            <parameter name="after"><description>The endCursor of the page before; blank is the first page.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="findings" type="List"><parameter name="finding" type="Map"/></parameter>
+            <parameter name="endCursor"/>
+            <parameter name="hasNextPage" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId"><return error="true" message="Audit ${audit} was not found"/></if>
+            <set field="terms" from="[[key: 'audit', values: [audit]],
+                    [key: 'state', values: state in ['open', 'pending'] ? [state] : ['open', 'pending']]] +
+                    (statement ? [[key: 'statement', values: [statement]]] : []) + (period ? [[key: 'period', values: [period]]] : [])"/>
+            <set field="result" from="darpan.audit.AuditReportAssembler.findingsPage(ec, tenantId, terms, null, false, 100, after ?: null)"/>
+            <if condition="result.publicError"><return error="true" message="${result.publicError}"/></if>
+            <set field="findings" from="result.page.edges*.node"/>
+            <set field="endCursor" from="result.page.pageInfo.endCursor"/>
+            <set field="hasNextPage" from="result.page.pageInfo.hasNextPage"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
     <!-- DAR-UI-063. The audit page's settings gear and play button. Writes need the active tenant's edit access. -->
     <service verb="get" noun="AuditSettings" authz-action="view" allow-remote="true" authenticate="true">
         <description>An audit's settings: its name, the daily schedule its checks run on, and each statement with its

@@ -301,6 +301,8 @@
             <parameter name="sourceReads" type="List">
                 <description>One Map per extract: systemEnumId (an endpoint or a root system), statusEnumId
                     (AUDSR_COMPLETE / AUDSR_PARTIAL / AUDSR_FAILED), recordCount, readStamp, reason.</description></parameter>
+            <parameter name="automationExecutionId">
+                <description>DAR-UI-072. The automation execution that read this run, kept so its extracts can be handed out.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="checkRunId"/>
@@ -379,6 +381,7 @@
             <set field="checkRun.statusEnumId" from="checkStatusEnumId"/>
             <set field="checkRun.reason" from="reason"/>
             <set field="checkRun.runStamp" from="runStamp"/>
+            <set field="checkRun.automationExecutionId" from="automationExecutionId"/>
             <entity-create value-field="checkRun" or-update="true"/>
             <set field="checkRunId" from="checkRun.checkRunId"/>
 

@@ -294,6 +294,44 @@ class AuditReportAssemblerSmokeTests {
         }
     }
 
+    // DAR-UI-075. One finding per order: the order's line findings sit under it, and the line whose cause is its own (not
+    // held by another line's) is the one named as holding the order up.
+    @Test
+    void anOrdersLineFindingsAreOneFindingThatNamesTheLineHoldingItUp() {
+        insert("moqui.basic.Enumeration", [enumId: "TREP_CONC_BACKORDERED", enumTypeId: "DarpanConclusion",
+                enumCode: "TREP_CONC_BACKORDERED", description: "Backordered in NetSuite"])
+        insert("moqui.basic.Enumeration", [enumId: "TREP_CONC_HELD", enumTypeId: "DarpanConclusion", enumCode: "TREP_CONC_HELD",
+                description: "Shipped, not billed: another line of its order is backordered in NetSuite", relatedEnumId: "TREP_CONC_BACKORDERED"])
+        Closure<Map> line = { String item, String cause ->
+            [statementCode: "R1", recordKey: item, headline: "Item ${item} is completed in HotWax and not billed in NetSuite".toString(),
+             conclusionEnumId: cause, records: [[systemEnumId: "OMS_RETURNS_GQL", recordType: "orderItem", recordId: item, recordStatus: "Completed"],
+                                                [systemEnumId: "NETSUITE_SUITEQL", recordType: "salesOrder", recordId: "SO7331269"]]]
+        }
+        Map found = ec.service.sync().name("${LEDGER}.record#CheckFindings").parameters([companyUserGroupId: TRUN, checkId: "TREP_T",
+                reportDate: Date.valueOf("2026-10-22"), checkStamp: at("2026-10-22", "07:27:00"),
+                findings: [line("M1168785/01", "TREP_CONC_BACKORDERED"), line("M1168785/02", "TREP_CONC_HELD"),
+                           line("M1168785/03", "TREP_CONC_HELD"), line("M1167646/01", null)]]).call()
+        noErrors()
+        List<String> ids = found.findingIds as List<String>
+
+        Map r1 = (Map) ((Map) ((Map) report(TRUN, "TREP_T_AUDIT", "2026-10-22").categories).orders.statements).R1
+        List<Map> findings = r1.findings as List<Map>
+        assertEquals(["order", "order"], findings*.kind, "M1168785's three lines are one finding; M1167646's one line is an order too")
+        Map order = findings[0]
+        assertEquals(["M1168785", "open", ids[0..2], [ids[0]], "Backordered in NetSuite"],
+                [order.order, order.state, (order.lines as List<Map>)*.id, order.stuck, order.cause])
+        assertEquals(["Backordered in NetSuite", "Shipped, not billed: another line of its order is backordered in NetSuite"],
+                ((order.lines as List<Map>)*.cause).unique())
+        // DAR-UI-075: a line by its number, not its "/01" suffix.
+        assertEquals("Order M1168785: line 1 backordered in NetSuite, holding 2 more lines", order.headline)
+        assertEquals([open: 2, pending: 0, newToday: 2, fixedToday: 0], r1.counts, "counted by order, not by line")
+        assertEquals(["M1167646", [ids[3]], "Order M1167646: line 1 is completed in HotWax and not billed in NetSuite"],
+                [findings[1].id, (findings[1].lines as List<Map>)*.id, findings[1].headline])
+        // A finding that only mentions an order (a memo naming its Shopify order) is not about an order line: no order.
+        Map r4 = (Map) ((Map) ((Map) report(GORJANA, "2026-10-08").categories).refundsAndCredits?.statements ?: [:]).R4
+        assertEquals(null, ((r4?.findings ?: []) as List<Map>).find()?.kind)
+    }
+
     // ---- the finding ---------------------------------------------------------------------------------------------
 
     @Test

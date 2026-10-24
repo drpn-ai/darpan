@@ -67,6 +67,19 @@ class GorjanaConclusionRulesDataTests {
         }
     }
 
+    // DAR-UI-075. The audit lists an order as one finding and names the line holding it up: a cause held by another
+    // line's cause says which (relatedEnumId), and that cause is a conclusion of this catalogue.
+    @Test
+    void aCauseHeldByAnotherLinesCauseNamesIt() {
+        def doc = load("data/GorjanaConclusionRulesData.xml")
+        def conclusions = doc.'**'.findAll { it.name() == 'moqui.basic.Enumeration' && it.@enumTypeId == 'DarpanConclusion' }
+        Map<String, String> heldBy = conclusions.collectEntries { [(it.@enumId.text()): it.@relatedEnumId.text()] }
+        assertEquals('CONC_NS_BACKORDERED', heldBy.CONC_ORDER_BACKORDER_HOLDS_BILLING)
+        heldBy.findAll { k, v -> v }.each { String id, String holder ->
+            assertTrue(heldBy.containsKey(holder), "${id} is held by ${holder}, which is not a conclusion here".toString())
+        }
+    }
+
     @Test
     void everyConnectorTheRunsUseCarriesAnEvidenceProjection() {
         def doc = load("data/SourceSystemConnectorSeedData.xml")

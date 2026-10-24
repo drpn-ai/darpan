@@ -153,9 +153,13 @@ class AuditReportAssembler {
             }
 
             List<Map> entries = sortOldestFirst(ledgerByStatement[st.statementId as String] ?: [])
-            Map counts = countsOf(entries, day)
-            List<Map> listed = entries.take(FINDINGS_CAP)
-            Map<String, Map> recordsByFinding = recordsFor(ec, tenantId, listed*.row*.findingId as List<String>)
+            // DAR-UI-075. One finding per order: every line's records name its order, so the order's lines are one unit,
+            // counted and capped as one. The ledger stays per line, so each line still opens and closes on its own.
+            Map<String, Map> recordsByFinding = recordsFor(ec, tenantId, entries*.row*.findingId as List<String>)
+            List<Map> units = orderUnits(entries, recordsByFinding)
+            Map counts = countsOf(units, day)
+            List<Map> listed = units.take(FINDINGS_CAP)
+            Map<String, Map> causes = conclusionsOf(ec, listed*.entries.flatten()*.row*.conclusionEnumId as List<String>)
             statementJsonById[st.statementId as String] = [
                     id             : st.statementCode,
                     text           : st.statementText,
@@ -164,8 +168,8 @@ class AuditReportAssembler {
                     reason         : reason,
                     checks         : checkJson,
                     counts         : counts,
-                    findings       : listed.collect { Map e -> briefFinding(e, day, recordsByFinding[e.row.findingId as String] ?: [:], codes) },
-                    findingsOmitted: entries.size() - listed.size()]
+                    findings       : listed.collect { Map unit -> unitFinding(unit, day, recordsByFinding, causes, codes) },
+                    findingsOmitted: units.size() - listed.size()]
         }
 
         Map<String, Object> categoryJson = new LinkedHashMap<>()
@@ -332,6 +336,159 @@ class AuditReportAssembler {
         return sum
     }
 
+    // ---------------------------------------------------------------------------------------------------------
+    // DAR-UI-075. Findings by order
+    // ---------------------------------------------------------------------------------------------------------
+
+    /**
+     * The order a finding is a line of: its HotWax order item's order (the item's id before its "/"), else its NetSuite
+     * sales order line's order; null when the finding is not about an order line. A finding that only mentions an order
+     * (a credit memo naming its Shopify order) is not one, so returns and memos stay findings of their own.
+     */
+    static String orderKeyOf(Map records) {
+        Closure<String> first = { String system, String type -> ((((records ?: [:])[system] ?: [:]) as Map)[type] as List)?.find()?.id as String }
+        return first("OMS", "orderItem")?.with { it.contains("/") ? it.substring(0, it.indexOf("/")) : it } ?:
+                first("NetSuite", "salesOrderLine")
+    }
+
+    /**
+     * Ledger entries as the report lists them: the lines of one order together as one unit (its earliest line's row, so
+     * oldest-first and newToday hold; its worst state: open, else pending, else fixed), one line or many; a finding that
+     * is not an order line a unit of its own. Units keep the order of their earliest line.
+     */
+    static List<Map> orderUnits(List<Map> entries, Map<String, Map> recordsByFinding) {
+        Map<String, List<Map>> byOrder = new LinkedHashMap<>()
+        List<Object> keys = []
+        entries.each { Map e ->
+            String order = orderKeyOf(recordsByFinding[e.row.findingId as String])
+            if (order) {
+                if (!byOrder.containsKey(order)) { byOrder[order] = []; keys << order }
+                byOrder[order] << e
+            } else keys << e
+        }
+        return keys.collect { Object key ->
+            if (!(key instanceof String)) return [row: ((Map) key).row, state: ((Map) key).state, entries: [(Map) key]]
+            List<Map> lines = byOrder[key]
+            String state = lines.any { it.state == OPEN } ? OPEN : lines.any { it.state == PENDING } ? PENDING : FIXED
+            return [row: lines[0].row, state: state, entries: lines, order: key]
+        }
+    }
+
+    /** Each conclusion's words and, when it is held by another line's cause (relatedEnumId), that cause. */
+    private static Map<String, Map> conclusionsOf(def ec, List<String> ids) {
+        List<String> wanted = (ids ?: []).findAll() .unique() as List<String>
+        if (!wanted) return [:]
+        return ec.entity.find("moqui.basic.Enumeration").condition("enumId", EntityCondition.IN, wanted).useCache(true).list()
+                .collectEntries { [(it.enumId): [label: it.description, heldBy: it.relatedEnumId ?: null]] }
+    }
+
+    /**
+     * A unit as the report lists it: a lone line as before; an order as one finding whose lines sit under it, each with
+     * its cause. The stuck lines are those whose cause is their own while another line's is held by one (DAR-BE-118's
+     * "another line of its order is backordered"); the order says which line holds it up and how many wait on it.
+     */
+    private static Map unitFinding(Map unit, LocalDate day, Map<String, Map> recordsByFinding, Map<String, Map> causes,
+                                   Map<String, String> codes) {
+        Closure<Map> line = { Map e ->
+            // get(), not [ ]: most lines have no conclusion, and map[null] dispatches to getProperty(null) and throws.
+            Map cause = e.row.conclusionEnumId ? causes.get(e.row.conclusionEnumId as String) : null
+            briefFinding(e, day, recordsByFinding[e.row.findingId as String] ?: [:], codes) +
+                    [cause: cause?.label ?: null, held: cause?.heldBy != null]
+        }
+        if (!unit.order) return line((unit.entries as List<Map>)[0]).findAll { k, v -> !(k in ["cause", "held"]) }
+        String order = unit.order as String
+        List<Map> lines = (unit.entries as List<Map>).collect(line)
+        List<Map> stuck = lines.any { it.held } ? lines.findAll { !it.held && it.cause } : []
+        List<String> own = lines*.cause.findAll().unique() as List<String>
+        String cause = stuck ? stuck[0].cause : (own.size() == 1 ? own[0] : null)
+        List<String> numbers = stuck.collect { Map l -> lineNumber(order, l) }
+        String named = numbers.size() == 1 ? "line ${numbers[0]}" :
+                "lines ${numbers.size() > 1 ? numbers[0..-2].join(', ') + ' and ' + numbers[-1] : ''}"
+        String headline = stuck ?
+                "Order ${order}: ${named} ${lowerFirst(cause)}, holding ${lines.size() - stuck.size()} more line${lines.size() - stuck.size() == 1 ? '' : 's'}" :
+                lines.size() == 1 ? "Order ${order}: ${oneLine(order, lines[0])}" :
+                "Order ${order}: ${lines.size()} lines${cause ? ', ' + lowerFirst(cause) : ''}"
+        Map first = lines[0]
+        return [id        : order,
+                kind      : "order",
+                order     : order,
+                headline  : headline.toString(),
+                state     : codes[unit.state as String],
+                firstFound: first.firstFound,
+                ageDays   : first.ageDays,
+                records   : mergedRecords(lines*.records as List<Map>),
+                difference: null,
+                cause     : cause,
+                stuck     : stuck*.id,
+                lines     : lines,
+                next      : "darpan findings show ${(stuck ? stuck[0] : first).id}".toString()]
+    }
+
+    /**
+     * The tenant's findings for one audit and period, one statement or every one in catalog order, as the report lists
+     * them: one per order, each with its statement and category. State is as of today, narrowed to `states` (open,
+     * pending; empty is both). The board's "N more", filters and export read these.
+     */
+    static List<Map> findingsByOrder(def ec, String tenantId, String auditId, String statementCode, String period,
+                                     List<String> states) {
+        Map<String, String> codes = enumCodes(ec)
+        List<String> stateIds = codes.findAll { k, v -> k.startsWith("AUDFS_") && v in (states ?: ["open", "pending"]) }*.key as List<String>
+        List<Map> statements = tenantRows(ec, "darpan.audit.AuditStatement", tenantId).condition("auditId", auditId).list()*.getMap()
+                .findAll { (it.isActive ?: "Y") != "N" && (!statementCode || it.statementCode == statementCode) }
+                .sort(false) { Map a, Map b ->
+                    ((a.sequenceNum ?: Long.MAX_VALUE) as Long) <=> ((b.sequenceNum ?: Long.MAX_VALUE) as Long) ?:
+                            (a.statementCode as String) <=> (b.statementCode as String)
+                }
+        LocalDate today = LocalDate.now((loadTenant(ec, tenantId)?.zone ?: ZoneId.of("UTC")) as ZoneId)
+        return statements.collectMany { Map st ->
+            def find = tenantRows(ec, "darpan.audit.AuditFinding", tenantId).condition("statementId", st.statementId)
+                    .condition("stateEnumId", EntityCondition.IN, stateIds ?: ["__NONE__"])
+            if (period) find.condition("period", period)
+            List<Map> entries = sortOldestFirst(find.list()*.getMap().collect { Map row -> [row: row, state: row.stateEnumId] })
+            Map<String, Map> records = recordsFor(ec, tenantId, entries*.row*.findingId as List<String>)
+            Map<String, Map> causes = conclusionsOf(ec, entries*.row*.conclusionEnumId as List<String>)
+            orderUnits(entries, records).collect { Map unit ->
+                unitFinding(unit, today, records, causes, codes) + [statement: st.statementCode, category: codes[st.categoryEnumId as String]]
+            }
+        } as List<Map>
+    }
+
+    /** An order of one line, in the check's own words with the item named as its line: "line 1 is completed in HotWax
+     *  and not billed in NetSuite" from "Item M1167975/01 is completed ...". With a cause and no such words, the cause. */
+    private static String oneLine(String order, Map line) {
+        String item = (((((line.records ?: [:]) as Map).OMS ?: [:]) as Map).orderItem as List)?.find()?.id as String
+        String headline = (line.headline ?: "") as String
+        int at = item ? headline.indexOf(item) : -1
+        if (at >= 0) return "line ${lineNumber(order, line)}${headline.substring(at + item.length())}".toString()
+        return "line ${lineNumber(order, line)}${line.cause ? ', ' + lowerFirst(line.cause as String) : ''}".toString()
+    }
+
+    /** "1" for item M1168785/01 of order M1168785 (a person reads "line 1", not "/01"); else the line's finding id. */
+    private static String lineNumber(String order, Map line) {
+        String item = (((((line.records ?: [:]) as Map).OMS ?: [:]) as Map).orderItem as List)?.find()?.id as String
+        if (!item?.startsWith(order) || item.length() <= order.length()) return line.id as String
+        String suffix = item.substring(order.length()).replaceFirst(/^[\/\-_ ]+/, "")
+        return suffix.isInteger() ? String.valueOf(suffix.toInteger()) : suffix
+    }
+
+    private static String lowerFirst(String text) {
+        return text ? text.substring(0, 1).toLowerCase() + text.substring(1) : text
+    }
+
+    /** Every line's records once each, systems and types in first-seen order. */
+    private static Map mergedRecords(List<Map> perLine) {
+        Map<String, Map<String, List>> out = new LinkedHashMap<>()
+        perLine.each { Map bySystem ->
+            (bySystem ?: [:]).each { String system, Map byType ->
+                byType.each { String type, List list ->
+                    List into = out.computeIfAbsent(system) { new LinkedHashMap<>() }.computeIfAbsent(type) { [] }
+                    list.each { Map r -> if (!into.any { it.id == r.id }) into << r }
+                }
+            }
+        }
+        return out
+    }
+
     private static Map briefFinding(Map entry, LocalDate day, Map records, Map<String, String> codes) {
         Map row = entry.row as Map
         return [id        : row.findingId,
@@ -423,13 +580,17 @@ class AuditReportAssembler {
 
         LocalDate today = LocalDate.now((loadTenant(ec, tenantId)?.zone ?: ZoneId.of("UTC")) as ZoneId)
         Map<String, Map> records = recordsFor(ec, tenantId, rows*.findingId as List<String>)
+        // DAR-UI-073. The cause in words (the conclusion that explains the finding), so the board can filter by it.
+        Map<String, Map> causes = conclusionsOf(ec, rows*.conclusionEnumId as List<String>)
         List<Map> edges = rows.collect { Map row ->
             Map st = statementById[row.statementId as String]
             Map brief = briefFinding([row: row, state: row.stateEnumId], today, records[row.findingId as String] ?: [:], codes)
             Map node = [id: brief.id, audit: auditCodes[st?.auditId as String], statement: st?.statementCode,
                         category: codes[st?.categoryEnumId as String], period: row.period, headline: brief.headline,
                         state: brief.state, firstFound: brief.firstFound, lastSeen: isoDate(row.lastSeenDate as Date),
-                        ageDays: brief.ageDays, records: brief.records, difference: brief.difference, next: brief.next]
+                        ageDays: brief.ageDays, records: brief.records, difference: brief.difference, next: brief.next,
+                        // get(), not [ ]: a null key there dispatches to getProperty(null) and throws.
+                        cause: row.conclusionEnumId ? causes.get(row.conclusionEnumId as String)?.label : null]
             [cursor: encodeFindingCursor([sort, rev, row.statementId, isoDate(row.firstFoundDate as Date), row.findingId]), node: node]
         }
         return [page: [edges   : edges,
@@ -676,8 +837,11 @@ class AuditReportAssembler {
 
     private static Map<String, Map> recordsFor(def ec, String tenantId, List<String> findingIds) {
         if (!findingIds) return [:]
-        List<Map> rows = tenantRows(ec, "darpan.audit.AuditFindingRecord", tenantId).condition("findingId", "in", findingIds)
-                .orderBy(["findingId", "recordSeqId"]).list()*.getMap()
+        // DAR-UI-075: a statement's every line now, so in chunks rather than one IN of every id.
+        List<Map> rows = findingIds.collate(500).collectMany { List<String> chunk ->
+            tenantRows(ec, "darpan.audit.AuditFindingRecord", tenantId).condition("findingId", "in", chunk)
+                    .orderBy(["findingId", "recordSeqId"]).list()*.getMap()
+        }
         return rows.groupBy { it.findingId as String }.collectEntries { k, v -> [(k): recordsJson(v)] }
     }
 

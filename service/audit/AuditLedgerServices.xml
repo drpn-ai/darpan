@@ -253,6 +253,25 @@
                     <set field="closedCount" from="closedCount + 1"/>
                 </if>
             </iterate>
+            <!-- DAR-BE-120: a finding already closed with no reason (closed before its cause was known) takes the reason
+                 this run names for its record; its state, close stamp and events are left as they are. -->
+            <if condition="explanations">
+                <entity-find entity-name="darpan.audit.AuditFinding" list="unexplained" for-update="true">
+                    <econdition field-name="companyUserGroupId"/>
+                    <econdition field-name="checkId"/>
+                    <econdition field-name="period"/>
+                    <econdition field-name="stateEnumId" value="AUDFS_FIXED"/>
+                    <econdition field-name="conclusionEnumId" operator="is-null"/>
+                    <econdition field-name="recordKey" operator="in" from="explanations.keySet()"/>
+                </entity-find>
+                <iterate list="unexplained" entry="finding">
+                    <set field="why" from="explanations.get(finding.recordKey)"/>
+                    <set field="finding.conclusionEnumId" from="why.conclusionEnumId"/>
+                    <set field="finding.diagnosisText" from="why.diagnosisText"/>
+                    <set field="finding.headline" from="why.headline ?: finding.headline"/>
+                    <entity-update value-field="finding"/>
+                </iterate>
+            </if>
         </actions>
     </service>
 

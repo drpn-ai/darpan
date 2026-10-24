@@ -414,8 +414,11 @@ class AuditAutomationSupport {
      */
     static List<Map> recordsOf(Map check, Map row, def file1Source, def file2Source) {
         String type = row.type as String
-        List<String> sides = type == "MISSING_IN_FILE_1" ? ["FILE_2"] :
-                type == "MISSING_IN_FILE_2" || type == "FINDING" ? ["FILE_1"] :
+        // A missing row also names the other side's record when the run found one (screened out, or under another key):
+        // its ids ride on the row (RunConclusionSupport), e.g. the NetSuite order of a line not billed (R1 F-100781).
+        Map rowIds = row.ids instanceof Map ? (Map) row.ids : [:]
+        List<String> sides = type == "MISSING_IN_FILE_1" ? ["FILE_2"] + (rowIds.file1 ? ["FILE_1"] : []) :
+                type == "MISSING_IN_FILE_2" || type == "FINDING" ? ["FILE_1"] + (rowIds.file2 ? ["FILE_2"] : []) :
                 type?.startsWith("DUPLICATE_IN_FILE_1") ? ["FILE_1"] :
                 type?.startsWith("DUPLICATE_IN_FILE_2") ? ["FILE_2"] : ["FILE_1", "FILE_2"]
         String dataSide = type == "MISSING_IN_FILE_1" || type?.startsWith("DUPLICATE_IN_FILE_2") ? "FILE_2" : "FILE_1"
@@ -446,13 +449,16 @@ class AuditAutomationSupport {
         return own + related.findAll { seen.add("${it.systemEnumId}|${it.recordType}|${it.recordId}".toString()) }
     }
 
-    /** The records in other systems one record names (RELATED_IDS); a "NO_..." value is a query's sentinel for none. */
+    /**
+     * The records in other systems one record names (RELATED_IDS); a "NO_..." or "NONE" value is a sentinel for none
+     * (NONE is the OMS units' "no NETSUITE_ORDER_ID", also when the read did not ask: never a sales order called NONE).
+     */
     static List<Map> relatedRecords(Map data, String systemEnumId) {
         if (!data) return []
         String own = rootSystem(systemEnumId)
         Closure<String> value = { String field ->
             String v = normalize(data.get(field))
-            v && !v.startsWith("NO_") && !(field == "externalId" && normalize(data.get("returnId"))) ? v : null
+            v && !v.startsWith("NO_") && v != "NONE" && !(field == "externalId" && normalize(data.get("returnId"))) ? v : null
         }
         return RELATED_IDS.findAll { it.system != own }.collect { Map spec ->
             String id = (spec.id as List<String>).findResult { value(it) }

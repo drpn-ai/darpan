@@ -112,6 +112,19 @@ class GorjanaConclusionRulesDataTests {
     }
 
     /**
+     * DAR-BE-120 (Aditi 2026-10-23: "conclusions that truely help the user"). Every cause of run C says what to do, where the
+     * link broke, instead of the check's one line; the backorder that holds billing names the order to fulfil.
+     */
+    @Test
+    void everyCauseOfTheCompletedRunSaysWhatToDo() {
+        List rules = load("data/GorjanaConclusionRulesData.xml").'**'.findAll {
+            it.name() == 'darpan.rule.RuleSetConclusionRule' && it.@compareScopeId == "GORJANA_OMS_NS_LINE_SCOPE" }
+        assertEquals([], rules.findAll { !it.@fixActionTemplate.toString() }*.@conclusionEnumId*.toString())
+        assertTrue(rules.find { it.@conclusionEnumId == "CONC_ORDER_BACKORDER_HOLDS_BILLING" }.@fixActionTemplate.toString()
+                .contains("{orderInNetsuite.tranId}"))
+    }
+
+    /**
      * DAR-BE-118, Aditi 2026-10-23 on R1. F-100799: a shipped line is not billed because another line of its order is
      * backordered (NetSuite bills the order once), read from the order looked up in NetSuite (orderInNetsuite, only for
      * these rows). F-100767: an order whose payment was taken back (total 0, "partial payment") is never sent to NetSuite.

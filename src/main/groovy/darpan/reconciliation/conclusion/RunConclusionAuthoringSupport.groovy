@@ -39,7 +39,7 @@ class RunConclusionAuthoringSupport {
         List<Map<String, Object>> nodes = rules.collect { r ->
             [key        : "${r.sequenceNum}".toString(), parent: r.parentSequenceNum != null ? "${r.parentSequenceNum}".toString() : null,
              conclusion : r.conclusionEnumId, label: labelOf(ec, r.conclusionEnumId as String), bucket: r.appliesToBucket,
-             question   : r.questionText,
+             question   : r.questionText, fix: r.fixActionTemplate,
              conditions : conditions.findAll { it.sequenceNum == r.sequenceNum }.collect { c ->
                  [subject : c.subject, presence: c.presence ?: "ANY", keyScope: c.keyScope ?: "FULL", quantifier: c.quantifier ?: "ALL",
                   field   : c.fieldExpression, operator: c.operator,
@@ -54,7 +54,7 @@ class RunConclusionAuthoringSupport {
 
     /**
      * Replaces the run's tree. conclusions: [{key, parent (an earlier node's key or blank), conclusion (a DarpanConclusion
-     * id), bucket (roots), question, conditions: [{subject FILE_1|FILE_2, presence, keyScope, quantifier, field, operator,
+     * id), bucket (roots), question, fix (DAR-BE-120: what to do when this is the cause), conditions: [{subject FILE_1|FILE_2, presence, keyScope, quantifier, field, operator,
      * values, checkLabel}]}]. An empty list clears it.
      */
     static Map<String, Object> save(def ec, String savedRunId, List submitted) {
@@ -83,13 +83,15 @@ class RunConclusionAuthoringSupport {
             if (bucket && parent) { ec.message.addError("Only a top-level conclusion says which rows it applies to ('${label}')."); return }
             String question = normalize(n.question)
             if (question && question.length() > 255) { ec.message.addError("'${label}' has a question longer than 255 characters."); return }
+            String fix = normalize(n.fix)
+            if (fix && fix.length() > 1000) { ec.message.addError("'${label}' has a fix longer than 1000 characters."); return }
             List<Map<String, Object>> conditions = conditionsOf(ec, label, n.conditions, evaluate)
             if (conditions == null) return
             int seq = (nodes.size() + 1) * 10
             seqByKey[key] = seq
             depthByKey[key] = depth
             nodes << [sequenceNum: seq, parentSequenceNum: parent ? seqByKey[parent] : null, conclusionEnumId: conclusion,
-                      appliesToBucket: bucket, questionText: question, conditions: conditions] as Map<String, Object>
+                      appliesToBucket: bucket, questionText: question, fixActionTemplate: fix, conditions: conditions] as Map<String, Object>
         }
         if (ec.message.hasError()) return null
 
@@ -101,7 +103,8 @@ class RunConclusionAuthoringSupport {
         nodes.each { Map<String, Object> node ->
             ec.entity.makeValue(RULE).setAll([compareScopeId: compareScopeId, sequenceNum: node.sequenceNum,
                     parentSequenceNum: node.parentSequenceNum, conclusionEnumId: node.conclusionEnumId,
-                    appliesToBucket: node.appliesToBucket, questionText: node.questionText, companyUserGroupId: tenantId,
+                    appliesToBucket: node.appliesToBucket, questionText: node.questionText,
+                    fixActionTemplate: node.fixActionTemplate, companyUserGroupId: tenantId,
                     createdDate: now, lastUpdatedDate: now]).create()
             ((List<Map>) node.conditions).eachWithIndex { Map c, int j ->
                 ec.entity.makeValue(CONDITION).setAll(c + [compareScopeId: compareScopeId, sequenceNum: node.sequenceNum,

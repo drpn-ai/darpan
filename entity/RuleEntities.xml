@@ -333,6 +333,11 @@
         <field name="questionText" type="text-medium">
             <description>Optional open question shown under "Needs a decision". Terse page copy.</description>
         </field>
+        <field name="fixActionTemplate" type="text-intermediate">
+            <description>DAR-BE-120. What to do when this is the cause, shown as the finding's fix in place of the check's.
+                {name} takes the check's template values (recordKey, the record ids by type, amounts) and any field one of
+                this scope's conditions reads, valued from the finding's evidence, e.g. {orderInNetsuite.tranId}.</description>
+        </field>
         <field name="suggestedFilterJson" type="text-long">
             <description>With questionText: {fileSide, fieldExpression, operator, values} the rules board opens pre-filled.</description>
         </field>

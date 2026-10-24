@@ -79,6 +79,10 @@ class DiffDetailClassifier {
         String typeToken = normalizeToken(resolveDiffType(record))
         String presentToken = normalizeToken(record.get('presentIn'))
 
+        // The compare's own side, first: two sides of one system share a label (NetSuite vs NetSuite), so a label
+        // match alone would read every row as missing from side 1 (gorjana R12, DAR-BE-120).
+        if (typeToken == 'missing_in_file_1') return 'file-1'
+        if (typeToken == 'missing_in_file_2') return 'file-2'
         if (missingToken && missingToken == file1Token) return 'file-1'
         if (missingToken && missingToken == file2Token) return 'file-2'
         if (file1Token && typeToken.contains("missing_in_${file1Token}".toString())) return 'file-1'

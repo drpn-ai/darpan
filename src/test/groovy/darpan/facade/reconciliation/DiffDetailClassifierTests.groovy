@@ -19,6 +19,18 @@ class DiffDetailClassifierTests {
 
     // --- normalize helpers ---
 
+    /**
+     * DAR-BE-120 (gorjana R12 F-100684, 2026-10-23): on a run whose two sides are the same system (NetSuite claims vs
+     * NetSuite memos) both labels read "NetSuite SuiteQL", so a label cannot tell the sides apart; the compare's own diff
+     * type does. Before, every such row read as missing from side 1 and no side-2 conclusion could apply.
+     */
+    @Test
+    void theDiffTypeTellsTheSidesApartWhenBothSidesShareALabel() {
+        Map row = [diffType: "MISSING_IN_FILE_2", presentIn: "NetSuite SuiteQL", missingIn: "NetSuite SuiteQL"]
+        assertEquals("file-2", DiffDetailClassifier.resolveDiffBucket(row, "NetSuite SuiteQL", "NetSuite SuiteQL"))
+        assertEquals("file-1", DiffDetailClassifier.resolveDiffBucket(row + [diffType: "MISSING_IN_FILE_1"], "NetSuite SuiteQL", "NetSuite SuiteQL"))
+    }
+
     @Test
     void normalizeTextTrimsStringsAndDropsNonStrings() {
         assertEquals("hello", DiffDetailClassifier.normalizeText("  hello  "))

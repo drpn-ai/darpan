@@ -127,6 +127,17 @@ class RunConclusionSupportTests {
         assertEquals(2, result.counts.C_BACKORDER)
     }
 
+    /** Aditi on R1 F-100781: the NetSuite line the run screened out is the finding's NetSuite record; its ids ride on the row. */
+    @Test
+    void aFoundOtherSideRecordsIdsRideOnTheRow() {
+        File doc = writeDiffDocument([missingRow("M1${SEP}01", FILE1, FILE2, [omsOrderId: "M1", orderItemSeqId: "01"])])
+        File ns = extract("ns-ids.json", [], [configuredExclusions: [[sequenceNum: 1]]])
+        sidecar(ns, [[orderId: "M1", orderLineId: "01", tranId: "SO7330652", internalId: "81049165", quantityBackordered: "1", status: "B"]])
+        RunConclusionSupport.concludeRun(args(doc, BACKORDER_RULES, ns))
+        Map row = (Map) ((List) parse(doc).differences)[0]
+        assertEquals([tranId: "SO7330652", internalId: "81049165"], ((Map) row.ids).file2)
+    }
+
     @Test
     void noRulesLeavesTheDocumentByteIdentical() {
         File doc = writeDiffDocument([missingRow("M1${SEP}01", FILE1, FILE2)])

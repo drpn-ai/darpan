@@ -233,6 +233,22 @@ class AuditAutomationSmokeTests {
         assertEquals(["M1137118/01"], AuditAutomationSupport.recordsOf(check, row, omsSource, nsSource)*.recordId)
     }
 
+    /**
+     * Aditi 2026-10-23 on R1 F-100781: "showing as none sales order in NS... but it is backordered... the data is not
+     * aligned". A completed item NetSuite has not billed is on a NetSuite line the run found (screened out, not billed):
+     * the finding lists that order with its state, and never a sales order called NONE (the OMS read's "no id" sentinel).
+     */
+    @Test
+    void aMissingRowListsTheOtherSidesRecordItFoundAndNoSentinel() {
+        Map check = [checkId: "X", file1RecordType: "orderItem", file2RecordType: "salesOrderLine"]
+        Map row = [type: "MISSING_IN_FILE_2", id: "M1167646\u001F01", data: [omsOrderId: "M1167646", netsuiteOrderId: "NONE"],
+                   ids: [file2: [tranId: "SO7330652", internalId: "81049165"]],
+                   systems: [[side: "FILE_2", presence: "EXCLUDED", state: "Pending Fulfillment"]]]
+        List<Map> recs = AuditAutomationSupport.recordsOf(check, row, omsSource, nsSource)
+        assertEquals([["orderItem", "M1167646/01", null], ["salesOrderLine", "SO7330652", "Pending Fulfillment"]],
+                recs.collect { [it.recordType, it.recordId, it.recordStatus] })
+    }
+
     @Test
     void aLinkCanNameTheRulesWhoseMismatchesBreakItsStatement() {
         // DAR-BE-095: one compare, two field rules, two statements. A link's ruleIds picks its rule's FIELD_MISMATCH rows.

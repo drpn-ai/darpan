@@ -176,6 +176,17 @@ class AuditLedgerServicesSmokeTests {
         Map f = row(id)
         assertEquals(["AUDFS_FIXED", "CONC_TEST_EXPLAINED", "Lost warranty, credited in NetSuite", "Return SAME-1: Lost warranty, credited in NetSuite"],
                 [f.stateEnumId, f.conclusionEnumId, f.diagnosisText, f.headline])
+
+        // Closed before its cause was known (no reason saved): a later run that names the cause fills it in, nothing else.
+        String bare = (record(CHECK, "2026-10-08", [finding("R4", "SAME-3")]).findingIds as List)[0]
+        close(CHECK, "2026-10-09", "AUDCS_RAN", ["SAME-3"])
+        Timestamp closedAt = row(bare).closedStamp as Timestamp
+        ec.service.sync().name("${SVC}.close#ResolvedFindings").parameters([companyUserGroupId: GORJANA, checkId: CHECK,
+                reportDate: Date.valueOf("2026-10-10"), checkStamp: Timestamp.valueOf("2026-10-10 06:12:00"), checkStatusEnumId: "AUDCS_RAN",
+                examinedRecordKeys: ["SAME-3"], reportedRecordKeys: [],
+                explanations: ["SAME-3": [conclusionEnumId: "CONC_TEST_EXPLAINED", diagnosisText: "Lost warranty, credited in NetSuite"]]]).call()
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertEquals(["AUDFS_FIXED", "CONC_TEST_EXPLAINED", closedAt], [row(bare).stateEnumId, row(bare).conclusionEnumId, row(bare).closedStamp])
     }
 
     @Test

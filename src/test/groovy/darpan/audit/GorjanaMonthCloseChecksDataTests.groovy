@@ -190,23 +190,12 @@ class GorjanaMonthCloseChecksDataTests {
         assertEquals(["GORJANA_MEMO_REPLACEMENT_RS"] as Set, attr(rows(REPLACEMENT, "darpan.audit.AuditCheck"), "savedRunId"))
     }
 
-    // DAR-BE-113 R19: Y/N against Y/N with "<=" breaks only when Shopify was paid (Y) and HotWax has no payment (N).
+    // R19 (DAR-BE-113): a paid Shopify order (Y) needs a payment in HotWax. R20 (DAR-BE-125): a completed HotWax order (Y) needs
+    // Shopify fulfilled; the extract makes PARTIALLY_FULFILLED an N. The operators' truth tables are RuleDiffSupportTests'.
     @Test
-    void r19FiresOnlyOnAPaidShopifyOrderWithNoPaymentInHotWax() {
-        Map<List<String>, Boolean> cases = [["Y", "N"]: true, ["Y", "Y"]: false, ["N", "N"]: false, ["N", "Y"]: false]
-        cases.each { List<String> pair, Boolean fires ->
-            assertEquals(fires, reconciliation.rule.RuleDiffSupport.violatesOperator(pair[0], pair[1], "<="), "Shopify ${pair[0]}, HotWax ${pair[1]}")
-        }
-    }
-
-    // DAR-BE-125 R20: Shopify isFulfilled ">=" HotWax isCompleted breaks only when HotWax completed it (Y) and Shopify has not
-    // fulfilled all of it (N); the extract makes PARTIALLY_FULFILLED an N.
-    @Test
-    void r20FiresOnlyOnACompletedHotWaxOrderShopifyHasNotFulfilled() {
-        Map<List<String>, Boolean> cases = [["N", "Y"]: true, ["Y", "Y"]: false, ["N", "N"]: false, ["Y", "N"]: false]
-        cases.each { List<String> pair, Boolean fires ->
-            assertEquals(fires, reconciliation.rule.RuleDiffSupport.violatesOperator(pair[0], pair[1], ">="), "Shopify ${pair[0]}, HotWax ${pair[1]}")
-        }
+    void r19AndR20AreOneWayPresenceRulesOnOneCompare() {
+        assertEquals("requires", ruleOperator("GORJANA_PAID_HAS_OPP"))
+        assertEquals("required by", ruleOperator("GORJANA_COMPLETED_FULFILLED"))
         List<Node> links = rows(PAYMENTS, "darpan.audit.AuditStatementCheck")
         assertEquals(["GORJANA_R19": "GORJANA_PAID_HAS_OPP", "GORJANA_R20": "GORJANA_COMPLETED_FULFILLED"],
                 links.collectEntries { [(it.attribute("statementId")): it.attribute("ruleIds")] })
@@ -340,5 +329,11 @@ class GorjanaMonthCloseChecksDataTests {
         } finally {
             engine.close()
         }
+    }
+
+    private static String ruleOperator(String ruleId) {
+        Node rule = rows(PAYMENTS, "darpan.rule.Rule").find { it.attribute("ruleId") == ruleId }
+        String expression = (rule.children().find { it instanceof Node && it.name() == "expression" } as Node).text().trim()
+        return (new groovy.json.JsonSlurper().parseText(expression) as Map).operator
     }
 }

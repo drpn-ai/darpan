@@ -547,10 +547,10 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             description="In keepFieldsBase. Comparison only — not key-like."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].hasPaymentPreference"
             label="Has payment" fieldType="string" sequenceNum="8"
-            description="Y when the order carries at least one OrderPaymentPreference, else N. Compared against Shopify hasPaymentTransaction by the presence OPP rule (operator &lt;=)."/>
+            description="Y when the order carries at least one OrderPaymentPreference, else N. Compared against Shopify hasPaymentTransaction by the presence OPP rule (hasPaymentTransaction requires hasPaymentPreference, DAR-BE-126)."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].isCompleted"
             label="Completed" fieldType="string" sequenceNum="10"
-            description="DAR-BE-125: Y when statusId is ORDER_COMPLETED, else N. Compared against Shopify isFulfilled (operator &gt;=)."/>
+            description="DAR-BE-125: Y when statusId is ORDER_COMPLETED, else N. Compared against Shopify isFulfilled (isFulfilled required by isCompleted, DAR-BE-126)."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].orderDate"
             label="Order date" fieldType="string" sequenceNum="5"
             description="In keepFieldsBase. Epoch millis, as on the REST connector."/>

@@ -19,8 +19,9 @@ import groovy.json.JsonSlurper
 class FieldComparisonRuleLogicGenerator {
 
     static final String FIELD_COMPARISON_TYPE = "FIELD_COMPARISON"
-    private static final Set<String> ORDERED_OPERATORS = [">", "<", ">=", "<="] as Set
-    private static final Set<String> VALID_OPERATORS = ["=", "==", "!=", ">", "<", ">=", "<="] as Set
+    // Operators whose meaning lives in RuleDiffSupport.matchesOperator (DAR-BE-126 adds the one-way presence pair).
+    private static final Set<String> RULE_DIFF_OPERATORS = [">", "<", ">=", "<=", "requires", "required by"] as Set
+    private static final Set<String> VALID_OPERATORS = ["=", "==", "!="] as Set + RULE_DIFF_OPERATORS
     private static final Set<String> VALID_PRE_ACTIONS = ["STRING_TO_INT", "STRING_TO_NUMBER"] as Set
     private static final JsonSlurper JSON = new JsonSlurper()
 
@@ -132,7 +133,7 @@ class FieldComparisonRuleLogicGenerator {
 
     private static String buildViolationExpression(String file1ValueExpression, String file2ValueExpression,
                                                    String operator, boolean useRuleDiffSupport) {
-        if (useRuleDiffSupport || ORDERED_OPERATORS.contains(operator)) {
+        if (useRuleDiffSupport || RULE_DIFF_OPERATORS.contains(operator)) {
             return "reconciliation.rule.RuleDiffSupport.violatesOperator(${file1ValueExpression}, ${file2ValueExpression}, \"${escapeDrlString(operator)}\")"
         }
         if (operator == "!=") {

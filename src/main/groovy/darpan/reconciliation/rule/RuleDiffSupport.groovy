@@ -84,9 +84,21 @@ class RuleDiffSupport {
                 return compareValues(file1Value, file2Value) >= 0
             case "<=":
                 return compareValues(file1Value, file2Value) <= 0
+            // DAR-BE-126: one-way presence. The left being true needs the right true; "required by" is the mirror.
+            case "requires":
+                return !isTrue(file1Value) || isTrue(file2Value)
+            case "required by":
+                return !isTrue(file2Value) || isTrue(file1Value)
             default:
                 return equalValues(file1Value, file2Value)
         }
+    }
+
+    /** Y or true, any case. N, blank, null and anything else are not. */
+    static boolean isTrue(Object value) {
+        if (value instanceof Boolean) return (Boolean) value
+        String text = normalize(value)?.toUpperCase(Locale.ROOT)
+        return text == "Y" || text == "TRUE"
     }
 
     static boolean violatesOperator(Object file1Value, Object file2Value, String operator) {

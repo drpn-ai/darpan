@@ -68,10 +68,10 @@
             description="NOT in keepFieldsBase; selected in the GraphQL document only when a filter or rule reads it."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].hasPaymentPreference"
             label="Has payment" fieldType="string" sequenceNum="8"
-            description="Y when the order carries at least one OrderPaymentPreference, else N. Compared against Shopify hasPaymentTransaction by the presence OPP rule (operator &lt;=)."/>
+            description="Y when the order carries at least one OrderPaymentPreference, else N. Compared against Shopify hasPaymentTransaction by the presence OPP rule (hasPaymentTransaction requires hasPaymentPreference, DAR-BE-126)."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].isCompleted"
             label="Completed" fieldType="string" sequenceNum="10"
-            description="DAR-BE-125: Y when statusId is ORDER_COMPLETED, else N. Compared against Shopify isFulfilled (operator &gt;=)."/>
+            description="DAR-BE-125: Y when statusId is ORDER_COMPLETED, else N. Compared against Shopify isFulfilled (isFulfilled required by isCompleted, DAR-BE-126)."/>
     <darpan.reconciliation.SourceSystemConnectorField systemEnumId="OMS_GQL" fieldPath="$.records[*].paymentMethodTypeIds"
             label="Payment methods" fieldType="string" sequenceNum="9"
             description="Comma-joined OPP paymentMethodTypeIds from the first two OPPs (detail, not a key)."/>

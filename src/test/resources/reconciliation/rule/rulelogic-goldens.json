@@ -174,5 +174,27 @@
     "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[*].b\",\"file2FieldPath\":\"$[*].b\",\"operator\":\"=\"}",
     "ruleText": "b = b",
     "ruleLogic": "rule \"FIELD_COMPARISON_2\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(!java.util.Objects.equals(((Map) $m.get(\"file1\")).get(\"b\"), ((Map) $m.get(\"file2\")).get(\"b\")))\nthen\n    Object _file1Value = ((Map) $m.get(\"file1\")).get(\"b\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"b\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"b = b\",\n        _file1Value,\n        _file2Value,\n        \"WARN\",\n        \"Field comparison failed: b = b\"\n    );\nend"
+  },
+  {
+    "name": "requires",
+    "index": 0,
+    "file1PrimaryIdExpression": "$.orders[*].order_id",
+    "file2PrimaryIdExpression": "$[*].shopify_order_id",
+    "ruleId": null,
+    "severity": "WARN",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[*].hasPayment\",\"file2FieldPath\":\"$[*].hasPayment\",\"operator\":\"requires\"}",
+    "ruleText": "hasPayment requires hasPayment",
+    "ruleLogic": "rule \"FIELD_COMPARISON_1\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get(\"file1\")).get(\"hasPayment\"), ((Map) $m.get(\"file2\")).get(\"hasPayment\"), \"requires\"))\nthen\n    Object _file1Value = ((Map) $m.get(\"file1\")).get(\"hasPayment\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"hasPayment\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"hasPayment requires hasPayment\",\n        _file1Value,\n        _file2Value,\n        \"WARN\",\n        \"Field comparison failed: hasPayment requires hasPayment\"\n    );\nend"
+  },
+  {
+    "name": "required_by",
+    "index": 0,
+    "file1PrimaryIdExpression": "$.orders[*].order_id",
+    "file2PrimaryIdExpression": "$[*].shopify_order_id",
+    "ruleId": "MY_RULE",
+    "severity": "ERROR",
+    "expression": "{\"type\":\"FIELD_COMPARISON\",\"file1FieldPath\":\"$.orders[*].isFulfilled\",\"file2FieldPath\":\"$[*].isCompleted\",\"operator\":\"required by\"}",
+    "ruleText": "isFulfilled required by isCompleted",
+    "ruleLogic": "rule \"MY_RULE\"\nwhen\n    $m : Map(this[\"file1\"] != null, this[\"file2\"] != null)\n    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get(\"file1\")).get(\"isFulfilled\"), ((Map) $m.get(\"file2\")).get(\"isCompleted\"), \"required by\"))\nthen\n    Object _file1Value = ((Map) $m.get(\"file1\")).get(\"isFulfilled\");\n    Object _file2Value = ((Map) $m.get(\"file2\")).get(\"isCompleted\");\n    reconciliation.rule.RuleDiffSupport.addFieldMismatch(\n        $m,\n        kcontext.getRule().getName(),\n        \"isFulfilled required by isCompleted\",\n        _file1Value,\n        _file2Value,\n        \"ERROR\",\n        \"Field comparison failed: isFulfilled required by isCompleted\"\n    );\nend"
   }
 ]

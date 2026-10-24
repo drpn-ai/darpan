@@ -47,4 +47,16 @@ class RuleDiffSupportTests {
         assertNull(row.data, "data stays the present record's, which a matched pair has none of")
         assertNull(RuleDiffSupport.pairIds([primaryId: "K", file1: [status: "Open"]]), "no ids, no column")
     }
+
+    // DAR-BE-126: one-way presence. "requires" breaks only when the left value is true and the right is not; "required by"
+    // is the mirror. True is Y or true, any case; N, blank, null and anything else are not.
+    @Test
+    void requiresBreaksOnlyWhenTheLeftIsTrueAndTheRightIsNot() {
+        Map<List, Boolean> requires = [["Y", "N"]: true, ["Y", "Y"]: false, ["N", "N"]: false, ["N", "Y"]: false,
+                                       ["y", null]: true, [true, "false"]: true, ["true", true]: false, [null, null]: false, ["Y", ""]: true]
+        requires.each { List pair, Boolean fires ->
+            assertEquals(fires, RuleDiffSupport.violatesOperator(pair[0], pair[1], "requires"), "requires ${pair}")
+            assertEquals(fires, RuleDiffSupport.violatesOperator(pair[1], pair[0], "required by"), "required by ${pair.reverse()}")
+        }
+    }
 }

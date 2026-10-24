@@ -259,11 +259,9 @@ class ReconciliationSavedRunSupport {
         String expr = normalize(idExpression)
         String root = normalize(recordRootExpression)
         if (!expr || !root || expr.startsWith('$')) return expr
-        int bar = expr.indexOf("|")
-        String base = bar >= 0 ? normalize(expr.substring(0, bar)) : expr
-        String suffix = bar >= 0 ? normalize(expr.substring(bar + 1)) : null
-        String folded = darpan.reconciliation.core.RuleSetCompareScopeAdapter.combineJsonRootAndPrimaryExpression(root, base)
-        return suffix ? "${folded}|${suffix}".toString() : folded
+        Map split = darpan.reconciliation.core.CompareIdExpressionSupport.splitIdExpression(expr)
+        String folded = darpan.reconciliation.core.RuleSetCompareScopeAdapter.combineJsonRootAndPrimaryExpression(root, (String) split.idExpr)
+        return split.normalizer ? "${folded}|${split.normalizer}".toString() : folded
     }
 
     static String normalizeJsonPrimaryIdExpression(Object rawExpression) {

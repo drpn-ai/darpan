@@ -637,31 +637,27 @@ class AuditReportAssembler {
         List scopeIds = tenantRows(ec, "darpan.rule.RuleSetCompareScope", tenantId).condition("ruleSetId", check.savedRunId)
                 .list()*.compareScopeId
         if (!scopeIds) return null
-        List<Map> rules = tenantRows(ec, "darpan.rule.RuleSetConclusionRule", tenantId)
+        Map rule = tenantRows(ec, "darpan.rule.RuleSetConclusionRule", tenantId)
                 .condition("compareScopeId", EntityCondition.IN, scopeIds).condition("conclusionEnumId", conclusionEnumId)
-                .orderBy("sequenceNum").list()*.getMap()
-        Map rule = rules.find { it.fixActionTemplate }
+                .orderBy("sequenceNum").list()*.getMap().find { it.fixActionTemplate }
         if (rule == null) return null
         List<Map> conditions = tenantRows(ec, "darpan.rule.RuleSetConclusionCondition", tenantId)
                 .condition("compareScopeId", rule.compareScopeId).list()*.getMap()
-        return causeFix([rule], conditions, conclusionEnumId, evidenceChecks, values)
+        return causeFix(rule.fixActionTemplate as String, conditions, evidenceChecks, values)
     }
 
     /**
      * The cause's fix filled: the check's values plus each of the scope's condition fields, valued from the finding's
      * evidence by the condition's checkLabel (the evidence is what those conditions read). Pure.
      */
-    static String causeFix(List<Map> rules, List<Map> conditions, String conclusionEnumId, List<Map> evidenceChecks,
-                           Map<String, String> values) {
-        String template = (rules ?: []).find { it.conclusionEnumId == conclusionEnumId && it.fixActionTemplate }?.fixActionTemplate
-        if (!template) return null
-        Map<String, String> byLabel = (evidenceChecks ?: []).collectEntries { [(it.label): it.checkValue] }
+    static String causeFix(String template, List<Map> conditions, List<Map> evidenceChecks, Map<String, String> values) {
+        Map<String, String> byLabel = evidenceChecks.collectEntries { [(it.label): it.checkValue] }
         Map<String, String> fields = [:]
-        (conditions ?: []).each { Map c ->
+        conditions.each { Map c ->
             String value = byLabel[c.checkLabel] as String
             if (c.fieldExpression && value != null) fields.putIfAbsent(c.fieldExpression as String, value)
         }
-        return fillTemplate(template as String, fields + (values ?: [:]))
+        return fillTemplate(template, fields + values)
     }
 
     // ---------------------------------------------------------------------------------------------------------

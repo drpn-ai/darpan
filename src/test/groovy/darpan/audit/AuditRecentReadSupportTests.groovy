@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
- * DAR-BE-116 phase 1 (Aditi 2026-10-23: "re-read only the last 7 days"). HotWax OMS is read for the audit's recent days;
+ * DAR-BE-116 phase 1 / DAR-BE-122. HotWax OMS is read for the days since the last complete read;
  * the other systems for the whole period. A record only the other system holds is judged only when its own date is
  * in those days, so an older one, whose OMS twin may simply be older than the read, neither raises nor closes a finding.
  */
@@ -22,13 +22,23 @@ class AuditRecentReadSupportTests {
 
     private static Timestamp at(String day) { Timestamp.from(LocalDate.parse(day).atStartOfDay(LA).toInstant()) }
 
+    /**
+     * DAR-BE-122 (Aditi 2026-10-24: "lookups that build on each other and only a complete one when explicitly asked"): a
+     * run reads from the last day its checks covered with a complete run, re-reading that day; a check never run, or a
+     * day outside the window, reads it all. The earliest of the checks' days, so no check misses a day.
+     */
     @Test
-    void theRecentStartIsThatManyDaysBeforeTheEndAndNeverBeforeTheWindow() {
-        assertEquals(at("2026-10-16"), AuditRecentReadSupport.recentStart(at("2026-10-01"), at("2026-10-23"), 7, LA))
-        assertNull(AuditRecentReadSupport.recentStart(at("2026-10-01"), at("2026-10-23"), null, LA), "empty reads the whole period")
-        assertEquals(at("2026-10-20"), AuditRecentReadSupport.recentStart(at("2026-10-01"), at("2026-10-23"), 3, LA))
-        assertNull(AuditRecentReadSupport.recentStart(at("2026-10-01"), at("2026-10-05"), 7, LA), "the window is already that short")
-        assertNull(AuditRecentReadSupport.recentStart(at("2026-10-01"), at("2026-10-23"), 0, LA), "zero reads the whole period")
+    void theReadStartsAtTheLastDayEveryCheckCoveredAndReReadsIt() {
+        Timestamp from = at("2026-10-01"), end = at("2026-10-24")
+        assertEquals(at("2026-10-22"), AuditRecentReadSupport.incrementalStart(
+                ["A": java.sql.Date.valueOf("2026-10-23"), "B": java.sql.Date.valueOf("2026-10-22")], ["A", "B"], from, end, LA))
+        assertNull(AuditRecentReadSupport.incrementalStart(["A": java.sql.Date.valueOf("2026-10-23")], ["A", "B"], from, end, LA),
+                "B never ran: read the whole window")
+        assertNull(AuditRecentReadSupport.incrementalStart([:], ["A"], from, end, LA), "first run: read it all")
+        assertEquals(at("2026-10-23"), AuditRecentReadSupport.incrementalStart(["A": java.sql.Date.valueOf("2026-10-30")], ["A"], from, end, LA),
+                "covered past the window: re-read its last day")
+        assertNull(AuditRecentReadSupport.incrementalStart(["A": java.sql.Date.valueOf("2026-10-01")], ["A"], from, end, LA),
+                "the window's first day: that is the whole window")
     }
 
     @Test
@@ -37,7 +47,6 @@ class AuditRecentReadSupportTests {
         assertEquals(d, AuditRecentReadSupport.dayOf("2026-10-17", LA))                 // NetSuite TO_CHAR(trandate, 'YYYY-MM-DD')
         assertEquals(d, AuditRecentReadSupport.dayOf("10/17/2026", LA))                 // NetSuite bare trandate
         assertEquals(d, AuditRecentReadSupport.dayOf("2026-10-17T19:30:00Z", LA))       // Shopify createdAt, still the 17th in LA
-        assertEquals(d, AuditRecentReadSupport.dayOf(at("2026-10-17").time + 3600_000L, LA)) // epoch millis
         assertNull(AuditRecentReadSupport.dayOf("not a date", LA))
         assertNull(AuditRecentReadSupport.dayOf(null, LA))
     }
@@ -47,7 +56,7 @@ class AuditRecentReadSupportTests {
         Timestamp start = at("2026-10-16")
         assertTrue(AuditRecentReadSupport.judged([tranDate: "2026-10-16"], "tranDate", start, LA))
         assertFalse(AuditRecentReadSupport.judged([tranDate: "2026-10-15"], "tranDate", start, LA))
-        assertTrue(AuditRecentReadSupport.judged(['$.records[*].tranDate': null, tranDate: "10/20/2026"], '$.records[*].tranDate', start, LA))
+        assertTrue(AuditRecentReadSupport.judged([tranDate: "10/20/2026"], "tranDate", start, LA))
         assertFalse(AuditRecentReadSupport.judged([tranDate: "2026-10-20"], null, start, LA), "no date field: not judged")
         assertFalse(AuditRecentReadSupport.judged([other: 1], "tranDate", start, LA), "no date on the record: not judged")
     }

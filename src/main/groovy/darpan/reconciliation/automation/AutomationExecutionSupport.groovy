@@ -304,25 +304,18 @@ class AutomationExecutionSupport {
 
     /**
      * Side 2's extract on its own thread and ExecutionContext: the same user, the run's system tenant, and the same
-     * extractor (whose service call relaxes authz at its one audited seam). Null, so the caller reads side 2 after side 1
-     * as before, when switched off or when a test has injected its own extractor (it may lean on the caller's ec).
+     * extractor (whose service call relaxes authz at its one audited seam). Null, so the caller reads side 2 after side 1,
+     * when switched off (as the test tasks do).
      */
     protected static Future<Map<String, Object>> startParallelSourceExtract(def ec, def automation, def source,
                                                                          Map<String, Object> window, Map windowParams) {
-        if (source == null || !sourceExtractor.is(DEFAULT_SOURCE_EXTRACTOR)) return null
         if ("false".equalsIgnoreCase(System.getProperty(PARALLEL_SOURCE_EXTRACTS_PROPERTY) ?: "true")) return null
-        // A context that cannot make a worker context (unit harnesses) reads side 2 after side 1, as the service
-        // dispatcher runs inline without an async facade; before, the run thread threw here and the run was lost.
-        if (!ec?.hasProperty("factory")) return null
         def factory = ec.factory
         String username = normalize(ec.user?.username)
         String systemTenant = TenantAccessSupport.activeSystemTenantUserGroupId()
-        // The worker carries the run thread's authz state, no more: a scheduled run reads the connector registry with authz
-        // already relaxed on its own thread, and side 1 does exactly that there (live 2026-10-23: side 2 without it was
-        // refused View on SourceSystemConnector).
+        // The worker carries the run thread's authz state, as side 1 reads the connector registry with it.
         boolean callerAuthzDisabled = ec.artifactExecution.authzDisabled
-        // Its own folder: the run folder is a millisecond timestamp and the file is named by system and window, so two
-        // same-system sides starting together (an NS-vs-NS check) would write one file (DAR-BE-117 report, 2026-10-23).
+        // Its own folder: two same-system sides starting together (an NS-vs-NS check) would otherwise write one file.
         Map<String, Object> sideParams = new LinkedHashMap<String, Object>(windowParams ?: [:])
         sideParams.sideOutputLocation = DataManagerSupport.resolveReconciliationRunLocation(ec, windowParams?.automationExecutionId,
                 DataManagerSupport.formatRunTimestamp(ec) + "-" + normalize(readField(source, "fileSide")))
@@ -498,39 +491,38 @@ class AutomationExecutionSupport {
                 RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [:])
                 openStep = null
 
-                // DAR-BE-116: side 2 is read while side 1 is, so a check costs its slower read, not the sum of both
-                // (an audit's 10-minute OMS read then waited 12 more for the NetSuite lines).
-                // DAR-BE-116: on a check pairing OMS with another system, the other side reads the audit's recent days
-                // too, with slack (a month of NetSuite lines took 12 minutes); checks between other systems keep the window.
+                // DAR-BE-116: side 2 is read while side 1 is. On a check pairing OMS with another system, the other side
+                // reads from the OMS read's start too, with slack; checks between other systems keep the window.
                 Object recentRead = window?.auditRecentReadStartDate
                 if (recentRead != null && file2Source != null) {
-                    boolean oms1 = darpan.audit.AuditRecentReadSupport.readsRecentOnly(ec, normalize(readField(file1Source, "systemEnumId")))
-                    boolean oms2 = darpan.audit.AuditRecentReadSupport.readsRecentOnly(ec, normalize(readField(file2Source, "systemEnumId")))
+                    boolean oms1 = darpan.audit.AuditRecentReadSupport.readsRecentOnly(normalize(readField(file1Source, "systemEnumId")))
+                    boolean oms2 = darpan.audit.AuditRecentReadSupport.readsRecentOnly(normalize(readField(file2Source, "systemEnumId")))
                     if (oms1 != oms2) window.auditOtherSideStartDate = darpan.audit.AuditRecentReadSupport.otherSideStart(
                             (java.sql.Timestamp) recentRead, (java.sql.Timestamp) window.childWindowStartDate)
                 }
                 Future<Map<String, Object>> parallelSide2 = evaluateMode ? null :
                         startParallelSourceExtract(ec, automation, file2Source, window, windowParams)
                 openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE1)
+                // A failure or a cancel before side 2 is joined cancels side 2's read too (DAR-BE-124).
                 try {
                     file1Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file1Source, window, windowParams), file1Source)
-                } catch (Throwable side1Failure) {
+                    RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [recordCount: file1Result.recordCount])
+                    openStep = null
+                    // Task 2c: refresh the clock after source-1 extraction, a real (possibly slow) I/O call —
+                    // see heartbeatAutomationRun's javadoc for why lastUpdatedStamp, not lastHeartbeatDate, is
+                    // what actually protects this run from StuckRunReaper.
+                    heartbeatAutomationRun(ec, automation, execution, mintedRunResultId)
+                    // Task 6: the same phase boundaries are the run's cancel checkpoints. Minting the row at
+                    // RUNNING put this run on the live progress view, which offers "Cancel run" — until now
+                    // nothing on the automation side ever read the flag that button sets, so the run finished
+                    // normally and reported SUCCESS to an operator who believed they had stopped it.
+                    // Cancellation stays cooperative (RunObservability.requestCancel only stamps the request):
+                    // this throws RunCancelledException out of the run loop, caught below.
+                    RunObservability.checkpointCancel(ec, mintedRunResultId)
+                } catch (Throwable beforeJoin) {
                     parallelSide2?.cancel(true)
-                    throw side1Failure
+                    throw beforeJoin
                 }
-                RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [recordCount: file1Result.recordCount])
-                openStep = null
-                // Task 2c: refresh the clock after source-1 extraction, a real (possibly slow) I/O call —
-                // see heartbeatAutomationRun's javadoc for why lastUpdatedStamp, not lastHeartbeatDate, is
-                // what actually protects this run from StuckRunReaper.
-                heartbeatAutomationRun(ec, automation, execution, mintedRunResultId)
-                // Task 6: the same phase boundaries are the run's cancel checkpoints. Minting the row at
-                // RUNNING put this run on the live progress view, which offers "Cancel run" — until now
-                // nothing on the automation side ever read the flag that button sets, so the run finished
-                // normally and reported SUCCESS to an operator who believed they had stopped it.
-                // Cancellation stays cooperative (RunObservability.requestCancel only stamps the request):
-                // this throws RunCancelledException out of the run loop, caught below.
-                RunObservability.checkpointCancel(ec, mintedRunResultId)
                 if (!evaluateMode) {
                     openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE2)
                     file2Result = normalizeSourceResult(parallelSide2 != null ? joinParallelSourceExtract(parallelSide2) :
@@ -541,8 +533,8 @@ class AutomationExecutionSupport {
                 // DAR-BE-119: the audit's open findings the recent read did not reach, read again by key on both sides and
                 // appended, so they close or are concluded again from today's facts.
                 AuditRecheckSupport.appendOpenFindings(ec, automation, auditChecks, window,
-                        [[source: file1Source, result: file1Result], [source: file2Source, result: file2Result]]) { def source, List<String> keys, String keyField ->
-                    Map<String, Object> byKey = new LinkedHashMap<String, Object>(windowParams) + [lookupKeys: keys, lookupKeyField: keyField,
+                        [[source: file1Source, result: file1Result], [source: file2Source, result: file2Result]]) { def source, List<String> keys ->
+                    Map<String, Object> byKey = new LinkedHashMap<String, Object>(windowParams) + [lookupKeys: keys,
                             sideOutputLocation: DataManagerSupport.resolveReconciliationRunLocation(ec, windowParams?.automationExecutionId,
                                     DataManagerSupport.formatRunTimestamp(ec) + "-" + normalize(readField(source, "fileSide")) + "-recheck")]
                     return normalizeSourceResult(sourceExtractor.call(ec, automation, source, window, byKey), source)
@@ -553,7 +545,10 @@ class AutomationExecutionSupport {
                 heartbeatAutomationRun(ec, automation, execution, mintedRunResultId)
                 RunObservability.checkpointCancel(ec, mintedRunResultId)
 
-                if (!hasData(file1Result) || (!evaluateMode && !hasData(file2Result))) {
+                // DAR-BE-123: a verify's empty side is its answer (the record is still missing), not "no data".
+                boolean verifying = window?.auditVerifyKeys
+                if (verifying ? (!normalize(file1Result?.fileLocation) || (!evaluateMode && !normalize(file2Result?.fileLocation))) :
+                        (!hasData(file1Result) || (!evaluateMode && !hasData(file2Result)))) {
                     Timestamp completedTimestamp = nowTimestamp(ec)
                     Map<String, Object> noDataFields = executionUpdateFields(file1Result, file2Result, [:]) + [
                             statusEnumId    : STATUS_NO_DATA,
@@ -688,7 +683,8 @@ class AutomationExecutionSupport {
                 AuditAutomationSupport.recordWindow(ec, automation, auditChecks, window, file1Source, file2Source,
                         file1Result, file2Result, reconcileResult,
                         ruleExecutionFailed ? new IllegalStateException("A rule failed to build or evaluate.") : null)
-                notifyRunCompletedWithStage(ec, mintedRunResultId, stepCtx, [
+                // DAR-BE-123: a verify answers the person who asked, on the finding; the run's space is not told.
+                if (!window?.auditVerifyKeys) notifyRunCompletedWithStage(ec, mintedRunResultId, stepCtx, [
                         reconciliationRunResultId: reconciliationRunResultId,
                         runName                  : normalize(readField(automation, "automationName")),
                         savedRunId               : normalize(readField(automation, "savedRunId")),
@@ -1900,10 +1896,10 @@ class AutomationExecutionSupport {
         serviceParams.fileSide = normalize(readField(source, "fileSide"))
         serviceParams.systemEnumId = normalize(readField(source, "systemEnumId"))
         serviceParams.sourceTypeEnumId = normalize(readField(source, "sourceTypeEnumId"))
-        // DAR-BE-116 phase 1: an audit reads HotWax OMS (rate-limited) for its recent days only; other systems keep
-        // the whole window (AuditRecentReadSupport).
+        // DAR-BE-116 / DAR-BE-122: an audit reads HotWax OMS (rate-limited) from its checks' last complete read
+        // (AuditRecentReadSupport).
         Object recentStart = window?.auditRecentReadStartDate
-        if (recentStart != null && darpan.audit.AuditRecentReadSupport.readsRecentOnly(ec, normalize(readField(source, "systemEnumId")))) {
+        if (recentStart != null && darpan.audit.AuditRecentReadSupport.readsRecentOnly(normalize(readField(source, "systemEnumId")))) {
             window = new LinkedHashMap<String, Object>(window) + [childWindowStartDate: recentStart] as Map<String, Object>
         } else if (window?.auditOtherSideStartDate != null) {
             // The other side of an OMS-paired check: a little earlier than OMS, so a twin dated just before is read.
@@ -1927,12 +1923,16 @@ class AutomationExecutionSupport {
         applyWindowFieldParameter(serviceParams, connectorForService)
         // DAR-BE-119: a read by key (an audit re-checking its older open findings), sent only to an extractor that
         // declares it: any other would ignore the keys and read the whole window.
-        if (params?.lookupKeys) {
+        // DAR-BE-123: verifying findings reads only their records, by this side's own first key field.
+        List verifyKeys = window?.auditVerifyKeys instanceof List ? AuditRecheckSupport.firstKeys((List) window.auditVerifyKeys).toList() : null
+        if (params?.lookupKeys || verifyKeys) {
             if (!ec.service.getServiceDefinition(serviceName)?.inParameterNameList?.contains("lookupKeys")) {
                 throw new IllegalStateException("${serviceName} cannot read by key")
             }
-            serviceParams.lookupKeys = params.lookupKeys
-            serviceParams.lookupKeyField = params.lookupKeyField
+            serviceParams.lookupKeys = params?.lookupKeys ?: verifyKeys
+            serviceParams.lookupKeyField = AuditRecheckSupport.firstKeyField(ec,
+                    normalize(readField(automation, "compareScopeId")), normalize(readField(source, "fileSide")))
+            if (!serviceParams.lookupKeyField) throw new IllegalStateException("${readField(source, 'fileSide')} has no key to read by")
         }
 
         def call = ec.service.sync().name(serviceName).parameters(serviceParams)

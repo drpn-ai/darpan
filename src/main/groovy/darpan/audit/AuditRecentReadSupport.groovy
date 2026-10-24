@@ -7,16 +7,10 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * DAR-BE-116 phase 1. An audit reads HotWax OMS, whose API refills 2000 cost/s on gorjana, for its recent days only
- * (Audit.recentReadDays; empty reads the whole period). On a check pairing OMS with another system, that system is read
- * from EDGE_SLACK_DAYS earlier, and a record only it holds is judged only when its own date
- * (AuditCheck.otherSideDateField) is EDGE_SLACK_DAYS or more into the recent days: its OMS twin may simply be older than
- * the read, so an older one neither raises nor closes a finding. Checks between other systems keep the whole period.
+ * DAR-BE-116 / DAR-BE-122. An audit reads rate-limited HotWax OMS from its checks' last complete read (incrementalStart);
+ * the other system of an OMS-paired check reads EDGE_SLACK_DAYS earlier and is judged from EDGE_SLACK_DAYS later.
  */
 class AuditRecentReadSupport {
-
-    /** The DarpanSystemSource parent of every HotWax OMS endpoint: these are the reads that are narrowed. */
-    static final String RECENT_READ_PARENT_SYSTEM = "OMS"
 
     /**
      * Slack at the edge of the recent read: the other system is read this many days earlier than OMS, and a record only it
@@ -38,35 +32,31 @@ class AuditRecentReadSupport {
     }
 
     /**
-     * Start of the recent read: the window's end minus `days` whole days in `zone`, or null when that is not later than
-     * the window's own start (the window is already that short) or `days` is empty or 0 (read the whole period).
+     * DAR-BE-122. Where a window's read starts: the earliest of the checks' last covered days (lastCoveredByCheck: the
+     * windowThruDate of each check's last complete run in the period), re-read; past the window, its last day. Null, the
+     * whole window, when a check has no complete run yet or the start would be the window's own first day.
      */
-    static Timestamp recentStart(Timestamp windowStart, Timestamp windowEnd, Integer days, ZoneId zone) {
-        int n = days ?: 0
-        if (n <= 0 || windowStart == null || windowEnd == null) return null
-        LocalDate endDay = windowEnd.toInstant().atZone(zone).toLocalDate()
-        Timestamp start = Timestamp.from(endDay.minusDays(n).atStartOfDay(zone).toInstant())
+    static Timestamp incrementalStart(Map<String, java.util.Date> lastCoveredByCheck, List<String> checkIds, Timestamp windowStart,
+                                      Timestamp windowEnd, ZoneId zone) {
+        if (checkIds.any { !lastCoveredByCheck.get(it) }) return null
+        LocalDate last = checkIds.collect { new java.sql.Date(lastCoveredByCheck.get(it).time).toLocalDate() }.min()
+        LocalDate windowLast = windowEnd.toInstant().atZone(zone).toLocalDate().minusDays(1)
+        if (last.isAfter(windowLast)) last = windowLast
+        Timestamp start = Timestamp.from(last.atStartOfDay(zone).toInstant())
         return start.after(windowStart) ? start : null
     }
 
-    /** True for a HotWax OMS endpoint (its DarpanSystemSource enum's parent is OMS), the system read for recent days only. */
-    static boolean readsRecentOnly(def ec, String systemEnumId) {
-        if (!systemEnumId) return false
-        def e = ec.entity.find("moqui.basic.Enumeration").condition("enumId", systemEnumId).useCache(true).one()
-        return e != null && (e.parentEnumId == RECENT_READ_PARENT_SYSTEM || e.enumId == RECENT_READ_PARENT_SYSTEM)
+    /** True for a HotWax OMS endpoint, the system read from the last complete read. */
+    static boolean readsRecentOnly(String systemEnumId) {
+        return AuditAutomationSupport.rootSystem(systemEnumId) == "OMS"
     }
 
-    /** The calendar day a record's date names, in `zone`: YYYY-MM-DD, NetSuite M/d/yyyy, an ISO instant, or epoch millis. */
+    /** The calendar day a record's date names, in `zone`: YYYY-MM-DD, NetSuite M/d/yyyy or an ISO instant. */
     static LocalDate dayOf(Object value, ZoneId zone) {
-        if (value == null) return null
-        if (value instanceof Number) return Instant.ofEpochMilli(((Number) value).longValue()).atZone(zone).toLocalDate()
-        if (value instanceof java.util.Date) return ((java.util.Date) value).toInstant().atZone(zone).toLocalDate()
-        String text = value.toString().trim()
-        if (!text) return null
+        String text = value?.toString()?.trim()
         try {
             if (text ==~ /\d{4}-\d{2}-\d{2}/) return LocalDate.parse(text)
             if (text ==~ /\d{1,2}\/\d{1,2}\/\d{4}/) return LocalDate.parse(text, NETSUITE_DATE)
-            if (text ==~ /-?\d{10,}/) return Instant.ofEpochMilli(text as long).atZone(zone).toLocalDate()
             return Instant.parse(text).atZone(zone).toLocalDate()
         } catch (Exception ignored) {
             return null
@@ -74,14 +64,12 @@ class AuditRecentReadSupport {
     }
 
     /**
-     * Whether a record only the other system holds is judged this run: its `dateField` names a day on or after the recent
-     * start. No field configured, or no readable date on the record: not judged (it can be neither raised nor closed).
+     * Whether a record only the other system holds is judged this run: its `dateField` names a day on or after
+     * `judgedFrom`. No field, or no readable date on the record: not judged (it can be neither raised nor closed).
      */
-    static boolean judged(Map record, String dateField, Timestamp recentStart, ZoneId zone) {
-        if (recentStart == null) return true
-        String field = dateField?.trim()?.replaceFirst(/^\$\.records\[\*\]\./, "")
-        if (!field || record == null) return false
-        LocalDate day = dayOf(record.get(field), zone)
-        return day != null && !day.isBefore(recentStart.toInstant().atZone(zone).toLocalDate())
+    static boolean judged(Map record, String dateField, Timestamp judgedFrom, ZoneId zone) {
+        if (!dateField || record == null) return false
+        LocalDate day = dayOf(record.get(dateField), zone)
+        return day != null && !day.isBefore(judgedFrom.toInstant().atZone(zone).toLocalDate())
     }
 }

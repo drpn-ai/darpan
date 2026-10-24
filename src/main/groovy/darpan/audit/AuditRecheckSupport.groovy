@@ -15,17 +15,9 @@ import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.readField
 
 /**
- * DAR-BE-119, phase 2 of DAR-BE-116's recent read. An audit reads HotWax OMS (and, on an OMS-paired check, the other
- * system) for its recent days only, so an open finding whose record is older would never be looked at again: it could
- * neither close nor be re-diagnosed. Each such window therefore reads those records again BY KEY on both sides (each
- * side's own extractor, lookupKeys, no window) and appends them to the side's extract, records and excluded-records
- * sidecar, before the compare. The compare, conclusions and ledger then do the rest: a record that has appeared closes
- * its finding; one still missing is concluded again from the facts as they are now.
- *
- * Asked as little as possible: only the open findings of this automation's checks whose key the recent read does not
- * already hold, by their first key field (an order's lines come back together). Both sides or neither: a key read on
- * one side only would report the other side missing. A side whose extractor cannot read by key, or a read that fails,
- * skips the re-check with a warning; it never fails the run.
+ * DAR-BE-119. An open finding older than the run's read is read again BY KEY on both sides (a key read on one side only
+ * would report the other missing) and appended to each side's extract and sidecar before the compare, so it closes or
+ * is concluded again from today's facts. Only keys the read does not already hold; a failure skips it with a warning.
  */
 class AuditRecheckSupport {
 
@@ -34,17 +26,14 @@ class AuditRecheckSupport {
     /** At most this many keys a window re-reads (the oldest open findings beyond it wait for a later run). */
     static final int MAX_KEYS = 1000
 
-    /**
-     * sides: [[source, result]] for FILE_1 and FILE_2. readByKey(source, keys, keyField) runs the side's extractor by key
-     * and answers its result (fileLocation). Answers what it did, for the run's metadata.
-     */
-    static Map appendOpenFindings(def ec, def automation, List<Map> checks, Map window, List<Map> sides, Closure readByKey) {
-        if (!checks || window?.auditRecentReadStartDate == null || !window?.auditPeriod) return [:]
+    /** sides: [[source, result]] for FILE_1 and FILE_2. readByKey(source, keys) runs the side's extractor by key. */
+    static void appendOpenFindings(def ec, def automation, List<Map> checks, Map window, List<Map> sides, Closure readByKey) {
+        if (!checks || window?.auditRecentReadStartDate == null || !window?.auditPeriod) return
         List<Map> live = sides.findAll { it.source != null }
-        if (!live || live.any { !it.result?.fileLocation } || !live.any { AuditRecentReadSupport.readsRecentOnly(ec, normalize(readField(it.source, "systemEnumId"))) }) return [:]
+        if (!live || live.any { !it.result?.fileLocation } || !live.any { AuditRecentReadSupport.readsRecentOnly(normalize(readField(it.source, "systemEnumId"))) }) return
         String tenantId = normalize(readField(automation, "companyUserGroupId"))
         Set<String> open = firstKeys(openRecordKeys(ec, tenantId, checks*.checkId, window.auditPeriod as String))
-        if (!open) return [:]
+        if (!open) return
         String scopeId = normalize(readField(automation, "compareScopeId"))
         try {
             List<Map> plan = live.collect { Map side ->
@@ -55,26 +44,22 @@ class AuditRecheckSupport {
             }
             // A key either side lacks is read again on both, so the pair is judged together.
             List<String> keys = (plan.collectMany { it.missing as Set } as Set).toList().sort().take(MAX_KEYS)
-            if (!keys) return [rechecked: 0]
+            if (!keys) return
             List<File> read = plan.collect { Map p ->
-                Map out = (Map) readByKey.call(p.side.source, keys, p.keyField)
+                Map out = (Map) readByKey.call(p.side.source, keys)
                 File f = RunVerificationSupport.resolveLocationFile(ec, normalize(out?.fileLocation))
                 if (f == null) throw new IllegalStateException("the ${readField(p.side.source, 'fileSide')} read by key wrote no file")
                 f
             }
-            List<Integer> appended = [plan, read].transpose().collect { List pair ->
+            [plan, read].transpose().each { List pair ->
                 Map p = (Map) pair[0]
-                int n = append((File) p.file, (File) pair[1], (String) p.keyField, ((keys as Set) - (Set) p.missing) as Set<String>)
-                Map result = (Map) ((Map) ((Map) pair[0]).side).result
-                result.recordCount = ((result.recordCount ?: 0) as int) + n
-                n
+                Map result = (Map) ((Map) p.side).result
+                result.recordCount = ((result.recordCount ?: 0) as int) +
+                        append((File) p.file, (File) pair[1], (String) p.keyField, ((keys as Set) - (Set) p.missing) as Set<String>)
             }
-            logger.info("Audit re-check (${window.auditPeriod}): ${keys.size()} open finding key(s) beyond the recent read, " +
-                    "read again by key; appended ${appended}")
-            return [rechecked: keys.size(), appended: appended]
+            logger.info("Audit re-check (${window.auditPeriod}): ${keys.size()} open finding key(s) beyond the recent read, read again by key")
         } catch (Exception e) {
             logger.warn("Audit re-check of older open findings skipped: ${e.message}")
-            return [warning: "Older open findings were not re-checked: ${e.message}".toString()]
         }
     }
 
@@ -145,14 +130,9 @@ class AuditRecheckSupport {
                 .selectField("recordKey").useCache(false).list()*.recordKey.collect { it as String }
     }
 
-    /** The side's first compare key field as a record field, as the compare keys it (RunConclusionStep.keySpec). */
-    private static String firstKeyField(def ec, String compareScopeId, String fileSide) {
-        List keyRows = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSourceKeyField")
-                .condition("compareScopeId", compareScopeId).condition("fileSide", fileSide).orderBy("sequenceNum").useCache(false).list()
-        def source = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSource")
-                .condition("compareScopeId", compareScopeId).condition("fileSide", fileSide).useCache(false).one()
-        Map key = RunConclusionStep.keySpec(keyRows.collect { normalize(it.fieldExpression) }, normalize(source?.primaryIdExpression),
-                normalize(source?.idValueNormalizer), normalize(source?.recordRootExpression))
+    /** The side's first compare key field as a record field, as the compare keys it. */
+    static String firstKeyField(def ec, String compareScopeId, String fileSide) {
+        Map key = RunConclusionStep.keySpecFor(ec, compareScopeId, fileSide)
         if (!key.keyReliable || key.idNormalizer) return null
         return ConclusionKeySupport.plainField(((List<String>) key.keyFields)[0])
     }

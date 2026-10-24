@@ -19,6 +19,7 @@ import java.time.ZoneId
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -196,6 +197,41 @@ class AuditAutomationSmokeTests {
         assertEquals(["AUDFS_OPEN", 2L], [finding("B1").stateEnumId, finding("B1").timesSeen as Long])
     }
 
+    // DAR-BE-123. A verify reads one finding's record; it closes or keeps the finding but writes no check run.
+    @Test
+    void aVerifyClosesItsFindingAndWritesNoCheckRun() {
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-10-15", ["V1"], []), omsSource, nsSource,
+                [recordCount: 1], [recordCount: 0], [diffLocation: diff("v1", [row("MISSING_IN_FILE_2", "V1", "missing in NetSuite")])], null)
+        assertEquals("AUDFS_OPEN", finding("V1").stateEnumId)
+
+        // DAR-BE-124: a partial by-key read closes nothing.
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-10-16", ["V1"], ["V1"]) + [auditVerifyKeys: ["V1"]],
+                omsSource, nsSource, [recordCount: 1], [recordCount: 1, partial: true], [diffLocation: diff("v2p", [])], null)
+        assertEquals("AUDFS_OPEN", finding("V1").stateEnumId, "a partial read cannot say it is fixed")
+
+        Map verify = window("2026-10-16", ["V1"], ["V1"]) + [auditVerifyKeys: ["V1"]]
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), verify, omsSource, nsSource,
+                [recordCount: 1], [recordCount: 1], [diffLocation: diff("v2", [])], null)
+        assertFalse(ec.message.hasError(), ec.message.errorsString)
+        assertEquals("AUDFS_FIXED", finding("V1").stateEnumId, "both sides hold it now")
+        assertEquals(0L, ec.entity.find("darpan.audit.AuditCheckRun").condition("checkId", CHECK)
+                .condition("reportDate", Date.valueOf("2026-10-16")).count(), "a verify moves neither health nor the incremental read")
+    }
+
+    // DAR-BE-122. A run reads from its checks' last complete day on; a full read only when asked.
+    @Test
+    void aRunReadsFromTheLastCompleteDayUnlessAFullReadIsAsked() {
+        AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-10-21", [], []), omsSource, nsSource,
+                [recordCount: 0], [recordCount: 0], null, null)
+        Map audit = AuditAutomationSupport.auditFor(ec, TENANT, checks())
+        Timestamp fireTime = at("2026-10-23", "06:00:00")
+        assertEquals(at("2026-10-21", "00:00:00"), AuditAutomationSupport.resolveWindows(ec, automation, audit, fireTime)[0].auditRecentReadStartDate,
+                "the last day read is read again; earlier days are not")
+        assertNull(AuditAutomationSupport.resolveWindows(ec, automation, audit, fireTime, [auditFullRead: true])[0].auditRecentReadStartDate)
+        assertNull(AuditAutomationSupport.resolveWindows(ec, automation, audit, fireTime, [auditVerifyKeys: ["V1"]])[0].auditRecentReadStartDate,
+                "a verify reads its keys, not recent days")
+    }
+
     @Test
     void aFailedReadIsRecordedAndClosesNothing() {
         AuditAutomationSupport.recordWindow(ec, automation, checks(), window("2026-10-10", ["F1"], []), omsSource, nsSource,
@@ -264,7 +300,7 @@ class AuditAutomationSmokeTests {
         Map original = row("FIELD_MISMATCH", "80443999", "replacement is the original order") + [ruleId: "RULE_NOT_OWN_ORIGINAL"]
         Map amount = row("FIELD_MISMATCH", "80443000", "amount differs") + [ruleId: "RULE_AMOUNT"]
         List<Map> found = AuditAutomationSupport.findingsFrom(ec, TENANT, [checkId: "TAUTO_PAIR", file1RecordType: "creditMemo",
-                file2RecordType: "salesOrder"], new File(diff("pair", [customer, original, amount])), nsSource, nsSource)
+                file2RecordType: "salesOrder"], new File(diff("pair", [customer, original, amount])), nsSource, nsSource, [:])
         assertEquals([["R14", "80443722"], ["R13", "80443999"]], found.collect { [it.statementCode, it.recordKey] },
                 "each rule's rows break only its statement; a rule no link names breaks nothing")
         assertEquals(true, AuditAutomationSupport.matches(null, "ANY_RULE"), "a blank ruleIds takes every rule")

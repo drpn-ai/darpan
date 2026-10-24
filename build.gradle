@@ -249,6 +249,9 @@ tasks.register('testAll') {
     dependsOn 'unitTest', 'smokeTest'
 }
 
+// Tests read side 2 after side 1: their harness contexts cannot make a worker context (AutomationExecutionSupport).
+tasks.withType(Test).configureEach { systemProperty 'darpan.reconciliation.automation.parallelSourceExtracts', 'false' }
+
 // Opt-in MySQL-backed suite (InnoDB lock behavior that H2 cannot reproduce — no FK parent-row
 // locking in H2). Requires a locally reachable darpan_test MySQL database; not part of `check` or
 // the default `test` task. Run with `./gradlew :runtime:component:darpan:mysqlTest`.

@@ -93,6 +93,33 @@
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
         </actions>
     </service>
+    <!-- DAR-BE-123. "Resolve" on one finding. -->
+    <service verb="verify" noun="AuditFinding" allow-remote="true" authenticate="true">
+        <description>Re-checks one finding's record now: its check runs for that record only, each system read by key, and the
+            ledger closes the finding if the problem is gone or refreshes it with today's cause. Submitted to the background;
+            get#AuditFinding shows the result once lastChecked moves. Writes no check run, so the check's health and its
+            next read are unchanged.</description>
+        <in-parameters>
+            <parameter name="findingId" required="true"><description>The finding's id, e.g. F-100794.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="submitted" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for audits.')"/>
+            <if condition="ec.message.hasError()"><return error="true"/></if>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <if condition="!tenantId || !darpan.audit.AuditReportGraph.ownsFinding(ec, tenantId, findingId)">
+                <return error="true" message="Finding ${findingId} was not found"/></if>
+            <set field="submitted" from="darpan.audit.AuditSettingsSupport.verifyFinding(ec, tenantId, findingId)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
     <!-- DAR-UI-063. The audit page's settings gear and play button. Writes need the active tenant's edit access. -->
     <service verb="get" noun="AuditSettings" authz-action="view" allow-remote="true" authenticate="true">
         <description>An audit's settings: its name, the daily schedule its checks run on, and each statement with its
@@ -163,6 +190,9 @@
             <parameter name="audit" required="true"><description>The audit's code.</description></parameter>
             <parameter name="fromDate" required="true"><description>First day, YYYY-MM-DD.</description></parameter>
             <parameter name="thruDate" required="true"><description>Last day, YYYY-MM-DD, inclusive.</description></parameter>
+            <parameter name="fullRead" type="Boolean" default="false"><description>DAR-BE-122. Read every system for the
+                whole of the days picked. Off: each check reads the days since its last complete read and re-checks its
+                older open findings by key.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="ok" type="Boolean"/>
@@ -180,7 +210,7 @@
                 <script>
                     try {
                         runs = darpan.audit.AuditSettingsSupport.run(ec, tenantId, auditRow, java.time.LocalDate.parse(fromDate.trim()),
-                                java.time.LocalDate.parse(thruDate.trim()))
+                                java.time.LocalDate.parse(thruDate.trim()), fullRead == true)
                     } catch (java.time.format.DateTimeParseException e) {
                         ec.message.addError("The days must be YYYY-MM-DD.")
                     }

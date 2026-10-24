@@ -60,12 +60,12 @@
     <darpan.rule.RuleSetConclusionCondition compareScopeId="GORJANA_CREDIT_ETAIL_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="etailOrderId" operator="BLANK" checkLabel="The credit memo has no Etail id" companyUserGroupId="GORJANA"/>
 
     <!-- ================================================================ The checks -->
-    <!-- graceDays 1: Aditi 2026-10-23, "any fulfilled order is expected to be invoiced 24 hours after its fulfillment", so
-         a completed item is pending, not open, for one day. (Measured lag was p95 4 days, SalesOrd -> CustInvc,
-         gorjana-chain-pairs.xml: past a day, the late invoices are the finding.) -->
+    <!-- graceDays 0 (was 1 until 2026-10-24): Aditi 2026-10-23, "any fulfilled order is expected to be invoiced 24 hours after
+         its fulfillment". The window is now the cause's own (CONC_FULFILLED_WITHIN_DAY, from the item's fulfillment time),
+         not a grace counted from the day Darpan first saw it. -->
     <darpan.audit.AuditCheck checkId="GORJANA_CHK_COMPLETED_BILLED" otherSideDateField="tranDate" companyUserGroupId="GORJANA" checkCode="completed-not-billed"
             label="HotWax completed items against NetSuite billed lines" savedRunId="GORJANA_OMS_NS_LINE_RS"
-            file1RecordType="orderItem" file2RecordType="salesOrderLine" graceDays="1"
+            file1RecordType="orderItem" file2RecordType="salesOrderLine" graceDays="0"
             matchedBy="OMS order id + item seq id (custbody_hc_order_id + custcol_hc_order_line_id)"
             fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
             headlineTemplate="Item {recordKey} is completed in HotWax and not billed in NetSuite"
@@ -73,7 +73,7 @@
             passesWhenTemplate="NetSuite has billed the line for item {recordKey}."/>
     <darpan.audit.AuditCheck checkId="GORJANA_CHK_LINE_LOCATION" otherSideDateField="tranDate" companyUserGroupId="GORJANA" checkCode="lines-without-location"
             label="Completed items whose NetSuite line has no location" savedRunId="GORJANA_OMS_NS_LINE_RS"
-            file1RecordType="orderItem" file2RecordType="salesOrderLine" graceDays="1"
+            file1RecordType="orderItem" file2RecordType="salesOrderLine" graceDays="0"
             matchedBy="OMS order id + item seq id (custbody_hc_order_id + custcol_hc_order_line_id)"
             fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
             headlineTemplate="Item {recordKey} has no location on its NetSuite line"
@@ -96,6 +96,8 @@
 
     <!-- Which rows break which statement. R1 is every completed item NetSuite did not bill, whatever the reason; R3 is the
          ones whose reason is the missing location, so such an item breaks both. -->
+    <!-- Aditi 2026-10-24: "drop grace from all checks with cause timing". Run C's causes carry NetSuite's 24-hour billing
+         window themselves (CONC_FULFILLED_WITHIN_DAY), so R1 and R3 have no grace: a finding is open or fixed. -->
     <!-- Aditi 2026-10-23/24 ("split by cause"): R1 counts the causes that need fixing; an expected one (a duplicate order,
          a partial payment, neither sent to NetSuite by design; a line fulfilled under 24 hours ago, in flight) closes with its reason. Unexplained still counts. -->
     <darpan.audit.AuditStatementCheck statementId="GORJANA_R1" checkId="GORJANA_CHK_COMPLETED_BILLED" companyUserGroupId="GORJANA"

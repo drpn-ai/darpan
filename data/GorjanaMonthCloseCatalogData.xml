@@ -17,10 +17,10 @@
       ec.entity.makeDataLoader().location("component://darpan/data/GorjanaMonthCloseCatalogData.xml").load()
 -->
 <entity-facade-xml type="darpan-tenant-config">
-    <!-- DAR-BE-116: HotWax OMS is read for the last 7 days (its API refills 2000 cost/s); the rest of the month only through
-         the other systems' own reads (Audit.recentReadDays). -->
+    <!-- DAR-BE-122: each run reads HotWax OMS (its API refills 2000 cost/s) for the days since its checks' last complete
+         read, and re-checks older open findings by key (DAR-BE-119); a full read only when asked. -->
     <darpan.audit.Audit auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" auditCode="month-close"
-            auditName="Month close" periodEnumId="AUDP_MONTH" recentReadDays="7"/>
+            auditName="Month close" periodEnumId="AUDP_MONTH"/>
     <darpan.audit.AuditStatement statementId="GORJANA_R1" auditId="GORJANA_MONTH_CLOSE" companyUserGroupId="GORJANA" statementCode="R1"
             categoryEnumId="AUDC_ORDERS" weightEnumId="AUDSW_FIRM" sequenceNum="1"
             statementText="Every order that is fulfilled, in store or online, is in NetSuite with its invoice. This includes digital gift cards."/>

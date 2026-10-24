@@ -321,6 +321,37 @@ class AuditReportAssemblerSmokeTests {
         assertEquals("read-only", doc.access.mode)
     }
 
+    // DAR-BE-120 / DAR-BE-124. A cause with a fix of its own: the finding's fix is that one, its fact filled from the
+    // evidence its conditions read (the rule rows are read as Moqui EntityLists, whose own find() wants a Boolean).
+    @Test
+    void aFindingsFixIsItsCausesNamingTheFactItFound() {
+        withoutForeignKeys {
+            insert("darpan.rule.RuleSetCompareScope", [compareScopeId: "TREP_SCOPE", ruleSetId: "TREP_RS", companyUserGroupId: GORJANA])
+            insert("darpan.rule.RuleSetConclusionRule", [compareScopeId: "TREP_SCOPE", sequenceNum: 10, companyUserGroupId: GORJANA,
+                    conclusionEnumId: "CONC_MEMO_SHORT_OF_REFUND", fixActionTemplate: "Raise {creditMemo.tranId} to the refund."])
+            insert("darpan.rule.RuleSetConclusionCondition", [compareScopeId: "TREP_SCOPE", sequenceNum: 10, conditionSeq: 1,
+                    companyUserGroupId: GORJANA, subject: "FILE_2", presence: "ANY", keyScope: "FULL", quantifier: "ALL", operator: "NOT_BLANK",
+                    fieldExpression: "creditMemo.tranId", checkLabel: "NetSuite has a credit memo for the return"])
+            insert("darpan.audit.AuditCheck", [checkId: RET, companyUserGroupId: GORJANA, savedRunId: "TREP_RS"])
+        }
+        try {
+            assertEquals("Raise CM-88213 to the refund.", finding(GORJANA, m258615).finding.fix.action)
+        } finally {
+            withoutForeignKeys { insert("darpan.audit.AuditCheck", [checkId: RET, companyUserGroupId: GORJANA, savedRunId: null]) }
+        }
+    }
+
+    private void withoutForeignKeys(Closure work) {
+        java.sql.Connection c = ec.entity.getConnection(ec.entity.getEntityGroupName("darpan.audit.AuditCheck"))
+        try {
+            c.createStatement().execute("SET REFERENTIAL_INTEGRITY FALSE")
+            work.call()
+        } finally {
+            c.createStatement().execute("SET REFERENTIAL_INTEGRITY TRUE")
+            c.close()
+        }
+    }
+
     @Test
     void aFixedFindingSaysWhenAndByWhat() {
         Map s = finding(GORJANA, rx1).finding.status

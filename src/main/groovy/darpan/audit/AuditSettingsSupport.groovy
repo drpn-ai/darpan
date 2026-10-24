@@ -122,7 +122,7 @@ class AuditSettingsSupport {
      * when the days cannot be recorded (in the future, backwards, or in a period that ended and was not extended).
      * Answers the automations submitted.
      */
-    static List<Map> run(def ec, String tenantId, Map audit, LocalDate from, LocalDate thru) {
+    static List<Map> run(def ec, String tenantId, Map audit, LocalDate from, LocalDate thru, boolean fullRead) {
         ZoneId zone = ZoneId.of(tenantZone(ec))
         try {
             AuditAutomationSupport.pickedWindows(ec, audit, zone, LocalDate.now(zone), from, thru)
@@ -135,10 +135,28 @@ class AuditSettingsSupport {
         Timestamp now = ec.user.nowTimestamp
         return automationRows(ec, tenantId, checks*.automationId.findAll { it }.unique() as List<String>).collect { automation ->
             Map submitted = AutomationExecutionSupport.submitExecuteAutomationService(ec, [automationId: automation.automationId,
-                    scheduledFireTime: now, auditWindowFromDate: Date.valueOf(from), auditWindowThruDate: Date.valueOf(thru)])
+                    scheduledFireTime: now, auditWindowFromDate: Date.valueOf(from), auditWindowThruDate: Date.valueOf(thru),
+                    auditFullRead: fullRead])
             [automationId: automation.automationId, savedRunId: automation.savedRunId, submitted: submitted.submitted == true,
              error: submitted.error]
         }
+    }
+
+    /**
+     * DAR-BE-123. Re-checks one finding's record now through its check's automation, the record read by key on both sides
+     * (auditVerifyKeys). Answers whether it was submitted; refuses in words a finding whose check has no automation yet.
+     */
+    static boolean verifyFinding(def ec, String tenantId, String findingId) {
+        def finding = rows(ec, "darpan.audit.AuditFinding", tenantId).condition("findingId", findingId).list().find()
+        def check = rows(ec, "darpan.audit.AuditCheck", tenantId).condition("checkId", finding.checkId).list().find()
+        if (!check?.automationId) {
+            ec.message.addError("Finding ${findingId} cannot be re-checked: its check has no automation yet (play the audit once).")
+            return false
+        }
+        Map submitted = AutomationExecutionSupport.submitExecuteAutomationService(ec, [automationId: check.automationId,
+                scheduledFireTime: ec.user.nowTimestamp, auditVerifyKeys: [finding.recordKey as String]])
+        if (submitted.error) ec.message.addError("Finding ${findingId} could not be re-checked: ${submitted.error}")
+        return submitted.submitted == true
     }
 
     /**

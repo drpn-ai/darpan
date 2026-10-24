@@ -31,14 +31,6 @@
             <description>AuditPeriod: the period a run's checked day is reported under (report.period), day, month or
                 quarter.</description>
         </field>
-        <field name="recentReadDays" type="number-integer">
-            <description>DAR-BE-116. How many days, up to the run's last day, the audit reads from HotWax OMS (whose API is
-                rate-limited) instead of the whole period. On a check pairing OMS with another system, that system is read
-                from AuditRecentReadSupport.EDGE_SLACK_DAYS earlier, and a record only it holds is judged only when its own date
-                (AuditCheck.otherSideDateField) is EDGE_SLACK_DAYS or more into those days, so an older one neither raises nor
-                closes a finding. Checks between other systems keep the whole period. Empty or zero: read OMS for the whole
-                period.</description>
-        </field>
         <relationship type="one" related="moqui.security.UserGroup" short-alias="companyUserGroup" fk-name="AUD_COMPANY_GRP">
             <key-map field-name="companyUserGroupId" related="userGroupId"/>
         </relationship>
@@ -158,8 +150,8 @@
         <field name="otherSideDateField" type="text-short">
             <description>DAR-BE-116. On a check comparing HotWax OMS with another system: the date field on the OTHER
                 system's record (e.g. tranDate on a NetSuite RMA, createdAt on a Shopify order) that says whether a record
-                only that system holds falls in the audit's recent OMS read (Audit.recentReadDays). Empty: such records
-                are not judged while OMS is read for fewer days than the period.</description>
+                only that system holds falls in the audit's OMS read (the days since its last complete read, DAR-BE-122). Empty:
+                such records are not judged while OMS is read for fewer days than the period.</description>
         </field>
         <field name="matchedBy" type="text-medium">
             <description>The shared id the two sides join on, in words, e.g. "return id (custbody_hc_return_id)".

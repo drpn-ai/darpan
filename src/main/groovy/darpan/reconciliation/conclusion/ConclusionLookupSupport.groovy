@@ -59,13 +59,11 @@ class ConclusionLookupSupport {
         Set<String> onPath = path*.nodeId as Set<String>
         return ((Set<String>) ((Map) plan.readers).get(name) ?: []).any { String readerId ->
             Map reader = nodes.get(readerId)
-            if (reader.appliesToBucket && reader.appliesToBucket != bucket) return false
             if (reader.parentNodeId && !onPath.contains(reader.parentNodeId)) return false
             Map matchedSibling = path.find { it.parentNodeId == reader.parentNodeId }
             if (matchedSibling != null && (matchedSibling.sequenceNum as int) < (reader.sequenceNum as int)) return false
-            return ((List<Map>) (reader.conditions ?: [])).every { Map c ->
-                reads(c, name) || ConclusionConditionSupport.check(c, (Map) (sides?.get(c.subject) ?: [:])).passed
-            }
+            return ConclusionTreeSupport.matches(ConclusionTreeSupport.newFact(bucket, sides),
+                    reader + [conditions: ((List<Map>) (reader.conditions ?: [])).findAll { !reads(it, name) }])
         }
     }
 

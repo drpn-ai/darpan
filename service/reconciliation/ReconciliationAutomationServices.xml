@@ -199,6 +199,15 @@
             <parameter name="auditWindowThruDate" type="Date">
                 <description>DAR-UI-063. The last picked day, inclusive.</description>
             </parameter>
+            <parameter name="auditVerifyKeys" type="List">
+                <description>DAR-BE-123. Verify these findings' records now: each side reads only them, by key; the ledger
+                    refreshes or closes their findings and writes no check run.</description>
+                <parameter name="recordKey"/>
+            </parameter>
+            <parameter name="auditFullRead" type="Boolean">
+                <description>DAR-BE-122. Read every source for the whole window, not just the days since the checks' last
+                    complete read.</description>
+            </parameter>
             <parameter name="nowTimestamp" type="Timestamp"/>
             <parameter name="hasHeader" type="Boolean" default-value="true"/>
             <parameter name="outputLocation"/>

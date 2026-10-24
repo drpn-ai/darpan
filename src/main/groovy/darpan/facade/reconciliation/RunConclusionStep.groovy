@@ -190,13 +190,7 @@ class RunConclusionStep {
     }
 
     private static Map sideSpec(def ec, String compareScopeId, String fileSide, Object source, Map fileResult) {
-        List keyFieldRows = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSourceKeyField")
-                .condition("compareScopeId", compareScopeId).condition("fileSide", fileSide)
-                .orderBy("sequenceNum").useCache(false).list() ?: []
-        def sourceRow = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSource")
-                .condition("compareScopeId", compareScopeId).condition("fileSide", fileSide).useCache(false).one()
-        Map key = keySpec(keyFieldRows.collect { normalize(it.fieldExpression) }, normalize(sourceRow?.primaryIdExpression),
-                normalize(sourceRow?.idValueNormalizer), normalize(sourceRow?.recordRootExpression))
+        Map key = keySpecFor(ec, compareScopeId, fileSide)
         Map<String, Object> connector = RunVerificationSupport.resolveConnector(ec, source)
         return [extractFile : RunVerificationSupport.resolveLocationFile(ec, normalize(fileResult?.fileLocation)),
                 keyFields   : key.keyFields,
@@ -212,6 +206,17 @@ class RunConclusionStep {
      * an extract's top-level `records` fields (a nested path, or a record root other than records), so
      * the side reads UNKNOWN rather than being keyed differently and reported "Not found".
      */
+    /** keySpec of one side of a compare scope, read from its RuleSetCompareSource and key field rows. */
+    static Map keySpecFor(def ec, String compareScopeId, String fileSide) {
+        List keyFieldRows = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSourceKeyField")
+                .condition("compareScopeId", compareScopeId).condition("fileSide", fileSide)
+                .orderBy("sequenceNum").useCache(false).list() ?: []
+        def sourceRow = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSource")
+                .condition("compareScopeId", compareScopeId).condition("fileSide", fileSide).useCache(false).one()
+        return keySpec(keyFieldRows.collect { normalize(it.fieldExpression) }, normalize(sourceRow?.primaryIdExpression),
+                normalize(sourceRow?.idValueNormalizer), normalize(sourceRow?.recordRootExpression))
+    }
+
     static Map keySpec(List<String> keyFieldExpressions, String primaryIdExpression, String idValueNormalizer,
                        String recordRootExpression) {
         List<String> composite = (keyFieldExpressions ?: []).collect { normalize(it) }.findAll { it }

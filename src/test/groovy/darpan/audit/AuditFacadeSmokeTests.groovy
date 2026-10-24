@@ -124,6 +124,19 @@ class AuditFacadeSmokeTests {
         assertNull(finding.finding)
     }
 
+    // DAR-BE-123. Resolve re-checks only the active tenant's finding, and only through its check's automation.
+    @Test
+    void aFindingIsVerifiedOnlyForItsTenantAndThroughItsChecksAutomation() {
+        Map other = call("verify#AuditFinding", [findingId: otherFinding])
+        assertTrue(other.hadError as boolean)
+        assertTrue((other.errorText as String).contains("not found"), other.errorText as String)
+
+        Map mine = call("verify#AuditFinding", [findingId: myFinding])
+        assertTrue(mine.hadError as boolean)
+        assertTrue((mine.errorText as String).contains("its check has no automation yet"), mine.errorText as String)
+        assertFalse(mine.submitted as boolean)
+    }
+
     @Test
     void aFindingIsTheAssemblersJsonUnchanged() {
         Map out = call("get#AuditFinding", [findingId: myFinding])

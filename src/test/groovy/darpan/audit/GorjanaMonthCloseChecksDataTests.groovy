@@ -254,11 +254,16 @@ class GorjanaMonthCloseChecksDataTests {
         }
     }
 
-    /** Aditi 2026-10-23: "any fulfilled order is expected to be invoiced 24 hours after its fulfillment". */
+    /**
+     * Aditi 2026-10-23: "any fulfilled order is expected to be invoiced 24 hours after its fulfillment"; 2026-10-24: "drop
+     * grace from all checks with cause timing". Run C's causes carry the 24 hours from fulfillment, so R1 and R3 keep none.
+     */
     @Test
-    void aCompletedItemHasOneDayToBillBeforeItIsOpen() {
-        Node check = rows(FILE, "darpan.audit.AuditCheck").find { it.attribute("checkCode") == "completed-not-billed" }
-        assertEquals("1", check.attribute("graceDays"))
+    void theChecksWhoseCausesCarryTheBillingWindowHaveNoGrace() {
+        ["completed-not-billed", "lines-without-location"].each { String code ->
+            Node check = rows(FILE, "darpan.audit.AuditCheck").find { it.attribute("checkCode") == code }
+            assertEquals("0", check.attribute("graceDays"), code)
+        }
     }
 
     @Test

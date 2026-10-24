@@ -311,6 +311,9 @@ class AutomationExecutionSupport {
                                                                          Map<String, Object> window, Map windowParams) {
         if (source == null || !sourceExtractor.is(DEFAULT_SOURCE_EXTRACTOR)) return null
         if ("false".equalsIgnoreCase(System.getProperty(PARALLEL_SOURCE_EXTRACTS_PROPERTY) ?: "true")) return null
+        // A context that cannot make a worker context (unit harnesses) reads side 2 after side 1, as the service
+        // dispatcher runs inline without an async facade; before, the run thread threw here and the run was lost.
+        if (!ec?.hasProperty("factory")) return null
         def factory = ec.factory
         String username = normalize(ec.user?.username)
         String systemTenant = TenantAccessSupport.activeSystemTenantUserGroupId()

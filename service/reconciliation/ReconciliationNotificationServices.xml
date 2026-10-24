@@ -95,7 +95,8 @@
             <if condition="tenantLabelValue">
                 <set field="ignoreLine" from="lines.add('Tenant: ' + tenantLabelValue)"/>
             </if>
-            <if condition="resultIdValue">
+            <!-- DAR-BE-121: the link names the run result; its id is printed only when no link can be built. -->
+            <if condition="resultIdValue &amp;&amp; !resultUrl">
                 <set field="ignoreLine" from="lines.add('Result ID: ' + resultIdValue)"/>
             </if>
             <if condition="resultUrl">

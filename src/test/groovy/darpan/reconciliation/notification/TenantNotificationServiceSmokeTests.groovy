@@ -62,14 +62,15 @@ class TenantNotificationServiceSmokeTests {
         String text = result.payload.text as String
         assertTrue(text.contains("API Automation — 4 to look at, missing on both sides."), text)
         assertTrue(text.contains("Tenant: Tenant A"))
-        assertTrue(text.contains("Result ID: RUN_RESULT_1"))
+        assertFalse(text.contains("Result ID"), "the link names the result; the id line is only a fallback: ${text}".toString())
         assertTrue(text.contains("Run result: <https://hotwax-darpan-dev.web.app/reconciliation/run-result/RS_ORDER/reconciliation-runs%2FAUTO_API%2F20260501%2Fresult.json?runName=API+Automation&file1SystemLabel=SHOPIFY&file2SystemLabel=OMS&tenantId=TENANT_A|Open run result>"))
         // Inversion: onlyInFile1Count is the SHOPIFY-side count, so it is what OMS is missing.
         assertTrue(text.contains("Missing from OMS: 1"), text)
         assertTrue(text.contains("Missing from SHOPIFY: 3"), text)
-        assertTrue(text.contains("Mismatches: 0"), text)
+        assertFalse(text.contains("Mismatches"), "a zero mismatch line is left out: ${text}")
         assertFalse(text.contains("Differences:"), "the redundant total is gone: ${text}")
-        assertEquals(10, text.readLines().size(), text)
+        // DAR-BE-121: 8, not 10 — no Result ID line beside the run-result link, no zero mismatch line.
+        assertEquals(8, text.readLines().size(), text)
     }
 
     @Test
@@ -134,7 +135,7 @@ class TenantNotificationServiceSmokeTests {
                 .call()
 
         String text = result.payload.text as String
-        assertTrue(text.contains("API Order Sync — ${RunNotificationVoice.CLEAN_HEADLINES.first()}"), text)
+        assertTrue(text.contains(RunNotificationVoice.CLEAN_HEADLINES.first().replace("{run}", "API Order Sync")), text)
         assertFalse(text.contains("*Details*"), "three zeros is noise on a clean run: ${text}")
         assertFalse(text.contains("Warnings ("), text)
         // The audit sentences stay OUT of the chat body entirely (2026-08-28). They were a second

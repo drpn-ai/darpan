@@ -109,7 +109,7 @@ class AutomationFailureNotificationTests {
     }
 
     /**
-     * The standard payload prints a Details block ("Missing from …: 0 / Mismatches: 0"). For a run
+     * The standard payload prints a Details block ("Missing from …: 0" for each side). For a run
      * that died before producing any result, those zeros read as a clean sync — worse than silence.
      * A no-output failure must not report counts it never computed, so it takes the service's
      * noOutput branch instead of the verdict renderer.

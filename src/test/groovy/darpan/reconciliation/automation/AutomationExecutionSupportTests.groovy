@@ -1546,7 +1546,7 @@ class AutomationExecutionSupportTests {
             // suite pins tokens a copy tweak cannot move.
             assertTrue(text.startsWith("API Automation"), text)
             assertTrue(text.contains("Tenant: Tenant A"))
-            assertTrue(text.contains("Result ID: RUN_RESULT_1"))
+            assertFalse(text.contains("Result ID"), text)
             // URL from main: the deep link now names the tenant so the app can switch into it.
             assertTrue(text.contains("Run result: <https://hotwax-darpan-dev.web.app/reconciliation/run-result/RS_ORDER/reconciliation-runs%2FAUTO_API%2F20260501%2Fresult.json?runName=API+Automation&file1SystemLabel=SHOPIFY&file2SystemLabel=OMS&tenantId=TENANT_A|Open run result>"))
             assertTrue(text.contains("Missing from "), text)
@@ -3433,7 +3433,8 @@ class AutomationExecutionSupportTests {
         String terminationReasonValue = ((params.terminationReason)?.toString()?.trim())
         if (terminationReasonValue) lines << "⚠ ${terminationReasonValue}".toString()
         if (tenantLabel) lines << "Tenant: ${tenantLabel}".toString()
-        if (resultId) lines << "Result ID: ${resultId}".toString()
+        // DAR-BE-121, as the XML service: the id only when no link can be built.
+        if (resultId && !resultUrl) lines << "Result ID: ${resultId}".toString()
         if (resultUrl) lines << "Run result: <${resultUrl}|Open run result>".toString()
         if (warningList) lines << "Warnings (${warningList.size()}): ${warningList.take(3).join('; ')}${warningList.size() > 3 ? ' …' : ''}".toString()
         return [payload: [text: lines.join("\n")]]

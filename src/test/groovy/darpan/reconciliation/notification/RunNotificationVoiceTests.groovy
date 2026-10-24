@@ -195,16 +195,16 @@ class RunNotificationVoiceTests {
     }
 
     @Test
-    void detailsBlockPrintsAllThreeLinesIncludingZeros() {
+    void detailsBlockKeepsZeroMissingLinesButDropsZeroMismatches() {
         RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
         Map model = RunNotificationVoice.classify(
                 [onlyInFile1Count: 39, onlyInFile2Count: 0, ruleDifferenceCount: 0]) +
                 [runName: "R", file1SystemLabel: "A", file2SystemLabel: "B",
                  priorCleanRuns: 0, completedMoment: null]
         String text = RunNotificationVoice.renderLines(model).join("\n")
-        // An omitted line cannot be told apart from an axis that was never checked.
+        // A missing line names a system, so its zero says that side came back complete.
         assertTrue(text.contains("Missing from A: 0"), text)
-        assertTrue(text.contains("Mismatches: 0"), text)
+        assertFalse(text.contains("Mismatches"), text)
     }
 
     @Test
@@ -282,8 +282,7 @@ class RunNotificationVoiceTests {
 
         assertEquals(1, lines.size(), "with no context hook the verdict and tail fuse: ${lines}".toString())
         String only = lines.first()
-        assertTrue(only.startsWith("Production Orders Automation \u2014 "), only)
-        assertTrue(only.contains(RunNotificationVoice.CLEAN_HEADLINES.first()), only)
+        assertTrue(only.startsWith(RunNotificationVoice.CLEAN_HEADLINES.first().replace("{run}", "Production Orders Automation")), only)
         assertTrue(only.endsWith(RunNotificationVoice.CLEAN_TAILS.first()), only)
     }
 
@@ -293,6 +292,43 @@ class RunNotificationVoiceTests {
             assertFalse(headline.endsWith(".") || headline.endsWith("!"),
                     "a headline must fuse with a tail clause, so it carries no terminator: ${headline}".toString())
         }
+    }
+
+    @Test
+    void everyCleanVerdictNamesTheRunExactlyOnceAndTheNameMoves() {
+        // DAR-BE-121: twenty messages a day all shaped "<run> — <clause>" read as one message reworded,
+        // however deep the pool. The run's name has to move around the sentence, not only the words after it.
+        RunNotificationVoice.CLEAN_HEADLINES.each { String headline ->
+            assertEquals(1, headline.count("{run}"), "a verdict names the run exactly once: ${headline}".toString())
+        }
+        int dashed = RunNotificationVoice.CLEAN_HEADLINES.count { it.startsWith("{run} \u2014 ") } as int
+        int nameLater = RunNotificationVoice.CLEAN_HEADLINES.count { !it.startsWith("{run}") } as int
+        assertTrue(dashed * 4 <= RunNotificationVoice.CLEAN_HEADLINES.size(),
+                "the dashed shape is one of several, not the default: ${dashed} of ${RunNotificationVoice.CLEAN_HEADLINES.size()}".toString())
+        assertTrue(nameLater * 3 >= RunNotificationVoice.CLEAN_HEADLINES.size(),
+                "at least a third of verdicts put the run's name after the opening: ${nameLater}".toString())
+    }
+
+    @Test
+    void aRenderedCleanVerdictCarriesTheRunsNameAndNoPlaceholder() {
+        RunNotificationVoice.CLEAN_HEADLINES.each { String headline ->
+            RunNotificationVoice.setLinePicker { List<String> pool, String slotName ->
+                slotName == "headline" ? headline : null
+            }
+            String text = RunNotificationVoice.renderLines(cleanModel() + [runName: "Daily Return Reconciliation UK",
+                    priorCleanRuns: 0, completedMoment: null]).join("\n")
+            assertTrue(text.contains("Daily Return Reconciliation UK"), text)
+            assertFalse(text.contains("{run}"), text)
+            assertTrue(text.endsWith("."), text)
+        }
+    }
+
+    @Test
+    void streakLinesDoNotAllOpenOnTheCount() {
+        // DAR-BE-121: "{n} in a row, ..." on every streaking run is the same sentence with a new number.
+        int countFirst = RunNotificationVoice.STREAK_TEMPLATES.count { it.startsWith("{n}") } as int
+        assertTrue(countFirst * 2 <= RunNotificationVoice.STREAK_TEMPLATES.size(),
+                "at most half of the streak lines open on the count: ${countFirst} of ${RunNotificationVoice.STREAK_TEMPLATES.size()}".toString())
     }
 
     @Test
@@ -462,10 +498,11 @@ class RunNotificationVoiceTests {
     // -------------------------------------------------------------------------------------
 
     /**
-     * Clean runs an operator may plausibly see in a week — a twice-hourly automation on a working
-     * week, not a daily one. The corpus must outlast it without repeating a message.
+     * DAR-BE-121. Ten days of one busy tenant's chat space: about twenty run messages a day (Rails,
+     * 2026-10-24), most of them clean runs on a streak. A pool every such message spends must last
+     * that long before its dealer reshuffles, or the space starts reading the same lines again.
      */
-    private static final int WEEK_OF_RUNS = 75
+    private static final int WEEK_OF_RUNS = 200
 
     /** Every pool that can supply the closing line of a clean run. */
     private static List<String> allCloserLines() {
@@ -505,9 +542,12 @@ class RunNotificationVoiceTests {
     @Test
     void everySupportingPoolIsDeepEnoughToAvoidAVisiblePattern() {
         Map<String, Integer> floors = [
-                tails         : 60, streaks: 30, cappedStreaks: 12,
-                earlyMorning  : 18, fridayAfternoon: 18, mondayMorning: 18,
-                midday        : 18, lateEvening: 18, weekend: 18]
+                // Streaks are spent by nearly every clean message, so they carry the full ten days; a tail
+                // or a time-of-day line only by some of them. The capped pool stays small on purpose: it
+                // retires when the stored streak (DAR-BE-107) counts past the 20-run lookback.
+                tails         : 100, streaks: WEEK_OF_RUNS, cappedStreaks: 12,
+                earlyMorning  : 40, fridayAfternoon: 40, mondayMorning: 40,
+                midday        : 40, lateEvening: 40, weekend: 40, shapeFrames: 100]
         Map<String, List<String>> pools = [
                 tails         : RunNotificationVoice.CLEAN_TAILS,
                 streaks       : RunNotificationVoice.STREAK_TEMPLATES,
@@ -517,7 +557,8 @@ class RunNotificationVoiceTests {
                 mondayMorning : RunNotificationVoice.MONDAY_MORNING_LINES,
                 midday        : RunNotificationVoice.MIDDAY_LINES,
                 lateEvening   : RunNotificationVoice.LATE_EVENING_LINES,
-                weekend       : RunNotificationVoice.WEEKEND_LINES]
+                weekend       : RunNotificationVoice.WEEKEND_LINES,
+                shapeFrames   : RunNotificationVoice.SHAPE_FRAMES]
         floors.each { String name, Integer floor ->
             assertTrue(pools.get(name).size() >= floor,
                     "${name} pool is ${pools.get(name).size()}, below its floor of ${floor}".toString())
@@ -526,7 +567,7 @@ class RunNotificationVoiceTests {
         [RunNotificationVoice.ONE_SIDED_DIAGNOSES, RunNotificationVoice.EVEN_SPLIT_DIAGNOSES,
          RunNotificationVoice.VALUE_DRIFT_DIAGNOSES, RunNotificationVoice.MIXED_MISMATCH_DIAGNOSES,
          RunNotificationVoice.MIXED_MISSING_DIAGNOSES].each { List<String> pool ->
-            assertTrue(pool.size() >= 10, "diagnosis pool is only ${pool.size()} deep: ${pool}".toString())
+            assertTrue(pool.size() >= 40, "diagnosis pool is only ${pool.size()} deep: ${pool}".toString())
         }
     }
 
@@ -595,6 +636,22 @@ class RunNotificationVoiceTests {
         }
         assertEquals(WEEK_OF_RUNS, rendered.toSet().size(),
                 "a week of clean runs repeated a message: ${rendered.countBy { it }.findAll { it.value > 1 }}".toString())
+    }
+
+    @Test
+    void tenDaysOfStreakingRunsNeverRepeatALine() {
+        // DAR-BE-121: a reader notices a repeated LINE, not a repeated pair of lines. Over ten days of a
+        // busy space, neither the verdict nor the streak line may come round twice.
+        RunNotificationVoice.resetLinePicker()
+        List<List<String>> messages = (1..WEEK_OF_RUNS).collect { int index ->
+            RunNotificationVoice.renderLines(cleanModel() + [runName: "Daily Return Reconciliation UK",
+                    priorCleanRuns: 6, completedMoment: null])
+        }
+        [0, 1].each { int line ->
+            List<String> seen = messages.collect { it.get(line) }
+            assertEquals(WEEK_OF_RUNS, seen.toSet().size(),
+                    "line ${line + 1} repeated within ten days: ${seen.countBy { it }.findAll { it.value > 1 }.keySet()}".toString())
+        }
     }
 
     @Test

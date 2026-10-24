@@ -70,6 +70,8 @@ class ConclusionConditionSupport {
             case "GT_ZERO": return isPositive(value)
             // DAR-BE-094 R4: more than the condition's one number ("more than $5 unapplied"); a blank or non-number is not.
             case "GT": return isAbove(value, wanted ? wanted[0] : null)
+            // Aditi 2026-10-24: a time within the last N hours (a fulfilled item NetSuite bills within 24 hours).
+            case "WITHIN_HOURS": return isWithinHours(value, wanted ? wanted[0] : null)
             case "BLANK": return !value
             case "NOT_BLANK": return value as boolean
             default: throw new IllegalArgumentException("Unsupported conclusion operator '${operator}'")
@@ -81,6 +83,18 @@ class ConclusionConditionSupport {
         try {
             return new BigDecimal(value) > new BigDecimal(floor)
         } catch (NumberFormatException ignored) {
+            return false
+        }
+    }
+
+    /** An ISO instant or epoch millis no more than `hours` before now (and not after it). */
+    private static boolean isWithinHours(String value, String hours) {
+        if (!value || !hours) return false
+        try {
+            long at = value ==~ /-?\d{10,}/ ? Long.parseLong(value) : java.time.Instant.parse(value).toEpochMilli()
+            long age = System.currentTimeMillis() - at
+            return age >= -60_000L && age <= (long) (new BigDecimal(hours) * 3_600_000L)
+        } catch (Exception ignored) {
             return false
         }
     }

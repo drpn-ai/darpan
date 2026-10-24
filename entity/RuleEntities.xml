@@ -398,7 +398,7 @@
                 (paymentPreferences.paymentMethodTypeId); a path yielding nothing reads as blank.</description>
         </field>
         <field name="operator" type="text-short">
-            <description>IN, NOT_IN, GT (more than the one number in conditionValues), GT_ZERO, BLANK, NOT_BLANK. Blank with a blank fieldExpression = presence only.</description>
+            <description>IN, NOT_IN, GT (more than the one number in conditionValues), GT_ZERO, WITHIN_HOURS (a time no more than that many hours before now), BLANK, NOT_BLANK. Blank with a blank fieldExpression = presence only.</description>
         </field>
         <field name="conditionValues" type="text-long"/>
         <field name="checkLabel" type="text-medium" not-null="true"/>

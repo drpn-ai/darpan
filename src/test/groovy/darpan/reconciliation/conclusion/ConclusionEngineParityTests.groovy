@@ -20,6 +20,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue
  */
 class ConclusionEngineParityTests {
 
+    private static final List<String> ORACLE_OPERATORS = ["IN", "NOT_IN", "GT_ZERO", "BLANK", "NOT_BLANK"]
+
     private static Path componentRoot() {
         Path p = Paths.get(System.getProperty("user.dir")).toAbsolutePath()
         while (p != null && !Files.exists(p.resolve("entity/RuleEntities.xml"))) {
@@ -45,8 +47,13 @@ class ConclusionEngineParityTests {
                 .collectEntries { [(it.@enumId.toString()): it.@description.toString()] }
         int compared = 0
         ruleRows*.compareScopeId.unique().each { String scope ->
+            // The oracle is DAR-UI-044's frozen evaluator: parity is over what it has. Later operators (GT, WITHIN_HOURS)
+            // and dotted paths (a looked-up record, DAR-BE-118) are proven by ConclusionConditionSupportTests and
+            // GorjanaConclusionRulesDataTests; their rules are left out of the comparison.
             List<Map> rules = RunConclusionStep.buildRules(ruleRows.findAll { it.compareScopeId == scope },
                     condRows.findAll { it.compareScopeId == scope }, labels)
+                    .findAll { Map r -> ((List<Map>) r.conditions).every {
+                        (!it.operator || it.operator in ORACLE_OPERATORS) && !(it.fieldExpression as String)?.contains(".") } }
             List<Map> findings = matrix(rules)
             ConclusionTreeEngine engine = ConclusionTreeEngine.compile(rules)
             List<Map> actual

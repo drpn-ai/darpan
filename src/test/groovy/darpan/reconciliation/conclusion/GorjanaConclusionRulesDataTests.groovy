@@ -50,7 +50,7 @@ class GorjanaConclusionRulesDataTests {
         Set<String> scopes = load("data/TriSystemOrderRunsRuleSetData.xml").'**'
                 .findAll { it.name() == 'darpan.rule.RuleSetCompareScope' }.collect { it.@compareScopeId.toString() } as Set
 
-        assertEquals(21, rules.size(), "the catalogue for runs A-open, B, C and C-cancel (DAR-BE-118: +2 causes on run C, +1 duplicate)")
+        assertEquals(23, rules.size(), "the catalogue for runs A-open, B, C and C-cancel (DAR-BE-118: +2 causes on run C, +1 duplicate, +2 for the 24-hour billing window)")
         Set<String> seen = []
         rules.each { rule ->
             String key = "${rule.@compareScopeId}/${rule.@sequenceNum}".toString()
@@ -139,6 +139,16 @@ class GorjanaConclusionRulesDataTests {
                 [presence: "KEPT", record: [orderGrandTotal: 0]], [presence: "ABSENT", record: null]))
         assertEquals("CONC_NEVER_REACHED_NS", conclude("GORJANA_OMS_NS_LINE_SCOPE", "MISSING_FROM_FILE_2",
                 [presence: "KEPT", record: [orderGrandTotal: 140]], [presence: "ABSENT", record: null]))
+        // Aditi 2026-10-24: "it takes a fulfilled item 24 hrs to be billed... outside that timeline it is an issue".
+        Closure hoursAgo = { long h -> java.time.Instant.now().minusSeconds(h * 3600L).toString() }
+        Closure fulfilled = { long h -> [presence: "KEPT", record: [omsOrder: [statuses: [[statusId: "ORDER_CREATED", statusDatetime: hoursAgo(h + 2)],
+                [statusId: "ITEM_COMPLETED", statusDatetime: hoursAgo(h)]]]]] }
+        assertEquals("CONC_FULFILLED_WITHIN_DAY", conclude("GORJANA_OMS_NS_LINE_SCOPE", "MISSING_FROM_FILE_2",
+                fulfilled(3), [presence: "EXCLUDED", record: [lineState: "OPEN", lineLocation: "31"]]))
+        assertEquals("CONC_NOT_SHIPPED_IN_NS", conclude("GORJANA_OMS_NS_LINE_SCOPE", "MISSING_FROM_FILE_2",
+                fulfilled(30), [presence: "EXCLUDED", record: [lineState: "OPEN", lineLocation: "31"]]))
+        assertEquals("CONC_SHIPPED_NOT_BILLED", conclude("GORJANA_OMS_NS_LINE_SCOPE", "MISSING_FROM_FILE_2",
+                fulfilled(30), [presence: "EXCLUDED", record: [lineState: "SHIPPED"]]))
         // Aditi 2026-10-24 (F-100794): HotWax notes the order as a duplicate; it is never sent to NetSuite by design.
         assertEquals("CONC_DUPLICATE_ORDER_NO_NS", conclude("GORJANA_OMS_NS_LINE_SCOPE", "MISSING_FROM_FILE_2",
                 [presence: "KEPT", record: [orderGrandTotal: 44, omsOrder: [orderId: "M1168007",

@@ -52,6 +52,18 @@ class ConclusionConditionSupportTests {
         }
     }
 
+    /** Aditi 2026-10-24: "it takes a fulfilled item 24 hrs to be billed... outside that timeline it is an issue". */
+    @Test
+    void withinHoursHoldsForATimeInsideTheLastHoursOnly() {
+        Closure at = { long hoursAgo -> java.time.Instant.now().minusSeconds(hoursAgo * 3600L).toString() }
+        Map c = cond(fieldExpression: "completedAt", operator: "WITHIN_HOURS", conditionValues: ["24"])
+        assertTrue(ConclusionConditionSupport.check(c, [presence: "KEPT", record: [completedAt: at(3)]]).passed)
+        assertTrue(ConclusionConditionSupport.check(c, [presence: "KEPT", record: [completedAt: System.currentTimeMillis() - 3_600_000L]]).passed, "epoch millis")
+        [at(25), at(72), "", null, "not a time"].each { Object v ->
+            assertFalse(ConclusionConditionSupport.check(c, [presence: "KEPT", record: [completedAt: v]]).passed, "${v} is not within 24 hours")
+        }
+    }
+
     @Test
     void anyHoldsWhenOneRecordDoes() {
         Map side = [presence: "KEPT", record: [q: "0"], records: [[q: "0"], [q: "2"]]]

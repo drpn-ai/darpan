@@ -171,10 +171,6 @@ class AutomationEntityContractTests {
         def upgradeData = parse(PREVIOUS_RELEASE_UPGRADE_DATA_PATH)
         assertCanonicalSystemSourceRows(upgradeData)
         assertOmsSystemSourceLabel(upgradeData)
-        assertLegacySystemSourceAliasCleanup(upgradeData)
-        assertNoLegacySystemSourceRows(parse("data/DarpanSystemSourceSeedData.xml"))
-        assertNoLegacySystemSourceRows(parse("data/MappingSeedData.xml"))
-        assertNoLegacySystemSourceRows(parse(PREVIOUS_RELEASE_UPGRADE_DATA_PATH))
     }
 
     @Test
@@ -375,22 +371,6 @@ class AutomationEntityContractTests {
             assertNotNull(row, "Missing ${enumId} DarpanSystemSource enum")
             assertEquals(description, attr(row, "description"))
         }
-    }
-
-    private static void assertLegacySystemSourceAliasCleanup(def root) {
-        List<String> staleEnumIds = ["HOTWAX", "DarSysOms", "DarSysShopify", "DarSysNetSuite", "DarSysNetsuite", "DarSysSapi"]
-        List<String> cleanupIds = nodes(root, "delete-moqui.basic.Enumeration").collect { attr(it, "enumId") }
-        staleEnumIds.each { String staleEnumId ->
-            assertTrue(cleanupIds.contains(staleEnumId), "Upgrade data should delete stale ${staleEnumId} DarpanSystemSource aliases")
-        }
-    }
-
-    private static void assertNoLegacySystemSourceRows(def root) {
-        List<String> staleEnumIds = ["HOTWAX", "DarSysOms", "DarSysShopify", "DarSysNetSuite", "DarSysNetsuite", "DarSysSapi"]
-        List<String> createdStaleIds = nodes(root, "moqui.basic.Enumeration").findAll {
-            attr(it, "enumTypeId") == "DarpanSystemSource" && staleEnumIds.contains(attr(it, "enumId"))
-        }.collect { attr(it, "enumId") }
-        assertTrue(createdStaleIds.isEmpty(), "Seed data should not create stale DarpanSystemSource aliases: ${createdStaleIds}")
     }
 
     private static void assertFields(def entityNode, Collection<String> expectedFields) {

@@ -409,7 +409,6 @@
                 <set field="compareScopeIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.generateCompareScopeId(ec, ruleSetIdValue, 'COMPARE_SCOPE')"/>
                 <set field="ruleSetValue" from="[ruleSetId: ruleSetIdValue, ruleSetName: runNameValue, description: descriptionValue, version: '1.0', createdDate: nowTs, lastUpdatedDate: nowTs]"/>
                 <set field="ignoreTenantOwnership" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(ruleSetValue, ec)"/>
-                <set field="ignoreCompareScopeColumnContract" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.ensureRuleSetCompareScopeObjectTypeNullable(ec)"/>
             </if>
 
             <if condition="!ec.message.hasError()">
@@ -602,7 +601,6 @@
                 <set field="compareScopeIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.generateCompareScopeId(ec, ruleSetIdValue, 'CSV_SCOPE')"/>
                 <set field="ruleSetValue" from="[ruleSetId: ruleSetIdValue, ruleSetName: runNameValue, description: descriptionValue, version: '1.0', createdDate: nowTs, lastUpdatedDate: nowTs]"/>
                 <set field="ignoreTenantOwnership" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(ruleSetValue, ec)"/>
-                <set field="ignoreCompareScopeColumnContract" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.ensureRuleSetCompareScopeObjectTypeNullable(ec)"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <service-call name="create#darpan.rule.RuleSet" in-map="ruleSetValue" disable-authz="true"/>

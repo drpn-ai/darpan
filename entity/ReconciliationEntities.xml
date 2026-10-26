@@ -262,8 +262,7 @@
             been reported Applied on prod (2026-08-19, DAR-BE-013) and on prod/UAT/sm-darpan with the v1.5.0
             load (2026-08-27), so the entity is genuinely past its purpose. It is still here because dropping
             it is not one edit — it needs the migration and its registry row, the SecuritySeedData
-            ArtifactGroupMember and EntityFilter, DarpanEntityConstants.TENANT_NOTIFICATION_SETTING (already
-            dead — declared, referenced nowhere), and the CryptRotationSmokeTests assertion to go together,
+            ArtifactGroupMember and EntityFilter, and the CryptRotationSmokeTests assertion to go together,
             plus a decision about environments restored from pre-migration backups. That is its own backlog
             item, not a tidy-up to fold into an unrelated change.
 

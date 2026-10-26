@@ -17,8 +17,6 @@ import org.slf4j.LoggerFactory
 import reconciliation.rule.FieldComparisonRuleLogicGenerator
 import reconciliation.rule.RuleEngineSupport
 
-import java.sql.Connection
-import java.sql.Statement
 
 import static darpan.common.ValueSupport.normalize
 import static darpan.common.ValueSupport.boundedInt
@@ -273,105 +271,6 @@ class ReconciliationSavedRunSupport {
 
         String normalizedBase = ReconciliationMappingSupport.normalizeMappingJsonIdExpression(baseExpression) ?: baseExpression
         return suffix ? "${normalizedBase}|${suffix}" : normalizedBase
-    }
-
-    static boolean ensureRuleSetCompareScopeObjectTypeNullable(def ec) {
-        String groupName = ec?.entity?.getEntityGroupName(DarpanEntityConstants.RULE_SET_COMPARE_SCOPE) ?: "default"
-        def datasourceFactory = ec?.entity?.getDatasourceFactory(groupName)
-        datasourceFactory?.checkAndAddTable(DarpanEntityConstants.RULE_SET_COMPARE_SCOPE)
-
-        def entityDefinition = ec?.entity?.getEntityDefinition(DarpanEntityConstants.RULE_SET_COMPARE_SCOPE)
-        if (entityDefinition == null) return true
-
-        String tableName = entityDefinition.getFullTableName()
-        String schemaName = entityDefinition.getSchemaName()
-        String rawTableName = entityDefinition.getTableName()
-        String columnName = entityDefinition.getColumnName("objectType")
-
-        Connection connection = null
-        Statement statement = null
-        try {
-            connection = ec.entity.getConnection(groupName)
-            def metadata = connection.metaData
-            Map<String, Object> columnMetadata = findColumn(metadata, connection?.catalog, schemaName, rawTableName, columnName)
-            if (columnMetadata == null) return true
-
-            String isNullable = normalizeUpper(columnMetadata.isNullable)
-            if (isNullable == "YES") return true
-
-            String databaseProductName = normalizeLower(metadata?.databaseProductName)
-            String typeName = normalize(columnMetadata.typeName) ?: "VARCHAR"
-            int columnSize = columnMetadata.columnSize instanceof Number ? ((Number) columnMetadata.columnSize).intValue() : 0
-            int decimalDigits = columnMetadata.decimalDigits instanceof Number ? ((Number) columnMetadata.decimalDigits).intValue() : 0
-            String alterSql = buildDropNotNullSql(databaseProductName, tableName, columnName, typeName, columnSize, decimalDigits)
-            if (!alterSql) {
-                ec?.message?.addError("RuleSetCompareScope.objectType must be nullable, but database '${metadata?.databaseProductName}' could not be repaired automatically.")
-                return false
-            }
-
-            statement = connection.createStatement()
-            statement.execute(alterSql)
-            return true
-        } catch (Exception e) {
-            ec?.message?.addError("Could not update RuleSetCompareScope.objectType column contract: ${e.message}")
-            return false
-        } finally {
-            try { statement?.close() } catch (Exception ignored) {}
-            try { connection?.close() } catch (Exception ignored) {}
-        }
-    }
-
-    protected static Map<String, Object> findColumn(def metadata, String catalog, String schemaName, String tableName, String columnName) {
-        List<Map<String, String>> attempts = [
-                [schema: schemaName, table: tableName, column: columnName],
-                [schema: schemaName?.toUpperCase(), table: tableName?.toUpperCase(), column: columnName?.toUpperCase()],
-                [schema: schemaName?.toLowerCase(), table: tableName?.toLowerCase(), column: columnName?.toLowerCase()],
-                [schema: null, table: tableName, column: columnName],
-                [schema: null, table: tableName?.toUpperCase(), column: columnName?.toUpperCase()],
-                [schema: null, table: tableName?.toLowerCase(), column: columnName?.toLowerCase()],
-        ].findAll { Map<String, String> attempt -> attempt.table && attempt.column }
-
-        for (Map<String, String> attempt : attempts) {
-            def rs = metadata.getColumns(catalog, attempt.schema, attempt.table, attempt.column)
-            try {
-                if (rs != null && rs.next()) {
-                    return [
-                            isNullable   : rs.getString("IS_NULLABLE"),
-                            typeName     : rs.getString("TYPE_NAME"),
-                            columnSize   : rs.getInt("COLUMN_SIZE"),
-                            decimalDigits: rs.getInt("DECIMAL_DIGITS"),
-                    ]
-                }
-            } finally {
-                rs?.close()
-            }
-        }
-        return null
-    }
-
-    protected static String buildDropNotNullSql(String databaseProductName, String tableName, String columnName,
-            String typeName, int columnSize, int decimalDigits) {
-        if (!databaseProductName || !tableName || !columnName) return null
-
-        if (databaseProductName.contains("h2") || databaseProductName.contains("postgres")) {
-            return "ALTER TABLE ${tableName} ALTER COLUMN ${columnName} DROP NOT NULL"
-        }
-
-        if (databaseProductName.contains("mysql") || databaseProductName.contains("mariadb")) {
-            String normalizedTypeName = typeName?.toUpperCase()
-            String typeSql = normalizedTypeName
-            if (normalizedTypeName in ["CHAR", "VARCHAR", "CHARACTER", "CHARACTER VARYING", "VARBINARY", "BINARY"]) {
-                int resolvedSize = columnSize > 0 ? columnSize : 255
-                String sqlTypeName = normalizedTypeName == "CHARACTER VARYING" ? "VARCHAR" : normalizedTypeName
-                typeSql = "${sqlTypeName}(${resolvedSize})"
-            } else if (normalizedTypeName in ["DECIMAL", "NUMERIC"] && columnSize > 0) {
-                int resolvedScale = Math.max(0, decimalDigits)
-                typeSql = "${normalizedTypeName}(${columnSize},${resolvedScale})"
-            }
-            return "ALTER TABLE ${tableName} MODIFY COLUMN ${columnName} ${typeSql} NULL"
-        }
-
-        return null
     }
 
     static String generateCompareScopeId(def ec, String ruleSetId) {

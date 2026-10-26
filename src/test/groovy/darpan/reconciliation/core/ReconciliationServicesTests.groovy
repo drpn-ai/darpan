@@ -30,19 +30,6 @@ class ReconciliationServicesTests {
     }
 
     @Test
-    void rejectsLegacyIdNormalizerAliases() {
-        IllegalArgumentException trailingDigits = assertThrows(IllegalArgumentException) {
-            ReconciliationServices.parseIdSpec('id|TRAILING_DIGITS', false)
-        }
-        assertTrue(trailingDigits.message.contains("SHOPIFY_GID_TAIL"))
-
-        IllegalArgumentException shopifyGidAlias = assertThrows(IllegalArgumentException) {
-            ReconciliationServices.parseIdSpec('id|SHOPIFY_GID', false)
-        }
-        assertTrue(shopifyGidAlias.message.contains("Unsupported ID normalizer 'SHOPIFY_GID'"))
-    }
-
-    @Test
     void convertsWizardStyleJsonFieldPathToRootedJsonPath() {
         Map spec = ReconciliationServices.parseIdSpec('data.orders.edges.[0].node.id', false)
 

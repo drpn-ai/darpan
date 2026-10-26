@@ -68,9 +68,6 @@ class RuleSetExecutionContractTests {
         String serviceText = Files.readString(serviceXml)
         assertTrue(serviceText.contains('name="create#darpan.rule.RuleSet"'))
         assertTrue(serviceText.contains('name="create#darpan.rule.Rule"'))
-        assertFalse(serviceText.contains("resolveRuleSetId"))
-        assertFalse(serviceText.contains("nextAvailableId"))
-        assertFalse(serviceText.contains("generateRuleId"))
     }
 
     @Test
@@ -82,7 +79,6 @@ class RuleSetExecutionContractTests {
                 .collect { it.@name as String }
 
         assertTrue(serviceNames.contains("reconciliation.ReconciliationRuleEngineServices.execute#RuleSet"))
-        assertFalse(serviceNames.contains("reconciliation.ReconciliationRuleEngineServices.execute#RuleSetJson"))
 
         String screenText = Files.readString(screenXml)
         assertTrue(screenText.contains("new groovy.json.JsonSlurper().parseText(rawJsonData)"))

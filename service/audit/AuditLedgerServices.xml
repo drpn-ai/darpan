@@ -156,7 +156,8 @@
                             map="[findingId:finding.findingId, recordSeqId:String.format('%02d', recordSeq),
                                   companyUserGroupId:companyUserGroupId, systemEnumId:(systemEnum.parentEnumId ?: systemEnum.enumId),
                                   recordType:r.recordType, recordId:r.recordId?.toString(), internalId:r.internalId?.toString(),
-                                  recordStatus:r.recordStatus]"/>
+                                  recordStatus:r.recordStatus,
+                                  recordData:(r.recordData ? groovy.json.JsonOutput.toJson(r.recordData) : null)]"/>
                     <entity-create value-field="findingRecord"/>
                 </iterate>
                 <set field="checkSeq" from="0"/>

@@ -341,6 +341,11 @@
         <field name="recordStatus" type="text-medium">
             <description>The record's status in its own system's words, when the check read it.</description>
         </field>
+        <field name="recordData" type="text-very-long">
+            <description>DAR-UI-080. Every field the check's read gave for the record, as JSON, e.g. a HotWax item's order
+                name and status, a return's channel, warranty and total, a NetSuite order's customer deposits. The finding
+                document carries it whole; the report shows the few facts that explain the finding.</description>
+        </field>
         <relationship type="one" related="darpan.audit.AuditFinding" fk-name="AUDFR_FINDING">
             <key-map field-name="findingId"/>
         </relationship>

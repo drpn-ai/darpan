@@ -309,7 +309,7 @@ class AuditAutomationSupport {
             // type / id / note. Read either.
             Map row = [type: (raw.diffType ?: raw.type) as String, id: (raw.primaryId ?: raw.id) as String,
                        note: normalize(raw.message ?: raw.note), data: AuditAutomationSupport.rowData(raw.data),
-                       ids: AuditAutomationSupport.rowData(raw.ids),
+                       ids: AuditAutomationSupport.rowData(raw.ids), sideRecords: AuditAutomationSupport.rowData(raw.sideRecords),
                        file1Value: normalize(raw.file1Value), file2Value: normalize(raw.file2Value),
                        systems: raw.conclusion instanceof Map ? ((Map) raw.conclusion).systems : null,
                        checks: raw.conclusion instanceof Map ? ((Map) raw.conclusion).checks : null,
@@ -440,6 +440,9 @@ class AuditAutomationSupport {
             String recordType = normalize(side == "FILE_1" ? check.file1RecordType : check.file2RecordType)
             Map ids = row.ids instanceof Map ? (Map) ((Map) row.ids).get(side == "FILE_1" ? "file1" : "file2") : null
             Map data = (side == dataSide ? (Map) row.data : null) ?: ids
+            // DAR-UI-080: everything the read gave for this record, kept on the finding; named from data, as before.
+            Map whole = (side == dataSide ? (Map) row.data : null) ?:
+                    (row.sideRecords instanceof Map ? (Map) ((Map) row.sideRecords).get(side == "FILE_1" ? "file1" : "file2") : null) ?: ids
             if (!systemEnumId || (typed && !recordType && !ids)) return
             related.addAll(relatedRecords(data, systemEnumId))
             // DAR-BE-125: a HotWax order joined on its Shopify id is named by its own name and id (RELATED_IDS), not the key.
@@ -455,7 +458,8 @@ class AuditAutomationSupport {
                     recordType  : recordType ?: "record",
                     recordId    : recordId,
                     internalId  : internalId == recordId ? null : internalId,
-                    recordStatus: normalize(evidence?.state)]
+                    recordStatus: normalize(evidence?.state),
+                    recordData  : whole ?: null]
         }
         Set<String> seen = own.collect { "${rootSystem(it.systemEnumId as String)}|${it.recordType}|${it.recordId}".toString() } as Set
         return own + related.findAll { seen.add("${it.systemEnumId}|${it.recordType}|${it.recordId}".toString()) }

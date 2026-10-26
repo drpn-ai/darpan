@@ -774,4 +774,38 @@ class AuditReportAssemblerSmokeTests {
     private void insert(String entityName, Map<String, Object> fields) {
         ec.entity.makeValue(entityName).setAll(fields).createOrUpdate()
     }
+
+    /**
+     * DAR-UI-080 (Aditi: "the minimal amount of information needed to draw a meaningful conclusion ... and the JSON should be
+     * comprehensive"): the report lists a record's few telling facts from its data; the finding's own document adds the data.
+     */
+    @Test
+    void aRecordListsItsTellingFactsAndItsDocumentCarriesAllItsData() {
+        Map item = [omsOrderId: "M1167975", omsOrderName: "#GOR195470263", omsOrderStatusId: "ORDER_COMPLETED"]
+        Map ret = [returnId: "M263376", returnChannelEnumId: "AFTSHIP_RTN_CHANNEL", warrantyId: "6URJ7WK3", returnTotal: "118",
+                   currencyUomId: "USD", orderName: "#GOR195470263"]
+        Map line = [tranId: "SO7330484", deposits: [[tranId: "CD1", amount: "118", status: "Customer Deposit : Deposited"]]]
+        Map shopify = [id: "18954083434627", displayFinancialStatus: "PARTIALLY_REFUNDED", displayFulfillmentStatus: "FULFILLED",
+                       totalPrice: "236.00", currencyCode: "USD"]
+        List<Map> rows = [[systemEnumId: "OMS", recordType: "orderItem", recordId: "M1167975/01", recordStatus: "Completed", recordData: JsonOutput.toJson(item)],
+                          [systemEnumId: "OMS", recordType: "return", recordId: "M263376", recordData: JsonOutput.toJson(ret)],
+                          [systemEnumId: "NETSUITE", recordType: "salesOrderLine", recordId: "SO7330484", recordStatus: "Pending Billing", recordData: JsonOutput.toJson(line)],
+                          [systemEnumId: "SHOPIFY", recordType: "order", recordId: "18954083434627", recordData: JsonOutput.toJson(shopify)],
+                          [systemEnumId: "NETSUITE", recordType: "rma", recordId: "RMA1", recordData: "not json"]]
+        Map report = AuditReportAssembler.recordsJson(rows)
+        assertEquals([id: "M1167975/01", internalId: null, status: "Completed", orderName: "#GOR195470263", orderStatus: "ORDER_COMPLETED"],
+                report.OMS.orderItem[0])
+        assertEquals([id: "M263376", internalId: null, status: null, orderName: "#GOR195470263", channel: "AFTSHIP_RTN_CHANNEL",
+                      warrantyId: "6URJ7WK3", total: [amount: "118.00", currency: "USD"]], report.OMS['return'][0])
+        assertEquals([id: "SO7330484", internalId: null, status: "Pending Billing", deposits: [[id: "CD1", amount: "118", status: "Deposited"]]],
+                report.NetSuite.salesOrderLine[0])
+        assertEquals([id: "18954083434627", internalId: null, status: "Partially refunded · Fulfilled", total: [amount: "236.00", currency: "USD"]],
+                report.Shopify.order[0])
+        assertEquals([id: "RMA1", internalId: null, status: null], report.NetSuite.rma[0])
+
+        Map document = AuditReportAssembler.recordsJson(rows, true)
+        assertEquals(shopify, document.Shopify.order[0].data)
+        assertEquals(line, document.NetSuite.salesOrderLine[0].data)
+        assertFalse(report.Shopify.order[0].containsKey("data"))
+    }
 }

@@ -675,7 +675,7 @@ class AuditReportAssembler {
                 .orderBy("sequenceNum").list()*.getMap()
         List<Map> recordRows = tenantRows(ec, "darpan.audit.AuditFindingRecord", tenantId).condition("findingId", findingId)
                 .orderBy("recordSeqId").list()*.getMap()
-        Map records = recordsJson(recordRows)
+        Map records = recordsJson(recordRows, true)
 
         String state = f.stateEnumId
         Date firstFound = f.firstFoundDate as Date
@@ -825,14 +825,70 @@ class AuditReportAssembler {
     // Shared shapes and reads
     // ---------------------------------------------------------------------------------------------------------
 
-    /** records.<System>.<recordType>: [ {id, internalId, status} ], systems and types in stored order. */
-    static Map recordsJson(List<Map> recordRows) {
+    /**
+     * records.<System>.<recordType>: [ {id, internalId, status} ], systems and types in stored order. DAR-UI-080: plus what
+     * it takes to see what happened, from the record's data (recordFacts), when known; and, in a finding's own document
+     * (withData), the data itself: every field the reads gave.
+     */
+    static Map recordsJson(List<Map> recordRows, boolean withData = false) {
         Map<String, Map<String, List>> out = new LinkedHashMap<>()
         recordRows.each { Map r ->
             Map<String, List> byType = out.computeIfAbsent(systemKey(r.systemEnumId as String)) { new LinkedHashMap<>() }
-            byType.computeIfAbsent(r.recordType as String) { [] } << [id: r.recordId, internalId: r.internalId ?: null, status: r.recordStatus ?: null]
+            Map data = recordData(r.recordData)
+            Map facts = recordFacts(data, r.recordType as String)
+            Object factStatus = facts.remove("status")
+            Map record = [id: r.recordId, internalId: r.internalId ?: null, status: r.recordStatus ?: factStatus ?: null]
+            record.putAll(facts.findAll { it.value != null })
+            if (withData && data) record.data = data
+            byType.computeIfAbsent(r.recordType as String) { [] } << record
         }
         return out
+    }
+
+    /** AuditFindingRecord.recordData: the record's fields as JSON; anything else reads as none. */
+    static Map recordData(Object stored) {
+        if (stored instanceof Map) return (Map) stored
+        String text = stored?.toString()?.trim()
+        if (!text) return null
+        try {
+            Object parsed = new groovy.json.JsonSlurper().parseText(text)
+            return parsed instanceof Map ? (Map) parsed : null
+        } catch (Exception ignored) {
+            return null
+        }
+    }
+
+    /**
+     * DAR-UI-080 (Aditi: "the minimal amount of information needed to draw a meaningful conclusion"). A record's facts
+     * from its data, under the fields Darpan's reads give them: its order's name and HotWax status (a HotWax item's
+     * omsOrderName and omsOrderStatusId, a return's orderName), a return's channel and AfterShip warranty, its total (a
+     * return's returnTotal; an order's grandTotal in HotWax, totalPrice in Shopify), a NetSuite order's customer
+     * deposits (status without NetSuite's "Customer Deposit : "), and a Shopify order's status (financial and
+     * fulfillment) when its read gave no status.
+     */
+    static Map recordFacts(Map data, String recordType) {
+        if (!data) return [:]
+        Closure<String> text = { String field -> data.get(field) instanceof Map || data.get(field) instanceof List ? null : (data.get(field)?.toString()?.trim() ?: null) }
+        List<String> totalFields = recordType == "return" ? ["returnTotal"] : recordType == "order" ? ["grandTotal", "totalPrice"] : []
+        String totalText = totalFields.findResult { text(it) }
+        BigDecimal total = null
+        try { total = totalText ? new BigDecimal(totalText) : null } catch (NumberFormatException ignored) { }
+        String shopifyStatus = [text("displayFinancialStatus"), text("displayFulfillmentStatus")].findAll().collect { words(it) }.join(" · ")
+        List<Map> deposits = ((data.get("deposits") instanceof List ? data.get("deposits") : []) as List).findAll { it instanceof Map }
+                .collect { Map d -> [id: d.tranId, amount: d.amount, status: d.status?.toString()?.replaceFirst(/^.* : /, '')] }
+        return [status     : shopifyStatus ?: null,
+                orderName  : text("omsOrderName") ?: (recordType == "return" ? text("orderName") : null),
+                orderStatus: text("omsOrderStatusId"),
+                channel    : text("returnChannelEnumId"),
+                warrantyId : text("warrantyId"),
+                total      : total != null ? money(total, text("currencyUomId") ?: text("currencyCode")) : null,
+                deposits   : deposits ?: null]
+    }
+
+    /** PARTIALLY_REFUNDED -> "Partially refunded". */
+    private static String words(String code) {
+        String w = code.replace('_', ' ').toLowerCase()
+        return w.substring(0, 1).toUpperCase() + w.substring(1)
     }
 
     private static Map<String, Map> recordsFor(def ec, String tenantId, List<String> findingIds) {

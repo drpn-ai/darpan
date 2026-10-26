@@ -173,19 +173,21 @@ class RunConclusionSupport {
     /**
      * Aditi 2026-10-23 on R1 F-100781 ("the data is not aligned"): the ids of a record the row's other side holds (kept
      * under its key, or screened out by a filter) ride on the row as ids.file1 / ids.file2, so the finding names that
-     * record, e.g. the NetSuite order of a line not billed, rather than only the side that reported it.
+     * record, e.g. the NetSuite order of a line not billed, rather than only the side that reported it. DAR-UI-080: and the
+     * whole record as sideRecords.file1 / sideRecords.file2, so the audit finding carries everything that read gave.
      */
     private static Map otherSideIds(JsonSlurper slurper, Map row, Map sides) {
         Map ids = row.ids instanceof Map ? new LinkedHashMap((Map) row.ids) : parseData(slurper, row.ids)
+        Map sideRecords = [:]
         boolean added = false
         sides.each { String side, Map state ->
             String key = side == "FILE_1" ? "file1" : "file2"
             Map record = (Map) state?.record
             if (ids.containsKey(key) || record == null || !(state.presence in ["KEPT", "EXCLUDED"])) return
             Map picked = [tranId: record.tranId, internalId: record.internalId].findAll { k, v -> v != null }
-            if (picked && record != parseData(slurper, row.data)) { ids.put(key, picked); added = true }
+            if (picked && record != parseData(slurper, row.data)) { ids.put(key, picked); sideRecords.put(key, record); added = true }
         }
-        return added ? [ids: ids] : [:]
+        return added ? [ids: ids, sideRecords: sideRecords] : [:]
     }
 
     private static String bucketOf(Map row, String file1Label, String file2Label) {

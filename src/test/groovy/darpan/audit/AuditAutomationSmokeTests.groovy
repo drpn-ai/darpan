@@ -345,6 +345,23 @@ class AuditAutomationSmokeTests {
         assertEquals([], AuditAutomationSupport.relatedRecords([returnId: "M7", externalId: "SR1"], "OMS_RETURNS_GQL"))
     }
 
+    /**
+     * DAR-UI-080 (Aditi: "the JSON should be comprehensive"; "bringing the needed info in the initial lookup"): a finding's
+     * record keeps everything the check's read gave for it, the other side's record too when the run held one (R1: the
+     * NetSuite line not billed, with its order's deposits); a record it only names (the Shopify order) has no data.
+     */
+    @Test
+    void aRecordKeepsEverythingItsReadGave() {
+        Map item = [omsOrderId: "M1167975", orderItemSeqId: "01", omsOrderName: "#GOR195470263", omsOrderStatusId: "ORDER_COMPLETED",
+                    shopifyOrderId: "18954083434627"]
+        Map line = [tranId: "SO7330484", internalId: "81049165", status: "F", deposits: [[tranId: "CD1", amount: "118", status: "Deposited"]]]
+        List<Map> recs = AuditAutomationSupport.recordsOf([checkId: "X", file1RecordType: "orderItem", file2RecordType: "salesOrderLine"],
+                [type: "MISSING_IN_FILE_2", id: "M1167975\u001F01", data: item,
+                 ids: [file2: [tranId: "SO7330484", internalId: "81049165"]], sideRecords: [file2: line]], omsSource, nsSource)
+        assertEquals([["orderItem", item], ["salesOrderLine", line], ["order", null]], recs.collect { [it.recordType, it.recordData] })
+        assertEquals(["M1167975/01", "SO7330484", "18954083434627"], recs*.recordId)
+    }
+
     @Test
     void aShopifyAgainstHotWaxOrderFindingNamesTheShopifyIdTheOrderNameAndTheHcId() {
         // DAR-BE-125 (R20 F-120757, Aditi: "there should be a Order ID, Order Name, and HC ID"): the HotWax order is named

@@ -36,6 +36,15 @@ class TenantPinBesidePrimaryKeyGuardTest {
                     "resolveRuleSetRun re-checks the row with canAccessTenantRecord before using it",
     ]
 
+    /**
+     * The re-check each allowlisted file must still contain. A reason is only text; DAR-BE-135 deleted
+     * resolveRuleSetRun's re-check as "dead" while its allowlist entry still vouched for it.
+     */
+    private static final Map<String, String> REQUIRED_RECHECK = [
+            "ReconciliationSavedRunSupport.groovy|reconciliationMappingId": "canAccessTenantRecord(ec, mapping)",
+            "ReconciliationSavedRunSupport.groovy|ruleSetId"              : "if (!TenantAccessSupport.canAccessTenantRecord(ec, ruleSet)) return [savedRun: null",
+    ]
+
     private static final Pattern CHAIN = Pattern.compile(
             /(findTenantScoped\(\s*ec\s*,\s*|findGlobalUnscoped\(\s*ec\s*,\s*|\.find\(\s*)([^,)\n]+)((?:(?!\.one\(\)).){0,500}?)\.one\(\)/,
             Pattern.DOTALL)
@@ -47,6 +56,7 @@ class TenantPinBesidePrimaryKeyGuardTest {
         Path componentRoot = ReconciliationSmokeTestSupport.resolveBackendRoot().resolve("runtime/component")
         Map<String, List<String>> primaryKeys = readPrimaryKeys(componentRoot)
         assertTrue(primaryKeys.containsKey("TenantChatSpace"), "entity PKs were not read; the guard would be hollow")
+        assertEquals(ALLOWLIST.keySet(), REQUIRED_RECHECK.keySet(), "every allowlisted site names the re-check that makes it safe")
         Map<String, String> constants = readEntityConstants(componentRoot)
 
         List<String> violations = []
@@ -61,7 +71,10 @@ class TenantPinBesidePrimaryKeyGuardTest {
                             chainsSeen += hits.size()
                             hits.findAll { it.dropped }.each { Map<String, Object> hit ->
                                 String key = "${p.fileName}|${(hit.pk as List).join(',')}"
-                                if (!ALLOWLIST.containsKey(key)) {
+                                String recheck = REQUIRED_RECHECK[key]
+                                if (recheck && !text.contains(recheck)) {
+                                    violations << "${componentRoot.relativize(p)}:${hit.line} is allowlisted but its re-check is gone: ${recheck}".toString()
+                                } else if (!ALLOWLIST.containsKey(key)) {
                                     violations << "${componentRoot.relativize(p)}:${hit.line} ${hit.entity} pk=${hit.pk}"
                                 }
                             }
@@ -97,9 +110,20 @@ class TenantPinBesidePrimaryKeyGuardTest {
                                                              Map<String, String> constants) {
         List<Map<String, Object>> hits = []
         Matcher m = CHAIN.matcher(text)
-        while (m.find()) {
+        int from = 0
+        while (m.find(from)) {
             String chain = m.group(3)
-            if (NEW_FIND.matcher(chain).find()) continue
+            // A match that runs through a later find (an earlier find...list() followed by find...one()) is not
+            // this find's chain: resume at the last inner find so that one() chain is still checked. Skipping the
+            // whole stretch is how RunConclusionStep.keySpecFor's dropped pin went unseen (DAR-BE-135).
+            Matcher inner = NEW_FIND.matcher(chain)
+            int lastInner = -1
+            while (inner.find()) lastInner = inner.start()
+            if (lastInner >= 0) {
+                from = m.start(3) + lastInner
+                continue
+            }
+            from = m.end()
             boolean tenantScopedFinder = m.group(1).startsWith("findTenantScoped")
             Set<String> conditions = [] as Set
             Matcher c = CONDITION.matcher(chain)

@@ -1,6 +1,7 @@
 package darpan.facade.reconciliation
 
 import darpan.facade.common.FacadeSupport
+import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import darpan.reconciliation.conclusion.ConclusionKeySupport
@@ -59,8 +60,11 @@ class RunConclusionStep {
 
             Map documentLabels = documentLabels(diffFile)
             boolean singleSided = documentLabels.file2Label == null || args.get("file2Result") == null
-            def scope = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareScope")
-                    .condition("compareScopeId", compareScopeId).useCache(false).one()
+            // one() on the full PK would drop a findTenantScoped pin, so the owner is checked on the row, against
+            // the same active tenant the rule reads above are scoped to.
+            def scope = TenantScopedFinder.findOneOwnedByTenant(ec, "darpan.rule.RuleSetCompareScope", "compareScopeId",
+                    compareScopeId, TenantAccessSupport.currentActiveTenantUserGroupId(ec),
+                    "RunConclusionStep scope read; owner checked on the row")
             List<String> lookupWarnings = []
             List<Map> lookups = []
             try {
@@ -211,8 +215,9 @@ class RunConclusionStep {
         List keyFieldRows = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSourceKeyField")
                 .condition("compareScopeId", compareScopeId).condition("fileSide", fileSide)
                 .orderBy("sequenceNum").useCache(false).list() ?: []
+        // list(), not one(): one() on the full PK would drop the tenant pin.
         def sourceRow = TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSource")
-                .condition("compareScopeId", compareScopeId).condition("fileSide", fileSide).useCache(false).one()
+                .condition("compareScopeId", compareScopeId).condition("fileSide", fileSide).useCache(false).list()?.find()
         return keySpec(keyFieldRows.collect { normalize(it.fieldExpression) }, normalize(sourceRow?.primaryIdExpression),
                 normalize(sourceRow?.idValueNormalizer), normalize(sourceRow?.recordRootExpression))
     }

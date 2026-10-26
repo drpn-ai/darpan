@@ -52,7 +52,7 @@ class RunFlowchartSupport {
                 .condition("ruleSetId", ruleSetId).useCache(false).list()?.find() : null
         def file1 = scope ? TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSource")
                 .condition("compareScopeId", scope.get("compareScopeId")).condition("fileSide", "FILE_1")
-                .useCache(false).one() : null
+                .useCache(false).list()?.find() : null
         List keyFields = scope ? (TenantScopedFinder.findTenantScoped(ec, "darpan.rule.RuleSetCompareSourceKeyField")
                 .condition("compareScopeId", scope.get("compareScopeId")).condition("fileSide", "FILE_1")
                 .orderBy("sequenceNum").useCache(false).list() ?: []).collect { it.get("fieldExpression") } : []

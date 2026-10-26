@@ -203,12 +203,13 @@ jobs:
 
       # Contract-drift guard (MACH P0, API management). The XML <-> committed-contract gate
       # already runs inside :test (ApiContractGeneratorTests); this step extends the guard to
-      # the docs service catalog. The UI side is enforced by darpan-ui's own CI
+      # the docs service catalog, which lives (unpublished) in darpan-developers. The UI side is
+      # enforced by darpan-ui's own CI
       # (src/lib/api/__tests__/contractDrift.spec.ts against its committed methods.txt copy).
       - name: Check docs service catalog against the generated API contract
         run: |
-          git clone --depth 1 https://github.com/drpn-ai/darpan-docs.git darpan-docs
-          cd darpan-docs && python3 scripts/check_service_catalog.py \
+          git clone --depth 1 https://github.com/drpn-ai/darpan-developers.git darpan-developers
+          cd darpan-developers && python3 scripts/check_service_catalog.py \
             ../darpan-backend/runtime/component/darpan/docs/api-contract/methods.txt
 
       # Contract compatibility gate (MACH P1): breaking facade changes (removed method/param/

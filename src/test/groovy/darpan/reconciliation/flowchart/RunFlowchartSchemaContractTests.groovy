@@ -44,7 +44,9 @@ class RunFlowchartSchemaContractTests {
 
     @Test
     void notRunStatusIsSeededAndInTheUpgradePack() {
-        ["data/AutomationSeedData.xml", "data/upgrade-data.xml"].each { String path ->
+        // Shipped in the 2.0.0 pack. data/upgrade-data.xml is rebuilt each release from the previous tag and is
+        // not a running total, so a row is pinned to the pack it shipped in, not to whichever pack is current.
+        ["data/AutomationSeedData.xml", "data/releases/2.0.0/upgrade-data.xml"].each { String path ->
             def row = parse(path)."moqui.basic.Enumeration".find { attr(it, "enumId") == "AUT_STAT_NOT_RUN" }
             assertNotNull(row, "${path} has no AUT_STAT_NOT_RUN")
             assertEquals("AutomationExecStatus", attr(row, "enumTypeId"))

@@ -82,8 +82,23 @@ class TenantOwnedEntityFilterContractTests {
             "darpan.reconciliation.TenantStreakQuest"            : "DARPAN_SCOPE_TENANT_STREAK_QUEST",
     ].asImmutable()
 
+    /** DAR-BE-135 — a tenant's own conclusion codes. */
+    static final Map<String, String> DAR_BE_135_FILTERS = [
+            "darpan.rule.TenantConclusion": "DARPAN_SCOPE_TENANT_CONCLUSION",
+    ].asImmutable()
+
+    /**
+     * Filter rows added since the last release cut. No pack carries them yet: the next cut generates its pack from
+     * the previous tag, and data/upgrade-data.xml is not hand-edited between cuts. Remove an entry once a pack ships it.
+     */
+    static final Map<String, String> PENDING_NEXT_PACK = [
+            "DARPAN_SCOPE_AUTOMATION_STREAK_BADGE": "DAR-BE-108, committed after the 2.1.0 cut (5b7038c)",
+            "DARPAN_SCOPE_TENANT_STREAK_QUEST"    : "DAR-BE-108, committed after the 2.1.0 cut (5b7038c)",
+            "DARPAN_SCOPE_TENANT_CONCLUSION"      : "DAR-BE-135, the entity shipped in 2.1.0 without a filter",
+    ].asImmutable()
+
     /** Every filter row this class pins by id, with its entity. */
-    static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS + DAR_BE_107_FILTERS + DAR_BE_108_FILTERS).asImmutable()
+    static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS + DAR_BE_107_FILTERS + DAR_BE_108_FILTERS + DAR_BE_135_FILTERS).asImmutable()
 
     /** Entities deliberately NOT in the filter set, each with the reason. */
     static final Map<String, String> EXCLUDED = [
@@ -124,6 +139,32 @@ class TenantOwnedEntityFilterContractTests {
                     }
                 }
         return rows
+    }
+
+    /**
+     * entityFilterId -> attributes as last shipped: the pre-reset packs, then every release pack, each in version
+     * order, then the current pack.
+     * data/upgrade-data.xml is rebuilt each release from the previous tag, so a row that shipped in an earlier
+     * pack is not repeated there (DAR-BE-135 found this test pinning 2.0.0 filters to the 2.1.0 pack).
+     */
+    private static Map<String, Map<String, String>> shippedFilters() {
+        Path data = componentRoot().resolve("darpan/data")
+        List<Path> packs = releasePacks(data.resolve("releases/pre-reset")) + releasePacks(data.resolve("releases"))
+        packs << data.resolve("upgrade-data.xml")
+        Map<String, Map<String, String>> rows = [:]
+        packs.each { Path pack -> rows.putAll(filterRows(pack)) }
+        return rows
+    }
+
+    private static List<Path> releasePacks(Path dir) {
+        return Files.list(dir)
+                .filter { Path d -> d.fileName.toString() ==~ /\d+(\.\d+)*/ && Files.exists(d.resolve("upgrade-data.xml")) }
+                .sorted({ Path a, Path b -> versionOf(a) <=> versionOf(b) } as Comparator<Path>)
+                .collect { it.resolve("upgrade-data.xml") }
+    }
+
+    private static String versionOf(Path releaseDir) {
+        return releaseDir.fileName.toString().tokenize(".").collect { (it as int).toString().padLeft(6, "0") }.join(".")
     }
 
     private static Map<String, Map<String, String>> seedFilters() {
@@ -173,10 +214,15 @@ class TenantOwnedEntityFilterContractTests {
     void theUpgradePackCarriesTheSameRowsVerbatim() {
         // The seed file only reaches an existing database through the upgrade pack.
         Map<String, Map<String, String>> seed = seedFilters()
-        Map<String, Map<String, String>> pack = filterRows(componentRoot().resolve("darpan/data/upgrade-data.xml"))
-        NAMED_FILTERS.values().each { String filterId ->
-            assertTrue(pack.containsKey(filterId), "upgrade-data.xml is missing EntityFilter ${filterId}")
-            assertEquals(seed[filterId], pack[filterId], "upgrade-data.xml must restate ${filterId} verbatim")
+        Map<String, Map<String, String>> pack = shippedFilters()
+        PENDING_NEXT_PACK.keySet().each { String filterId ->
+            assertTrue(seed.containsKey(filterId), "PENDING_NEXT_PACK names ${filterId}, which the seed does not carry")
+            assertFalse(pack.containsKey(filterId), "${filterId} has shipped; remove it from PENDING_NEXT_PACK")
+        }
+        seed.keySet().findAll { !PENDING_NEXT_PACK.containsKey(it) }.each { String filterId ->
+            assertTrue(pack.containsKey(filterId), "no shipped upgrade pack carries EntityFilter ${filterId}; " +
+                    "if it was added since the last cut, list it in PENDING_NEXT_PACK")
+            assertEquals(seed[filterId], pack[filterId], "the latest pack carrying ${filterId} must restate it verbatim")
         }
     }
 

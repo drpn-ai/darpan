@@ -1117,7 +1117,13 @@ class RunNotificationVoice {
     private static List<String> renderClean(String runName, Map<String, Object> model) {
         String verdict = (pickLine(CLEAN_HEADLINES, "headline") ?: "{run} matched every record").replace("{run}", runName)
 
-        String streak = streakLine(toCount(model.get("priorCleanRuns")))
+        // DAR-BE-108: a badge or side quest this run earned takes the closer's place; it already says the streak.
+        List<String> earned = [model.get("badgeLine"), model.get("questLine")].findAll { it } as List<String>
+        if (earned) return [verdict + "."] + earned
+
+        // DAR-BE-107: past the lookback the stored streak speaks, in days and with no ceiling.
+        String streak = StreakMilestoneVoice.longStreakLine(toCount(model.get("storedStreakDays"))) ?:
+                streakLine(toCount(model.get("priorCleanRuns")))
         if (streak) return [verdict + ".", streak]
 
         String timeLine = timeOfDayLine((ZonedDateTime) model.get("completedMoment"))

@@ -3,6 +3,7 @@ package darpan.reconciliation.automation
 import darpan.common.DarpanEntityConstants
 import darpan.facade.common.TenantScopedFinder
 import darpan.reconciliation.notification.TenantNotificationSupport
+import darpan.reconciliation.streak.AutomationStreakSupport
 import groovy.transform.CompileStatic
 
 import org.moqui.context.ExecutionContext
@@ -90,6 +91,10 @@ class StuckRunReaper {
                     }
                     row.update()
                     updated++
+                    // DAR-BE-107: a reaper-killed slot breaks the streak (decision 6, 2026-10-22).
+                    if (DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION == entityName) {
+                        AutomationStreakSupport.recordSlots(ec, row.get("automationId"))
+                    }
                     // Task 7: the reaper has no automation/interactive-run context to carry a chatSpaceId,
                     // so subscriber spaces (ReconciliationRunNotifySubscription) are the only destinations.
                     // Best-effort — a notify failure must never stop the sweep from reaping other rows.

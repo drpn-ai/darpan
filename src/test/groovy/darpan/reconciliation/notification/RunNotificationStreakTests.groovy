@@ -133,6 +133,23 @@ class RunNotificationStreakTests {
     }
 
     @Test
+    void aValueMismatchOnTheExecutionBreaksTheStreak() {
+        // DAR-BE-107 decision 1: the run row's differenceCount counts missing records only; the execution row's
+        // includes value mismatches, and a run with mismatches is not clean.
+        String savedRunId = "SR_MISMATCH"
+        makeAutomation("AUT_MISMATCH", savedRunId, "TENANT_A")
+        makeAutomationRun("AUT_MISMATCH", savedRunId, "TENANT_A", 0, "AUT_STAT_SUCCESS", 60)
+        String mismatched = makeAutomationRun("AUT_MISMATCH", savedRunId, "TENANT_A", 0, "AUT_STAT_SUCCESS", 50)
+        makeAutomationRun("AUT_MISMATCH", savedRunId, "TENANT_A", 0, "AUT_STAT_SUCCESS", 40)
+        String current = makeAutomationRun("AUT_MISMATCH", savedRunId, "TENANT_A", 0, "AUT_STAT_SUCCESS", 1)
+        ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution")
+                .condition("reconciliationRunResultId", mismatched).one()
+                .set("differenceCount", 3L).update()
+
+        assertEquals(1, RunNotificationStreak.countConsecutiveCleanRuns(ec, savedRunId, "TENANT_A", current))
+    }
+
+    @Test
     void thisAutomationsOwnBadRunStillBreaksTheStreak() {
         // Guard for the guard above: narrowing the scope to one automation must not make the streak
         // unbreakable — a bad run of THIS schedule still stops the count.

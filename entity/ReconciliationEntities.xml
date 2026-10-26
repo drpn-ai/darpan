@@ -351,6 +351,10 @@
                 rename; never used to address a message.</description>
         </field>
         <field name="isActive" type="text-indicator" default="'Y'"/>
+        <field name="lastBadgeGifDate" type="date-time">
+            <description>DAR-BE-108. When a badge GIF last went to this space. One per space per day: a later badge
+                that day keeps its line and drops the picture.</description>
+        </field>
         <field name="createdByUserId" type="id"/>
         <field name="createdDate" type="date-time"/>
         <field name="lastUpdatedDate" type="date-time"/>
@@ -805,6 +809,55 @@
             <key-map field-name="automationId"/>
         </relationship>
         <relationship type="one" title="Company" related="moqui.security.UserGroup" fk-name="AUTSTRK_COMPANY">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="AutomationStreakBadge" package="darpan.reconciliation" use="transactional" cache="never">
+        <description>DAR-BE-108. A streak badge one automation has earned (StreakMilestoneVoice.BADGE_LADDER). Its own
+            record because the once-only rule cannot be read off the live streak: High Five and Fifteen Days of Fame
+            are earned once per automation, ever, and from Month Doze up each streak that reaches the badge earns it
+            again (timesEarned).</description>
+        <field name="automationId" type="id" is-pk="true"/>
+        <field name="badgeKey" type="id" is-pk="true"/>
+        <field name="companyUserGroupId" type="id" not-null="true"/>
+        <field name="timesEarned" type="number-integer"/>
+        <field name="firstEarnedDate" type="date-time"/>
+        <field name="lastEarnedDate" type="date-time"/>
+        <field name="lastEarnedSlotDate" type="date-time">
+            <description>scheduledDate of the slot whose run earned it last. The run message for that slot carries
+                the badge line, so a re-sent or late notification never celebrates a later or earlier run.</description>
+        </field>
+        <field name="lastEarnedStreakStartDate" type="date-time">
+            <description>streakStartDate of the streak that earned it last: one streak earns a badge at most once.</description>
+        </field>
+
+        <relationship type="one" related="darpan.reconciliation.ReconciliationAutomation" fk-name="AUTSTRKB_AUT">
+            <key-map field-name="automationId"/>
+        </relationship>
+        <relationship type="one" title="Company" related="moqui.security.UserGroup" fk-name="AUTSTRKB_COMPANY">
+            <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
+        </relationship>
+    </entity>
+
+    <entity entity-name="TenantStreakQuest" package="darpan.reconciliation" use="transactional" cache="never">
+        <description>DAR-BE-108. A side quest a tenant has found. Once per tenant, ever.</description>
+        <field name="companyUserGroupId" type="id" is-pk="true"/>
+        <field name="questKey" type="id" is-pk="true"/>
+        <field name="automationId" type="id">
+            <description>The automation that found it; null for a quest every automation earned together.</description>
+        </field>
+        <field name="earnedDate" type="date-time"/>
+        <field name="earnedSlotDate" type="date-time">
+            <description>scheduledDate of the slot that found it, for an any-automation quest: that run's message
+                carries the quest.</description>
+        </field>
+        <field name="notifiedDate" type="date-time">
+            <description>When an all-automations quest was posted to the tenant's streaks space; null when none
+                was set.</description>
+        </field>
+
+        <relationship type="one" title="Company" related="moqui.security.UserGroup" fk-name="TSTRKQ_COMPANY">
             <key-map field-name="companyUserGroupId" related-field-name="userGroupId"/>
         </relationship>
     </entity>

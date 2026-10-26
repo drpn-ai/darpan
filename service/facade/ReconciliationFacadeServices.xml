@@ -2923,9 +2923,14 @@
                 <set field="ignoreSetTimeZone" from="automationRecord.set('windowTimeZone', automationFields.windowTimeZone)"/>
                 <set field="ignoreSetSafeConfig" from="automationRecord.set('safeConfigJson', automationFields.safeConfigJson)"/>
                 <set field="ignoreSetChatSpace" from="automationRecord.set('chatSpaceId', automationFields.chatSpaceId)"/>
+                <set field="pausedNow" from="automationRecord.isActive != 'N' &amp;&amp; automationFields.isActive == 'N'"/>
                 <set field="ignoreSetIsActive" from="automationRecord.set('isActive', automationFields.isActive)"/>
                 <set field="ignoreSetUpdatedDate" from="automationRecord.set('lastUpdatedDate', automationFields.lastUpdatedDate)"/>
                 <set field="ignoreAutomationUpdate" from="automationRecord.update()"/>
+                <!-- DAR-BE-107: a pause carries the streak, however the automation was paused. -->
+                <if condition="pausedNow">
+                    <set field="ignoreStreakPause" from="darpan.reconciliation.streak.AutomationStreakSupport.pause(ec, automationIdValue)"/>
+                </if>
                 <set field="savedAutomationId" from="automationIdValue"/>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; !automationRecord">
@@ -3110,6 +3115,8 @@
                 <set field="deletedFilterCount" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSourceFilter').condition('automationId', automationIdValue).disableAuthz().useCache(false).deleteAll()"/>
                 <set field="deletedSourceCount" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', automationIdValue).disableAuthz().useCache(false).deleteAll()"/>
                 <set field="deletedExecutionCount" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).disableAuthz().useCache(false).deleteAll()"/>
+                <!-- DAR-BE-107/108: the streak and its badges belong to the automation. A side quest it found stays the tenant's. -->
+                <set field="ignoreStreakDelete" from="darpan.reconciliation.streak.AutomationStreakSupport.deleteFor(ec, automationIdValue)"/>
                 <set field="ignoreAutomationDelete" from="automationRecord.delete()"/>
                 <set field="deleted" from="true"/>
                 <set field="deletedAutomationId" from="automationIdValue"/>
@@ -3428,6 +3435,8 @@
                 <set field="ignoreSetInactive" from="automationRecord.set('isActive', 'N')"/>
                 <set field="ignoreUpdatedDate" from="automationRecord.set('lastUpdatedDate', ec.user.nowTimestamp)"/>
                 <set field="ignoreAutomationUpdate" from="automationRecord.update()"/>
+                <!-- DAR-BE-107: a pause carries the streak. -->
+                <set field="ignoreStreakPause" from="darpan.reconciliation.streak.AutomationStreakSupport.pause(ec, automationIdValue)"/>
                 <set field="automationSources" from="ec.entity.find('darpan.reconciliation.ReconciliationAutomationSource').condition('automationId', automationIdValue).orderBy('fileSide').disableAuthz().useCache(false).list() ?: []"/>
                 <set field="automationExecutions" from="darpan.facade.reconciliation.AutomationFacadeSupport.collapseExecutionHistory(ec.entity.find('darpan.reconciliation.ReconciliationAutomationExecution').condition('automationId', automationIdValue).orderBy('-completedDate,-startedDate,-scheduledDate,-createdDate,-automationExecutionId').disableAuthz().useCache(false).list() ?: [])"/>
                 <set field="automation" from="darpan.facade.reconciliation.AutomationFacadeSupport.buildAutomationRow(ec, automationRecord, true, automationSources, automationExecutions)"/>
@@ -3580,6 +3589,54 @@
                 <set field="statusEnumId" from="reprocessResult.statusEnumId"/>
                 <set field="requeued" from="reprocessResult.requeued"/>
             </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="AutomationStreaks" authz-action="view" allow-remote="true" authenticate="true">
+        <description>DAR-BE-107. The active tenant's clean-day streaks: each automation's live and best streak in days,
+            on its own midnight, and the badges it has earned; the tenant streak (the shortest live streak of its active
+            scheduled automations); and the side quests the tenant has found. Read-only: slots not yet stored are folded
+            in memory, so the numbers are current before an automation's next run.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="tenantStreakDays" type="Integer"/>
+            <parameter name="automations" type="List">
+                <parameter name="automationId"/>
+                <parameter name="automationName"/>
+                <parameter name="isActive" type="Boolean"/>
+                <parameter name="scheduled" type="Boolean"/>
+                <parameter name="windowTimeZone"/>
+                <parameter name="currentDays" type="Integer"/>
+                <parameter name="bestDays" type="Integer"/>
+                <parameter name="streakStartDate" type="Timestamp"/>
+                <parameter name="lastBreakDate" type="Timestamp"/>
+                <parameter name="lastBreakReason"/>
+                <parameter name="badges" type="List">
+                    <parameter name="badgeKey"/>
+                    <parameter name="title"/>
+                    <parameter name="days" type="Integer"/>
+                    <parameter name="timesEarned" type="Integer"/>
+                    <parameter name="firstEarnedDate" type="Timestamp"/>
+                    <parameter name="lastEarnedDate" type="Timestamp"/>
+                </parameter>
+            </parameter>
+            <parameter name="quests" type="List">
+                <parameter name="questKey"/>
+                <parameter name="title"/>
+                <parameter name="automationId"/>
+                <parameter name="earnedDate" type="Timestamp"/>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="streaks" from="darpan.reconciliation.streak.AutomationStreakSupport.tenantStreaks(ec)"/>
+            <set field="tenantStreakDays" from="streaks.tenantStreakDays"/>
+            <set field="automations" from="streaks.automations"/>
+            <set field="quests" from="streaks.quests"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

@@ -4,6 +4,7 @@ import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import darpan.reconciliation.source.SourceFilterSupport
+import darpan.reconciliation.streak.AutomationStreakSupport
 import groovy.json.JsonOutput
 
 import java.sql.Timestamp
@@ -82,6 +83,8 @@ class AutomationRuntimeSupport {
             execution.update()
             return null
         })
+        // DAR-BE-107: every run path ends a window here, so the streak folds before the run's message is built.
+        if (AutomationStreakSupport.isTerminal(fields.statusEnumId)) AutomationStreakSupport.recordSlots(ec, execution.automationId)
     }
 
     static Object runInTransaction(def ec, String message, Closure work) {

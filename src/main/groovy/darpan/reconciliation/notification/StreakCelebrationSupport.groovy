@@ -20,6 +20,9 @@ package darpan.reconciliation.notification
 class StreakCelebrationSupport {
 
     static final String CELEBRATION_KEY = "celebration"
+    /** celebration.kind: a badge GIF is capped at one per space per day; a quest GIF is not. */
+    static final String KIND_BADGE = "badge"
+    static final String KIND_QUEST = "quest"
     static final String GIF_PATH = "/streaks/"
 
     /** Badges that earn a GIF (first earn per automation only) and every side quest. */
@@ -95,7 +98,12 @@ class StreakCelebrationSupport {
         return blocks
     }
 
-    private static Map<String, Object> stripped(Map<String, Object> payload) {
+    static boolean isBadgeGif(Map<String, Object> payload) {
+        return hasCelebration(payload) && (payload.get(CELEBRATION_KEY) as Map).kind == KIND_BADGE
+    }
+
+    /** The payload with its picture dropped and its text kept. */
+    static Map<String, Object> stripped(Map<String, Object> payload) {
         if (payload == null || !payload.containsKey(CELEBRATION_KEY)) return payload
         Map<String, Object> copy = new LinkedHashMap<>(payload)
         copy.remove(CELEBRATION_KEY)

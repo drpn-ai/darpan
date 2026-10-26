@@ -5,8 +5,8 @@ package darpan.reconciliation.notification
  * once a streak runs past the 20-run lookback RunNotificationVoice can see. Pure, like RunNotificationVoice, and dealt
  * through its pickLine so every pool spends all its entries before one comes round again.
  *
- * Nothing calls this yet. It is wired in when DAR-BE-107 serves the exact day count and the earn events, and a badge's
- * line then rides on the run message that crossed the threshold (DAR-BE-108), in place of the streak line.
+ * AutomationStreakSupport.notificationFacts reads the stored streak and the badge or quest this run's slot earned, and a
+ * badge's line rides on the run message that crossed the threshold (DAR-BE-108), in place of the streak line.
  *
  * Badges belong to an automation and count clean DAYS (DAR-UI-059). High Five and Fifteen Days of Fame are earned once
  * per automation, ever; from Month Doze up a later streak earns the badge again.
@@ -378,6 +378,36 @@ class StreakMilestoneVoice {
             "Patience, {next} is {left} away and the streak is {n} days in.",
             "{n} days, and {next} is the obvious next stop, {left} off.",
     ].asImmutable()
+
+    /**
+     * DAR-BE-108. The line for a side quest just found, once per tenant. Big Haul rides on the run that found it;
+     * Black Friday Survivor is its own post to the tenant's streaks space. {records} is the run's record count with
+     * thousands separators.
+     */
+    static final Map<String, List<String>> QUEST_LINES = [
+            BIG_HAUL: [
+                    "Side quest found: Big Haul. {records} records in one run, and every one of them lined up.",
+                    "That was {records} records without a single difference, which counts as a Big Haul. Side quest found.",
+                    "Big Haul: {records} records checked in one go and nothing to chase. Side quest found.",
+                    "Side quest found: Big Haul, for carrying {records} records through one run without dropping any.",
+                    "{records} records, one run, zero differences. That is the Big Haul side quest.",
+                    "One run moved {records} records and every one lined up, so Big Haul is found.",
+            ].asImmutable(),
+            BLACK_FRIDAY_SURVIVOR: [
+                    "Side quest found: Black Friday Survivor. Every automation lined up from Black Friday to Cyber Monday.",
+                    "Black Friday through Cyber Monday, and not one automation found a difference. Side quest found: Black Friday Survivor.",
+                    "The busiest weekend of the year came and went, and every automation stayed clean. Black Friday Survivor is found.",
+                    "Every automation made it through Black Friday to Cyber Monday without a difference, which earns Black Friday Survivor.",
+                    "Side quest found: Black Friday Survivor. Four of the loudest days of the year, and the records stayed quiet.",
+                    "Black Friday Survivor: every automation, every day from Friday to Cyber Monday, all lined up.",
+            ].asImmutable(),
+    ].asImmutable()
+
+    /** The line for a side quest just found, or null for a quest with no lines. */
+    static String questLine(String key, long records) {
+        String template = key ? RunNotificationVoice.pickLine(QUEST_LINES.get(key), "quest|" + key) : null
+        return template?.replace("{records}", String.format(Locale.US, "%,d", records))
+    }
 
     /** The plain pool and the next-badge pool dealt as one, so a long streak names its next badge about half the time. */
     static final List<String> LONG_WITH_NEXT_LINES = (LONG_STREAK_LINES + NEXT_BADGE_LINES).asImmutable()

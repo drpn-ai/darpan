@@ -192,10 +192,16 @@ class TenantNotificationSupport {
         for (Map<String, Object> destination : destinations) {
             String destinationProvider = resolveChatProvider(destination.chatProviderEnumId)
             try {
-                Map<String, Object> delivery = deliverToDestination(destination, payload)
+                // DAR-BE-108: one badge GIF per space per day; a later badge that day keeps its line.
+                boolean badgeGif = StreakCelebrationSupport.isBadgeGif(payload) &&
+                        !badgeGifSentToday(ec, tenantId, (String) destination.chatSpaceId)
+                Map<String, Object> destinationPayload = StreakCelebrationSupport.isBadgeGif(payload) && !badgeGif ?
+                        StreakCelebrationSupport.stripped(payload) : payload
+                Map<String, Object> delivery = deliverToDestination(destination, destinationPayload)
                 if (delivery.ok == true) {
                     deliveredCount++
                     recordSlackMessage(ec, resultId, destination, delivery)
+                    if (badgeGif) stampBadgeGif(ec, tenantId, (String) destination.chatSpaceId)
                 } else {
                     failedCount++
                     // providerMessage carries Slack's plain-text reason ("invalid_token",
@@ -213,6 +219,37 @@ class TenantNotificationSupport {
             }
         }
         return [ok: failedCount == 0, attempted: true, deliveredCount: deliveredCount, failedCount: failedCount]
+    }
+
+    /**
+     * DAR-BE-108. Posts one message to one of the tenant's chat spaces, outside any run (a side quest every automation
+     * earned together goes to the tenant's streaks space). Null when the space cannot deliver.
+     */
+    static Map<String, Object> postToChatSpace(def ec, String tenantId, String chatSpaceId, Map<String, Object> payload) {
+        def spaceRow = TenantScopedFinder.findOneOwnedByTenant(ec, DarpanEntityConstants.TENANT_CHAT_SPACE,
+                "chatSpaceId", chatSpaceId, tenantId, "streaks space post — owner re-checked against the tenant")
+        Map<String, Object> destination = describeDestination(ec, tenantId, chatSpaceId, spaceRow)
+        return destination == null ? null : deliverToDestination(destination, payload)
+    }
+
+    private static boolean badgeGifSentToday(def ec, String tenantId, String chatSpaceId) {
+        def spaceRow = TenantScopedFinder.findOneOwnedByTenant(ec, DarpanEntityConstants.TENANT_CHAT_SPACE,
+                "chatSpaceId", chatSpaceId, tenantId, "badge GIF daily cap — owner re-checked against the run tenant")
+        java.sql.Timestamp last = spaceRow?.lastBadgeGifDate as java.sql.Timestamp
+        if (last == null) return false
+        ZoneId zone = resolveTenantZone(ec, tenantId)
+        return last.toInstant().atZone(zone).toLocalDate() == ZonedDateTime.now(zone).toLocalDate()
+    }
+
+    private static void stampBadgeGif(def ec, String tenantId, String chatSpaceId) {
+        try {
+            def spaceRow = TenantScopedFinder.findOneOwnedByTenant(ec, DarpanEntityConstants.TENANT_CHAT_SPACE,
+                    "chatSpaceId", chatSpaceId, tenantId, "badge GIF daily cap stamp — owner re-checked against the run tenant")
+            spaceRow?.set("lastBadgeGifDate", new java.sql.Timestamp(System.currentTimeMillis()))
+            spaceRow?.update()
+        } catch (Throwable t) {
+            logger.warn("Badge GIF stamp failed for space {}: {}", chatSpaceId, t.message)
+        }
     }
 
     /**
@@ -609,7 +646,7 @@ class TenantNotificationSupport {
         }
     }
 
-    protected static String resolveAppBaseUrl(def ec) {
+    static String resolveAppBaseUrl(def ec) {
         // Resolution order: env var, Moqui resource property, Java system property (deploy/test override),
         // then the first non-* webapp_allow_origin. DEFAULT_APP_BASE_URL is now null (audit H11.2 — used
         // to silently route prod chat links to the dev firebase host when nothing was configured); when
@@ -773,24 +810,27 @@ class TenantNotificationSupport {
             def completedDate = resultRow?.completedDate
             if (completedDate == null) return null
 
-            def tenantSettingRow = TenantScopedFinder.findGlobalUnscoped(ec,
-                            DarpanEntityConstants.TENANT_SETTING,
-                            "tenant timezone read pinned to run tenant — explicit companyUserGroupId condition applied")
-                    ?.condition("companyUserGroupId", tenantId)
-                    ?.useCache(false)?.one()
-            String zoneText = ((tenantSettingRow?.timeZone)?.toString()?.trim())
-            ZoneId zone
-            try {
-                zone = zoneText ? ZoneId.of(zoneText) : ZoneId.of("UTC")
-            } catch (Throwable badZone) {
-                // A stored zone id the JVM does not know must not cost the whole notification.
-                logger.warn("Unknown tenant time zone '{}' for tenant {}; falling back to UTC", zoneText, tenantId)
-                zone = ZoneId.of("UTC")
-            }
-            return ((java.sql.Timestamp) completedDate).toInstant().atZone(zone)
+            return ((java.sql.Timestamp) completedDate).toInstant().atZone(resolveTenantZone(ec, tenantId))
         } catch (Throwable t) {
             logger.warn("Completed-moment resolution failed for result {}: {}", resultId, t.message)
             return null
+        }
+    }
+
+    /** The tenant's own zone (TenantSetting.timeZone), UTC when unset or unknown to the JVM. */
+    static ZoneId resolveTenantZone(def ec, String tenantId) {
+        def tenantSettingRow = TenantScopedFinder.findGlobalUnscoped(ec,
+                        DarpanEntityConstants.TENANT_SETTING,
+                        "tenant timezone read pinned to run tenant — explicit companyUserGroupId condition applied")
+                ?.condition("companyUserGroupId", tenantId)
+                ?.useCache(false)?.one()
+        String zoneText = ((tenantSettingRow?.timeZone)?.toString()?.trim())
+        try {
+            return zoneText ? ZoneId.of(zoneText) : ZoneId.of("UTC")
+        } catch (Throwable badZone) {
+            // A stored zone id the JVM does not know must not cost the whole notification.
+            logger.warn("Unknown tenant time zone '{}' for tenant {}; falling back to UTC", zoneText, tenantId)
+            return ZoneId.of("UTC")
         }
     }
 }

@@ -76,8 +76,14 @@ class TenantOwnedEntityFilterContractTests {
             "darpan.reconciliation.AutomationStreak"             : "DARPAN_SCOPE_AUTOMATION_STREAK",
     ].asImmutable()
 
+    /** DAR-BE-108: earned streak badges and found side quests. */
+    static final Map<String, String> DAR_BE_108_FILTERS = [
+            "darpan.reconciliation.AutomationStreakBadge"        : "DARPAN_SCOPE_AUTOMATION_STREAK_BADGE",
+            "darpan.reconciliation.TenantStreakQuest"            : "DARPAN_SCOPE_TENANT_STREAK_QUEST",
+    ].asImmutable()
+
     /** Every filter row this class pins by id, with its entity. */
-    static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS + DAR_BE_107_FILTERS).asImmutable()
+    static final Map<String, String> NAMED_FILTERS = (DAR_BE_076_FILTERS + DAR_BE_088_FILTERS + DAR_BE_089_FILTERS + DAR_BE_090_FILTERS + DAR_BE_103_FILTERS + DAR_BE_107_FILTERS + DAR_BE_108_FILTERS).asImmutable()
 
     /** Entities deliberately NOT in the filter set, each with the reason. */
     static final Map<String, String> EXCLUDED = [

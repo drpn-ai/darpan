@@ -294,6 +294,9 @@
                                         "$ref": "#/components/schemas/GetAutomationRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetAutomationStreaksRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetGeneratedOutputRequest"
                                     },
                                     {
@@ -615,6 +618,7 @@
                                         "facade.ReconciliationFacadeServices.disable#SavedRun": "#/components/schemas/DisableSavedRunRequest",
                                         "facade.ReconciliationFacadeServices.enable#SavedRun": "#/components/schemas/EnableSavedRunRequest",
                                         "facade.ReconciliationFacadeServices.get#Automation": "#/components/schemas/GetAutomationRequest",
+                                        "facade.ReconciliationFacadeServices.get#AutomationStreaks": "#/components/schemas/GetAutomationStreaksRequest",
                                         "facade.ReconciliationFacadeServices.get#GeneratedOutput": "#/components/schemas/GetGeneratedOutputRequest",
                                         "facade.ReconciliationFacadeServices.get#GeneratedOutputDifferences": "#/components/schemas/GetGeneratedOutputDifferencesRequest",
                                         "facade.ReconciliationFacadeServices.get#LifecyclePlan": "#/components/schemas/GetLifecyclePlanRequest",
@@ -976,6 +980,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetAutomationResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetAutomationStreaksResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetGeneratedOutputResponse"
@@ -12376,6 +12383,220 @@
                     "result"
                 ]
             },
+            "GetAutomationStreaksParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "DAR-BE-107. The active tenant's clean-day streaks: each automation's live and best streak in days,\n            on its own midnight, and the badges it has earned; the tenant streak (the shortest live streak of its active\n            scheduled automations); and the side quests the tenant has found. Read-only: slots not yet stored are folded\n            in memory, so the numbers are current before an automation's next run."
+            },
+            "GetAutomationStreaksResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "tenantStreakDays": {
+                        "type": "integer"
+                    },
+                    "automations": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "automationId": {
+                                    "type": "string"
+                                },
+                                "automationName": {
+                                    "type": "string"
+                                },
+                                "isActive": {
+                                    "type": "boolean"
+                                },
+                                "scheduled": {
+                                    "type": "boolean"
+                                },
+                                "windowTimeZone": {
+                                    "type": "string"
+                                },
+                                "currentDays": {
+                                    "type": "integer"
+                                },
+                                "bestDays": {
+                                    "type": "integer"
+                                },
+                                "streakStartDate": {
+                                    "oneOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "type": "number"
+                                        }
+                                    ],
+                                    "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                },
+                                "lastBreakDate": {
+                                    "oneOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "type": "number"
+                                        }
+                                    ],
+                                    "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                },
+                                "lastBreakReason": {
+                                    "type": "string"
+                                },
+                                "badges": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "badgeKey": {
+                                                "type": "string"
+                                            },
+                                            "title": {
+                                                "type": "string"
+                                            },
+                                            "days": {
+                                                "type": "integer"
+                                            },
+                                            "timesEarned": {
+                                                "type": "integer"
+                                            },
+                                            "firstEarnedDate": {
+                                                "oneOf": [
+                                                    {
+                                                        "type": "string"
+                                                    },
+                                                    {
+                                                        "type": "number"
+                                                    }
+                                                ],
+                                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                            },
+                                            "lastEarnedDate": {
+                                                "oneOf": [
+                                                    {
+                                                        "type": "string"
+                                                    },
+                                                    {
+                                                        "type": "number"
+                                                    }
+                                                ],
+                                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "quests": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "questKey": {
+                                    "type": "string"
+                                },
+                                "title": {
+                                    "type": "string"
+                                },
+                                "automationId": {
+                                    "type": "string"
+                                },
+                                "earnedDate": {
+                                    "oneOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "type": "number"
+                                        }
+                                    ],
+                                    "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "GetAutomationStreaksRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.get#AutomationStreaks",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.get#AutomationStreaks",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.get#AutomationStreaks"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAutomationStreaksParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAutomationStreaksResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.get#AutomationStreaks. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAutomationStreaksResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "GetGeneratedOutputParams": {
                 "type": "object",
                 "properties": {
@@ -23597,6 +23818,7 @@
         "facade.ReconciliationFacadeServices.disable#SavedRun": "DisableSavedRun",
         "facade.ReconciliationFacadeServices.enable#SavedRun": "EnableSavedRun",
         "facade.ReconciliationFacadeServices.get#Automation": "GetAutomation",
+        "facade.ReconciliationFacadeServices.get#AutomationStreaks": "GetAutomationStreaks",
         "facade.ReconciliationFacadeServices.get#GeneratedOutput": "GetGeneratedOutput",
         "facade.ReconciliationFacadeServices.get#GeneratedOutputDifferences": "GetGeneratedOutputDifferences",
         "facade.ReconciliationFacadeServices.get#LifecyclePlan": "GetLifecyclePlan",

@@ -84,7 +84,11 @@ class RunNotificationStreak {
         return ((executions[0].automationId)?.toString()?.trim()) ?: null
     }
 
-    /** The run results this automation produced, newest first. */
+    /**
+     * The run results this automation produced, newest first. Each carries its execution row's differenceCount where
+     * there is one: on the automation path that count includes value mismatches, which break the streak (DAR-BE-107
+     * decision 1), while the run row's own differenceCount never counts them.
+     */
     private static List loadRunResultsForAutomation(def ec, String automationId, String tenantId) {
         List executions = TenantScopedFinder.findGlobalUnscoped(ec,
                         DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION,
@@ -100,8 +104,13 @@ class RunNotificationStreak {
                 .findAll { it }
                 .unique() as List<String>
         if (!resultIds) return []
+        Map<String, Object> executionDifferences = [:]
+        executions.each { def execution ->
+            String resultId = ((execution.reconciliationRunResultId)?.toString()?.trim())
+            if (resultId && execution.differenceCount != null) executionDifferences.put(resultId, execution.differenceCount)
+        }
 
-        return TenantScopedFinder.findGlobalUnscoped(ec,
+        List rows = TenantScopedFinder.findGlobalUnscoped(ec,
                         DarpanEntityConstants.RECONCILIATION_RUN_RESULT,
                         "streak lookback pinned to run tenant — explicit companyUserGroupId condition applied below")
                 ?.condition("reconciliationRunResultId", "in", resultIds)
@@ -109,6 +118,11 @@ class RunNotificationStreak {
                 ?.orderBy("-completedDate")
                 ?.limit(LOOKBACK_LIMIT + 1)
                 ?.useCache(false)?.list() ?: []
+        return rows.collect { def row ->
+            String resultId = ((row.reconciliationRunResultId)?.toString()?.trim())
+            [reconciliationRunResultId: resultId, completedDate: row.completedDate, statusEnumId: row.statusEnumId,
+             differenceCount: executionDifferences.containsKey(resultId) ? executionDifferences.get(resultId) : row.differenceCount]
+        }
     }
 
     /** The pre-DAR-BE-043 series, kept for runs that no automation produced. */

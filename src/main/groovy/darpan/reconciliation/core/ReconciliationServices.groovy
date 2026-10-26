@@ -63,6 +63,8 @@ class ReconciliationServices {
             .add("missingIn", DataTypes.StringType, true)
             .add("data", DataTypes.StringType, true)
             .add("ids", DataTypes.StringType, true)
+            // DAR-UI-081: each side's whole record on a matched pair's row, so an audit finding carries what both reads gave.
+            .add("sideRecords", DataTypes.StringType, true)
             .add("ruleId", DataTypes.StringType, true)
             .add("severity", DataTypes.StringType, true)
             .add("message", DataTypes.StringType, true)

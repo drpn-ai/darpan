@@ -7,7 +7,10 @@ import org.moqui.entity.EntityCondition
 import java.math.RoundingMode
 import java.sql.Date
 import java.sql.Timestamp
+import java.time.DateTimeException
+import java.time.Instant
 import java.time.LocalDate
+import java.time.OffsetDateTime
 import java.time.YearMonth
 import java.time.format.DateTimeParseException
 import java.util.regex.Matcher
@@ -675,7 +678,7 @@ class AuditReportAssembler {
                 .orderBy("sequenceNum").list()*.getMap()
         List<Map> recordRows = tenantRows(ec, "darpan.audit.AuditFindingRecord", tenantId).condition("findingId", findingId)
                 .orderBy("recordSeqId").list()*.getMap()
-        Map records = recordsJson(recordRows, true)
+        Map records = recordsJson(recordRows, true, zone)
 
         String state = f.stateEnumId
         Date firstFound = f.firstFoundDate as Date
@@ -830,12 +833,12 @@ class AuditReportAssembler {
      * it takes to see what happened, from the record's data (recordFacts), when known; and, in a finding's own document
      * (withData), the data itself: every field the reads gave.
      */
-    static Map recordsJson(List<Map> recordRows, boolean withData = false) {
+    static Map recordsJson(List<Map> recordRows, boolean withData = false, ZoneId zone = ZoneId.of("UTC")) {
         Map<String, Map<String, List>> out = new LinkedHashMap<>()
         recordRows.each { Map r ->
             Map<String, List> byType = out.computeIfAbsent(systemKey(r.systemEnumId as String)) { new LinkedHashMap<>() }
             Map data = recordData(r.recordData)
-            Map facts = recordFacts(data, r.recordType as String)
+            Map facts = recordFacts(data, r.recordType as String, zone)
             Object factStatus = facts.remove("status")
             Map record = [id: r.recordId, internalId: r.internalId ?: null, status: r.recordStatus ?: factStatus ?: null]
             record.putAll(facts.findAll { it.value != null })
@@ -861,28 +864,94 @@ class AuditReportAssembler {
     /**
      * DAR-UI-080 (Aditi: "the minimal amount of information needed to draw a meaningful conclusion"). A record's facts
      * from its data, under the fields Darpan's reads give them: its order's name and HotWax status (a HotWax item's
-     * omsOrderName and omsOrderStatusId, a return's orderName), a return's channel and AfterShip warranty, its total (a
-     * return's returnTotal; an order's grandTotal in HotWax, totalPrice in Shopify), a NetSuite order's customer
+     * omsOrderName and omsOrderStatusId, a return's orderName), a return's channel and AfterShip warranty, its order's total
+     * (an order's grandTotal in HotWax, totalPrice in Shopify, else the orderGrandTotal an item or return carries) and a
+     * return's own (returnTotal), a NetSuite order's customer
      * deposits (status without NetSuite's "Customer Deposit : "), and a Shopify order's status (financial and
-     * fulfillment) when its read gave no status.
+     * fulfillment) when its read gave no status, else the record's own (statusId); its order's date and a return's own, as
+     * the tenant's calendar day (zone); its customer, an item's SKU and its location (HotWax facilityId and its name,
+     * NetSuite lineLocation). DAR-UI-081: a return held behind
+     * another (R8 "Exchange held by open return") names the return holding it (heldBy) and its exchange order, with
+     * whether that order reached NetSuite. Codes read as words (ORDER_COMPLETED -> Completed); data keeps them.
      */
-    static Map recordFacts(Map data, String recordType) {
+    static Map recordFacts(Map data, String recordType, ZoneId zone = ZoneId.of("UTC")) {
         if (!data) return [:]
         Closure<String> text = { String field -> data.get(field) instanceof Map || data.get(field) instanceof List ? null : (data.get(field)?.toString()?.trim() ?: null) }
-        List<String> totalFields = recordType == "return" ? ["returnTotal"] : recordType == "order" ? ["grandTotal", "totalPrice"] : []
-        String totalText = totalFields.findResult { text(it) }
-        BigDecimal total = null
-        try { total = totalText ? new BigDecimal(totalText) : null } catch (NumberFormatException ignored) { }
+        Closure<Map> amount = { String value ->
+            BigDecimal number = null
+            try { number = value ? new BigDecimal(value) : null } catch (NumberFormatException ignored) { }
+            number != null ? money(number, text("currencyUomId") ?: text("currencyCode")) : null
+        }
         String shopifyStatus = [text("displayFinancialStatus"), text("displayFulfillmentStatus")].findAll().collect { words(it) }.join(" · ")
         List<Map> deposits = ((data.get("deposits") instanceof List ? data.get("deposits") : []) as List).findAll { it instanceof Map }
                 .collect { Map d -> [id: d.tranId, amount: d.amount, status: d.status?.toString()?.replaceFirst(/^.* : /, '')] }
-        return [status     : shopifyStatus ?: null,
-                orderName  : text("omsOrderName") ?: (recordType == "return" ? text("orderName") : null),
-                orderStatus: text("omsOrderStatusId"),
+        String heldBy = text("openReturnOnOrderId")
+        String exchange = text("exchangeOrderName") ?: text("exchangeOrderId")
+        return [status     : shopifyStatus ?: statusWords(text("statusId")),
+                orderName  : text("omsOrderName") ?: (recordType == "return" ? text("orderName") : recordType == "order" ? text("name") : null),
+                orderStatus: statusWords(text("omsOrderStatusId")),
+                customer   : text("customerName") ?: personName(data.get("billToCustomer")),
+                sku        : text("sku"),
+                location   : text("facilityId") ?: text("lineLocation"),
+                locationName: text("facilityName"),
+                // DAR-UI-081 (Aditi: "add order sales channel and shipping method", "add the IF id"): NetSuite's channel
+                // (custbody_hc_sales_channel), HotWax's ship group method, a NetSuite line's item fulfillments.
+                salesChannel: text("salesChannel") ?: channelWords(text("sourceName") ?: text("salesChannelEnumId")),
+                shipMethod : text("shipmentMethodTypeId") ?: shipMethods(data.get("shipGroups")),
+                fulfillments: (data.get("fulfillments") instanceof List ? ((List) data.get("fulfillments")).collect { it?.toString() }.findAll() : []) ?: null,
+                orderDate  : dayOf(text("omsOrderDate") ?: text("orderDate") ?: (recordType == "order" ? text("createdAt") : null), zone),
+                returnDate : recordType == "return" ? dayOf(text("returnDate") ?: text("entryDate"), zone) : null,
+                heldBy     : heldBy ? [id: heldBy, status: statusWords(text("openReturnOnOrderStatus"))] : null,
+                exchange   : exchange ? [id: exchange, netsuiteId: text("exchangeOrderNetsuiteId")] : null,
                 channel    : text("returnChannelEnumId"),
                 warrantyId : text("warrantyId"),
-                total      : total != null ? money(total, text("currencyUomId") ?: text("currencyCode")) : null,
+                // Aditi: "order and return totals are missing": an order's own total, else the one its item or return carries.
+                orderTotal : amount(text("grandTotal") ?: text("totalPrice") ?: text("orderGrandTotal")),
+                returnTotal: recordType == "return" ? amount(text("returnTotal")) : null,
                 deposits   : deposits ?: null]
+    }
+
+    /**
+     * DAR-UI-080. A record's date as the tenant's calendar day (2026-10-21): epoch millis (an OMS return's returnDate), an
+     * ISO instant (GraphQL orderDate, Shopify createdAt), or a date already written as one. Anything else is no date.
+     */
+    static String dayOf(String text, ZoneId zone) {
+        if (!text) return null
+        try {
+            if (text ==~ /\d{10,}/) return Instant.ofEpochMilli(text as long).atZone(zone).toLocalDate().toString()
+            if (text ==~ /\d{4}-\d{2}-\d{2}T.+/) return OffsetDateTime.parse(text).atZoneSameInstant(zone).toLocalDate().toString()
+            if (text ==~ /\d{4}-\d{2}-\d{2}.*/) return text.substring(0, 10)
+        } catch (DateTimeException ignored) { }
+        return null
+    }
+
+    /**
+     * DAR-UI-081 (Aditi: "all findings should have basic order info... maintain some consistency"). The same facts
+     * under each system's own names: a customer as HotWax's billToCustomer {firstName, lastName}; a sales channel as
+     * Shopify's sourceName (pos, web) or HotWax's salesChannelEnumId (POS_SALES_CHANNEL); a ship method from HotWax's
+     * ship groups.
+     */
+    private static String personName(Object person) {
+        if (!(person instanceof Map)) return null
+        String name = [((Map) person).firstName, ((Map) person).lastName].collect { it?.toString()?.trim() }.findAll().join(" ")
+        return name ?: null
+    }
+
+    private static String channelWords(String code) {
+        String bare = code?.replaceFirst(/(?i)_?(SALES_)?CHANNEL$/, '')?.trim()
+        if (!bare) return null
+        return bare.equalsIgnoreCase("pos") ? "POS" : words(bare)
+    }
+
+    private static String shipMethods(Object shipGroups) {
+        List<String> methods = ((shipGroups instanceof List ? shipGroups : []) as List).findAll { it instanceof Map }
+                .collect { ((Map) it).shipmentMethodTypeId?.toString()?.trim() }.findAll().unique()
+        return methods ? methods.join(", ") : null
+    }
+
+    /** ORDER_COMPLETED, RETURN_REQUESTED, ITEM_COMPLETED -> "Completed", "Requested"; null stays null. */
+    private static String statusWords(String code) {
+        return code ? words(code.replaceFirst(/^(ORDER|RETURN|ITEM)_/, '')) : null
     }
 
     /** PARTIALLY_REFUNDED -> "Partially refunded". */
@@ -898,7 +967,8 @@ class AuditReportAssembler {
             tenantRows(ec, "darpan.audit.AuditFindingRecord", tenantId).condition("findingId", "in", chunk)
                     .orderBy(["findingId", "recordSeqId"]).list()*.getMap()
         }
-        return rows.groupBy { it.findingId as String }.collectEntries { k, v -> [(k): recordsJson(v)] }
+        ZoneId zone = (loadTenant(ec, tenantId)?.zone ?: ZoneId.of("UTC")) as ZoneId
+        return rows.groupBy { it.findingId as String }.collectEntries { k, v -> [(k): recordsJson(v, false, zone)] }
     }
 
     /** Money: amount at the currency's scale as a string, sign included. Null when there is no amount. */

@@ -360,6 +360,14 @@ class AuditAutomationSmokeTests {
                  ids: [file2: [tranId: "SO7330484", internalId: "81049165"]], sideRecords: [file2: line]], omsSource, nsSource)
         assertEquals([["orderItem", item], ["salesOrderLine", line], ["order", null]], recs.collect { [it.recordType, it.recordData] })
         assertEquals(["M1167975/01", "SO7330484", "18954083434627"], recs*.recordId)
+
+        // DAR-UI-081 (R20 F-120759): a matched pair's mismatch keeps both orders whole, Shopify's statuses and HotWax's.
+        Map shopify = [id: "18957767082115", displayFinancialStatus: "PAID", displayFulfillmentStatus: "UNFULFILLED", isFulfilled: "N"]
+        Map oms = [orderId: "M1174087", orderName: "#GOR197395673", statusId: "ORDER_COMPLETED", isCompleted: "Y"]
+        List<Map> pair = AuditAutomationSupport.recordsOf([checkId: "Y", file1RecordType: "order", file2RecordType: "order"],
+                [type: "FIELD_MISMATCH", id: "18957767082115", ids: [file2: [orderName: "#GOR197395673", orderId: "M1174087"]],
+                 sideRecords: [file1: shopify, file2: oms]], [systemEnumId: "SHOPIFY", fileSide: "FILE_1"], [systemEnumId: "OMS_GQL", fileSide: "FILE_2"])
+        assertEquals([shopify, oms], pair*.recordData)
     }
 
     @Test

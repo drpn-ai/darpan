@@ -285,6 +285,7 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             filterParameterName="sourceFilters"
             evidenceFieldsJson='{"system":"NetSuite","state":"status","stateLabels":{"A":"Pending Approval","B":"Pending Fulfillment","C":"Cancelled","D":"Partially Fulfilled","E":"Pending Billing/Partially Fulfilled","F":"Pending Billing","G":"Billed","H":"Closed"},"facts":["orderLineId","lineState","lineLocation","quantityShipped","quantityBilled","quantityBackordered","tranId"]}'
             enabled="Y"/>
+    <!-- DAR-UI-081: an order keeps its basics for audit findings (currency, bill-to customer, ship groups' method). -->
     <darpan.reconciliation.SourceSystemConnector
             systemEnumId="OMS_GQL"
             extractServiceName="reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlOrders"
@@ -300,7 +301,7 @@ new pill with value IN_PROGRESS (the value changes too: REQUESTED,OPEN becomes I
             systemAliases="OMS_GQL,HOTWAX_GQL,DAR_SYS_OMS_GQL"
             preserveWindowInstants="N"
             keepFieldsParameterName="keepRecordFields"
-            keepFieldsBase="orderId,orderName,externalId,grandTotal,orderDate,statusId"
+            keepFieldsBase="orderId,orderName,externalId,grandTotal,orderDate,statusId,currencyUomId,billToCustomer,shipGroups"
             filterParameterName="sourceFilters"
             pairLookupServiceName="reconciliation.HotWaxOmsExtractionServices.lookup#HotWaxOmsOrdersByExternalId"
             healthCheckServiceName="facade.HotWaxOmsFacadeServices.probe#HotWaxOmsConnection"

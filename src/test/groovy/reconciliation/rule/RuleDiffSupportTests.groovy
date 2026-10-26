@@ -3,6 +3,7 @@ package reconciliation.rule
 import org.junit.jupiter.api.Test
 
 import static org.junit.jupiter.api.Assertions.assertEquals
+import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -46,6 +47,12 @@ class RuleDiffSupportTests {
                 new groovy.json.JsonSlurper().parseText(row.ids as String))
         assertNull(row.data, "data stays the present record's, which a matched pair has none of")
         assertNull(RuleDiffSupport.pairIds([primaryId: "K", file1: [status: "Open"]]), "no ids, no column")
+        // DAR-UI-081: and each record whole, without the rule engine's own keys, for the audit finding.
+        Map whole = new groovy.json.JsonSlurper().parseText(row.sideRecords as String) as Map
+        assertEquals("Open", whole.file1.status)
+        assertEquals("2459269", whole.file2.dayNumber)
+        assertFalse(whole.file1.keySet().any { (it as String).startsWith("_") } || whole.file2.keySet().any { (it as String).startsWith("_") })
+        assertNull(RuleDiffSupport.pairRecords([primaryId: "K"]))
     }
 
     // DAR-BE-126: one-way presence. "requires" breaks only when the left value is true and the right is not; "required by"

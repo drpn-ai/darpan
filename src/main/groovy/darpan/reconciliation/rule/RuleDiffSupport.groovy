@@ -245,10 +245,24 @@ class RuleDiffSupport {
                 missingIn     : normalize(diff.missingIn),
                 data          : stringify(diff.data),
                 ids           : stringify(diff.ids) ?: pairIds(fact),
+                sideRecords   : stringify(diff.sideRecords) ?: pairRecords(fact),
                 ruleId        : normalize(diff.ruleId),
                 severity      : normalize(diff.severity),
                 message       : normalize(diff.message)
         ]
+    }
+
+    /**
+     * DAR-UI-081 (Aditi on R20 F-120759: "the UI on this finding is still empty"). {"file1": {..}, "file2": {..}}: each side
+     * of a matched pair whole, as JSON, so the audit finding carries what both reads gave (Shopify's statuses, HotWax's
+     * order); the rule engine's own keys (_...) are left out. Null when neither side is a record.
+     */
+    static String pairRecords(Map fact) {
+        Map records = ["file1", "file2"].collectEntries { String side ->
+            Object record = fact?.get(side)
+            record instanceof Map ? [(side): ((Map) record).findAll { k, v -> !(k as String).startsWith("_") }] : [:]
+        }
+        return records ? groovy.json.JsonOutput.toJson(records) : null
     }
 
     /** {"file1": {..}, "file2": {..}}: the RECORD_ID_FIELDS each side of a matched pair holds, as JSON; null when neither has any. */

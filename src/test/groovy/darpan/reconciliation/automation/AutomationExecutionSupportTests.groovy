@@ -2135,6 +2135,27 @@ class AutomationExecutionSupportTests {
         assertTrue(execution.safeMetadataJson.contains("file2DataAvailable"))
     }
 
+    /**
+     * DAR-BE-134 x DAR-BE-130: the progress heartbeat raises a cancel INSIDE the extract service; Moqui catches it and
+     * leaves an error on the facade. That is the operator's cancel, so the run ends CANCELLED, not failed and retried.
+     */
+    @Test
+    void aCancelRaisedInsideTheExtractCancelsTheRun() {
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE && call.params.fileSide == "FILE_1") {
+                requestCancelMidRun(ec)
+                ec.message.addError("Reconciliation run cancelled")
+                return [:]
+            }
+            return [dataAvailable: true, fileLocation: "runtime://tmp/file2.json", fileName: "file2.json", recordCount: 1]
+        }
+        Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+        assertEquals(1, result.cancelledCount)
+        assertEquals(0, result.failedCount, "a cancel is not a failure")
+    }
+
     /** DAR-BE-130: an error already on the facade before the extract (a side's login) is not the extract's failure. */
     @Test
     void anErrorLeftBeforeTheExtractDoesNotFailIt() {

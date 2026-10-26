@@ -1,6 +1,6 @@
 # Darpan 2.1.0
 
-Release date: 2026-10-26 (prepared; not tagged, not deployed)
+Release date: 2026-10-26 (tagged; not deployed)
 
 ## Scope note
 
@@ -17,8 +17,7 @@ Release date: 2026-10-26 (prepared; not tagged, not deployed)
 
 ## Repo targets
 
-Content is on `main` and pushed in every repo. Version metadata is bumped at the cut (see
-`release-checklist.md`).
+Tagged commits per repo: `release-checklist.md`, Cut.
 
 | Repo | From | To | Content head |
 | --- | --- | --- | --- |

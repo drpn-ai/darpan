@@ -3,7 +3,7 @@
 ## Scope
 
 Minor release from prod's `v2.0.0` (deployed 2026-10-19). All content is on `main` and pushed in
-every repo; the cut bumps version metadata and moves the prod pins (below), then tags.
+every repo; the cut bumped version metadata and moved the prod pins (below), then tagged.
 
 | Repo | From | To | Content head |
 | --- | --- | --- | --- |
@@ -30,22 +30,27 @@ Linear is retired; the backlog (`roadmap/BACKLOG.md`) is the source of truth.
   release (DAR-CLI-001, 002); the live checks under Not verified.
 - Open release issues: 0
 
-## At the cut (not done in this prep)
+## Cut (2026-10-26)
 
-1. Push `darpan-ui` `626b8b1` (its owner's call), or cut the UI from `2520855` and ship DAR-BE-028's
-   mirror later.
-2. Version metadata: `darpan/component.xml` 2.0.0 → 2.1.0, then
-   `./gradlew :runtime:component:darpan:generateApiContract` (the contract embeds the version) and
-   re-run `ApiContractGeneratorTests` and `FacadeContractSnapshotTests`; `darpan-hotwax` 0.9.0 → 0.10.0,
-   `netsuite-darpan` 0.3.0 → 0.4.0, `shopify-darpan` 0.7.0 → 0.8.0; `darpan-ui` `package.json` and the
-   two root keys of `package-lock.json` 3.0.0 → 3.1.0 (JSON edit, no dependency entry), re-sync
-   `src/lib/api/contract/` and regenerate `schema.d.ts`.
-3. `darpan-docker-config/docker/prod/Dockerfile`: `DARPAN_REF=v2.1.0`, `DARPAN_HOTWAX_REF=v0.10.0`,
-   `NETSUITE_DARPAN_REF=v0.4.0`, `SHOPIFY_DARPAN_REF=v0.8.0`, `MOQUI_GQL_REF=v0.1.0` (after that tag
-   exists), `DATABASE_DARPAN_REF=v0.2.1` unchanged; `docker/Dockerfile` tracks `main` by design.
-4. `plugins/darpan-workflows/scripts/verify_release_pins.py --version 2.1.0` exits 0 (today, offline:
-   fails on exactly the version and `DARPAN_REF`, as it should before the bump).
-5. Tags, GitHub release pages, docs publish.
+| Repo | Tag | Release commit |
+| --- | --- | --- |
+| `drpn-ai/darpan` | `v2.1.0` | the release-pack commit on `a90cbf4` (component 2.1.0, contract version 2.1.0) |
+| `drpn-ai/darpan-ui` | `v3.1.0` | `5243440` (package 3.1.0, contract copy; carries `626b8b1`) |
+| `drpn-ai/darpan-hotwax` | `v0.10.0` | `3eb266f` |
+| `drpn-ai/netsuite-darpan` | `v0.4.0` | `3071af8` |
+| `drpn-ai/shopify-darpan` | `v0.8.0` | `c56c3d5` |
+| `drpn-ai/moqui-gql` | `v0.1.0` | `d7c753f` (notes updated for the four commits after `907fd15`) |
+| `drpn-ai/darpan-docker-config` | `v2.1.0` | `e488e3b` (prod pins) |
+| `drpn-ai/database-darpan` | stays `v0.2.1` | — |
+
+- `generateApiContract` after the bump: diff is the version string only; `ApiContractGeneratorTests`
+  7/7 and `FacadeContractSnapshotTests` 1/1 re-run (`--rerun`, Gradle exit 0).
+- darpan-ui: `package.json` and the two root keys of `package-lock.json` edited as JSON (diff: those
+  three lines); `sync-contract` + `generate-api-types`: diff is the contract version string only
+  (`626b8b1` already mirrored darpan's 2.1.0 contract); `npx vitest run src/lib/api` 11 files / 106
+  tests, `type-check` and `lint` exit 0.
+- `verify_release_pins.py --version 2.1.0 --offline`: exit 0 before tagging; online after the push.
+- GitHub release pages and the darpan-docs publish are not part of this cut.
 
 ## Deploy and data, in order
 
@@ -151,5 +156,6 @@ Run 2026-10-26 on `main` heads, JDK 21.0.11, focused tests only (standing instru
 
 ## Approval
 
-- Release owner sign-off: pending Aditi (tags, pages, docs publish and every deploy are hers).
-- Cut/tag blocked until the steps under "At the cut" are done and `verify_release_pins.py` exits 0.
+- Release owner sign-off: Aditi, "Finish and cut the tag" (2026-10-26). Release pages, docs publish
+  and every deploy remain hers.
+- Cut/tag gate: the steps under Cut done; `verify_release_pins.py` exit 0 offline, online after push.

@@ -422,7 +422,9 @@ class ReconciliationSavedRunSupport {
                 .condition("ruleSetId", savedRunId)
                 .useCache(false)
                 .one()
-        if (!ruleSet) return [savedRun: null, error: null]
+        // one() on the full PK drops the tenant pin above, so the owner check on the row is the real
+        // gate. DAR-BE-135: another tenant's run answers exactly as a missing one does.
+        if (!TenantAccessSupport.canAccessTenantRecord(ec, ruleSet)) return [savedRun: null, error: null]
 
         // RuleSetCompareScope is transitively-owned via ruleSetId; gate via findTenantScopedChildren.
         def compareScopeFinder = TenantScopedFinder.findTenantScopedChildren(

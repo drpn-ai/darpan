@@ -161,6 +161,28 @@ class SavedRunsFacadeSmokeTests {
                 .find { Map<String, Object> row -> row.ruleSetId == ruleSetId }
     }
 
+    /**
+     * DAR-BE-135: one() on the full PK drops findTenantScoped's tenant pin, so resolveRuleSetRun's owner
+     * check on the row is the only gate. Another tenant must get exactly what a missing id gets.
+     */
+    @Test
+    void anotherTenantsRunResolvesExactlyLikeAMissingOne() {
+        Map<String, Object> createResult = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.create#CsvRun")
+                .parameters([runName: "Cross Tenant Resolve", file1SystemEnumId: "OMS", file2SystemEnumId: "SHOPIFY",
+                             file1CompareColumn: "order_id", file2CompareColumn: "order_id"])
+                .disableAuthz()
+                .call()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        String savedRunId = createResult.savedRun.savedRunId as String
+        assertNotNull(ReconciliationSavedRunSupport.resolveRuleSetRun(ec, savedRunId).savedRun, "the owner sees its run")
+
+        loginAsTenantUser(OUTSIDE_TENANT_USER_ID, "test.gorjana.editor", GORJANA, TenantAccessSupport.DARPAN_COMPANY_EDITOR_GROUP_ID)
+
+        assertEquals([savedRun: null, error: null], ReconciliationSavedRunSupport.resolveRuleSetRun(ec, savedRunId))
+        assertEquals([savedRun: null, error: null], ReconciliationSavedRunSupport.resolveRuleSetRun(ec, "RS_NO_SUCH_RUN"))
+    }
+
     @Test
     void csvRunCanBeCreatedListedAndExecutedThroughTheSavedRunFacade() {
         Map<String, Object> createResult = ec.service.sync()

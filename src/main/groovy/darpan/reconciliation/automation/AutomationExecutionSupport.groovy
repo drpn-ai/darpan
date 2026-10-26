@@ -312,6 +312,9 @@ class AutomationExecutionSupport {
         if ("false".equalsIgnoreCase(System.getProperty(PARALLEL_SOURCE_EXTRACTS_PROPERTY) ?: "true")) return null
         def factory = ec.factory
         String username = normalize(ec.user?.username)
+        // DAR-BE-133: a scheduled run has no user, only the anonymous login its anonymous-all service gave it, which is
+        // what lets an authenticate="true" extract run; the worker must carry that too.
+        boolean callerAnonymous = ec.user.loggedInAnonymous
         String systemTenant = TenantAccessSupport.activeSystemTenantUserGroupId()
         // The worker carries the run thread's authz state, as side 1 reads the connector registry with it.
         boolean callerAuthzDisabled = ec.artifactExecution.authzDisabled
@@ -323,6 +326,7 @@ class AutomationExecutionSupport {
             def sideEc = factory.getExecutionContext()
             try {
                 if (username) sideEc.user.internalLoginUser(username)
+                else if (callerAnonymous) sideEc.user.loginAnonymousIfNoUser()
                 if (callerAuthzDisabled) sideEc.artifactExecution.disableAuthz()
                 return (Map<String, Object>) TenantAccessSupport.withSystemTenant(systemTenant) { ->
                     sourceExtractor.call(sideEc, automation, source, window, sideParams)

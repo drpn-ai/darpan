@@ -341,6 +341,58 @@ class ScheduledAutomationTenantContextTests {
                 .call()
     }
 
+    /**
+     * DAR-BE-133, gorjana prod 2026-10-26: "User must be logged in to call service
+     * reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsReconciliationOrders". Side 2 is read on a worker
+     * thread (DAR-BE-116) whose new ExecutionContext carried the run's username but not its anonymous login, and a
+     * scheduled run has only the anonymous login — so every authenticate="true" extract on side 2 was refused. The
+     * test tasks turn the worker off (build.gradle), so this test turns it back on.
+     */
+    @Test
+    void scheduledRunReadsSideTwoOnTheWorkerWithoutAUser() {
+        AtomicReference<String> side2Thread = new AtomicReference<String>()
+        AtomicReference<Throwable> side2Refusal = new AtomicReference<Throwable>()
+        AutomationExecutionSupport.setSourceExtractor { def sourceEc, def ignoredAutomation, def source,
+                Map<String, Object> ignoredWindow, Map<String, Object> ignoredParams ->
+            String fileSide = source.get("fileSide")
+            if (fileSide == AutomationExecutionSupport.FILE_SIDE_2) {
+                side2Thread.set(Thread.currentThread().name)
+                // What a real extract is: an authenticate="true" service called on this thread's context.
+                try {
+                    sourceEc.service.sync().name("facade.AuditFacadeServices.get#Audits").call()
+                } catch (Throwable t) {
+                    side2Refusal.set(t)
+                    throw t
+                }
+            }
+            return [dataAvailable : true,
+                    fileLocation  : fileSide == AutomationExecutionSupport.FILE_SIDE_1 ?
+                            "component://darpan/data/test/test-orders-1.json" : "component://darpan/data/test/test-orders-2.json",
+                    fileName      : "${fileSide}.json".toString(), fileTypeEnumId: "DftJson", recordCount: 3]
+        }
+        String property = AutomationExecutionSupport.PARALLEL_SOURCE_EXTRACTS_PROPERTY
+        String before = System.getProperty(property)
+        System.setProperty(property, "true")
+        Map<String, Object> result
+        try {
+            result = (Map<String, Object>) onSchedulerThread { ExecutionContext jobEc ->
+                return callExecuteAutomation(jobEc, [
+                        automationId     : AUTOMATION_ID,
+                        scheduledFireTime: Timestamp.valueOf("2026-05-10 10:00:00"),
+                        sparkMaster      : "local[1]",
+                        sparkAppName     : "ScheduledAutomationTenantContextTests",
+                ])
+            }
+        } finally {
+            if (before == null) System.clearProperty(property) else System.setProperty(property, before)
+        }
+
+        assertEquals("automation-side2-extract", side2Thread.get(), "Side 2 must be read on the worker thread")
+        assertNull(side2Refusal.get(), "Side 2's authenticate=\"true\" call was refused: ${side2Refusal.get()}")
+        assertEquals(1, result.executedCount, "Result: ${result}")
+        assertEquals(0, result.failedCount, "Result: ${result}")
+    }
+
     private void stubSourceExtractorWithData() {
         stubSourceExtractor("component://darpan/data/test/test-orders-1.json",
                 "component://darpan/data/test/test-orders-2.json")

@@ -6699,7 +6699,7 @@
                     "emailAddress",
                     "currentPassword"
                 ],
-                "description": "DAR-BE-028. Save the signed-in user's recovery email, where password reset codes go. Saved as\n            typed (trimmed, lower-cased) with no confirmation code; the new address, and the previous one when it\n            changes, get a notice. An address already used by another account is not saved, but the reply is the\n            same, so this cannot be used to test whether an address has an account. Requires the current password."
+                "description": "DAR-BE-028. Save the signed-in user's recovery email, where password reset codes go. Saved as\n            typed (trimmed, lower-cased) with no confirmation code; the new address, and the previous one when it\n            changes, get a notice. An address already used by another account is refused as already in use.\n            Requires the current password."
             },
             "SaveRecoveryEmailResult": {
                 "type": "object",

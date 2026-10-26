@@ -83,7 +83,7 @@ class PasswordResetServicesSmokeTests {
     @Test
     void templatesSeeded() {
         [PasswordResetSupport.TEMPLATE_RESET_CODE, PasswordResetSupport.TEMPLATE_PASSWORD_CHANGED,
-         PasswordResetSupport.TEMPLATE_RECOVERY_SET, PasswordResetSupport.TEMPLATE_RECOVERY_CONFLICT].each { String id ->
+         PasswordResetSupport.TEMPLATE_RECOVERY_SET].each { String id ->
             def template = ec.entity.find("moqui.basic.email.EmailTemplate").condition("emailTemplateId", id)
                     .disableAuthz().one()
             assertNotNull(template, "missing EmailTemplate ${id}")
@@ -335,20 +335,16 @@ class PasswordResetServicesSmokeTests {
         Map saved = signedIn(OK_USERNAME, "save#RecoveryEmail", [emailAddress: OK_EMAIL.toUpperCase(), currentPassword: OLD_PASSWORD])
         assertEquals([], saved.errors)
         assertEquals(OK_EMAIL, account(OK_ID).emailAddress)
-        assertTrue(sent.every { it.templateId != PasswordResetSupport.TEMPLATE_RECOVERY_CONFLICT }, "sends: ${sent}")
         assertEquals(1, sent.count { it.templateId == PasswordResetSupport.TEMPLATE_RECOVERY_SET })
     }
 
     @Test
-    void conflictDoesNotSaveAndRepliesOk() {
+    void conflictRefusedAsAlreadyInUse() {
         setPassword(NOEMAIL_ID, OLD_PASSWORD)
         Map saved = signedIn("pwr.noemail", "save#RecoveryEmail", [emailAddress: OK_EMAIL, currentPassword: OLD_PASSWORD])
-        assertEquals([], saved.errors)
-        assertTrue(saved.out.ok as boolean)
-        assertEquals("p•••@example.com", saved.out.emailAddressMasked)
+        assertEquals(["That email is already in use by another account."], saved.errors)
         assertNull(account(NOEMAIL_ID).emailAddress)
-        assertEquals(1, sent.size(), "sends: ${sent}")
-        assertEquals([PasswordResetSupport.TEMPLATE_RECOVERY_CONFLICT, OK_EMAIL], [sent[0].templateId, sent[0].to])
+        assertTrue(sent.isEmpty(), "sends: ${sent}")
     }
 
     @Test

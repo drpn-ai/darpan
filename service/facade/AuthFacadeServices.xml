@@ -648,8 +648,8 @@
     <service verb="save" noun="RecoveryEmail" allow-remote="true" authenticate="true">
         <description>DAR-BE-028. Save the signed-in user's recovery email, where password reset codes go. Saved as
             typed (trimmed, lower-cased) with no confirmation code; the new address, and the previous one when it
-            changes, get a notice. An address already used by another account is not saved, but the reply is the
-            same, so this cannot be used to test whether an address has an account. Requires the current password.</description>
+            changes, get a notice. An address already used by another account is refused as already in use.
+            Requires the current password.</description>
         <in-parameters>
             <parameter name="emailAddress" required="true">
                 <description>The recovery email address.</description>
@@ -695,20 +695,17 @@
                 <econdition field-name="emailAddress" from="email" ignore-case="true"/>
                 <econdition field-name="userId" operator="not-equals" from="ec.user.userId"/>
             </entity-find>
-            <if condition="otherHolderList"><then>
-                <!-- Not saved, yet answered like a save: the signed-in user learns nothing about other accounts,
-                     and the inbox's owner is told instead. -->
-                <log level="warn" message="Recovery email not saved for userId ${ec.user.userId}: the address belongs to another account"/>
-                <script>darpan.facade.auth.PasswordResetSupport.sendEmail.call(ec, 'DARPAN_RECOVERY_EMAIL_CONFLICT', email, [username: ec.user.username])</script>
-            </then><else>
-                <set field="previousEmail" from="ec.user.userAccount?.emailAddress?.trim()"/>
-                <!-- Facade services carry inheritAuthz=Y, so this own-user write is authorized (as save#UserSettings). -->
-                <service-call name="update#moqui.security.UserAccount" in-map="[userId: ec.user.userId, emailAddress: email]"/>
-                <script>darpan.facade.auth.PasswordResetSupport.sendEmail.call(ec, 'DARPAN_RECOVERY_EMAIL_SET', email, [username: ec.user.username, isOldAddress: false])</script>
-                <if condition="previousEmail &amp;&amp; previousEmail.toLowerCase() != email">
-                    <script>darpan.facade.auth.PasswordResetSupport.sendEmail.call(ec, 'DARPAN_RECOVERY_EMAIL_SET', previousEmail, [username: ec.user.username, isOldAddress: true])</script>
-                </if>
-            </else></if>
+            <!-- Aditi 2026-10-26: said plainly. The current password is required first, and the session's
+                 recoveryEmailMissing flag would reveal a silent refusal anyway. -->
+            <if condition="otherHolderList"><return error="true" message="That email is already in use by another account."/></if>
+
+            <set field="previousEmail" from="ec.user.userAccount?.emailAddress?.trim()"/>
+            <!-- Facade services carry inheritAuthz=Y, so this own-user write is authorized (as save#UserSettings). -->
+            <service-call name="update#moqui.security.UserAccount" in-map="[userId: ec.user.userId, emailAddress: email]"/>
+            <script>darpan.facade.auth.PasswordResetSupport.sendEmail.call(ec, 'DARPAN_RECOVERY_EMAIL_SET', email, [username: ec.user.username, isOldAddress: false])</script>
+            <if condition="previousEmail &amp;&amp; previousEmail.toLowerCase() != email">
+                <script>darpan.facade.auth.PasswordResetSupport.sendEmail.call(ec, 'DARPAN_RECOVERY_EMAIL_SET', previousEmail, [username: ec.user.username, isOldAddress: true])</script>
+            </if>
 
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

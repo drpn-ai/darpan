@@ -22,7 +22,6 @@ class PasswordResetSupport {
     static final String TEMPLATE_RESET_CODE = "DARPAN_PASSWORD_RESET_CODE"
     static final String TEMPLATE_PASSWORD_CHANGED = "DARPAN_PASSWORD_CHANGED"
     static final String TEMPLATE_RECOVERY_SET = "DARPAN_RECOVERY_EMAIL_SET"
-    static final String TEMPLATE_RECOVERY_CONFLICT = "DARPAN_RECOVERY_EMAIL_CONFLICT"
 
     static final String PURPOSE_PASSWORD_RESET = "DrpnRcPasswordReset"
     static final int CODE_LIFETIME_MINUTES = 15

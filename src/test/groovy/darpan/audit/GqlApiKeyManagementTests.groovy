@@ -19,16 +19,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
  * DAR-BE-100 — read-only agent keys for the public GraphQL tier (moqui-gql gql.GqlAuthServices): mint, resolve, list,
- * disable, rotate. Super-admin only; a key's digest never leaves the database; a refused key always reads as the same
- * generic "invalid API key".
+ * disable, rotate. A key's digest never leaves the database; a refused key always reads as the same generic
+ * "invalid API key".
+ * DAR-BE-136 — a tenant admin (or super-admin) manages keys, and only for the tenant they are signed into: a key is
+ * minted for the active tenant, even when the caller also administers another, and another tenant's key reads as missing.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class GqlApiKeyManagementTests {
 
     private static final String AUTH = "gql.GqlAuthServices"
     private static final String TENANT = "TKEY_A"
+    private static final String OTHER_TENANT = "TKEY_B"
     private static final String PLAIN_USER = "TKEY_PLAIN"
     private static final String ADMIN_USER = "TKEY_ADMIN"
+    private static final String TENANT_ADMIN_USER = "TKEY_TADMIN"
+    private static final Timestamp FROM_DATE = new Timestamp(System.currentTimeMillis() - 60000L)
 
     private ExecutionContext ec
 
@@ -36,18 +41,48 @@ class GqlApiKeyManagementTests {
     void setup() {
         Path backendRoot = ReconciliationSmokeTestSupport.resolveBackendRoot()
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "gql-api-keys")
-        ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: TENANT, description: "Key tenant"]).createOrUpdate()
-        ec.entity.makeValue("moqui.security.UserAccount").setAll([userId: PLAIN_USER, username: "tkey.plain",
-                userFullName: "Plain user", emailAddress: "tkey.plain@example.com"]).createOrUpdate()
-        ec.entity.makeValue("moqui.security.UserAccount").setAll([userId: ADMIN_USER, username: "tkey.admin",
-                userFullName: "Key admin", emailAddress: "tkey.admin@example.com"]).createOrUpdate()
+        ec.entity.makeValue("moqui.basic.EnumerationType").setAll([enumTypeId: "UserGroupType", description: "User Group Type"]).createOrUpdate()
+        [TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID, "UgtDarpanPermission"].each { String enumId ->
+            ec.entity.makeValue("moqui.basic.Enumeration").setAll([enumId: enumId, enumTypeId: "UserGroupType",
+                    description: enumId]).createOrUpdate()
+        }
+        [TENANT, OTHER_TENANT].each { String tenant ->
+            ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: tenant, description: "Key tenant ${tenant}",
+                    groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID]).createOrUpdate()
+        }
+        [TenantAccessSupport.DARPAN_TENANT_ADMIN_GROUP_ID, TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID].each { String group ->
+            ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: group, description: group,
+                    groupTypeEnumId: "UgtDarpanPermission"]).createOrUpdate()
+        }
+        [(PLAIN_USER): "tkey.plain", (ADMIN_USER): "tkey.admin", (TENANT_ADMIN_USER): "tkey.tadmin"].each { String userId, String username ->
+            ec.entity.makeValue("moqui.security.UserAccount").setAll([userId: userId, username: username,
+                    userFullName: username, emailAddress: "${username}@example.com".toString()]).createOrUpdate()
+        }
         ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: TenantAccessSupport.DARPAN_SUPER_ADMIN_GROUP_ID,
                 description: "Darpan super admin"]).createOrUpdate()
         ec.entity.makeValue("moqui.security.UserGroupMember").setAll([userGroupId: TenantAccessSupport.DARPAN_SUPER_ADMIN_GROUP_ID,
-                userId: ADMIN_USER, fromDate: new Timestamp(System.currentTimeMillis() - 60000L)]).createOrUpdate()
-        ec.user.logoutUser()
-        assertTrue(ec.user.internalLoginUser("tkey.admin"))
+                userId: ADMIN_USER, fromDate: FROM_DATE]).createOrUpdate()
+        // The tenant admin administers BOTH tenants; the plain user is an ordinary member of the first.
+        member(TENANT_ADMIN_USER, TENANT, TenantAccessSupport.DARPAN_TENANT_ADMIN_GROUP_ID)
+        member(TENANT_ADMIN_USER, OTHER_TENANT, TenantAccessSupport.DARPAN_TENANT_ADMIN_GROUP_ID)
+        member(PLAIN_USER, TENANT, TenantAccessSupport.DARPAN_TENANT_USER_GROUP_ID)
+        signInAs("tkey.admin", TENANT)
         assertTrue(TenantAccessSupport.isSuperAdmin(ec), "the test admin must be a super-admin")
+    }
+
+    private void member(String userId, String tenant, String permissionGroupId) {
+        ec.entity.makeValue("moqui.security.UserGroupMember").setAll([userGroupId: tenant, userId: userId,
+                fromDate: FROM_DATE]).createOrUpdate()
+        ec.entity.makeValue(TenantAccessSupport.TENANT_USER_PERMISSION_GROUP_MEMBER_ENTITY_NAME).setAll([tenantUserGroupId: tenant,
+                userId: userId, permissionUserGroupId: permissionGroupId, fromDate: FROM_DATE]).createOrUpdate()
+    }
+
+    private void signInAs(String username, String activeTenant) {
+        ec.user.logoutUser()
+        assertTrue(ec.user.internalLoginUser(username))
+        ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, activeTenant)
+        assertEquals(activeTenant, TenantAccessSupport.currentActiveTenantUserGroupId(ec), "${username} signed into ${activeTenant}")
+        ec.message.clearErrors()
     }
 
     @AfterAll
@@ -68,7 +103,7 @@ class GqlApiKeyManagementTests {
     }
 
     private Map mint(String label, Timestamp expireDate = null) {
-        Map out = svc("create#ApiKey", [companyUserGroupId: TENANT, clientName: label, expireDate: expireDate])
+        Map out = svc("create#ApiKey", [clientName: label, expireDate: expireDate])
         assertEquals(null, out.errors)
         return out
     }
@@ -125,7 +160,7 @@ class GqlApiKeyManagementTests {
     @Test
     void theListNeverCarriesAKeyOrItsDigest() {
         Map minted = mint("listed agent")
-        Map out = svc("list#ApiKeys", [companyUserGroupId: TENANT])
+        Map out = svc("list#ApiKeys", [:])
         assertEquals(null, out.errors)
         Map listed = (out.apiKeys as List<Map>).find { it.apiKeyId == minted.apiKeyId }
         assertEquals(["listed agent", TENANT, true, true], [listed.clientName, listed.companyUserGroupId, listed.enabled, listed.active])
@@ -137,23 +172,76 @@ class GqlApiKeyManagementTests {
     }
 
     @Test
-    void onlyASuperAdminManagesKeys() {
+    void aTenantMemberWhoIsNotAnAdminManagesNoKeys() {
         Map minted = mint("guarded agent")
-        ec.user.logoutUser()
-        assertTrue(ec.user.internalLoginUser("tkey.plain"))
+        signInAs("tkey.plain", TENANT)
         try {
-            assertFalse(TenantAccessSupport.isSuperAdmin(ec))
+            assertFalse(TenantAccessSupport.isTenantAdmin(ec, TENANT))
             ["list#ApiKeys": [:], "disable#ApiKey": [apiKeyId: minted.apiKeyId], "rotate#ApiKey": [apiKeyId: minted.apiKeyId],
-             "create#ApiKey": [companyUserGroupId: TENANT, clientName: "self-served"]].each { String service, Map params ->
+             "create#ApiKey": [clientName: "self-served"]].each { String service, Map params ->
                 Map out = svc(service, params)
-                assertTrue((out.errors as String)?.contains("requires super-admin"), "${service}: ${out.errors}")
+                assertTrue((out.errors as String)?.contains("requires tenant-admin"), "${service}: ${out.errors}")
                 assertEquals(null, out.apiKey, "${service} returned a key")
+                assertEquals(null, out.apiKeys, "${service} listed keys")
             }
         } finally {
-            ec.user.logoutUser()
-            assertTrue(ec.user.internalLoginUser("tkey.admin"))
+            signInAs("tkey.admin", TENANT)
         }
         assertTrue(resolves(minted.apiKey as String), "the refused calls changed nothing")
+    }
+
+    @Test
+    void aTenantAdminMintsOnlyForTheTenantTheyAreSignedInto() {
+        signInAs("tkey.tadmin", TENANT)
+        try {
+            assertTrue(TenantAccessSupport.isTenantAdmin(ec, OTHER_TENANT), "the caller also administers the other tenant")
+            // Naming the other tenant changes nothing: the key's tenant is not an input.
+            Map out = svc("create#ApiKey", [clientName: "tenant admin agent", companyUserGroupId: OTHER_TENANT])
+            assertEquals(null, out.errors)
+            assertEquals(TENANT, out.companyUserGroupId)
+            assertEquals(TENANT, row(out.apiKeyId as String).companyUserGroupId)
+            assertEquals(TENANT, svc("resolve#ApiKey", [apiKey: out.apiKey]).companyUserGroupId, "every read is fixed to the active tenant")
+
+            signInAs("tkey.tadmin", OTHER_TENANT)
+            Map other = svc("create#ApiKey", [clientName: "other tenant agent"])
+            assertEquals(null, other.errors)
+            assertEquals(OTHER_TENANT, row(other.apiKeyId as String).companyUserGroupId)
+
+            Map profiled = svc("create#ApiKey", [clientName: "unlimited agent", profileId: "ANY_PROFILE"])
+            assertTrue((profiled.errors as String)?.contains("super-admin"), "a tenant admin cannot pick a key's limits: ${profiled.errors}")
+            assertEquals(null, profiled.apiKey)
+        } finally {
+            signInAs("tkey.admin", TENANT)
+        }
+    }
+
+    @Test
+    void anotherTenantsKeyReadsAsMissing() {
+        signInAs("tkey.tadmin", OTHER_TENANT)
+        Map foreign
+        Map own
+        try {
+            foreign = svc("create#ApiKey", [clientName: "other tenant key"])
+            assertEquals(null, foreign.errors)
+            signInAs("tkey.tadmin", TENANT)
+            own = svc("create#ApiKey", [clientName: "own tenant key"])
+            assertEquals(null, own.errors)
+
+            List<Map> listed = svc("list#ApiKeys", [companyUserGroupId: OTHER_TENANT]).apiKeys as List<Map>
+            assertTrue(listed*.apiKeyId.contains(own.apiKeyId))
+            assertEquals([TENANT] as Set, listed*.companyUserGroupId as Set, "only the active tenant's keys")
+
+            String missing = svc("disable#ApiKey", [apiKeyId: "NO_SUCH_KEY"]).errors as String
+            assertEquals(missing.replace("NO_SUCH_KEY", foreign.apiKeyId as String),
+                    svc("disable#ApiKey", [apiKeyId: foreign.apiKeyId]).errors, "foreign = missing")
+            assertTrue((svc("rotate#ApiKey", [apiKeyId: foreign.apiKeyId]).errors as String).contains("was not found"))
+            assertTrue(resolves(foreign.apiKey as String), "the other tenant's key is untouched")
+
+            assertEquals(null, svc("disable#ApiKey", [apiKeyId: own.apiKeyId]).errors, "the active tenant's key is the admin's to disable")
+            assertFalse(resolves(own.apiKey as String))
+        } finally {
+            signInAs("tkey.admin", TENANT)
+        }
     }
 
     @Test

@@ -103,7 +103,9 @@ class GorjanaMonthCloseMorningsSmokeTests {
                     "${f.recordKey}: inside the one-day grace")
         }
         assertEquals("Invoice INV9000002 has no Etail id", first.INV9000002.headline)
-        assertEquals([["NETSUITE", "invoice", "INV9000002", "81000002", "Invoice : Open"]], records(first.INV9000002.findingId),
+        // DAR-UI-080: the finding keeps both records of its pair, the HotWax order beside the NetSuite invoice.
+        assertEquals([["NETSUITE", "invoice", "INV9000002", "81000002", "Invoice : Open"], ["OMS", "order", "M2000002", null, null]],
+                records(first.INV9000002.findingId),
                 "the record a person searches by, NetSuite's own key, and its status in NetSuite's words")
         Map run1 = checkRun("2026-10-14")
         assertEquals(["AUDCS_RAN", "2026-10"], [run1.statusEnumId, run1.period])
@@ -198,15 +200,19 @@ class GorjanaMonthCloseMorningsSmokeTests {
         }
         List<Map> r14 = findingsOf("GORJANA_CHK_REPLACEMENT_CUSTOMER")
         List<Map> r13 = findingsOf("GORJANA_CHK_REPLACEMENT_NOT_ORIGINAL")
-        assertEquals([["GORJANA_R14", "81000101", "Credit memo id 81000101 and its replacement order are under different customers"]],
+        // DAR-UI-081: the headline names the memo by the number a person searches NetSuite by, not its internal id.
+        assertEquals([["GORJANA_R14", "81000101", "Credit memo id CM9000101 and its replacement order are under different customers"]],
                 r14.collect { [it.statementId, it.recordKey, it.headline] })
-        assertEquals([["GORJANA_R13", "81000102", "Credit memo id 81000102 names an existing order as its replacement"],
-                      ["GORJANA_R13", "81000104", "Credit memo id 81000104 names an existing order as its replacement"]],
+        assertEquals([["GORJANA_R13", "81000102", "Credit memo id CM9000102 names an existing order as its replacement"],
+                      ["GORJANA_R13", "81000104", "Credit memo id CM9000104 names an existing order as its replacement"]],
                 r13.sort { it.recordKey }.collect { [it.statementId, it.recordKey, it.headline] })
-        // A FIELD_MISMATCH row carries no record, so the memo is named by the compare key (its internal id), and with no
-        // conclusion rules there is no evidence state either.
-        assertEquals([["NETSUITE", "creditMemo", "81000101", null, null]], records(r14[0].findingId as String),
-                "one record, the memo; the replacement's id is not on the row")
+        // DAR-UI-080: a FIELD_MISMATCH row carries both sides' records (sideRecords), so the memo is named by its own number
+        // with its internal id beside it, and the replacement chain it points at is listed with it. With no conclusion
+        // rules there is no evidence state.
+        assertEquals([["NETSUITE", "creditMemo", "CM9000101", "81000101", null], ["NETSUITE", "replacementOrder", "SO9000101", null, null],
+                      ["OMS", "order", "GR1000101", null, null], ["OMS", "return", "M300101", null, null],
+                      ["OMS", "order", "EXC-#GOR100101-1", "M1000101", null]], records(r14[0].findingId as String),
+                "the memo and the replacement chain it names")
     }
 
     /**
@@ -255,7 +261,9 @@ class GorjanaMonthCloseMorningsSmokeTests {
         List<Map> noMemo = findingsOf("GORJANA_CHK_WARRANTY_NO_MEMO")
         assertEquals([["GORJANA_R12", "M400103", "Warranty claim RMA900103 has no credit memo"]],
                 noMemo.collect { [it.statementId, it.recordKey, it.headline] }, "only the claim with no memo; not the stray memo")
-        assertEquals([["NETSUITE", "warrantyClaim", "RMA900103", "82000103", null]], records(noMemo[0].findingId as String))
+        // DAR-UI-080: the claim's HotWax return is kept beside it.
+        assertEquals([["NETSUITE", "warrantyClaim", "RMA900103", "82000103", null], ["OMS", "return", "M400103", null, null]],
+                records(noMemo[0].findingId as String))
 
         List<Map> amount = findingsOf("GORJANA_CHK_WARRANTY_MEMO_AMOUNT")
         assertEquals(["M400102", "M400104"], amount*.recordKey, "65 and 65.00 are one amount; above and a cent below are not")

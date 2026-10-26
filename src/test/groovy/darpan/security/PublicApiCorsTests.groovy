@@ -13,7 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue
 /**
  * DAR-DOCS-005: the developers.drpn.ai API explorer calls the public GraphQL API from the browser. A
  * webapp_public_api_origins origin gets CORS on webapp_public_api_paths only, and never
- * Access-Control-Allow-Credentials, so a page on that origin cannot act through a logged-in user's cookie.
+ * Access-Control-Allow-Credentials, and a request from it that carries a cookie is refused, so a page on that
+ * origin cannot act through a logged-in user's session.
  */
 class PublicApiCorsTests {
     static final Set<String> ORIGINS = ["https://developers.drpn.ai"] as Set
@@ -26,6 +27,13 @@ class PublicApiCorsTests {
         // the session realm and the app's RPC stay closed to it
         assertFalse(MoquiServlet.publicApiAllows(ORIGINS, PATHS, "https://developers.drpn.ai", "/rest/s1/graphql"))
         assertFalse(MoquiServlet.publicApiAllows(ORIGINS, PATHS, "https://developers.drpn.ai", "/rpc/json"))
+    }
+
+    @Test
+    void matchesPathsOnSegmentBoundaries() {
+        assertTrue(MoquiServlet.publicApiAllows(ORIGINS, PATHS, "https://developers.drpn.ai", "/rest/s1/graphql/public/x"))
+        assertFalse(MoquiServlet.publicApiAllows(ORIGINS, PATHS, "https://developers.drpn.ai", "/rest/s1/graphql/publicity"))
+        assertTrue(MoquiServlet.publicApiAllows(ORIGINS, ["/rest/s1/graphql/public/"], "https://developers.drpn.ai", "/rest/s1/graphql/public"))
     }
 
     @Test
@@ -66,6 +74,18 @@ class PublicApiCorsTests {
         assertNull(status[0])
         assertEquals("https://developers.drpn.ai", out["Access-Control-Allow-Origin"])
         assertNull(out["Access-Control-Allow-Credentials"])
+    }
+
+    @Test
+    void aRequestCarryingACookieIsRefusedBeforeItReachesASession() {
+        Map<String, String> out = [:]
+        Integer[] status = [null]
+        boolean answered = MoquiServlet.handlePublicApiCors(request("POST", [Cookie: "darpan_login_key=abc"]),
+                response(out, status), "https://developers.drpn.ai")
+
+        assertTrue(answered)
+        assertEquals(401, status[0])
+        assertNull(out["Access-Control-Allow-Origin"])
     }
 
     private static HttpServletRequest request(String method, Map<String, String> headers) {

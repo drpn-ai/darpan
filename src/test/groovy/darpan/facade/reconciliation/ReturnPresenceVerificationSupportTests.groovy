@@ -46,7 +46,7 @@ class ReturnPresenceVerificationSupportTests {
     /**
      * Stands in for lookup#HotWaxOmsOrdersByExternalId, whose real contract is
      * [ok, ordersByExternalId, errors] with each value an order GROUP (a List of order Maps, each
-     * carrying statusId) — see OmsRestSourceSupport.summarizePairOrder.
+     * carrying statusId) — see OmsPairLookupSupport (darpan-hotwax).
      */
     private static Closure lookupReturning(Map<String, Object> ordersByExternalId, boolean ok = true) {
         return { List ids ->

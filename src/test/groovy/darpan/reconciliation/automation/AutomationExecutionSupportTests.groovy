@@ -2135,6 +2135,76 @@ class AutomationExecutionSupportTests {
         assertTrue(execution.safeMetadataJson.contains("file2DataAvailable"))
     }
 
+    /** DAR-BE-130: an error already on the facade before the extract (a side's login) is not the extract's failure. */
+    @Test
+    void anErrorLeftBeforeTheExtractDoesNotFailIt() {
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                return [dataAvailable: true, fileLocation: "runtime://tmp/${call.params.fileSide}.json".toString(),
+                        fileName: "${call.params.fileSide}.json".toString(), recordCount: 3]
+            }
+            return [:]
+        }
+        ec.message.addError("Error creating UserLoginHistory: record already exists")
+        Map<String, Object> result = AutomationExecutionSupport.callConfiguredSourceExtractor(ec,
+                ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"][0],
+                ec.entity.rows["darpan.reconciliation.ReconciliationAutomationSource"].find { it.fileSide == "FILE_1" },
+                [childWindowStartDate: timestamp("2026-04-30T00:00:00Z"), childWindowEndDate: timestamp("2026-05-01T00:00:00Z")], [:])
+        assertEquals(3, result.recordCount)
+    }
+
+    /** DAR-BE-129: an extract that reports progress is told the run's row and its own side's stage. */
+    @Test
+    void anExtractThatReportsProgressGetsTheRunAndItsSidesStage() {
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        ec.service.declaredInParameters = ["reconciliationRunResultId", "progressStageCode"]
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                return [dataAvailable: false, fileName: "${call.params.fileSide}.json".toString(), recordCount: 0]
+            }
+            return [:]
+        }
+        AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+        List<FakeServiceCall> extracts = ec.service.calls.findAll { it.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE }
+        FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+        assertEquals([execution.reconciliationRunResultId] * 2, extracts*.params*.reconciliationRunResultId)
+        assertEquals([FILE_1: "EXTRACT_FILE1", FILE_2: "EXTRACT_FILE2"],
+                extracts.collectEntries { [(it.params.fileSide): it.params.progressStageCode] })
+    }
+
+    /**
+     * DAR-BE-130: a service that throws is caught by Moqui, which puts the error on the message facade and answers an
+     * empty map. The run read that as a window with no data (gorjana 2026-10-26: the Oct 1-25 order-items extract threw
+     * after 20 minutes and its check closed NO_DATA, reading as nothing to report).
+     */
+    @Test
+    void anExtractServiceThatFailsFailsTheRunNotNoData() {
+        FakeEc ec = fakeEc()
+        seedApiAutomation(ec)
+        ec.service.responder = { FakeServiceCall call ->
+            if (call.serviceName == AutomationExecutionSupport.SHOPIFY_ORDERS_EXTRACT_SERVICE) {
+                if (call.params.fileSide == "FILE_1") {
+                    ec.message.addError('Cannot invoke "String.isEmpty()" because "name" is null')
+                    return [:]
+                }
+                return [dataAvailable: true, fileLocation: "runtime://tmp/file2.json", fileName: "file2.json", recordCount: 9]
+            }
+            throw new IllegalStateException("Reconcile must not run after a failed extract")
+        }
+
+        Map result = AutomationExecutionSupport.executeAutomation(ec, [automationId: "AUTO_API", scheduledFireTime: NOW])
+
+        assertEquals(0, result.noDataCount ?: 0)
+        FakeValue execution = ec.entity.createdValues("darpan.reconciliation.ReconciliationAutomationExecution")[0]
+        // A failed extract is retried like a timed-out one (PENDING, then dead-lettered), never closed as no data.
+        assertNotEquals(AutomationExecutionSupport.STATUS_NO_DATA, execution.statusEnumId)
+        assertTrue(((execution.errorMessage ?: "") as String).contains('"name" is null'), "error: ${execution.errorMessage}")
+        assertTrue(ec.message.errors.isEmpty(), "the failure is the run's, not left on the message facade")
+    }
+
     @Test
     void apiExecutionRejectsPersistedExtractServiceNameOutsideAllowlist() {
         // HIGH gap 6 (defense-in-depth): even if a row carries an extractServiceName outside the
@@ -3637,6 +3707,9 @@ class AutomationExecutionSupportTests {
          */
         Closure serviceDefinedCheck = { String ignored -> true }
         boolean isServiceDefined(String serviceName) { return serviceDefinedCheck(serviceName) }
+        /** The in-parameters every service declares here (ServiceDefinition.inParameterNameList); none by default. */
+        List<String> declaredInParameters = []
+        Map getServiceDefinition(String serviceName) { return [inParameterNameList: declaredInParameters] }
         List<FakeServiceCall> calls = Collections.synchronizedList([] as List<FakeServiceCall>)
         FakeEc ec
         /**

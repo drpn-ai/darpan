@@ -34,7 +34,7 @@ class ExchangePairVerificationSupport {
     // candidates need a lookup. 200 covers the largest observed daily candidate set (102, gorjana
     // 2026-07-30) with headroom; the deferral path stays as the pathological-case backstop.
     static final int DEFAULT_MAX_LOOKUPS = 200
-    // Mirrors OmsRestSourceSupport.PAIR_LOOKUP_MAX_IDS (darpan-hotwax): the OMS pair lookup service
+    // Mirrors OmsPairLookupSupport.PAIR_LOOKUP_MAX_IDS (darpan-hotwax): the OMS pair lookup service
     // hard-rejects any single call requesting more than this many externalIds.
     static final int OMS_PAIR_LOOKUP_CHUNK_SIZE = 100
     // Opening phrase of the always-emitted audit sentence, and the ONLY thing that distinguishes it

@@ -474,6 +474,8 @@ class AutomationExecutionSupport {
                 // has no run-result id — precisely the window the "Run now" UI poll watches, so a row it
                 // could never match is a redirect that never fires.
                 mintedRunResultId = beginAutomationRunResult(ec, automation, startedTimestamp)
+                // DAR-BE-129: the extracts heartbeat their record count (and see a cancel) on this row's stages.
+                windowParams.reconciliationRunResultId = mintedRunResultId
                 updateAutomationExecution(ec, execution, [
                         statusEnumId             : STATUS_RUNNING,
                         startedDate              : startedTimestamp,
@@ -1911,6 +1913,15 @@ class AutomationExecutionSupport {
         }
         serviceParams.windowStartDate = window.childWindowStartDate
         serviceParams.windowEndDate = window.childWindowEndDate
+        // DAR-BE-129: live progress, as the interactive path has always sent it (RunExtractSupport): the run's row and
+        // this side's extract stage, to an extractor that reports them. Before, an automation's extract showed no
+        // count until it finished (an audit month's 20-40 minute OMS reads read as stuck).
+        if (params?.reconciliationRunResultId &&
+                ec.service.getServiceDefinition(serviceName)?.inParameterNameList?.contains("reconciliationRunResultId")) {
+            serviceParams.reconciliationRunResultId = params.reconciliationRunResultId
+            serviceParams.progressStageCode = serviceParams.fileSide == FILE_SIDE_1 ?
+                    RunObservability.STAGE_EXTRACT_FILE1 : RunObservability.STAGE_EXTRACT_FILE2
+        }
 
         // Date-parameter names + the Shopify preserve-window flag are now data-driven: look the connector
         // up by the service being invoked (what the pre-registry switch keyed on). A source-level override
@@ -1941,10 +1952,19 @@ class AutomationExecutionSupport {
 
         def call = ec.service.sync().name(serviceName).parameters(serviceParams)
         if (call?.metaClass?.respondsTo(call, "disableAuthz")) call = call.disableAuthz()
+        // Counted first: only an error this call adds is its failure (a side's login can leave one of its own).
+        int errorsBefore = ((ec.message.getErrors() ?: []) as List).size()
         Map<String, Object> result = (call.call() ?: [:]) as Map<String, Object>
         List<String> errors = (result.errors instanceof Collection ? (Collection) result.errors : [])
                 .collect { Object error -> normalize(error) }
                 .findAll { String error -> error } as List<String>
+        // DAR-BE-130: a service that throws is caught by Moqui, which leaves the error on the message facade and
+        // answers an empty map; taken as it came, that empty map closed the run as "no data".
+        List added = ((ec.message.getErrors() ?: []) as List).drop(errorsBefore)
+        if (added) {
+            errors += added.collect { normalize(it) }.findAll { it } as List<String>
+            ec.message.clearErrors()
+        }
         if (errors) throw new IllegalStateException(errors.join("; "))
         return result
     }

@@ -2770,7 +2770,7 @@ SERVICE save NsAuthConfig
     clientId : String
     description : String
     isActive : Boolean
-    nsAuthConfigId : String [required]
+    nsAuthConfigId : String
     password : String
     privateKeyPem : String
     scope : String
@@ -2809,7 +2809,7 @@ SERVICE save NsRestletConfig
     httpMethod : String
     isActive : Boolean
     nsAuthConfigId : String [required]
-    nsRestletConfigId : String [required]
+    nsRestletConfigId : String
     readTimeoutSeconds : Integer
   OUT:
     errors : List
@@ -2840,7 +2840,7 @@ SERVICE save SftpServer
     port : Integer
     privateKey : String
     remoteAttributes : Boolean
-    sftpServerId : String [required]
+    sftpServerId : String
     username : String [required]
   OUT:
     errors : List

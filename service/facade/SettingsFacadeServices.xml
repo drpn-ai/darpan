@@ -480,7 +480,8 @@
     <service verb="save" noun="SftpServer" allow-remote="true" authenticate="true">
         <description>Create or update an SFTP server configuration.</description>
         <in-parameters>
-            <parameter name="sftpServerId" required="true"/>
+            <parameter name="sftpServerId"><description>DAR-BE-135: names a server this tenant owns, to update it. Leave it out to
+                create one; the server mints the id, so a tenant never learns another tenant's ids.</description></parameter>
             <parameter name="description"/>
             <parameter name="host" required="true"/>
             <parameter name="port" type="Integer" default-value="22"/>
@@ -513,9 +514,6 @@
             <set field="privateKeyValue" from="((privateKey)?.toString()?.trim())"/>
             <set field="portValue" from="port != null ? port : 22"/>
             <set field="remoteAttributesValue" from="remoteAttributes != null ? (remoteAttributes ? 'Y' : 'N') : 'Y'"/>
-            <if condition="!sftpServerIdValue">
-                <message error="true">Server ID is required.</message>
-            </if>
             <if condition="!hostValue">
                 <message error="true">Host is required.</message>
             </if>
@@ -541,18 +539,22 @@
             <if condition="portValue &gt; 65535">
                 <message error="true">Port must be between 1 and 65535.</message>
             </if>
-            <if condition="!ec.message.hasError()">
+            <if condition="!ec.message.hasError() &amp;&amp; sftpServerIdValue">
                 <!-- DAR-BE-079: the existence check must see every tenant's row. A bare find is filtered
                      by DARPAN_SCOPE_SFTP_SERVER, so a foreign row read as null, the gate below was
                      skipped, and store# (PK-only refresh/update, no filter) overwrote and re-owned it.
                      Read unscoped, then gate. Do not revert this to a bare ec.entity.find. -->
                 <set field="existingServer" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.SftpServer', 'save#SftpServer existence check; the requireTenantRecordAccess gate below refuses a foreign row (DAR-BE-079)').condition('sftpServerId', sftpServerIdValue).useCache(false).one()"/>
-                <if condition="existingServer">
-                    <set field="ignoreServerAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, existingServer, &quot;SFTP server '${sftpServerIdValue}' was not found.&quot;, &quot;SFTP server '${sftpServerIdValue}' is not available in your active tenant.&quot;)"/>
+                <!-- DAR-BE-135: a named id only updates. A foreign row and a missing one get the same answer. -->
+                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, existingServer)">
+                    <message error="true">SFTP server '${sftpServerIdValue}' was not found.</message>
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for SFTP settings.')"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; !sftpServerIdValue">
+                <set field="sftpServerIdValue" from="darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.reconciliation.SftpServer', 'sftpServerId')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="serverMap" from="[sftpServerId: sftpServerIdValue, description: descriptionValue, companyUserGroupId: existingServer?.companyUserGroupId, createdByUserId: existingServer?.createdByUserId, host: hostValue, port: portValue, username: usernameValue, remoteAttributes: remoteAttributesValue, password: passwordValue ?: existingServer?.password, privateKey: privateKeyValue ?: existingServer?.privateKey]"/>
@@ -637,7 +639,8 @@
     <service verb="save" noun="NsAuthConfig" allow-remote="true" authenticate="true">
         <description>Create or update a NetSuite auth configuration.</description>
         <in-parameters>
-            <parameter name="nsAuthConfigId" required="true"/>
+            <parameter name="nsAuthConfigId"><description>DAR-BE-135: names an auth profile this tenant owns or was granted, to
+                update it. Leave it out to create one; the server mints the id.</description></parameter>
             <parameter name="description"/>
             <parameter name="authType" default-value="NONE"/>
             <parameter name="username"/>
@@ -682,23 +685,20 @@
             <set field="nsScopeValue" from="((scope)?.toString()?.trim()) ?: 'restlets rest_webservices'"/>
             <set field="nsPrivateKeyPemValue" from="((privateKeyPem)?.toString()?.trim())"/>
             <set field="nsIsActiveValue" from="isActive != null ? (isActive ? 'Y' : 'N') : 'Y'"/>
-            <if condition="!nsAuthConfigIdValue">
-                <message error="true">Auth Config ID is required.</message>
-            </if>
             <if condition="!['NONE', 'BASIC', 'BEARER', 'OAUTH2_M2M_JWT'].contains(nsAuthTypeValue)">
                 <message error="true">Auth Type must be NONE, BASIC, BEARER, or OAUTH2_M2M_JWT.</message>
             </if>
             <if condition="nsAuthTypeValue == 'BASIC' &amp;&amp; !nsUsernameValue">
                 <message error="true">Username is required for BASIC auth.</message>
             </if>
-            <if condition="!ec.message.hasError()">
+            <if condition="!ec.message.hasError() &amp;&amp; nsAuthConfigIdValue">
                 <!-- DAR-BE-005 seam C: a bare ec.entity.find here is silently filtered by
                      DARPAN_ACTIVE_COMPANY_SCOPE (SecuritySeedData.xml DARPAN_SCOPE_NS_AUTH), so a
                      shared-but-foreign-owned row would be invisible before any access check runs.
                      findGlobalUnscoped bypasses that filter; canActiveTenantUseConfig below is the
                      real owner-or-shared gate. -->
                 <set field="existingAuth" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsAuthConfig', 'save#NsAuthConfig existence check; SharedConfigAccessSupport.canActiveTenantUseConfig gates owner-or-shared access on the next line (DAR-BE-005)').condition('nsAuthConfigId', nsAuthConfigIdValue).useCache(false).one()"/>
-                <if condition="existingAuth &amp;&amp; !darpan.facade.common.SharedConfigAccessSupport.canActiveTenantUseConfig(ec, darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_AUTH, existingAuth)">
+                <if condition="!existingAuth || !darpan.facade.common.SharedConfigAccessSupport.canActiveTenantUseConfig(ec, darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_AUTH, existingAuth)">
                     <!-- Deliberately ONE message for "no such row" and "row exists but this tenant has
                          no standing over it" (not owner, not a peer) — matches Task 6's
                          validateNetSuiteAuthConfig and Task 7's component gates. findTenantScoped
@@ -736,6 +736,9 @@
                 <if condition="nsAuthTypeValue == 'BEARER' &amp;&amp; !nsApiTokenValue &amp;&amp; !nsPasswordValue &amp;&amp; !existingAuth?.apiToken &amp;&amp; !existingAuth?.password">
                     <message>Provide API Token (or password fallback) for BEARER auth.</message>
                 </if>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; !nsAuthConfigIdValue">
+                <set field="nsAuthConfigIdValue" from="darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.reconciliation.NsAuthConfig', 'nsAuthConfigId')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="authMap" from="[nsAuthConfigId: nsAuthConfigIdValue, description: nsAuthDescriptionValue, companyUserGroupId: existingAuth?.companyUserGroupId, createdByUserId: existingAuth?.createdByUserId, authType: nsAuthTypeValue, username: nsUsernameValue, tokenUrl: nsTokenUrlValue, clientId: nsClientIdValue, certId: nsCertIdValue, scope: nsScopeValue, isActive: nsIsActiveValue, password: nsPasswordValue ?: existingAuth?.password, apiToken: nsApiTokenValue ?: existingAuth?.apiToken, privateKeyPem: nsPrivateKeyPemValue ?: existingAuth?.privateKeyPem]"/>
@@ -886,7 +889,8 @@
     <service verb="save" noun="NsRestletConfig" allow-remote="true" authenticate="true">
         <description>Create or update a NetSuite endpoint configuration bound to an auth config.</description>
         <in-parameters>
-            <parameter name="nsRestletConfigId" required="true"/>
+            <parameter name="nsRestletConfigId"><description>DAR-BE-135: names an endpoint this tenant owns or was granted, to
+                update it. Leave it out to create one; the server mints the id.</description></parameter>
             <parameter name="description"/>
             <parameter name="endpointUrl" required="true"/>
             <parameter name="httpMethod" default-value="POST"/>
@@ -923,9 +927,6 @@
             <set field="nsReadTimeoutValue" from="readTimeoutSeconds != null ? readTimeoutSeconds : 60"/>
             <set field="nsIsActiveValue" from="isActive != null ? (isActive ? 'Y' : 'N') : 'Y'"/>
             <set field="headersJsonError" from="darpan.facade.settings.SettingsFacadeSupport.validateJsonObjectText(nsHeadersJsonValue, 'Headers JSON')"/>
-            <if condition="!nsRestletConfigIdValue">
-                <message error="true">Endpoint Config ID is required.</message>
-            </if>
             <if condition="!nsEndpointUrlValue">
                 <message error="true">Endpoint URL is required.</message>
             </if>
@@ -952,14 +953,14 @@
             <if condition="headersJsonError">
                 <message error="true">${headersJsonError}</message>
             </if>
-            <if condition="!ec.message.hasError()">
+            <if condition="!ec.message.hasError() &amp;&amp; nsRestletConfigIdValue">
                 <!-- DAR-BE-005 seam C: a bare ec.entity.find here is silently filtered by
                      DARPAN_ACTIVE_COMPANY_SCOPE (SecuritySeedData.xml DARPAN_SCOPE_NS_RESTLET), so a
                      shared-but-foreign-owned row would be invisible before any access check runs.
                      findGlobalUnscoped bypasses that filter; canActiveTenantUseConfig below is the
                      real owner-or-shared gate. -->
                 <set field="existingEndpoint" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.NsRestletConfig', 'save#NsRestletConfig existence check; SharedConfigAccessSupport.canActiveTenantUseConfig gates owner-or-shared access on the next line (DAR-BE-005)').condition('nsRestletConfigId', nsRestletConfigIdValue).useCache(false).one()"/>
-                <if condition="existingEndpoint &amp;&amp; !darpan.facade.common.SharedConfigAccessSupport.canActiveTenantUseConfig(ec, darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_RESTLET, existingEndpoint)">
+                <if condition="!existingEndpoint || !darpan.facade.common.SharedConfigAccessSupport.canActiveTenantUseConfig(ec, darpan.facade.common.SharedConfigAccessSupport.CONFIG_TYPE_NS_RESTLET, existingEndpoint)">
                     <!-- Deliberately ONE message for "no such row" and "row exists but this tenant has
                          no standing over it" (not owner, not a peer) — matches Task 6's reference
                          validators and Task 7's component gates. Splitting this into a more specific
@@ -988,6 +989,9 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for NetSuite endpoint settings.')"/>
+            </if>
+            <if condition="!ec.message.hasError() &amp;&amp; !nsRestletConfigIdValue">
+                <set field="nsRestletConfigIdValue" from="darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.reconciliation.NsRestletConfig', 'nsRestletConfigId')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="endpointMap" from="[nsRestletConfigId: nsRestletConfigIdValue, description: nsDescriptionValue, companyUserGroupId: existingEndpoint?.companyUserGroupId ?: authCfg?.companyUserGroupId, createdByUserId: existingEndpoint?.createdByUserId, endpointUrl: nsEndpointUrlValue, httpMethod: nsHttpMethodValue, nsAuthConfigId: nsAuthConfigIdValue, headersJson: nsHeadersJsonValue, connectTimeoutSeconds: nsConnectTimeoutValue, readTimeoutSeconds: nsReadTimeoutValue, isActive: nsIsActiveValue, authType: null, username: null, password: null, apiToken: null, tokenUrl: null, clientId: null, certId: null, privateKeyPem: null, scope: null]"/>

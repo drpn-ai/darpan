@@ -39,8 +39,7 @@ if (!ec.message.hasError()) {
     if (mapping == null) {
         ec.message.addError("Mapping '${mappingId}' was not found.")
     } else {
-        TenantAccessSupport.requireTenantRecordAccess(ec, mapping, "Mapping '${mappingId}' was not found.",
-                "Mapping '${mappingId}' is not available in your active tenant.")
+        TenantAccessSupport.requireTenantRecordAccess(ec, mapping, "Mapping '${mappingId}' was not found.")
     }
 }
 

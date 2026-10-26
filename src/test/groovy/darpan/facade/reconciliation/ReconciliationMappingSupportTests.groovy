@@ -122,22 +122,8 @@ class ReconciliationMappingSupportTests {
         ])
 
         assertEquals(1, issues.size())
-        assertEquals("OMS schema 'orders.schema.json' is not available in your active tenant.", issues[0].toString())
-    }
-
-    @Test
-    void generateMappingIdAddsTimestampSuffixWhenBaseIdExists() {
-        FinderStub finder = new FinderStub(existingIds: ["OrdersVsInventory"] as Set)
-        EntityFacadeStub entity = new EntityFacadeStub(finder: finder)
-        def ec = new Expando(
-                entity: entity,
-                l10n: new Expando(format: { Object ts, String pattern -> "260408123456" }),
-                user: new Expando(nowTimestamp: new java.sql.Timestamp(0L))
-        )
-
-        String mappingId = ReconciliationMappingSupport.generateMappingId(ec, "Orders Vs Inventory")
-
-        assertEquals("OrdersVsInventory-260408123456", mappingId)
+        // DAR-BE-135: another tenant's schema reads exactly as an unsaved one.
+        assertEquals("OMS schema 'orders.schema.json' is not saved in Darpan.", issues[0].toString())
     }
 
     private static Expando buildLookupEc(Map<String, Map<String, Object>> schemasByName) {
@@ -156,14 +142,6 @@ class ReconciliationMappingSupportTests {
 
         Object getPreference(String preferenceKey) {
             return preferences[preferenceKey]
-        }
-    }
-
-    static class EntityFacadeStub {
-        FinderStub finder
-
-        FinderStub find(String entityName) {
-            return finder
         }
     }
 
@@ -189,13 +167,11 @@ class ReconciliationMappingSupportTests {
     }
 
     static class FinderStub {
-        Set<String> existingIds = [] as Set
         String currentId
         Map<String, Object> conditions = [:]
         List listResult = []
 
         FinderStub condition(String fieldName, Object value) {
-            currentId = value?.toString()
             conditions[fieldName] = value
             return this
         }
@@ -209,7 +185,7 @@ class ReconciliationMappingSupportTests {
         }
 
         Object one() {
-            return existingIds.contains(currentId) ? [reconciliationMappingId: currentId] : null
+            return null
         }
 
         List list() {

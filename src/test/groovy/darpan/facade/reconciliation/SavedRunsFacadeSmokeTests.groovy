@@ -181,7 +181,7 @@ class SavedRunsFacadeSmokeTests {
         assertNotNull(createResult.savedRun.savedRunId)
         assertNotNull(createResult.savedRun.ruleSetId)
         assertNotNull(createResult.savedRun.compareScopeId)
-        assertTrue((createResult.savedRun.compareScopeId as String).contains("_CSV_SCOPE"))
+        assertTrue((createResult.savedRun.compareScopeId as String) ==~ /CS_\d+/, createResult.savedRun.compareScopeId as String)
         assertEquals("CSV compare scope for CSV Order Compare", createResult.savedRun.compareScopeDescription)
         assertEquals("OMS", createResult.savedRun.defaultFile1SystemEnumId)
         assertEquals("SHOPIFY", createResult.savedRun.defaultFile2SystemEnumId)
@@ -267,7 +267,6 @@ class SavedRunsFacadeSmokeTests {
     @Test
     void ruleSetRunCreationCanonicalizesLegacySystemAliasesBeforePersistingCompareSources() {
         deleteLegacySystemSourceAliases()
-        deleteRuleSetRunEntities("RS_RECON", "CS_RS_RECON_COMPARE_SCOPE")
 
         Map<String, Object> createResult = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
@@ -285,7 +284,9 @@ class SavedRunsFacadeSmokeTests {
                 .call()
 
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())
-        assertEquals("CS_RS_RECON_COMPARE_SCOPE", createResult.savedRun.compareScopeId)
+        // DAR-BE-135: minted ids, never derived from the run name.
+        assertTrue((createResult.savedRun.savedRunId as String) ==~ /RS_\d+/, createResult.savedRun.savedRunId as String)
+        assertTrue((createResult.savedRun.compareScopeId as String) ==~ /CS_\d+/, createResult.savedRun.compareScopeId as String)
         assertEquals("OMS", createResult.savedRun.defaultFile1SystemEnumId)
         assertEquals("SHOPIFY", createResult.savedRun.defaultFile2SystemEnumId)
 
@@ -299,8 +300,6 @@ class SavedRunsFacadeSmokeTests {
 
     @Test
     void ruleSetRunChildrenCarryDenormalizedTenantStampAndSweepBackfills() {
-        deleteRuleSetRunEntities("RS_TENANT_STAMP", "CS_RS_TENANT_STAMP_COMPARE_SCOPE")
-
         Map<String, Object> createResult = ec.service.sync()
                 .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
                 .parameters([
@@ -545,7 +544,8 @@ class SavedRunsFacadeSmokeTests {
                 .call()
 
         assertEquals(false, outsideTenantGetResult.ok)
-        assertTrue((outsideTenantGetResult.errors ?: []).join(" ").contains("active tenant"))
+        // DAR-BE-135: another tenant's output answers exactly as a missing one does.
+        assertTrue((outsideTenantGetResult.errors ?: []).join(" ").contains("was not found"), outsideTenantGetResult.errors?.toString())
 
         ec.message.clearErrors()
         Map<String, Object> outsideTenantSourceDownloadResult = ec.service.sync()
@@ -555,7 +555,8 @@ class SavedRunsFacadeSmokeTests {
                 .call()
 
         assertEquals(false, outsideTenantSourceDownloadResult.ok)
-        assertTrue((outsideTenantSourceDownloadResult.errors ?: []).join(" ").contains("active tenant"))
+        assertTrue((outsideTenantSourceDownloadResult.errors ?: []).join(" ").contains("was not found"),
+                outsideTenantSourceDownloadResult.errors?.toString())
 
         ec.message.clearErrors()
         Map<String, Object> outsideTenantDeleteResult = ec.service.sync()
@@ -565,7 +566,7 @@ class SavedRunsFacadeSmokeTests {
                 .call()
 
         assertEquals(false, outsideTenantDeleteResult.ok)
-        assertTrue((outsideTenantDeleteResult.errors ?: []).join(" ").contains("active tenant"))
+        assertEquals(["Generated output '${outputFileName}' was not found.".toString()], outsideTenantDeleteResult.errors)
 
         ec.message.clearErrors()
         loginAsTenantUser(
@@ -628,7 +629,7 @@ class SavedRunsFacadeSmokeTests {
         )
         Map<String, Object> outsideTenant = differences(outputFileName)
         assertEquals(false, outsideTenant.ok)
-        assertEquals(["Generated output '${outputFileName}' is not available in your active tenant.".toString()], outsideTenant.errors)
+        assertEquals(["Generated output '${outputFileName}' was not found.".toString()], outsideTenant.errors)
         assertNull(outsideTenant.outputFile)
         ec.message.clearErrors()
     }
@@ -757,8 +758,7 @@ class SavedRunsFacadeSmokeTests {
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())
         String compareScopeId = createResult.savedRun.compareScopeId as String
         assertNotNull(compareScopeId)
-        assertTrue(compareScopeId.size() <= ReconciliationSavedRunSupport.ENTITY_ID_MAX_LENGTH)
-        assertTrue(compareScopeId.endsWith("_CSV_SCOPE"))
+        assertTrue(compareScopeId ==~ /CS_\d+/, compareScopeId)
     }
 
     @Test
@@ -1238,7 +1238,6 @@ end'''
 
     @Test
     void apiRuleSetRunFailsBeforeCompareSourceInsertWhenSourceTypeEnumIsMissing() {
-        deleteRuleSetRunEntities("RS_API_ORDER_SYNC", "CS_RS_API_ORDER_SYNC_COMPARE_SCOPE")
         deleteAutomationSourceTypeReferences("AUT_SRC_API")
         ec.entity.find("moqui.basic.Enumeration")
                 .condition("enumId", "AUT_SRC_API")
@@ -1251,6 +1250,7 @@ end'''
                 sendUrl              : "https://oms.example.test/orders",
         ])
 
+        long sourcesBefore = ec.entity.find("darpan.rule.RuleSetCompareSource").disableAuthz().useCache(false).count()
         try {
             Map<String, Object> createResult = ec.service.sync()
                     .name("facade.ReconciliationFacadeServices.create#RuleSetRun")
@@ -1273,12 +1273,10 @@ end'''
             assertTrue(ec.message.errors.any { String message ->
                 message.contains("file1SourceTypeEnumId 'AUT_SRC_API' is not valid")
             })
-            assertEquals(0, ec.entity.find("darpan.rule.RuleSetCompareSource")
-                    .condition("compareScopeId", "CS_RS_API_ORDER_SYNC_COMPARE_SCOPE")
+            assertEquals(sourcesBefore, ec.entity.find("darpan.rule.RuleSetCompareSource")
                     .disableAuthz()
                     .useCache(false)
-                    .list()
-                    .size())
+                    .count())
         } finally {
             ec.message.clearErrors()
             upsertAutomationSourceTypeApi()
@@ -1527,8 +1525,7 @@ end'''
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())
         assertEquals("JSON Order Compare", createResult.savedRun.runName)
         assertEquals("ruleset", createResult.savedRun.runType)
-        assertTrue((createResult.savedRun.compareScopeId as String).contains("_COMPARE_SCOPE"))
-        assertFalse((createResult.savedRun.compareScopeId as String).contains("_CSV_SCOPE"))
+        assertTrue((createResult.savedRun.compareScopeId as String) ==~ /CS_\d+/, createResult.savedRun.compareScopeId as String)
         assertEquals("Compare scope for JSON Order Compare", createResult.savedRun.compareScopeDescription)
         assertEquals(null, ec.entity.find("darpan.rule.RuleSetCompareScope")
                 .condition("compareScopeId", createResult.savedRun.compareScopeId)
@@ -1583,9 +1580,7 @@ end'''
         assertFalse(ec.message.hasError(), ec.message.errors?.toString())
         String compareScopeId = createResult.savedRun.compareScopeId as String
         assertNotNull(compareScopeId)
-        assertTrue(compareScopeId.size() <= ReconciliationSavedRunSupport.ENTITY_ID_MAX_LENGTH)
-        assertTrue(compareScopeId.endsWith("_COMPARE_SCOPE"))
-        assertFalse(compareScopeId.contains("_CSV_SCOPE"))
+        assertTrue(compareScopeId ==~ /CS_\d+/, compareScopeId)
     }
 
     @Test
@@ -2715,8 +2710,7 @@ end'''
     // ── Task 7 fixtures: save#RuleSetRun exclusion-filter persistence and list#SavedRuns load ──
 
     // RULE_SET has a unique (companyUserGroupId, ruleSetName) constraint (RULESET_TENANT_NAME) — every
-    // call needs a unique runName, not just the generated ruleSetId (generateRuleSetId only dedupes
-    // the id, not the name).
+    // call needs a unique runName; the server mints the ruleSetId separately.
     private Map<String, Object> baseRuleSetCreateParams() {
         return [
                 runName                 : "Exclude Filter Save Fixture ${UUID.randomUUID()}".toString(),
@@ -2811,8 +2805,8 @@ end'''
     }
 
     // NOTE: adapted from the task brief, which named the first parameter "compareScopeId" and passed
-    // savedRunId directly as if the two were interchangeable. They are not — generateCompareScopeId
-    // derives a distinct id (CS_RS_..._COMPARE_SCOPE) from the ruleSetId, so querying on savedRunId
+    // savedRunId directly as if the two were interchangeable. They are not — the compareScopeId is
+    // minted separately (CS_<n>) from the ruleSetId (RS_<n>), so querying on savedRunId
     // as compareScopeId would silently match zero rows. This resolves the real compareScopeId from
     // the savedRunId (ruleSetId) first.
     private List findFilterRows(String savedRunId, String fileSide) {

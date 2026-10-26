@@ -508,8 +508,7 @@ try {
     }
 
     if (!ec.message.hasError() && mapping != null) {
-        TenantAccessSupport.requireTenantRecordAccess(ec, mapping, "Saved run '${savedRunIdValue}' was not found.",
-                "Saved run '${savedRunIdValue}' is not available in your active tenant.")
+        TenantAccessSupport.requireTenantRecordAccess(ec, mapping, "Saved run '${savedRunIdValue}' was not found.")
     }
 
     if (!ec.message.hasError() && mapping != null) {

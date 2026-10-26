@@ -18,7 +18,7 @@
     <entity entity-name="Audit" package="darpan.audit" use="configuration">
         <description>One audit run a tenant has set up, e.g. gorjana's "Month close": its statements, checked each period.</description>
         <field name="auditId" type="id" is-pk="true">
-            <description>Globally unique row id, e.g. GORJANA_MONTH_CLOSE. Never shown; the JSON uses auditCode.</description>
+            <description>Globally unique row id, minted on create (DAR-BE-135); older rows read like GORJANA_MONTH_CLOSE. Never shown; the JSON uses auditCode.</description>
         </field>
         <field name="companyUserGroupId" type="id" not-null="true"/>
         <field name="auditCode" type="text-short" not-null="true">

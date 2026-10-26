@@ -328,21 +328,6 @@ class TenantAccessSupportTests {
     }
 
     @Test
-    void requireOwnedRecordAccessRejectsCrossCustomerRecord() {
-        MessageFacadeStub message = new MessageFacadeStub()
-        def ec = executionContext(
-                user: new UserStub(userId: "CUSTOMER_A"),
-                message: message
-        )
-
-        TenantAccessSupport.requireOwnedRecordAccess(ec, [ownerUserId: "CUSTOMER_B"],
-                "Schema not found", "Schema is not available in your customer scope.")
-
-        assertTrue(message.hasError())
-        assertEquals(["Schema is not available in your customer scope."], message.errors)
-    }
-
-    @Test
     void requireTenantRecordAccessRejectsCrossTenantRecord() {
         MessageFacadeStub message = new MessageFacadeStub()
         FinderStub companyFinder = new FinderStub(listResult: [
@@ -356,11 +341,11 @@ class TenantAccessSupportTests {
                 message: message
         )
 
-        TenantAccessSupport.requireTenantRecordAccess(ec, [companyUserGroupId: "ACME"],
-                "Schema not found", "Schema is not available in your active tenant.")
+        TenantAccessSupport.requireTenantRecordAccess(ec, [companyUserGroupId: "ACME"], "Schema not found")
 
+        // DAR-BE-135: another tenant's row answers exactly as a missing one does.
         assertTrue(message.hasError())
-        assertEquals(["Schema is not available in your active tenant."], message.errors)
+        assertEquals(["Schema not found"], message.errors)
     }
 
     @Test

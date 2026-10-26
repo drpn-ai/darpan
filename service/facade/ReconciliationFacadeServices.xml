@@ -350,11 +350,11 @@
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson">
                 <set field="file1Schema" from="jsonschema.common.JsonSchemaUtil.resolveSchemaRecord(ec, null, file1SchemaFileNameValue, file1SchemaFileNameValue, false)"/>
-                <set field="ignoreFile1SchemaAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file1Schema, &quot;file1SchemaFileName '${file1SchemaFileNameValue}' was not found&quot;, 'file1 schema is not available in your active tenant.')"/>
+                <set field="ignoreFile1SchemaAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file1Schema, &quot;file1SchemaFileName '${file1SchemaFileNameValue}' was not found&quot;)"/>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson">
                 <set field="file2Schema" from="jsonschema.common.JsonSchemaUtil.resolveSchemaRecord(ec, null, file2SchemaFileNameValue, file2SchemaFileNameValue, false)"/>
-                <set field="ignoreFile2SchemaAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file2Schema, &quot;file2SchemaFileName '${file2SchemaFileNameValue}' was not found&quot;, 'file2 schema is not available in your active tenant.')"/>
+                <set field="ignoreFile2SchemaAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file2Schema, &quot;file2SchemaFileName '${file2SchemaFileNameValue}' was not found&quot;)"/>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson">
                 <set field="file1SchemaSystemEnumId" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file1Schema?.systemEnumId)"/>
@@ -405,8 +405,9 @@
 
             <if condition="!ec.message.hasError()">
                 <set field="nowTs" from="ec.user.nowTimestamp"/>
-                <set field="ruleSetIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.generateRuleSetId(ec, runNameValue)"/>
-                <set field="compareScopeIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.generateCompareScopeId(ec, ruleSetIdValue, 'COMPARE_SCOPE')"/>
+                <!-- DAR-BE-135: minted, never derived from the run name, so a tenant cannot learn another tenant's run names. -->
+                <set field="ruleSetIdValue" from="darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.rule.RuleSet', 'ruleSetId', 'RS_')"/>
+                <set field="compareScopeIdValue" from="darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.rule.RuleSetCompareScope', 'compareScopeId', 'CS_')"/>
                 <set field="ruleSetValue" from="[ruleSetId: ruleSetIdValue, ruleSetName: runNameValue, description: descriptionValue, version: '1.0', createdDate: nowTs, lastUpdatedDate: nowTs]"/>
                 <set field="ignoreTenantOwnership" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(ruleSetValue, ec)"/>
             </if>
@@ -482,7 +483,7 @@
                 <iterate list="ruleEntries" entry="ruleEntry">
                     <service-call name="reconciliation.ReconciliationRuleEngineServices.save#Rule"
                             disable-authz="true"
-                            in-map="[ruleSetId: ruleSetIdValue, ruleId: ruleEntry.ruleId, sequenceNum: ruleEntry.sequenceNum, ruleText: ruleEntry.ruleText, ruleLogic: ruleEntry.ruleLogic, ruleType: ruleEntry.ruleType, expression: ruleEntry.expression, enabled: ruleEntry.enabled, severity: ruleEntry.severity, validateOnSave: false]"/>
+                            in-map="[ruleSetId: ruleSetIdValue, sequenceNum: ruleEntry.sequenceNum, ruleText: ruleEntry.ruleText, ruleLogic: ruleEntry.ruleLogic, ruleType: ruleEntry.ruleType, expression: ruleEntry.expression, enabled: ruleEntry.enabled, severity: ruleEntry.severity, validateOnSave: false]"/>
                 </iterate>
                 <service-call name="reconciliation.ReconciliationRuleEngineServices.compile#RuleSet"
                         disable-authz="true"
@@ -597,8 +598,8 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="nowTs" from="ec.user.nowTimestamp"/>
-                <set field="ruleSetIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.generateCsvRuleSetId(ec, runNameValue)"/>
-                <set field="compareScopeIdValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.generateCompareScopeId(ec, ruleSetIdValue, 'CSV_SCOPE')"/>
+                <set field="ruleSetIdValue" from="darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.rule.RuleSet', 'ruleSetId', 'RS_')"/>
+                <set field="compareScopeIdValue" from="darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.rule.RuleSetCompareScope', 'compareScopeId', 'CS_')"/>
                 <set field="ruleSetValue" from="[ruleSetId: ruleSetIdValue, ruleSetName: runNameValue, description: descriptionValue, version: '1.0', createdDate: nowTs, lastUpdatedDate: nowTs]"/>
                 <set field="ignoreTenantOwnership" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(ruleSetValue, ec)"/>
             </if>
@@ -680,8 +681,8 @@
             <if condition="!ec.message.hasError()">
                 <set field="schema1" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schema1IdValue).useCache(false).one()"/>
                 <set field="schema2" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schema2IdValue).useCache(false).one()"/>
-                <set field="ignoreAccessCheck1" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema1, &quot;Schema not found for schema1Id '${schema1IdValue}'&quot;, 'Schema 1 is not available in your active tenant.')"/>
-                <set field="ignoreAccessCheck2" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema2, &quot;Schema not found for schema2Id '${schema2IdValue}'&quot;, 'Schema 2 is not available in your active tenant.')"/>
+                <set field="ignoreAccessCheck1" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema1, &quot;Schema not found for schema1Id '${schema1IdValue}'&quot;)"/>
+                <set field="ignoreAccessCheck2" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema2, &quot;Schema not found for schema2Id '${schema2IdValue}'&quot;)"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
@@ -701,7 +702,7 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="nowTs" from="ec.user.nowTimestamp"/>
-                <set field="mappingIdValue" from="darpan.facade.reconciliation.ReconciliationMappingSupport.generateMappingId(ec, mappingNameValue)"/>
+                <set field="mappingIdValue" from="darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.mapping.ReconciliationMapping', 'reconciliationMappingId', 'MAP_')"/>
                 <set field="newMappingMap" from="[reconciliationMappingId: mappingIdValue, mappingName: mappingNameValue, createdDate: nowTs, lastUpdatedDate: nowTs]"/>
                 <set field="ignoreCompanyAssignment" from="darpan.facade.common.TenantAccessSupport.assignTenantOwnershipOnCreate(newMappingMap, ec)"/>
                 <if condition="!ec.message.hasError()">
@@ -1076,11 +1077,11 @@
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson">
                 <set field="file1Schema" from="jsonschema.common.JsonSchemaUtil.resolveSchemaRecord(ec, null, file1SchemaFileNameValue, file1SchemaFileNameValue, false)"/>
-                <set field="ignoreFile1SchemaAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file1Schema, &quot;file1SchemaFileName '${file1SchemaFileNameValue}' was not found&quot;, 'file1 schema is not available in your active tenant.')"/>
+                <set field="ignoreFile1SchemaAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file1Schema, &quot;file1SchemaFileName '${file1SchemaFileNameValue}' was not found&quot;)"/>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; file2UsesJson">
                 <set field="file2Schema" from="jsonschema.common.JsonSchemaUtil.resolveSchemaRecord(ec, null, file2SchemaFileNameValue, file2SchemaFileNameValue, false)"/>
-                <set field="ignoreFile2SchemaAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file2Schema, &quot;file2SchemaFileName '${file2SchemaFileNameValue}' was not found&quot;, 'file2 schema is not available in your active tenant.')"/>
+                <set field="ignoreFile2SchemaAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, file2Schema, &quot;file2SchemaFileName '${file2SchemaFileNameValue}' was not found&quot;)"/>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; file1UsesJson">
                 <set field="file1SchemaSystemEnumId" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.canonicalSystemEnumId(file1Schema?.systemEnumId)"/>
@@ -1486,11 +1487,11 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; mapping != null">
-                <set field="ignoreMappingAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, mapping, &quot;Saved run '${savedRunIdValue}' was not found.&quot;, 'Saved run is not available in your active tenant.')"/>
+                <set field="ignoreMappingAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, mapping, &quot;Saved run '${savedRunIdValue}' was not found.&quot;)"/>
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; ruleSet != null">
-                <set field="ignoreRuleSetAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, ruleSet, &quot;Saved run '${savedRunIdValue}' was not found.&quot;, 'Saved run is not available in your active tenant.')"/>
+                <set field="ignoreRuleSetAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, ruleSet, &quot;Saved run '${savedRunIdValue}' was not found.&quot;)"/>
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
             </if>
             <if condition="!ec.message.hasError()">
@@ -1553,11 +1554,11 @@
                 <set field="ruleSetRun" from="ec.entity.find('darpan.rule.RuleSet').condition('ruleSetId', savedRunIdValue).useCache(false).one()"/>
                 <set field="mappingRun" from="ruleSetRun ? null : ec.entity.find('darpan.mapping.ReconciliationMapping').condition('reconciliationMappingId', savedRunIdValue).useCache(false).one()"/>
                 <if condition="ruleSetRun">
-                    <set field="ignoreRuleSetAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, ruleSetRun, &quot;Saved run '${savedRunIdValue}' was not found&quot;, 'Saved run is not available in your active tenant.')"/>
+                    <set field="ignoreRuleSetAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, ruleSetRun, &quot;Saved run '${savedRunIdValue}' was not found&quot;)"/>
                     <set field="deletedRunType" from="'ruleset'"/>
                 </if>
                 <if condition="!ruleSetRun &amp;&amp; mappingRun">
-                    <set field="ignoreMappingAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, mappingRun, &quot;Saved run '${savedRunIdValue}' was not found&quot;, 'Saved run is not available in your active tenant.')"/>
+                    <set field="ignoreMappingAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, mappingRun, &quot;Saved run '${savedRunIdValue}' was not found&quot;)"/>
                     <set field="deletedRunType" from="'mapping'"/>
                 </if>
                 <if condition="!ruleSetRun &amp;&amp; !mappingRun">
@@ -1706,7 +1707,7 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreMappingAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, mapping, &quot;Mapping '${mappingIdValue}' was not found.&quot;, &quot;Mapping '${mappingIdValue}' is not available in your active tenant.&quot;)"/>
+                <set field="ignoreMappingAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, mapping, &quot;Mapping '${mappingIdValue}' was not found.&quot;)"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="members" from="ec.entity.find('darpan.mapping.ReconciliationMappingMember').condition('reconciliationMappingId', mappingIdValue).orderBy('mappingMemberId').useCache(false).list() ?: []"/>
@@ -1795,7 +1796,7 @@
                 </if>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreMappingAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, mapping, &quot;Mapping '${mappingIdValue}' was not found.&quot;, &quot;Mapping '${mappingIdValue}' is not available in your active tenant.&quot;)"/>
+                <set field="ignoreMappingAccess" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, mapping, &quot;Mapping '${mappingIdValue}' was not found.&quot;)"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="existingMembers" from="ec.entity.find('darpan.mapping.ReconciliationMappingMember').condition('reconciliationMappingId', mappingIdValue).orderBy('mappingMemberId').useCache(false).list() ?: []"/>
@@ -1806,8 +1807,8 @@
             <if condition="!ec.message.hasError()">
                 <set field="schema1" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schema1IdValue).useCache(false).one()"/>
                 <set field="schema2" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schema2IdValue).useCache(false).one()"/>
-                <set field="ignoreAccessCheck1" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema1, &quot;Schema not found for schema1Id '${schema1IdValue}'&quot;, 'Schema 1 is not available in your active tenant.')"/>
-                <set field="ignoreAccessCheck2" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema2, &quot;Schema not found for schema2Id '${schema2IdValue}'&quot;, 'Schema 2 is not available in your active tenant.')"/>
+                <set field="ignoreAccessCheck1" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema1, &quot;Schema not found for schema1Id '${schema1IdValue}'&quot;)"/>
+                <set field="ignoreAccessCheck2" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema2, &quot;Schema not found for schema2Id '${schema2IdValue}'&quot;)"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for run changes.')"/>
@@ -4208,8 +4209,9 @@
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="generatedOutputFile" from="darpan.facade.reconciliation.ReconciliationOutputSupport.resolveGeneratedOutputFile(ec, fileNameValue)"/>
-                <if condition="generatedOutputFile != null &amp;&amp; generatedOutputFile.exists() &amp;&amp; generatedOutputFile.isFile() &amp;&amp; !darpan.facade.reconciliation.ReconciliationOutputSupport.canAccessGeneratedOutputFile(ec, generatedOutputFile, fileNameValue)">
-                    <message error="true">Generated output '${fileNameValue}' is not available in your active tenant.</message>
+                <!-- DAR-BE-135: a missing file and another tenant's file answer alike. -->
+                <if condition="generatedOutputFile == null || !generatedOutputFile.exists() || !generatedOutputFile.isFile() || !darpan.facade.reconciliation.ReconciliationOutputSupport.canAccessGeneratedOutputFile(ec, generatedOutputFile, fileNameValue)">
+                    <message error="true">Generated output '${fileNameValue}' was not found.</message>
                 </if>
             </if>
             <if condition="!ec.message.hasError()">

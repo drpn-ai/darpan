@@ -143,7 +143,7 @@ Run these checks after production setup or after moving a tenant to a new enviro
 - Save `NsRestletConfig` through `save#NsRestletConfig` using the tenant A auth config.
 - Confirm both rows carry tenant A `companyUserGroupId`.
 - Switch to tenant B and call `list#NsAuthConfigs` and `list#NsRestletConfigs`; tenant A rows must not appear.
-- Attempt to save a tenant B endpoint that references tenant A auth; the backend must reject it because the auth config is not available in the active tenant.
+- Attempt to save a tenant B endpoint that references tenant A auth; the backend must reject it with the same "not found" a missing auth config gets.
 - Confirm endpoint timeout, method, active flag, and headers JSON remain endpoint-level settings, while credentials stay on `NsAuthConfig`.
 - Share the tenant A auth config with tenant B through `grant#ConfigTenantAccess`; tenant B can now list and use it. Revoke it and confirm tenant B loses access.
 

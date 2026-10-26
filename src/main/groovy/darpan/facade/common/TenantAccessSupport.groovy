@@ -55,11 +55,9 @@ class TenantAccessSupport {
     static final String SCOPE_TYPE_ANONYMOUS = "ANONYMOUS"
     static final String SCOPE_TYPE_TENANT = "TENANT"
     static final String ACTIVE_TENANT_UNAVAILABLE_MESSAGE = "Requested tenant is not available for current user."
-    static final String TENANT_RECORD_UNAVAILABLE_MESSAGE = "Requested record is not available in your active tenant."
     static final String ACTIVE_TENANT_WRITE_REQUIRED_MESSAGE = "An active tenant is required for tenant-scoped writes."
     static final String ACTIVE_TENANT_READ_ONLY_MESSAGE = "Your active tenant is read-only for this action."
     static final String NO_ACTIVE_TENANT_FILTER_VALUE = "__NO_ACTIVE_TENANT__"
-    static final String OWNED_RECORD_UNAVAILABLE_MESSAGE = "Requested record is not available in your customer scope."
     static final String TENANT_ADMIN_REQUIRED_MESSAGE = "This action requires tenant-admin access for the named tenant."
 
     protected static final List<String> ACCESS_SCOPE_CONTEXT_KEYS = [
@@ -582,15 +580,10 @@ class TenantAccessSupport {
         return recordCompanyUserGroupId != null && recordCompanyUserGroupId == activeTenantUserGroupId
     }
 
+    /** DAR-BE-135: one message for a missing row and another tenant's row, so the answer never says which. */
     static void requireTenantRecordAccess(def ec, def record, String missingMessage = "Requested record was not found.",
-            String forbiddenMessage = TENANT_RECORD_UNAVAILABLE_MESSAGE, String companyField = "companyUserGroupId") {
-        if (record == null) {
-            ec?.message?.addError(missingMessage)
-            return
-        }
-        if (!canAccessTenantRecord(ec, record, companyField)) {
-            ec?.message?.addError(forbiddenMessage)
-        }
+            String companyField = "companyUserGroupId") {
+        if (!canAccessTenantRecord(ec, record, companyField)) ec?.message?.addError(missingMessage)
     }
 
     static void assignTenantOwnershipOnCreate(def value, def ec, String companyField = "companyUserGroupId",
@@ -618,36 +611,6 @@ class TenantAccessSupport {
         String userId = currentUserId(ec)
         if (!userId) return
         finder.condition(ownerField, userId)
-    }
-
-    static boolean canAccessOwnedRecord(def ec, def record, String ownerField = "ownerUserId") {
-        if (record == null) return false
-        if (isSuperAdmin(ec)) return true
-        String ownerUserId = extractString(record, ownerField)
-        String currentUserId = currentUserId(ec)
-        return ownerUserId != null && ownerUserId == currentUserId
-    }
-
-    static void requireOwnedRecordAccess(def ec, def record, String missingMessage = "Requested record was not found.",
-            String forbiddenMessage = OWNED_RECORD_UNAVAILABLE_MESSAGE, String ownerField = "ownerUserId") {
-        if (record == null) {
-            ec?.message?.addError(missingMessage)
-            return
-        }
-        if (!canAccessOwnedRecord(ec, record, ownerField)) {
-            ec?.message?.addError(forbiddenMessage)
-        }
-    }
-
-    static void assignOwnerOnCreate(def value, def ec, String ownerField = "ownerUserId") {
-        if (value == null || isSuperAdmin(ec)) return
-        String userId = currentUserId(ec)
-        if (!userId) return
-        if (value instanceof Map) {
-            value[ownerField] = userId
-        } else {
-            value."${ownerField}" = userId
-        }
     }
 
     static String resolveScopedRuntimeLocation(def ec, String baseLocation) {

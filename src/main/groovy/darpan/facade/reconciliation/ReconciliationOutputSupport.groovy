@@ -253,12 +253,9 @@ class ReconciliationOutputSupport {
     /** The generated output's file when it exists and the active tenant may read it; else adds the error and returns null. */
     private static File accessibleGeneratedOutputFile(def ec, String fileNameValue) {
         File generatedOutputFile = OutputPathSupport.resolveGeneratedOutputArtifactFile(ec, fileNameValue)
-        if (generatedOutputFile == null || !generatedOutputFile.exists() || !generatedOutputFile.isFile()) {
+        if (generatedOutputFile == null || !generatedOutputFile.exists() || !generatedOutputFile.isFile()
+                || !canAccessGeneratedOutputFile(ec, generatedOutputFile, fileNameValue)) {
             ec.message.addError("Generated output '${fileNameValue}' was not found.")
-            return null
-        }
-        if (!canAccessGeneratedOutputFile(ec, generatedOutputFile, fileNameValue)) {
-            ec.message.addError("Generated output '${fileNameValue}' is not available in your active tenant.")
             return null
         }
         return generatedOutputFile
@@ -415,16 +412,14 @@ class ReconciliationOutputSupport {
         }
 
         File targetFile = OutputPathSupport.resolveGeneratedOutputFile(ec, fileNameToDelete)
-        if (targetFile == null || !targetFile.exists() || !targetFile.isFile()) {
+        if (targetFile == null || !targetFile.exists() || !targetFile.isFile()
+                || !canAccessGeneratedOutputFile(ec, targetFile, fileNameToDelete)) {
             logger.warn("Delete requested for missing reconciliation output ${fileNameToDelete}")
             return [
                     deleted        : false,
                     deletedFileName: fileNameToDelete,
                     statusMessage  : "File not found: ${fileNameToDelete}",
             ]
-        }
-        if (!canAccessGeneratedOutputFile(ec, targetFile, fileNameToDelete)) {
-            throw new IllegalArgumentException("Generated output '${fileNameToDelete}' is not available in your active tenant.")
         }
 
         boolean deletedOk = targetFile.delete()

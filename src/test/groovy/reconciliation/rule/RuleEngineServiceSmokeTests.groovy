@@ -141,4 +141,32 @@ class RuleEngineServiceSmokeTests {
         assertEquals("N", ruleRow.enabled)
         assertEquals("status is Shipped", ruleRow.ruleText)
     }
+
+    /**
+     * DAR-BE-135: a rule id from another rule set (another tenant's, say) answers exactly as a missing
+     * one does. Before, the refusal named the other rule set, and a rule set id carried its run's name.
+     */
+    @Test
+    void aRuleIdFromAnotherRuleSetAnswersAsMissingAndNamesNothing() {
+        ec.entity.makeValue("darpan.rule.RuleSet").setAll([ruleSetId: "RS_OTHER_TENANT_SECRET_RUN",
+                ruleSetName: "Other tenant secret run"]).createOrUpdate()
+        ec.entity.makeValue("darpan.rule.Rule").setAll([ruleId: "OTHER_TENANT_RULE", ruleSetId: "RS_OTHER_TENANT_SECRET_RUN",
+                sequenceNum: 10, ruleText: "status is Pending", enabled: "Y"]).createOrUpdate()
+
+        Map<String, Object> params = [ruleSetId: "DARPAN_TEST_COMPARE_RS", ruleText: "status is Shipped"]
+        ec.service.sync().name("reconciliation.ReconciliationRuleEngineServices.save#Rule")
+                .parameters(params + [ruleId: "OTHER_TENANT_RULE"]).disableAuthz().call()
+        List<String> foreignErrors = new ArrayList<String>(ec.message.errors)
+        ec.message.clearErrors()
+        ec.service.sync().name("reconciliation.ReconciliationRuleEngineServices.save#Rule")
+                .parameters(params + [ruleId: "NO_SUCH_RULE"]).disableAuthz().call()
+        List<String> missingErrors = new ArrayList<String>(ec.message.errors)
+
+        assertEquals(["Rule OTHER_TENANT_RULE was not found."], foreignErrors)
+        assertEquals(["Rule NO_SUCH_RULE was not found."], missingErrors)
+        assertEquals(null, ec.entity.find("darpan.rule.Rule").condition("ruleId", "NO_SUCH_RULE")
+                .disableAuthz().useCache(false).one(), "a caller-named rule id must never create a rule")
+        assertEquals("RS_OTHER_TENANT_SECRET_RUN", ec.entity.find("darpan.rule.Rule").condition("ruleId", "OTHER_TENANT_RULE")
+                .disableAuthz().useCache(false).one().ruleSetId)
+    }
 }

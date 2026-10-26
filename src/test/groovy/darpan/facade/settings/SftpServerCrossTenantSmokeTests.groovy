@@ -125,15 +125,30 @@ class SftpServerCrossTenantSmokeTests {
     }
 
     @Test
-    void editorCanCreateANewServerOwnedByTheActiveTenant() {
+    void editorCreatesANewServerUnderAMintedIdOwnedByTheActiveTenant() {
         Map<String, Object> out = withProductionAuthz {
-            callService(SAVE_SERVICE, [sftpServerId: "NEW_KREWE_SFTP", host: "new.sftp.test", port: 22,
-                                username: "new-user", password: "new-secret"])
+            callService(SAVE_SERVICE, [host: "new.sftp.test", port: 22, username: "new-user", password: "new-secret"])
         }
         assertTrue(out.ok as Boolean, "create failed: ${out.errors}")
-        def created = findRow("NEW_KREWE_SFTP")
+        String mintedId = (out.savedServer as Map).sftpServerId as String
+        assertTrue(mintedId ==~ /\d+/, "DAR-BE-135: a new server takes a minted id, got ${mintedId}")
+        def created = findRow(mintedId)
         assertEquals(KREWE, created.companyUserGroupId)
         assertEquals(EDITOR_ID, created.createdByUserId)
+    }
+
+    @Test
+    void aForeignIdAndAMissingIdAnswerAlikeAndNeitherCreatesARow() {
+        // DAR-BE-135: before, a free id created a row while a foreign id was refused with its own
+        // message, so the answer told a tenant which ids another tenant holds.
+        Map<String, Object> params = [host: "probe.sftp.test", port: 22, username: "probe", password: "probe-secret"]
+        Map<String, Object> foreign = withProductionAuthz { callService(SAVE_SERVICE, params + [sftpServerId: "VICTIM_SFTP"]) }
+        Map<String, Object> missing = withProductionAuthz { callService(SAVE_SERVICE, params + [sftpServerId: "NO_SUCH_SFTP"]) }
+        assertFalse(foreign.ok as Boolean)
+        assertFalse(missing.ok as Boolean)
+        assertEquals(["SFTP server 'VICTIM_SFTP' was not found."], foreign.errors)
+        assertEquals(["SFTP server 'NO_SUCH_SFTP' was not found."], missing.errors)
+        assertEquals(null, findRow("NO_SUCH_SFTP"), "a caller-named id must never create a row")
     }
 
     private Map<String, Object> callService(String serviceName, Map<String, Object> params) {

@@ -76,7 +76,7 @@ class JsonSchemaFacadeSmokeTests {
 
         assertTrue(ec.message.hasError())
         assertNull(result.schemaData)
-        assertEquals(["Schema is not available in your active tenant."], ec.message.errors)
+        assertEquals(["Schema not found"], ec.message.errors)
     }
 
     @Test

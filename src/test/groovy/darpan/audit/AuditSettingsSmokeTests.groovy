@@ -187,6 +187,8 @@ class AuditSettingsSmokeTests {
         assertEquals([id: "month-close-2", name: "Month close 2", period: "month"], out.audit)
         def made = ec.entity.find("darpan.audit.Audit").condition("auditCode", "month-close-2").disableAuthz().useCache(false).list()
         assertEquals([[MINE, "AUDP_MONTH"]], made.collect { [it.companyUserGroupId, it.periodEnumId] }, "the active tenant's own")
+        // DAR-BE-135: minted, not tenant + code, which collided across tenants (DOLLS + "kill x" vs DOLLS_KILL + "x").
+        assertTrue((made[0].auditId as String) ==~ /\d+/, made[0].auditId as String)
         assertTrue(facade("get#Audits").audits*.id.contains("month-close-2"))
 
         Map again = facade("create#Audit", [name: "month close 2", period: "day"])

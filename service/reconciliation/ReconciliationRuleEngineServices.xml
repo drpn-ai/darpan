@@ -240,8 +240,11 @@
             <set field="existingRule" from="null"/>
             <if condition="!ec.message.hasError() &amp;&amp; requestedRuleIdValue">
                 <set field="existingRule" from="ec.entity.find('darpan.rule.Rule').condition('ruleId', requestedRuleIdValue).disableAuthz().useCache(false).one()"/>
-                <if condition="existingRule != null &amp;&amp; existingRule.ruleSetId?.toString()?.trim() != ruleSetId">
-                    <message error="true">Rule ${requestedRuleIdValue} belongs to RuleSet ${existingRule.ruleSetId}; moving between RuleSets is not supported.</message>
+                <!-- DAR-BE-135: a named rule id only updates a rule of THIS rule set. A missing id, or one in
+                     any other rule set (another tenant's included), answers "not found" and never names that
+                     rule set. New rules take the entity's sequenced id, never a caller's. -->
+                <if condition="existingRule?.ruleSetId?.toString()?.trim() != ruleSetId">
+                    <message error="true">Rule ${requestedRuleIdValue} was not found.</message>
                 </if>
             </if>
 

@@ -109,7 +109,7 @@ class SettingsFacadeTenantFilteringSmokeTests {
                 username    : "leaked-user",
         ])
         assertFalse((Boolean) sftpResult.ok)
-        assertTrue((sftpResult.errors ?: []).join(" ").contains("not available in your active tenant"))
+        assertEquals(["SFTP server 'GORJANA_SFTP' was not found."], sftpResult.errors)
         assertEquals("gorjana.sftp.test", findOne("darpan.reconciliation.SftpServer", [sftpServerId: "GORJANA_SFTP"]).host)
 
         ec.message.clearErrors()
@@ -150,7 +150,6 @@ class SettingsFacadeTenantFilteringSmokeTests {
 
         ec.message.clearErrors()
         Map<String, Object> createResult = saveFacade("facade.SettingsFacadeServices.save#SftpServer", [
-                sftpServerId: "KREWE_VIEW_ONLY_CREATE",
                 description : "Blocked view-only create",
                 host        : "blocked.sftp.test",
                 port        : 22,
@@ -158,7 +157,7 @@ class SettingsFacadeTenantFilteringSmokeTests {
         ])
         assertFalse((Boolean) createResult.ok)
         assertTrue((createResult.errors ?: []).join(" ").contains("view access"))
-        assertNull(findOne("darpan.reconciliation.SftpServer", [sftpServerId: "KREWE_VIEW_ONLY_CREATE"]))
+        assertNull(findOne("darpan.reconciliation.SftpServer", [description: "Blocked view-only create"]))
 
         ec.message.clearErrors()
         Map<String, Object> chatSpaceResult = saveFacade("facade.SettingsFacadeServices.save#TenantChatSpace", [
@@ -201,37 +200,35 @@ class SettingsFacadeTenantFilteringSmokeTests {
         ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, GORJANA)
 
         Map<String, Object> sftpResult = saveFacade("facade.SettingsFacadeServices.save#SftpServer", [
-                sftpServerId: "GORJANA_CREATED_SFTP",
                 description : "Created SFTP",
                 host        : "created.sftp.test",
                 port        : 22,
                 username    : "created-user",
         ])
         assertTrue((Boolean) sftpResult.ok, sftpResult.errors?.toString())
-        assertTenantOwnership("darpan.reconciliation.SftpServer", [sftpServerId: "GORJANA_CREATED_SFTP"])
+        assertTenantOwnership("darpan.reconciliation.SftpServer", [sftpServerId: (sftpResult.savedServer as Map).sftpServerId])
 
         ec.message.clearErrors()
         Map<String, Object> authResult = saveFacade("facade.SettingsFacadeServices.save#NsAuthConfig", [
-                nsAuthConfigId: "GORJANA_CREATED_AUTH",
                 description   : "Created Auth",
                 authType      : "BASIC",
                 username      : "created-auth-user",
                 password      : "secret",
         ])
         assertTrue((Boolean) authResult.ok, authResult.errors?.toString())
-        assertTenantOwnership("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "GORJANA_CREATED_AUTH"])
+        String createdAuthId = (authResult.savedAuthConfig as Map).nsAuthConfigId
+        assertTenantOwnership("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: createdAuthId])
 
         ec.message.clearErrors()
         Map<String, Object> endpointResult = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", [
-                nsRestletConfigId: "GORJANA_CREATED_ENDPOINT",
                 description      : "Created Endpoint",
                 endpointUrl      : "https://created.suitetalk.api.netsuite.com/restlet",
                 httpMethod       : "POST",
-                nsAuthConfigId   : "GORJANA_CREATED_AUTH",
+                nsAuthConfigId   : createdAuthId,
                 headersJson      : "{}",
         ])
         assertTrue((Boolean) endpointResult.ok, endpointResult.errors?.toString())
-        assertTenantOwnership("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "GORJANA_CREATED_ENDPOINT"])
+        assertTenantOwnership("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: (endpointResult.savedRestletConfig as Map).nsRestletConfigId])
 
         ec.message.clearErrors()
         Map<String, Object> tenantSettingsResult = saveFacade("facade.SettingsFacadeServices.save#TenantSettings", [

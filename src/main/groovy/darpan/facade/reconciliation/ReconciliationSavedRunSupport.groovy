@@ -15,7 +15,6 @@ import groovy.json.JsonSlurper
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import reconciliation.rule.FieldComparisonRuleLogicGenerator
-import reconciliation.rule.RuleEngineSupport
 
 
 import static darpan.common.ValueSupport.normalize
@@ -159,25 +158,6 @@ class ReconciliationSavedRunSupport {
     static final String SHOPIFY_GRAPHQL_EXECUTE_SERVICE = "facade.ShopifyFacadeServices.execute#ShopifyGraphql"
     static final String SHOPIFY_ORDERS_EXTRACT_SERVICE = "reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrders"
     static final String SHOPIFY_ORDER_IDS_LOOKUP_SERVICE = "reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyOrderIds"
-    static final int ENTITY_ID_MAX_LENGTH = 40
-
-    static String generateCsvRuleSetId(def ec, String runName) {
-        return generateRuleSetId(ec, runName ?: "CSV_RUN")
-    }
-
-    static String generateRuleSetId(def ec, String runName) {
-        String base = RuleEngineSupport.sanitizeIdToken(runName ?: "CSV_RUN", "RUN")
-        if (base.startsWith("RS_")) base = base.substring(3)
-        String candidate = buildEntityId("RS", base)
-        int suffix = 1
-
-        while (savedRunIdExists(ec, candidate)) {
-            candidate = buildEntityId("RS", base, null, "_${suffix}")
-            suffix++
-        }
-
-        return candidate
-    }
 
     static List<Map<String, Object>> normalizeRuleEntries(Object rawRules) {
         if (!(rawRules instanceof Collection)) return []
@@ -273,74 +253,10 @@ class ReconciliationSavedRunSupport {
         return suffix ? "${normalizedBase}|${suffix}" : normalizedBase
     }
 
-    static String generateCompareScopeId(def ec, String ruleSetId) {
-        return buildCompareScopeId(ec, ruleSetId, "COMPARE_SCOPE")
-    }
-
-    static String generateCompareScopeId(def ec, String ruleSetId, String scopeKind) {
-        return buildCompareScopeId(ec, ruleSetId, scopeKind)
-    }
-
-    protected static String buildCompareScopeId(def ec, String ruleSetId, String scopeKind) {
-        String normalizedRuleSetId = RuleEngineSupport.sanitizeIdToken(normalize(ruleSetId) ?: "RULE_SET", "RS")
-        if (!normalizedRuleSetId.startsWith("RS_")) normalizedRuleSetId = "RS_${normalizedRuleSetId}"
-        String scopeSuffix = RuleEngineSupport.sanitizeIdToken(normalize(scopeKind) ?: "COMPARE_SCOPE", "COMPARE_SCOPE")
-        String candidate = buildEntityId("CS", normalizedRuleSetId, scopeSuffix)
-        int suffix = 1
-
-        while (TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.RULE_SET_COMPARE_SCOPE,
-                        "ID uniqueness check — must scan all tenants to avoid PK collision")
-                .condition("compareScopeId", candidate)
-                .useCache(false)
-                .one() != null) {
-            candidate = buildEntityId("CS", normalizedRuleSetId, scopeSuffix, "_${suffix}")
-            suffix++
-        }
-
-        return candidate
-    }
-
-    protected static String buildEntityId(String prefix, String bodyToken, String trailingToken = null, String collisionSuffix = null) {
-        String normalizedPrefix = normalize(prefix) ?: "ID"
-        String normalizedBodyToken = normalize(bodyToken) ?: "VALUE"
-        String normalizedTrailingToken = normalize(trailingToken)
-        String normalizedCollisionSuffix = collisionSuffix ?: ""
-
-        int reservedLength = normalizedPrefix.length() + 1 + normalizedCollisionSuffix.length()
-        if (normalizedTrailingToken) reservedLength += 1 + normalizedTrailingToken.length()
-
-        int maxBodyLength = Math.max(1, ENTITY_ID_MAX_LENGTH - reservedLength)
-        String trimmedBodyToken = normalizedBodyToken.length() > maxBodyLength ?
-                normalizedBodyToken.substring(0, maxBodyLength) : normalizedBodyToken
-
-        return normalizedPrefix +
-                "_" +
-                trimmedBodyToken +
-                (normalizedTrailingToken ? "_${normalizedTrailingToken}" : "") +
-                normalizedCollisionSuffix
-    }
-
     static String compareScopeDisplayName(Object compareScopeId, Object compareScopeDescription) {
         String description = normalize(compareScopeDescription)
         if (description) return description
         return normalize(compareScopeId)
-    }
-
-    static boolean savedRunIdExists(def ec, String savedRunId) {
-        String normalized = normalize(savedRunId)
-        if (!normalized) return false
-
-        // ID uniqueness check — must scan all tenants to avoid PK collision across tenant spaces.
-        return TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.RULE_SET,
-                        "ID uniqueness check — must scan all tenants to avoid PK collision")
-                .condition("ruleSetId", normalized)
-                .useCache(false)
-                .one() != null ||
-                TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.RECONCILIATION_MAPPING,
-                        "ID uniqueness check — must scan all tenants to avoid PK collision")
-                        .condition("reconciliationMappingId", normalized)
-                        .useCache(false)
-                        .one() != null
     }
 
     static List<Map<String, Object>> collectSavedRunRows(def ec) {
@@ -507,9 +423,6 @@ class ReconciliationSavedRunSupport {
                 .useCache(false)
                 .one()
         if (!ruleSet) return [savedRun: null, error: null]
-        if (!TenantAccessSupport.canAccessTenantRecord(ec, ruleSet)) {
-            return [savedRun: null, error: "Saved run '${savedRunId}' is not available in your active tenant."]
-        }
 
         // RuleSetCompareScope is transitively-owned via ruleSetId; gate via findTenantScopedChildren.
         def compareScopeFinder = TenantScopedFinder.findTenantScopedChildren(

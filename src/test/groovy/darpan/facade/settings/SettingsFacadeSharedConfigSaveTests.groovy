@@ -15,6 +15,7 @@ import java.sql.Timestamp
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -120,7 +121,6 @@ class SettingsFacadeSharedConfigSaveTests {
         ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, STRANGER)
 
         Map<String, Object> realResult = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", [
-                nsRestletConfigId: "ORACLE_REF_ENDPOINT_1",
                 description      : "Stranger probe",
                 endpointUrl      : "https://stranger-probe.suitetalk.api.netsuite.com/restlet",
                 httpMethod       : "POST",
@@ -131,12 +131,11 @@ class SettingsFacadeSharedConfigSaveTests {
         List<String> realErrors = (List<String>) realResult.errors
 
         // Remove the referenced auth config so the SAME id is now genuinely nonexistent, then probe
-        // again with a fresh (never-used) nsRestletConfigId so the endpoint's own existence check
-        // (site :785) stays silent both times and the referenced-config check is what's compared.
+        // again. Both probes create (no nsRestletConfigId, DAR-BE-135), so the endpoint's own
+        // existence check stays silent both times and the referenced-config check is what's compared.
         deleteEntity("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "ORACLE_REF_AUTH"])
         ec.message.clearErrors()
         Map<String, Object> missingResult = saveFacade("facade.SettingsFacadeServices.save#NsRestletConfig", [
-                nsRestletConfigId: "ORACLE_REF_ENDPOINT_2",
                 description      : "Stranger probe",
                 endpointUrl      : "https://stranger-probe.suitetalk.api.netsuite.com/restlet",
                 httpMethod       : "POST",
@@ -166,24 +165,33 @@ class SettingsFacadeSharedConfigSaveTests {
 
         assertFalse((Boolean) result.ok)
         // Pre-fix this was "NS Auth config 'ORACLE_AUTH' is not available in your active tenant." —
-        // a distinguishable text that told a stranger the id exists somewhere. Finding A collapses
-        // it to the same "was not found" text a real not-found denial produces (see the reference
-        // check test above for the byte-identical comparison, which this primary check cannot do —
-        // see the next test for why).
+        // a distinguishable text that told a stranger the id exists somewhere.
         assertEquals(["NS Auth config 'ORACLE_AUTH' was not found."], (List<String>) result.errors)
     }
 
     @Test
-    void strangerCreatingWithANeverUsedNsAuthConfigIdSucceedsInsteadOfDenying() {
-        // Documents why the "real foreign vs nonexistent" equality test above is done via the
-        // referenced-config check rather than this primary one: save#NsAuthConfig is create-or-update,
-        // so a genuinely free id has no row to deny access to — it is a legitimate create, not a
-        // "not found" denial. There is nothing to close here; a stranger claiming a never-used id is
-        // ordinary tenant self-service, unrelated to the shared-config access gate this task fixes.
+    void aNeverUsedNsAuthConfigIdIsRefusedExactlyLikeAForeignOneAndCreatesNothing() {
+        // DAR-BE-135: save#NsAuthConfig used to create a row under any free id, so a free id said
+        // "created" where a foreign one said "not found" — the same oracle by another door. A named id
+        // now only updates; a create leaves the id out and the server mints one.
+        ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, STRANGER)
+        Map<String, Object> params = [description: "Stranger probe", authType: "BASIC",
+                                      username: "stranger-user", password: "stranger-password"]
+
+        Map<String, Object> foreign = saveFacade("facade.SettingsFacadeServices.save#NsAuthConfig", params + [nsAuthConfigId: "ORACLE_AUTH"])
+        ec.message.clearErrors()
+        Map<String, Object> free = saveFacade("facade.SettingsFacadeServices.save#NsAuthConfig", params + [nsAuthConfigId: "STRANGER_OWN_NEW_AUTH"])
+
+        assertEquals(["NS Auth config 'ORACLE_AUTH' was not found."], (List<String>) foreign.errors)
+        assertEquals(["NS Auth config 'STRANGER_OWN_NEW_AUTH' was not found."], (List<String>) free.errors)
+        assertNull(findOne("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "STRANGER_OWN_NEW_AUTH"]))
+    }
+
+    @Test
+    void aStrangerCreatesItsOwnNsAuthConfigUnderAMintedId() {
         ec.user.setPreference(TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY, STRANGER)
 
         Map<String, Object> result = saveFacade("facade.SettingsFacadeServices.save#NsAuthConfig", [
-                nsAuthConfigId: "STRANGER_OWN_NEW_AUTH",
                 description   : "Stranger's own new config",
                 authType      : "BASIC",
                 username      : "stranger-user",
@@ -191,8 +199,9 @@ class SettingsFacadeSharedConfigSaveTests {
         ])
 
         assertTrue((Boolean) result.ok, result.errors?.toString())
-        def stored = findOne("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "STRANGER_OWN_NEW_AUTH"])
-        assertEquals(STRANGER, stored.companyUserGroupId)
+        String mintedId = (result.savedAuthConfig as Map).nsAuthConfigId as String
+        assertTrue(mintedId ==~ /\d+/, "a new auth config takes a minted id, got ${mintedId}")
+        assertEquals(STRANGER, findOne("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: mintedId]).companyUserGroupId)
     }
 
     // --- helpers ------------------------------------------------------------------------------

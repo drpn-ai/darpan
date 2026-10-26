@@ -118,9 +118,7 @@ class JsonSchemaFacadeSupport {
                 TenantAccessSupport.requireTenantRecordAccess(
                         ec,
                         schemaRecord,
-                        "Schema not found",
-                        "Schema is not available in your active tenant."
-                )
+                        "Schema not found")
                 if (!ec.message.hasError()) {
                     JsonNode schemaNode = mapper.readTree(schemaRecord.schemaText)
                     def schema = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V7).getSchema(schemaNode)

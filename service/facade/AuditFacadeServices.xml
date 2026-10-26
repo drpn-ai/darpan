@@ -239,8 +239,10 @@
                 <econdition field-name="auditCode" from="auditCode"/>
             </entity-find-count>
             <if condition="sameCode"><return error="true" message="There is already an audit by that name."/></if>
+            <!-- DAR-BE-135: minted, not tenantId + code. That form collided across tenants (DOLLS + "kill month
+                 close" and DOLLS_KILL + "month close" both make DOLLS_KILL_MONTH_CLOSE). Statement ids extend it. -->
             <entity-make-value entity-name="darpan.audit.Audit" value-field="auditValue"
-                    map="[auditId: tenantId + '_' + auditCode.toUpperCase().replace('-', '_'), companyUserGroupId: tenantId,
+                    map="[auditId: darpan.facade.common.TenantScopedFinder.mintId(ec, 'darpan.audit.Audit', 'auditId'), companyUserGroupId: tenantId,
                           auditCode: auditCode, auditName: auditName, periodEnumId: periodList[0].enumId]"/>
             <entity-create value-field="auditValue"/>
             <set field="audit" from="[id: auditCode, name: auditName, period: period]"/>

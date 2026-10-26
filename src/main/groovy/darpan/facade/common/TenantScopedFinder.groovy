@@ -59,7 +59,7 @@ class TenantScopedFinder {
      * {@link TenantAccessSupport#canAccessTenantRecord} before returning.
      *
      * <p>Returns {@code null} for both a missing record and a foreign-tenant record.
-     * An error is added to {@code ec.message} (not-found or forbidden) in either case via
+     * The same not-found error is added to {@code ec.message} in either case (DAR-BE-135) via
      * {@link TenantAccessSupport#requireTenantRecordAccess}.  Callers MUST check
      * {@code ec.message.hasError()} before consuming the returned value.</p>
      *
@@ -76,7 +76,7 @@ class TenantScopedFinder {
     static def findTenantScopedById(def ec, String entityName, String pkField, Object pkValue) {
         def rec = ec.entity.find(entityName).condition(pkField, pkValue).disableAuthz().one()
         if (rec == null || !TenantAccessSupport.canAccessTenantRecord(ec, rec)) {
-            TenantAccessSupport.requireTenantRecordAccess(ec, rec)  // sets the standard not-found / forbidden ec.message error
+            TenantAccessSupport.requireTenantRecordAccess(ec, rec)  // the same not-found error for both
             return null
         }
         return rec
@@ -189,5 +189,19 @@ class TenantScopedFinder {
         }
         logger.info("[tenant-scope] GLOBAL unscoped read of {}: {}", entityName, reason)
         return ec.entity.find(entityName).disableAuthz()
+    }
+
+    /**
+     * DAR-BE-135: the id for a new tenant-owned row. Ids are one namespace across every tenant, so a
+     * caller never chooses one and never sees a name-derived id bend around another tenant's row:
+     * the next sequence value, skipping any that an older hand-typed id already holds. The skip is
+     * invisible to the caller, who could not have predicted the number either way.
+     */
+    static String mintId(def ec, String entityName, String pkField, String prefix = "") {
+        while (true) {
+            String id = prefix + ec.entity.sequencedIdPrimary(entityName, null, null)
+            if (findGlobalUnscoped(ec, entityName, "DAR-BE-135 minted-id uniqueness: ids span every tenant")
+                    .condition(pkField, id).useCache(false).one() == null) return id
+        }
     }
 }

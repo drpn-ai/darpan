@@ -95,7 +95,7 @@
                 <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active tenant.')"/>
+                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="systemEnumIdValue" from="((schema.systemEnumId)?.toString()?.trim())"/>
@@ -169,7 +169,7 @@
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; schemaIdValue">
                 <set field="existingSchema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('jsonSchemaId', schemaIdValue).useCache(false).one()"/>
-                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, existingSchema, &quot;Schema not found for ID '${schemaIdValue}'&quot;, 'Schema is not available in your active tenant.')"/>
+                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, existingSchema, &quot;Schema not found for ID '${schemaIdValue}'&quot;)"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for schema changes.')"/>
@@ -318,7 +318,7 @@
                 <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active tenant.')"/>
+                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <service-call name="jsonschema.JsonSchemaServices.flatten#JsonSchema"
@@ -372,7 +372,7 @@
                 <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
             </if>
             <if condition="!ec.message.hasError() &amp;&amp; (schemaIdValue || schemaNameValue)">
-                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active tenant.')"/>
+                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for schema changes.')"/>
@@ -424,7 +424,7 @@
                 <set field="schema" from="ec.entity.find('darpan.reconciliation.JsonSchema').condition('schemaName', schemaNameValue).useCache(false).one()"/>
             </if>
             <if condition="!ec.message.hasError()">
-                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found', 'Schema is not available in your active tenant.')"/>
+                <set field="ignoreAccessCheck" from="darpan.facade.common.TenantAccessSupport.requireTenantRecordAccess(ec, schema, 'Schema not found')"/>
             </if>
             <if condition="!ec.message.hasError()">
                 <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access for schema changes.')"/>

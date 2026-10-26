@@ -7978,7 +7978,8 @@
                 "type": "object",
                 "properties": {
                     "omsRestSourceConfigId": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "DAR-BE-135: names a config this tenant owns or was granted,\n                to update it. Leave it out to create one; the server mints the id."
                     },
                     "description": {
                         "type": "string"
@@ -8026,7 +8027,6 @@
                     }
                 },
                 "required": [
-                    "omsRestSourceConfigId",
                     "baseUrl"
                 ],
                 "description": "Create or update a tenant-owned OMS REST source configuration. Secret fields are stored encrypted and are never returned in clear text."
@@ -10008,7 +10008,8 @@
                 "type": "object",
                 "properties": {
                     "nsSuiteQlSourceQueryId": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "DAR-BE-135: names a check this tenant owns, to update it.\n                Leave it out to create one; the server mints the id."
                     },
                     "nsAuthConfigId": {
                         "type": "string"
@@ -10104,7 +10105,6 @@
                     }
                 },
                 "required": [
-                    "nsSuiteQlSourceQueryId",
                     "nsAuthConfigId",
                     "recordType",
                     "fields"
@@ -21433,7 +21433,8 @@
                 "type": "object",
                 "properties": {
                     "nsAuthConfigId": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "DAR-BE-135: names an auth profile this tenant owns or was granted, to\n                update it. Leave it out to create one; the server mints the id."
                     },
                     "description": {
                         "type": "string"
@@ -21469,9 +21470,6 @@
                         "type": "boolean"
                     }
                 },
-                "required": [
-                    "nsAuthConfigId"
-                ],
                 "description": "Create or update a NetSuite auth configuration."
             },
             "SaveNsAuthConfigResult": {
@@ -21599,7 +21597,8 @@
                 "type": "object",
                 "properties": {
                     "nsRestletConfigId": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "DAR-BE-135: names an endpoint this tenant owns or was granted, to\n                update it. Leave it out to create one; the server mints the id."
                     },
                     "description": {
                         "type": "string"
@@ -21627,7 +21626,6 @@
                     }
                 },
                 "required": [
-                    "nsRestletConfigId",
                     "endpointUrl",
                     "nsAuthConfigId"
                 ],
@@ -21749,7 +21747,8 @@
                 "type": "object",
                 "properties": {
                     "sftpServerId": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "DAR-BE-135: names a server this tenant owns, to update it. Leave it out to\n                create one; the server mints the id, so a tenant never learns another tenant's ids."
                     },
                     "description": {
                         "type": "string"
@@ -21774,7 +21773,6 @@
                     }
                 },
                 "required": [
-                    "sftpServerId",
                     "host",
                     "username"
                 ],
@@ -22802,7 +22800,8 @@
                 "type": "object",
                 "properties": {
                     "shopifyAuthConfigId": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "DAR-BE-135: names a config this tenant owns or was granted,\n                to update it. Leave it out to create one; the server mints the id."
                     },
                     "description": {
                         "type": "string"
@@ -22827,7 +22826,6 @@
                     }
                 },
                 "required": [
-                    "shopifyAuthConfigId",
                     "shopApiUrl",
                     "apiVersion"
                 ],

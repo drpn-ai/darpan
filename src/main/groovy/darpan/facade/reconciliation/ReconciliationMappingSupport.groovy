@@ -23,25 +23,6 @@ class ReconciliationMappingSupport {
         return true
     }
 
-    static String generateMappingId(def ec, String rawName) {
-        String mappingIdBase = rawName?.replaceAll('[^A-Za-z0-9]', '')
-        if (!mappingIdBase) mappingIdBase = "Mapping"
-        if (mappingIdBase.length() > 38) mappingIdBase = mappingIdBase.substring(0, 38)
-
-        String mappingIdValue = mappingIdBase
-        def existingMapping = ec.entity.find(DarpanEntityConstants.RECONCILIATION_MAPPING)
-                .condition("reconciliationMappingId", mappingIdValue)
-                .useCache(false)
-                .one()
-        if (existingMapping != null) {
-            String idSuffix = ec.l10n.format(ec.user.nowTimestamp, 'yyMMddHHmmss')
-            int baseMax = 38 - idSuffix.length() - 1
-            String trimmedBase = mappingIdBase.length() > baseMax ? mappingIdBase.substring(0, baseMax) : mappingIdBase
-            mappingIdValue = "${trimmedBase}-${idSuffix}"
-        }
-        return mappingIdValue
-    }
-
     static List<Map<String, Object>> buildEditableMappingMembers(def ec, List mappingMembers) {
         List members = mappingMembers ?: []
 
@@ -59,9 +40,7 @@ class ReconciliationMappingSupport {
                 TenantAccessSupport.requireTenantRecordAccess(
                         ec,
                         schema,
-                        "Schema '${schemaName}' was not found.",
-                        "Schema '${schemaName}' is not available in your active tenant."
-                )
+                        "Schema '${schemaName}' was not found.")
             }
 
             [
@@ -130,12 +109,8 @@ class ReconciliationMappingSupport {
         }
 
         def schema = resolveSavedSchemaRecord(ec, schemaFileName, false)
-        if (schema == null) {
-            issues.add("${systemLabel} schema '${schemaFileName}' is not saved in Darpan.")
-            return issues
-        }
         if (!TenantAccessSupport.canAccessTenantRecord(ec, schema)) {
-            issues.add("${systemLabel} schema '${schemaFileName}' is not available in your active tenant.")
+            issues.add("${systemLabel} schema '${schemaFileName}' is not saved in Darpan.")
             return issues
         }
 

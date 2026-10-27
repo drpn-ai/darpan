@@ -1,5 +1,6 @@
 package darpan.facade.reconciliation
 
+import darpan.facade.common.DataManagerSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
@@ -675,6 +676,151 @@ class AutomationFacadeSmokeTests {
         assertEquals(false, missingPrimaryIdResult.ok)
         assertTrue(ec.message.hasError())
         assertTrue(ec.message.errors.any { String message -> message.contains("file1PrimaryIdExpression is required") })
+    }
+
+    // DAR-BE-142 (Aditi, 2026-10-27, after gorjana's month close read HotWax for 38 min and failed at compare: "build
+    // the retry.. i do not want to do another extract today"). The failed window's files are replayed, nothing is read.
+    @Test
+    void aWindowThatFailedAtCompareIsRetriedFromItsExtractsWithoutReadingAgain() {
+        int reads = 0
+        boolean failCompare = true
+        List<String> compared = []
+        AutomationExecutionSupport.setSourceExtractor { Object ecArg, Object automation, Object source,
+                Map<String, Object> window, Map<String, Object> params ->
+            reads++
+            String side = source.get("fileSide") as String
+            String location = DataManagerSupport.childLocation(DataManagerSupport.resolveReconciliationRunLocation(ecArg,
+                    params.automationExecutionId, side == "FILE_2" ? "20261027-102252000-FILE_2" : "20261027-102252000"), "${side}.json")
+            File file = DataManagerSupport.resolveDirectoryFile(ecArg, location, false)
+            file.parentFile.mkdirs()
+            file.text = '{"metadata":{},"records":[{"order_id":"1"}]}'
+            return [dataAvailable: true, fileLocation: location, fileName: "${side}.json".toString(), recordCount: side == "FILE_1" ? 5 : 4]
+        }
+        AutomationExecutionSupport.setReconcileRunner { Object ecArg, Object automation, Object file1Source, Object file2Source,
+                Map<String, Object> file1Result, Map<String, Object> file2Result, Map<String, Object> window, Map<String, Object> params ->
+            compared << (file1Result.fileLocation as String) << (file2Result.fileLocation as String)
+            if (failCompare) throw new IllegalArgumentException("[UNRESOLVED_COLUMN] `omsOrderId` cannot be resolved")
+            return [reconciliationType: "ORDER", diffLocation: "reconciliation-runs/replay/result.json", diffFileName: "result.json",
+                    differenceCount: 0, onlyInFile1Count: 0, onlyInFile2Count: 0, validationErrors: [], processingWarnings: []]
+        }
+        String automationId = saveReplayAutomation()
+        callFacade("facade.ReconciliationFacadeServices.run#AutomationNow", [automationId: automationId])
+        ec.message.clearErrors()
+        def failed = executionsOf(automationId).find { it.statusEnumId == "AUT_STAT_FAILED" }
+        assertNotNull(failed, "the compare failed the window: ${executionsOf(automationId)*.statusEnumId}")
+        assertEquals(2, reads)
+        // Stamped as each side was read, so the failure still names its files.
+        assertTrue((failed.file1DataManagerPath as String).endsWith("/FILE_1.json"), failed.file1DataManagerPath as String)
+        assertEquals([5L, 4L], [failed.file1RecordCount as Long, failed.file2RecordCount as Long])
+
+        failCompare = false
+        reads = 0
+        Map retried = callFacade("facade.ReconciliationFacadeServices.retry#AutomationExecutionFromExtracts",
+                [automationExecutionId: failed.automationExecutionId])
+        assertTrue(retried.ok as boolean, retried.errors?.toString())
+        assertEquals(true, retried.submitted)
+        assertEquals([["FILE_1", "FILE_1.json", 5], ["FILE_2", "FILE_2.json", 4]],
+                retried.extracts.collect { [it.side, it.fileName, it.recordCount as Integer] })
+        def succeeded = waitFor { executionsOf(automationId).find { it.statusEnumId == "AUT_STAT_SUCCESS" } }
+        assertNotNull(succeeded, "the retry ran: ${executionsOf(automationId)*.statusEnumId}")
+        assertEquals(0, reads, "nothing was read again")
+        assertEquals([failed.file1DataManagerPath, failed.file2DataManagerPath], compared.takeRight(2), "the failed attempt's files were compared")
+
+        // Refused in words: a window that did not fail, and one whose file is gone.
+        ec.message.clearErrors()
+        Map notFailed = callFacade("facade.ReconciliationFacadeServices.retry#AutomationExecutionFromExtracts",
+                [automationExecutionId: succeeded.automationExecutionId])
+        assertEquals(false, notFailed.ok)
+        assertTrue(notFailed.errors.toString().contains("only a failed window"), notFailed.errors?.toString())
+        ec.message.clearErrors()
+        DataManagerSupport.resolveDirectoryFile(ec, failed.file1DataManagerPath as String, false).delete()
+        Map gone = callFacade("facade.ReconciliationFacadeServices.retry#AutomationExecutionFromExtracts",
+                [automationExecutionId: failed.automationExecutionId])
+        assertEquals(false, gone.ok)
+        assertTrue(gone.errors.toString().contains("no longer on disk"), gone.errors?.toString())
+        ec.message.clearErrors()
+    }
+
+    // DAR-BE-142: create#RuleSetRun folds a sent root into a connector source's keys (as save does since DAR-BE-115), and
+    // repair#ConnectorRecordKeys fixes a run already stored with bare keys, touching nothing else.
+    @Test
+    void connectorKeysAreFoldedOnCreateAndBareStoredKeysAreRepaired() {
+        Map<String, Object> created = callFacade("facade.ReconciliationFacadeServices.create#RuleSetRun", [
+                runName                   : "Seed-shaped connector run",
+                file1SystemEnumId         : "OMS",
+                file1SourceTypeEnumId     : "AUT_SRC_API",
+                file1SystemMessageRemoteId: "OMS_REMOTE",
+                file1SourceConfigId       : "KREWE_OMS",
+                file1SourceConfigType     : "HOTWAX_OMS_REST",
+                file1RecordRootExpression : "records",
+                file1PrimaryIdExpressions : ["omsOrderId", "orderItemSeqId"],
+                file2SystemEnumId         : "SHOPIFY",
+                file2FileTypeEnumId       : "DftCsv",
+                file2PrimaryIdExpressions : ["order_id", "line_id"],
+                rules                     : [],
+        ])
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        String scopeId = (created.savedRun as Map).compareScopeId as String
+        String savedRunId = (created.savedRun as Map).savedRunId as String
+        assertEquals(["\$.records[*].omsOrderId", "\$.records[*].orderItemSeqId"], keyFields(scopeId, "FILE_1"), "folded on create")
+        assertEquals(["order_id", "line_id"], keyFields(scopeId, "FILE_2"), "a file source keeps its keys")
+
+        // The shape prod gorjana's runs were stored in before this fix: no root, bare keys.
+        ec.entity.find("darpan.rule.RuleSetCompareSourceKeyField").condition("compareScopeId", scopeId).condition("fileSide", "FILE_1")
+                .disableAuthz().useCache(false).list().each { it.set("fieldExpression", (it.fieldExpression as String).replace("\$.records[*].", "")); it.update() }
+        Map dry = callFacade("facade.ReconciliationFacadeServices.repair#ConnectorRecordKeys", [savedRunId: savedRunId, dryRun: true])
+        assertTrue(dry.ok as boolean, dry.errors?.toString())
+        assertEquals([["FILE_1", "omsOrderId", "\$.records[*].omsOrderId"], ["FILE_1", "orderItemSeqId", "\$.records[*].orderItemSeqId"]],
+                dry.changes.collect { [it.side, it.from, it.to] })
+        assertEquals(["omsOrderId", "orderItemSeqId"], keyFields(scopeId, "FILE_1"), "a dry run writes nothing")
+
+        Map repaired = callFacade("facade.ReconciliationFacadeServices.repair#ConnectorRecordKeys", [savedRunId: savedRunId])
+        assertEquals(2, (repaired.changes as List).size())
+        assertEquals(["\$.records[*].omsOrderId", "\$.records[*].orderItemSeqId"], keyFields(scopeId, "FILE_1"))
+        assertEquals(["order_id", "line_id"], keyFields(scopeId, "FILE_2"))
+        assertEquals([], callFacade("facade.ReconciliationFacadeServices.repair#ConnectorRecordKeys", [savedRunId: savedRunId]).changes,
+                "nothing left to repair")
+        ec.message.clearErrors()
+    }
+
+    private String saveReplayAutomation() {
+        Map<String, Object> saved = callFacade("facade.ReconciliationFacadeServices.save#Automation", [
+                automationName          : "Replay API Orders",
+                inputModeEnumId         : "AUT_IN_API_RANGE",
+                savedRun                : [createMode: "csv", runName: "Replay API Saved Run", file1SystemEnumId: "OMS",
+                                           file2SystemEnumId: "SHOPIFY", file1CompareColumn: "order_id", file2CompareColumn: "order_id"],
+                scheduleExpr            : "PT1H",
+                relativeWindowTypeEnumId: "AUT_WIN_PREV_DAY",
+                relativeWindowCount     : 1,
+                windowTimeZone          : "UTC",
+                sources                 : ["FILE_1": "OMS", "FILE_2": "SHOPIFY"].collect { String side, String system ->
+                    [fileSide: side, sourceTypeEnumId: "AUT_SRC_API", systemEnumId: system, fileTypeEnumId: "DftCsv",
+                     systemMessageRemoteId: "${system}_REMOTE".toString(), dateFromParameterName: "fromDate", dateToParameterName: "toDate"]
+                },
+        ])
+        assertTrue((Boolean) saved.ok, saved.errors?.toString())
+        return (saved.automation as Map).automationId as String
+    }
+
+    private List executionsOf(String automationId) {
+        return ec.entity.find("darpan.reconciliation.ReconciliationAutomationExecution").condition("automationId", automationId)
+                .orderBy("automationExecutionId").disableAuthz().useCache(false).list()
+    }
+
+    private List<String> keyFields(String scopeId, String side) {
+        return ec.entity.find("darpan.rule.RuleSetCompareSourceKeyField").condition("compareScopeId", scopeId).condition("fileSide", side)
+                .orderBy("sequenceNum").disableAuthz().useCache(false).list()*.fieldExpression as List<String>
+    }
+
+    /** The retry is submitted to the worker pool; poll for its result. */
+    private static Object waitFor(Closure probe) {
+        long deadline = System.currentTimeMillis() + 60_000L
+        while (System.currentTimeMillis() < deadline) {
+            Object found = probe.call()
+            if (found) return found
+            Thread.sleep(250)
+        }
+        return probe.call()
     }
 
     // ─── state-mode source-capability validation (RQ-15) ──────────────────────────

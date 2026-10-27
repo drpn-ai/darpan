@@ -391,6 +391,16 @@
                 <set field="resolvedFile2PrimaryIdExpressionValue" from="file2UsesJson ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.normalizeJsonPrimaryIdExpression(file2PrimaryIdExpressionValue) : file2PrimaryIdExpressionValue"/>
                 <set field="resolvedFile1PrimaryIdExpressionsValue" from="file1PrimaryIdExpressionsValue.collect { file1UsesJson ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.normalizeJsonPrimaryIdExpression(it) : it }"/>
                 <set field="resolvedFile2PrimaryIdExpressionsValue" from="file2PrimaryIdExpressionsValue.collect { file2UsesJson ? darpan.facade.reconciliation.ReconciliationSavedRunSupport.normalizeJsonPrimaryIdExpression(it) : it }"/>
+                <!-- DAR-BE-142: as save#RuleSetRun (DAR-BE-115), a connector source's record root is not stored, so fold the
+                     root sent into its ids; a seed-shaped create (root "records" + bare ids) otherwise compares the envelope. -->
+                <if condition="file1UsesConnectorSource">
+                    <set field="resolvedFile1PrimaryIdExpressionValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.foldConnectorRecordRoot(file1RecordRootExpressionValue, resolvedFile1PrimaryIdExpressionValue)"/>
+                    <set field="resolvedFile1PrimaryIdExpressionsValue" from="resolvedFile1PrimaryIdExpressionsValue.collect { darpan.facade.reconciliation.ReconciliationSavedRunSupport.foldConnectorRecordRoot(file1RecordRootExpressionValue, it) }"/>
+                </if>
+                <if condition="file2UsesConnectorSource">
+                    <set field="resolvedFile2PrimaryIdExpressionValue" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.foldConnectorRecordRoot(file2RecordRootExpressionValue, resolvedFile2PrimaryIdExpressionValue)"/>
+                    <set field="resolvedFile2PrimaryIdExpressionsValue" from="resolvedFile2PrimaryIdExpressionsValue.collect { darpan.facade.reconciliation.ReconciliationSavedRunSupport.foldConnectorRecordRoot(file2RecordRootExpressionValue, it) }"/>
+                </if>
             </if>
 
             <!-- Cross-side count guard (ET1): a mismatched number of composite key fields between file1
@@ -3590,6 +3600,74 @@
                 <set field="statusEnumId" from="reprocessResult.statusEnumId"/>
                 <set field="requeued" from="reprocessResult.requeued"/>
             </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="retry" noun="AutomationExecutionFromExtracts" transaction="ignore" allow-remote="true" authenticate="true">
+        <description>DAR-BE-142. Retry a FAILED or dead-lettered window from the extracts it already read: a new execution
+            over the same window (an audit's same days) replays the failed attempt's files, so the compare and everything
+            after it run again without reading any system. Refused, in words, when a read did not finish or its file is
+            gone; then reprocess#AutomationExecution reads again.</description>
+        <in-parameters>
+            <parameter name="automationExecutionId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="submitted" type="Boolean"/>
+            <parameter name="automationId"/>
+            <parameter name="replayFromExecutionId"/>
+            <parameter name="extracts" type="List"><description>[{side, fileName, recordCount}] replayed.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="executionIdValue" from="((automationExecutionId)?.toString()?.trim())"/>
+            <set field="ignoreRunAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access for automation runs.')"/>
+            <if condition="!ec.message.hasError()">
+                <set field="executionRecord" from="darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, 'darpan.reconciliation.ReconciliationAutomationExecution', 'retry from extracts: load by id, then canAccessTenantRecord').condition('automationExecutionId', executionIdValue).useCache(false).one()"/>
+                <if condition="!darpan.facade.common.TenantAccessSupport.canAccessTenantRecord(ec, executionRecord)">
+                    <message error="true">Automation execution '${executionIdValue}' was not found.</message>
+                </if>
+            </if>
+            <if condition="!ec.message.hasError()">
+                <set field="retryResult" from="darpan.reconciliation.automation.AutomationExecutionSupport.retryFromExtracts(ec, [automationExecutionId: executionIdValue])"/>
+                <if condition="retryResult.error"><message error="true">${retryResult.error}</message></if>
+                <set field="submitted" from="retryResult.submitted"/>
+                <set field="automationId" from="retryResult.automationId"/>
+                <set field="replayFromExecutionId" from="retryResult.replayFromExecutionId"/>
+                <set field="extracts" from="retryResult.extracts"/>
+            </if>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
+    <service verb="repair" noun="ConnectorRecordKeys" allow-remote="true" authenticate="true">
+        <description>DAR-BE-142 (DAR-BE-115's stored rows). A connector source keeps no record root once saved, so a key
+            stored bare ("omsOrderId") compares the extract's {metadata, records} envelope and fails at compare. Folds the
+            root into each bare key of one run's connector sources ("$.records[*].omsOrderId"), the form runs made in the
+            app store; rules, filters and everything else are left as they are. dryRun answers the changes without
+            writing them.</description>
+        <in-parameters>
+            <parameter name="savedRunId" required="true"/>
+            <parameter name="recordRoot" default-value="records"><description>The extract envelope's records field.</description></parameter>
+            <parameter name="dryRun" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="changes" type="List"><description>[{side, field, from, to}]; empty when nothing was bare.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="ignoreWriteAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantWriteAccess(ec, 'Your active tenant only has view access, so it cannot change a run.')"/>
+            <if condition="ec.message.hasError()"><return error="true"/></if>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="changes" from="darpan.facade.reconciliation.ReconciliationSavedRunSupport.repairConnectorRecordKeys(ec, tenantId, savedRunId?.toString()?.trim(), recordRoot, dryRun == true)"/>
             <set field="ok" from="!ec.message.hasError()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>

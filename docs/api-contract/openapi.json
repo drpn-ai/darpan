@@ -366,6 +366,9 @@
                                         "$ref": "#/components/schemas/PauseAutomationRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/RepairConnectorRecordKeysRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/ReprocessAutomationExecutionRequest"
                                     },
                                     {
@@ -376,6 +379,9 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/ResumeAutomationRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/RetryAutomationExecutionFromExtractsRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/RunAutomationNowRequest"
@@ -660,10 +666,12 @@
                                         "facade.ReconciliationFacadeServices.list#Reconciliations": "#/components/schemas/ListReconciliationsRequest",
                                         "facade.ReconciliationFacadeServices.list#SavedRuns": "#/components/schemas/ListSavedRunsRequest",
                                         "facade.ReconciliationFacadeServices.pause#Automation": "#/components/schemas/PauseAutomationRequest",
+                                        "facade.ReconciliationFacadeServices.repair#ConnectorRecordKeys": "#/components/schemas/RepairConnectorRecordKeysRequest",
                                         "facade.ReconciliationFacadeServices.reprocess#AutomationExecution": "#/components/schemas/ReprocessAutomationExecutionRequest",
                                         "facade.ReconciliationFacadeServices.restore#Automation": "#/components/schemas/RestoreAutomationRequest",
                                         "facade.ReconciliationFacadeServices.restore#SavedRun": "#/components/schemas/RestoreSavedRunRequest",
                                         "facade.ReconciliationFacadeServices.resume#Automation": "#/components/schemas/ResumeAutomationRequest",
+                                        "facade.ReconciliationFacadeServices.retry#AutomationExecutionFromExtracts": "#/components/schemas/RetryAutomationExecutionFromExtractsRequest",
                                         "facade.ReconciliationFacadeServices.run#AutomationNow": "#/components/schemas/RunAutomationNowRequest",
                                         "facade.ReconciliationFacadeServices.run#GenericDiff": "#/components/schemas/RunGenericDiffRequest",
                                         "facade.ReconciliationFacadeServices.run#Reconciliation": "#/components/schemas/RunReconciliationRequest",
@@ -1078,6 +1086,9 @@
                                             "$ref": "#/components/schemas/PauseAutomationResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/RepairConnectorRecordKeysResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/ReprocessAutomationExecutionResponse"
                                         },
                                         {
@@ -1088,6 +1099,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/ResumeAutomationResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RetryAutomationExecutionFromExtractsResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/RunAutomationNowResponse"
@@ -16261,6 +16275,112 @@
                     "result"
                 ]
             },
+            "RepairConnectorRecordKeysParams": {
+                "type": "object",
+                "properties": {
+                    "savedRunId": {
+                        "type": "string"
+                    },
+                    "recordRoot": {
+                        "type": "string",
+                        "description": "The extract envelope's records field."
+                    },
+                    "dryRun": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "savedRunId"
+                ],
+                "description": "DAR-BE-142 (DAR-BE-115's stored rows). A connector source keeps no record root once saved, so a key\n            stored bare (\"omsOrderId\") compares the extract's {metadata, records} envelope and fails at compare. Folds the\n            root into each bare key of one run's connector sources (\"$.records[*].omsOrderId\"), the form runs made in the\n            app store; rules, filters and everything else are left as they are. dryRun answers the changes without\n            writing them."
+            },
+            "RepairConnectorRecordKeysResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "changes": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "[{side, field, from, to}]; empty when nothing was bare."
+                    }
+                }
+            },
+            "RepairConnectorRecordKeysRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.repair#ConnectorRecordKeys",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.repair#ConnectorRecordKeys",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.repair#ConnectorRecordKeys"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RepairConnectorRecordKeysParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RepairConnectorRecordKeysResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.repair#ConnectorRecordKeys. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RepairConnectorRecordKeysResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "ReprocessAutomationExecutionParams": {
                 "type": "object",
                 "properties": {
@@ -16650,6 +16770,114 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/ResumeAutomationResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RetryAutomationExecutionFromExtractsParams": {
+                "type": "object",
+                "properties": {
+                    "automationExecutionId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "automationExecutionId"
+                ],
+                "description": "DAR-BE-142. Retry a FAILED or dead-lettered window from the extracts it already read: a new execution\n            over the same window (an audit's same days) replays the failed attempt's files, so the compare and everything\n            after it run again without reading any system. Refused, in words, when a read did not finish or its file is\n            gone; then reprocess#AutomationExecution reads again."
+            },
+            "RetryAutomationExecutionFromExtractsResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "submitted": {
+                        "type": "boolean"
+                    },
+                    "automationId": {
+                        "type": "string"
+                    },
+                    "replayFromExecutionId": {
+                        "type": "string"
+                    },
+                    "extracts": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "[{side, fileName, recordCount}] replayed."
+                    }
+                }
+            },
+            "RetryAutomationExecutionFromExtractsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.retry#AutomationExecutionFromExtracts",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.retry#AutomationExecutionFromExtracts",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.retry#AutomationExecutionFromExtracts"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RetryAutomationExecutionFromExtractsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RetryAutomationExecutionFromExtractsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.retry#AutomationExecutionFromExtracts. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RetryAutomationExecutionFromExtractsResult"
                     }
                 },
                 "required": [
@@ -24541,10 +24769,12 @@
         "facade.ReconciliationFacadeServices.list#Reconciliations": "ListReconciliations",
         "facade.ReconciliationFacadeServices.list#SavedRuns": "ListSavedRuns",
         "facade.ReconciliationFacadeServices.pause#Automation": "PauseAutomation",
+        "facade.ReconciliationFacadeServices.repair#ConnectorRecordKeys": "RepairConnectorRecordKeys",
         "facade.ReconciliationFacadeServices.reprocess#AutomationExecution": "ReprocessAutomationExecution",
         "facade.ReconciliationFacadeServices.restore#Automation": "RestoreAutomation",
         "facade.ReconciliationFacadeServices.restore#SavedRun": "RestoreSavedRun",
         "facade.ReconciliationFacadeServices.resume#Automation": "ResumeAutomation",
+        "facade.ReconciliationFacadeServices.retry#AutomationExecutionFromExtracts": "RetryAutomationExecutionFromExtracts",
         "facade.ReconciliationFacadeServices.run#AutomationNow": "RunAutomationNow",
         "facade.ReconciliationFacadeServices.run#GenericDiff": "RunGenericDiff",
         "facade.ReconciliationFacadeServices.run#Reconciliation": "RunReconciliation",

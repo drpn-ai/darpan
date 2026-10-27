@@ -241,6 +241,48 @@ class ReconciliationSavedRunSupport {
         return split.normalizer ? "${folded}|${split.normalizer}".toString() : folded
     }
 
+    /**
+     * DAR-BE-142. Repairs the stored rows DAR-BE-115's save fix cannot reach: a connector source (API/DB) with no record
+     * root whose keys are bare ("omsOrderId") compares the {metadata, records} envelope. Each bare key of the run's
+     * connector sources, single (primaryIdExpression) or composite (RuleSetCompareSourceKeyField), takes the root
+     * folded in. Absolute keys, file sources and sources that still carry a root are left alone, as are rules and
+     * filters. Tenant rows only. Answers [{side, field, from, to}]; dryRun writes nothing.
+     */
+    static List<Map<String, Object>> repairConnectorRecordKeys(def ec, String tenantId, String savedRunId, Object recordRoot,
+                                                               boolean dryRun) {
+        String root = normalize(recordRoot) ?: "records"
+        String why = "repair#ConnectorRecordKeys: explicit companyUserGroupId condition applied"
+        Closure rows = { String entityName ->
+            darpan.facade.common.TenantScopedFinder.findGlobalUnscoped(ec, entityName, why).condition("companyUserGroupId", tenantId).useCache(false)
+        }
+        if (!tenantId || !savedRunId || rows("darpan.rule.RuleSet").condition("ruleSetId", savedRunId).list().isEmpty()) {
+            ec.message.addError("Run ${savedRunId} was not found.")
+            return []
+        }
+        List<Map<String, Object>> changes = []
+        rows("darpan.rule.RuleSetCompareScope").condition("ruleSetId", savedRunId).list().each { scope ->
+            rows("darpan.rule.RuleSetCompareSource").condition("compareScopeId", scope.get("compareScopeId")).list().each { source ->
+                if (!(normalize(source.get("sourceTypeEnumId")) in [SOURCE_TYPE_API, SOURCE_TYPE_DB]) || normalize(source.get("recordRootExpression"))) return
+                String side = source.get("fileSide") as String
+                String primary = normalize(source.get("primaryIdExpression"))
+                String folded = foldConnectorRecordRoot(root, primary)
+                if (primary && folded != primary) {
+                    changes << [side: side, field: "primaryIdExpression", from: primary, to: folded]
+                    if (!dryRun) { source.set("primaryIdExpression", folded); source.set("lastUpdatedDate", ec.user.nowTimestamp); source.update() }
+                }
+                rows("darpan.rule.RuleSetCompareSourceKeyField").condition("compareScopeId", scope.get("compareScopeId"))
+                        .condition("fileSide", side).orderBy("sequenceNum").list().each { key ->
+                    String expression = normalize(key.get("fieldExpression"))
+                    String keyFolded = foldConnectorRecordRoot(root, expression)
+                    if (!expression || keyFolded == expression) return
+                    changes << [side: side, field: "keyField ${key.get('sequenceNum')}".toString(), from: expression, to: keyFolded]
+                    if (!dryRun) { key.set("fieldExpression", keyFolded); key.set("lastUpdatedDate", ec.user.nowTimestamp); key.update() }
+                }
+            }
+        }
+        return changes
+    }
+
     static String normalizeJsonPrimaryIdExpression(Object rawExpression) {
         String normalized = normalize(rawExpression)
         if (!normalized) return null

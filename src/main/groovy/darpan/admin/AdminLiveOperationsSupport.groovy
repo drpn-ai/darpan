@@ -198,8 +198,9 @@ class AdminLiveOperationsSupport {
         Map<String, String> auditNames = (ec.entity.find("darpan.audit.Audit").list() ?: []).collectEntries { row ->
             [(readField(row, "auditId")): readField(row, "auditName")]
         }
-        return (ec.entity.find("darpan.audit.AuditCheck").list() ?: [])
-                .findAll { readField(it, "automationId") }
+        // A plain List: EntityList.findAll casts its closure's answer to Boolean, so a String answer throws.
+        return ((ec.entity.find("darpan.audit.AuditCheck").list() ?: []) as List)
+                .findAll { readField(it, "automationId") != null }
                 .collectEntries { row -> [(readField(row, "automationId")): auditNames[readField(row, "auditId")]] }
                 .findAll { it.value }
     }

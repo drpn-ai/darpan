@@ -410,6 +410,21 @@ class AutomationExecutionSupport {
         Map<String, Object> executionParams = new LinkedHashMap<String, Object>(input)
         Map<String, Object> sourceExtractorConfigDefaults = resolveSourceExtractorConfigDefaults(ec, automation, [file1Source, file2Source])
         if (sourceExtractorConfigDefaults) executionParams.sourceExtractorConfigDefaults = sourceExtractorConfigDefaults
+        // DAR-BE-142: a retry from the last extract reads nothing; every side is the failed attempt's file. A by-key
+        // lookup (the audit's open-finding re-checks) still reads, as it reads records the window's file may not hold.
+        String replayFrom = normalize(input.replayFromExecutionId)
+        Closure extract = sourceExtractor
+        if (replayFrom) {
+            if (windows.size() != 1) {
+                throw new IllegalStateException("A retry from the last extract replays one window; automation ${automationId} resolved ${windows.size()}.")
+            }
+            Map<String, Map<String, Object>> replay = ExtractReplaySupport.replayResults(ec,
+                    normalize(readField(automation, "companyUserGroupId")), replayFrom, !evaluateMode)
+            extract = { def extractEc, def extractAutomation, def source, Map<String, Object> extractWindow, Map extractParams ->
+                extractParams?.lookupKeys ? sourceExtractor.call(extractEc, extractAutomation, source, extractWindow, extractParams) :
+                        new LinkedHashMap<String, Object>(replay[normalize(readField(source, "fileSide"))])
+            }
+        }
 
         List<Map<String, Object>> executionResults = []
         windows.eachWithIndex { Map<String, Object> window, int index ->
@@ -506,14 +521,15 @@ class AutomationExecutionSupport {
                     if (oms1 != oms2) window.auditOtherSideStartDate = darpan.audit.AuditRecentReadSupport.otherSideStart(
                             (java.sql.Timestamp) recentRead, (java.sql.Timestamp) window.childWindowStartDate)
                 }
-                Future<Map<String, Object>> parallelSide2 = evaluateMode ? null :
+                Future<Map<String, Object>> parallelSide2 = evaluateMode || replayFrom ? null :
                         startParallelSourceExtract(ec, automation, file2Source, window, windowParams)
                 openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE1)
                 // A failure or a cancel before side 2 is joined cancels side 2's read too (DAR-BE-124).
                 try {
-                    file1Result = normalizeSourceResult(sourceExtractor.call(ec, automation, file1Source, window, windowParams), file1Source)
+                    file1Result = normalizeSourceResult(extract.call(ec, automation, file1Source, window, windowParams), file1Source)
                     RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [recordCount: file1Result.recordCount])
                     openStep = null
+                    stampExtract(ec, execution, "file1", file1Result)
                     // Task 2c: refresh the clock after source-1 extraction, a real (possibly slow) I/O call —
                     // see heartbeatAutomationRun's javadoc for why lastUpdatedStamp, not lastHeartbeatDate, is
                     // what actually protects this run from StuckRunReaper.
@@ -532,9 +548,10 @@ class AutomationExecutionSupport {
                 if (!evaluateMode) {
                     openStep = RunObservability.beginStep(ec, mintedRunResultId, stepCtx, RunObservability.STAGE_EXTRACT_FILE2)
                     file2Result = normalizeSourceResult(parallelSide2 != null ? joinParallelSourceExtract(parallelSide2) :
-                            sourceExtractor.call(ec, automation, file2Source, window, windowParams), file2Source)
+                            extract.call(ec, automation, file2Source, window, windowParams), file2Source)
                     RunObservability.endStep(ec, openStep, RunObservability.STATUS_SUCCESS, [recordCount: file2Result.recordCount])
                     openStep = null
+                    stampExtract(ec, execution, "file2", file2Result)
                 }
                 // DAR-BE-119: the audit's open findings the recent read did not reach, read again by key on both sides and
                 // appended, so they close or are concluded again from today's facts.
@@ -543,7 +560,7 @@ class AutomationExecutionSupport {
                     Map<String, Object> byKey = new LinkedHashMap<String, Object>(windowParams) + [lookupKeys: keys,
                             sideOutputLocation: DataManagerSupport.resolveReconciliationRunLocation(ec, windowParams?.automationExecutionId,
                                     DataManagerSupport.formatRunTimestamp(ec) + "-" + normalize(readField(source, "fileSide")) + "-recheck")]
-                    return normalizeSourceResult(sourceExtractor.call(ec, automation, source, window, byKey), source)
+                    return normalizeSourceResult(extract.call(ec, automation, source, window, byKey), source)
                 }
                 // Task 2c: after source-2 extraction too — a NO_DATA window returns just below without
                 // ever reaching the reconcile heartbeat, so this is the last one it gets before its own
@@ -1112,6 +1129,72 @@ class AutomationExecutionSupport {
      * run-permission are gated by the facade service (reprocess#AutomationExecution); this performs the
      * state transition and returns any user error in the result map (no ec.message, to stay unit-testable).
      */
+    /**
+     * DAR-BE-142. Each side's file and count go on the execution as soon as that side is read, not only when the window
+     * succeeds, so a window that fails later still names the extracts a retry can replay. Best effort.
+     */
+    protected static void stampExtract(def ec, def execution, String field, Map<String, Object> result) {
+        if (!hasData(result)) return
+        try {
+            updateAutomationExecution(ec, execution, [("${field}Name".toString())          : normalize(result.fileName),
+                                                      ("${field}DataManagerPath".toString()): normalize(result.dataManagerPath),
+                                                      ("${field}RecordCount".toString())    : normalizeInt(result.recordCount)])
+        } catch (Throwable t) {
+            logger.warn("Could not stamp the {} extract on execution {}: {}", field, readField(execution, "automationExecutionId"), t.message)
+        }
+    }
+
+    /**
+     * DAR-BE-142. Operator retry from the last extract: a FAILED or dead-lettered window whose reads all finished is run
+     * again as a new execution over the same window, its extracts replayed (ExtractReplaySupport) instead of read. An
+     * audit automation keeps the window the failed attempt read, so its findings land on the same morning's report.
+     * Refused up front, in words, when the attempt cannot be replayed. Answers what was submitted.
+     */
+    static Map<String, Object> retryFromExtracts(def ec, Map params) {
+        String executionId = normalize(params?.automationExecutionId)
+        if (!executionId) return [submitted: false, error: "automationExecutionId is required"]
+        def execution = TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION,
+                        "operator retry from extracts: load automation execution by id")
+                .condition("automationExecutionId", executionId).useCache(false).one()
+        if (!execution) return [submitted: false, error: "Automation execution '${executionId}' was not found.".toString()]
+        String status = normalize(readField(execution, "statusEnumId"))
+        if (!(status in [STATUS_FAILED, STATUS_DEAD_LETTER])) {
+            return [submitted: false, error: "Automation execution '${executionId}' is ${status}; only a failed window can be retried from its extracts.".toString()]
+        }
+        String automationId = normalize(readField(execution, "automationId"))
+        def automation = loadAutomation(ec, automationId)
+        String tenantId = normalize(readField(automation, "companyUserGroupId"))
+        Map<String, Map<String, Object>> files
+        try {
+            files = ExtractReplaySupport.replayResults(ec, tenantId, executionId, !isEvaluateScope(ec, automation))
+        } catch (IllegalStateException refused) {
+            return [submitted: false, error: refused.message]
+        }
+
+        Timestamp start = toTimestamp(readField(execution, "childWindowStartDate") ?: readField(execution, "windowStartDate"))
+        Timestamp end = toTimestamp(readField(execution, "childWindowEndDate") ?: readField(execution, "windowEndDate"))
+        if (start == null || end == null) return [submitted: false, error: "Execution ${executionId} recorded no window to replay.".toString()]
+        Map<String, Object> executeParams = [automationId: automationId, scheduledFireTime: nowTimestamp(ec), replayFromExecutionId: executionId]
+        if (AuditAutomationSupport.checksFor(ec, automation)) {
+            // The audit's own days in the zone its windows are cut in (AuditAutomationSupport.zoneOf), end exclusive:
+            // [Oct 1 00:00, Oct 28 00:00) is Oct 1 to 27.
+            ZoneId zone
+            try { zone = ZoneId.of(normalize(readField(automation, "windowTimeZone")) ?: "UTC") } catch (Exception ignored) { zone = ZoneId.of("UTC") }
+            executeParams.auditWindowFromDate = java.sql.Date.valueOf(start.toInstant().atZone(zone).toLocalDate())
+            executeParams.auditWindowThruDate = java.sql.Date.valueOf(new Timestamp(end.time - 1).toInstant().atZone(zone).toLocalDate())
+            executeParams.auditFullRead = true
+        } else {
+            executeParams.windowStartDate = start
+            executeParams.windowEndDate = end
+        }
+        Map submitted = submitExecuteAutomationService(ec, executeParams)
+        return [submitted            : submitted.submitted == true,
+                error                : submitted.error,
+                automationId         : automationId,
+                replayFromExecutionId: executionId,
+                extracts             : files.collect { String side, Map f -> [side: side, fileName: f.fileName, recordCount: f.recordCount] }]
+    }
+
     static Map<String, Object> reprocessAutomationExecution(def ec, Map params) {
         Map<String, Object> input = params ?: [:]
         String executionId = normalize(input.automationExecutionId)

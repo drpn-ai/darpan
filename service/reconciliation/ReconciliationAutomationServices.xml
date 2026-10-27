@@ -208,6 +208,10 @@
                 <description>DAR-BE-122. Read every source for the whole window, not just the days since the checks' last
                     complete read.</description>
             </parameter>
+            <parameter name="replayFromExecutionId">
+                <description>DAR-BE-142. Replay this failed execution's extracts instead of reading (retry from the last
+                    extract); one window only.</description>
+            </parameter>
             <parameter name="nowTimestamp" type="Timestamp"/>
             <parameter name="hasHeader" type="Boolean" default-value="true"/>
             <parameter name="outputLocation"/>

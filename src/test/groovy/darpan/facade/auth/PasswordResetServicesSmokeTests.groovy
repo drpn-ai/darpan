@@ -98,10 +98,19 @@ class PasswordResetServicesSmokeTests {
     @Test
     void resetCodeBodyRendersCode() {
         String html = renderBody("component://darpan/screen/email/PasswordResetCode.xml",
-                [code: "042117", expiresMinutes: 15, username: "u1"])
+                [code: "042117", expiresMinutes: 15, firstName: "Riya"])
         assertTrue(html.contains("042117"), html)
+        assertTrue(html.contains("Hi Riya,"), html)
         assertTrue(html.contains("15 minutes"), html)
+        // the voiced copy (DAR-BE-139) keeps the plain security instruction
+        assertTrue(html.contains("Your password stays exactly as it is."), html)
         assertFalse(html.contains("<b>") || html.contains("<strong>") || html.contains("href"), html)
+    }
+
+    @Test
+    void emailsGreetByFirstName() {
+        assertEquals("Riya", PasswordResetSupport.firstName([userFullName: "  Riya Mehta ", username: "riya.m"]))
+        assertEquals("riya.m", PasswordResetSupport.firstName([userFullName: " ", username: "riya.m"]))
     }
 
     @Test

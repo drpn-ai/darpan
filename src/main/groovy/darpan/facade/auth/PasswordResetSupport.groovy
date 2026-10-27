@@ -84,7 +84,7 @@ class PasswordResetSupport {
             } else {
                 String code = issueCode(ec, account, ip, now)
                 sendEmail(ec, TEMPLATE_RESET_CODE, (String) account.emailAddress,
-                        [code: code, expiresMinutes: CODE_LIFETIME_MINUTES, username: account.username])
+                        [code: code, expiresMinutes: CODE_LIFETIME_MINUTES, firstName: firstName(account)])
                 outcome = "code sent"
             }
         }
@@ -148,7 +148,7 @@ class PasswordResetSupport {
             row.update()
             signOutEverywhere(ec, userId)
             sendEmail(ec, TEMPLATE_PASSWORD_CHANGED, (String) account.emailAddress,
-                    [username: account.username, changedAt: ec.l10n.format(now, null)])
+                    [firstName: firstName(account), changedAt: ec.l10n.format(now, null)])
             logger.info("Password reset completed for {}", logSubject(account))
             return [passwordUpdated: true] + FacadeSupport.envelope(ec)
         }
@@ -204,6 +204,12 @@ class PasswordResetSupport {
                         EntityCondition.ComparisonOperator.EQUALS, usernameOrEmail).ignoreCase())
                 .useCache(false).list()
         return byEmail.size() == 1 ? byEmail[0] : null
+    }
+
+    /** What the emails call the person: the first word of their full name, else their username. */
+    static String firstName(def account) {
+        String fullName = account?.userFullName?.toString()?.trim()
+        return fullName ? fullName.split(/\s+/)[0] : (String) account?.username
     }
 
     /** Digits only, so a code pasted with spaces or a trailing newline still matches. */

@@ -1,15 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- DAR-BE-028 email body. Plain on purpose: no bold, and no links, because a link in a reset email is the
-     phishing shape users should learn to distrust, and a code needs none. -->
+<!-- DAR-BE-028 email body; copy voiced in DAR-BE-139 (Aditi: "it doesnt need to be so dry"). No bold, and no
+     links, because a link in a reset email is the phishing shape users should learn to distrust, and a code needs
+     none. The "not you" line stays plain: that is the security instruction. -->
 <screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
         require-authentication="false">
     <widgets>
         <render-mode><text type="html"><![CDATA[<html><body>]]></text></render-mode>
         <section name="RecoveryAddressSide" condition="isOldAddress">
-            <widgets><container><label text="This address will no longer receive Darpan password reset codes for ${username}."/></container></widgets>
-            <fail-widgets><container><label text="This address will receive Darpan password reset codes for ${username}."/></container></fail-widgets>
+            <widgets><container><label text="Hi ${firstName}, this inbox is no longer your spare key to Darpan. Password reset codes go to your new address from now on."/></container></widgets>
+            <fail-widgets><container><label text="Hi ${firstName}, done. This inbox is now your spare key to Darpan. Forget your password, and the reset code lands here."/></container></fail-widgets>
         </section>
         <container><label text="Not you? Ignore this email and tell your administrator."/></container>
+        <container><label text="— Darpan"/></container>
         <render-mode><text type="html"><![CDATA[</body></html>]]></text></render-mode>
     </widgets>
 </screen>

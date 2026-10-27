@@ -702,9 +702,9 @@
             <set field="previousEmail" from="ec.user.userAccount?.emailAddress?.trim()"/>
             <!-- Facade services carry inheritAuthz=Y, so this own-user write is authorized (as save#UserSettings). -->
             <service-call name="update#moqui.security.UserAccount" in-map="[userId: ec.user.userId, emailAddress: email]"/>
-            <script>darpan.facade.auth.PasswordResetSupport.sendEmail.call(ec, 'DARPAN_RECOVERY_EMAIL_SET', email, [username: ec.user.username, isOldAddress: false])</script>
+            <script>darpan.facade.auth.PasswordResetSupport.sendEmail.call(ec, 'DARPAN_RECOVERY_EMAIL_SET', email, [firstName: darpan.facade.auth.PasswordResetSupport.firstName(ec.user.userAccount), isOldAddress: false])</script>
             <if condition="previousEmail &amp;&amp; previousEmail.toLowerCase() != email">
-                <script>darpan.facade.auth.PasswordResetSupport.sendEmail.call(ec, 'DARPAN_RECOVERY_EMAIL_SET', previousEmail, [username: ec.user.username, isOldAddress: true])</script>
+                <script>darpan.facade.auth.PasswordResetSupport.sendEmail.call(ec, 'DARPAN_RECOVERY_EMAIL_SET', previousEmail, [firstName: darpan.facade.auth.PasswordResetSupport.firstName(ec.user.userAccount), isOldAddress: true])</script>
             </if>
 
             <set field="ok" from="!ec.message.hasError()"/>

@@ -67,6 +67,31 @@ class SecretSealTests {
     }
 
     @Test
+    void hkdfMatchesRfc5869CaseOne() {
+        byte[] ikm = (1..22).collect { (byte) 0x0b } as byte[]
+        byte[] salt = (0..12).collect { (byte) it } as byte[]
+        byte[] info = (0xf0..0xf9).collect { (byte) it } as byte[]
+        assertEquals("3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865",
+                SecretSeal.hkdf(ikm, salt, info, 42).encodeHex().toString())
+    }
+
+    @Test
+    void aTokenOpensOnlyUnderItsOwnKeyAndUnaltered() {
+        byte[] key = SecretSeal.handoffKey("instance-a-crypt-pass")
+        String token = SecretSeal.sealToken(key, '{"tenant":"A"}')
+        assertEquals('{"tenant":"A"}', SecretSeal.openToken(key, token))
+        assertFalse(token.contains("tenant"))
+
+        assertThrows(GeneralSecurityException, { SecretSeal.openToken(SecretSeal.handoffKey("instance-b-crypt-pass"), token) },
+                "a token from a differently keyed instance does not open")
+        char[] chars = token.toCharArray()
+        int last = chars.length - 3
+        chars[last] = chars[last] == ('A' as char) ? ('B' as char) : ('A' as char)
+        assertThrows(GeneralSecurityException, { SecretSeal.openToken(key, new String(chars)) }, "an altered token does not open")
+        assertThrows(GeneralSecurityException) { SecretSeal.openToken(key, "not-a-token") }
+    }
+
+    @Test
     void aKeyThatIsNoPublicKeyIsRefused() {
         assertThrows(IllegalArgumentException) { SecretSeal.newBundleKey("not-a-key") }
     }

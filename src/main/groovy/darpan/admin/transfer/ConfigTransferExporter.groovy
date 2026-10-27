@@ -7,6 +7,7 @@ import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import groovy.transform.CompileDynamic
+import org.moqui.impl.entity.FieldInfo
 
 import javax.crypto.SecretKey
 
@@ -189,7 +190,9 @@ class ConfigTransferExporter {
 
     /**
      * Seals each owned connection's non-empty secret columns (TransferSpecs.secretFields) into its sealedSecrets, and
-     * logs one source AdminAuditLog row naming the connections, the fields and the target key's fingerprint.
+     * logs one source AdminAuditLog row naming the connections, the fields and the target key's fingerprint. A column this
+     * instance cannot decrypt reads as Moqui's placeholder: it is never sealed (writing it back throws), only named in
+     * unreadableSecrets, so the target asks for it instead.
      */
     private static Map<String, Object> sealSecrets(def ec, String tenantId, List<Map> connections, Map<String, Object> bundleKey) {
         List<String> sealedLines = []
@@ -201,12 +204,18 @@ class ConfigTransferExporter {
             def row = finder(ec, entityName).condition("companyUserGroupId", tenantId).condition(kindSpec.pkField as String, id)
                     .selectFields([kindSpec.pkField as String] + secretColumns).useCache(false).list().find()
             Map<String, Map> sealed = new TreeMap<String, Map>()
+            List<String> unreadable = []
             secretColumns.each { String field ->
                 String value = row?.get(field) as String
-                if (value) sealed[field] = SecretSeal.seal(bundleKey.key as SecretKey, rec.ref as String, field, value)
+                if (value == FieldInfo.decryptFailedMagicString) unreadable << field
+                else if (value) sealed[field] = SecretSeal.seal(bundleKey.key as SecretKey, rec.ref as String, field, value)
             }
             rec.sealedSecrets = sealed
-            if (sealed) sealedLines << "${rec.ref} (${sealed.keySet().join(', ')})".toString()
+            rec.unreadableSecrets = unreadable
+            if (sealed || unreadable) {
+                sealedLines << ("${rec.ref} (${sealed.keySet().join(', ')}" +
+                        (unreadable ? "; unreadable here: ${unreadable.join(', ')}" : "") + ")").toString()
+            }
         }
         AdminAuditSupport.record(ec, "admin.TransferAdminServices.export#ConfigBundle", "Tenant", tenantId,
                 "Sealed credentials to key ${bundleKey.keyFingerprint}: ${sealedLines ? sealedLines.join('; ') : 'none'}".toString())

@@ -106,8 +106,8 @@
 
     <service verb="begin" noun="SecretHandoff" allow-remote="true" authenticate="true">
         <description>DAR-ADMIN-007. Starts a credentials handoff on the TARGET: a one-time RSA-3072 key pair. The source seals
-            credentials to publicKey; handoffToken carries the private key sealed with this instance's own entity encryption,
-            for this tenant, for 30 minutes. Nothing is stored.</description>
+            credentials to publicKey; handoffToken carries the private key, sealed (AES-256-GCM) under a key derived from this
+            instance's entity crypt pass, for this tenant, for 30 minutes. Nothing is stored but one AdminAuditLog row.</description>
         <in-parameters>
             <parameter name="tenantUserGroupId" required="true"><description>The target tenant.</description></parameter>
         </in-parameters>
@@ -126,6 +126,9 @@
             <set field="handoffToken" from="handoff.handoffToken"/>
             <set field="keyFingerprint" from="handoff.keyFingerprint"/>
             <set field="expiresAt" from="handoff.expiresAt"/>
+            <!-- Who opened a handoff into which tenant, and for which key: the fingerprint ties it to the source's export row. -->
+            <set field="ignoreAudit" from="darpan.admin.AdminAuditSupport.record(ec, 'admin.TransferAdminServices.begin#SecretHandoff',
+                    'Tenant', tenantUserGroupId, 'Credentials handoff key ' + keyFingerprint + ', expires ' + expiresAt)"/>
         </actions>
     </service>
 </services>

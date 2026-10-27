@@ -135,7 +135,7 @@ class ConfigTransferImporter {
     static Map<String, Object> analyse(def ec, String tenantId, Map bundle, Map connectionMap, String secretHandoffToken = null) {
         Map ctx = [ec      : ec, tenantId: tenantId, bundle: bundle ?: [:], map: (connectionMap ?: [:]),
                    blocking: [], warnings: [], resolved: [:], matches: [:], actions: [:], changes: [:], ruleIdentity: [:],
-                   secretValues: [:], fills: [:], kept: [:]]
+                   secretValues: [:], fills: [:], kept: [:], unreadable: [:]]
         if (text(bundle?.bundleVersion) != text(BUNDLE_VERSION)) {
             block(ctx, "BUNDLE_VERSION", null,
                     "This instance reads bundle version ${BUNDLE_VERSION}, not ${bundle?.bundleVersion}. Export again from a matching source.")
@@ -343,11 +343,23 @@ class ConfigTransferImporter {
         }
         ctx.handoffFingerprint = handoff.keyFingerprint
         records(ctx, "connections").each { Map c ->
-            Map sealed = c.sealedSecrets instanceof Map ? (Map) c.sealedSecrets : null
-            if (!sealed) return
             Map kindSpec = TransferSpecs.spec(c.kind as String)
             List<String> allowed = kindSpec && isEntityAvailable(ctx.ec, kindSpec.entityName as String) && !c.granted ?
                     secretFields(ctx.ec, kindSpec.entityName as String) : []
+            // The source could not decrypt these (Moqui's placeholder): nothing to fill, so the operator enters them here.
+            List<String> unreadable = ((c.unreadableSecrets instanceof List ? c.unreadableSecrets : []) as List).collect { it as String }.sort()
+            unreadable.findAll { !(it in allowed) }.each { String field ->
+                block(ctx, "FIELD_NOT_ALLOWED", c.ref, "${kindSpec ? shortName(kindSpec.entityName as String) : c.kind}.${field} is not " +
+                        "a credential a transfer writes; the bundle was edited. Export it again.")
+            }
+            unreadable = unreadable.findAll { it in allowed }
+            if (unreadable) {
+                ctx.unreadable[c.ref] = unreadable
+                warn(ctx, "SECRET_UNREADABLE_AT_SOURCE", c.ref, "The source cannot decrypt ${unreadable.join(', ')} of ${c.label}, so " +
+                        "it is not copied; enter it on this instance.")
+            }
+            Map sealed = c.sealedSecrets instanceof Map ? (Map) c.sealedSecrets : null
+            if (!sealed) return
             sealed.keySet().collect { it as String }.sort().each { String field ->
                 if (!(field in allowed)) {
                     block(ctx, "FIELD_NOT_ALLOWED", c.ref, "${kindSpec ? shortName(kindSpec.entityName as String) : c.kind}.${field} is not " +
@@ -374,9 +386,8 @@ class ConfigTransferImporter {
         List<String> filled = []
         List<String> kept = []
         opened.keySet().collect { it as String }.sort().each { String field ->
-            // Counted, not read: an empty column is null, and reading a set one would decrypt it for nothing.
-            boolean set = !owned || finder(ctx.ec, kindSpec.entityName as String).condition(kindSpec.pkField as String, ctx.resolved[c.ref])
-                    .condition(field, org.moqui.entity.EntityCondition.ComparisonOperator.NOT_EQUAL, null).count() > 0
+            boolean set = !owned || !isSecretEmpty(ctx.ec, kindSpec.entityName as String, kindSpec.pkField as String,
+                    ctx.resolved[c.ref] as String, field)
             (set ? kept : filled) << field
         }
         ctx.fills[c.ref] = filled
@@ -391,13 +402,36 @@ class ConfigTransferImporter {
 
     private static void fillMapped(Map ctx, Map c) {
         Map kindSpec = TransferSpecs.spec(c.kind as String)
-        Map<String, String> secrets = fillsFor(ctx, c)
-        def value = finder(ctx.ec, kindSpec.entityName as String).condition(kindSpec.pkField as String, ctx.resolved[c.ref])
-                .selectFields([kindSpec.pkField as String, "companyUserGroupId"] + (secrets.keySet() as List<String>)).useCache(false).one()
-        if (value == null || value.companyUserGroupId != ctx.tenantId) throw new IllegalStateException("${c.label} changed on this instance during the transfer.")
-        secrets.each { String field, String secret -> value.set(field, secret) }
+        List<String> filled = fillEmptySecrets(ctx.ec, kindSpec.entityName as String, kindSpec.pkField as String,
+                ctx.resolved[c.ref] as String, ctx.tenantId as String, fillsFor(ctx, c))
+        ctx.filledCount = ((ctx.filledCount ?: 0) as int) + filled.size()
+    }
+
+    /**
+     * Writes each credential into the tenant's own connection only where that column is empty at the moment of writing,
+     * so a value saved since the plan read the row is never overwritten. Answers the fields written.
+     */
+    static List<String> fillEmptySecrets(def ec, String entityName, String pkField, String id, String tenantId, Map<String, String> secrets) {
+        List<String> empty = secrets.keySet().findAll { isSecretEmpty(ec, entityName, pkField, id, it as String) }.collect { it as String }.sort()
+        def value = finder(ec, entityName).condition(pkField, id).selectFields([pkField, "companyUserGroupId"]).useCache(false).one()
+        if (value == null || value.companyUserGroupId != tenantId) throw new IllegalStateException("Connection ${id} changed on this instance during the transfer.")
+        if (!empty) return []
+        empty.each { String field -> value.set(field, secrets[field]) }
         value.update()
-        ctx.filledCount = ((ctx.filledCount ?: 0) as int) + secrets.size()
+        return empty
+    }
+
+    /**
+     * A credential column is empty when it is NULL or '' as stored (checked as raw SQL: a condition on an encrypted column
+     * is itself encrypted), or when it decrypts to ''. A value that does not decrypt is not empty: it is never overwritten.
+     */
+    private static boolean isSecretEmpty(def ec, String entityName, String pkField, String id, String field) {
+        String column = ec.entity.getEntityDefinition(entityName).getColumnName(field)
+        if (finder(ec, entityName).condition(pkField, id)
+                .condition(ec.entity.conditionFactory.makeConditionWhere("(${column} IS NULL OR ${column} = '')".toString()))
+                .useCache(false).count() > 0) return true
+        def row = finder(ec, entityName).condition(pkField, id).selectFields([pkField, field]).useCache(false).one()
+        return row != null && (row.get(field) as String) == ""
     }
 
     // ---------------------------------------------------------------- matching
@@ -480,10 +514,14 @@ class ConfigTransferImporter {
                 List secrets = (c.secretFields ?: []) as List
                 Map opened = (ctx.secretValues[c.ref] ?: [:]) as Map
                 ctx.fills[c.ref] = opened.keySet().sort()
-                // With sealed credentials it needs them only when the source had none to send.
-                boolean needs = secrets && !opened
+                // With sealed credentials it needs them only when the source had none to send, or could not read some.
+                List<String> unreadable = (ctx.unreadable[c.ref] ?: []) as List<String>
+                boolean needs = secrets && (!opened || unreadable)
                 ctx.actions[c.ref] = needs ? "NEEDS_CREDENTIALS" : CREATE
-                if (needs) warn(ctx, "NEEDS_CREDENTIALS", c.ref, "${c.label} is created without ${secrets.join(', ')}; enter them on this instance.")
+                if (needs) {
+                    warn(ctx, "NEEDS_CREDENTIALS", c.ref, "${c.label} is created without ${(unreadable ?: secrets).join(', ')}; " +
+                            "enter them on this instance.")
+                }
             } else if (connectionTarget(ctx, kindSpec, choice) == null) {
                 // One answer for a missing id, another kind's id and another tenant's id (DAR-BE-135).
                 block(ctx, "CONNECTION_NOT_FOUND", c.ref, "Connection ${choice} was not found for ${c.label}.")

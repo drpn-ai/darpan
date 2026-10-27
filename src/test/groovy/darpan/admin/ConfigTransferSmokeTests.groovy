@@ -1,5 +1,6 @@
 package darpan.admin
 
+import darpan.admin.transfer.ConfigTransferImporter
 import darpan.admin.transfer.SecretHandoff
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
@@ -755,7 +756,8 @@ class ConfigTransferSmokeTests {
             String everythingSaid = JsonOutput.toJson([preview.result, applied.result, preview.errors, applied.errors,
                     ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().useCache(false).list()*.getMap()])
             plaintexts.each { assertFalse(everythingSaid.contains(it), "no plaintext in a plan, an error or the audit log: ${it}") }
-            assertTrue((ec.entity.find("darpan.admin.AdminAuditLog").condition("targetId", DST).disableAuthz().useCache(false).one()
+            assertTrue((ec.entity.find("darpan.admin.AdminAuditLog").condition("targetId", DST)
+                    .condition("serviceName", "admin.TransferAdminServices.import#ConfigBundle").disableAuthz().useCache(false).one()
                     .detailText as String).contains("credentials filled: 6"), "the apply log counts the fields filled")
         } finally {
             wipeTenant(DST)
@@ -776,6 +778,100 @@ class ConfigTransferSmokeTests {
         Map bundle = exportSealed(handoff.publicKey as String)
         assertEquals(["SECRET_HANDOFF_INVALID"], blockedCodes(bundle, handoff.handoffToken as String))
         assertEquals(["SECRET_HANDOFF_INVALID"], blockedCodes(bundle, "not-a-token"), "an unreadable token answers the same")
+    }
+
+    @Test
+    void tamperedHandoffTokenBlocks() {
+        Map handoff = beginHandoff(DST)
+        Map bundle = exportSealed(handoff.publicKey as String)
+        char[] chars = (handoff.handoffToken as String).toCharArray()
+        int at = chars.length - 5
+        chars[at] = chars[at] == ('A' as char) ? ('B' as char) : ('A' as char)
+        assertEquals(["SECRET_HANDOFF_INVALID"], blockedCodes(bundle, new String(chars)))
+    }
+
+    @Test
+    void beginIsAuditLoggedOnTheTarget() {
+        Map handoff = beginHandoff(DST)
+        List rows = ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().useCache(false).list()
+        assertEquals(1, rows.size())
+        assertEquals("admin.TransferAdminServices.begin#SecretHandoff", rows[0].serviceName)
+        assertEquals(DST, rows[0].targetId)
+        assertTrue((rows[0].detailText as String).contains(handoff.keyFingerprint as String), rows[0].detailText as String)
+        assertTrue((rows[0].detailText as String).contains("expires"), rows[0].detailText as String)
+        assertFalse((rows[0].detailText as String).contains(handoff.handoffToken as String))
+    }
+
+    @Test
+    void unreadableSecretAtSourceIsNeedsCredentials() {
+        // Prod's OMS apiToken does not decrypt: Moqui reads it as its _DECRYPT_FAILED_ placeholder, which must never be
+        // sealed (writing it back throws) and must not fail the transfer either.
+        Closure update = { String value -> rawColumn("XFER_NS_AUTH", "apiToken", value) }
+        update("zz-not-ciphertext")
+        try {
+            Map handoff = beginHandoff(DST)
+            Map bundle = exportSealed(handoff.publicKey as String)
+            Map auth = (bundle.connections as List<Map>).find { it.ref == AUTH_REF }
+            assertEquals(["apiToken"], auth.unreadableSecrets)
+            assertEquals(["password", "privateKeyPem"], (auth.sealedSecrets as Map).keySet().collect { it as String }.sort())
+            assertFalse(JsonOutput.toJson(bundle).contains("_DECRYPT_FAILED_"))
+            String sourceRow = ec.entity.find("darpan.admin.AdminAuditLog").condition("serviceName", "admin.TransferAdminServices.export#ConfigBundle")
+                    .disableAuthz().useCache(false).one().detailText
+            assertTrue(sourceRow.contains("unreadable") && sourceRow.contains("apiToken"), sourceRow)
+
+            Map preview = importInto(DST, bundle, [(AUTH_REF): "CREATE"], false, null, handoff.handoffToken as String)
+            Map plan = preview.result.plan as Map
+            assertEquals([], plan.blocking, "an unreadable source secret is a warning, not a block")
+            Map line = (plan.lines as List<Map>).find { it.ref == AUTH_REF }
+            assertEquals("NEEDS_CREDENTIALS", line.action)
+            assertEquals(["password", "privateKeyPem"], line.secretsFilled)
+            Map warning = (plan.warnings as List<Map>).find { it.code == "SECRET_UNREADABLE_AT_SOURCE" }
+            assertEquals(AUTH_REF, warning?.ref, "${plan.warnings}")
+            assertTrue((warning.message as String).contains("apiToken"))
+
+            Map applied = importInto(DST, bundle, [(AUTH_REF): "CREATE"], true, preview.result.planHash as String, handoff.handoffToken as String)
+            assertNoErrors(applied)
+            def target = ec.entity.find("darpan.reconciliation.NsAuthConfig").condition("nsAuthConfigId", applied.result.idMap[AUTH_REF])
+                    .disableAuthz().useCache(false).one()
+            assertEquals(PASSWORD, target.password)
+            assertNull(target.apiToken)
+        } finally {
+            update(null)
+        }
+    }
+
+    @Test
+    void emptyStringTargetSecretIsFilled() {
+        create("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "XFER_DST_AUTH", description: "dst auth", companyUserGroupId: DST,
+                authType: "OAUTH2_M2M"])
+        // Raw SQL: the entity layer stores a blank as null, but a hand load can leave '' in the column.
+        rawColumn("XFER_DST_AUTH", "password", "")
+        Map handoff = beginHandoff(DST)
+        Map bundle = exportSealed(handoff.publicKey as String)
+        Map map = [(AUTH_REF): "XFER_DST_AUTH"]
+        Map preview = importInto(DST, bundle, map, false, null, handoff.handoffToken as String)
+        assertEquals(["password", "privateKeyPem"], (preview.result.plan.lines as List<Map>).find { it.ref == AUTH_REF }.secretsFilled,
+                "an empty string is as empty as null")
+        assertNoErrors(importInto(DST, bundle, map, true, preview.result.planHash as String, handoff.handoffToken as String))
+        assertEquals(PASSWORD, ec.entity.find("darpan.reconciliation.NsAuthConfig").condition("nsAuthConfigId", "XFER_DST_AUTH")
+                .disableAuthz().useCache(false).one().password)
+    }
+
+    @Test
+    void fillingNeverOverwritesASecretSetMeanwhile() {
+        // The guarded write the apply makes for a mapped connection, called directly: a value saved since the plan read
+        // the row (a concurrent settings save) is kept.
+        create("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "XFER_DST_AUTH", description: "dst auth", companyUserGroupId: DST,
+                authType: "OAUTH2_M2M", password: "saved-meanwhile"])
+        List filled = ConfigTransferImporter.fillEmptySecrets(ec, "darpan.reconciliation.NsAuthConfig", "nsAuthConfigId", "XFER_DST_AUTH",
+                DST, [password: "from-transfer", privateKeyPem: "pem-from-transfer"])
+        assertEquals(["privateKeyPem"], filled)
+        def auth = ec.entity.find("darpan.reconciliation.NsAuthConfig").condition("nsAuthConfigId", "XFER_DST_AUTH").disableAuthz().useCache(false).one()
+        assertEquals("saved-meanwhile", auth.password)
+        assertEquals("pem-from-transfer", auth.privateKeyPem)
+        assertThrows(IllegalStateException) {
+            ConfigTransferImporter.fillEmptySecrets(ec, "darpan.reconciliation.NsAuthConfig", "nsAuthConfigId", "XFER_DST_AUTH", OTHER, [apiToken: "x"])
+        }
     }
 
     @Test
@@ -850,7 +946,8 @@ class ConfigTransferSmokeTests {
     void secretExportIsAuditLogged() {
         Map handoff = beginHandoff(DST)
         exportSealed(handoff.publicKey as String)
-        List rows = ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().useCache(false).list()
+        List rows = ec.entity.find("darpan.admin.AdminAuditLog").condition("serviceName", "admin.TransferAdminServices.export#ConfigBundle")
+                .disableAuthz().useCache(false).list()
         assertEquals(1, rows.size(), "one source row per export that carries secrets")
         assertEquals("admin.TransferAdminServices.export#ConfigBundle", rows[0].serviceName)
         assertEquals(SRC, rows[0].targetId)
@@ -991,6 +1088,22 @@ class ConfigTransferSmokeTests {
         Map preview = importInto(tenantId, bundle, connectionMap)
         assertNoErrors(preview)
         return importInto(tenantId, bundle, connectionMap, true, preview.result.planHash as String)
+    }
+
+    /** Writes an NsAuthConfig column as raw SQL, bypassing the entity layer's encryption. */
+    private void rawColumn(String nsAuthConfigId, String field, String value) {
+        def ed = ec.entity.getEntityDefinition("darpan.reconciliation.NsAuthConfig")
+        def connection = ec.entity.getConnection(ec.entity.getEntityGroupName("darpan.reconciliation.NsAuthConfig"))
+        try {
+            def statement = connection.prepareStatement("UPDATE ${ed.getFullTableName()} SET ${ed.getColumnName(field)} = ? " +
+                    "WHERE ${ed.getColumnName("nsAuthConfigId")} = ?")
+            statement.setString(1, value)
+            statement.setString(2, nsAuthConfigId)
+            statement.executeUpdate()
+            statement.close()
+        } finally {
+            connection.close()
+        }
     }
 
     private Map beginHandoff(String tenantId) {

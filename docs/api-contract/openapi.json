@@ -3162,7 +3162,7 @@
                 "required": [
                     "tenantUserGroupId"
                 ],
-                "description": "DAR-ADMIN-007. Starts a credentials handoff on the TARGET: a one-time RSA-3072 key pair. The source seals\n            credentials to publicKey; handoffToken carries the private key sealed with this instance's own entity encryption,\n            for this tenant, for 30 minutes. Nothing is stored."
+                "description": "DAR-ADMIN-007. Starts a credentials handoff on the TARGET: a one-time RSA-3072 key pair. The source seals\n            credentials to publicKey; handoffToken carries the private key, sealed (AES-256-GCM) under a key derived from this\n            instance's entity crypt pass, for this tenant, for 30 minutes. Nothing is stored but one AdminAuditLog row."
             },
             "BeginSecretHandoffResult": {
                 "type": "object",

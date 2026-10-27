@@ -4,10 +4,12 @@ import groovy.transform.CompileStatic
 
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
+import javax.crypto.Mac
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.OAEPParameterSpec
 import javax.crypto.spec.PSource
+import javax.crypto.spec.SecretKeySpec
 import java.nio.charset.StandardCharsets
 import java.security.GeneralSecurityException
 import java.security.KeyFactory
@@ -27,6 +29,9 @@ import java.security.spec.X509EncodedKeySpec
  * bundle, and each value is sealed with AES-256-GCM under a fresh 12-byte IV and AAD "<ref>|<field>", so a ciphertext
  * opens only on the connection and field it was sealed for. Base64 throughout.
  *
+ * <p>The handoff token is sealed apart from that: AES-256-GCM under a key HKDF-SHA256 derives from the instance's entity
+ * crypt pass (info {@link #HANDOFF_INFO}), so it is authenticated and opens only where that key can be derived.</p>
+ *
  * <p>Nothing here logs, and no message it raises carries a value.</p>
  */
 @CompileStatic
@@ -37,6 +42,7 @@ class SecretSeal {
     private static final OAEPParameterSpec OAEP = new OAEPParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA256, PSource.PSpecified.DEFAULT)
     private static final String GCM = "AES/GCM/NoPadding"
     private static final SecureRandom RANDOM = new SecureRandom()
+    static final String HANDOFF_INFO = "darpan-transfer-handoff-v1"
 
     /** A one-time key pair: [publicKey (base64 SPKI), privateKey (base64 PKCS8), keyFingerprint]. */
     static Map<String, String> newKeyPair() {
@@ -98,6 +104,56 @@ class SecretSeal {
             return new String(aes.doFinal(Base64.decoder.decode(sealed?.get("ct") as String)), StandardCharsets.UTF_8)
         } catch (IllegalArgumentException | NullPointerException ignored) {
             throw new GeneralSecurityException("The sealed value is not well formed.")
+        }
+    }
+
+    /** RFC 5869 HKDF with HMAC-SHA256. */
+    static byte[] hkdf(byte[] ikm, byte[] salt, byte[] info, int length) {
+        Mac mac = Mac.getInstance("HmacSHA256")
+        mac.init(new SecretKeySpec(salt ?: new byte[32], "HmacSHA256"))
+        byte[] prk = mac.doFinal(ikm)
+        mac.init(new SecretKeySpec(prk, "HmacSHA256"))
+        ByteArrayOutputStream okm = new ByteArrayOutputStream()
+        byte[] block = new byte[0]
+        int counter = 1
+        while (okm.size() < length) {
+            mac.update(block)
+            mac.update(info ?: new byte[0])
+            mac.update((byte) counter++)
+            block = mac.doFinal()
+            okm.write(block)
+        }
+        return Arrays.copyOf(okm.toByteArray(), length)
+    }
+
+    /** The 256-bit key an instance seals its handoff tokens with, derived from its entity crypt pass. */
+    static byte[] handoffKey(String cryptPass) {
+        return hkdf(cryptPass.getBytes(StandardCharsets.UTF_8), "darpan-transfer-handoff".getBytes(StandardCharsets.UTF_8),
+                HANDOFF_INFO.getBytes(StandardCharsets.UTF_8), 32)
+    }
+
+    /** "<iv>.<ciphertext>", base64url, AES-256-GCM with AAD {@link #HANDOFF_INFO}. */
+    static String sealToken(byte[] key, String payload) {
+        byte[] iv = new byte[12]
+        RANDOM.nextBytes(iv)
+        Cipher aes = Cipher.getInstance(GCM)
+        aes.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key, "AES"), new GCMParameterSpec(128, iv))
+        aes.updateAAD(HANDOFF_INFO.getBytes(StandardCharsets.UTF_8))
+        Base64.Encoder url = Base64.urlEncoder.withoutPadding()
+        return url.encodeToString(iv) + "." + url.encodeToString(aes.doFinal(payload.getBytes(StandardCharsets.UTF_8)))
+    }
+
+    /** The payload, or GeneralSecurityException when the token was altered, is malformed, or was sealed under another key. */
+    static String openToken(byte[] key, String token) {
+        String[] parts = (token ?: "").split("\\.")
+        if (parts.length != 2) throw new GeneralSecurityException("The handoff token is not well formed.")
+        try {
+            Cipher aes = Cipher.getInstance(GCM)
+            aes.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key, "AES"), new GCMParameterSpec(128, Base64.urlDecoder.decode(parts[0])))
+            aes.updateAAD(HANDOFF_INFO.getBytes(StandardCharsets.UTF_8))
+            return new String(aes.doFinal(Base64.urlDecoder.decode(parts[1])), StandardCharsets.UTF_8)
+        } catch (IllegalArgumentException ignored) {
+            throw new GeneralSecurityException("The handoff token is not well formed.")
         }
     }
 

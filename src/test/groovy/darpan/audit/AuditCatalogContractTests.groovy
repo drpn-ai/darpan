@@ -4,6 +4,7 @@ import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.xml.XmlParser
 import org.junit.jupiter.api.Test
 
+import java.nio.file.Files
 import java.nio.file.Path
 
 import static org.junit.jupiter.api.Assertions.assertEquals
@@ -68,21 +69,50 @@ class AuditCatalogContractTests {
         }
     }
 
+    /**
+     * The newest shipped pack holding any audit enum type: the release packs in version order, then the current one.
+     * data/upgrade-data.xml is rebuilt each release from the previous tag, so after 2.1.0 the vocabulary lives in
+     * releases/2.1.0, not in a later delta pack, until a release changes it and restates it.
+     */
+    private static Path vocabularyPack() {
+        Path data = dataDir()
+        List<Path> packs = Files.list(data.resolve("releases"))
+                .filter { Path d -> d.fileName.toString() ==~ /\d+(\.\d+)*/ && Files.exists(d.resolve("upgrade-data.xml")) }
+                .sorted({ Path a, Path b -> versionOf(a) <=> versionOf(b) } as Comparator<Path>)
+                .collect { it.resolve("upgrade-data.xml") }
+        packs << data.resolve("upgrade-data.xml")
+        Path found = packs.findAll { Path pack ->
+            packRows(pack, "moqui.basic.EnumerationType").any { CODES.containsKey(it.attribute("enumTypeId")) }
+        }.with { it ? it.last() : null }
+        assertTrue(found != null, "no shipped upgrade pack carries the audit vocabulary")
+        return found
+    }
+
+    private static String versionOf(Path releaseDir) {
+        return releaseDir.fileName.toString().tokenize(".").collect { (it as int).toString().padLeft(6, "0") }.join(".")
+    }
+
+    private static List<Node> packRows(Path pack, String elementName) {
+        return new XmlParser(false, false).parse(pack.toFile()).children()
+                .findAll { it instanceof Node && it.name() == elementName } as List<Node>
+    }
+
     @Test
     void theUpgradePackRestatesTheVocabularyVerbatim() {
         // An existing database only gets darpan-seed rows through the upgrade pack.
+        Path vocabulary = vocabularyPack()
         ["moqui.basic.EnumerationType", "moqui.basic.Enumeration"].each { String element ->
             List<Map> seed = rows("AuditSeedData.xml", element)*.attributes()
-            List<Map> pack = rows("upgrade-data.xml", element)*.attributes()
-            seed.each { Map row -> assertTrue(pack.contains(row), "upgrade-data.xml is missing ${element} ${row}") }
+            List<Map> pack = packRows(vocabulary, element)*.attributes()
+            seed.each { Map row -> assertTrue(pack.contains(row), "${vocabulary} is missing ${element} ${row}") }
         }
         // Document order is load order: every type ahead of its first member.
-        List<Node> pack = new XmlParser(false, false).parse(dataDir().resolve("upgrade-data.xml").toFile())
+        List<Node> pack = new XmlParser(false, false).parse(vocabulary.toFile())
                 .children().findAll { it instanceof Node } as List<Node>
         CODES.keySet().each { String type ->
             int typeAt = pack.findIndexOf { it.name() == "moqui.basic.EnumerationType" && it.attribute("enumTypeId") == type }
             int firstMember = pack.findIndexOf { it.name() == "moqui.basic.Enumeration" && it.attribute("enumTypeId") == type }
-            assertTrue(typeAt >= 0 && typeAt < firstMember, "${type} must precede its members in upgrade-data.xml")
+            assertTrue(typeAt >= 0 && typeAt < firstMember, "${type} must precede its members in ${vocabulary}")
         }
     }
 

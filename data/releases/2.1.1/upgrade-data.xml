@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Upgrade data for Darpan 2.1.1 (from 2.1.0). Load on EVERY instance with ./gradlew loadDarpanUpgradeData.
+Generated from backend compare range v2.1.0..HEAD, darpan-seed files only; every record also lives in its generic
+seed file under runtime/component/darpan/data/. Five records: four active-tenant entity filters (badges, side
+quests, streak facts, tenant conclusions) and the Shopify returns connector's completedReturns extract option.
+Tenant config (RAILS: data/RailsAuditData.xml, type darpan-tenant-config) is NOT here; it is loaded per tenant.
+-->
+<entity-facade-xml type="darpan-seed">
+    <!-- Added records from data/SecuritySeedData.xml -->
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_AUTOMATION_STREAK_BADGE" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.AutomationStreakBadge" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_TENANT_CONCLUSION" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.rule.TenantConclusion" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_TENANT_STREAK_FACT" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.TenantStreakFact" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <moqui.security.EntityFilter entityFilterId="DARPAN_SCOPE_TENANT_STREAK_QUEST" entityFilterSetId="DARPAN_ACTIVE_COMPANY_SCOPE" entityName="darpan.reconciliation.TenantStreakQuest" filterMap="[companyUserGroupId: activeTenantUserGroupId]"/>
+    <!-- Modified records from data/SourceSystemConnectorSeedData.xml -->
+    <darpan.reconciliation.SourceSystemConnector systemEnumId="SHOPIFY_RETURN_REFS" extractServiceName="reconciliation.ShopifyOrderExtractionServices.extract#ShopifyOrderReturnRefs" dateFromParameterName="windowStart" dateToParameterName="windowEnd" expectedSourceConfigType="SHOPIFY_RETURN_REFS_API" configParameterName="shopifyAuthConfigId" configEntityName="darpan.shopify.ShopifyAuthConfig" remoteId="SHOPIFY_REMOTE" endpointLabel="Returns" systemAliases="SHOPIFY_RETURN_REFS,SHOPIFY_RETURNS,DAR_SYS_SHOPIFY_RETURN_REFS" preserveWindowInstants="N" filterParameterName="sourceFilters" keepFieldsBase="refundOrReturnId,refundOrReturnType,orderId,createdAt,orderCancelledAt,refundLineEverFulfilled,orderReturnStatus" lookupServiceName="reconciliation.ShopifyOrderExtractionServices.lookup#ShopifyRefundOrReturnIds" lookupIdsParameterName="refundOrReturnIds" lookupMaxIds="50000" enabled="Y" extractOptionsJson='[{"name":"completedReturns","label":"Completed returns, one row per order: refunded, exchanged or orderRefunded","type":"text"}]'/>
+</entity-facade-xml>

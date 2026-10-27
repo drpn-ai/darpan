@@ -2,6 +2,7 @@ package darpan.audit
 
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.automation.AutomationExecutionSupport
+import darpan.reconciliation.automation.ExtractReplaySupport
 import darpan.reconciliation.automation.RunAdmission
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
@@ -21,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
 import static org.junit.jupiter.api.Assertions.assertNotEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
+import static org.junit.jupiter.api.Assertions.assertThrows
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
@@ -336,6 +338,20 @@ class AuditSettingsSmokeTests {
         thread.start()
         thread.join(120_000L)
         assertFalse(thread.alive, "the run finished")
+    }
+
+    // DAR-BE-147: one() on the execution's full key dropped the tenant condition beside it, so another tenant's
+    // execution read as found and its replay answered "did not finish reading" where a missing one says "not found".
+    @Test
+    @Order(12)
+    void anotherTenantsExecutionIsNotFoundForAReplay() {
+        insert("darpan.reconciliation.ReconciliationAutomationExecution", [automationExecutionId: "TSET_REPLAY_OTHER",
+                automationId: checkRow("TSET_PAID").automationId, companyUserGroupId: OTHER, statusEnumId: "AUT_STAT_FAILED", retryCount: 0L])
+
+        IllegalStateException refused = assertThrows(IllegalStateException) {
+            ExtractReplaySupport.replayResults(ec, MINE, "TSET_REPLAY_OTHER", true)
+        }
+        assertEquals("Automation execution TSET_REPLAY_OTHER was not found.", refused.message)
     }
 
     private Map facade(String verbNoun, Map params = [:]) {

@@ -44,8 +44,8 @@ class ExtractReplaySupport {
      * when it cannot be replayed.
      */
     static Map<String, Map<String, Object>> replayResults(def ec, String tenantId, String executionId, boolean twoSided) {
-        def execution = TenantScopedFinder.findGlobalUnscoped(ec, DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION, WHY)
-                .condition("companyUserGroupId", tenantId).condition("automationExecutionId", executionId).useCache(false).one()
+        def execution = TenantScopedFinder.findOneOwnedByTenant(ec, DarpanEntityConstants.RECONCILIATION_AUTOMATION_EXECUTION,
+                "automationExecutionId", executionId, tenantId, "extract replay: the execution's owner is checked on the row")
         if (execution == null) throw new IllegalStateException("Automation execution ${executionId} was not found.")
         Map<String, Integer> counts = readCounts(ec, tenantId, readField(execution, "reconciliationRunResultId") as String)
         List<String> sides = twoSided ? [SIDE_1, SIDE_2] : [SIDE_1]

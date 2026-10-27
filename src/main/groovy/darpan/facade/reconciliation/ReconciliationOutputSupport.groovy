@@ -99,7 +99,7 @@ class ReconciliationOutputSupport {
         if (runFolderTenantUserGroupId) return runFolderTenantUserGroupId
 
         File tenantSourceFile = OutputPathSupport.isGeneratedResultFile(safePath) ? file : (OutputPathSupport.resolveSourceArtifactResultFile(ec, safePath) ?: file)
-        Map<String, Object> outputDocument = OutputDescriptorSupport.parseOutputDocument(tenantSourceFile)
+        Map<String, Object> outputDocument = OutputDescriptorSupport.readOutputDocumentHeader(tenantSourceFile)
         return normalize(outputDocument?.metadata instanceof Map ? outputDocument.metadata.companyUserGroupId : null)
     }
 
@@ -253,7 +253,7 @@ class ReconciliationOutputSupport {
     private static Map<String, Object> describeListedOutput(def ec, Map<String, Object> outputFile) {
         if (outputFile.descriptor == null) {
             File file = (File) outputFile.file
-            Map<String, Object> outputDocument = file != null ? OutputDescriptorSupport.parseOutputDocument(file) : [:]
+            Map<String, Object> outputDocument = file != null ? OutputDescriptorSupport.readOutputDocumentHeader(file) : [:]
             outputFile.descriptor = outputFile.runResult ?
                     OutputDescriptorSupport.buildRunResultDescriptor(ec, outputFile.runResult, file, outputDocument) :
                     OutputDescriptorSupport.buildGeneratedOutputDescriptor(outputFile.fileName as String, outputDocument, file.length(), new Timestamp(file.lastModified()))

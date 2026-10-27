@@ -4,12 +4,11 @@ import darpan.common.DarpanEntityConstants
 import darpan.facade.common.FacadeSupport
 import darpan.facade.common.PaginationSupport
 import darpan.facade.common.TenantAccessSupport
+import darpan.facade.reconciliation.OutputDescriptorSupport
 import darpan.facade.reconciliation.ReconciliationOutputSupport
 import darpan.facade.reconciliation.ReconciliationSavedRunSupport
 import jsonschema.common.JsonSchemaConstants
 import jsonschema.common.JsonSchemaUtil
-import org.slf4j.Logger
-import org.slf4j.LoggerFactory
 
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -18,7 +17,6 @@ import java.sql.Timestamp
 import static darpan.common.ValueSupport.normalize
 
 class NavigationSearchSupport {
-    private static final Logger logger = LoggerFactory.getLogger(NavigationSearchSupport.class)
 
     static final String TYPE_SCHEMA = "schema"
     static final String TYPE_SFTP_SERVER = "sftp-server"
@@ -366,15 +364,9 @@ class NavigationSearchSupport {
                     if (file == null || !file.exists() || !file.isFile() || !outputFileName) return []
                     if (!ReconciliationOutputSupport.canAccessGeneratedOutputFile(ec, file, outputFileName)) return []
 
-                    Map outputDocument = [:]
-                    if (ReconciliationOutputSupport.sourceFormatForFile(file.name) == "json") {
-                        try {
-                            outputDocument = ReconciliationOutputSupport.parseGeneratedOutputText(file.getText("UTF-8"))
-                        } catch (Exception e) {
-                            logger.warn("Failed to parse generated output for navigation search: {}", file.name, e)
-                            outputDocument = [:]
-                        }
-                    }
+                    // DAR-BE-148: a target needs only the document's metadata and summary, read from its head;
+                    // parsing every result whole made one search read GBs.
+                    Map outputDocument = OutputDescriptorSupport.readOutputDocumentHeader(file)
 
                     Map<String, Object> descriptor = ReconciliationOutputSupport.buildGeneratedOutputDescriptor(
                             outputFileName,

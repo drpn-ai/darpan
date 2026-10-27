@@ -827,8 +827,8 @@ class ReconciliationOutputSupportTests {
         )
 
         List<String> parsed = []
-        def parse = OutputDescriptorSupport.metaClass.getStaticMetaMethod("parseOutputDocument", [File] as Class[])
-        OutputDescriptorSupport.metaClass.static.parseOutputDocument = { File file ->
+        def parse = OutputDescriptorSupport.metaClass.getStaticMetaMethod("readOutputDocumentHeader", [File] as Class[])
+        OutputDescriptorSupport.metaClass.static.readOutputDocumentHeader = { File file ->
             parsed.add(file.name)
             return parse.invoke(null, file)
         }
@@ -843,6 +843,35 @@ class ReconciliationOutputSupportTests {
         } finally {
             GroovySystem.metaClassRegistry.removeMetaClass(OutputDescriptorSupport)
         }
+    }
+
+    /**
+     * DAR-BE-148: a list row, a search target and the ownership fallback need only the metadata and
+     * summary header lines, so a result document is never parsed past them. The differences here are
+     * not even valid JSON, so a whole-document parse would answer nothing.
+     */
+    @Test
+    void outputDocumentHeaderComesFromTheHeadAloneAndSkipsASummaryInsideMetadata(@TempDir File dir) {
+        File result = new File(dir, "RS_HEAD_result.json")
+        result.text = '{\n"metadata":{"savedRunName":"Head","note":{"summary":{"totalDifferences":99}}},\n' +
+                '"summary":{"totalDifferences":7},\n"validationErrors":[],\n"processingWarnings":[],\n"differences":[\n{"id":"1", broken'
+
+        Map<String, Object> header = OutputDescriptorSupport.readOutputDocumentHeader(result)
+
+        assertEquals("Head", ((Map) header.metadata).savedRunName)
+        assertEquals(7, ((Map) header.summary).totalDifferences)
+        assertEquals([:], OutputDescriptorSupport.parseOutputDocument(result))
+    }
+
+    @Test
+    void anOutputDocumentWithoutBothHeaderLinesUpFrontIsParsedWhole(@TempDir File dir) {
+        File result = new File(dir, "RS_LEGACY_result.json")
+        result.text = '{"metadata":{"savedRunName":"Legacy"},"differences":[{"id":"1"}],"summary":{"totalDifferences":1}}'
+
+        Map<String, Object> header = OutputDescriptorSupport.readOutputDocumentHeader(result)
+
+        assertEquals("Legacy", ((Map) header.metadata).savedRunName)
+        assertEquals(1, ((Map) header.summary).totalDifferences)
     }
 
     static class FakeResource {

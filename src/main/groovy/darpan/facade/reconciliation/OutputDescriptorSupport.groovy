@@ -55,22 +55,51 @@ class OutputDescriptorSupport {
         if (artifactFile == null || !artifactFile.exists() || !artifactFile.isFile()) return [:]
 
         try {
-            char[] buffer = new char[ARTIFACT_HEADER_SCAN_CHARS]
-            int read = 0
-            artifactFile.withReader("UTF-8") { Reader reader ->
-                while (read < buffer.length) {
-                    int count = reader.read(buffer, read, buffer.length - read)
-                    if (count < 0) break
-                    read += count
-                }
-            }
-            String metadataJson = extractJsonObjectForKey(new String(buffer, 0, Math.max(read, 0)), '"metadata"')
+            String metadataJson = extractJsonObjectForKey(readHead(artifactFile), '"metadata"')
             if (!metadataJson) return [:]
             def parsed = new JsonSlurper().parseText(metadataJson)
             return parsed instanceof Map ? (Map<String, Object>) parsed : [:]
         } catch (Exception ignored) {
             return [:]
         }
+    }
+
+    /**
+     * DAR-BE-146/148: a result document's metadata and summary, all a list row, a search target or an
+     * ownership fallback is built from, read from its bounded head. writeDiffDatasetOutput writes both
+     * as header lines before "differences" (DiffDocumentStreamSupport); a document that does not have
+     * both there is parsed whole, as before.
+     */
+    static Map<String, Object> readOutputDocumentHeader(File file) {
+        if (file == null || !file.exists() || !file.isFile()) return [:]
+        if (OutputPathSupport.sourceFormatForFile(file.name) != "json") return [:]
+        try {
+            String head = readHead(file)
+            String metadataJson = extractJsonObjectForKey(head, '"metadata"')
+            // Looked for past the metadata object, so a "summary" key inside metadata is never taken for it.
+            String summaryJson = metadataJson ?
+                    extractJsonObjectForKey(head.substring(head.indexOf(metadataJson) + metadataJson.length()), '"summary"') : null
+            if (metadataJson && summaryJson) {
+                JsonSlurper slurper = new JsonSlurper()
+                return [metadata: slurper.parseText(metadataJson), summary: slurper.parseText(summaryJson)] as Map<String, Object>
+            }
+        } catch (Exception ignored) {
+        }
+        return parseOutputDocument(file)
+    }
+
+    /** At most {@link #ARTIFACT_HEADER_SCAN_CHARS} from the start of the file. */
+    private static String readHead(File file) {
+        char[] buffer = new char[ARTIFACT_HEADER_SCAN_CHARS]
+        int read = 0
+        file.withReader("UTF-8") { Reader reader ->
+            while (read < buffer.length) {
+                int count = reader.read(buffer, read, buffer.length - read)
+                if (count < 0) break
+                read += count
+            }
+        }
+        return new String(buffer, 0, Math.max(read, 0))
     }
 
     /** Quote/escape-aware extraction of the {@code {...}} value following keyToken; null if absent or unclosed. */

@@ -78,6 +78,15 @@
                                         "$ref": "#/components/schemas/UpdateTenantRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/ExportConfigBundleRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetTransferCatalogRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/ImportConfigBundleRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/CreateUserAccountRequest"
                                     },
                                     {
@@ -546,6 +555,9 @@
                                         "admin.TenantAdminServices.get#TenantList": "#/components/schemas/GetTenantListRequest",
                                         "admin.TenantAdminServices.reactivate#Tenant": "#/components/schemas/ReactivateTenantRequest",
                                         "admin.TenantAdminServices.update#Tenant": "#/components/schemas/UpdateTenantRequest",
+                                        "admin.TransferAdminServices.export#ConfigBundle": "#/components/schemas/ExportConfigBundleRequest",
+                                        "admin.TransferAdminServices.get#TransferCatalog": "#/components/schemas/GetTransferCatalogRequest",
+                                        "admin.TransferAdminServices.import#ConfigBundle": "#/components/schemas/ImportConfigBundleRequest",
                                         "admin.UserAdminServices.create#UserAccount": "#/components/schemas/CreateUserAccountRequest",
                                         "admin.UserAdminServices.disable#UserAccount": "#/components/schemas/DisableUserAccountRequest",
                                         "admin.UserAdminServices.enable#UserAccount": "#/components/schemas/EnableUserAccountRequest",
@@ -764,6 +776,15 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/UpdateTenantResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ExportConfigBundleResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetTransferCatalogResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/ImportConfigBundleResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/CreateUserAccountResponse"
@@ -3116,6 +3137,323 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/UpdateTenantResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ExportConfigBundleParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "The source tenant."
+                    },
+                    "auditCodes": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "Audits to send, by auditCode."
+                    },
+                    "savedRunIds": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "Saved runs to send on their own, by savedRunId."
+                    },
+                    "connectionRefs": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "Connections to send that no picked audit or run\n                reaches, as KIND:id refs from the catalog."
+                    },
+                    "sourceInstanceLabel": {
+                        "type": "string",
+                        "description": "This instance's name as the operator knows it, e.g. local."
+                    }
+                },
+                "required": [
+                    "tenantUserGroupId"
+                ],
+                "description": "The bundle a target imports: the picked audits with every statement, check, run, query, conclusion\n            code and connection they reach, plus picked runs and connections. Ids travel as refs; secrets never travel."
+            },
+            "ExportConfigBundleResult": {
+                "type": "object",
+                "properties": {
+                    "bundle": {
+                        "type": "object",
+                        "description": "{bundleVersion, source, connections, queries, conclusionCodes,\n                runs, audits, statements, checks}; consumed unchanged by import#ConfigBundle."
+                    }
+                }
+            },
+            "ExportConfigBundleRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.TransferAdminServices.export#ConfigBundle",
+                "x-darpan-method": "admin.TransferAdminServices.export#ConfigBundle",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.TransferAdminServices.export#ConfigBundle"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ExportConfigBundleParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ExportConfigBundleResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.TransferAdminServices.export#ConfigBundle. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ExportConfigBundleResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetTransferCatalogParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "The source tenant."
+                    }
+                },
+                "required": [
+                    "tenantUserGroupId"
+                ],
+                "description": "What a tenant can send: its audits, saved runs and connections, for the transfer's pick and map steps."
+            },
+            "GetTransferCatalogResult": {
+                "type": "object",
+                "properties": {
+                    "audits": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "[{auditId, auditCode, auditName, statementCount, checkCount}]\n                sorted by auditCode."
+                    },
+                    "runs": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "[{savedRunId, ruleSetName, auditCodes}]: the tenant's saved runs\n                and the audits whose checks use each."
+                    },
+                    "connections": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "[{ref, kind, id, description, granted}]: owned connections\n                and those shared to the tenant (granted: true)."
+                    }
+                }
+            },
+            "GetTransferCatalogRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.TransferAdminServices.get#TransferCatalog",
+                "x-darpan-method": "admin.TransferAdminServices.get#TransferCatalog",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.TransferAdminServices.get#TransferCatalog"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetTransferCatalogParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetTransferCatalogResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.TransferAdminServices.get#TransferCatalog. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetTransferCatalogResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "ImportConfigBundleParams": {
+                "type": "object",
+                "properties": {
+                    "tenantUserGroupId": {
+                        "type": "string",
+                        "description": "The target tenant."
+                    },
+                    "bundle": {
+                        "type": "object",
+                        "description": "The bundle export#ConfigBundle answered, unchanged."
+                    },
+                    "connectionMap": {
+                        "type": "object",
+                        "description": "{connection ref: an existing target connection id, or\n                CREATE}, one entry per bundle connection."
+                    },
+                    "apply": {
+                        "type": "boolean",
+                        "description": "True writes; false only plans."
+                    },
+                    "planHash": {
+                        "type": "string",
+                        "description": "Required with apply: the planHash of the preview being applied."
+                    }
+                },
+                "required": [
+                    "tenantUserGroupId",
+                    "bundle"
+                ],
+                "description": "Plans a bundle into a target tenant (apply false: a dry run that writes nothing) or applies the plan\n            previewed (apply true with its planHash), in one transaction: all of it or none of it."
+            },
+            "ImportConfigBundleResult": {
+                "type": "object",
+                "properties": {
+                    "plan": {
+                        "type": "object",
+                        "description": "{lines: [{kind, ref, label, action (CREATE | UPDATE | UNCHANGED |\n                MAPPED | NEEDS_CREDENTIALS), targetId, changes: [{field, from, to}]}], blocking: [{code, ref, message}],\n                warnings: [{code, ref, message}], counts: {action: n}}."
+                    },
+                    "planHash": {
+                        "type": "string",
+                        "description": "SHA-256 of the bundle, connection map, target tenant and plan."
+                    },
+                    "idMap": {
+                        "type": "object",
+                        "description": "When applied: every bundle ref to its target id."
+                    },
+                    "applied": {
+                        "type": "boolean",
+                        "description": "True when the plan was written."
+                    }
+                }
+            },
+            "ImportConfigBundleRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.TransferAdminServices.import#ConfigBundle",
+                "x-darpan-method": "admin.TransferAdminServices.import#ConfigBundle",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.TransferAdminServices.import#ConfigBundle"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/ImportConfigBundleParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "ImportConfigBundleResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.TransferAdminServices.import#ConfigBundle. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/ImportConfigBundleResult"
                     }
                 },
                 "required": [
@@ -23744,6 +24082,9 @@
         "admin.TenantAdminServices.get#TenantList": "GetTenantList",
         "admin.TenantAdminServices.reactivate#Tenant": "ReactivateTenant",
         "admin.TenantAdminServices.update#Tenant": "UpdateTenant",
+        "admin.TransferAdminServices.export#ConfigBundle": "ExportConfigBundle",
+        "admin.TransferAdminServices.get#TransferCatalog": "GetTransferCatalog",
+        "admin.TransferAdminServices.import#ConfigBundle": "ImportConfigBundle",
         "admin.UserAdminServices.create#UserAccount": "CreateUserAccount",
         "admin.UserAdminServices.disable#UserAccount": "DisableUserAccount",
         "admin.UserAdminServices.enable#UserAccount": "EnableUserAccount",

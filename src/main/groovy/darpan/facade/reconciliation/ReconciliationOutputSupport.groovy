@@ -7,6 +7,7 @@ import darpan.facade.common.PaginationSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
 import groovy.io.FileType
+import org.moqui.entity.EntityCondition
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -131,7 +132,11 @@ class ReconciliationOutputSupport {
         return normalize(mapping?.companyUserGroupId)
     }
 
-    static List<Map<String, Object>> listGeneratedOutputFiles(def ec) {
+    /**
+     * With savedRunIdFilter (DAR-BE-146), the run rows are filtered in the query and only that run's
+     * folder is walked, so one run's history no longer costs a walk of every run's files.
+     */
+    static List<Map<String, Object>> listGeneratedOutputFiles(def ec, String savedRunIdFilter = null) {
         List<Map<String, Object>> outputFiles = []
         Set<String> seenFileNames = [] as Set
         Set<String> seenRunResultIds = [] as Set
@@ -144,6 +149,13 @@ class ReconciliationOutputSupport {
         def resultFinder = TenantScopedFinder.findTenantScoped(ec, DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
         if (resultFinder != null) {
             if (resultFinder.metaClass.respondsTo(resultFinder, "useCache", Boolean)) resultFinder.useCache(false)
+            // The same id fields, in the same order, that a row's descriptor names its saved run by.
+            if (savedRunIdFilter) {
+                def conditions = ec.entity.conditionFactory
+                resultFinder.condition(conditions.makeCondition(["savedRunId", "reconciliationMappingId", "ruleSetId"].collect { String field ->
+                    conditions.makeCondition(field, EntityCondition.EQUALS, savedRunIdFilter)
+                }, EntityCondition.OR))
+            }
             (resultFinder.list() ?: []).each { runResult ->
                 String fileName = OutputPathSupport.normalizeDataManagerRelativePath(ec, runResult.resultDataManagerPath)
                 File file = fileName ? OutputPathSupport.resolveGeneratedOutputFile(ec, fileName) : null
@@ -167,6 +179,12 @@ class ReconciliationOutputSupport {
         }
 
         File runsRoot = DataManagerSupport.resolveDirectoryFile(ec, DataManagerSupport.resolveReconciliationRunsLocation(ec), false)
+        // A run's files sit under reconciliation-runs/<its id>/. An id that is not one plain folder name
+        // names no folder there, so a request's savedRunId can never walk outside it.
+        if (savedRunIdFilter) {
+            runsRoot = savedRunIdFilter ==~ /[A-Za-z0-9_.\-]+/ && !(savedRunIdFilter in [".", ".."]) && runsRoot != null ?
+                    new File(runsRoot, savedRunIdFilter) : null
+        }
         if (runsRoot?.exists()) {
             runsRoot.eachFileRecurse(FileType.FILES) { File file ->
                 if (OutputPathSupport.isGeneratedResultFile(file.name)) {
@@ -207,30 +225,40 @@ class ReconciliationOutputSupport {
         String savedRunIdFilter = normalize(savedRunId ?: reconciliationMappingId)
         String search = normalizeLower(query)
 
-        List<Map<String, Object>> rows = []
-        (listGeneratedOutputFiles(ec) ?: [])
-                .sort { Map left, Map right -> Long.compare(OutputDescriptorSupport.outputRowSortTime(right), OutputDescriptorSupport.outputRowSortTime(left)) }
-                .each { Map outputFile ->
+        // DAR-BE-146: a result document runs to GBs, so it is read only for a row this page returns.
+        // Before paging, one is read only to answer a search, or for a flat legacy output: a run row or a
+        // run folder already names the saved run, and listGeneratedOutputFiles filtered both by it.
+        List<Map<String, Object>> rows = (listGeneratedOutputFiles(ec, savedRunIdFilter) ?: [])
+                .findAll { Map<String, Object> outputFile ->
                     File file = (File) outputFile.file
-                    String fileName = outputFile.fileName as String
-                    if (file != null && canAccessGeneratedOutputFile(ec, file, fileName)) {
-                        Map<String, Object> outputDocument = OutputDescriptorSupport.parseOutputDocument(file)
-                        Map<String, Object> descriptor = outputFile.runResult ?
-                                OutputDescriptorSupport.buildRunResultDescriptor(ec, outputFile.runResult, file, outputDocument) :
-                                OutputDescriptorSupport.buildGeneratedOutputDescriptor(fileName, outputDocument, file.length(), new Timestamp(file.lastModified()))
-
-                        if (OutputDescriptorSupport.matchesGeneratedOutputDescriptor(descriptor, savedRunIdFilter, search)) rows.add(descriptor)
-                    } else if (file == null && outputFile.runResult != null && canAccessRunResult(ec, outputFile.runResult)) {
-                        Map<String, Object> descriptor = OutputDescriptorSupport.buildRunResultDescriptor(ec, outputFile.runResult, null, [:])
-                        if (OutputDescriptorSupport.matchesGeneratedOutputDescriptor(descriptor, savedRunIdFilter, search)) rows.add(descriptor)
-                    }
+                    file != null ? canAccessGeneratedOutputFile(ec, file, outputFile.fileName) :
+                            outputFile.runResult != null && canAccessRunResult(ec, outputFile.runResult)
                 }
+                .sort { Map left, Map right -> Long.compare(OutputDescriptorSupport.outputRowSortTime(right), OutputDescriptorSupport.outputRowSortTime(left)) }
+        if (search || savedRunIdFilter) {
+            rows = rows.findAll { Map<String, Object> outputFile ->
+                boolean runNamed = outputFile.runResult != null || OutputPathSupport.extractRunFolderToken(outputFile.fileName as String)
+                (runNamed && !search) || OutputDescriptorSupport.matchesGeneratedOutputDescriptor(describeListedOutput(ec, outputFile), savedRunIdFilter, search)
+            }
+        }
 
         Map<String, Object> envelope = FacadeSupport.envelope(ec)
         return envelope + [
-                generatedOutputs: PaginationSupport.pageRows(rows, page, size),
+                generatedOutputs: PaginationSupport.pageRows(rows, page, size).collect { Map<String, Object> outputFile -> describeListedOutput(ec, outputFile) },
                 pagination      : PaginationSupport.pagination(page, size, rows.size()),
         ]
+    }
+
+    /** A listed output's descriptor, built once per list: the only place the list reads a result document. */
+    private static Map<String, Object> describeListedOutput(def ec, Map<String, Object> outputFile) {
+        if (outputFile.descriptor == null) {
+            File file = (File) outputFile.file
+            Map<String, Object> outputDocument = file != null ? OutputDescriptorSupport.parseOutputDocument(file) : [:]
+            outputFile.descriptor = outputFile.runResult ?
+                    OutputDescriptorSupport.buildRunResultDescriptor(ec, outputFile.runResult, file, outputDocument) :
+                    OutputDescriptorSupport.buildGeneratedOutputDescriptor(outputFile.fileName as String, outputDocument, file.length(), new Timestamp(file.lastModified()))
+        }
+        return (Map<String, Object>) outputFile.descriptor
     }
 
     /**

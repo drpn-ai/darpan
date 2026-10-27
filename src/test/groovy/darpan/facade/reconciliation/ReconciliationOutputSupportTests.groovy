@@ -785,6 +785,66 @@ class ReconciliationOutputSupportTests {
                 "The file-less FAILED run must be listed so the UI can surface the failure")
     }
 
+    /**
+     * DAR-BE-146: a result document (local ones run to 1.3 GB) is read only for a row the page
+     * returns. The list used to parse every result file the tenant could see before paging, and the
+     * run page polled it every 900 ms after Run, so opening the live view took seconds.
+     */
+    @Test
+    void listGeneratedOutputsReadsOnlyThePagesResultDocuments(@TempDir File dataManagerRoot) {
+        List<Map<String, Object>> runResults = (1..3).collect { int n ->
+            String path = "reconciliation-runs/RS_PAGE/2026010${n}-000000000/RS_PAGE_${n}_result.json"
+            File resultFile = new File(dataManagerRoot, path)
+            assertTrue(resultFile.parentFile.mkdirs())
+            resultFile.text = '{"metadata":{"savedRunId":"RS_PAGE"},"summary":{"totalDifferences":' + n + '}}'
+            resultFile.lastModified = Timestamp.valueOf("2026-01-0${n} 00:00:00").time
+            [
+                    reconciliationRunResultId: "RRR_PAGE_${n}".toString(),
+                    savedRunId               : "RS_PAGE",
+                    companyUserGroupId       : "GORJANA",
+                    statusEnumId             : ReconciliationOutputSupport.STATUS_SUCCEEDED,
+                    resultDataManagerPath    : path,
+            ] as Map<String, Object>
+        }
+        def gorjanaEc = new Expando(
+                resource: new FakeResource(dataManagerRoot),
+                user    : new Expando(
+                        userId       : "gorjana-user",
+                        nowTimestamp : Timestamp.valueOf("2026-01-04 00:00:00"),
+                        getPreference: { String key ->
+                            key == TenantAccessSupport.ACTIVE_TENANT_PREFERENCE_KEY ? "GORJANA" : null
+                        }
+                ),
+                entity  : new FakeEntity([
+                        "darpan.reconciliation.ReconciliationRunResult": runResults,
+                        "moqui.security.UserGroupAndMember"            : [[
+                                userId         : "gorjana-user",
+                                groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID,
+                                userGroupId    : "GORJANA",
+                        ]],
+                        "moqui.security.UserGroupMember"               : [],
+                ])
+        )
+
+        List<String> parsed = []
+        def parse = OutputDescriptorSupport.metaClass.getStaticMetaMethod("parseOutputDocument", [File] as Class[])
+        OutputDescriptorSupport.metaClass.static.parseOutputDocument = { File file ->
+            parsed.add(file.name)
+            return parse.invoke(null, file)
+        }
+        try {
+            Map<String, Object> result = ReconciliationOutputSupport.listGeneratedOutputs(gorjanaEc, null, null, "", 0, 1)
+
+            List<Map<String, Object>> rows = (List<Map<String, Object>>) result.generatedOutputs
+            assertEquals(["RRR_PAGE_3"], rows*.reconciliationRunResultId)
+            assertEquals(3L, rows[0].totalDifferences)
+            assertEquals(3, result.pagination.totalCount)
+            assertEquals(["RS_PAGE_3_result.json"], parsed)
+        } finally {
+            GroovySystem.metaClassRegistry.removeMetaClass(OutputDescriptorSupport)
+        }
+    }
+
     static class FakeResource {
         Map<String, Object> properties = [:]
         File dataManagerRoot

@@ -312,6 +312,9 @@
                                         "$ref": "#/components/schemas/EnableSavedRunRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetActiveRunResultRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetAutomationRequest"
                                     },
                                     {
@@ -651,6 +654,7 @@
                                         "facade.ReconciliationFacadeServices.delete#SavedRun": "#/components/schemas/DeleteSavedRunRequest",
                                         "facade.ReconciliationFacadeServices.disable#SavedRun": "#/components/schemas/DisableSavedRunRequest",
                                         "facade.ReconciliationFacadeServices.enable#SavedRun": "#/components/schemas/EnableSavedRunRequest",
+                                        "facade.ReconciliationFacadeServices.get#ActiveRunResult": "#/components/schemas/GetActiveRunResultRequest",
                                         "facade.ReconciliationFacadeServices.get#Automation": "#/components/schemas/GetAutomationRequest",
                                         "facade.ReconciliationFacadeServices.get#AutomationStreaks": "#/components/schemas/GetAutomationStreaksRequest",
                                         "facade.ReconciliationFacadeServices.get#GeneratedOutput": "#/components/schemas/GetGeneratedOutputRequest",
@@ -1034,6 +1038,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/EnableSavedRunResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetActiveRunResultResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetAutomationResponse"
@@ -13139,6 +13146,101 @@
                     "result"
                 ]
             },
+            "GetActiveRunResultParams": {
+                "type": "object",
+                "properties": {
+                    "savedRunId": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "savedRunId"
+                ],
+                "description": "DAR-BE-146. The newest run of a saved run still pending or running that began in the last two minutes, in the active tenant; empty when there is none. run#SavedRunDiff answers only when its run ends, so the run page asks this right after Run to open the live view."
+            },
+            "GetActiveRunResultResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "reconciliationRunResultId": {
+                        "type": "string"
+                    }
+                }
+            },
+            "GetActiveRunResultRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.ReconciliationFacadeServices.get#ActiveRunResult",
+                "x-darpan-method": "facade.ReconciliationFacadeServices.get#ActiveRunResult",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.ReconciliationFacadeServices.get#ActiveRunResult"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetActiveRunResultParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetActiveRunResultResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.ReconciliationFacadeServices.get#ActiveRunResult. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetActiveRunResultResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
             "GetAutomationParams": {
                 "type": "object",
                 "properties": {
@@ -24890,6 +24992,7 @@
         "facade.ReconciliationFacadeServices.delete#SavedRun": "DeleteSavedRun",
         "facade.ReconciliationFacadeServices.disable#SavedRun": "DisableSavedRun",
         "facade.ReconciliationFacadeServices.enable#SavedRun": "EnableSavedRun",
+        "facade.ReconciliationFacadeServices.get#ActiveRunResult": "GetActiveRunResult",
         "facade.ReconciliationFacadeServices.get#Automation": "GetAutomation",
         "facade.ReconciliationFacadeServices.get#AutomationStreaks": "GetAutomationStreaks",
         "facade.ReconciliationFacadeServices.get#GeneratedOutput": "GetGeneratedOutput",

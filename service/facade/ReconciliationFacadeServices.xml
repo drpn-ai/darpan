@@ -3927,6 +3927,33 @@
         </actions>
     </service>
 
+    <service verb="get" noun="ActiveRunResult" authz-action="view" allow-remote="true" authenticate="true">
+        <description>DAR-BE-146. The newest run of a saved run still pending or running that began in the last two minutes, in the active tenant; empty when there is none. run#SavedRunDiff answers only when its run ends, so the run page asks this right after Run to open the live view.</description>
+        <in-parameters><parameter name="savedRunId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="reconciliationRunResultId"/>
+        </out-parameters>
+        <actions>
+            <!-- Tenant scope as get#ReconciliationExecution: the explicit condition holds in every authz posture.
+                 Both dates are the server's, so two minutes needs no allowance for the browser's clock; it only
+                 has to leave out an earlier run of the same saved run still going. -->
+            <entity-find entity-name="darpan.reconciliation.ReconciliationRunResult" list="activeRows" cache="false" limit="1">
+                <econdition field-name="companyUserGroupId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec) ?: darpan.facade.common.TenantScopedFinder.NO_ACTIVE_TENANT_SENTINEL"/>
+                <econdition field-name="savedRunId" from="savedRunId"/>
+                <econdition field-name="statusEnumId" operator="in" from="['AUT_STAT_PENDING', 'AUT_STAT_RUNNING']"/>
+                <econdition field-name="createdDate" operator="greater-equals" from="new java.sql.Timestamp(ec.user.nowTimestamp.time - 2 * 60 * 1000)"/>
+                <order-by field-name="-createdDate"/>
+            </entity-find>
+            <set field="reconciliationRunResultId" from="activeRows ? activeRows[0].reconciliationRunResultId : null"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
     <service verb="get" noun="GeneratedOutput" authz-action="view" allow-remote="true" authenticate="true">
         <description>Retrieve a scoped generated diff output for direct download from darpan-ui.</description>
         <in-parameters>

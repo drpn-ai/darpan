@@ -2408,6 +2408,81 @@ end'''
         ])
     }
 
+    @Test
+    void activeRunResultIsTheTenantsNewestRunStillGoingAndNeverAnotherTenants() {
+        // DAR-BE-146. The run page opens the live view from this one indexed read instead of polling the
+        // generated-outputs list. KREWE is active; authz is disabled, so only the explicit tenant condition
+        // stands between KREWE and GORJANA's newer run of the same saved run.
+        String savedRunId = "RS_ACTIVE_LOOKUP"
+        Timestamp now = ec.user.nowTimestamp
+        Closure<Timestamp> minutesAgo = { int minutes -> new Timestamp(now.time - minutes * 60_000L) }
+        Closure<Map<String, Object>> lookup = {
+            ec.service.sync().name("facade.ReconciliationFacadeServices.get#ActiveRunResult")
+                    .parameters([savedRunId: savedRunId]).disableAuthz().call()
+        }
+        ec.entity.find("darpan.reconciliation.ReconciliationRunResult").condition("savedRunId", savedRunId)
+                .disableAuthz().useCache(false).deleteAll()
+        upsertEntity("moqui.security.UserGroup", [userGroupId: GORJANA], [
+                userGroupId    : GORJANA,
+                description    : "Gorjana",
+                groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID,
+        ])
+
+        createRunResultRow("RRR_ACTIVE_GORJANA", savedRunId, GORJANA, "AUT_STAT_RUNNING", minutesAgo(0))
+        assertNull(lookup().reconciliationRunResultId, "another tenant's run reads as no run")
+
+        createRunResultRow("RRR_ACTIVE_OLD", savedRunId, KREWE, "AUT_STAT_RUNNING", minutesAgo(10))
+        createRunResultRow("RRR_ACTIVE_DONE", savedRunId, KREWE, "AUT_STAT_SUCCESS", minutesAgo(0))
+        assertNull(lookup().reconciliationRunResultId, "a run begun before the window, or one already ended, is not the new run")
+
+        createRunResultRow("RRR_ACTIVE_PENDING", savedRunId, KREWE, "AUT_STAT_PENDING", minutesAgo(1))
+        createRunResultRow("RRR_ACTIVE_NEW", savedRunId, KREWE, "AUT_STAT_RUNNING", new Timestamp(now.time - 1_000L))
+        Map<String, Object> result = lookup()
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        assertEquals("RRR_ACTIVE_NEW", result.reconciliationRunResultId)
+    }
+
+    @Test
+    void generatedOutputsForOneSavedRunListOnlyThatRunsRows() {
+        // DAR-BE-146. The saved-run filter now runs in the query; a legacy row named by its mapping id
+        // alone still belongs to the run, and another saved run's row does not. Other tests here run the
+        // seeded mapping too, so this checks membership rather than an exact list.
+        String mappingId = "OrderIdSchemaMap"
+        Timestamp now = ec.user.nowTimestamp
+        createRunResultRow("RRR_FILTER_MINE", mappingId, KREWE, "AUT_STAT_RUNNING", now)
+        createRunResultRow("RRR_FILTER_LEGACY", null, KREWE, "AUT_STAT_FAILED", now, mappingId)
+        createRunResultRow("RRR_FILTER_OTHER", "RS_FILTER_OTHER", KREWE, "AUT_STAT_FAILED", now)
+
+        Map<String, Object> result = ec.service.sync()
+                .name("facade.ReconciliationFacadeServices.list#GeneratedOutputs")
+                .parameters([savedRunId: mappingId, pageIndex: 0, pageSize: 200, query: ""])
+                .disableAuthz()
+                .call()
+
+        assertFalse(ec.message.hasError(), ec.message.errors?.toString())
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) result.generatedOutputs
+        List<String> ids = rows*.reconciliationRunResultId
+        assertTrue(ids.containsAll(["RRR_FILTER_MINE", "RRR_FILTER_LEGACY"]), ids.toString())
+        assertFalse(ids.contains("RRR_FILTER_OTHER"), ids.toString())
+        assertTrue(rows.every { Map<String, Object> row -> (row.savedRunId ?: row.reconciliationMappingId) == mappingId }, rows.toString())
+    }
+
+    private void createRunResultRow(String runResultId, String savedRunId, String tenantId, String statusEnumId,
+            Timestamp createdDate, String reconciliationMappingId = null) {
+        ec.entity.find("darpan.reconciliation.ReconciliationRunResult").condition("reconciliationRunResultId", runResultId)
+                .disableAuthz().useCache(false).deleteAll()
+        ec.entity.makeValue("darpan.reconciliation.ReconciliationRunResult").setAll([
+                reconciliationRunResultId: runResultId,
+                savedRunId               : savedRunId,
+                reconciliationMappingId  : reconciliationMappingId,
+                companyUserGroupId       : tenantId,
+                statusEnumId             : statusEnumId,
+                createdDate              : createdDate,
+                startedDate              : createdDate,
+                lastUpdatedDate          : createdDate,
+        ]).create()
+    }
+
     private void seedPermissionGroup(String permissionGroupId, String description) {
         upsertEntity("moqui.security.UserGroup", [userGroupId: permissionGroupId], [
                 userGroupId    : permissionGroupId,

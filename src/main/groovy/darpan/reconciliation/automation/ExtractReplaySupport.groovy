@@ -30,8 +30,12 @@ class ExtractReplaySupport {
     /** formatRunTimestamp: yyyyMMdd-HHmmssSSS. A "-recheck" or "-FILE_2" suffix is another folder. */
     static final Pattern SIDE_1_DIR = ~/^\d{8}-\d{9}$/
     static final Pattern SIDE_2_DIR = ~/^\d{8}-\d{9}-FILE_2$/
-    /** Sidecars and outputs written beside an extract, never the extract itself. */
-    static final Pattern NOT_AN_EXTRACT = ~/(?i).*(manifest\.json|[-_.](result|diff)[-_.].*|[-_.](result|diff)\.json)$/
+    /**
+     * Sidecars and outputs written beside an extract, never the extract itself: the OMS exchange manifest, the rows a
+     * source filter dropped (ExcludedRecordsSidecar, "<extract>.excluded.json", found by name by the conclude pass, so a
+     * replay of the extract carries it), and compare outputs.
+     */
+    static final Pattern NOT_AN_EXTRACT = ~/(?i).*(manifest\.json|\.excluded\.json|[-_.](result|diff)[-_.].*|[-_.](result|diff)\.json)$/
     private static final String WHY = "extract replay: explicit companyUserGroupId condition applied"
 
     /**

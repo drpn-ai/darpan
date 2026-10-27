@@ -66,7 +66,8 @@ class ExtractReplaySupportTests {
 
     @Test
     void outputsAndSidecarsAreNotExtracts() {
-        write("20261027-152223914", "oms-items.json", "RUN1-result.json", "RUN1-diff.json", "x.manifest.json")
+        // Prod gorjana 101796: the OMS items extract sits beside the rows its unitState filter dropped.
+        write("20261027-152223914", "oms-items.json", "oms-items.excluded.json", "RUN1-result.json", "RUN1-diff.json", "x.manifest.json")
 
         Map picked = ExtractReplaySupport.pickFromRunFolder(runDir, RUN, false)
 

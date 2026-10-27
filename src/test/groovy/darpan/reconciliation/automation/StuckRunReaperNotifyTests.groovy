@@ -239,7 +239,7 @@ class StuckRunReaperNotifyTests {
         // suite green against copy the production path no longer produces.
         List<String> lines = RunNotificationVoice.renderLines(
                 RunNotificationVoice.classify([runFailed: runFailed]) +
-                        [runName: runName, priorCleanRuns: 0, completedMoment: null])
+                        [runName: runName, completedMoment: null])
         if (runFailed) lines << "⚠ Status: FAILED — the ruleset did not fully evaluate; results may be incomplete.".toString()
         if (terminationReasonValue) lines << "⚠ ${terminationReasonValue}".toString()
         String resultId = ((params.reconciliationRunResultId)?.toString()?.trim())

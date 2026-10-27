@@ -47,9 +47,9 @@ class MigrationStatusSmokeTests {
                 .parameters([:]).disableAuthz().call()
 
         List<Map<String, Object>> migrations = out.migrations as List<Map<String, Object>>
-        assertEquals(6, migrations.size())
+        assertEquals(7, migrations.size())
         assertEquals(["TENANT_NOTIF_SETTINGS", "UNDECRYPTABLE_HOOKS", "AUTOMATION_FILTERS",
-                      "RULE_TENANT_STAMPS", "ENDPOINT_ACCESS", "RETIRED_FIELDS"],
+                      "RULE_TENANT_STAMPS", "ENDPOINT_ACCESS", "RETIRED_FIELDS", "AUTOMATION_STREAKS"],
                 migrations.collect { it.migrationId })
         migrations.each { row ->
             assertEquals("PENDING", row.status)

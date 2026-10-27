@@ -47,7 +47,7 @@ class AutomationStreakSupportSmokeTests {
         ec = ReconciliationSmokeTestSupport.initMoqui(backendRoot, "automation-streak-support-smoke")
         ReconciliationSmokeTestSupport.loadSeedData(ec, "component://darpan/data/AutomationSeedData.xml")
         ReconciliationSmokeTestSupport.seedCompanyScope(ec)
-        ["GORJANA", "STRK_BF", "STRK_BF_BROKEN", "STRK_CAP", "STRK_FACT", "STRK_FACT_2"].each { String tenant ->
+        ["GORJANA", "STRK_BF", "STRK_BF_BROKEN", "STRK_CAP", "STRK_FACT", "STRK_FACT_2", "STRK_MIG"].each { String tenant ->
             ec.entity.makeValue("moqui.security.UserGroup").setAll([userGroupId: tenant, description: tenant,
                     groupTypeEnumId: TenantAccessSupport.DARPAN_COMPANY_GROUP_TYPE_ENUM_ID]).createOrUpdate()
         }
@@ -293,6 +293,41 @@ class AutomationStreakSupportSmokeTests {
         assertEquals(daysSince(dailyFires(6)[0]), read.currentDays)
         assertNull((board.automations as List<Map>).find { it.automationId == "STRK_OTHER" }, "another tenant's automation is not")
         assertNull(row("darpan.reconciliation.AutomationStreak", [automationId: "STRK_READ"]), "the read never writes")
+    }
+
+    // ---- DAR-BE-144: the migration -----------------------------------------------------------------
+
+    @Test
+    void theMigrationStoresEveryTenantsStreakBeforeItsNextRunAndOnlyOnce() {
+        automation("STRK_MIG_A", KREWE)
+        List<Instant> fires = dailyFires(25)
+        List<String> executions = fires.collect { slot("STRK_MIG_A", KREWE, it) }
+        String latest = result(executions[24], KREWE)
+        automation("STRK_MIG_B", "STRK_MIG")
+        dailyFires(4).each { slot("STRK_MIG_B", "STRK_MIG", it) }
+        assertNull(row("darpan.reconciliation.AutomationStreak", [automationId: "STRK_MIG_A"]), "no stored streak before")
+
+        Map out = migrate()
+
+        assertTrue(out.ok as boolean, out.errors?.toString())
+        assertTrue((out.streaksCreated as int) >= 2, out.toString())
+        def a = row("darpan.reconciliation.AutomationStreak", [automationId: "STRK_MIG_A"])
+        assertEquals(KREWE, a.companyUserGroupId)
+        assertEquals(ts(fires[0].plus(Duration.ofMinutes(20))), a.streakStartDate)
+        assertEquals("STRK_MIG", row("darpan.reconciliation.AutomationStreak", [automationId: "STRK_MIG_B"]).companyUserGroupId)
+        assertEquals(daysSince(fires[0]), AutomationStreakSupport.notificationFacts(ec, KREWE, latest).streakDays,
+                "past 20 the message reads the real day count, not a floor")
+
+        Map again = migrate()
+        assertTrue(again.ok as boolean, again.errors?.toString())
+        assertEquals(0, again.streaksCreated as int, "a second pass stores nothing new")
+        assertEquals(a.streakStartDate,
+                row("darpan.reconciliation.AutomationStreak", [automationId: "STRK_MIG_A"]).streakStartDate)
+    }
+
+    private Map migrate() {
+        return (Map) ec.service.sync().name("reconciliation.ReconciliationNotificationServices.migrate#AutomationStreaks")
+                .parameters([:]).disableAuthz().call()
     }
 
     // ---- fixtures --------------------------------------------------------------------------------

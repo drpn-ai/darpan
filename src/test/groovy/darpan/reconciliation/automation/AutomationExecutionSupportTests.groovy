@@ -3542,7 +3542,7 @@ class AutomationExecutionSupportTests {
                 runFailed          : runFailed,
                 hasWarnings        : (warningList ? true : false),
         ]) + [runName         : runName, file1SystemLabel: file1SystemLabel,
-              file2SystemLabel: file2SystemLabel, priorCleanRuns: 0, completedMoment: null]
+              file2SystemLabel: file2SystemLabel, completedMoment: null]
         List<String> lines = RunNotificationVoice.renderLines(voiceModel)
         if (runFailed) lines << "⚠ Status: FAILED — the ruleset did not fully evaluate; results may be incomplete.".toString()
         String terminationReasonValue = ((params.terminationReason)?.toString()?.trim())

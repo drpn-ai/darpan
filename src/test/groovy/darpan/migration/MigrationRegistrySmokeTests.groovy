@@ -30,7 +30,7 @@ class MigrationRegistrySmokeTests {
     }
 
     @Test
-    void registrySeedLoadsEverySixExistingMigration() {
+    void registrySeedLoadsEveryRegisteredMigration() {
         List<String> ids = ec.entity.find("darpan.migration.DarpanMigration")
                 .orderBy("sequenceNum")
                 .disableAuthz()
@@ -38,7 +38,7 @@ class MigrationRegistrySmokeTests {
                 .collect { it.getString("migrationId") }
 
         assertEquals(["TENANT_NOTIF_SETTINGS", "UNDECRYPTABLE_HOOKS", "AUTOMATION_FILTERS",
-                      "RULE_TENANT_STAMPS", "ENDPOINT_ACCESS", "RETIRED_FIELDS"], ids)
+                      "RULE_TENANT_STAMPS", "ENDPOINT_ACCESS", "RETIRED_FIELDS", "AUTOMATION_STREAKS"], ids)
     }
 
     @Test

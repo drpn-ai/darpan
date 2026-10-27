@@ -79,7 +79,6 @@
                 <set field="streakFacts" from="darpan.reconciliation.streak.AutomationStreakSupport.notificationFacts(ec, companyUserGroupId, resultIdValue)"/>
                 <set field="voiceModel" from="darpan.reconciliation.notification.RunNotificationVoice.classify(voiceCounts) + [
                         runName: runNameValue, file1SystemLabel: file1SystemLabelValue, file2SystemLabel: file2SystemLabelValue,
-                        priorCleanRuns: darpan.reconciliation.notification.RunNotificationStreak.countConsecutiveCleanRuns(ec, savedRunId, companyUserGroupId, resultIdValue),
                         storedStreakDays: streakFacts.streakDays, badgeLine: streakFacts.badgeLine, questLine: streakFacts.questLine,
                         factLine: streakFacts.factLine,
                         completedMoment: darpan.reconciliation.notification.TenantNotificationSupport.resolveCompletedMoment(ec, companyUserGroupId, resultIdValue)]"/>
@@ -289,6 +288,34 @@
                  already ran never appears in the messages out-parameter, matching every sibling service
                  in ReconciliationFacadeServices.xml. -->
             <message>Backfilled ${rowsCreated} exclusion filter rows across ${sidesSeeded} source sides (${automationsScanned} automations scanned, ${automationsSkipped} skipped).</message>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec).drop(preCallErrorCount)"/>
+            <set field="ok" from="errors.isEmpty()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+        </actions>
+    </service>
+
+    <!-- DAR-BE-144: same internal posture as migrate#AutomationExcludeFilters above. transaction="ignore" because each
+         automation's fold commits in its own transaction (AutomationStreakSupport.recordSlots), so one bad history
+         cannot roll back every other tenant's streak. -->
+    <service verb="migrate" noun="AutomationStreaks" authenticate="false" transaction="ignore">
+        <description>One-time backfill: fold every automation's run history into its stored AutomationStreak, across
+            every tenant, so the clean-run Chat line reads the real day count from the first message after deploy.
+            The Chat message reads only the stored streak (the 20-run lookback is gone). Idempotent: a fold reads only
+            slots past the stored cursor. Badges history earns are recorded silently, as on the lazy path. Internal
+            only, not remote.</description>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="automationsScanned" type="Integer"/>
+            <parameter name="streaksCreated" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="preCallErrorCount" from="darpan.facade.common.FacadeSupport.getErrors(ec).size()"/>
+            <set field="backfillResult" from="darpan.reconciliation.streak.AutomationStreakSupport.backfillAll(ec)"/>
+            <set field="automationsScanned" from="backfillResult.automationsScanned"/>
+            <set field="streaksCreated" from="backfillResult.streaksCreated"/>
+            <message>Folded ${automationsScanned} automations; ${streaksCreated} streaks stored for the first time.</message>
             <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec).drop(preCallErrorCount)"/>
             <set field="ok" from="errors.isEmpty()"/>
             <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>

@@ -2,7 +2,7 @@ package darpan.reconciliation.notification
 
 /**
  * DAR-BE-121. The chat lines for a stored streak (DAR-BE-107): the badge an automation just earned, and the streak line
- * once a streak runs past the 20-run lookback RunNotificationVoice can see. Pure, like RunNotificationVoice, and dealt
+ * (DAR-BE-144: the only streak line; the 20-run lookback is gone). Pure, like RunNotificationVoice, and dealt
  * through its pickLine so every pool spends all its entries before one comes round again.
  *
  * AutomationStreakSupport.notificationFacts reads the stored streak and the badge or quest this run's slot earned, and a
@@ -30,8 +30,8 @@ class StreakMilestoneVoice {
             [key: "GLORIOUSLY_BORING", title: "Full Orbit", days: 365, reEarnable: true],
     ].asImmutable()
 
-    /** Up to here RunNotificationVoice's own streak lines speak; past it, the lines below. */
-    static final int LONG_STREAK_FROM = 21
+    /** The first day count worth a line, where the run lookback used to say "3 in a row". */
+    static final int STREAK_LINE_FROM = 3
 
     /**
      * The line on the run message whose run earned a badge, the first time this automation earns it. Badges are rare,
@@ -176,10 +176,10 @@ class StreakMilestoneVoice {
     ].asImmutable()
 
     /**
-     * A stored streak past the lookback, counted in DAYS (DAR-BE-107), so no line says "runs". Read for any count from 21
+     * A stored streak, counted in DAYS (DAR-BE-107), so no line says "runs". Read for any count from STREAK_LINE_FROM
      * into the thousands; no badge is named, so these still read once every badge is earned.
      */
-    static final List<String> LONG_STREAK_LINES = [
+    static final List<String> STREAK_LINES = [
             "Nothing has slipped across {n} days.",
             "That makes {n} days without a gap.",
             "{n} unbroken days now.",
@@ -422,8 +422,8 @@ class StreakMilestoneVoice {
         return text ? "Space fact: ${text}".toString() : null
     }
 
-    /** The plain pool and the next-badge pool dealt as one, so a long streak names its next badge about half the time. */
-    static final List<String> LONG_WITH_NEXT_LINES = (LONG_STREAK_LINES + NEXT_BADGE_LINES).asImmutable()
+    /** The plain pool and the next-badge pool dealt as one, so a streak names its next badge about half the time. */
+    static final List<String> STREAK_WITH_NEXT_LINES = (STREAK_LINES + NEXT_BADGE_LINES).asImmutable()
 
     static Map<String, Object> badge(String key) {
         return BADGE_LADDER.find { it.key == key }
@@ -465,14 +465,14 @@ class StreakMilestoneVoice {
         return template?.replace("{badge}", earned.title as String)
     }
 
-    /** The streak line for a stored streak past the lookback; null below it, where RunNotificationVoice speaks. */
-    static String longStreakLine(int days) {
-        if (days < LONG_STREAK_FROM) return null
+    /** The streak line for a stored streak; null below STREAK_LINE_FROM, where a clean message has no streak to tell. */
+    static String streakLine(int days) {
+        if (days < STREAK_LINE_FROM) return null
         Map<String, Object> next = nextBadge(days)
         if (next == null) {
-            return RunNotificationVoice.pickLine(LONG_STREAK_LINES, "longStreak")?.replace("{n}", Integer.toString(days))
+            return RunNotificationVoice.pickLine(STREAK_LINES, "streak")?.replace("{n}", Integer.toString(days))
         }
-        return RunNotificationVoice.pickLine(LONG_WITH_NEXT_LINES, "longStreak")
+        return RunNotificationVoice.pickLine(STREAK_WITH_NEXT_LINES, "streak")
                 ?.replace("{n}", Integer.toString(days))
                 ?.replace("{next}", next.title as String)
                 ?.replace("{left}", dayCount(((Integer) next.days) - days))

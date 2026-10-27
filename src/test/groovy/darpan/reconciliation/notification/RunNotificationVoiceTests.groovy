@@ -150,26 +150,6 @@ class RunNotificationVoiceTests {
     }
 
     @Test
-    void streakLineIsNullBelowTwoPriorCleanRuns() {
-        assertEquals(null, RunNotificationVoice.streakLine(0))
-        assertEquals(null, RunNotificationVoice.streakLine(1))
-    }
-
-    @Test
-    void streakLineCountsTheCurrentRunToo() {
-        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
-        // Three prior clean runs plus this one is a streak of four.
-        assertTrue(RunNotificationVoice.streakLine(3).contains("4"))
-    }
-
-    @Test
-    void streakLineSaysAndCountingAtTheLookbackCap() {
-        RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
-        assertTrue(RunNotificationVoice.streakLine(RunNotificationVoice.LOOKBACK_LIMIT)
-                .toLowerCase().contains("counting"))
-    }
-
-    @Test
     void cleanRunOmitsTheDetailsBlock() {
         RunNotificationVoice.setLinePicker { List<String> pool, String slotName -> pool.first() }
         List<String> lines = RunNotificationVoice.renderLines(
@@ -185,7 +165,7 @@ class RunNotificationVoiceTests {
                 [onlyInFile1Count: 39, onlyInFile2Count: 0, ruleDifferenceCount: 8]) +
                 [runName: "Production Orders Automation",
                  file1SystemLabel: "HotWax", file2SystemLabel: "Shopify",
-                 priorCleanRuns: 0, completedMoment: null]
+                 completedMoment: null]
         String text = RunNotificationVoice.renderLines(model).join("\n")
 
         // onlyInFile1Count is the HotWax-side count, so it is what SHOPIFY is missing.
@@ -200,7 +180,7 @@ class RunNotificationVoiceTests {
         Map model = RunNotificationVoice.classify(
                 [onlyInFile1Count: 39, onlyInFile2Count: 0, ruleDifferenceCount: 0]) +
                 [runName: "R", file1SystemLabel: "A", file2SystemLabel: "B",
-                 priorCleanRuns: 0, completedMoment: null]
+                 completedMoment: null]
         String text = RunNotificationVoice.renderLines(model).join("\n")
         // A missing line names a system, so its zero says that side came back complete.
         assertTrue(text.contains("Missing from A: 0"), text)
@@ -213,7 +193,7 @@ class RunNotificationVoiceTests {
         Map model = RunNotificationVoice.classify(
                 [onlyInFile1Count: 1, onlyInFile2Count: 0, ruleDifferenceCount: 0]) +
                 [runName: "R", file1SystemLabel: "A", file2SystemLabel: "B",
-                 priorCleanRuns: 0, completedMoment: null]
+                 completedMoment: null]
         String text = RunNotificationVoice.renderLines(model).join("\n")
         assertTrue(text.contains("*Details*"), text)
         assertFalse(text.contains("**Details**"), "double asterisks render literally in Google Chat")
@@ -225,7 +205,7 @@ class RunNotificationVoiceTests {
         Map model = RunNotificationVoice.classify(
                 [onlyInFile1Count: 39, onlyInFile2Count: 0, ruleDifferenceCount: 8]) +
                 [runName: "Production Orders Automation", file1SystemLabel: "A",
-                 file2SystemLabel: "B", priorCleanRuns: 0, completedMoment: null]
+                 file2SystemLabel: "B", completedMoment: null]
         assertTrue(RunNotificationVoice.renderLines(model).first().contains("47"))
     }
 
@@ -235,10 +215,25 @@ class RunNotificationVoiceTests {
         Map model = RunNotificationVoice.classify(
                 [onlyInFile1Count: 0, onlyInFile2Count: 0, ruleDifferenceCount: 0, runFailed: true]) +
                 [runName: "R", file1SystemLabel: "A", file2SystemLabel: "B",
-                 priorCleanRuns: 9, completedMoment: null]
+                 storedStreakDays: 9, completedMoment: null]
         String text = RunNotificationVoice.renderLines(model).join("\n")
         RunNotificationVoice.CLEAN_TAILS.each { assertFalse(text.contains(it), text) }
-        assertFalse(text.toLowerCase().contains("in a row"), text)
+        assertFalse(text.contains("9 days"), text)
+    }
+
+    @Test
+    void cleanRunPastTwentyDaysStatesTheStoredDayCountNotAFloor() {
+        // DAR-BE-144: RAILS "no differences. At least 20, possibly more." read as twenty differences.
+        // The streak is the stored day count, with no ceiling and always in days.
+        RunNotificationVoice.resetLinePicker()
+        WEEK_OF_RUNS.times {
+            List<String> lines = RunNotificationVoice.renderLines(cleanModel() +
+                    [runName: "Daily Order Reconciliation EU", storedStreakDays: 34, completedMoment: null])
+            assertEquals(2, lines.size(), lines.toString())
+            assertTrue(lines.get(1).contains("34"), lines.toString())
+            assertTrue(lines.get(1).contains("day"), "a streak line names its unit: ${lines}".toString())
+            assertFalse(lines.join(" ").toLowerCase().contains("at least"), lines.toString())
+        }
     }
 
     @Test
@@ -248,7 +243,7 @@ class RunNotificationVoiceTests {
         ZonedDateTime earlyFriday = ZonedDateTime.of(2026, 8, 21, 5, 30, 0, 0, ZoneId.of("Asia/Kolkata"))
         List<String> lines = RunNotificationVoice.renderLines(
                 cleanModel() + [runName: "Production Orders Automation",
-                                priorCleanRuns: 3, completedMoment: earlyFriday])
+                                storedStreakDays: 4, completedMoment: earlyFriday])
 
         assertEquals(2, lines.size(), "a clean run carries exactly one closer: ${lines}".toString())
         assertTrue(lines.get(1).contains("4"), lines.toString())
@@ -263,7 +258,7 @@ class RunNotificationVoiceTests {
         ZonedDateTime earlyWednesday = ZonedDateTime.of(2026, 8, 19, 5, 30, 0, 0, ZoneId.of("Asia/Kolkata"))
         List<String> lines = RunNotificationVoice.renderLines(
                 cleanModel() + [runName: "SM Prod Orders Automation",
-                                priorCleanRuns: 0, completedMoment: earlyWednesday])
+                                completedMoment: earlyWednesday])
 
         assertEquals(2, lines.size(), "a clean run carries exactly one closer: ${lines}".toString())
         assertEquals(RunNotificationVoice.EARLY_MORNING_LINES.first(), lines.get(1))
@@ -278,7 +273,7 @@ class RunNotificationVoiceTests {
         ZonedDateTime plainWednesday = ZonedDateTime.of(2026, 8, 19, 16, 0, 0, 0, ZoneId.of("Asia/Kolkata"))
         List<String> lines = RunNotificationVoice.renderLines(
                 cleanModel() + [runName: "Production Orders Automation",
-                                priorCleanRuns: 0, completedMoment: plainWednesday])
+                                completedMoment: plainWednesday])
 
         assertEquals(1, lines.size(), "with no context hook the verdict and tail fuse: ${lines}".toString())
         String only = lines.first()
@@ -316,19 +311,11 @@ class RunNotificationVoiceTests {
                 slotName == "headline" ? headline : null
             }
             String text = RunNotificationVoice.renderLines(cleanModel() + [runName: "Daily Return Reconciliation UK",
-                    priorCleanRuns: 0, completedMoment: null]).join("\n")
+                    completedMoment: null]).join("\n")
             assertTrue(text.contains("Daily Return Reconciliation UK"), text)
             assertFalse(text.contains("{run}"), text)
             assertTrue(text.endsWith("."), text)
         }
-    }
-
-    @Test
-    void streakLinesDoNotAllOpenOnTheCount() {
-        // DAR-BE-121: "{n} in a row, ..." on every streaking run is the same sentence with a new number.
-        int countFirst = RunNotificationVoice.STREAK_TEMPLATES.count { it.startsWith("{n}") } as int
-        assertTrue(countFirst * 2 <= RunNotificationVoice.STREAK_TEMPLATES.size(),
-                "at most half of the streak lines open on the count: ${countFirst} of ${RunNotificationVoice.STREAK_TEMPLATES.size()}".toString())
     }
 
     @Test
@@ -369,7 +356,7 @@ class RunNotificationVoiceTests {
                 [onlyInFile1Count: onlyIn1, onlyInFile2Count: onlyIn2, ruleDifferenceCount: ruleDiffs]) +
                 [runName: "Production Orders Automation",
                  file1SystemLabel: "HotWax", file2SystemLabel: "Shopify",
-                 priorCleanRuns: 0, completedMoment: null]
+                 completedMoment: null]
     }
 
     /** Every bucket that renders a headline + diagnosis pair, with counts that produce it. */
@@ -447,7 +434,7 @@ class RunNotificationVoiceTests {
         Map model = RunNotificationVoice.classify(
                 [onlyInFile1Count: 0, onlyInFile2Count: 0, ruleDifferenceCount: 0, hasWarnings: true]) +
                 [runName: "API Order Sync", file1SystemLabel: "A", file2SystemLabel: "B",
-                 priorCleanRuns: 0, completedMoment: null]
+                 completedMoment: null]
         String headline = RunNotificationVoice.renderLines(model).first()
         assertEquals("API Order Sync finished, but not cleanly.", headline)
     }
@@ -456,7 +443,7 @@ class RunNotificationVoiceTests {
         return RunNotificationVoice.classify(
                 [onlyInFile1Count: 0, onlyInFile2Count: 0, ruleDifferenceCount: 0]) +
                 [file1SystemLabel: "HotWax", file2SystemLabel: "Shopify",
-                 priorCleanRuns: 0, completedMoment: null]
+                 completedMoment: null]
     }
 
     /**
@@ -478,7 +465,7 @@ class RunNotificationVoiceTests {
                                                        ruleDifferenceCount: 2,
                                                        runFailed: failed, hasWarnings: !failed]) +
                     [runName: "R", file1SystemLabel: "SHOPIFY", file2SystemLabel: "OMS",
-                     priorCleanRuns: 0, completedMoment: null]
+                     completedMoment: null]
             assertEquals(expectedBucket, model.bucket)
             String text = RunNotificationVoice.renderLines(model).join("\n")
             assertTrue(text.contains("Missing from OMS: 1"), text)
@@ -506,7 +493,7 @@ class RunNotificationVoiceTests {
 
     /** Every pool that can supply the closing line of a clean run. */
     private static List<String> allCloserLines() {
-        return RunNotificationVoice.STREAK_TEMPLATES + RunNotificationVoice.LONG_STREAK_TEMPLATES +
+        return StreakMilestoneVoice.STREAK_WITH_NEXT_LINES +
                 RunNotificationVoice.EARLY_MORNING_LINES + RunNotificationVoice.FRIDAY_AFTERNOON_LINES +
                 RunNotificationVoice.MONDAY_MORNING_LINES + RunNotificationVoice.MIDDAY_LINES +
                 RunNotificationVoice.LATE_EVENING_LINES + RunNotificationVoice.WEEKEND_LINES
@@ -521,7 +508,7 @@ class RunNotificationVoiceTests {
 
     private static List<List<String>> everyPool() {
         return [RunNotificationVoice.CLEAN_HEADLINES, RunNotificationVoice.CLEAN_TAILS,
-                RunNotificationVoice.STREAK_TEMPLATES, RunNotificationVoice.LONG_STREAK_TEMPLATES,
+                StreakMilestoneVoice.STREAK_WITH_NEXT_LINES,
                 RunNotificationVoice.EARLY_MORNING_LINES, RunNotificationVoice.FRIDAY_AFTERNOON_LINES,
                 RunNotificationVoice.MONDAY_MORNING_LINES, RunNotificationVoice.MIDDAY_LINES,
                 RunNotificationVoice.LATE_EVENING_LINES, RunNotificationVoice.WEEKEND_LINES,
@@ -543,15 +530,13 @@ class RunNotificationVoiceTests {
     void everySupportingPoolIsDeepEnoughToAvoidAVisiblePattern() {
         Map<String, Integer> floors = [
                 // Streaks are spent by nearly every clean message, so they carry the full ten days; a tail
-                // or a time-of-day line only by some of them. The capped pool stays small on purpose: it
-                // retires when the stored streak (DAR-BE-107) counts past the 20-run lookback.
-                tails         : 100, streaks: WEEK_OF_RUNS, cappedStreaks: 12,
+                // or a time-of-day line only by some of them.
+                tails         : 100, streaks: WEEK_OF_RUNS,
                 earlyMorning  : 40, fridayAfternoon: 40, mondayMorning: 40,
                 midday        : 40, lateEvening: 40, weekend: 40, shapeFrames: 100]
         Map<String, List<String>> pools = [
                 tails         : RunNotificationVoice.CLEAN_TAILS,
-                streaks       : RunNotificationVoice.STREAK_TEMPLATES,
-                cappedStreaks : RunNotificationVoice.LONG_STREAK_TEMPLATES,
+                streaks       : StreakMilestoneVoice.STREAK_WITH_NEXT_LINES,
                 earlyMorning  : RunNotificationVoice.EARLY_MORNING_LINES,
                 fridayAfternoon: RunNotificationVoice.FRIDAY_AFTERNOON_LINES,
                 mondayMorning : RunNotificationVoice.MONDAY_MORNING_LINES,
@@ -631,8 +616,7 @@ class RunNotificationVoiceTests {
                 2026, 8, 19, 16, 0, 0, 0, ZoneId.of("Asia/Kolkata"))
         List<String> rendered = (1..WEEK_OF_RUNS).collect {
             RunNotificationVoice.renderLines(cleanModel() +
-                    [runName: "Production Orders Automation", priorCleanRuns: 0,
-                     completedMoment: plainWednesday]).join("\n")
+                    [runName: "Production Orders Automation", completedMoment: plainWednesday]).join("\n")
         }
         assertEquals(WEEK_OF_RUNS, rendered.toSet().size(),
                 "a week of clean runs repeated a message: ${rendered.countBy { it }.findAll { it.value > 1 }}".toString())
@@ -645,7 +629,7 @@ class RunNotificationVoiceTests {
         RunNotificationVoice.resetLinePicker()
         List<List<String>> messages = (1..WEEK_OF_RUNS).collect { int index ->
             RunNotificationVoice.renderLines(cleanModel() + [runName: "Daily Return Reconciliation UK",
-                    priorCleanRuns: 6, completedMoment: null])
+                    storedStreakDays: 6, completedMoment: null])
         }
         [0, 1].each { int line ->
             List<String> seen = messages.collect { it.get(line) }
@@ -661,43 +645,11 @@ class RunNotificationVoiceTests {
         // streak closer wins every time and the message is headline plus streak.
         List<String> rendered = (1..WEEK_OF_RUNS).collect { int index ->
             RunNotificationVoice.renderLines(cleanModel() +
-                    [runName: "Production Orders Automation", priorCleanRuns: 4,
+                    [runName: "Production Orders Automation", storedStreakDays: 4,
                      completedMoment: null]).join("\n")
         }
         assertEquals(WEEK_OF_RUNS, rendered.toSet().size(),
                 "a week of streaking clean runs repeated a message: ${rendered.countBy { it }.findAll { it.value > 1 }}".toString())
-    }
-
-    @Test
-    void aCappedStreakStillVariesItsClosingLine() {
-        RunNotificationVoice.resetLinePicker()
-        // At the lookback cap the renderer used to return one frozen string, so an automation that
-        // had been clean for twenty runs printed an identical second line forever. That is the
-        // staleness this whole change exists to remove, and it got worse the healthier a tenant was.
-        List<String> dealt = (1..RunNotificationVoice.LONG_STREAK_TEMPLATES.size()).collect {
-            RunNotificationVoice.streakLine(RunNotificationVoice.LOOKBACK_LIMIT)
-        }
-        assertEquals(RunNotificationVoice.LONG_STREAK_TEMPLATES.size(), dealt.toSet().size(),
-                "capped streak copy is still frozen: ${dealt}".toString())
-    }
-
-    @Test
-    void everyStreakTemplateKeepsTheCountPlaceholder() {
-        (RunNotificationVoice.STREAK_TEMPLATES + RunNotificationVoice.LONG_STREAK_TEMPLATES)
-                .each { String template ->
-            assertTrue(template.contains("{n}"),
-                    "a streak line that drops the number is just flavour: ${template}".toString())
-        }
-    }
-
-    @Test
-    void everyCappedStreakLineRendersTheLookbackLimit() {
-        RunNotificationVoice.resetLinePicker()
-        RunNotificationVoice.LONG_STREAK_TEMPLATES.size().times {
-            String line = RunNotificationVoice.streakLine(RunNotificationVoice.LOOKBACK_LIMIT)
-            assertTrue(line.contains(Integer.toString(RunNotificationVoice.LOOKBACK_LIMIT)), line)
-            assertFalse(line.contains("{n}"), "unrendered placeholder: ${line}".toString())
-        }
     }
 
     @Test

@@ -90,6 +90,21 @@ class AutomationStreakSupport {
     }
 
     /**
+     * DAR-BE-144, migrate#AutomationStreaks: folds every automation's history into its stored streak now, rather than on
+     * its next finished run, so the first message after deploy already reads the real day count. Idempotent: a fold
+     * reads only slots past the stored cursor, so a second pass changes nothing.
+     */
+    static Map<String, Object> backfillAll(def ec) {
+        String reason = "one-time streak backfill across every tenant — each fold pins reads and writes to the automation's own tenant"
+        List automationIds = (TenantScopedFinder.findGlobalUnscoped(ec, AUTOMATION, reason)
+                .selectField("automationId").useCache(false).list() ?: []).collect { it.automationId }
+        long before = TenantScopedFinder.findGlobalUnscoped(ec, STREAK, reason).useCache(false).count()
+        automationIds.each { recordSlots(ec, it) }
+        long after = TenantScopedFinder.findGlobalUnscoped(ec, STREAK, reason).useCache(false).count()
+        return [automationsScanned: automationIds.size(), streaksCreated: (int) (after - before)]
+    }
+
+    /**
      * What the message of the run behind {@code resultId} says about the streak: the stored day count, and the badge
      * or side quest its slot earned (lines + the GIF to show). Empty for a run no automation scheduled.
      */

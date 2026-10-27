@@ -49,4 +49,11 @@
                 loads are createOrUpdate and never delete, so withdrawal needs an explicit deletion.
                 Idempotent — a second run deletes nothing."/>
 
+    <darpan.migration.DarpanMigration migrationId="AUTOMATION_STREAKS" componentName="darpan"
+            serviceName="reconciliation.ReconciliationNotificationServices.migrate#AutomationStreaks"
+            sequenceNum="70" supportsDryRun="N" enabled="Y"
+            description="Fold every automation's run history into its stored clean-day streak, so the
+                clean-run Chat line reads the day count from the first message (DAR-BE-144).
+                Idempotent — a fold reads only slots past the stored cursor."/>
+
 </entity-facade-xml>

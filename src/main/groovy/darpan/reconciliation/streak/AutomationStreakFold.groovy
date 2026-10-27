@@ -10,9 +10,9 @@ import java.time.temporal.ChronoUnit
  * DAR-BE-107: one automation's clean-day streak, folded forward one finished scheduled slot at a time.
  *
  * <p>The streak used to be recomputed from run history on every Chat notification
- * ({@code RunNotificationStreak}), which is why it stopped at 20: each extra step of lookback is
- * more rows read per notification, and a year of an hourly check is 8,760 runs. Here the state is
- * stored and only slots newer than its cursor are ever read, so it has no ceiling.</p>
+ * (a run-count lookback, deleted by DAR-BE-144), which is why it stopped at 20: each extra step of
+ * lookback is more rows read per notification, and a year of an hourly check is 8,760 runs. Here the
+ * state is stored and only slots newer than its cursor are ever read, so it has no ceiling.</p>
  *
  * <p>Moqui-free on purpose (the loader and the entity live elsewhere), so every rule below is a
  * unit test in the fast pool. The rules are Aditi's decisions of 2026-10-21/22 on DAR-BE-107:</p>

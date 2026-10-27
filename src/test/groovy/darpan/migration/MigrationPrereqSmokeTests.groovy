@@ -79,7 +79,7 @@ class MigrationPrereqSmokeTests {
                 .find { it.migrationId == "TENANT_NOTIF_SETTINGS" }
         assertEquals("BLOCKED", blocked.outcome)
         assertEquals(1, out.blockedCount)
-        assertEquals(5, out.appliedCount)
+        assertEquals(6, out.appliedCount)
 
         long ledgerRows = ec.entity.find("darpan.migration.DarpanMigrationRun")
                 .condition("migrationId", "TENANT_NOTIF_SETTINGS")

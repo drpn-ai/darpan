@@ -81,11 +81,12 @@ class StreakMilestoneVoiceTests {
     }
 
     @Test
-    void aLongStreakLineStartsWhereTheLookbackStopsAndNeverLeavesAPlaceholder() {
-        assertNull(StreakMilestoneVoice.longStreakLine(20), "up to 20, RunNotificationVoice's own streak lines speak")
-        [21, 29, 89, 364, 365, 400, 1500].each { int days ->
-            StreakMilestoneVoice.LONG_WITH_NEXT_LINES.size().times {
-                String line = StreakMilestoneVoice.longStreakLine(days)
+    void aStreakLineStartsAtThreeDaysAndNeverLeavesAPlaceholder() {
+        assertNull(StreakMilestoneVoice.streakLine(0))
+        assertNull(StreakMilestoneVoice.streakLine(2), "two days is not a streak worth a line")
+        [3, 4, 20, 21, 29, 89, 364, 365, 400, 1500].each { int days ->
+            StreakMilestoneVoice.STREAK_WITH_NEXT_LINES.size().times {
+                String line = StreakMilestoneVoice.streakLine(days)
                 assertTrue(line.contains(Integer.toString(days)), line)
                 assertFalse(line.contains("{"), line)
                 if (days >= 365) assertFalse(line.contains("Full Orbit"), "past the top rung there is no next badge: ${line}".toString())
@@ -100,23 +101,23 @@ class StreakMilestoneVoiceTests {
             assertEquals(1, template.count("{left}"), template)
             assertFalse(template.contains("{left} day"), "the distance carries its own unit: ${template}".toString())
             RunNotificationVoice.setLinePicker { List<String> p, String slot -> template }
-            String line = StreakMilestoneVoice.longStreakLine(89)
+            String line = StreakMilestoneVoice.streakLine(89)
             assertTrue(line.contains("Solstice") && line.contains("1 day") && !line.contains("1 days"), line)
         }
     }
 
     @Test
-    void tenDaysOfLongStreaksNeverRepeatALine() {
-        assertTrue(StreakMilestoneVoice.LONG_WITH_NEXT_LINES.size() >= TEN_DAYS_OF_MESSAGES,
-                "long-streak pool is ${StreakMilestoneVoice.LONG_WITH_NEXT_LINES.size()}".toString())
-        List<String> lines = (1..TEN_DAYS_OF_MESSAGES).collect { StreakMilestoneVoice.longStreakLine(45) }
+    void tenDaysOfStreaksNeverRepeatALine() {
+        assertTrue(StreakMilestoneVoice.STREAK_WITH_NEXT_LINES.size() >= TEN_DAYS_OF_MESSAGES,
+                "streak pool is ${StreakMilestoneVoice.STREAK_WITH_NEXT_LINES.size()}".toString())
+        List<String> lines = (1..TEN_DAYS_OF_MESSAGES).collect { StreakMilestoneVoice.streakLine(45) }
         assertEquals(TEN_DAYS_OF_MESSAGES, lines.toSet().size(),
-                "a long-streak line repeated within ten days: ${lines.countBy { it }.findAll { it.value > 1 }.keySet()}".toString())
+                "a streak line repeated within ten days: ${lines.countBy { it }.findAll { it.value > 1 }.keySet()}".toString())
     }
 
     @Test
-    void longStreakLinesDoNotMostlyOpenOnTheCount() {
-        List<String> pool = StreakMilestoneVoice.LONG_WITH_NEXT_LINES
+    void streakLinesDoNotMostlyOpenOnTheCount() {
+        List<String> pool = StreakMilestoneVoice.STREAK_WITH_NEXT_LINES
         int countFirst = pool.count { it.startsWith("{n}") || it.startsWith("Day {n}") } as int
         assertTrue(countFirst * 3 <= pool.size(), "${countFirst} of ${pool.size()} open on the count".toString())
     }
@@ -125,7 +126,7 @@ class StreakMilestoneVoiceTests {
     void everyLineIsQuietPlainTextAndOnlyAFirstEarnGetsMoreThanOneSentence() {
         List<String> firstEarn = StreakMilestoneVoice.FIRST_EARN_LINES.values().flatten() as List<String>
         List<String> all = firstEarn + StreakMilestoneVoice.RE_EARN_LINES +
-                StreakMilestoneVoice.LONG_STREAK_LINES + StreakMilestoneVoice.NEXT_BADGE_LINES
+                StreakMilestoneVoice.STREAK_LINES + StreakMilestoneVoice.NEXT_BADGE_LINES
         assertTrue(all.size() > 300, "corpus is ${all.size()} lines".toString())
         all.each { String line ->
             // DAR-BE-138: a first earn is rare enough for a joke, so up to three short sentences; the rest stay at one.
@@ -141,10 +142,10 @@ class StreakMilestoneVoiceTests {
                 assertTrue(((int) c) < 128 || ((int) c) == 0x2014, "non-plain character in: ${line}".toString())
             }
         }
-        (StreakMilestoneVoice.LONG_STREAK_LINES + StreakMilestoneVoice.NEXT_BADGE_LINES).each { String line ->
+        (StreakMilestoneVoice.STREAK_LINES + StreakMilestoneVoice.NEXT_BADGE_LINES).each { String line ->
             assertFalse((line.toLowerCase() =~ /\bruns?\b/).find(), "a stored streak counts days, not runs: ${line}".toString())
         }
-        [StreakMilestoneVoice.RE_EARN_LINES, StreakMilestoneVoice.LONG_WITH_NEXT_LINES].each { List<String> pool ->
+        [StreakMilestoneVoice.RE_EARN_LINES, StreakMilestoneVoice.STREAK_WITH_NEXT_LINES].each { List<String> pool ->
             assertEquals(pool.size(), pool.toSet().size(), "duplicate entry in a pool")
         }
         StreakMilestoneVoice.FIRST_EARN_LINES.each { String key, List<String> pool ->

@@ -43,7 +43,7 @@ class MigrationSupervisorSmokeTests {
     }
 
     @Test
-    void bootstrapRunAppliesEverySixMigrationsAndRecordsThem() {
+    void bootstrapRunAppliesEveryMigrationAndRecordsThem() {
         // The ledger starts empty, so the first supervised run IS the backfill. Every registered
         // migration documents idempotence, so running them all is safe even where an operator
         // already ran them by hand.
@@ -54,13 +54,13 @@ class MigrationSupervisorSmokeTests {
                 .call()
 
         assertTrue(out.ok as Boolean, "bootstrap run reported failure: ${out.results}")
-        assertEquals(6, out.appliedCount)
+        assertEquals(7, out.appliedCount)
         assertEquals(0, out.failedCount)
         assertEquals(0, out.blockedCount)
 
         long successRows = ec.entity.find("darpan.migration.DarpanMigrationRun")
                 .condition("statusId", "SUCCESS").disableAuthz().count()
-        assertEquals(6L, successRows)
+        assertEquals(7L, successRows)
     }
 
     @Test
@@ -72,7 +72,7 @@ class MigrationSupervisorSmokeTests {
                 .parameters([:]).disableAuthz().call()
 
         assertEquals(0, second.appliedCount)
-        assertEquals(6, second.skippedCount)
+        assertEquals(7, second.skippedCount)
         (second.results as List<Map<String, Object>>).each { result ->
             assertEquals("ALREADY_APPLIED", result.outcome)
         }

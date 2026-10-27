@@ -20,4 +20,51 @@
             <set field="ok" from="adminSessionInfo != null"/>
         </actions>
     </service>
+
+    <service verb="get" noun="LiveOperations" allow-remote="true" authz-action="view">
+        <description>DAR-ADMIN-008. What is running on this instance right now, across every tenant: each
+            in-flight reconciliation, automation and audit run with its stage, progress and health, the
+            automation slots and overdue schedule, failures in the last 24 hours, this JVM's load, and the
+            warnings that follow, critical first.
+
+            Run health compares a run with its own last successful run, because heartbeats tick only inside
+            the extract stages: a long compare with a silent heartbeat is not stuck. System figures describe
+            the one JVM that answered. A source that could not be read is listed in unavailable, never
+            reported as zero. Rules: darpan.admin.LiveOperationsRules.</description>
+        <out-parameters>
+            <parameter name="liveOperations" type="Map">
+                <parameter name="generatedAt" type="Timestamp"/>
+                <parameter name="warnings" type="List">
+                    <description>severity (critical | warning), code, title, detail, tenantLabel, runResultId,
+                        automationId, since. Critical first, then oldest first.</description>
+                </parameter>
+                <parameter name="running" type="List">
+                    <description>One row per RUNNING run result: kind (audit | automation | run), name, tenant,
+                        currentStage, progressPercent, startedDate, elapsedMs, usualDurationMs, health
+                        (healthy | slow | stuck), healthReason.</description>
+                </parameter>
+                <parameter name="overdue" type="List">
+                    <description>Active automations past their fire time by more than one scan tick and not
+                        still running, latest first.</description>
+                </parameter>
+                <parameter name="slots" type="Map">
+                    <description>inFlight and cap (darpan.reconciliation.automation.maxConcurrentExecutions,
+                        instance-wide), plus pending executions.</description>
+                </parameter>
+                <parameter name="recentFailures" type="Map">
+                    <description>windowHours, count and items: failed run results in the window, newest first.</description>
+                </parameter>
+                <parameter name="system" type="Map">
+                    <description>Heap, heap after GC, process CPU, load average, threads, disk on the runtime
+                        volume, the Moqui worker pool and uptime. Null when unreadable.</description>
+                </parameter>
+                <parameter name="unavailable" type="List">
+                    <description>source and reason for each source that could not be read.</description>
+                </parameter>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="liveOperations" from="darpan.admin.AdminLiveOperationsSupport.getLiveOperations(ec, ec.user.nowTimestamp)"/>
+        </actions>
+    </service>
 </services>

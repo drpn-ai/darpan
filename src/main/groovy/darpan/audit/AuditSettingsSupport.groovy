@@ -1,6 +1,7 @@
 package darpan.audit
 
 import darpan.facade.common.TenantAccessSupport
+import darpan.facade.reconciliation.RunHealth
 import darpan.reconciliation.automation.AutomationExecutionSupport
 import darpan.reconciliation.automation.AutomationRuntimeSupport
 import darpan.reconciliation.automation.SourceExtractOptionsSupport
@@ -138,6 +139,57 @@ class AuditSettingsSupport {
             [automationId: automation.automationId, savedRunId: automation.savedRunId, submitted: submitted.submitted == true,
              error: submitted.error]
         }
+    }
+
+    /**
+     * DAR-UI-085. What a play (or the morning run) is doing right now, for the audit page's Run health: one entry per
+     * automation of the audit with an execution RUNNING or PENDING, naming the checks it feeds, its stage and progress,
+     * and its health (RunHealth). The ledger row a check writes lands only when its window ends, so without this the
+     * report reads every check as "not run" until then.
+     *
+     * Answers {checks: configured checks, activeChecks, active: [{run, checks: [codes], state: running | queued,
+     * attempt, stage, progressPercent, elapsedMs, usualDurationMs, health, healthReason, retryAt}]}.
+     */
+    static Map progress(def ec, String tenantId, Map audit, Timestamp now) {
+        List<Map> checks = checksByStatement(ec, tenantId, statementsOf(ec, tenantId, audit, true)).values().flatten()
+                .unique { it.checkId } as List<Map>
+        Map<String, List<Map>> checksByAutomation = checks.findAll { it.automationId }.groupBy { it.automationId as String }
+        List<Map> active = []
+        if (checksByAutomation) {
+            Map<String, Map> automations = automationsOf(ec, tenantId, checks).collectEntries { [(it.automationId): it] }
+            Map<String, String> names = runNames(ec, tenantId, automations.values()*.savedRunId.findAll { it }.unique() as List<String>)
+            rows(ec, "darpan.reconciliation.ReconciliationAutomationExecution", tenantId)
+                    .condition("automationId", EntityCondition.IN, checksByAutomation.keySet() as List)
+                    .condition("statusEnumId", EntityCondition.IN, [AutomationExecutionSupport.STATUS_RUNNING, AutomationExecutionSupport.STATUS_PENDING])
+                    .list()*.getMap().groupBy { it.automationId as String }.each { String automationId, List<Map> executions ->
+                Map execution = executions.find { it.statusEnumId == AutomationExecutionSupport.STATUS_RUNNING } ?:
+                        executions.max { (it.createdDate as Timestamp)?.time ?: 0L }
+                boolean running = execution.statusEnumId == AutomationExecutionSupport.STATUS_RUNNING
+                Map automation = automations[automationId] ?: [:]
+                Map run = running && execution.reconciliationRunResultId ? rows(ec, "darpan.reconciliation.ReconciliationRunResult", tenantId)
+                        .condition("reconciliationRunResultId", execution.reconciliationRunResultId).list().find()?.getMap() : null
+                Map entry = [run         : names[automation.savedRunId as String] ?: automation.automationName ?: automationId,
+                             checks      : checksByAutomation[automationId]*.checkCode.sort(),
+                             state       : running ? "running" : "queued",
+                             attempt     : ((execution.retryCount ?: 0) as Integer) + 1,
+                             retryAt     : running ? null : execution.nextRetryDate,
+                             stage       : run?.currentStage,
+                             progressPercent: run?.progressPercent]
+                if (run) {
+                    Timestamp started = (run.startedDate ?: execution.startedDate) as Timestamp
+                    Long usual = RunHealth.usualDurationMs(rows(ec, "darpan.reconciliation.ReconciliationRunResult", tenantId),
+                            tenantId, run.savedRunId as String)
+                    Map health = RunHealth.of(run + [startedDate: started, usualDurationMs: usual], now)
+                    entry += [elapsedMs: started ? now.time - started.time : null, usualDurationMs: usual,
+                              health: health.health, healthReason: health.reason]
+                }
+                active << entry
+            }
+        }
+        // Running before queued, then by run name.
+        return [checks      : checks.size(),
+                activeChecks: (active.sum { it.checks.size() } ?: 0) as int,
+                active      : active.sort { a, b -> (b.state <=> a.state) ?: (a.run <=> b.run) }]
     }
 
     /**

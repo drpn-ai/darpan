@@ -207,6 +207,31 @@
         </actions>
     </service>
 
+    <service verb="get" noun="AuditProgress" authz-action="view" allow-remote="true" authenticate="true">
+        <description>DAR-UI-085. What the audit's checks are doing right now, for its page's Run health while a play or the
+            morning run is going: each automation with a run in progress or queued, the checks it feeds, its stage and
+            progress, and whether it looks healthy, slow or stuck (slow against its own last successful run). Cheap
+            enough to poll; the page reloads the report when a check finishes.</description>
+        <in-parameters><parameter name="audit" required="true"><description>The audit's code.</description></parameter></in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="progress" type="Map"><description>{checks: configured checks, activeChecks, active: [{run,
+                checks: [check codes], state: running | queued, attempt, retryAt, stage, progressPercent, elapsedMs,
+                usualDurationMs, health: healthy | slow | stuck, healthReason}]}</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="auditRow" from="darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit)"/>
+            <if condition="!auditRow"><return error="true" message="Audit ${audit} was not found"/></if>
+            <set field="progress" from="darpan.audit.AuditSettingsSupport.progress(ec, tenantId, auditRow, ec.user.nowTimestamp)"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
     <service verb="create" noun="Audit" allow-remote="true" authenticate="true">
         <description>DAR-UI-078. Makes an audit of the active tenant's own. Its id (the code every audit page and service names
             it by) is the name in lower case with dashes, one per tenant. Statements and checks are added on its settings.</description>

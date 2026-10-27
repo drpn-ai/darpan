@@ -219,6 +219,44 @@ class AuditSettingsSmokeTests {
                 "another tenant's audit is not found")
     }
 
+    // DAR-UI-085 (Aditi: "when an audit is running... i cannot see any indication"). Order(3) made both automations.
+    @Test
+    @Order(9)
+    void progressShowsEachRunInFlightWithItsChecksAndNothingOfAnotherTenant() {
+        Map idle = facade("get#AuditProgress", [audit: "system-health"])
+        assertFalse(idle.hadError as boolean, idle.errorText as String)
+        assertEquals([checks: 3, activeChecks: 0, active: []], idle.progress, "nothing in flight")
+
+        String paid = checkRow("TSET_PAID").automationId
+        String open = checkRow("TSET_OPEN").automationId
+        long now = System.currentTimeMillis()
+        insert("darpan.reconciliation.ReconciliationRunResult", [reconciliationRunResultId: "TSET_PROG_RR", companyUserGroupId: MINE,
+                savedRunId: "TSET_RS2", statusEnumId: "AUT_STAT_RUNNING", currentStage: "EXTRACT_FILE2", progressPercent: 40L,
+                startedDate: new java.sql.Timestamp(now - 3 * 60_000L), lastHeartbeatDate: new java.sql.Timestamp(now - 60_000L)])
+        insert("darpan.reconciliation.ReconciliationAutomationExecution", [automationExecutionId: "TSET_PROG_X1", automationId: paid,
+                companyUserGroupId: MINE, statusEnumId: "AUT_STAT_RUNNING", reconciliationRunResultId: "TSET_PROG_RR",
+                startedDate: new java.sql.Timestamp(now - 3 * 60_000L), retryCount: 0L])
+        insert("darpan.reconciliation.ReconciliationAutomationExecution", [automationExecutionId: "TSET_PROG_X2", automationId: open,
+                companyUserGroupId: MINE, statusEnumId: "AUT_STAT_PENDING", retryCount: 1L, createdDate: new java.sql.Timestamp(now)])
+        // Another tenant's row naming one of these automations must not count: every read carries the tenant condition.
+        insert("darpan.reconciliation.ReconciliationAutomationExecution", [automationExecutionId: "TSET_PROG_X3", automationId: open,
+                companyUserGroupId: OTHER, statusEnumId: "AUT_STAT_RUNNING", retryCount: 0L])
+
+        Map progress = facade("get#AuditProgress", [audit: "system-health"]).progress as Map
+        assertEquals(3, progress.checks)
+        assertEquals(3, progress.activeChecks, "R2's two checks ride one automation, R1's on the other")
+        assertEquals(["running", "queued"], progress.active*.state, "running first")
+        Map running = progress.active[0] as Map
+        assertEquals(["paid-without-opp", "paid-without-opp-2"], running.checks)
+        assertEquals("TSET_RS2 run", running.run)
+        assertEquals(["EXTRACT_FILE2", 40L, "healthy", 1], [running.stage, running.progressPercent as Long, running.health, running.attempt])
+        assertTrue((running.elapsedMs as Long) >= 3 * 60_000L, "elapsed from the run's start: ${running.elapsedMs}")
+        Map queued = progress.active[1] as Map
+        assertEquals([["open-in-netsuite"], 2, null], [queued.checks, queued.attempt, queued.health], "a retry waits; no health yet")
+
+        assertTrue(facade("get#AuditProgress", [audit: "other-only"]).hadError as boolean, "another tenant's audit is not found")
+    }
+
     private Map facade(String verbNoun, Map params = [:]) {
         Map out = ec.service.sync().name("${FACADE}.${verbNoun}").parameters(params).call() ?: [:]
         Map result = out + [hadError: ec.message.hasError(), errorText: ec.message.errorsString]

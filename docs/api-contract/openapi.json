@@ -57,6 +57,9 @@
                                         "$ref": "#/components/schemas/GetAdminSessionInfoRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/GetLiveOperationsRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/GetScheduleBoardRequest"
                                     },
                                     {
@@ -127,6 +130,9 @@
                                     },
                                     {
                                         "$ref": "#/components/schemas/GetAuditFindingsByOrderRequest"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/GetAuditProgressRequest"
                                     },
                                     {
                                         "$ref": "#/components/schemas/GetAuditReportRequest"
@@ -551,6 +557,7 @@
                                         "admin.MigrationAdminServices.run#PendingMigrations": "#/components/schemas/RunPendingMigrationsRequest",
                                         "admin.MigrationAdminServices.set#MigrationEnabled": "#/components/schemas/SetMigrationEnabledRequest",
                                         "admin.ObserveAdminServices.get#AdminSessionInfo": "#/components/schemas/GetAdminSessionInfoRequest",
+                                        "admin.ObserveAdminServices.get#LiveOperations": "#/components/schemas/GetLiveOperationsRequest",
                                         "admin.ScheduleAdminServices.get#ScheduleBoard": "#/components/schemas/GetScheduleBoardRequest",
                                         "admin.TenantAdminServices.create#Tenant": "#/components/schemas/CreateTenantRequest",
                                         "admin.TenantAdminServices.deactivate#Tenant": "#/components/schemas/DeactivateTenantRequest",
@@ -575,6 +582,7 @@
                                         "facade.AuditFacadeServices.get#AuditCheckOptions": "#/components/schemas/GetAuditCheckOptionsRequest",
                                         "facade.AuditFacadeServices.get#AuditFinding": "#/components/schemas/GetAuditFindingRequest",
                                         "facade.AuditFacadeServices.get#AuditFindingsByOrder": "#/components/schemas/GetAuditFindingsByOrderRequest",
+                                        "facade.AuditFacadeServices.get#AuditProgress": "#/components/schemas/GetAuditProgressRequest",
                                         "facade.AuditFacadeServices.get#AuditReport": "#/components/schemas/GetAuditReportRequest",
                                         "facade.AuditFacadeServices.get#AuditSettings": "#/components/schemas/GetAuditSettingsRequest",
                                         "facade.AuditFacadeServices.get#Audits": "#/components/schemas/GetAuditsRequest",
@@ -761,6 +769,9 @@
                                             "$ref": "#/components/schemas/GetAdminSessionInfoResponse"
                                         },
                                         {
+                                            "$ref": "#/components/schemas/GetLiveOperationsResponse"
+                                        },
+                                        {
                                             "$ref": "#/components/schemas/GetScheduleBoardResponse"
                                         },
                                         {
@@ -831,6 +842,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetAuditFindingsByOrderResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/GetAuditProgressResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetAuditReportResponse"
@@ -2438,6 +2452,134 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/GetAdminSessionInfoResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetLiveOperationsParams": {
+                "type": "object",
+                "properties": {
+                    
+                },
+                "description": "DAR-ADMIN-008. What is running on this instance right now, across every tenant: each\n            in-flight reconciliation, automation and audit run with its stage, progress and health, the\n            automation slots and overdue schedule, failures in the last 24 hours, this JVM's load, and the\n            warnings that follow, critical first.\n\n            Run health compares a run with its own last successful run, because heartbeats tick only inside\n            the extract stages: a long compare with a silent heartbeat is not stuck. System figures describe\n            the one JVM that answered. A source that could not be read is listed in unavailable, never\n            reported as zero. Rules: darpan.admin.LiveOperationsRules."
+            },
+            "GetLiveOperationsResult": {
+                "type": "object",
+                "properties": {
+                    "liveOperations": {
+                        "type": "object",
+                        "properties": {
+                            "generatedAt": {
+                                "oneOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "number"
+                                    }
+                                ],
+                                "description": "Timestamp \u2014 ISO-8601 string or epoch milliseconds"
+                            },
+                            "warnings": {
+                                "type": "array",
+                                "items": {
+                                    
+                                },
+                                "description": "severity (critical | warning), code, title, detail, tenantLabel, runResultId,\n                        automationId, since. Critical first, then oldest first."
+                            },
+                            "running": {
+                                "type": "array",
+                                "items": {
+                                    
+                                },
+                                "description": "One row per RUNNING run result: kind (audit | automation | run), name, tenant,\n                        currentStage, progressPercent, startedDate, elapsedMs, usualDurationMs, health\n                        (healthy | slow | stuck), healthReason."
+                            },
+                            "overdue": {
+                                "type": "array",
+                                "items": {
+                                    
+                                },
+                                "description": "Active automations past their fire time by more than one scan tick and not\n                        still running, latest first."
+                            },
+                            "slots": {
+                                "type": "object",
+                                "description": "inFlight and cap (darpan.reconciliation.automation.maxConcurrentExecutions,\n                        instance-wide), plus pending executions."
+                            },
+                            "recentFailures": {
+                                "type": "object",
+                                "description": "windowHours, count and items: failed run results in the window, newest first."
+                            },
+                            "system": {
+                                "type": "object",
+                                "description": "Heap, heap after GC, process CPU, load average, threads, disk on the runtime\n                        volume, the Moqui worker pool and uptime. Null when unreadable."
+                            },
+                            "unavailable": {
+                                "type": "array",
+                                "items": {
+                                    
+                                },
+                                "description": "source and reason for each source that could not be read."
+                            }
+                        }
+                    }
+                }
+            },
+            "GetLiveOperationsRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for admin.ObserveAdminServices.get#LiveOperations",
+                "x-darpan-method": "admin.ObserveAdminServices.get#LiveOperations",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "admin.ObserveAdminServices.get#LiveOperations"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetLiveOperationsParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetLiveOperationsResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for admin.ObserveAdminServices.get#LiveOperations. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetLiveOperationsResult"
                     }
                 },
                 "required": [
@@ -4887,6 +5029,103 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/GetAuditFindingsByOrderResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "GetAuditProgressParams": {
+                "type": "object",
+                "properties": {
+                    "audit": {
+                        "type": "string",
+                        "description": "The audit's code."
+                    }
+                },
+                "required": [
+                    "audit"
+                ],
+                "description": "DAR-UI-085. What the audit's checks are doing right now, for its page's Run health while a play or the\n            morning run is going: each automation with a run in progress or queued, the checks it feeds, its stage and\n            progress, and whether it looks healthy, slow or stuck (slow against its own last successful run). Cheap\n            enough to poll; the page reloads the report when a check finishes."
+            },
+            "GetAuditProgressResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "progress": {
+                        "type": "object",
+                        "description": "{checks: configured checks, activeChecks, active: [{run,\n                checks: [check codes], state: running | queued, attempt, retryAt, stage, progressPercent, elapsedMs,\n                usualDurationMs, health: healthy | slow | stuck, healthReason}]}"
+                    }
+                }
+            },
+            "GetAuditProgressRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.get#AuditProgress",
+                "x-darpan-method": "facade.AuditFacadeServices.get#AuditProgress",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuditFacadeServices.get#AuditProgress"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/GetAuditProgressParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "GetAuditProgressResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.get#AuditProgress. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/GetAuditProgressResult"
                     }
                 },
                 "required": [
@@ -24199,6 +24438,7 @@
         "admin.MigrationAdminServices.run#PendingMigrations": "RunPendingMigrations",
         "admin.MigrationAdminServices.set#MigrationEnabled": "SetMigrationEnabled",
         "admin.ObserveAdminServices.get#AdminSessionInfo": "GetAdminSessionInfo",
+        "admin.ObserveAdminServices.get#LiveOperations": "GetLiveOperations",
         "admin.ScheduleAdminServices.get#ScheduleBoard": "GetScheduleBoard",
         "admin.TenantAdminServices.create#Tenant": "CreateTenant",
         "admin.TenantAdminServices.deactivate#Tenant": "DeactivateTenant",
@@ -24223,6 +24463,7 @@
         "facade.AuditFacadeServices.get#AuditCheckOptions": "GetAuditCheckOptions",
         "facade.AuditFacadeServices.get#AuditFinding": "GetAuditFinding",
         "facade.AuditFacadeServices.get#AuditFindingsByOrder": "GetAuditFindingsByOrder",
+        "facade.AuditFacadeServices.get#AuditProgress": "GetAuditProgress",
         "facade.AuditFacadeServices.get#AuditReport": "GetAuditReport",
         "facade.AuditFacadeServices.get#AuditSettings": "GetAuditSettings",
         "facade.AuditFacadeServices.get#Audits": "GetAudits",

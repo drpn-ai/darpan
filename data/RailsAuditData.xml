@@ -8,7 +8,7 @@
   created or held in HotWax is correct: still open in both.
   Live 2026-10-22, Oct 1-19 (tools/live-probes/run-open-orders-oms-status.sh): 12 findings, all completed in HotWax and
   Pending Fulfillment in NetSuite (e.g. SO8432201 / HC 145059); the 86 cancelled are all Closed in NetSuite.
-  DAR-CLIENT-005 (Aditi, 2026-10-27) adds R2-R6, one check per Shopify store where Shopify is a side (see below).
+  DAR-CLIENT-005 (Aditi, 2026-10-27) adds R2-R7, one check per Shopify store where Shopify is a side (see below).
   NOT seed data - tenant configuration. Load per install, AFTER the backend carrying NsSuiteQlSourceQuery.omsStatusConfigId
   (DAR-BE-111) and shopify-darpan's completedReturns=orderRefunded (DAR-CLIENT-005), AuditSeedData.xml,
   rails-audit-queries.xml, and once the RAILS tenant exists. sourceConfigId values name the TARGET environment's configs:
@@ -106,9 +106,20 @@
     <darpan.audit.AuditStatement statementId="RAILS_R6" auditId="RAILS_MONTH_CLOSE" companyUserGroupId="RAILS" statementCode="R6"
             categoryEnumId="AUDC_RETURNS" weightEnumId="AUDSW_FIRM" sequenceNum="6"
             statementText="Every return Shopify completes with a refund is in NetSuite."/>
+    <!-- R7 (Aditi, 2026-10-27, "rails is missing the exchanges order check"; both paths). Every exchange is its own NetSuite
+         sales order named EXC... (custbody_rails_ext_order_number), two kinds (live, Oct 20-25):
+         - Loop: channel Loop Exchange, EXC-<name>-1, a NEW Shopify order; custbody_rails_ext_order_id = that order's own id.
+         - HotWax (POS): channel POS Channel, EXC-#<name>-1, a Shopify return with exchange items on the original order;
+           custbody_rails_ext_order_id = the ORIGINAL order's id (some originals are from 2023).
+         So one NetSuite query (rails-audit-queries.xml RAILS_NS_EXCHANGE_ORDERS) and two runs per store, one per path. -->
+    <darpan.audit.AuditStatement statementId="RAILS_R7" auditId="RAILS_MONTH_CLOSE" companyUserGroupId="RAILS" statementCode="R7"
+            categoryEnumId="AUDC_EXCHANGES_WARRANTY" weightEnumId="AUDSW_FIRM" sequenceNum="7"
+            statementText="Every exchange Shopify makes is in NetSuite."/>
 
     <moqui.basic.Enumeration enumId="CONC_SHOPIFY_ORDER_NOT_IN_OMS" enumTypeId="DarpanConclusion" enumCode="CONC_SHOPIFY_ORDER_NOT_IN_OMS" description="Not in HotWax"/>
     <moqui.basic.Enumeration enumId="CONC_NO_CREDIT_MEMO_IN_NS" enumTypeId="DarpanConclusion" enumCode="CONC_NO_CREDIT_MEMO_IN_NS" description="No credit memo in NetSuite"/>
+    <moqui.basic.Enumeration enumId="CONC_EXCHANGE_NOT_IN_NS" enumTypeId="DarpanConclusion" enumCode="CONC_EXCHANGE_NOT_IN_NS" description="Exchange not in NetSuite"/>
+    <moqui.basic.Enumeration enumId="CONC_EXCHANGE_ORIGINAL_UNFULFILLED" enumTypeId="DarpanConclusion" enumCode="CONC_EXCHANGE_ORIGINAL_UNFULFILLED" description="Original order not fulfilled"/>
     <!-- R4's causes, the same codes as gorjana's R1 (GorjanaConclusionRulesData.xml), repeated so this file loads alone. -->
     <moqui.basic.Enumeration enumId="CONC_COMPLETED_CLOSED_IN_NS" enumTypeId="DarpanConclusion" enumCode="CONC_COMPLETED_CLOSED_IN_NS" description="Closed in NetSuite"/>
     <moqui.basic.Enumeration enumId="CONC_NS_NO_LINE_LOCATION" enumTypeId="DarpanConclusion" enumCode="CONC_NS_NO_LINE_LOCATION" description="No location"/>
@@ -740,6 +751,291 @@ end]]></ruleLogic>
             fixActionTemplate="Bill the NetSuite line for item {recordKey}, or sync the order if NetSuite does not have it."
             passesWhenTemplate="NetSuite has billed the line for item {recordKey}."/>
 
+    <!-- ================================================================ R7 - Rails US (Shopify 100003, NetSuite store 1) -->
+    <darpan.rule.RuleSet ruleSetId="RAILS_EXC_LOOP_USA_RS" ruleSetName="Shopify Loop exchanges against NetSuite - US"
+            description="Every Rails US Loop exchange order in Shopify (named EXC-) against the store's NetSuite exchange sales orders." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_EXC_LOOP_USA_SCOPE" ruleSetId="RAILS_EXC_LOOP_USA_RS"
+            objectType="ORDER" scopeMode="COMPARE" description="Every Rails US Loop exchange order in Shopify (named EXC-) against the store's NetSuite exchange sales orders." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_LOOP_USA_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="legacyResourceId"
+            sourceConfigId="100003" sourceConfigType="SHOPIFY_AUTH" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_LOOP_USA_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="legacyResourceId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_EXC_LOOP_USA_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="name" operator="INCLUDE_PREFIX" filterValues="EXC-" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_LOOP_USA_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyOrderId"
+            sourceConfigId="RAILS_NS_EXCHANGE_ORDERS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_LOOP_USA_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_EXC_LOOP_USA_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyStore" operator="INCLUDE_IN" filterValues="1" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_EXC_LOOP_USA_SCOPE" sequenceNum="10" fixActionTemplate="Sync Loop exchange order {recordKey} from HotWax to NetSuite." conclusionEnumId="CONC_EXCHANGE_NOT_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_LOOP_USA_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no sales order for the exchange" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_LOOP_EXC_NOT_IN_NS_USA" companyUserGroupId="RAILS" checkCode="loop-exchanges-not-in-netsuite-usa"
+            label="Rails US Loop exchange orders NetSuite does not have" savedRunId="RAILS_EXC_LOOP_USA_RS"
+            file1RecordType="order" file2RecordType="salesOrder" graceDays="1"
+            matchedBy="Shopify order id = custbody_rails_ext_order_id on the exchange sales order"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Loop exchange order {recordKey} is not in NetSuite"
+            fixActionTemplate="Sync Loop exchange order {recordKey} from HotWax to NetSuite."
+            passesWhenTemplate="NetSuite has a sales order for Loop exchange order {recordKey}."/>
+    <darpan.rule.RuleSet ruleSetId="RAILS_EXC_POS_USA_RS" ruleSetName="Shopify store exchanges against NetSuite - US"
+            description="Every Rails US Shopify order with a completed return that has exchange items (a HotWax store exchange) against the store's NetSuite exchange sales orders." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_EXC_POS_USA_SCOPE" ruleSetId="RAILS_EXC_POS_USA_RS"
+            objectType="RETURN" scopeMode="COMPARE" description="Every Rails US Shopify order with a completed return that has exchange items (a HotWax store exchange) against the store's NetSuite exchange sales orders." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_POS_USA_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY_RETURN_REFS" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="orderId"
+            sourceConfigId="100003" sourceConfigType="SHOPIFY_RETURN_REFS_API"
+            extractParametersJson='{"completedReturns":"exchanged"}' companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_POS_USA_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="orderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_POS_USA_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyOrderId"
+            sourceConfigId="RAILS_NS_EXCHANGE_ORDERS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_POS_USA_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_EXC_POS_USA_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyStore" operator="INCLUDE_IN" filterValues="1" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_EXC_POS_USA_SCOPE" sequenceNum="10" fixActionTemplate="Ship the original order {recordKey}: its exchange reaches NetSuite only once the original is fulfilled." conclusionEnumId="CONC_EXCHANGE_ORIGINAL_UNFULFILLED" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_POS_USA_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no sales order for the exchange" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_POS_USA_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="originalUnfulfilledQuantity" operator="GT" conditionValues="0" checkLabel="Shopify has not fulfilled the original order" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_EXC_POS_USA_SCOPE" sequenceNum="20" fixActionTemplate="Sync the HotWax exchange for Shopify order {recordKey} to NetSuite." conclusionEnumId="CONC_EXCHANGE_NOT_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_POS_USA_SCOPE" sequenceNum="20" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no sales order for the exchange" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_POS_EXC_NOT_IN_NS_USA" companyUserGroupId="RAILS" checkCode="store-exchanges-not-in-netsuite-usa"
+            label="Rails US store exchanges NetSuite does not have" savedRunId="RAILS_EXC_POS_USA_RS"
+            file1RecordType="return" file2RecordType="salesOrder" graceDays="1"
+            matchedBy="Shopify order id (the original order) = custbody_rails_ext_order_id on the exchange sales order"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="The exchange on Shopify order {recordKey} is not in NetSuite"
+            fixActionTemplate="Sync the HotWax exchange for Shopify order {recordKey} to NetSuite."
+            passesWhenTemplate="NetSuite has the exchange sales order for Shopify order {recordKey}."/>
+
+    <!-- ================================================================ R7 - Rails Canada (Shopify 100000, NetSuite store 5) -->
+    <darpan.rule.RuleSet ruleSetId="RAILS_EXC_LOOP_CANADA_RS" ruleSetName="Shopify Loop exchanges against NetSuite - Canada"
+            description="Every Rails Canada Loop exchange order in Shopify (named EXC-) against the store's NetSuite exchange sales orders." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_EXC_LOOP_CANADA_SCOPE" ruleSetId="RAILS_EXC_LOOP_CANADA_RS"
+            objectType="ORDER" scopeMode="COMPARE" description="Every Rails Canada Loop exchange order in Shopify (named EXC-) against the store's NetSuite exchange sales orders." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_LOOP_CANADA_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="legacyResourceId"
+            sourceConfigId="100000" sourceConfigType="SHOPIFY_AUTH" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_LOOP_CANADA_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="legacyResourceId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_EXC_LOOP_CANADA_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="name" operator="INCLUDE_PREFIX" filterValues="EXC-" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_LOOP_CANADA_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyOrderId"
+            sourceConfigId="RAILS_NS_EXCHANGE_ORDERS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_LOOP_CANADA_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_EXC_LOOP_CANADA_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyStore" operator="INCLUDE_IN" filterValues="5" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_EXC_LOOP_CANADA_SCOPE" sequenceNum="10" fixActionTemplate="Sync Loop exchange order {recordKey} from HotWax to NetSuite." conclusionEnumId="CONC_EXCHANGE_NOT_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_LOOP_CANADA_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no sales order for the exchange" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_LOOP_EXC_NOT_IN_NS_CANADA" companyUserGroupId="RAILS" checkCode="loop-exchanges-not-in-netsuite-canada"
+            label="Rails Canada Loop exchange orders NetSuite does not have" savedRunId="RAILS_EXC_LOOP_CANADA_RS"
+            file1RecordType="order" file2RecordType="salesOrder" graceDays="1"
+            matchedBy="Shopify order id = custbody_rails_ext_order_id on the exchange sales order"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Loop exchange order {recordKey} is not in NetSuite"
+            fixActionTemplate="Sync Loop exchange order {recordKey} from HotWax to NetSuite."
+            passesWhenTemplate="NetSuite has a sales order for Loop exchange order {recordKey}."/>
+    <darpan.rule.RuleSet ruleSetId="RAILS_EXC_POS_CANADA_RS" ruleSetName="Shopify store exchanges against NetSuite - Canada"
+            description="Every Rails Canada Shopify order with a completed return that has exchange items (a HotWax store exchange) against the store's NetSuite exchange sales orders." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_EXC_POS_CANADA_SCOPE" ruleSetId="RAILS_EXC_POS_CANADA_RS"
+            objectType="RETURN" scopeMode="COMPARE" description="Every Rails Canada Shopify order with a completed return that has exchange items (a HotWax store exchange) against the store's NetSuite exchange sales orders." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_POS_CANADA_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY_RETURN_REFS" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="orderId"
+            sourceConfigId="100000" sourceConfigType="SHOPIFY_RETURN_REFS_API"
+            extractParametersJson='{"completedReturns":"exchanged"}' companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_POS_CANADA_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="orderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_POS_CANADA_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyOrderId"
+            sourceConfigId="RAILS_NS_EXCHANGE_ORDERS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_POS_CANADA_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_EXC_POS_CANADA_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyStore" operator="INCLUDE_IN" filterValues="5" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_EXC_POS_CANADA_SCOPE" sequenceNum="10" fixActionTemplate="Ship the original order {recordKey}: its exchange reaches NetSuite only once the original is fulfilled." conclusionEnumId="CONC_EXCHANGE_ORIGINAL_UNFULFILLED" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_POS_CANADA_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no sales order for the exchange" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_POS_CANADA_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="originalUnfulfilledQuantity" operator="GT" conditionValues="0" checkLabel="Shopify has not fulfilled the original order" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_EXC_POS_CANADA_SCOPE" sequenceNum="20" fixActionTemplate="Sync the HotWax exchange for Shopify order {recordKey} to NetSuite." conclusionEnumId="CONC_EXCHANGE_NOT_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_POS_CANADA_SCOPE" sequenceNum="20" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no sales order for the exchange" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_POS_EXC_NOT_IN_NS_CANADA" companyUserGroupId="RAILS" checkCode="store-exchanges-not-in-netsuite-canada"
+            label="Rails Canada store exchanges NetSuite does not have" savedRunId="RAILS_EXC_POS_CANADA_RS"
+            file1RecordType="return" file2RecordType="salesOrder" graceDays="1"
+            matchedBy="Shopify order id (the original order) = custbody_rails_ext_order_id on the exchange sales order"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="The exchange on Shopify order {recordKey} is not in NetSuite"
+            fixActionTemplate="Sync the HotWax exchange for Shopify order {recordKey} to NetSuite."
+            passesWhenTemplate="NetSuite has the exchange sales order for Shopify order {recordKey}."/>
+
+    <!-- ================================================================ R7 - Rails EU (Shopify 100001, NetSuite store 2) -->
+    <darpan.rule.RuleSet ruleSetId="RAILS_EXC_LOOP_EU_RS" ruleSetName="Shopify Loop exchanges against NetSuite - EU"
+            description="Every Rails EU Loop exchange order in Shopify (named EXC-) against the store's NetSuite exchange sales orders." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_EXC_LOOP_EU_SCOPE" ruleSetId="RAILS_EXC_LOOP_EU_RS"
+            objectType="ORDER" scopeMode="COMPARE" description="Every Rails EU Loop exchange order in Shopify (named EXC-) against the store's NetSuite exchange sales orders." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_LOOP_EU_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="legacyResourceId"
+            sourceConfigId="100001" sourceConfigType="SHOPIFY_AUTH" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_LOOP_EU_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="legacyResourceId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_EXC_LOOP_EU_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="name" operator="INCLUDE_PREFIX" filterValues="EXC-" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_LOOP_EU_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyOrderId"
+            sourceConfigId="RAILS_NS_EXCHANGE_ORDERS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_LOOP_EU_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_EXC_LOOP_EU_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyStore" operator="INCLUDE_IN" filterValues="2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_EXC_LOOP_EU_SCOPE" sequenceNum="10" fixActionTemplate="Sync Loop exchange order {recordKey} from HotWax to NetSuite." conclusionEnumId="CONC_EXCHANGE_NOT_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_LOOP_EU_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no sales order for the exchange" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_LOOP_EXC_NOT_IN_NS_EU" companyUserGroupId="RAILS" checkCode="loop-exchanges-not-in-netsuite-eu"
+            label="Rails EU Loop exchange orders NetSuite does not have" savedRunId="RAILS_EXC_LOOP_EU_RS"
+            file1RecordType="order" file2RecordType="salesOrder" graceDays="1"
+            matchedBy="Shopify order id = custbody_rails_ext_order_id on the exchange sales order"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Loop exchange order {recordKey} is not in NetSuite"
+            fixActionTemplate="Sync Loop exchange order {recordKey} from HotWax to NetSuite."
+            passesWhenTemplate="NetSuite has a sales order for Loop exchange order {recordKey}."/>
+    <darpan.rule.RuleSet ruleSetId="RAILS_EXC_POS_EU_RS" ruleSetName="Shopify store exchanges against NetSuite - EU"
+            description="Every Rails EU Shopify order with a completed return that has exchange items (a HotWax store exchange) against the store's NetSuite exchange sales orders." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_EXC_POS_EU_SCOPE" ruleSetId="RAILS_EXC_POS_EU_RS"
+            objectType="RETURN" scopeMode="COMPARE" description="Every Rails EU Shopify order with a completed return that has exchange items (a HotWax store exchange) against the store's NetSuite exchange sales orders." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_POS_EU_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY_RETURN_REFS" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="orderId"
+            sourceConfigId="100001" sourceConfigType="SHOPIFY_RETURN_REFS_API"
+            extractParametersJson='{"completedReturns":"exchanged"}' companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_POS_EU_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="orderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_POS_EU_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyOrderId"
+            sourceConfigId="RAILS_NS_EXCHANGE_ORDERS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_POS_EU_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_EXC_POS_EU_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyStore" operator="INCLUDE_IN" filterValues="2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_EXC_POS_EU_SCOPE" sequenceNum="10" fixActionTemplate="Ship the original order {recordKey}: its exchange reaches NetSuite only once the original is fulfilled." conclusionEnumId="CONC_EXCHANGE_ORIGINAL_UNFULFILLED" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_POS_EU_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no sales order for the exchange" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_POS_EU_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="originalUnfulfilledQuantity" operator="GT" conditionValues="0" checkLabel="Shopify has not fulfilled the original order" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_EXC_POS_EU_SCOPE" sequenceNum="20" fixActionTemplate="Sync the HotWax exchange for Shopify order {recordKey} to NetSuite." conclusionEnumId="CONC_EXCHANGE_NOT_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_POS_EU_SCOPE" sequenceNum="20" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no sales order for the exchange" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_POS_EXC_NOT_IN_NS_EU" companyUserGroupId="RAILS" checkCode="store-exchanges-not-in-netsuite-eu"
+            label="Rails EU store exchanges NetSuite does not have" savedRunId="RAILS_EXC_POS_EU_RS"
+            file1RecordType="return" file2RecordType="salesOrder" graceDays="1"
+            matchedBy="Shopify order id (the original order) = custbody_rails_ext_order_id on the exchange sales order"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="The exchange on Shopify order {recordKey} is not in NetSuite"
+            fixActionTemplate="Sync the HotWax exchange for Shopify order {recordKey} to NetSuite."
+            passesWhenTemplate="NetSuite has the exchange sales order for Shopify order {recordKey}."/>
+
+    <!-- ================================================================ R7 - Rails UK (Shopify 100004, NetSuite store 3) -->
+    <darpan.rule.RuleSet ruleSetId="RAILS_EXC_LOOP_UK_RS" ruleSetName="Shopify Loop exchanges against NetSuite - UK"
+            description="Every Rails UK Loop exchange order in Shopify (named EXC-) against the store's NetSuite exchange sales orders." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_EXC_LOOP_UK_SCOPE" ruleSetId="RAILS_EXC_LOOP_UK_RS"
+            objectType="ORDER" scopeMode="COMPARE" description="Every Rails UK Loop exchange order in Shopify (named EXC-) against the store's NetSuite exchange sales orders." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_LOOP_UK_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="legacyResourceId"
+            sourceConfigId="100004" sourceConfigType="SHOPIFY_AUTH" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_LOOP_UK_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="legacyResourceId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_EXC_LOOP_UK_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="name" operator="INCLUDE_PREFIX" filterValues="EXC-" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_LOOP_UK_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyOrderId"
+            sourceConfigId="RAILS_NS_EXCHANGE_ORDERS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_LOOP_UK_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_EXC_LOOP_UK_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyStore" operator="INCLUDE_IN" filterValues="3" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_EXC_LOOP_UK_SCOPE" sequenceNum="10" fixActionTemplate="Sync Loop exchange order {recordKey} from HotWax to NetSuite." conclusionEnumId="CONC_EXCHANGE_NOT_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_LOOP_UK_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no sales order for the exchange" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_LOOP_EXC_NOT_IN_NS_UK" companyUserGroupId="RAILS" checkCode="loop-exchanges-not-in-netsuite-uk"
+            label="Rails UK Loop exchange orders NetSuite does not have" savedRunId="RAILS_EXC_LOOP_UK_RS"
+            file1RecordType="order" file2RecordType="salesOrder" graceDays="1"
+            matchedBy="Shopify order id = custbody_rails_ext_order_id on the exchange sales order"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Loop exchange order {recordKey} is not in NetSuite"
+            fixActionTemplate="Sync Loop exchange order {recordKey} from HotWax to NetSuite."
+            passesWhenTemplate="NetSuite has a sales order for Loop exchange order {recordKey}."/>
+    <darpan.rule.RuleSet ruleSetId="RAILS_EXC_POS_UK_RS" ruleSetName="Shopify store exchanges against NetSuite - UK"
+            description="Every Rails UK Shopify order with a completed return that has exchange items (a HotWax store exchange) against the store's NetSuite exchange sales orders." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_EXC_POS_UK_SCOPE" ruleSetId="RAILS_EXC_POS_UK_RS"
+            objectType="RETURN" scopeMode="COMPARE" description="Every Rails UK Shopify order with a completed return that has exchange items (a HotWax store exchange) against the store's NetSuite exchange sales orders." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_POS_UK_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY_RETURN_REFS" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="orderId"
+            sourceConfigId="100004" sourceConfigType="SHOPIFY_RETURN_REFS_API"
+            extractParametersJson='{"completedReturns":"exchanged"}' companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_POS_UK_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="orderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_POS_UK_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyOrderId"
+            sourceConfigId="RAILS_NS_EXCHANGE_ORDERS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_POS_UK_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_EXC_POS_UK_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyStore" operator="INCLUDE_IN" filterValues="3" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_EXC_POS_UK_SCOPE" sequenceNum="10" fixActionTemplate="Ship the original order {recordKey}: its exchange reaches NetSuite only once the original is fulfilled." conclusionEnumId="CONC_EXCHANGE_ORIGINAL_UNFULFILLED" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_POS_UK_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no sales order for the exchange" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_POS_UK_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="originalUnfulfilledQuantity" operator="GT" conditionValues="0" checkLabel="Shopify has not fulfilled the original order" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_EXC_POS_UK_SCOPE" sequenceNum="20" fixActionTemplate="Sync the HotWax exchange for Shopify order {recordKey} to NetSuite." conclusionEnumId="CONC_EXCHANGE_NOT_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_POS_UK_SCOPE" sequenceNum="20" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no sales order for the exchange" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_POS_EXC_NOT_IN_NS_UK" companyUserGroupId="RAILS" checkCode="store-exchanges-not-in-netsuite-uk"
+            label="Rails UK store exchanges NetSuite does not have" savedRunId="RAILS_EXC_POS_UK_RS"
+            file1RecordType="return" file2RecordType="salesOrder" graceDays="1"
+            matchedBy="Shopify order id (the original order) = custbody_rails_ext_order_id on the exchange sales order"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="The exchange on Shopify order {recordKey} is not in NetSuite"
+            fixActionTemplate="Sync the HotWax exchange for Shopify order {recordKey} to NetSuite."
+            passesWhenTemplate="NetSuite has the exchange sales order for Shopify order {recordKey}."/>
+
+    <!-- ================================================================ R7 - Rails Outlet (Shopify 100002, NetSuite store 4) -->
+    <darpan.rule.RuleSet ruleSetId="RAILS_EXC_LOOP_OUTLET_RS" ruleSetName="Shopify Loop exchanges against NetSuite - Outlet"
+            description="Every Rails Outlet Loop exchange order in Shopify (named EXC-) against the store's NetSuite exchange sales orders." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_EXC_LOOP_OUTLET_SCOPE" ruleSetId="RAILS_EXC_LOOP_OUTLET_RS"
+            objectType="ORDER" scopeMode="COMPARE" description="Every Rails Outlet Loop exchange order in Shopify (named EXC-) against the store's NetSuite exchange sales orders." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_LOOP_OUTLET_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="legacyResourceId"
+            sourceConfigId="100002" sourceConfigType="SHOPIFY_AUTH" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_LOOP_OUTLET_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="legacyResourceId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_EXC_LOOP_OUTLET_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="name" operator="INCLUDE_PREFIX" filterValues="EXC-" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_LOOP_OUTLET_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyOrderId"
+            sourceConfigId="RAILS_NS_EXCHANGE_ORDERS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_LOOP_OUTLET_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_EXC_LOOP_OUTLET_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyStore" operator="INCLUDE_IN" filterValues="4" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_EXC_LOOP_OUTLET_SCOPE" sequenceNum="10" fixActionTemplate="Sync Loop exchange order {recordKey} from HotWax to NetSuite." conclusionEnumId="CONC_EXCHANGE_NOT_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_LOOP_OUTLET_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no sales order for the exchange" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_LOOP_EXC_NOT_IN_NS_OUTLET" companyUserGroupId="RAILS" checkCode="loop-exchanges-not-in-netsuite-outlet"
+            label="Rails Outlet Loop exchange orders NetSuite does not have" savedRunId="RAILS_EXC_LOOP_OUTLET_RS"
+            file1RecordType="order" file2RecordType="salesOrder" graceDays="1"
+            matchedBy="Shopify order id = custbody_rails_ext_order_id on the exchange sales order"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Loop exchange order {recordKey} is not in NetSuite"
+            fixActionTemplate="Sync Loop exchange order {recordKey} from HotWax to NetSuite."
+            passesWhenTemplate="NetSuite has a sales order for Loop exchange order {recordKey}."/>
+    <darpan.rule.RuleSet ruleSetId="RAILS_EXC_POS_OUTLET_RS" ruleSetName="Shopify store exchanges against NetSuite - Outlet"
+            description="Every Rails Outlet Shopify order with a completed return that has exchange items (a HotWax store exchange) against the store's NetSuite exchange sales orders." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_EXC_POS_OUTLET_SCOPE" ruleSetId="RAILS_EXC_POS_OUTLET_RS"
+            objectType="RETURN" scopeMode="COMPARE" description="Every Rails Outlet Shopify order with a completed return that has exchange items (a HotWax store exchange) against the store's NetSuite exchange sales orders." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_POS_OUTLET_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY_RETURN_REFS" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="orderId"
+            sourceConfigId="100002" sourceConfigType="SHOPIFY_RETURN_REFS_API"
+            extractParametersJson='{"completedReturns":"exchanged"}' companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_POS_OUTLET_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="orderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_EXC_POS_OUTLET_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyOrderId"
+            sourceConfigId="RAILS_NS_EXCHANGE_ORDERS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_EXC_POS_OUTLET_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_EXC_POS_OUTLET_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyStore" operator="INCLUDE_IN" filterValues="4" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_EXC_POS_OUTLET_SCOPE" sequenceNum="10" fixActionTemplate="Ship the original order {recordKey}: its exchange reaches NetSuite only once the original is fulfilled." conclusionEnumId="CONC_EXCHANGE_ORIGINAL_UNFULFILLED" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_POS_OUTLET_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no sales order for the exchange" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_POS_OUTLET_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="originalUnfulfilledQuantity" operator="GT" conditionValues="0" checkLabel="Shopify has not fulfilled the original order" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_EXC_POS_OUTLET_SCOPE" sequenceNum="20" fixActionTemplate="Sync the HotWax exchange for Shopify order {recordKey} to NetSuite." conclusionEnumId="CONC_EXCHANGE_NOT_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_EXC_POS_OUTLET_SCOPE" sequenceNum="20" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no sales order for the exchange" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_POS_EXC_NOT_IN_NS_OUTLET" companyUserGroupId="RAILS" checkCode="store-exchanges-not-in-netsuite-outlet"
+            label="Rails Outlet store exchanges NetSuite does not have" savedRunId="RAILS_EXC_POS_OUTLET_RS"
+            file1RecordType="return" file2RecordType="salesOrder" graceDays="1"
+            matchedBy="Shopify order id (the original order) = custbody_rails_ext_order_id on the exchange sales order"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="The exchange on Shopify order {recordKey} is not in NetSuite"
+            fixActionTemplate="Sync the HotWax exchange for Shopify order {recordKey} to NetSuite."
+            passesWhenTemplate="NetSuite has the exchange sales order for Shopify order {recordKey}."/>
+
     <!-- ================================================================ Which rows break which statement -->
     <darpan.audit.AuditStatementCheck statementId="RAILS_R4" checkId="RAILS_CHK_COMPLETED_BILLED" companyUserGroupId="RAILS"
             sequenceNum="1" diffTypes="MISSING_IN_FILE_2"
@@ -764,4 +1060,14 @@ end]]></ruleLogic>
     <darpan.audit.AuditStatementCheck statementId="RAILS_R3" checkId="RAILS_CHK_PAID_NO_OPP_OUTLET" companyUserGroupId="RAILS" sequenceNum="5" diffTypes="FIELD_MISMATCH" ruleIds="RAILS_OUTLET_PAID_HAS_OPP"/>
     <darpan.audit.AuditStatementCheck statementId="RAILS_R5" checkId="RAILS_CHK_COMPLETED_NOT_FULFILLED_OUTLET" companyUserGroupId="RAILS" sequenceNum="5" diffTypes="FIELD_MISMATCH" ruleIds="RAILS_OUTLET_COMPLETED_FULFILLED"/>
     <darpan.audit.AuditStatementCheck statementId="RAILS_R6" checkId="RAILS_CHK_RETURN_NO_CM_OUTLET" companyUserGroupId="RAILS" sequenceNum="5" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R7" checkId="RAILS_CHK_LOOP_EXC_NOT_IN_NS_USA" companyUserGroupId="RAILS" sequenceNum="1" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R7" checkId="RAILS_CHK_POS_EXC_NOT_IN_NS_USA" companyUserGroupId="RAILS" sequenceNum="2" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R7" checkId="RAILS_CHK_LOOP_EXC_NOT_IN_NS_CANADA" companyUserGroupId="RAILS" sequenceNum="3" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R7" checkId="RAILS_CHK_POS_EXC_NOT_IN_NS_CANADA" companyUserGroupId="RAILS" sequenceNum="4" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R7" checkId="RAILS_CHK_LOOP_EXC_NOT_IN_NS_EU" companyUserGroupId="RAILS" sequenceNum="5" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R7" checkId="RAILS_CHK_POS_EXC_NOT_IN_NS_EU" companyUserGroupId="RAILS" sequenceNum="6" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R7" checkId="RAILS_CHK_LOOP_EXC_NOT_IN_NS_UK" companyUserGroupId="RAILS" sequenceNum="7" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R7" checkId="RAILS_CHK_POS_EXC_NOT_IN_NS_UK" companyUserGroupId="RAILS" sequenceNum="8" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R7" checkId="RAILS_CHK_LOOP_EXC_NOT_IN_NS_OUTLET" companyUserGroupId="RAILS" sequenceNum="9" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R7" checkId="RAILS_CHK_POS_EXC_NOT_IN_NS_OUTLET" companyUserGroupId="RAILS" sequenceNum="10" diffTypes="MISSING_IN_FILE_2"/>
 </entity-facade-xml>

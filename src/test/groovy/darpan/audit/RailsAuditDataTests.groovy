@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
 /**
- * DAR-CLIENT-005. RAILS's audit (R1-R6) as configuration, at parse level. RAILS runs five Shopify stores into one HotWax
+ * DAR-CLIENT-005. RAILS's audit (R1-R7) as configuration, at parse level. RAILS runs five Shopify stores into one HotWax
  * and one NetSuite, so every statement with Shopify on a side has one check per store, and each store's run must read that
  * store on BOTH sides: its Shopify config, HotWax productStoreId, NetSuite custbody_rails_shopify_store (live 2026-10-27).
  */
@@ -51,14 +51,16 @@ class RailsAuditDataTests {
     }
 
     @Test
-    void theAuditCarriesAditisSixStatements() {
+    void theAuditCarriesAditisSevenStatements() {
         assertEquals(["R1": "An order HotWax completed or cancelled does not stay open in NetSuite.",
                       "R2": "Every Shopify order is in HotWax.",
                       "R3": "Every order paid in Shopify has its payment in HotWax.",
                       "R4": "Every item HotWax completes is billed in NetSuite.",
                       "R5": "Every order HotWax completes is fulfilled in Shopify.",
-                      "R6": "Every return Shopify completes with a refund is in NetSuite."],
+                      "R6": "Every return Shopify completes with a refund is in NetSuite.",
+                      "R7": "Every exchange Shopify makes is in NetSuite."],
                 rows("darpan.audit.AuditStatement").collectEntries { [(it.attribute("statementCode")): it.attribute("statementText")] })
+        assertEquals("AUDC_EXCHANGES_WARRANTY", rows("darpan.audit.AuditStatement").find { it.attribute("statementCode") == "R7" }.attribute("categoryEnumId"))
     }
 
     @Test
@@ -70,6 +72,9 @@ class RailsAuditDataTests {
             assertEquals(STORES.keySet().collect { prefix + it } as Set, checksByStatement[statement], statement)
         }
         assertEquals(["RAILS_CHK_COMPLETED_BILLED"] as Set, checksByStatement["RAILS_R4"])
+        // R7 has two exchange paths per store: Loop's and HotWax's (POS).
+        assertEquals(STORES.keySet().collectMany { ["RAILS_CHK_LOOP_EXC_NOT_IN_NS_" + it, "RAILS_CHK_POS_EXC_NOT_IN_NS_" + it] } as Set,
+                checksByStatement["RAILS_R7"])
     }
 
     @Test
@@ -99,6 +104,38 @@ class RailsAuditDataTests {
             assertEquals([], filters(scope, "FILE_1"), code)
             assertEquals([["shopifyStore", "INCLUDE_IN", store[2]]], filters(scope, "FILE_2"), code)
             assertEquals("CONC_NO_CREDIT_MEMO_IN_NS", conclude(scope, "MISSING_FROM_FILE_2", [orderId: "7317384134825"], null))
+        }
+    }
+
+    @Test
+    void eachStoresLoopExchangeRunReadsShopifyExchangeOrdersAgainstThatStoresExchangeSalesOrders() {
+        STORES.each { String code, List<String> store ->
+            String scope = "RAILS_EXC_LOOP_${code}_SCOPE"
+            Node shop = source(scope, "FILE_1")
+            assertEquals(["SHOPIFY", store[0], "legacyResourceId"], ["systemEnumId", "sourceConfigId", "primaryIdExpression"].collect { shop.attribute(it) }, code)
+            // A Loop exchange is a new Shopify order, EXC-<name>-1, and NetSuite keys it by its own Shopify id.
+            assertEquals([["name", "INCLUDE_PREFIX", "EXC-"]], filters(scope, "FILE_1"), code)
+            assertEquals(["RAILS_NS_EXCHANGE_ORDERS", "shopifyOrderId"], ["sourceConfigId", "primaryIdExpression"].collect { source(scope, "FILE_2").attribute(it) }, code)
+            assertEquals([["shopifyStore", "INCLUDE_IN", store[2]]], filters(scope, "FILE_2"), code)
+            assertEquals("CONC_EXCHANGE_NOT_IN_NS", conclude(scope, "MISSING_FROM_FILE_2", [legacyResourceId: "18938434945193", name: "EXC-1015225-1"], null))
+        }
+    }
+
+    @Test
+    void eachStoresPosExchangeRunReadsCompletedShopifyExchangesAgainstThatStoresExchangeSalesOrders() {
+        STORES.each { String code, List<String> store ->
+            String scope = "RAILS_EXC_POS_${code}_SCOPE"
+            Node shop = source(scope, "FILE_1")
+            assertEquals(["SHOPIFY_RETURN_REFS", store[0], "SHOPIFY_RETURN_REFS_API", "orderId"],
+                    ["systemEnumId", "sourceConfigId", "sourceConfigType", "primaryIdExpression"].collect { shop.attribute(it) }, code)
+            // A HotWax (POS) exchange is a Shopify return with exchange items; NetSuite keys its EXC-#<name>-1 sales order by
+            // the ORIGINAL order's Shopify id.
+            assertEquals([completedReturns: "exchanged"], new JsonSlurper().parseText(shop.attribute("extractParametersJson") as String), code)
+            assertEquals([], filters(scope, "FILE_1"), code)
+            assertEquals(["RAILS_NS_EXCHANGE_ORDERS", "shopifyOrderId"], ["sourceConfigId", "primaryIdExpression"].collect { source(scope, "FILE_2").attribute(it) }, code)
+            assertEquals([["shopifyStore", "INCLUDE_IN", store[2]]], filters(scope, "FILE_2"), code)
+            assertEquals("CONC_EXCHANGE_NOT_IN_NS", conclude(scope, "MISSING_FROM_FILE_2", [orderId: "18910442225833", originalUnfulfilledQuantity: 0], null))
+            assertEquals("CONC_EXCHANGE_ORIGINAL_UNFULFILLED", conclude(scope, "MISSING_FROM_FILE_2", [orderId: "18910442225833", originalUnfulfilledQuantity: 2], null))
         }
     }
 

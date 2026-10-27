@@ -393,7 +393,7 @@
             lookupIdsParameterName="refundOrReturnIds"
             lookupMaxIds="50000"
             enabled="Y"
-            extractOptionsJson='[{"name":"completedReturns","label":"Completed returns, one row per order: refunded or exchanged","type":"text"}]'/>
+            extractOptionsJson='[{"name":"completedReturns","label":"Completed returns, one row per order: refunded, exchanged or orderRefunded","type":"text"}]'/>
 
     <!-- NetSuite via SuiteQL over REST Web Services. ONE row for every NetSuite pair, not one per
          endpoint (DAR-BE-032, generalized by DAR-BE-044). NEW CAPABILITY: Darpan did not reconcile

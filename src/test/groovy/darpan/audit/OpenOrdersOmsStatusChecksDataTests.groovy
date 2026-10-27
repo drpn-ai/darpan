@@ -83,19 +83,20 @@ class OpenOrdersOmsStatusChecksDataTests {
 
     @Test
     void theStatementChecksNameConclusionsTheFileDefines() {
+        // RailsAuditData.xml also holds RAILS's other statements (DAR-CLIENT-005, RailsAuditDataTests): only this run's checks here.
+        Map<String, String> statementOf = ["RailsAuditData.xml": "RAILS_R1", "GorjanaMonthCloseOpenOrdersChecksData.xml": "GORJANA_R18"]
         SCOPES.each { String file, String scope ->
             Set<String> defined = rows(file, "moqui.basic.Enumeration")*.attribute("enumId") as Set<String>
             Set<String> concluded = rows(file, "darpan.rule.RuleSetConclusionRule").findAll { it.attribute("compareScopeId") == scope }*.attribute("conclusionEnumId") as Set<String>
-            List<Node> links = rows(file, "darpan.audit.AuditStatementCheck")
+            String ruleSet = rows(file, "darpan.rule.RuleSetCompareScope").find { it.attribute("compareScopeId") == scope }.attribute("ruleSetId")
+            Set<String> checks = rows(file, "darpan.audit.AuditCheck").findAll { it.attribute("savedRunId") == ruleSet }*.attribute("checkId") as Set<String>
+            List<Node> links = rows(file, "darpan.audit.AuditStatementCheck").findAll { checks.contains(it.attribute("checkId")) }
+            assertEquals([statementOf[file]] as Set, links*.attribute("statementId") as Set, file)
             Set<String> named = links.collectMany { (it.attribute("conclusionCodes") as String).split(",") as List } as Set<String>
             assertEquals(concluded, named, "${file}: every conclusion breaks the statement, through one check or the other")
             assertTrue(defined.containsAll(named), file)
-            Set<String> checks = rows(file, "darpan.audit.AuditCheck")*.attribute("checkId") as Set<String>
             assertEquals(checks, links*.attribute("checkId") as Set<String>, file)
         }
-        assertEquals(["RAILS_R1"] as Set, rows("RailsAuditData.xml", "darpan.audit.AuditStatementCheck")*.attribute("statementId") as Set)
-        assertEquals(["GORJANA_R18"] as Set, rows("GorjanaMonthCloseOpenOrdersChecksData.xml", "darpan.audit.AuditStatementCheck")*.attribute("statementId") as Set)
-        assertEquals(["RAILS_R1"], rows("RailsAuditData.xml", "darpan.audit.AuditStatement")*.attribute("statementId"))
     }
 
     private static String conclude(String file, String scope, Map record) {

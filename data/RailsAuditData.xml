@@ -8,8 +8,11 @@
   created or held in HotWax is correct: still open in both.
   Live 2026-10-22, Oct 1-19 (tools/live-probes/run-open-orders-oms-status.sh): 12 findings, all completed in HotWax and
   Pending Fulfillment in NetSuite (e.g. SO8432201 / HC 145059); the 86 cancelled are all Closed in NetSuite.
+  DAR-CLIENT-005 (Aditi, 2026-10-27) adds R2-R6, one check per Shopify store where Shopify is a side (see below).
   NOT seed data - tenant configuration. Load per install, AFTER the backend carrying NsSuiteQlSourceQuery.omsStatusConfigId
-  (DAR-BE-111), AuditSeedData.xml, rails-audit-queries.xml, and once the RAILS tenant exists:
+  (DAR-BE-111) and shopify-darpan's completedReturns=orderRefunded (DAR-CLIENT-005), AuditSeedData.xml,
+  rails-audit-queries.xml, and once the RAILS tenant exists. sourceConfigId values name the TARGET environment's configs:
+  Shopify 100000 Canada, 100001 EU, 100002 Outlet, 100003 USA, 100004 UK; HotWax rails_prod. Check them before loading:
       ec.entity.makeDataLoader().location("component://darpan/data/RailsAuditData.xml").load()
 -->
 <entity-facade-xml type="darpan-tenant-config">
@@ -72,4 +75,693 @@
             sequenceNum="1" diffTypes="FINDING" conclusionCodes="CONC_OMS_COMPLETED_NS_OPEN,CONC_OMS_CANCELLED_NS_OPEN"/>
     <darpan.audit.AuditStatementCheck statementId="RAILS_R1" checkId="RAILS_CHK_OPEN_NOT_IN_OMS" companyUserGroupId="RAILS"
             sequenceNum="2" diffTypes="FINDING" conclusionCodes="CONC_NS_ORDER_NOT_IN_OMS"/>
+
+    <!-- ================================================================ DAR-CLIENT-005: R2-R6 (Aditi, 2026-10-27)
+         RAILS runs five Shopify stores (USA, Canada, EU, UK, Outlet) into one HotWax and one NetSuite, so every statement
+         that touches Shopify has one check per store. Discovery (2026-10-27, read-only, live):
+         - HotWax order externalId = the Shopify order id in every store; productStoreId names the store (STORE, STORE_CA,
+           STORE_EU, STORE_UK, STORE_OUTLET). HotWax's own POS exchange orders (EXC-#<name>-1) reuse the original order's
+           externalId and carry an EXCHANGE association, which the OMS_GQL read already drops (applyExchangeExclusion, on by
+           default). Loop's exchange orders (EXC-<name>-1, no #) are real Shopify orders with their own id: they stay in.
+         - NetSuite marks every Shopify order, RMA and credit memo with its store (custbody_rails_shopify_store: 1 Rails
+           (USA), 2 EU, 3 UK, 4 Outlet, 5 Canada) and its Shopify order id (custbody_rails_ext_order_id).
+         - Returns reach NetSuite two ways. Online returns: Loop writes the RMA (when the return is requested, up to 35 days
+           before Shopify closes it, and it stays Pending Receipt), then a credit memo and a refund when it refunds; Loop
+           closes the Shopify Return and refunds the ORDER without linking the two. POS / admin returns: HotWax writes a
+           Refunded RMA and a credit memo. Both credit memos carry custbody_rails_ext_order_id, dated the Pacific day the
+           Shopify return closed (209 of 210, Oct 20-26), so R6 matches per order on the credit memo.
+    -->
+    <darpan.audit.AuditStatement statementId="RAILS_R2" auditId="RAILS_MONTH_CLOSE" companyUserGroupId="RAILS" statementCode="R2"
+            categoryEnumId="AUDC_ORDERS" weightEnumId="AUDSW_FIRM" sequenceNum="2"
+            statementText="Every Shopify order is in HotWax."/>
+    <darpan.audit.AuditStatement statementId="RAILS_R3" auditId="RAILS_MONTH_CLOSE" companyUserGroupId="RAILS" statementCode="R3"
+            categoryEnumId="AUDC_ORDERS" weightEnumId="AUDSW_FIRM" sequenceNum="3"
+            statementText="Every order paid in Shopify has its payment in HotWax."/>
+    <darpan.audit.AuditStatement statementId="RAILS_R4" auditId="RAILS_MONTH_CLOSE" companyUserGroupId="RAILS" statementCode="R4"
+            categoryEnumId="AUDC_ORDERS" weightEnumId="AUDSW_FIRM" sequenceNum="4"
+            statementText="Every item HotWax completes is billed in NetSuite."/>
+    <darpan.audit.AuditStatement statementId="RAILS_R5" auditId="RAILS_MONTH_CLOSE" companyUserGroupId="RAILS" statementCode="R5"
+            categoryEnumId="AUDC_ORDERS" weightEnumId="AUDSW_FIRM" sequenceNum="5"
+            statementText="Every order HotWax completes is fulfilled in Shopify."/>
+    <darpan.audit.AuditStatement statementId="RAILS_R6" auditId="RAILS_MONTH_CLOSE" companyUserGroupId="RAILS" statementCode="R6"
+            categoryEnumId="AUDC_RETURNS" weightEnumId="AUDSW_FIRM" sequenceNum="6"
+            statementText="Every return Shopify completes with a refund is in NetSuite."/>
+
+    <moqui.basic.Enumeration enumId="CONC_SHOPIFY_ORDER_NOT_IN_OMS" enumTypeId="DarpanConclusion" enumCode="CONC_SHOPIFY_ORDER_NOT_IN_OMS" description="Not in HotWax"/>
+    <moqui.basic.Enumeration enumId="CONC_NO_CREDIT_MEMO_IN_NS" enumTypeId="DarpanConclusion" enumCode="CONC_NO_CREDIT_MEMO_IN_NS" description="No credit memo in NetSuite"/>
+    <!-- R4's causes, the same codes as gorjana's R1 (GorjanaConclusionRulesData.xml), repeated so this file loads alone. -->
+    <moqui.basic.Enumeration enumId="CONC_COMPLETED_CLOSED_IN_NS" enumTypeId="DarpanConclusion" enumCode="CONC_COMPLETED_CLOSED_IN_NS" description="Closed in NetSuite"/>
+    <moqui.basic.Enumeration enumId="CONC_NS_NO_LINE_LOCATION" enumTypeId="DarpanConclusion" enumCode="CONC_NS_NO_LINE_LOCATION" description="No location"/>
+    <moqui.basic.Enumeration enumId="CONC_NS_BACKORDERED" enumTypeId="DarpanConclusion" enumCode="CONC_NS_BACKORDERED" description="Backordered"/>
+    <moqui.basic.Enumeration enumId="CONC_SHIPPED_NOT_BILLED" enumTypeId="DarpanConclusion" enumCode="CONC_SHIPPED_NOT_BILLED" description="Shipped, not billed"/>
+    <moqui.basic.Enumeration enumId="CONC_NOT_SHIPPED_IN_NS" enumTypeId="DarpanConclusion" enumCode="CONC_NOT_SHIPPED_IN_NS" description="Not shipped after 24 hours"/>
+    <moqui.basic.Enumeration enumId="CONC_PARTIAL_PAYMENT_NO_NS" enumTypeId="DarpanConclusion" enumCode="CONC_PARTIAL_PAYMENT_NO_NS" description="Partial payment"/>
+    <moqui.basic.Enumeration enumId="CONC_NEVER_REACHED_NS" enumTypeId="DarpanConclusion" enumCode="CONC_NEVER_REACHED_NS" description="Not in NetSuite"/>
+    <moqui.basic.Enumeration enumId="CONC_BILLED_NOT_COMPLETED" enumTypeId="DarpanConclusion" enumCode="CONC_BILLED_NOT_COMPLETED" description="Billed, not completed"/>
+
+    <!-- ================================================================ R2, R3, R5 - Rails US (Shopify 100003, HotWax STORE) -->
+    <darpan.rule.RuleSet ruleSetId="RAILS_SHOP_OMS_USA_RS" ruleSetName="Shopify orders against HotWax - US"
+            description="Every Rails US Shopify order against its HotWax order: missing from HotWax, paid with no HotWax payment, or completed in HotWax and not fulfilled in Shopify." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_SHOP_OMS_USA_SCOPE" ruleSetId="RAILS_SHOP_OMS_USA_RS"
+            objectType="ORDER" scopeMode="COMPARE" description="Every Rails US Shopify order against its HotWax order: missing from HotWax, paid with no HotWax payment, or completed in HotWax and not fulfilled in Shopify." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_SHOP_OMS_USA_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="legacyResourceId"
+            sourceConfigId="100003" sourceConfigType="SHOPIFY_AUTH" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_SHOP_OMS_USA_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="legacyResourceId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_SHOP_OMS_USA_SCOPE" fileSide="FILE_2"
+            systemEnumId="OMS_GQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="externalId"
+            sourceConfigId="rails_prod" sourceConfigType="HOTWAX_OMS_GQL" duplicateKeyHandling="FINDING" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_SHOP_OMS_USA_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="externalId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_SHOP_OMS_USA_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="productStoreId" operator="INCLUDE_IN" filterValues="STORE" companyUserGroupId="RAILS"/>
+    <darpan.rule.Rule ruleId="RAILS_USA_PAID_HAS_OPP" ruleSetId="RAILS_SHOP_OMS_USA_RS" sequenceNum="10"
+            ruleText="hasPaymentTransaction requires hasPaymentPreference" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN" companyUserGroupId="RAILS">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"hasPaymentTransaction","file2FieldPath":"hasPaymentPreference","operator":"requires"}</expression>
+        <ruleLogic><![CDATA[rule "RAILS_USA_PAID_HAS_OPP"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get("file1")).get("hasPaymentTransaction"), ((Map) $m.get("file2")).get("hasPaymentPreference"), "requires"))
+then
+    Object _file1Value = ((Map) $m.get("file1")).get("hasPaymentTransaction");
+    Object _file2Value = ((Map) $m.get("file2")).get("hasPaymentPreference");
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "hasPaymentTransaction requires hasPaymentPreference",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: hasPaymentTransaction requires hasPaymentPreference"
+    );
+end]]></ruleLogic>
+    </darpan.rule.Rule>
+    <darpan.rule.Rule ruleId="RAILS_USA_COMPLETED_FULFILLED" ruleSetId="RAILS_SHOP_OMS_USA_RS" sequenceNum="20"
+            ruleText="isFulfilled required by isCompleted" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN" companyUserGroupId="RAILS">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"isFulfilled","file2FieldPath":"isCompleted","operator":"required by"}</expression>
+        <ruleLogic><![CDATA[rule "RAILS_USA_COMPLETED_FULFILLED"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get("file1")).get("isFulfilled"), ((Map) $m.get("file2")).get("isCompleted"), "required by"))
+then
+    Object _file1Value = ((Map) $m.get("file1")).get("isFulfilled");
+    Object _file2Value = ((Map) $m.get("file2")).get("isCompleted");
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "isFulfilled required by isCompleted",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: isFulfilled required by isCompleted"
+    );
+end]]></ruleLogic>
+    </darpan.rule.Rule>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_SHOP_OMS_USA_SCOPE" sequenceNum="10" fixActionTemplate="Import Shopify order {recordKey} into HotWax." conclusionEnumId="CONC_SHOPIFY_ORDER_NOT_IN_OMS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_SHOP_OMS_USA_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="HotWax has no order with this Shopify id" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_NOT_IN_OMS_USA" otherSideDateField="createdAt" companyUserGroupId="RAILS" checkCode="shopify-orders-not-in-hotwax-usa"
+            label="Rails US Shopify orders HotWax does not have" savedRunId="RAILS_SHOP_OMS_USA_RS"
+            file1RecordType="order" file2RecordType="order" graceDays="1"
+            matchedBy="Shopify order id = HotWax externalId"
+            fixOwner="HotWax Support" fixWhereEnumId="OMS"
+            headlineTemplate="Shopify order {recordKey} is not in HotWax"
+            fixActionTemplate="Import Shopify order {recordKey} into HotWax."
+            passesWhenTemplate="HotWax has Shopify order {recordKey}."/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_PAID_NO_OPP_USA" otherSideDateField="createdAt" companyUserGroupId="RAILS" checkCode="paid-orders-without-a-payment-in-hotwax-usa"
+            label="Rails US Shopify orders paid whose HotWax order has no payment" savedRunId="RAILS_SHOP_OMS_USA_RS"
+            file1RecordType="order" file2RecordType="order" graceDays="1"
+            matchedBy="Shopify order id = HotWax externalId"
+            fixOwner="HotWax Support" fixWhereEnumId="OMS"
+            headlineTemplate="Shopify order {recordKey} is paid and its HotWax order has no payment"
+            fixActionTemplate="Sync the Shopify payment for order {recordKey} to HotWax, so the HotWax order carries its payment preference."
+            passesWhenTemplate="The HotWax order for Shopify order {recordKey} carries a payment."/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_COMPLETED_NOT_FULFILLED_USA" otherSideDateField="createdAt" companyUserGroupId="RAILS" checkCode="completed-orders-not-fulfilled-in-shopify-usa"
+            label="Rails US HotWax orders completed that Shopify has not fulfilled" savedRunId="RAILS_SHOP_OMS_USA_RS"
+            file1RecordType="order" file2RecordType="order" graceDays="1"
+            matchedBy="Shopify order id = HotWax externalId"
+            fixOwner="HotWax Support" fixWhereEnumId="SHOPIFY"
+            headlineTemplate="Shopify order {recordKey} is completed in HotWax and not fulfilled in Shopify"
+            fixActionTemplate="Sync the HotWax fulfillment for order {recordKey} to Shopify, so Shopify shows it fulfilled."
+            passesWhenTemplate="Shopify shows order {recordKey} fulfilled."/>
+
+    <!-- ================================================================ R2, R3, R5 - Rails Canada (Shopify 100000, HotWax STORE_CA) -->
+    <darpan.rule.RuleSet ruleSetId="RAILS_SHOP_OMS_CANADA_RS" ruleSetName="Shopify orders against HotWax - Canada"
+            description="Every Rails Canada Shopify order against its HotWax order: missing from HotWax, paid with no HotWax payment, or completed in HotWax and not fulfilled in Shopify." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_SHOP_OMS_CANADA_SCOPE" ruleSetId="RAILS_SHOP_OMS_CANADA_RS"
+            objectType="ORDER" scopeMode="COMPARE" description="Every Rails Canada Shopify order against its HotWax order: missing from HotWax, paid with no HotWax payment, or completed in HotWax and not fulfilled in Shopify." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_SHOP_OMS_CANADA_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="legacyResourceId"
+            sourceConfigId="100000" sourceConfigType="SHOPIFY_AUTH" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_SHOP_OMS_CANADA_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="legacyResourceId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_SHOP_OMS_CANADA_SCOPE" fileSide="FILE_2"
+            systemEnumId="OMS_GQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="externalId"
+            sourceConfigId="rails_prod" sourceConfigType="HOTWAX_OMS_GQL" duplicateKeyHandling="FINDING" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_SHOP_OMS_CANADA_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="externalId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_SHOP_OMS_CANADA_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="productStoreId" operator="INCLUDE_IN" filterValues="STORE_CA" companyUserGroupId="RAILS"/>
+    <darpan.rule.Rule ruleId="RAILS_CANADA_PAID_HAS_OPP" ruleSetId="RAILS_SHOP_OMS_CANADA_RS" sequenceNum="10"
+            ruleText="hasPaymentTransaction requires hasPaymentPreference" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN" companyUserGroupId="RAILS">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"hasPaymentTransaction","file2FieldPath":"hasPaymentPreference","operator":"requires"}</expression>
+        <ruleLogic><![CDATA[rule "RAILS_CANADA_PAID_HAS_OPP"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get("file1")).get("hasPaymentTransaction"), ((Map) $m.get("file2")).get("hasPaymentPreference"), "requires"))
+then
+    Object _file1Value = ((Map) $m.get("file1")).get("hasPaymentTransaction");
+    Object _file2Value = ((Map) $m.get("file2")).get("hasPaymentPreference");
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "hasPaymentTransaction requires hasPaymentPreference",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: hasPaymentTransaction requires hasPaymentPreference"
+    );
+end]]></ruleLogic>
+    </darpan.rule.Rule>
+    <darpan.rule.Rule ruleId="RAILS_CANADA_COMPLETED_FULFILLED" ruleSetId="RAILS_SHOP_OMS_CANADA_RS" sequenceNum="20"
+            ruleText="isFulfilled required by isCompleted" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN" companyUserGroupId="RAILS">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"isFulfilled","file2FieldPath":"isCompleted","operator":"required by"}</expression>
+        <ruleLogic><![CDATA[rule "RAILS_CANADA_COMPLETED_FULFILLED"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get("file1")).get("isFulfilled"), ((Map) $m.get("file2")).get("isCompleted"), "required by"))
+then
+    Object _file1Value = ((Map) $m.get("file1")).get("isFulfilled");
+    Object _file2Value = ((Map) $m.get("file2")).get("isCompleted");
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "isFulfilled required by isCompleted",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: isFulfilled required by isCompleted"
+    );
+end]]></ruleLogic>
+    </darpan.rule.Rule>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_SHOP_OMS_CANADA_SCOPE" sequenceNum="10" fixActionTemplate="Import Shopify order {recordKey} into HotWax." conclusionEnumId="CONC_SHOPIFY_ORDER_NOT_IN_OMS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_SHOP_OMS_CANADA_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="HotWax has no order with this Shopify id" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_NOT_IN_OMS_CANADA" otherSideDateField="createdAt" companyUserGroupId="RAILS" checkCode="shopify-orders-not-in-hotwax-canada"
+            label="Rails Canada Shopify orders HotWax does not have" savedRunId="RAILS_SHOP_OMS_CANADA_RS"
+            file1RecordType="order" file2RecordType="order" graceDays="1"
+            matchedBy="Shopify order id = HotWax externalId"
+            fixOwner="HotWax Support" fixWhereEnumId="OMS"
+            headlineTemplate="Shopify order {recordKey} is not in HotWax"
+            fixActionTemplate="Import Shopify order {recordKey} into HotWax."
+            passesWhenTemplate="HotWax has Shopify order {recordKey}."/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_PAID_NO_OPP_CANADA" otherSideDateField="createdAt" companyUserGroupId="RAILS" checkCode="paid-orders-without-a-payment-in-hotwax-canada"
+            label="Rails Canada Shopify orders paid whose HotWax order has no payment" savedRunId="RAILS_SHOP_OMS_CANADA_RS"
+            file1RecordType="order" file2RecordType="order" graceDays="1"
+            matchedBy="Shopify order id = HotWax externalId"
+            fixOwner="HotWax Support" fixWhereEnumId="OMS"
+            headlineTemplate="Shopify order {recordKey} is paid and its HotWax order has no payment"
+            fixActionTemplate="Sync the Shopify payment for order {recordKey} to HotWax, so the HotWax order carries its payment preference."
+            passesWhenTemplate="The HotWax order for Shopify order {recordKey} carries a payment."/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_COMPLETED_NOT_FULFILLED_CANADA" otherSideDateField="createdAt" companyUserGroupId="RAILS" checkCode="completed-orders-not-fulfilled-in-shopify-canada"
+            label="Rails Canada HotWax orders completed that Shopify has not fulfilled" savedRunId="RAILS_SHOP_OMS_CANADA_RS"
+            file1RecordType="order" file2RecordType="order" graceDays="1"
+            matchedBy="Shopify order id = HotWax externalId"
+            fixOwner="HotWax Support" fixWhereEnumId="SHOPIFY"
+            headlineTemplate="Shopify order {recordKey} is completed in HotWax and not fulfilled in Shopify"
+            fixActionTemplate="Sync the HotWax fulfillment for order {recordKey} to Shopify, so Shopify shows it fulfilled."
+            passesWhenTemplate="Shopify shows order {recordKey} fulfilled."/>
+
+    <!-- ================================================================ R2, R3, R5 - Rails EU (Shopify 100001, HotWax STORE_EU) -->
+    <darpan.rule.RuleSet ruleSetId="RAILS_SHOP_OMS_EU_RS" ruleSetName="Shopify orders against HotWax - EU"
+            description="Every Rails EU Shopify order against its HotWax order: missing from HotWax, paid with no HotWax payment, or completed in HotWax and not fulfilled in Shopify." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_SHOP_OMS_EU_SCOPE" ruleSetId="RAILS_SHOP_OMS_EU_RS"
+            objectType="ORDER" scopeMode="COMPARE" description="Every Rails EU Shopify order against its HotWax order: missing from HotWax, paid with no HotWax payment, or completed in HotWax and not fulfilled in Shopify." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_SHOP_OMS_EU_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="legacyResourceId"
+            sourceConfigId="100001" sourceConfigType="SHOPIFY_AUTH" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_SHOP_OMS_EU_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="legacyResourceId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_SHOP_OMS_EU_SCOPE" fileSide="FILE_2"
+            systemEnumId="OMS_GQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="externalId"
+            sourceConfigId="rails_prod" sourceConfigType="HOTWAX_OMS_GQL" duplicateKeyHandling="FINDING" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_SHOP_OMS_EU_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="externalId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_SHOP_OMS_EU_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="productStoreId" operator="INCLUDE_IN" filterValues="STORE_EU" companyUserGroupId="RAILS"/>
+    <darpan.rule.Rule ruleId="RAILS_EU_PAID_HAS_OPP" ruleSetId="RAILS_SHOP_OMS_EU_RS" sequenceNum="10"
+            ruleText="hasPaymentTransaction requires hasPaymentPreference" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN" companyUserGroupId="RAILS">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"hasPaymentTransaction","file2FieldPath":"hasPaymentPreference","operator":"requires"}</expression>
+        <ruleLogic><![CDATA[rule "RAILS_EU_PAID_HAS_OPP"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get("file1")).get("hasPaymentTransaction"), ((Map) $m.get("file2")).get("hasPaymentPreference"), "requires"))
+then
+    Object _file1Value = ((Map) $m.get("file1")).get("hasPaymentTransaction");
+    Object _file2Value = ((Map) $m.get("file2")).get("hasPaymentPreference");
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "hasPaymentTransaction requires hasPaymentPreference",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: hasPaymentTransaction requires hasPaymentPreference"
+    );
+end]]></ruleLogic>
+    </darpan.rule.Rule>
+    <darpan.rule.Rule ruleId="RAILS_EU_COMPLETED_FULFILLED" ruleSetId="RAILS_SHOP_OMS_EU_RS" sequenceNum="20"
+            ruleText="isFulfilled required by isCompleted" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN" companyUserGroupId="RAILS">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"isFulfilled","file2FieldPath":"isCompleted","operator":"required by"}</expression>
+        <ruleLogic><![CDATA[rule "RAILS_EU_COMPLETED_FULFILLED"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get("file1")).get("isFulfilled"), ((Map) $m.get("file2")).get("isCompleted"), "required by"))
+then
+    Object _file1Value = ((Map) $m.get("file1")).get("isFulfilled");
+    Object _file2Value = ((Map) $m.get("file2")).get("isCompleted");
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "isFulfilled required by isCompleted",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: isFulfilled required by isCompleted"
+    );
+end]]></ruleLogic>
+    </darpan.rule.Rule>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_SHOP_OMS_EU_SCOPE" sequenceNum="10" fixActionTemplate="Import Shopify order {recordKey} into HotWax." conclusionEnumId="CONC_SHOPIFY_ORDER_NOT_IN_OMS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_SHOP_OMS_EU_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="HotWax has no order with this Shopify id" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_NOT_IN_OMS_EU" otherSideDateField="createdAt" companyUserGroupId="RAILS" checkCode="shopify-orders-not-in-hotwax-eu"
+            label="Rails EU Shopify orders HotWax does not have" savedRunId="RAILS_SHOP_OMS_EU_RS"
+            file1RecordType="order" file2RecordType="order" graceDays="1"
+            matchedBy="Shopify order id = HotWax externalId"
+            fixOwner="HotWax Support" fixWhereEnumId="OMS"
+            headlineTemplate="Shopify order {recordKey} is not in HotWax"
+            fixActionTemplate="Import Shopify order {recordKey} into HotWax."
+            passesWhenTemplate="HotWax has Shopify order {recordKey}."/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_PAID_NO_OPP_EU" otherSideDateField="createdAt" companyUserGroupId="RAILS" checkCode="paid-orders-without-a-payment-in-hotwax-eu"
+            label="Rails EU Shopify orders paid whose HotWax order has no payment" savedRunId="RAILS_SHOP_OMS_EU_RS"
+            file1RecordType="order" file2RecordType="order" graceDays="1"
+            matchedBy="Shopify order id = HotWax externalId"
+            fixOwner="HotWax Support" fixWhereEnumId="OMS"
+            headlineTemplate="Shopify order {recordKey} is paid and its HotWax order has no payment"
+            fixActionTemplate="Sync the Shopify payment for order {recordKey} to HotWax, so the HotWax order carries its payment preference."
+            passesWhenTemplate="The HotWax order for Shopify order {recordKey} carries a payment."/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_COMPLETED_NOT_FULFILLED_EU" otherSideDateField="createdAt" companyUserGroupId="RAILS" checkCode="completed-orders-not-fulfilled-in-shopify-eu"
+            label="Rails EU HotWax orders completed that Shopify has not fulfilled" savedRunId="RAILS_SHOP_OMS_EU_RS"
+            file1RecordType="order" file2RecordType="order" graceDays="1"
+            matchedBy="Shopify order id = HotWax externalId"
+            fixOwner="HotWax Support" fixWhereEnumId="SHOPIFY"
+            headlineTemplate="Shopify order {recordKey} is completed in HotWax and not fulfilled in Shopify"
+            fixActionTemplate="Sync the HotWax fulfillment for order {recordKey} to Shopify, so Shopify shows it fulfilled."
+            passesWhenTemplate="Shopify shows order {recordKey} fulfilled."/>
+
+    <!-- ================================================================ R2, R3, R5 - Rails UK (Shopify 100004, HotWax STORE_UK) -->
+    <darpan.rule.RuleSet ruleSetId="RAILS_SHOP_OMS_UK_RS" ruleSetName="Shopify orders against HotWax - UK"
+            description="Every Rails UK Shopify order against its HotWax order: missing from HotWax, paid with no HotWax payment, or completed in HotWax and not fulfilled in Shopify." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_SHOP_OMS_UK_SCOPE" ruleSetId="RAILS_SHOP_OMS_UK_RS"
+            objectType="ORDER" scopeMode="COMPARE" description="Every Rails UK Shopify order against its HotWax order: missing from HotWax, paid with no HotWax payment, or completed in HotWax and not fulfilled in Shopify." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_SHOP_OMS_UK_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="legacyResourceId"
+            sourceConfigId="100004" sourceConfigType="SHOPIFY_AUTH" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_SHOP_OMS_UK_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="legacyResourceId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_SHOP_OMS_UK_SCOPE" fileSide="FILE_2"
+            systemEnumId="OMS_GQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="externalId"
+            sourceConfigId="rails_prod" sourceConfigType="HOTWAX_OMS_GQL" duplicateKeyHandling="FINDING" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_SHOP_OMS_UK_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="externalId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_SHOP_OMS_UK_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="productStoreId" operator="INCLUDE_IN" filterValues="STORE_UK" companyUserGroupId="RAILS"/>
+    <darpan.rule.Rule ruleId="RAILS_UK_PAID_HAS_OPP" ruleSetId="RAILS_SHOP_OMS_UK_RS" sequenceNum="10"
+            ruleText="hasPaymentTransaction requires hasPaymentPreference" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN" companyUserGroupId="RAILS">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"hasPaymentTransaction","file2FieldPath":"hasPaymentPreference","operator":"requires"}</expression>
+        <ruleLogic><![CDATA[rule "RAILS_UK_PAID_HAS_OPP"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get("file1")).get("hasPaymentTransaction"), ((Map) $m.get("file2")).get("hasPaymentPreference"), "requires"))
+then
+    Object _file1Value = ((Map) $m.get("file1")).get("hasPaymentTransaction");
+    Object _file2Value = ((Map) $m.get("file2")).get("hasPaymentPreference");
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "hasPaymentTransaction requires hasPaymentPreference",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: hasPaymentTransaction requires hasPaymentPreference"
+    );
+end]]></ruleLogic>
+    </darpan.rule.Rule>
+    <darpan.rule.Rule ruleId="RAILS_UK_COMPLETED_FULFILLED" ruleSetId="RAILS_SHOP_OMS_UK_RS" sequenceNum="20"
+            ruleText="isFulfilled required by isCompleted" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN" companyUserGroupId="RAILS">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"isFulfilled","file2FieldPath":"isCompleted","operator":"required by"}</expression>
+        <ruleLogic><![CDATA[rule "RAILS_UK_COMPLETED_FULFILLED"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get("file1")).get("isFulfilled"), ((Map) $m.get("file2")).get("isCompleted"), "required by"))
+then
+    Object _file1Value = ((Map) $m.get("file1")).get("isFulfilled");
+    Object _file2Value = ((Map) $m.get("file2")).get("isCompleted");
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "isFulfilled required by isCompleted",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: isFulfilled required by isCompleted"
+    );
+end]]></ruleLogic>
+    </darpan.rule.Rule>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_SHOP_OMS_UK_SCOPE" sequenceNum="10" fixActionTemplate="Import Shopify order {recordKey} into HotWax." conclusionEnumId="CONC_SHOPIFY_ORDER_NOT_IN_OMS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_SHOP_OMS_UK_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="HotWax has no order with this Shopify id" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_NOT_IN_OMS_UK" otherSideDateField="createdAt" companyUserGroupId="RAILS" checkCode="shopify-orders-not-in-hotwax-uk"
+            label="Rails UK Shopify orders HotWax does not have" savedRunId="RAILS_SHOP_OMS_UK_RS"
+            file1RecordType="order" file2RecordType="order" graceDays="1"
+            matchedBy="Shopify order id = HotWax externalId"
+            fixOwner="HotWax Support" fixWhereEnumId="OMS"
+            headlineTemplate="Shopify order {recordKey} is not in HotWax"
+            fixActionTemplate="Import Shopify order {recordKey} into HotWax."
+            passesWhenTemplate="HotWax has Shopify order {recordKey}."/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_PAID_NO_OPP_UK" otherSideDateField="createdAt" companyUserGroupId="RAILS" checkCode="paid-orders-without-a-payment-in-hotwax-uk"
+            label="Rails UK Shopify orders paid whose HotWax order has no payment" savedRunId="RAILS_SHOP_OMS_UK_RS"
+            file1RecordType="order" file2RecordType="order" graceDays="1"
+            matchedBy="Shopify order id = HotWax externalId"
+            fixOwner="HotWax Support" fixWhereEnumId="OMS"
+            headlineTemplate="Shopify order {recordKey} is paid and its HotWax order has no payment"
+            fixActionTemplate="Sync the Shopify payment for order {recordKey} to HotWax, so the HotWax order carries its payment preference."
+            passesWhenTemplate="The HotWax order for Shopify order {recordKey} carries a payment."/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_COMPLETED_NOT_FULFILLED_UK" otherSideDateField="createdAt" companyUserGroupId="RAILS" checkCode="completed-orders-not-fulfilled-in-shopify-uk"
+            label="Rails UK HotWax orders completed that Shopify has not fulfilled" savedRunId="RAILS_SHOP_OMS_UK_RS"
+            file1RecordType="order" file2RecordType="order" graceDays="1"
+            matchedBy="Shopify order id = HotWax externalId"
+            fixOwner="HotWax Support" fixWhereEnumId="SHOPIFY"
+            headlineTemplate="Shopify order {recordKey} is completed in HotWax and not fulfilled in Shopify"
+            fixActionTemplate="Sync the HotWax fulfillment for order {recordKey} to Shopify, so Shopify shows it fulfilled."
+            passesWhenTemplate="Shopify shows order {recordKey} fulfilled."/>
+
+    <!-- ================================================================ R2, R3, R5 - Rails Outlet (Shopify 100002, HotWax STORE_OUTLET) -->
+    <darpan.rule.RuleSet ruleSetId="RAILS_SHOP_OMS_OUTLET_RS" ruleSetName="Shopify orders against HotWax - Outlet"
+            description="Every Rails Outlet Shopify order against its HotWax order: missing from HotWax, paid with no HotWax payment, or completed in HotWax and not fulfilled in Shopify." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_SHOP_OMS_OUTLET_SCOPE" ruleSetId="RAILS_SHOP_OMS_OUTLET_RS"
+            objectType="ORDER" scopeMode="COMPARE" description="Every Rails Outlet Shopify order against its HotWax order: missing from HotWax, paid with no HotWax payment, or completed in HotWax and not fulfilled in Shopify." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_SHOP_OMS_OUTLET_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="legacyResourceId"
+            sourceConfigId="100002" sourceConfigType="SHOPIFY_AUTH" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_SHOP_OMS_OUTLET_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="legacyResourceId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_SHOP_OMS_OUTLET_SCOPE" fileSide="FILE_2"
+            systemEnumId="OMS_GQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="externalId"
+            sourceConfigId="rails_prod" sourceConfigType="HOTWAX_OMS_GQL" duplicateKeyHandling="FINDING" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_SHOP_OMS_OUTLET_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="externalId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_SHOP_OMS_OUTLET_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="productStoreId" operator="INCLUDE_IN" filterValues="STORE_OUTLET" companyUserGroupId="RAILS"/>
+    <darpan.rule.Rule ruleId="RAILS_OUTLET_PAID_HAS_OPP" ruleSetId="RAILS_SHOP_OMS_OUTLET_RS" sequenceNum="10"
+            ruleText="hasPaymentTransaction requires hasPaymentPreference" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN" companyUserGroupId="RAILS">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"hasPaymentTransaction","file2FieldPath":"hasPaymentPreference","operator":"requires"}</expression>
+        <ruleLogic><![CDATA[rule "RAILS_OUTLET_PAID_HAS_OPP"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get("file1")).get("hasPaymentTransaction"), ((Map) $m.get("file2")).get("hasPaymentPreference"), "requires"))
+then
+    Object _file1Value = ((Map) $m.get("file1")).get("hasPaymentTransaction");
+    Object _file2Value = ((Map) $m.get("file2")).get("hasPaymentPreference");
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "hasPaymentTransaction requires hasPaymentPreference",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: hasPaymentTransaction requires hasPaymentPreference"
+    );
+end]]></ruleLogic>
+    </darpan.rule.Rule>
+    <darpan.rule.Rule ruleId="RAILS_OUTLET_COMPLETED_FULFILLED" ruleSetId="RAILS_SHOP_OMS_OUTLET_RS" sequenceNum="20"
+            ruleText="isFulfilled required by isCompleted" enabled="Y" ruleType="FIELD_COMPARISON" severity="WARN" companyUserGroupId="RAILS">
+        <expression>{"type":"FIELD_COMPARISON","file1FieldPath":"isFulfilled","file2FieldPath":"isCompleted","operator":"required by"}</expression>
+        <ruleLogic><![CDATA[rule "RAILS_OUTLET_COMPLETED_FULFILLED"
+when
+    $m : Map(this["file1"] != null, this["file2"] != null)
+    eval(reconciliation.rule.RuleDiffSupport.violatesOperator(((Map) $m.get("file1")).get("isFulfilled"), ((Map) $m.get("file2")).get("isCompleted"), "required by"))
+then
+    Object _file1Value = ((Map) $m.get("file1")).get("isFulfilled");
+    Object _file2Value = ((Map) $m.get("file2")).get("isCompleted");
+    reconciliation.rule.RuleDiffSupport.addFieldMismatch(
+        $m,
+        kcontext.getRule().getName(),
+        "isFulfilled required by isCompleted",
+        _file1Value,
+        _file2Value,
+        "WARN",
+        "Field comparison failed: isFulfilled required by isCompleted"
+    );
+end]]></ruleLogic>
+    </darpan.rule.Rule>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_SHOP_OMS_OUTLET_SCOPE" sequenceNum="10" fixActionTemplate="Import Shopify order {recordKey} into HotWax." conclusionEnumId="CONC_SHOPIFY_ORDER_NOT_IN_OMS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_SHOP_OMS_OUTLET_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="HotWax has no order with this Shopify id" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_NOT_IN_OMS_OUTLET" otherSideDateField="createdAt" companyUserGroupId="RAILS" checkCode="shopify-orders-not-in-hotwax-outlet"
+            label="Rails Outlet Shopify orders HotWax does not have" savedRunId="RAILS_SHOP_OMS_OUTLET_RS"
+            file1RecordType="order" file2RecordType="order" graceDays="1"
+            matchedBy="Shopify order id = HotWax externalId"
+            fixOwner="HotWax Support" fixWhereEnumId="OMS"
+            headlineTemplate="Shopify order {recordKey} is not in HotWax"
+            fixActionTemplate="Import Shopify order {recordKey} into HotWax."
+            passesWhenTemplate="HotWax has Shopify order {recordKey}."/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_PAID_NO_OPP_OUTLET" otherSideDateField="createdAt" companyUserGroupId="RAILS" checkCode="paid-orders-without-a-payment-in-hotwax-outlet"
+            label="Rails Outlet Shopify orders paid whose HotWax order has no payment" savedRunId="RAILS_SHOP_OMS_OUTLET_RS"
+            file1RecordType="order" file2RecordType="order" graceDays="1"
+            matchedBy="Shopify order id = HotWax externalId"
+            fixOwner="HotWax Support" fixWhereEnumId="OMS"
+            headlineTemplate="Shopify order {recordKey} is paid and its HotWax order has no payment"
+            fixActionTemplate="Sync the Shopify payment for order {recordKey} to HotWax, so the HotWax order carries its payment preference."
+            passesWhenTemplate="The HotWax order for Shopify order {recordKey} carries a payment."/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_COMPLETED_NOT_FULFILLED_OUTLET" otherSideDateField="createdAt" companyUserGroupId="RAILS" checkCode="completed-orders-not-fulfilled-in-shopify-outlet"
+            label="Rails Outlet HotWax orders completed that Shopify has not fulfilled" savedRunId="RAILS_SHOP_OMS_OUTLET_RS"
+            file1RecordType="order" file2RecordType="order" graceDays="1"
+            matchedBy="Shopify order id = HotWax externalId"
+            fixOwner="HotWax Support" fixWhereEnumId="SHOPIFY"
+            headlineTemplate="Shopify order {recordKey} is completed in HotWax and not fulfilled in Shopify"
+            fixActionTemplate="Sync the HotWax fulfillment for order {recordKey} to Shopify, so Shopify shows it fulfilled."
+            passesWhenTemplate="Shopify shows order {recordKey} fulfilled."/>
+
+    <!-- ================================================================ R6 - Rails US (Shopify 100003, NetSuite store 1) -->
+    <darpan.rule.RuleSet ruleSetId="RAILS_RETURN_CM_USA_RS" ruleSetName="Shopify refunded returns against NetSuite credit memos - US"
+            description="Every Rails US Shopify order with a return completed and refunded (on the return or, as Loop does, on the order) against its NetSuite credit memos." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_RETURN_CM_USA_SCOPE" ruleSetId="RAILS_RETURN_CM_USA_RS"
+            objectType="RETURN" scopeMode="COMPARE" description="Every Rails US Shopify order with a return completed and refunded (on the return or, as Loop does, on the order) against its NetSuite credit memos." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_RETURN_CM_USA_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY_RETURN_REFS" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="orderId"
+            sourceConfigId="100003" sourceConfigType="SHOPIFY_RETURN_REFS_API"
+            extractParametersJson='{"completedReturns":"orderRefunded"}' companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_RETURN_CM_USA_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="orderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_RETURN_CM_USA_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyOrderId"
+            sourceConfigId="RAILS_NS_CREDIT_MEMOS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_RETURN_CM_USA_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_RETURN_CM_USA_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyStore" operator="INCLUDE_IN" filterValues="1" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_RETURN_CM_USA_SCOPE" sequenceNum="10" fixActionTemplate="Book the refund of Shopify order {recordKey} in NetSuite: Loop writes a credit memo for an online return, HotWax for a store or admin return." conclusionEnumId="CONC_NO_CREDIT_MEMO_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_RETURN_CM_USA_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no credit memo for the order" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_RETURN_NO_CM_USA" companyUserGroupId="RAILS" checkCode="refunded-returns-without-credit-memo-usa"
+            label="Rails US Shopify returns refunded with no NetSuite credit memo" savedRunId="RAILS_RETURN_CM_USA_RS"
+            file1RecordType="return" file2RecordType="creditMemo" graceDays="1"
+            matchedBy="Shopify order id = custbody_rails_ext_order_id on the credit memo"
+            fixOwner="Rails Accounting" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Shopify order {recordKey} has a refunded return and no credit memo in NetSuite"
+            fixActionTemplate="Book the refund of Shopify order {recordKey} in NetSuite: Loop writes a credit memo for an online return, HotWax for a store or admin return."
+            passesWhenTemplate="NetSuite has a credit memo for Shopify order {recordKey}."/>
+
+    <!-- ================================================================ R6 - Rails Canada (Shopify 100000, NetSuite store 5) -->
+    <darpan.rule.RuleSet ruleSetId="RAILS_RETURN_CM_CANADA_RS" ruleSetName="Shopify refunded returns against NetSuite credit memos - Canada"
+            description="Every Rails Canada Shopify order with a return completed and refunded (on the return or, as Loop does, on the order) against its NetSuite credit memos." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_RETURN_CM_CANADA_SCOPE" ruleSetId="RAILS_RETURN_CM_CANADA_RS"
+            objectType="RETURN" scopeMode="COMPARE" description="Every Rails Canada Shopify order with a return completed and refunded (on the return or, as Loop does, on the order) against its NetSuite credit memos." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_RETURN_CM_CANADA_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY_RETURN_REFS" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="orderId"
+            sourceConfigId="100000" sourceConfigType="SHOPIFY_RETURN_REFS_API"
+            extractParametersJson='{"completedReturns":"orderRefunded"}' companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_RETURN_CM_CANADA_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="orderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_RETURN_CM_CANADA_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyOrderId"
+            sourceConfigId="RAILS_NS_CREDIT_MEMOS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_RETURN_CM_CANADA_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_RETURN_CM_CANADA_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyStore" operator="INCLUDE_IN" filterValues="5" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_RETURN_CM_CANADA_SCOPE" sequenceNum="10" fixActionTemplate="Book the refund of Shopify order {recordKey} in NetSuite: Loop writes a credit memo for an online return, HotWax for a store or admin return." conclusionEnumId="CONC_NO_CREDIT_MEMO_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_RETURN_CM_CANADA_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no credit memo for the order" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_RETURN_NO_CM_CANADA" companyUserGroupId="RAILS" checkCode="refunded-returns-without-credit-memo-canada"
+            label="Rails Canada Shopify returns refunded with no NetSuite credit memo" savedRunId="RAILS_RETURN_CM_CANADA_RS"
+            file1RecordType="return" file2RecordType="creditMemo" graceDays="1"
+            matchedBy="Shopify order id = custbody_rails_ext_order_id on the credit memo"
+            fixOwner="Rails Accounting" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Shopify order {recordKey} has a refunded return and no credit memo in NetSuite"
+            fixActionTemplate="Book the refund of Shopify order {recordKey} in NetSuite: Loop writes a credit memo for an online return, HotWax for a store or admin return."
+            passesWhenTemplate="NetSuite has a credit memo for Shopify order {recordKey}."/>
+
+    <!-- ================================================================ R6 - Rails EU (Shopify 100001, NetSuite store 2) -->
+    <darpan.rule.RuleSet ruleSetId="RAILS_RETURN_CM_EU_RS" ruleSetName="Shopify refunded returns against NetSuite credit memos - EU"
+            description="Every Rails EU Shopify order with a return completed and refunded (on the return or, as Loop does, on the order) against its NetSuite credit memos." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_RETURN_CM_EU_SCOPE" ruleSetId="RAILS_RETURN_CM_EU_RS"
+            objectType="RETURN" scopeMode="COMPARE" description="Every Rails EU Shopify order with a return completed and refunded (on the return or, as Loop does, on the order) against its NetSuite credit memos." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_RETURN_CM_EU_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY_RETURN_REFS" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="orderId"
+            sourceConfigId="100001" sourceConfigType="SHOPIFY_RETURN_REFS_API"
+            extractParametersJson='{"completedReturns":"orderRefunded"}' companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_RETURN_CM_EU_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="orderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_RETURN_CM_EU_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyOrderId"
+            sourceConfigId="RAILS_NS_CREDIT_MEMOS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_RETURN_CM_EU_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_RETURN_CM_EU_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyStore" operator="INCLUDE_IN" filterValues="2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_RETURN_CM_EU_SCOPE" sequenceNum="10" fixActionTemplate="Book the refund of Shopify order {recordKey} in NetSuite: Loop writes a credit memo for an online return, HotWax for a store or admin return." conclusionEnumId="CONC_NO_CREDIT_MEMO_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_RETURN_CM_EU_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no credit memo for the order" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_RETURN_NO_CM_EU" companyUserGroupId="RAILS" checkCode="refunded-returns-without-credit-memo-eu"
+            label="Rails EU Shopify returns refunded with no NetSuite credit memo" savedRunId="RAILS_RETURN_CM_EU_RS"
+            file1RecordType="return" file2RecordType="creditMemo" graceDays="1"
+            matchedBy="Shopify order id = custbody_rails_ext_order_id on the credit memo"
+            fixOwner="Rails Accounting" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Shopify order {recordKey} has a refunded return and no credit memo in NetSuite"
+            fixActionTemplate="Book the refund of Shopify order {recordKey} in NetSuite: Loop writes a credit memo for an online return, HotWax for a store or admin return."
+            passesWhenTemplate="NetSuite has a credit memo for Shopify order {recordKey}."/>
+
+    <!-- ================================================================ R6 - Rails UK (Shopify 100004, NetSuite store 3) -->
+    <darpan.rule.RuleSet ruleSetId="RAILS_RETURN_CM_UK_RS" ruleSetName="Shopify refunded returns against NetSuite credit memos - UK"
+            description="Every Rails UK Shopify order with a return completed and refunded (on the return or, as Loop does, on the order) against its NetSuite credit memos." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_RETURN_CM_UK_SCOPE" ruleSetId="RAILS_RETURN_CM_UK_RS"
+            objectType="RETURN" scopeMode="COMPARE" description="Every Rails UK Shopify order with a return completed and refunded (on the return or, as Loop does, on the order) against its NetSuite credit memos." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_RETURN_CM_UK_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY_RETURN_REFS" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="orderId"
+            sourceConfigId="100004" sourceConfigType="SHOPIFY_RETURN_REFS_API"
+            extractParametersJson='{"completedReturns":"orderRefunded"}' companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_RETURN_CM_UK_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="orderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_RETURN_CM_UK_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyOrderId"
+            sourceConfigId="RAILS_NS_CREDIT_MEMOS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_RETURN_CM_UK_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_RETURN_CM_UK_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyStore" operator="INCLUDE_IN" filterValues="3" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_RETURN_CM_UK_SCOPE" sequenceNum="10" fixActionTemplate="Book the refund of Shopify order {recordKey} in NetSuite: Loop writes a credit memo for an online return, HotWax for a store or admin return." conclusionEnumId="CONC_NO_CREDIT_MEMO_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_RETURN_CM_UK_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no credit memo for the order" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_RETURN_NO_CM_UK" companyUserGroupId="RAILS" checkCode="refunded-returns-without-credit-memo-uk"
+            label="Rails UK Shopify returns refunded with no NetSuite credit memo" savedRunId="RAILS_RETURN_CM_UK_RS"
+            file1RecordType="return" file2RecordType="creditMemo" graceDays="1"
+            matchedBy="Shopify order id = custbody_rails_ext_order_id on the credit memo"
+            fixOwner="Rails Accounting" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Shopify order {recordKey} has a refunded return and no credit memo in NetSuite"
+            fixActionTemplate="Book the refund of Shopify order {recordKey} in NetSuite: Loop writes a credit memo for an online return, HotWax for a store or admin return."
+            passesWhenTemplate="NetSuite has a credit memo for Shopify order {recordKey}."/>
+
+    <!-- ================================================================ R6 - Rails Outlet (Shopify 100002, NetSuite store 4) -->
+    <darpan.rule.RuleSet ruleSetId="RAILS_RETURN_CM_OUTLET_RS" ruleSetName="Shopify refunded returns against NetSuite credit memos - Outlet"
+            description="Every Rails Outlet Shopify order with a return completed and refunded (on the return or, as Loop does, on the order) against its NetSuite credit memos." version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_RETURN_CM_OUTLET_SCOPE" ruleSetId="RAILS_RETURN_CM_OUTLET_RS"
+            objectType="RETURN" scopeMode="COMPARE" description="Every Rails Outlet Shopify order with a return completed and refunded (on the return or, as Loop does, on the order) against its NetSuite credit memos." companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_RETURN_CM_OUTLET_SCOPE" fileSide="FILE_1"
+            systemEnumId="SHOPIFY_RETURN_REFS" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="orderId"
+            sourceConfigId="100002" sourceConfigType="SHOPIFY_RETURN_REFS_API"
+            extractParametersJson='{"completedReturns":"orderRefunded"}' companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_RETURN_CM_OUTLET_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="orderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_RETURN_CM_OUTLET_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="shopifyOrderId"
+            sourceConfigId="RAILS_NS_CREDIT_MEMOS" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_RETURN_CM_OUTLET_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyOrderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_RETURN_CM_OUTLET_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="shopifyStore" operator="INCLUDE_IN" filterValues="4" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_RETURN_CM_OUTLET_SCOPE" sequenceNum="10" fixActionTemplate="Book the refund of Shopify order {recordKey} in NetSuite: Loop writes a credit memo for an online return, HotWax for a store or admin return." conclusionEnumId="CONC_NO_CREDIT_MEMO_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_RETURN_CM_OUTLET_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FULL" checkLabel="NetSuite has no credit memo for the order" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_RETURN_NO_CM_OUTLET" companyUserGroupId="RAILS" checkCode="refunded-returns-without-credit-memo-outlet"
+            label="Rails Outlet Shopify returns refunded with no NetSuite credit memo" savedRunId="RAILS_RETURN_CM_OUTLET_RS"
+            file1RecordType="return" file2RecordType="creditMemo" graceDays="1"
+            matchedBy="Shopify order id = custbody_rails_ext_order_id on the credit memo"
+            fixOwner="Rails Accounting" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Shopify order {recordKey} has a refunded return and no credit memo in NetSuite"
+            fixActionTemplate="Book the refund of Shopify order {recordKey} in NetSuite: Loop writes a credit memo for an online return, HotWax for a store or admin return."
+            passesWhenTemplate="NetSuite has a credit memo for Shopify order {recordKey}."/>
+
+    <!-- ================================================================ R4 - HotWax completed items against NetSuite billed lines
+         Gorjana R1's run (TriSystemOrderRunsRuleSetData GORJANA_OMS_NS_LINE_RS), keyed (HotWax order id, item seq id) =
+         (custbody_hc_order_id, custcol_hc_order_line_id): RAILS writes both on every store order's item line (Oct 20: 927
+         of 927 inventory lines). Its causes without the two conclusion lookups (within-24-hours, duplicate order): a
+         grace day covers an item still in flight. -->
+    <darpan.rule.RuleSet ruleSetId="RAILS_OMS_NS_LINE_RS" ruleSetName="Completed - HotWax vs NetSuite"
+            description="Every item HotWax completed must be billed on its NetSuite sales order line. Keyed (HotWax order id, item seq id)."
+            version="1.0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareScope compareScopeId="RAILS_OMS_NS_LINE_SCOPE" ruleSetId="RAILS_OMS_NS_LINE_RS"
+            objectType="ORDER_LINE_UNIT" scopeMode="COMPARE" description="Every item HotWax completed must be billed on its NetSuite sales order line. Keyed (HotWax order id, item seq id)."
+            companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_OMS_NS_LINE_SCOPE" fileSide="FILE_1"
+            systemEnumId="OMS_ORDER_ITEMS_GQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="omsOrderId"
+            sourceConfigId="rails_prod" sourceConfigType="HOTWAX_OMS_GQL_ORDER_ITEMS" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_OMS_NS_LINE_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="omsOrderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_OMS_NS_LINE_SCOPE" fileSide="FILE_1" sequenceNum="2" fieldExpression="orderItemSeqId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_OMS_NS_LINE_SCOPE" fileSide="FILE_1" sequenceNum="1" fieldExpression="unitState" operator="INCLUDE_IN" filterValues="COMPLETED" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSource compareScopeId="RAILS_OMS_NS_LINE_SCOPE" fileSide="FILE_2"
+            systemEnumId="NETSUITE_SUITEQL" sourceTypeEnumId="AUT_SRC_API" fileTypeEnumId="DftJson"
+            recordRootExpression="records" primaryIdExpression="orderId"
+            sourceConfigId="RAILS_NS_SO_LINES" sourceConfigType="NETSUITE_SUITEQL" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_OMS_NS_LINE_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="orderId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceKeyField compareScopeId="RAILS_OMS_NS_LINE_SCOPE" fileSide="FILE_2" sequenceNum="2" fieldExpression="orderLineId" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_OMS_NS_LINE_SCOPE" fileSide="FILE_2" sequenceNum="1" fieldExpression="lineState" operator="INCLUDE_IN" filterValues="BILLED" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_OMS_NS_LINE_SCOPE" fileSide="FILE_2" sequenceNum="2" fieldExpression="itemType" operator="EXCLUDE_IN" filterValues="Discount" companyUserGroupId="RAILS"/>
+    <!-- Only Shopify store orders (wholesale and Celigo orders carry no store and no HotWax ids). -->
+    <darpan.rule.RuleSetCompareSourceFilter compareScopeId="RAILS_OMS_NS_LINE_SCOPE" fileSide="FILE_2" sequenceNum="3" fieldExpression="shopifyStore" operator="INCLUDE_IN" filterValues="1,2,3,4,5" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_OMS_NS_LINE_SCOPE" sequenceNum="5" fixActionTemplate="NetSuite closed the line HotWax completed: reopen and bill it in NetSuite, or cancel item {recordKey} in HotWax if it never shipped." conclusionEnumId="CONC_COMPLETED_CLOSED_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OMS_NS_LINE_SCOPE" sequenceNum="5" conditionSeq="1" subject="FILE_2" presence="EXCLUDED" keyScope="FULL" fieldExpression="lineState" operator="IN" conditionValues="CLOSED" checkLabel="NetSuite closed the line" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_OMS_NS_LINE_SCOPE" sequenceNum="8" fixActionTemplate="Set the location on the NetSuite line of item {recordKey}; NetSuite can then ship and bill it." conclusionEnumId="CONC_NS_NO_LINE_LOCATION" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OMS_NS_LINE_SCOPE" sequenceNum="8" conditionSeq="1" subject="FILE_2" presence="EXCLUDED" keyScope="FULL" fieldExpression="lineState" operator="IN" conditionValues="OPEN" checkLabel="NetSuite has the line, nothing shipped" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OMS_NS_LINE_SCOPE" sequenceNum="8" conditionSeq="2" subject="FILE_2" presence="ANY" keyScope="FULL" fieldExpression="lineLocation" operator="BLANK" checkLabel="The line has no location" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_OMS_NS_LINE_SCOPE" sequenceNum="10" fixActionTemplate="Fulfil the backordered line in NetSuite ({quantityBackordered} on backorder); it is billed once it ships." conclusionEnumId="CONC_NS_BACKORDERED" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OMS_NS_LINE_SCOPE" sequenceNum="10" conditionSeq="1" subject="FILE_2" presence="EXCLUDED" keyScope="FULL" checkLabel="NetSuite has the line" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OMS_NS_LINE_SCOPE" sequenceNum="10" conditionSeq="2" subject="FILE_2" presence="ANY" keyScope="FULL" fieldExpression="quantityBackordered" operator="GT_ZERO" checkLabel="Nothing shipped, on backorder" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_OMS_NS_LINE_SCOPE" sequenceNum="15" fixActionTemplate="Bill the shipped line in NetSuite: it shipped and its sales order is not invoiced." conclusionEnumId="CONC_SHIPPED_NOT_BILLED" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OMS_NS_LINE_SCOPE" sequenceNum="15" conditionSeq="1" subject="FILE_2" presence="EXCLUDED" keyScope="FULL" fieldExpression="lineState" operator="IN" conditionValues="SHIPPED" checkLabel="NetSuite shipped, not billed" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_OMS_NS_LINE_SCOPE" sequenceNum="16" fixActionTemplate="Send the fulfillment of item {recordKey} to NetSuite: HotWax fulfilled it and NetSuite still shows the line not shipped, so it cannot bill it." conclusionEnumId="CONC_NOT_SHIPPED_IN_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OMS_NS_LINE_SCOPE" sequenceNum="16" conditionSeq="1" subject="FILE_2" presence="EXCLUDED" keyScope="FULL" fieldExpression="lineState" operator="IN" conditionValues="OPEN" checkLabel="NetSuite has the line, nothing shipped" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_OMS_NS_LINE_SCOPE" sequenceNum="18" fixActionTemplate="Nothing to fix in NetSuite: HotWax sends an order only once it is paid, and this one&#x27;s payment was taken back (order total {orderGrandTotal}). It syncs once paid; cancel it in HotWax if the sale did not stand." conclusionEnumId="CONC_PARTIAL_PAYMENT_NO_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OMS_NS_LINE_SCOPE" sequenceNum="18" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FIRST_FIELD" checkLabel="NetSuite has no line for the order" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OMS_NS_LINE_SCOPE" sequenceNum="18" conditionSeq="2" subject="FILE_1" presence="ANY" keyScope="FULL" fieldExpression="orderGrandTotal" operator="IN" conditionValues="0" checkLabel="Its payment was taken back: the order total is 0" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_OMS_NS_LINE_SCOPE" sequenceNum="20" fixActionTemplate="Re-run the order sync in HotWax for item {recordKey}: NetSuite has no sales order for it." conclusionEnumId="CONC_NEVER_REACHED_NS" appliesToBucket="MISSING_FROM_FILE_2" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OMS_NS_LINE_SCOPE" sequenceNum="20" conditionSeq="1" subject="FILE_2" presence="ABSENT" keyScope="FIRST_FIELD" checkLabel="NetSuite has no line for the order" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionRule compareScopeId="RAILS_OMS_NS_LINE_SCOPE" sequenceNum="30" fixActionTemplate="Complete item {recordKey} in HotWax: NetSuite already billed it." conclusionEnumId="CONC_BILLED_NOT_COMPLETED" appliesToBucket="MISSING_FROM_FILE_1" companyUserGroupId="RAILS"/>
+    <darpan.rule.RuleSetConclusionCondition compareScopeId="RAILS_OMS_NS_LINE_SCOPE" sequenceNum="30" conditionSeq="1" subject="FILE_2" presence="KEPT" keyScope="FULL" fieldExpression="lineState" operator="IN" conditionValues="BILLED" checkLabel="NetSuite billed the line" companyUserGroupId="RAILS"/>
+    <darpan.audit.AuditCheck checkId="RAILS_CHK_COMPLETED_BILLED" otherSideDateField="tranDate" companyUserGroupId="RAILS" checkCode="completed-not-billed"
+            label="HotWax completed items against NetSuite billed lines" savedRunId="RAILS_OMS_NS_LINE_RS"
+            file1RecordType="orderItem" file2RecordType="salesOrderLine" graceDays="1"
+            matchedBy="HotWax order id + item seq id (custbody_hc_order_id + custcol_hc_order_line_id)"
+            fixOwner="HotWax Support" fixWhereEnumId="NETSUITE"
+            headlineTemplate="Item {recordKey} is completed in HotWax and not billed in NetSuite"
+            fixActionTemplate="Bill the NetSuite line for item {recordKey}, or sync the order if NetSuite does not have it."
+            passesWhenTemplate="NetSuite has billed the line for item {recordKey}."/>
+
+    <!-- ================================================================ Which rows break which statement -->
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R4" checkId="RAILS_CHK_COMPLETED_BILLED" companyUserGroupId="RAILS"
+            sequenceNum="1" diffTypes="MISSING_IN_FILE_2"
+            conclusionCodes="CONC_COMPLETED_CLOSED_IN_NS,CONC_NS_NO_LINE_LOCATION,CONC_NS_BACKORDERED,CONC_SHIPPED_NOT_BILLED,CONC_NOT_SHIPPED_IN_NS,CONC_NEVER_REACHED_NS,UNEXPLAINED"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R2" checkId="RAILS_CHK_NOT_IN_OMS_USA" companyUserGroupId="RAILS" sequenceNum="1" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R3" checkId="RAILS_CHK_PAID_NO_OPP_USA" companyUserGroupId="RAILS" sequenceNum="1" diffTypes="FIELD_MISMATCH" ruleIds="RAILS_USA_PAID_HAS_OPP"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R5" checkId="RAILS_CHK_COMPLETED_NOT_FULFILLED_USA" companyUserGroupId="RAILS" sequenceNum="1" diffTypes="FIELD_MISMATCH" ruleIds="RAILS_USA_COMPLETED_FULFILLED"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R6" checkId="RAILS_CHK_RETURN_NO_CM_USA" companyUserGroupId="RAILS" sequenceNum="1" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R2" checkId="RAILS_CHK_NOT_IN_OMS_CANADA" companyUserGroupId="RAILS" sequenceNum="2" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R3" checkId="RAILS_CHK_PAID_NO_OPP_CANADA" companyUserGroupId="RAILS" sequenceNum="2" diffTypes="FIELD_MISMATCH" ruleIds="RAILS_CANADA_PAID_HAS_OPP"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R5" checkId="RAILS_CHK_COMPLETED_NOT_FULFILLED_CANADA" companyUserGroupId="RAILS" sequenceNum="2" diffTypes="FIELD_MISMATCH" ruleIds="RAILS_CANADA_COMPLETED_FULFILLED"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R6" checkId="RAILS_CHK_RETURN_NO_CM_CANADA" companyUserGroupId="RAILS" sequenceNum="2" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R2" checkId="RAILS_CHK_NOT_IN_OMS_EU" companyUserGroupId="RAILS" sequenceNum="3" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R3" checkId="RAILS_CHK_PAID_NO_OPP_EU" companyUserGroupId="RAILS" sequenceNum="3" diffTypes="FIELD_MISMATCH" ruleIds="RAILS_EU_PAID_HAS_OPP"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R5" checkId="RAILS_CHK_COMPLETED_NOT_FULFILLED_EU" companyUserGroupId="RAILS" sequenceNum="3" diffTypes="FIELD_MISMATCH" ruleIds="RAILS_EU_COMPLETED_FULFILLED"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R6" checkId="RAILS_CHK_RETURN_NO_CM_EU" companyUserGroupId="RAILS" sequenceNum="3" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R2" checkId="RAILS_CHK_NOT_IN_OMS_UK" companyUserGroupId="RAILS" sequenceNum="4" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R3" checkId="RAILS_CHK_PAID_NO_OPP_UK" companyUserGroupId="RAILS" sequenceNum="4" diffTypes="FIELD_MISMATCH" ruleIds="RAILS_UK_PAID_HAS_OPP"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R5" checkId="RAILS_CHK_COMPLETED_NOT_FULFILLED_UK" companyUserGroupId="RAILS" sequenceNum="4" diffTypes="FIELD_MISMATCH" ruleIds="RAILS_UK_COMPLETED_FULFILLED"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R6" checkId="RAILS_CHK_RETURN_NO_CM_UK" companyUserGroupId="RAILS" sequenceNum="4" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R2" checkId="RAILS_CHK_NOT_IN_OMS_OUTLET" companyUserGroupId="RAILS" sequenceNum="5" diffTypes="MISSING_IN_FILE_2"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R3" checkId="RAILS_CHK_PAID_NO_OPP_OUTLET" companyUserGroupId="RAILS" sequenceNum="5" diffTypes="FIELD_MISMATCH" ruleIds="RAILS_OUTLET_PAID_HAS_OPP"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R5" checkId="RAILS_CHK_COMPLETED_NOT_FULFILLED_OUTLET" companyUserGroupId="RAILS" sequenceNum="5" diffTypes="FIELD_MISMATCH" ruleIds="RAILS_OUTLET_COMPLETED_FULFILLED"/>
+    <darpan.audit.AuditStatementCheck statementId="RAILS_R6" checkId="RAILS_CHK_RETURN_NO_CM_OUTLET" companyUserGroupId="RAILS" sequenceNum="5" diffTypes="MISSING_IN_FILE_2"/>
 </entity-facade-xml>

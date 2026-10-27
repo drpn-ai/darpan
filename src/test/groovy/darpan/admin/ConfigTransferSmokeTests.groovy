@@ -1,5 +1,6 @@
 package darpan.admin
 
+import darpan.admin.transfer.SecretHandoff
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import groovy.json.JsonOutput
@@ -210,7 +211,8 @@ class ConfigTransferSmokeTests {
     @Test
     void nonAdminIsRefused() {
         ["get#TransferCatalog": [tenantUserGroupId: SRC],
-         "export#ConfigBundle": [tenantUserGroupId: SRC, auditCodes: ["month-close"]]].each { String verb, Map params ->
+         "export#ConfigBundle": [tenantUserGroupId: SRC, auditCodes: ["month-close"]],
+         "begin#SecretHandoff": [tenantUserGroupId: DST]].each { String verb, Map params ->
             Map out = callAs(PLAIN_USERNAME, "${SERVICES}.${verb}", params)
             assertNotNull(out.authzDenied, "${verb} must be refused by the DARPAN_ADMIN_API fence; got ${out}")
             Map gated = callAs(PLAIN_USERNAME, "${SERVICES}.${verb}", params, true)
@@ -704,6 +706,190 @@ class ConfigTransferSmokeTests {
         }
     }
 
+    // ---------------------------------------------------------------- DAR-ADMIN-007: credentials sealed end to end
+
+    @Test
+    void sealedRoundTrip() {
+        String restletRef = "NETSUITE_RESTLET:XFER_SEAL_RESTLET"
+        Map secrets = [password: "restlet-pass-xfer", apiToken: "restlet-token-xfer", privateKeyPem: "restlet-pem-xfer",
+                       headersJson: '{"X-Api-Key":"restlet-header-xfer"}']
+        create("darpan.reconciliation.NsRestletConfig", [nsRestletConfigId: "XFER_SEAL_RESTLET", description: "sealed restlet",
+                companyUserGroupId: SRC, endpointUrl: "https://ns.example/sealed", nsAuthConfigId: "XFER_NS_AUTH"] + secrets)
+        List<String> plaintexts = [PASSWORD, PEM] + secrets.values().collect { it as String } + ["restlet-header-xfer"]
+        try {
+            Map handoff = beginHandoff(DST)
+            assertTrue((handoff.publicKey as String).length() > 300)
+            assertTrue((handoff.keyFingerprint as String) ==~ /[0-9a-f]{64}/)
+            assertNotNull(handoff.expiresAt)
+            Map bundle = exportSealed(handoff.publicKey as String, [connectionRefs: [restletRef]])
+            String bundleJson = JsonOutput.toJson(bundle)
+            plaintexts.each { assertFalse(bundleJson.contains(it), "no plaintext in the bundle: ${it}") }
+            assertEquals(handoff.keyFingerprint, bundle.secrets.keyFingerprint)
+            assertEquals("RSA-OAEP-256+A256GCM", bundle.secrets.alg)
+            assertEquals(["password", "privateKeyPem"], ((bundle.connections as List<Map>).find { it.ref == AUTH_REF }.sealedSecrets as Map).keySet().collect { it as String }.sort())
+
+            Map map = [(AUTH_REF): "CREATE", (restletRef): "CREATE"]
+            Map preview = importInto(DST, bundle, map, false, null, handoff.handoffToken as String)
+            assertNoErrors(preview)
+            Map plan = preview.result.plan as Map
+            assertEquals([], plan.blocking)
+            Map authLine = (plan.lines as List<Map>).find { it.ref == AUTH_REF }
+            assertEquals("CREATE", authLine.action, "credentials arrive, so nothing is left to enter")
+            assertEquals(["password", "privateKeyPem"], authLine.secretsFilled)
+            assertEquals([], authLine.secretsKept)
+            assertEquals(["apiToken", "headersJson", "password", "privateKeyPem"], (plan.lines as List<Map>).find { it.ref == restletRef }.secretsFilled)
+            assertEquals(2, plan.counts.CREDENTIALS_FILLED)
+            assertFalse((plan.warnings as List<Map>).any { it.code == "NEEDS_CREDENTIALS" })
+
+            Map applied = importInto(DST, bundle, map, true, preview.result.planHash as String, handoff.handoffToken as String)
+            assertNoErrors(applied)
+            def auth = ec.entity.find("darpan.reconciliation.NsAuthConfig").condition("nsAuthConfigId", applied.result.idMap[AUTH_REF])
+                    .disableAuthz().useCache(false).one()
+            assertEquals(PASSWORD, auth.password)
+            assertEquals(PEM, auth.privateKeyPem)
+            assertNull(auth.apiToken)
+            def restlet = ec.entity.find("darpan.reconciliation.NsRestletConfig").condition("nsRestletConfigId", applied.result.idMap[restletRef])
+                    .disableAuthz().useCache(false).one()
+            secrets.each { String field, String value -> assertEquals(value, restlet.get(field), field) }
+
+            String everythingSaid = JsonOutput.toJson([preview.result, applied.result, preview.errors, applied.errors,
+                    ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().useCache(false).list()*.getMap()])
+            plaintexts.each { assertFalse(everythingSaid.contains(it), "no plaintext in a plan, an error or the audit log: ${it}") }
+            assertTrue((ec.entity.find("darpan.admin.AdminAuditLog").condition("targetId", DST).disableAuthz().useCache(false).one()
+                    .detailText as String).contains("credentials filled: 6"), "the apply log counts the fields filled")
+        } finally {
+            wipeTenant(DST)
+            ec.entity.find("darpan.reconciliation.NsRestletConfig").condition("nsRestletConfigId", "XFER_SEAL_RESTLET").disableAuthz().deleteAll()
+        }
+    }
+
+    @Test
+    void handoffTokenWrongTenantBlocks() {
+        Map handoff = beginHandoff(OTHER)
+        Map bundle = exportSealed(handoff.publicKey as String)
+        assertEquals(["SECRET_HANDOFF_INVALID"], blockedCodes(bundle, handoff.handoffToken as String))
+    }
+
+    @Test
+    void handoffTokenExpiredBlocks() {
+        Map handoff = SecretHandoff.begin(ec, DST, System.currentTimeMillis() - 31L * 60 * 1000)
+        Map bundle = exportSealed(handoff.publicKey as String)
+        assertEquals(["SECRET_HANDOFF_INVALID"], blockedCodes(bundle, handoff.handoffToken as String))
+        assertEquals(["SECRET_HANDOFF_INVALID"], blockedCodes(bundle, "not-a-token"), "an unreadable token answers the same")
+    }
+
+    @Test
+    void missingTokenBlocks() {
+        Map bundle = exportSealed(beginHandoff(DST).publicKey as String)
+        assertEquals(["SECRET_HANDOFF_MISSING"], blockedCodes(bundle, null))
+        Map other = beginHandoff(DST)
+        assertEquals(["SECRET_HANDOFF_INVALID"], blockedCodes(bundle, other.handoffToken as String), "a token for another key")
+    }
+
+    @Test
+    void tamperedCiphertextBlocks() {
+        Map handoff = beginHandoff(DST)
+        Map bundle = copy(exportSealed(handoff.publicKey as String))
+        Map sealed = (bundle.connections as List<Map>).find { it.ref == AUTH_REF }.sealedSecrets.password as Map
+        byte[] ct = Base64.decoder.decode(sealed.ct as String)
+        ct[3] = (byte) (ct[3] ^ 0x10)
+        sealed.ct = Base64.encoder.encodeToString(ct)
+        Map plan = importInto(DST, bundle, [(AUTH_REF): "CREATE"], false, null, handoff.handoffToken as String).result.plan as Map
+        assertEquals([[code: "SECRET_UNREADABLE", ref: AUTH_REF]], (plan.blocking as List<Map>).collect { it.subMap(["code", "ref"]) })
+        assertTrue((plan.blocking[0].message as String).contains("password"))
+    }
+
+    @Test
+    void ciphertextMovedToAnotherFieldBlocks() {
+        Map handoff = beginHandoff(DST)
+        Map bundle = copy(exportSealed(handoff.publicKey as String))
+        Map sealedSecrets = (bundle.connections as List<Map>).find { it.ref == AUTH_REF }.sealedSecrets as Map
+        sealedSecrets.privateKeyPem = sealedSecrets.password
+        Map plan = importInto(DST, bundle, [(AUTH_REF): "CREATE"], false, null, handoff.handoffToken as String).result.plan as Map
+        assertEquals(["SECRET_UNREADABLE"], plan.blocking*.code)
+        assertTrue((plan.blocking[0].message as String).contains("privateKeyPem"))
+    }
+
+    @Test
+    void existingTargetSecretIsKept() {
+        create("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "XFER_DST_AUTH", description: "dst auth", companyUserGroupId: DST,
+                authType: "OAUTH2_M2M", password: "dst-own-pass"])
+        Map handoff = beginHandoff(DST)
+        Map bundle = exportSealed(handoff.publicKey as String)
+        Map map = [(AUTH_REF): "XFER_DST_AUTH"]
+        Map preview = importInto(DST, bundle, map, false, null, handoff.handoffToken as String)
+        Map line = (preview.result.plan.lines as List<Map>).find { it.ref == AUTH_REF }
+        assertEquals("MAPPED", line.action)
+        assertEquals(["privateKeyPem"], line.secretsFilled)
+        assertEquals(["password"], line.secretsKept)
+        assertNoErrors(importInto(DST, bundle, map, true, preview.result.planHash as String, handoff.handoffToken as String))
+        def auth = ec.entity.find("darpan.reconciliation.NsAuthConfig").condition("nsAuthConfigId", "XFER_DST_AUTH").disableAuthz().useCache(false).one()
+        assertEquals("dst-own-pass", auth.password, "a set secret is never overwritten")
+        assertEquals(PEM, auth.privateKeyPem, "an empty one is filled")
+    }
+
+    @Test
+    void emptyMappedSecretIsFilled() {
+        create("darpan.reconciliation.NsAuthConfig", [nsAuthConfigId: "XFER_DST_AUTH", description: "dst auth", companyUserGroupId: DST,
+                authType: "OAUTH2_M2M"])
+        Map handoff = beginHandoff(DST)
+        Map bundle = exportSealed(handoff.publicKey as String)
+        Map map = [(AUTH_REF): "XFER_DST_AUTH"]
+        Map preview = importInto(DST, bundle, map, false, null, handoff.handoffToken as String)
+        Map line = (preview.result.plan.lines as List<Map>).find { it.ref == AUTH_REF }
+        assertEquals("MAPPED", line.action)
+        assertEquals(["password", "privateKeyPem"], line.secretsFilled)
+        assertEquals(1, preview.result.plan.counts.CREDENTIALS_FILLED)
+        assertNoErrors(importInto(DST, bundle, map, true, preview.result.planHash as String, handoff.handoffToken as String))
+        def auth = ec.entity.find("darpan.reconciliation.NsAuthConfig").condition("nsAuthConfigId", "XFER_DST_AUTH").disableAuthz().useCache(false).one()
+        assertEquals(PASSWORD, auth.password)
+        assertEquals(PEM, auth.privateKeyPem)
+    }
+
+    @Test
+    void secretExportIsAuditLogged() {
+        Map handoff = beginHandoff(DST)
+        exportSealed(handoff.publicKey as String)
+        List rows = ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().useCache(false).list()
+        assertEquals(1, rows.size(), "one source row per export that carries secrets")
+        assertEquals("admin.TransferAdminServices.export#ConfigBundle", rows[0].serviceName)
+        assertEquals(SRC, rows[0].targetId)
+        String detail = rows[0].detailText as String
+        [AUTH_REF, "password", "privateKeyPem", handoff.keyFingerprint as String].each { assertTrue(detail.contains(it), "${it} in ${detail}") }
+        [PASSWORD, PEM].each { assertFalse(detail.contains(it)) }
+    }
+
+    @Test
+    void noSecretsWithoutKey() {
+        Map bundle = exportSource()
+        assertFalse(bundle.containsKey("secrets"))
+        assertFalse(JsonOutput.toJson(bundle).contains("sealedSecrets"))
+        assertEquals(0, ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().useCache(false).count())
+    }
+
+    @Test
+    void secondImportAfterCopyIsUnchanged() {
+        Map handoff = beginHandoff(DST)
+        Map bundle = exportSealed(handoff.publicKey as String)
+        Map preview = importInto(DST, bundle, [(AUTH_REF): "CREATE"], false, null, handoff.handoffToken as String)
+        Map applied = importInto(DST, bundle, [(AUTH_REF): "CREATE"], true, preview.result.planHash as String, handoff.handoffToken as String)
+        assertNoErrors(applied)
+
+        Map again = beginHandoff(DST)
+        Map rebundle = exportSealed(again.publicKey as String)
+        Map plan = importInto(DST, rebundle, [(AUTH_REF): applied.result.idMap[AUTH_REF]], false, null, again.handoffToken as String)
+                .result.plan as Map
+        assertEquals([], plan.blocking)
+        (plan.lines as List<Map>).each {
+            assertEquals(it.ref == AUTH_REF ? "MAPPED" : "UNCHANGED", it.action, "${it.ref}: ${it.changes}")
+        }
+        Map authLine = (plan.lines as List<Map>).find { it.ref == AUTH_REF }
+        assertEquals([], authLine.secretsFilled)
+        assertEquals(["password", "privateKeyPem"], authLine.secretsKept)
+        assertEquals(0, plan.counts.CREDENTIALS_FILLED)
+        assertFalse((plan.warnings as List<Map>).any { it.code == "NEEDS_CREDENTIALS" })
+    }
+
     // ---------------------------------------------------------------- fixtures
 
     private void seedSource() {
@@ -792,9 +978,11 @@ class ConfigTransferSmokeTests {
         return out.result.bundle as Map
     }
 
-    private Map importInto(String tenantId, Map bundle, Map connectionMap, boolean apply = false, String planHash = null) {
+    private Map importInto(String tenantId, Map bundle, Map connectionMap, boolean apply = false, String planHash = null,
+                           String handoffToken = null) {
         Map params = [tenantUserGroupId: tenantId, bundle: bundle, connectionMap: connectionMap, apply: apply]
         if (planHash) params.planHash = planHash
+        if (handoffToken) params.secretHandoffToken = handoffToken
         return callAs(SUPER_USERNAME, "${SERVICES}.import#ConfigBundle", params)
     }
 
@@ -803,6 +991,25 @@ class ConfigTransferSmokeTests {
         Map preview = importInto(tenantId, bundle, connectionMap)
         assertNoErrors(preview)
         return importInto(tenantId, bundle, connectionMap, true, preview.result.planHash as String)
+    }
+
+    private Map beginHandoff(String tenantId) {
+        Map out = callAs(SUPER_USERNAME, "${SERVICES}.begin#SecretHandoff", [tenantUserGroupId: tenantId])
+        assertNoErrors(out)
+        return out.result as Map
+    }
+
+    private Map exportSealed(String publicKey, Map extra = [:]) {
+        Map out = callAs(SUPER_USERNAME, "${SERVICES}.export#ConfigBundle", [tenantUserGroupId: SRC, auditCodes: ["month-close"],
+                sourceInstanceLabel: "local", secretsPublicKey: publicKey] + extra)
+        assertNoErrors(out)
+        return out.result.bundle as Map
+    }
+
+    private List<String> blockedCodes(Map bundle, String token) {
+        Map out = importInto(DST, bundle, [(AUTH_REF): "CREATE"], false, null, token)
+        assertNoErrors(out)
+        return (out.result.plan.blocking as List<Map>)*.code.unique()
     }
 
     /** The refs a plan blocks with one code, sorted. */

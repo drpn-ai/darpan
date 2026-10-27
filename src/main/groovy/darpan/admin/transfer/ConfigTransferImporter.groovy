@@ -8,7 +8,9 @@ import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import groovy.json.JsonOutput
 import groovy.transform.CompileDynamic
 
+import javax.crypto.SecretKey
 import java.nio.charset.StandardCharsets
+import java.security.GeneralSecurityException
 import java.security.MessageDigest
 
 import reconciliation.rule.RuleEngineSupport
@@ -42,13 +44,27 @@ class ConfigTransferImporter {
     static final String REMOTE_ENTITY = "moqui.service.message.SystemMessageRemote"
 
     /** The dry run: [lines, blocking, warnings, counts]. Writes nothing. */
-    static Map<String, Object> plan(def ec, String targetTenantId, Map bundle, Map<String, String> connectionMap) {
-        return analyse(ec, targetTenantId, bundle, connectionMap).plan as Map<String, Object>
+    static Map<String, Object> plan(def ec, String targetTenantId, Map bundle, Map<String, String> connectionMap,
+                                    String secretHandoffToken = null) {
+        return analyse(ec, targetTenantId, bundle, connectionMap, secretHandoffToken).plan as Map<String, Object>
     }
 
-    /** SHA-256 hex over the canonical JSON (keys sorted at every level) of what was previewed and where. */
-    static String planHash(String targetTenantId, Map bundle, Map connectionMap, Map plan) {
-        String json = JsonOutput.toJson(sorted([tenant: targetTenantId, bundle: bundle, connectionMap: connectionMap ?: [:], plan: plan]))
+    /** The dry run and its hash, which covers the handoff key the sealed credentials were opened with. */
+    static Map<String, Object> preview(def ec, String targetTenantId, Map bundle, Map<String, String> connectionMap,
+                                       String secretHandoffToken = null) {
+        Map ctx = analyse(ec, targetTenantId, bundle, connectionMap, secretHandoffToken)
+        return [plan    : ctx.plan,
+                planHash: planHash(targetTenantId, bundle, connectionMap, ctx.plan as Map, ctx.handoffFingerprint as String)] as Map<String, Object>
+    }
+
+    /**
+     * SHA-256 hex over the canonical JSON (keys sorted at every level) of what was previewed and where; with sealed
+     * credentials, also the fingerprint of the handoff key that opened them.
+     */
+    static String planHash(String targetTenantId, Map bundle, Map connectionMap, Map plan, String handoffFingerprint = null) {
+        Map hashed = [tenant: targetTenantId, bundle: bundle, connectionMap: connectionMap ?: [:], plan: plan]
+        if (handoffFingerprint) hashed.handoffFingerprint = handoffFingerprint
+        String json = JsonOutput.toJson(sorted(hashed))
         return MessageDigest.getInstance("SHA-256").digest(json.getBytes(StandardCharsets.UTF_8)).encodeHex().toString()
     }
 
@@ -58,10 +74,10 @@ class ConfigTransferImporter {
      * planHash, idMap: every bundle ref to its target id]; null, with an error and nothing written, when refused.
      */
     static Map<String, Object> apply(def ec, String targetTenantId, Map bundle, Map connectionMap, String expectedPlanHash,
-                                     String sourceInstanceLabel) {
-        Map ctx = analyse(ec, targetTenantId, bundle, connectionMap)
+                                     String sourceInstanceLabel, String secretHandoffToken = null) {
+        Map ctx = analyse(ec, targetTenantId, bundle, connectionMap, secretHandoffToken)
         Map plan = ctx.plan as Map
-        String hash = planHash(targetTenantId, bundle, connectionMap, plan)
+        String hash = planHash(targetTenantId, bundle, connectionMap, plan, ctx.handoffFingerprint as String)
         if (plan.blocking) {
             ec.message.addError("The plan has blocking items (${(plan.blocking as List<Map>)*.code.unique().join(', ')}); resolve them and preview again.")
             return null
@@ -77,8 +93,11 @@ class ConfigTransferImporter {
         records(ctx, "connections").each { Map c ->
             if (ctx.actions[c.ref] in [CREATE, "NEEDS_CREDENTIALS"]) {
                 Map kindSpec = TransferSpecs.spec(c.kind as String)
-                // Secret columns are not in the record, so a created connection has them empty.
-                createRow(ctx, kindSpec, c, TenantScopedFinder.mintId(ec, kindSpec.entityName as String, kindSpec.pkField as String))
+                // Secret columns are not in the record: a created connection has them empty unless sealed ones were opened.
+                createRow(ctx, kindSpec, c, TenantScopedFinder.mintId(ec, kindSpec.entityName as String, kindSpec.pkField as String),
+                        fillsFor(ctx, c))
+            } else if (ctx.actions[c.ref] == "MAPPED" && fillsFor(ctx, c)) {
+                fillMapped(ctx, c)
             }
         }
         records(ctx, "queries").each { Map q -> writeTree(ctx, spec(NETSUITE_SUITEQL), q, "") }
@@ -108,13 +127,15 @@ class ConfigTransferImporter {
 
         String counts = ACTIONS.collect { "${it} ${plan.counts[it]}" }.join(", ")
         AdminAuditSupport.record(ec, SERVICE_NAME, "Tenant", targetTenantId,
-                "${sourceInstanceLabel ?: '?'}/${bundle.source?.tenantUserGroupId ?: '?'} bundle ${hash.take(12)}: ${counts}".toString())
+                ("${sourceInstanceLabel ?: '?'}/${bundle.source?.tenantUserGroupId ?: '?'} bundle ${hash.take(12)}: ${counts}" +
+                        (ctx.carriesSecrets ? "; credentials filled: ${ctx.filledCount ?: 0}" : "")).toString())
         return [plan: plan, planHash: hash, idMap: ctx.idMap] as Map<String, Object>
     }
 
-    static Map<String, Object> analyse(def ec, String tenantId, Map bundle, Map connectionMap) {
+    static Map<String, Object> analyse(def ec, String tenantId, Map bundle, Map connectionMap, String secretHandoffToken = null) {
         Map ctx = [ec      : ec, tenantId: tenantId, bundle: bundle ?: [:], map: (connectionMap ?: [:]),
-                   blocking: [], warnings: [], resolved: [:], matches: [:], actions: [:], changes: [:], ruleIdentity: [:]]
+                   blocking: [], warnings: [], resolved: [:], matches: [:], actions: [:], changes: [:], ruleIdentity: [:],
+                   secretValues: [:], fills: [:], kept: [:]]
         if (text(bundle?.bundleVersion) != text(BUNDLE_VERSION)) {
             block(ctx, "BUNDLE_VERSION", null,
                     "This instance reads bundle version ${BUNDLE_VERSION}, not ${bundle?.bundleVersion}. Export again from a matching source.")
@@ -127,6 +148,7 @@ class ConfigTransferImporter {
         }
         checkShape(ctx)
         checkRefs(ctx)
+        openSecrets(ctx, secretHandoffToken)
 
         matchConnections(ctx)
         matchByKey(ctx, "queries", "description", { Map q -> text(q.fields?.description) }) { Map q ->
@@ -290,6 +312,94 @@ class ConfigTransferImporter {
         }
     }
 
+    // ---------------------------------------------------------------- credentials (DAR-ADMIN-007)
+
+    /**
+     * A bundle with sealed credentials needs this instance's handoff token: readable here, the target tenant's, unexpired,
+     * and for the key the bundle was sealed to. Every sealed value is opened now, so a value that will not open blocks the
+     * plan rather than the apply. Plaintext is kept in ctx for the apply only, never in the plan.
+     */
+    private static void openSecrets(Map ctx, String token) {
+        Map secrets = ctx.bundle.secrets instanceof Map ? (Map) ctx.bundle.secrets : null
+        if (secrets == null) return
+        ctx.carriesSecrets = true
+        if (!text(token)) {
+            block(ctx, "SECRET_HANDOFF_MISSING", null, "The bundle carries sealed credentials but no handoff token came with it. Preview again.")
+            return
+        }
+        Map handoff = SecretHandoff.open(ctx.ec, text(token), ctx.tenantId as String)
+        SecretKey key = null
+        if (handoff != null && handoff.keyFingerprint == text(secrets.keyFingerprint)) {
+            try {
+                key = SecretSeal.unwrap(handoff.privateKey as String, text(secrets.wrappedKey))
+            } catch (Exception ignored) {
+                key = null
+            }
+        }
+        if (key == null) {
+            block(ctx, "SECRET_HANDOFF_INVALID", null, "The credentials handoff is expired, unreadable, for another tenant or for " +
+                    "another key. Preview again.")
+            return
+        }
+        ctx.handoffFingerprint = handoff.keyFingerprint
+        records(ctx, "connections").each { Map c ->
+            Map sealed = c.sealedSecrets instanceof Map ? (Map) c.sealedSecrets : null
+            if (!sealed) return
+            Map kindSpec = TransferSpecs.spec(c.kind as String)
+            List<String> allowed = kindSpec && isEntityAvailable(ctx.ec, kindSpec.entityName as String) && !c.granted ?
+                    secretFields(ctx.ec, kindSpec.entityName as String) : []
+            sealed.keySet().collect { it as String }.sort().each { String field ->
+                if (!(field in allowed)) {
+                    block(ctx, "FIELD_NOT_ALLOWED", c.ref, "${kindSpec ? shortName(kindSpec.entityName as String) : c.kind}.${field} is not " +
+                            "a credential a transfer writes; the bundle was edited. Export it again.")
+                    return
+                }
+                try {
+                    String value = SecretSeal.open(key, c.ref as String, field, sealed[field] as Map)
+                    Map opened = (Map) (ctx.secretValues[c.ref] ?: (ctx.secretValues[c.ref] = new TreeMap()))
+                    opened[field] = value
+                } catch (GeneralSecurityException ignored) {
+                    block(ctx, "SECRET_UNREADABLE", c.ref, "The sealed ${field} of ${c.label} does not open: it was altered or sealed " +
+                            "for another connection or field. Export again.")
+                }
+            }
+        }
+    }
+
+    /** A mapped connection takes a credential only where its own is empty, and only when it is the target tenant's own. */
+    private static void planMappedFills(Map ctx, Map kindSpec, Map c, def target) {
+        Map opened = (ctx.secretValues[c.ref] ?: [:]) as Map
+        if (!opened) return
+        boolean owned = target?.companyUserGroupId == ctx.tenantId
+        List<String> filled = []
+        List<String> kept = []
+        opened.keySet().collect { it as String }.sort().each { String field ->
+            // Counted, not read: an empty column is null, and reading a set one would decrypt it for nothing.
+            boolean set = !owned || finder(ctx.ec, kindSpec.entityName as String).condition(kindSpec.pkField as String, ctx.resolved[c.ref])
+                    .condition(field, org.moqui.entity.EntityCondition.ComparisonOperator.NOT_EQUAL, null).count() > 0
+            (set ? kept : filled) << field
+        }
+        ctx.fills[c.ref] = filled
+        ctx.kept[c.ref] = kept
+    }
+
+    /** The opened credentials a connection takes in this transfer: all of them on CREATE, the empty ones on MAPPED. */
+    private static Map<String, String> fillsFor(Map ctx, Map c) {
+        Map opened = (ctx.secretValues[c.ref] ?: [:]) as Map
+        return ((ctx.fills[c.ref] ?: []) as List<String>).collectEntries { [(it): opened[it] as String] } as Map<String, String>
+    }
+
+    private static void fillMapped(Map ctx, Map c) {
+        Map kindSpec = TransferSpecs.spec(c.kind as String)
+        Map<String, String> secrets = fillsFor(ctx, c)
+        def value = finder(ctx.ec, kindSpec.entityName as String).condition(kindSpec.pkField as String, ctx.resolved[c.ref])
+                .selectFields([kindSpec.pkField as String, "companyUserGroupId"] + (secrets.keySet() as List<String>)).useCache(false).one()
+        if (value == null || value.companyUserGroupId != ctx.tenantId) throw new IllegalStateException("${c.label} changed on this instance during the transfer.")
+        secrets.each { String field, String secret -> value.set(field, secret) }
+        value.update()
+        ctx.filledCount = ((ctx.filledCount ?: 0) as int) + secrets.size()
+    }
+
     // ---------------------------------------------------------------- matching
 
     /**
@@ -368,14 +478,19 @@ class ConfigTransferImporter {
                     return
                 }
                 List secrets = (c.secretFields ?: []) as List
-                ctx.actions[c.ref] = secrets ? "NEEDS_CREDENTIALS" : CREATE
-                if (secrets) warn(ctx, "NEEDS_CREDENTIALS", c.ref, "${c.label} is created without ${secrets.join(', ')}; enter them on this instance.")
+                Map opened = (ctx.secretValues[c.ref] ?: [:]) as Map
+                ctx.fills[c.ref] = opened.keySet().sort()
+                // With sealed credentials it needs them only when the source had none to send.
+                boolean needs = secrets && !opened
+                ctx.actions[c.ref] = needs ? "NEEDS_CREDENTIALS" : CREATE
+                if (needs) warn(ctx, "NEEDS_CREDENTIALS", c.ref, "${c.label} is created without ${secrets.join(', ')}; enter them on this instance.")
             } else if (connectionTarget(ctx, kindSpec, choice) == null) {
                 // One answer for a missing id, another kind's id and another tenant's id (DAR-BE-135).
                 block(ctx, "CONNECTION_NOT_FOUND", c.ref, "Connection ${choice} was not found for ${c.label}.")
             } else {
                 ctx.resolved[c.ref] = choice
                 ctx.actions[c.ref] = "MAPPED"
+                planMappedFills(ctx, kindSpec, c, connectionTarget(ctx, kindSpec, choice))
             }
         }
     }
@@ -607,9 +722,12 @@ class ConfigTransferImporter {
         }
     }
 
-    private static def createRow(Map ctx, Map spec, Map rec, String id) {
+    private static def createRow(Map ctx, Map spec, Map rec, String id, Map<String, String> secrets = [:]) {
         def value = ctx.ec.entity.makeValue(spec.entityName as String)
         value.setAll(columns(ctx, spec, rec))
+        // Plaintext only here, in memory; the entity layer encrypts the encrypt="true" columns on write.
+        secrets.each { String field, String secret -> value.set(field, secret) }
+        ctx.filledCount = ((ctx.filledCount ?: 0) as int) + secrets.size()
         value.set(spec.pkField as String, id)
         stamp(ctx, spec.entityName as String, value, true)
         value.create()
@@ -831,13 +949,19 @@ class ConfigTransferImporter {
 
     private static Map line(Map ctx, String kind, Map rec) {
         String action = ctx.actions[rec.ref] as String
-        return [kind    : kind, ref: rec.ref, label: rec.label, action: action,
-                targetId: action in [CREATE, "NEEDS_CREDENTIALS"] ? null : ctx.resolved[rec.ref],
-                changes : (ctx.changes[rec.ref] ?: []) as List]
+        Map out = [kind    : kind, ref: rec.ref, label: rec.label, action: action,
+                   targetId: action in [CREATE, "NEEDS_CREDENTIALS"] ? null : ctx.resolved[rec.ref],
+                   changes : (ctx.changes[rec.ref] ?: []) as List]
+        if (ctx.carriesSecrets && kind in CONNECTION_KINDS) {
+            out.secretsFilled = (ctx.fills[rec.ref] ?: []) as List
+            out.secretsKept = (ctx.kept[rec.ref] ?: []) as List
+        }
+        return out
     }
 
     private static Map<String, Object> finish(Map ctx, List<Map> lines) {
         Map counts = ACTIONS.collectEntries { String a -> [(a): lines.count { it.action == a } as int] }
+        counts.CREDENTIALS_FILLED = lines.count { it.secretsFilled } as int
         ctx.plan = [lines: lines, blocking: ctx.blocking, warnings: ctx.warnings, counts: counts]
         return ctx
     }

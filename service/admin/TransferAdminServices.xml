@@ -44,6 +44,10 @@
             <parameter name="connectionRefs" type="List"><description>Connections to send that no picked audit or run
                 reaches, as KIND:id refs from the catalog.</description></parameter>
             <parameter name="sourceInstanceLabel"><description>This instance's name as the operator knows it, e.g. local.</description></parameter>
+            <parameter name="secretsPublicKey"><description>DAR-ADMIN-007. The target's publicKey from begin#SecretHandoff
+                (base64 SPKI). When given, each owned connection's non-empty credentials are sealed to it (sealedSecrets),
+                the bundle carries secrets {wrappedKey, keyFingerprint, alg}, and one AdminAuditLog row records what was
+                sealed to which key. Without it no credential is read.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="bundle" type="Map"><description>{bundleVersion, source, connections, queries, conclusionCodes,
@@ -52,7 +56,7 @@
         <actions>
             <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
             <set field="bundle" from="darpan.admin.transfer.ConfigTransferExporter.bundle(ec, tenantUserGroupId, auditCodes,
-                    savedRunIds, connectionRefs, sourceInstanceLabel)"/>
+                    savedRunIds, connectionRefs, sourceInstanceLabel, secretsPublicKey)"/>
             <if condition="bundle == null"><return error="true"/></if>
         </actions>
     </service>
@@ -67,11 +71,14 @@
                 CREATE}, one entry per bundle connection.</description></parameter>
             <parameter name="apply" type="Boolean" default-value="false"><description>True writes; false only plans.</description></parameter>
             <parameter name="planHash"><description>Required with apply: the planHash of the preview being applied.</description></parameter>
+            <parameter name="secretHandoffToken"><description>DAR-ADMIN-007. The handoffToken begin#SecretHandoff answered on this
+                instance for this tenant; required when the bundle carries sealed credentials.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="plan" type="Map"><description>{lines: [{kind, ref, label, action (CREATE | UPDATE | UNCHANGED |
-                MAPPED | NEEDS_CREDENTIALS), targetId, changes: [{field, from, to}]}], blocking: [{code, ref, message}],
-                warnings: [{code, ref, message}], counts: {action: n}}.</description></parameter>
+                MAPPED | NEEDS_CREDENTIALS), targetId, changes: [{field, from, to}], and on connection lines of a bundle with
+                sealed credentials secretsFilled and secretsKept (field names)}], blocking: [{code, ref, message}],
+                warnings: [{code, ref, message}], counts: {action: n, CREDENTIALS_FILLED: connections}}.</description></parameter>
             <parameter name="planHash"><description>SHA-256 of the bundle, connection map, target tenant and plan.</description></parameter>
             <parameter name="idMap" type="Map"><description>When applied: every bundle ref to its target id.</description></parameter>
             <parameter name="applied" type="Boolean"><description>True when the plan was written.</description></parameter>
@@ -82,7 +89,7 @@
             <if condition="!darpan.admin.transfer.ConfigTransferExporter.requireTenant(ec, tenantUserGroupId)"><return error="true"/></if>
             <if condition="apply">
                 <set field="result" from="darpan.admin.transfer.ConfigTransferImporter.apply(ec, tenantUserGroupId, bundle, connectionMap,
-                        planHash, bundle?.source?.instanceLabel)"/>
+                        planHash, bundle?.source?.instanceLabel, secretHandoffToken)"/>
                 <if condition="result == null"><return error="true"/></if>
                 <set field="plan" from="result.plan"/>
                 <set field="planHash" from="result.planHash"/>
@@ -90,8 +97,35 @@
                 <set field="applied" from="true"/>
                 <return/>
             </if>
-            <set field="plan" from="darpan.admin.transfer.ConfigTransferImporter.plan(ec, tenantUserGroupId, bundle, connectionMap)"/>
-            <set field="planHash" from="darpan.admin.transfer.ConfigTransferImporter.planHash(tenantUserGroupId, bundle, connectionMap, plan)"/>
+            <set field="preview" from="darpan.admin.transfer.ConfigTransferImporter.preview(ec, tenantUserGroupId, bundle, connectionMap,
+                    secretHandoffToken)"/>
+            <set field="plan" from="preview.plan"/>
+            <set field="planHash" from="preview.planHash"/>
+        </actions>
+    </service>
+
+    <service verb="begin" noun="SecretHandoff" allow-remote="true" authenticate="true">
+        <description>DAR-ADMIN-007. Starts a credentials handoff on the TARGET: a one-time RSA-3072 key pair. The source seals
+            credentials to publicKey; handoffToken carries the private key sealed with this instance's own entity encryption,
+            for this tenant, for 30 minutes. Nothing is stored.</description>
+        <in-parameters>
+            <parameter name="tenantUserGroupId" required="true"><description>The target tenant.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="publicKey"><description>Base64 SPKI, for export#ConfigBundle secretsPublicKey.</description></parameter>
+            <parameter name="handoffToken"><description>Opaque; only this instance can open it. For import#ConfigBundle
+                secretHandoffToken.</description></parameter>
+            <parameter name="keyFingerprint"><description>Hex SHA-256 of the SPKI bytes.</description></parameter>
+            <parameter name="expiresAt" type="Timestamp"><description>When the token stops opening.</description></parameter>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <if condition="!darpan.admin.transfer.ConfigTransferExporter.requireTenant(ec, tenantUserGroupId)"><return error="true"/></if>
+            <set field="handoff" from="darpan.admin.transfer.SecretHandoff.begin(ec, tenantUserGroupId)"/>
+            <set field="publicKey" from="handoff.publicKey"/>
+            <set field="handoffToken" from="handoff.handoffToken"/>
+            <set field="keyFingerprint" from="handoff.keyFingerprint"/>
+            <set field="expiresAt" from="handoff.expiresAt"/>
         </actions>
     </service>
 </services>

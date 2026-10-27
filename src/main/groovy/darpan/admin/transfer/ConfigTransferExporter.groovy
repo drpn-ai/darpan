@@ -1,11 +1,14 @@
 package darpan.admin.transfer
 
+import darpan.admin.AdminAuditSupport
 import darpan.facade.common.SharedConfigAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import groovy.transform.CompileDynamic
+
+import javax.crypto.SecretKey
 
 import static darpan.admin.transfer.TransferSpecs.*
 
@@ -72,10 +75,23 @@ class ConfigTransferExporter {
     /**
      * The bundle: the picked audits with everything they reach, the picked runs, and the picked connections. Null (with
      * an error) when something picked is not the tenant's; another tenant's audit reads exactly like an unknown one.
+     *
+     * <p>DAR-ADMIN-007: with secretsPublicKey (the target's, from begin#SecretHandoff) every owned connection's non-empty
+     * secret columns are sealed to that key in sealedSecrets, and one AdminAuditLog row records what was sealed and to
+     * which key, never a value. Without it nothing secret is read, exactly as before.</p>
      */
     static Map<String, Object> bundle(def ec, String tenantId, List auditCodes, List savedRunIds, List connectionRefs,
-                                      String sourceInstanceLabel) {
+                                      String sourceInstanceLabel, String secretsPublicKey = null) {
         if (!requireTenant(ec, tenantId)) return null
+        Map<String, Object> bundleKey = null
+        if (text(secretsPublicKey)) {
+            try {
+                bundleKey = SecretSeal.newBundleKey(text(secretsPublicKey))
+            } catch (IllegalArgumentException e) {
+                ec.message.addError(e.message)
+                return null
+            }
+        }
         Map<String, Set<String>> reached = [:].withDefault { new LinkedHashSet<String>() }
         Closure<String> namer = { String kind, Object id ->
             String sourceId = text(id)
@@ -156,8 +172,9 @@ class ConfigTransferExporter {
             }
         }
         if (ec.message.hasError()) return null
+        Map<String, Object> secrets = bundleKey == null ? null : sealSecrets(ec, tenantId, connectionRecords, bundleKey)
 
-        return [bundleVersion  : BUNDLE_VERSION,
+        Map<String, Object> out = [bundleVersion  : BUNDLE_VERSION,
                 source         : [instanceLabel: sourceInstanceLabel, darpanVersion: darpanVersion(ec), tenantUserGroupId: tenantId],
                 connections    : sortConnections(connectionRecords),
                 queries        : queryRecords,
@@ -166,6 +183,34 @@ class ConfigTransferExporter {
                 audits         : auditRecords,
                 statements     : statementRecords,
                 checks         : checkRecords] as Map<String, Object>
+        if (secrets != null) out.secrets = secrets
+        return out
+    }
+
+    /**
+     * Seals each owned connection's non-empty secret columns (TransferSpecs.secretFields) into its sealedSecrets, and
+     * logs one source AdminAuditLog row naming the connections, the fields and the target key's fingerprint.
+     */
+    private static Map<String, Object> sealSecrets(def ec, String tenantId, List<Map> connections, Map<String, Object> bundleKey) {
+        List<String> sealedLines = []
+        connections.findAll { !it.granted }.each { Map rec ->
+            Map kindSpec = TransferSpecs.spec(rec.kind as String)
+            String entityName = kindSpec.entityName as String
+            List<String> secretColumns = secretFields(ec, entityName)
+            String id = parseRef(rec.ref)[1]
+            def row = finder(ec, entityName).condition("companyUserGroupId", tenantId).condition(kindSpec.pkField as String, id)
+                    .selectFields([kindSpec.pkField as String] + secretColumns).useCache(false).list().find()
+            Map<String, Map> sealed = new TreeMap<String, Map>()
+            secretColumns.each { String field ->
+                String value = row?.get(field) as String
+                if (value) sealed[field] = SecretSeal.seal(bundleKey.key as SecretKey, rec.ref as String, field, value)
+            }
+            rec.sealedSecrets = sealed
+            if (sealed) sealedLines << "${rec.ref} (${sealed.keySet().join(', ')})".toString()
+        }
+        AdminAuditSupport.record(ec, "admin.TransferAdminServices.export#ConfigBundle", "Tenant", tenantId,
+                "Sealed credentials to key ${bundleKey.keyFingerprint}: ${sealedLines ? sealedLines.join('; ') : 'none'}".toString())
+        return [wrappedKey: bundleKey.wrappedKey, keyFingerprint: bundleKey.keyFingerprint, alg: SecretSeal.ALG] as Map<String, Object>
     }
 
     /**

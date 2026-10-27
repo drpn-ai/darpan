@@ -66,9 +66,11 @@ class AutomationExecutionSupport {
     // due automations to the next tick rather than stampeding Moqui's worker pool (bounded at 32+
     // threads, far above the Spark concurrency this cap exists to allow). Override via the system
     // property for tenants with heavier scheduler/Spark capacity.
+    // DAR-BE-143: 4 -> 8, with each tenant held to 5 of them (RunAdmission), so a second tenant's audit runs beside the
+    // first (gorjana's play already ran its 5 automations at once, unbounded); play now counts against it too.
     static final int MAX_CONCURRENT_EXECUTIONS =
-            (System.getProperty("darpan.reconciliation.automation.maxConcurrentExecutions") ?: "4").isInteger() ?
-                    (System.getProperty("darpan.reconciliation.automation.maxConcurrentExecutions") ?: "4").toInteger() : 4
+            (System.getProperty("darpan.reconciliation.automation.maxConcurrentExecutions") ?: "8").isInteger() ?
+                    (System.getProperty("darpan.reconciliation.automation.maxConcurrentExecutions") ?: "8").toInteger() : 8
     // Security (HIGH gap 2, reworked 2026-06-30): hard DoS sanity ceiling on the resolved window span,
     // SEPARATE from the per-automation `maxWindowDays` operational default (entity default=28). This
     // ceiling exists only to stop the 1970->9999 (~2.9M-day) explosion; it must never reject a real
@@ -921,6 +923,9 @@ class AutomationExecutionSupport {
         // their schedule untouched, so the very next tick re-drives the same window instead of losing it.
         int inFlightCount = countInFlightExecutions(ec)
         int submissionBudget = remainingSubmissionBudget(inFlightCount)
+        // DAR-BE-143: first start what waited here for memory, then submit only what starts at once in its tenant's
+        // lane; the rest stays due, so the next tick re-drives it and a restart loses nothing.
+        runAdmission.drain()
         List<Map<String, Object>> scanResults = []
         List<Map<String, Object>> deferredResults = []
         dueAutomationEntries.each { Map<String, Object> dueEntry ->
@@ -928,7 +933,8 @@ class AutomationExecutionSupport {
             String automationId = normalize(readField(automation, "automationId"))
             Timestamp scheduledFireTime = toTimestamp(dueEntry.scheduledFireTime)
 
-            if (scanResults.size() >= submissionBudget) {
+            String tenantId = normalize(readField(automation, "companyUserGroupId"))
+            if (scanResults.size() >= submissionBudget || !runAdmission.canStartNow(tenantId)) {
                 // Deliberately visible, never a silent truncation: an operator reading the ServiceJobRun
                 // must be able to tell "nothing was due" apart from "the cap was saturated".
                 deferredResults << [automationId: automationId, scheduledFireTime: scheduledFireTime, deferred: true]
@@ -944,7 +950,7 @@ class AutomationExecutionSupport {
                 if (input[key] != null) executeParams[key] = input[key]
             }
 
-            Map<String, Object> submitResult = submitExecuteAutomationService(ec, executeParams)
+            Map<String, Object> submitResult = submitExecuteAutomationService(ec, executeParams, tenantId)
             if (submitResult.submitted != true) {
                 // The submission itself was refused (saturated queue, dispatch error). Leave the schedule
                 // alone so the next tick retries: nothing was enqueued, so there is nothing to double-fire.
@@ -977,8 +983,8 @@ class AutomationExecutionSupport {
         // error above, and saying "in flight" about it would misattribute the cause.
         int capDeferredCount = deferredResults.count { Map<String, Object> entry -> !entry.containsKey("submitResult") } as int
         if (capDeferredCount > 0) {
-            logger.warn("Automation scan deferred {} due automation(s) to the next tick: {} execution(s) already in flight (cap {})",
-                    capDeferredCount, inFlightCount, MAX_CONCURRENT_EXECUTIONS)
+            logger.warn("Automation scan deferred {} due automation(s) to the next tick: {} execution(s) already in flight (cap {}), admission {}",
+                    capDeferredCount, inFlightCount, MAX_CONCURRENT_EXECUTIONS, runAdmission.snapshot())
         }
 
         return [
@@ -1081,7 +1087,8 @@ class AutomationExecutionSupport {
                 return
             }
 
-            if (remainingBudget <= 0) {
+            String tenantId = normalize(readField(row, "companyUserGroupId"))
+            if (remainingBudget <= 0 || !runAdmission.canStartNow(tenantId)) {
                 // Do NOT claim what cannot be submitted: leaving retryCount and nextRetryDate untouched
                 // means the next tick re-drives this exact row without having burnt a retry on it.
                 results << [automationExecutionId: execId, automationId: automationId, deferred: true]
@@ -1111,7 +1118,7 @@ class AutomationExecutionSupport {
                     nowTimestamp     : now,
             ]
             ["outputLocation", "sparkMaster", "sparkAppName"].each { String key -> if (input[key] != null) executeParams[key] = input[key] }
-            Map<String, Object> executeResult = submitExecuteAutomationService(ec, executeParams)
+            Map<String, Object> executeResult = submitExecuteAutomationService(ec, executeParams, tenantId)
             if (executeResult.submitted == true) remainingBudget--
             results << [automationExecutionId: execId, automationId: automationId, retryCount: currentRetry + 1, executeResult: executeResult]
         }
@@ -1187,8 +1194,9 @@ class AutomationExecutionSupport {
             executeParams.windowStartDate = start
             executeParams.windowEndDate = end
         }
-        Map submitted = submitExecuteAutomationService(ec, executeParams)
+        Map submitted = submitExecuteAutomationService(ec, executeParams, tenantId)
         return [submitted            : submitted.submitted == true,
+                queued               : submitted.queued == true,
                 error                : submitted.error,
                 automationId         : automationId,
                 replayFromExecutionId: executionId,
@@ -2376,8 +2384,15 @@ class AutomationExecutionSupport {
                 "reconciliation.ReconciliationAutomationServices.execute#Automation", executeParams)
     }
 
+    /** DAR-BE-143: which execution starts when (RunAdmission.SHARED); a test may set its own. */
+    private static RunAdmission runAdmission = RunAdmission.SHARED
+
+    static void setRunAdmission(RunAdmission admission) { runAdmission = admission ?: RunAdmission.SHARED }
+
+    static RunAdmission getRunAdmission() { return runAdmission }
+
     /**
-     * DAR-BE-002: hand execute#Automation to Moqui's async worker pool and return AT ONCE — no future,
+     * DAR-BE-002: hand execute#Automation to the background and return AT ONCE — no future,
      * no join. The returned map is a submission ACK, not an outcome: the execution's real result lives on
      * its own ReconciliationAutomationExecution + ReconciliationRunResult rows, both minted at RUNNING,
      * which is what the live progress view follows.
@@ -2386,11 +2401,35 @@ class AutomationExecutionSupport {
      * ambient tenant (the scheduler runs as anonymous {@code _NA_}) and resolves its tenant anchor from
      * the automation's companyUserGroupId, exactly as the joined path did.</p>
      *
-     * <p>Contexts with no async facade (unit harnesses, degraded runtimes) fall back to running inline
-     * rather than dropping the window — the same fallback the future-based dispatcher had.</p>
+     * <p>DAR-BE-143: on a running Moqui the execution goes through {@link RunAdmission} in its tenant's lane and may
+     * wait for a slot (answer queued: true). It runs on RunAdmission's threads as Moqui's own async runner runs a
+     * service, but as anonymous, whoever asked: the automation's tenant then applies, as on a scheduled run, rather than
+     * whichever tenant the person who pressed play has switched to by the time it starts (DAR-BE-141).</p>
+     *
+     * <p>Contexts with no Moqui factory (unit harnesses) keep Moqui's async facade; those with no async facade
+     * either fall back to running inline rather than dropping the window — the same fallback the future-based
+     * dispatcher had.</p>
      */
-    protected static Map<String, Object> submitExecuteAutomationService(def ec, Map<String, Object> executeParams) {
+    protected static Map<String, Object> submitExecuteAutomationService(def ec, Map<String, Object> executeParams,
+                                                                       String tenantId = null) {
         String automationId = normalize(executeParams?.automationId)
+        def factory = moquiFactoryOf(ec)
+        if (factory != null) {
+            Map<String, Object> params = new HashMap<String, Object>(executeParams ?: [:])
+            Map admitted = runAdmission.submit(tenantId, "automation ${automationId}".toString(), { ->
+                new org.moqui.impl.service.ServiceCallAsyncImpl.AsyncServiceInfo(factory, null,
+                        "reconciliation.ReconciliationAutomationServices.execute#Automation", params).runInternal()
+            } as Runnable)
+            if (admitted.submitted != true) {
+                logger.error("Could not submit automation execution for {}: {}", automationId, admitted.error)
+                return [submitted: false, submittedAsync: true, error: admitted.error]
+            }
+            if (admitted.queued == true) {
+                logger.info("Automation execution {} waits for a slot (tenant {}, position {})", automationId, tenantId, admitted.position)
+            }
+            return [submitted: true, submittedAsync: true, queued: admitted.queued == true] +
+                    (admitted.position != null ? [queuePosition: admitted.position] : [:])
+        }
         if (!ec?.service?.metaClass?.respondsTo(ec.service, "async")) {
             try {
                 return (callExecuteAutomationService(ec, executeParams) ?: [:]) + [submitted: true, submittedAsync: false]
@@ -2413,6 +2452,13 @@ class AutomationExecutionSupport {
             logger.error("Could not submit automation execution for {}: {}", automationId, sanitizeErrorMessage(submitError))
             return [submitted: false, submittedAsync: true, error: sanitizeErrorMessage(submitError)]
         }
+    }
+
+    /** The running Moqui's factory, or null in a harness that has none. */
+    private static def moquiFactoryOf(def ec) {
+        def factory
+        try { factory = ec?.factory } catch (MissingPropertyException ignored) { return null }
+        return factory instanceof org.moqui.impl.context.ExecutionContextFactoryImpl ? factory : null
     }
 
     protected static List loadActiveAutomations(def ec) {

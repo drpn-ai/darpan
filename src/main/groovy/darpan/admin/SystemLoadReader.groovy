@@ -42,11 +42,14 @@ class SystemLoadReader {
         ]
     }
 
+    /** DAR-BE-143: the same figure for RunAdmission's memory hold; null when this JVM cannot report it. */
+    static Integer heapAfterGcPercent() { return heapAfterGcPercent(Runtime.getRuntime().maxMemory()) }
+
     /**
      * Old-generation occupancy as of the last collection, the figure that means "memory pressure".
      * Live heap swings with every allocation burst and reads 90% on a healthy JVM just before a young GC.
      */
-    private static Integer heapAfterGcPercent(long heapMax) {
+    static Integer heapAfterGcPercent(long heapMax) {
         try {
             MemoryPoolMXBean oldGen = ManagementFactory.memoryPoolMXBeans.find { MemoryPoolMXBean pool ->
                 pool.type == MemoryType.HEAP && pool.collectionUsage != null && (pool.name =~ /(?i)old|tenured/)

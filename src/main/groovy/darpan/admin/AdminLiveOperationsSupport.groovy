@@ -69,7 +69,8 @@ class AdminLiveOperationsSupport {
                 warnings      : LiveOperationsRules.sortWarnings(warnings),
                 running       : running,
                 overdue       : overdue,
-                slots         : [inFlight: runningExecutions.size(), cap: cap, pending: pendingExecutions.size()],
+                slots         : [inFlight: runningExecutions.size(), cap: cap, pending: pendingExecutions.size()] +
+                        admissionOf(AutomationExecutionSupport.runAdmission.snapshot()),
                 recentFailures: [windowHours: FAILURE_WINDOW_HOURS, count: failures.size(),
                                  recovered  : failures.count { it.recoveredAt != null } as int,
                                  items      : failures.sort(false) { -((it.completedDate as Timestamp)?.time ?: 0L) }],
@@ -162,6 +163,12 @@ class AdminLiveOperationsSupport {
                 .condition("statusEnumId", RunObservability.STATUS_SUCCESS)
                 .orderBy("-completedDate").limit(1).useCache(false).list() ?: [])[0]
         return readField(last, "completedDate") as Timestamp
+    }
+
+    /** DAR-BE-143: what waits for a slot on this instance, each tenant's share, and whether memory holds new starts. */
+    private static Map<String, Object> admissionOf(Map snapshot) {
+        return [queued: snapshot.queued, perTenantCap: snapshot.perTenantCap, heldForMemory: snapshot.heldForMemory,
+                holdAtHeapPercent: snapshot.holdAtHeapPercent, byTenant: snapshot.byTenant]
     }
 
     /**

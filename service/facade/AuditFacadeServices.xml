@@ -422,7 +422,8 @@
             <parameter name="ok" type="Boolean"/>
             <parameter name="messages" type="List"><parameter name="message"/></parameter>
             <parameter name="errors" type="List"><parameter name="error"/></parameter>
-            <parameter name="runs" type="List"><description>[{automationId, savedRunId, submitted, error}]</description>
+            <parameter name="runs" type="List"><description>[{automationId, savedRunId, submitted, queued, error}]; queued: the
+                run waits for a free slot (DAR-BE-143) and starts on its own.</description>
                 <parameter name="run" type="Map"/></parameter>
         </out-parameters>
         <actions>

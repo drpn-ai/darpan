@@ -21,7 +21,8 @@ import static darpan.common.ValueSupport.normalize
  * Settings: the audit's name, one daily schedule for every check it runs, and each statement's text and on/off. A check
  * runs through an automation (DAR-BE-092, AuditAutomationSupport.checksFor), so the schedule IS the schedule of those
  * automations, written to each one. Play runs every check over the days a person picks, through the same automations,
- * submitted to the async pool (run#AutomationNow is synchronous and a dozen checks would outlast the gateway).
+ * submitted to the background (run#AutomationNow is synchronous and a dozen checks would outlast the gateway), where
+ * RunAdmission starts them as the instance and the tenant's share allow (DAR-BE-143); a check past that waits, queued.
  *
  * A check whose run has no automation gets one the first time either is asked for: one per run (a run several checks
  * share serves them all), its sources copied from the run's compare scope (each naming the config it reads), paused at
@@ -135,9 +136,9 @@ class AuditSettingsSupport {
         return automationRows(ec, tenantId, checks*.automationId.findAll { it }.unique() as List<String>).collect { automation ->
             Map submitted = AutomationExecutionSupport.submitExecuteAutomationService(ec, [automationId: automation.automationId,
                     scheduledFireTime: now, auditWindowFromDate: Date.valueOf(from), auditWindowThruDate: Date.valueOf(thru),
-                    auditFullRead: fullRead])
+                    auditFullRead: fullRead], tenantId)
             [automationId: automation.automationId, savedRunId: automation.savedRunId, submitted: submitted.submitted == true,
-             error: submitted.error]
+             queued: submitted.queued == true, error: submitted.error]
         }
     }
 
@@ -227,7 +228,7 @@ class AuditSettingsSupport {
             return false
         }
         Map submitted = AutomationExecutionSupport.submitExecuteAutomationService(ec, [automationId: check.automationId,
-                scheduledFireTime: ec.user.nowTimestamp, auditVerifyKeys: [finding.recordKey as String]])
+                scheduledFireTime: ec.user.nowTimestamp, auditVerifyKeys: [finding.recordKey as String]], tenantId)
         if (submitted.error) ec.message.addError("Finding ${findingId} could not be re-checked: ${submitted.error}")
         return submitted.submitted == true
     }

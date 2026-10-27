@@ -1,5 +1,7 @@
 package darpan.admin
 
+import darpan.reconciliation.automation.AutomationExecutionSupport
+import darpan.reconciliation.automation.RunAdmission
 import org.junit.jupiter.api.Test
 
 import java.sql.Timestamp
@@ -169,7 +171,26 @@ class AdminLiveOperationsSupportTests {
         assertNull(live.system)
         assertEquals(["system"], live.unavailable*.source)
         assertEquals("no MXBean", live.unavailable[0].reason)
-        assertEquals(4, live.slots.cap)
+        assertEquals(AutomationExecutionSupport.MAX_CONCURRENT_EXECUTIONS, live.slots.cap)
+    }
+
+    @Test
+    void slotsCarryWhatWaitsForAdmissionAndEachTenantsShare() {
+        def ec = superAdminEc(baseFinders())
+        java.util.concurrent.Executor hold = { Runnable r -> } as java.util.concurrent.Executor
+        RunAdmission admission = new RunAdmission(1, 1, 85, { -> null }, hold)
+        admission.submit("GORJANA", "a1", { -> } as Runnable)
+        admission.submit("GORJANA", "a2", { -> } as Runnable)
+        AutomationExecutionSupport.setRunAdmission(admission)
+        try {
+            Map live = AdminLiveOperationsSupport.getLiveOperations(ec, NOW, { e -> [:] })
+            assertEquals(1, live.slots.queued)
+            assertEquals(1, live.slots.perTenantCap)
+            assertEquals(false, live.slots.heldForMemory)
+            assertEquals([GORJANA: [running: 1, queued: 1]], live.slots.byTenant)
+        } finally {
+            AutomationExecutionSupport.setRunAdmission(null)
+        }
     }
 
     @Test

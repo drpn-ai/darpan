@@ -1,5 +1,8 @@
 package darpan.audit
 
+import darpan.facade.common.TenantAccessSupport
+import darpan.reconciliation.automation.AutomationExecutionSupport
+import darpan.reconciliation.automation.RunAdmission
 import darpan.reconciliation.support.ReconciliationSmokeTestSupport
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -12,9 +15,11 @@ import org.junit.jupiter.api.TestMethodOrder
 import org.moqui.context.ExecutionContext
 
 import java.nio.file.Path
+import java.util.concurrent.Executor
 
 import static org.junit.jupiter.api.Assertions.assertEquals
 import static org.junit.jupiter.api.Assertions.assertFalse
+import static org.junit.jupiter.api.Assertions.assertNotEquals
 import static org.junit.jupiter.api.Assertions.assertNotNull
 import static org.junit.jupiter.api.Assertions.assertTrue
 
@@ -285,6 +290,52 @@ class AuditSettingsSmokeTests {
         assertTrue((facade("retry#AuditCheck", params).errorText as String).contains("already ran"))
         assertTrue(facade("retry#AuditCheck", [audit: "other-only", check: "paid-without-opp", period: period]).hadError as boolean,
                 "another tenant's audit is not found")
+    }
+
+    // DAR-BE-143 + DAR-BE-141: past its tenant's share a played check waits for a slot, and each starts as nobody in the
+    // audit's own tenant, not as the player (whose active tenant may have moved on by then). The executor only collects
+    // what was started, and the extractor hook records who and where each run is, then stops it.
+    @Test
+    @Order(11)
+    void playWaitsForItsTenantsShareAndEachRunStartsAsNobodyInTheAuditsTenant() {
+        List<Runnable> started = Collections.synchronizedList([] as List<Runnable>)
+        RunAdmission admission = new RunAdmission(8, 1, 85, { -> null }, { Runnable r -> started << r } as Executor)
+        List<Map> seen = Collections.synchronizedList([] as List<Map>)
+        AutomationExecutionSupport.setRunAdmission(admission)
+        AutomationExecutionSupport.setSourceExtractor({ runEc, automation, source, window, params ->
+            seen << [automationId: automation.automationId, user: runEc.user.username,
+                     tenant: TenantAccessSupport.currentActiveTenantUserGroupId(runEc)]
+            throw new IllegalStateException("probe: stop before reading")
+        })
+        String player = ec.user.username
+        try {
+            String today = java.time.LocalDate.now(java.time.ZoneId.of("America/Los_Angeles")).toString()
+            Map played = facade("run#Audit", [audit: "system-health", fromDate: today, thruDate: today])
+            assertFalse(played.hadError as boolean, played.errorText as String)
+            assertEquals([false, true], (played.runs*.queued as List).sort(), "one starts, the other waits for KREWE's one slot")
+            assertEquals([(MINE): [running: 1, queued: 1]], admission.snapshot().byTenant)
+
+            runOnItsOwnThread(started[0])
+            assertEquals(2, started.size(), "the first finishing starts the one waiting")
+            runOnItsOwnThread(started[1])
+            assertEquals([running: 0, queued: 0], admission.snapshot().subMap(["running", "queued"]))
+
+            assertEquals((played.runs*.automationId as Set), (seen*.automationId as Set), "both runs reached their read: ${seen}")
+            seen.each { Map probe ->
+                assertNotEquals(player, probe.user, "a played run does not run as the player")
+                assertEquals(MINE, probe.tenant, "it runs in the audit's tenant")
+            }
+        } finally {
+            AutomationExecutionSupport.setRunAdmission(null)
+            AutomationExecutionSupport.resetExecutionHooks()
+        }
+    }
+
+    private static void runOnItsOwnThread(Runnable work) {
+        Thread thread = new Thread(work, "audit-settings-run")
+        thread.start()
+        thread.join(120_000L)
+        assertFalse(thread.alive, "the run finished")
     }
 
     private Map facade(String verbNoun, Map params = [:]) {

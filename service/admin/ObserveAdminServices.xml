@@ -49,7 +49,9 @@
                 </parameter>
                 <parameter name="slots" type="Map">
                     <description>inFlight and cap (darpan.reconciliation.automation.maxConcurrentExecutions,
-                        instance-wide), plus pending executions.</description>
+                        instance-wide), plus pending executions. DAR-BE-143, this instance's admission: queued (runs
+                        waiting for a slot), perTenantCap, heldForMemory and holdAtHeapPercent, and byTenant
+                        {tenantId: {running, queued}}.</description>
                 </parameter>
                 <parameter name="recentFailures" type="Map">
                     <description>windowHours, count and items: failed run results in the window, newest first.</description>

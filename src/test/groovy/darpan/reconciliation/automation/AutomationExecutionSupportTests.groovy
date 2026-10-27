@@ -2578,6 +2578,30 @@ class AutomationExecutionSupportTests {
     }
 
     @Test
+    void scanDefersATenantWhoseShareIsFullAndSubmitsAnotherTenantsDueRun() {
+        // DAR-BE-143: one tenant's audit filling its share must not make another tenant's morning run wait, and the
+        // deferred one stays due (the scan submits only what starts at once, so a restart loses nothing).
+        FakeEc ec = fakeEc()
+        addDueAutomation(ec, "AUTO_A", timestamp("2026-05-01T09:00:00Z"))
+        addDueAutomation(ec, "AUTO_B", timestamp("2026-05-01T09:00:00Z"))
+        ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_B" }.companyUserGroupId = "TENANT_B"
+        RunAdmission admission = new RunAdmission(8, 1, 85, { -> null }, { Runnable r -> } as java.util.concurrent.Executor)
+        admission.submit("TENANT_A", "TENANT_A's audit check", { -> } as Runnable)
+        ec.service.responder = { FakeServiceCall call -> [executedCount: 1] }
+        AutomationExecutionSupport.setRunAdmission(admission)
+        try {
+            Map result = AutomationExecutionSupport.scanDueAutomations(ec, [nowTimestamp: NOW, limit: 100])
+
+            assertEquals(["AUTO_B"], ec.service.calls*.params.automationId)
+            assertEquals(["AUTO_A"], result.deferredResults*.automationId)
+            FakeValue deferred = ec.entity.rows["darpan.reconciliation.ReconciliationAutomation"].find { it.automationId == "AUTO_A" }
+            assertNull(deferred.lastScheduledFireTime, "a deferred automation stays due")
+        } finally {
+            AutomationExecutionSupport.setRunAdmission(null)
+        }
+    }
+
+    @Test
     void aDeferredAutomationIsSubmittedOnTheNextTickOnceCapacityFrees() {
         // The deferral above must be a delay, not a loss: once the in-flight executions clear, the very
         // next 5-minute tick picks the same window up.

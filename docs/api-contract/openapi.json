@@ -2527,7 +2527,7 @@
                             },
                             "slots": {
                                 "type": "object",
-                                "description": "inFlight and cap (darpan.reconciliation.automation.maxConcurrentExecutions,\n                        instance-wide), plus pending executions."
+                                "description": "inFlight and cap (darpan.reconciliation.automation.maxConcurrentExecutions,\n                        instance-wide), plus pending executions. DAR-BE-143, this instance's admission: queued (runs\n                        waiting for a slot), perTenantCap, heldForMemory and holdAtHeapPercent, and byTenant\n                        {tenantId: {running, queued}}."
                             },
                             "recentFailures": {
                                 "type": "object",
@@ -5632,7 +5632,7 @@
                             "type": "string",
                             "description": "Moqui type Map"
                         },
-                        "description": "[{automationId, savedRunId, submitted, error}]"
+                        "description": "[{automationId, savedRunId, submitted, queued, error}]; queued: the\n                run waits for a free slot (DAR-BE-143) and starts on its own."
                     }
                 }
             },

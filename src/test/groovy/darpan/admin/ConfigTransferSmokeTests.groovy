@@ -439,6 +439,68 @@ class ConfigTransferSmokeTests {
         assertTrue((plan.blocking[0].message as String).contains("Returns vs memos"))
         Map refused = importInto(DST, bundle, [(AUTH_REF): "CREATE"], true, importInto(DST, bundle, [(AUTH_REF): "CREATE"]).result.planHash as String)
         assertTrue(refused.hasError as boolean, "a blocked plan never applies, even with its own hash")
+
+        // A remote this instance already has is instance config, not the source's: it transfers and nothing is created.
+        create("moqui.service.message.SystemMessageRemote", [systemMessageRemoteId: "XFER_REMOTE", description: "Here already"])
+        try {
+            Map present = importInto(DST, bundle, [(AUTH_REF): "CREATE"]).result.plan as Map
+            assertEquals([], present.blocking)
+            assertNoErrors(applyPlan(DST, bundle, [(AUTH_REF): "CREATE"]))
+            assertEquals("Here already", ec.entity.find("moqui.service.message.SystemMessageRemote")
+                    .condition("systemMessageRemoteId", "XFER_REMOTE").disableAuthz().useCache(false).one().description)
+        } finally {
+            wipeTenant(DST)
+            ec.entity.find("moqui.service.message.SystemMessageRemote").condition("systemMessageRemoteId", "XFER_REMOTE").disableAuthz().deleteAll()
+        }
+    }
+
+    @Test
+    void sharedOmsRemoteTransfersWhenTheRegistryCanMakeIt() {
+        // The gorjana month-close shape: an OMS GraphQL returns source on the shared HOTWAX_ORDERS_API remote. The source
+        // must hold the remote (a foreign key), so the bundle is exported first and the remote then removed: this test
+        // database plays a target that has never needed it, and the OMS_RETURNS_GQL registry row names it.
+        String omsRef = "HOTWAX_OMS_REST:XFER_OMS"
+        Closure dropSourceRun = {
+            ec.entity.find("darpan.rule.RuleSetCompareSource").condition("compareScopeId", "XFER_CS_OMS").disableAuthz().deleteAll()
+            ec.entity.find("darpan.rule.RuleSetCompareScope").condition("compareScopeId", "XFER_CS_OMS").disableAuthz().deleteAll()
+            ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", "XFER_RS_OMS").disableAuthz().deleteAll()
+            ec.entity.find("darpan.hotwax.HotWaxOmsRestSourceConfig").condition("omsRestSourceConfigId", "XFER_OMS").disableAuthz().deleteAll()
+        }
+        Closure dropRemote = {
+            ec.entity.find("moqui.service.message.SystemMessageRemote").condition("systemMessageRemoteId", "HOTWAX_ORDERS_API").disableAuthz().deleteAll()
+        }
+        upsert("moqui.service.message.SystemMessageRemote", [systemMessageRemoteId: "HOTWAX_ORDERS_API", description: "Orders API"])
+        create("darpan.hotwax.HotWaxOmsRestSourceConfig", [omsRestSourceConfigId: "XFER_OMS", description: "gorjana oms",
+                companyUserGroupId: SRC, baseUrl: "https://oms.example"])
+        create("darpan.rule.RuleSet", [ruleSetId: "XFER_RS_OMS", ruleSetName: "OMS returns", version: "1.0", companyUserGroupId: SRC])
+        create("darpan.rule.RuleSetCompareScope", [compareScopeId: "XFER_CS_OMS", ruleSetId: "XFER_RS_OMS", scopeMode: "EVALUATE",
+                objectType: "RETURN", companyUserGroupId: SRC])
+        create("darpan.rule.RuleSetCompareSource", [compareScopeId: "XFER_CS_OMS", fileSide: "FILE_1", systemEnumId: "OMS_RETURNS_GQL",
+                sourceTypeEnumId: "AUT_SRC_API", sourceConfigId: "XFER_OMS", sourceConfigType: "HOTWAX_OMS_GQL_RETURNS",
+                systemMessageRemoteId: "HOTWAX_ORDERS_API", primaryIdExpression: "returnId", companyUserGroupId: SRC])
+        try {
+            Map out = callAs(SUPER_USERNAME, "${SERVICES}.export#ConfigBundle", [tenantUserGroupId: SRC, savedRunIds: ["XFER_RS_OMS"]])
+            assertNoErrors(out)
+            Map bundle = out.result.bundle as Map
+            assertEquals(omsRef, sourcesOf((bundle.runs as List<Map>)[0])[0].refs.sourceConfigId)
+            dropSourceRun()
+            dropRemote()
+
+            Map plan = importInto(DST, bundle, [(omsRef): "CREATE"]).result.plan as Map
+            assertEquals([], plan.blocking, "the shared remote is not the source's to keep")
+            assertNoErrors(applyPlan(DST, bundle, [(omsRef): "CREATE"]))
+            def made = ec.entity.find("moqui.service.message.SystemMessageRemote").condition("systemMessageRemoteId", "HOTWAX_ORDERS_API")
+                    .disableAuthz().useCache(false).one()
+            assertNotNull(made, "the apply makes the remote from the registry row")
+            assertEquals("reconciliation.HotWaxOmsExtractionServices.extract#HotWaxOmsGqlReturns", made.sendServiceName)
+            def dstSource = ec.entity.find("darpan.rule.RuleSetCompareSource").condition("companyUserGroupId", DST)
+                    .disableAuthz().useCache(false).one()
+            assertEquals("HOTWAX_ORDERS_API", dstSource.systemMessageRemoteId)
+        } finally {
+            wipeTenant(DST)
+            dropSourceRun()
+            dropRemote()
+        }
     }
 
     @Test

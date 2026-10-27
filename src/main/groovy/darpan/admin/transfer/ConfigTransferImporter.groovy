@@ -4,7 +4,7 @@ import darpan.admin.AdminAuditSupport
 import darpan.facade.common.SharedConfigAccessSupport
 import darpan.facade.common.TenantAccessSupport
 import darpan.facade.common.TenantScopedFinder
-import darpan.facade.reconciliation.ReconciliationSavedRunSupport
+import darpan.reconciliation.automation.SourceSystemConnectorSupport
 import groovy.json.JsonOutput
 import groovy.transform.CompileDynamic
 
@@ -39,6 +39,7 @@ class ConfigTransferImporter {
     static final String SERVICE_NAME = "admin.TransferAdminServices.import#ConfigBundle"
     /** Length of a Moqui "id" column (MoquiDefaultConf: VARCHAR(40)). */
     static final int ID_LENGTH = 40
+    static final String REMOTE_ENTITY = "moqui.service.message.SystemMessageRemote"
 
     /** The dry run: [lines, blocking, warnings, counts]. Writes nothing. */
     static Map<String, Object> plan(def ec, String targetTenantId, Map bundle, Map<String, String> connectionMap) {
@@ -83,9 +84,15 @@ class ConfigTransferImporter {
         records(ctx, "queries").each { Map q -> writeTree(ctx, spec(NETSUITE_SUITEQL), q, "") }
         records(ctx, "conclusionCodes").each { Map c -> if (ctx.actions[c.ref] == CREATE) createConclusion(ctx, c) }
         records(ctx, "runs").findAll { ctx.actions[it.ref] != "UNCHANGED" }.collectMany { sources(it) }.each { Map source ->
-            // A virtual API-orders remote is seed-defined; create it here if this instance has not needed it yet.
+            // A shared remote this instance has not needed yet is made from the run's connector row, as
+            // ensureVirtualApiOrdersRemote does for the canonical OMS and Shopify ones; one it has is left as it is.
             Map f = (source.fields ?: [:]) as Map
-            if (text(f.systemMessageRemoteId)) ReconciliationSavedRunSupport.ensureVirtualApiOrdersRemote(ec, f.systemEnumId, f.systemMessageRemoteId, f.sourceConfigType)
+            String remote = text(f.systemMessageRemoteId)
+            Object found = remote ? remoteSource(ctx, text(f.systemEnumId), remote) : null
+            if (found instanceof Map) {
+                ec.entity.makeValue(REMOTE_ENTITY).setAll([systemMessageRemoteId: remote, description: found.endpointLabel,
+                        sendUrl: found.sendUrlTemplate, sendServiceName: found.remoteSendServiceName]).create()
+            }
         }
         records(ctx, "runs").each { Map r ->
             if (ctx.actions[r.ref] == "UNCHANGED") {
@@ -188,9 +195,10 @@ class ConfigTransferImporter {
             sources(run).each { Map source ->
                 Map f = (source.fields ?: [:]) as Map
                 String remote = text(f.systemMessageRemoteId)
-                if (remote && !ReconciliationSavedRunSupport.isVirtualApiOrdersRemote(f.systemEnumId, remote, f.sourceConfigType)) {
-                    block(ctx, "SYSTEM_MESSAGE_REMOTE", run.ref, "Run ${run.label} reads endpoint ${remote}, which belongs to the source " +
-                            "instance. Point the run's ${f.fileSide} at a connection before transferring it.")
+                if (remote && remoteSource(ctx, text(f.systemEnumId), remote) == null) {
+                    block(ctx, "SYSTEM_MESSAGE_REMOTE", run.ref, "Run ${run.label} reads endpoint ${remote}, which this instance does not " +
+                            "have and no connector here makes for ${f.systemEnumId}. Load that remote here, or point the run's " +
+                            "${f.fileSide} at a connection.")
                 }
             }
         }
@@ -771,6 +779,18 @@ class ConfigTransferImporter {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /**
+     * Where a compare source's systemMessageRemoteId comes from on this instance: PRESENT when it already has that remote
+     * (instance config, not a tenant's), the connector registry row of the source's own systemEnumId when that row names
+     * it (so the apply can make it), and null when neither, which blocks.
+     */
+    private static Object remoteSource(Map ctx, String systemEnumId, String remoteId) {
+        if (TenantScopedFinder.findGlobalUnscoped(ctx.ec, REMOTE_ENTITY, "instance-level endpoint config, not tenant-owned (DAR-ADMIN-006)")
+                .condition("systemMessageRemoteId", remoteId).useCache(false).one() != null) return "PRESENT"
+        Map connector = systemEnumId ? SourceSystemConnectorSupport.resolve(ctx.ec, systemEnumId) : null
+        return text(connector?.remoteId) == remoteId ? connector : null
+    }
 
     private static boolean referenceExists(Map ctx, String entityName, String keyField, String value) {
         Map cache = (Map) (ctx.references ?: (ctx.references = [:]))

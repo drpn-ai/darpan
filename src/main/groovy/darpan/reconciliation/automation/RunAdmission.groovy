@@ -22,7 +22,8 @@ import java.util.concurrent.atomic.AtomicInteger
  *   2000 cost/s per endpoint), not by how many of its checks run at once, so the share costs it little;
  * - waiting tenants take turns, first-come within a tenant;
  * - while old-generation heap after the last GC is at or above {@code holdAtHeapPercent}, nothing new starts. One
- *   execution always may when none is running, so a stale reading never stops the instance for good.
+ *   execution always may when none is running, so a stale reading never stops the instance for good;
+ * - one tenant keeps at most {@code maxWaitingPerTenant} runs waiting; past that a submission is refused in words.
  *
  * Executions run on this class's own threads, not Moqui's worker pool: each holds its thread for the whole run (40+
  * minutes for an audit check, mostly waiting on rate limits), and the pool's 16 core threads also run the scan job and
@@ -37,12 +38,15 @@ class RunAdmission {
 
     static final String PER_TENANT_PROPERTY = "darpan.reconciliation.automation.maxConcurrentExecutionsPerTenant"
     static final String HOLD_HEAP_PROPERTY = "darpan.reconciliation.automation.holdAtHeapPercent"
+    static final String MAX_WAITING_PROPERTY = "darpan.reconciliation.automation.maxWaitingPerTenant"
     static final int DEFAULT_PER_TENANT = 5
     static final int DEFAULT_HOLD_AT_HEAP_PERCENT = 85
+    static final int DEFAULT_MAX_WAITING_PER_TENANT = 50
 
     static final RunAdmission SHARED = new RunAdmission(AutomationExecutionSupport.MAX_CONCURRENT_EXECUTIONS,
             intProperty(PER_TENANT_PROPERTY, DEFAULT_PER_TENANT), intProperty(HOLD_HEAP_PROPERTY, DEFAULT_HOLD_AT_HEAP_PERCENT),
-            { -> SystemLoadReader.heapAfterGcPercent() }, runPool())
+            { -> SystemLoadReader.heapAfterGcPercent() }, runPool(),
+            intProperty(MAX_WAITING_PROPERTY, DEFAULT_MAX_WAITING_PER_TENANT))
 
     private static class Waiting {
         String tenantId
@@ -57,18 +61,21 @@ class RunAdmission {
     private final int holdAtHeapPercent
     private final Closure<Integer> heapPercent
     private final Executor executor
+    private final int maxWaitingPerTenant
     /** Waiting runs per tenant, tenants in the order they first waited. */
     private final LinkedHashMap<String, ArrayDeque<Waiting>> waiting = new LinkedHashMap<>()
     private final Map<String, Integer> runningByTenant = [:]
     private int running = 0
     private String lastStarted = null
 
-    RunAdmission(int cap, int perTenantCap, int holdAtHeapPercent, Closure<Integer> heapPercent, Executor executor) {
+    RunAdmission(int cap, int perTenantCap, int holdAtHeapPercent, Closure<Integer> heapPercent, Executor executor,
+                 int maxWaitingPerTenant = DEFAULT_MAX_WAITING_PER_TENANT) {
         this.cap = Math.max(1, cap)
         this.perTenantCap = Math.max(1, Math.min(perTenantCap, this.cap))
         this.holdAtHeapPercent = holdAtHeapPercent
         this.heapPercent = heapPercent
         this.executor = executor
+        this.maxWaitingPerTenant = Math.max(1, maxWaitingPerTenant)
     }
 
     /**
@@ -77,6 +84,11 @@ class RunAdmission {
      */
     synchronized Map<String, Object> submit(String tenantId, String label, Runnable work) {
         Waiting entry = new Waiting(tenantId: tenantKey(tenantId), label: label, work: work)
+        int alreadyWaiting = waiting[entry.tenantId]?.size() ?: 0
+        if (alreadyWaiting >= maxWaitingPerTenant) {
+            return [submitted: false, queued: false, error: ("This tenant already has ${alreadyWaiting} runs waiting for a slot; " +
+                    "try again once some have started.").toString()]
+        }
         waiting.computeIfAbsent(entry.tenantId, { new ArrayDeque<Waiting>() }).addLast(entry)
         drain()
         if (entry.error) return [submitted: false, queued: false, error: entry.error]
@@ -85,11 +97,16 @@ class RunAdmission {
         return [submitted: true, queued: true, position: position]
     }
 
-    /** Whether a run of this tenant submitted now would start without waiting. */
+    /**
+     * Whether a run of this tenant submitted now would start without waiting: a slot is free and the tenant's own lane
+     * (running plus waiting) is under its share. Other tenants' waiting runs do not count: after every drain each of them
+     * waits only because its own tenant is at its share, so it cannot take the free slot, and counting them would let one
+     * tenant's queue defer every other tenant's runs (security review 2026-10-27). The scan drains before asking.
+     */
     synchronized boolean canStartNow(String tenantId) {
         String key = tenantKey(tenantId)
         int tenantLoad = (runningByTenant[key] ?: 0) + (waiting[key]?.size() ?: 0)
-        return running + waitingTotal() < cap && tenantLoad < perTenantCap && !held()
+        return running < cap && tenantLoad < perTenantCap && !held()
     }
 
     /** Starts every waiting run there is room for, tenants in turn. Called on submit, on finish, and by each scan tick. */
@@ -108,7 +125,7 @@ class RunAdmission {
             [(t): [running: runningByTenant[t] ?: 0, queued: waiting[t]?.size() ?: 0]]
         }
         return [running      : running, queued: waitingTotal(), cap: cap, perTenantCap: perTenantCap,
-                holdAtHeapPercent: holdAtHeapPercent, heldForMemory: running > 0 && heapAtOrAbove(), byTenant: byTenant]
+                holdAtHeapPercent: holdAtHeapPercent, maxWaitingPerTenant: maxWaitingPerTenant, heldForMemory: running > 0 && heapAtOrAbove(), byTenant: byTenant]
     }
 
     private Waiting nextEligible() {

@@ -131,6 +131,32 @@ class RunAdmissionTests {
     }
 
     @Test
+    void oneTenantsQueueDoesNotStopAnotherTenantsRunFromStarting() {
+        // Security review 2026-10-27: counting every waiting run against the instance let one tenant who played over and
+        // over defer every other tenant's scheduled run while slots stood free.
+        HandExecutor executor = new HandExecutor()
+        RunAdmission admission = admission(executor, 8, 2)
+        (1..12).each { admission.submit("A", "a${it}", work("a${it}")) }
+        assertEquals(2, executor.started.size())
+        assertTrue(admission.canStartNow("B"), "6 slots are free and B runs nothing")
+        assertEquals(false, admission.submit("B", "b1", work("b1")).queued)
+    }
+
+    @Test
+    void aTenantCannotQueueWithoutLimit() {
+        HandExecutor executor = new HandExecutor()
+        RunAdmission admission = new RunAdmission(1, 1, 85, { -> null }, executor, 2)
+        admission.submit("A", "a1", work("a1"))
+        assertEquals(true, admission.submit("A", "a2", work("a2")).queued)
+        assertEquals(true, admission.submit("A", "a3", work("a3")).queued)
+        Map refused = admission.submit("A", "a4", work("a4"))
+        assertEquals(false, refused.submitted)
+        assertTrue((refused.error as String).contains("2 runs waiting"), refused.error as String)
+        assertEquals(2, admission.snapshot().queued, "the refused run was not kept")
+        assertEquals(true, admission.submit("B", "b1", work("b1")).queued, "another tenant still queues")
+    }
+
+    @Test
     void canStartNowRespectsTheMemoryHold() {
         HandExecutor executor = new HandExecutor()
         RunAdmission admission = admission(executor, 4, 4, { -> 95 }, 85)

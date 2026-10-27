@@ -56,4 +56,35 @@
             <if condition="bundle == null"><return error="true"/></if>
         </actions>
     </service>
+
+    <service verb="import" noun="ConfigBundle" allow-remote="true" authenticate="true" transaction-timeout="600">
+        <description>Plans a bundle into a target tenant (apply false: a dry run that writes nothing) or applies the plan
+            previewed (apply true with its planHash), in one transaction: all of it or none of it.</description>
+        <in-parameters>
+            <parameter name="tenantUserGroupId" required="true"><description>The target tenant.</description></parameter>
+            <parameter name="bundle" type="Map" required="true"><description>The bundle export#ConfigBundle answered, unchanged.</description></parameter>
+            <parameter name="connectionMap" type="Map"><description>{connection ref: an existing target connection id, or
+                CREATE}, one entry per bundle connection.</description></parameter>
+            <parameter name="apply" type="Boolean" default-value="false"><description>True writes; false only plans.</description></parameter>
+            <parameter name="planHash"><description>Required with apply: the planHash of the preview being applied.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="plan" type="Map"><description>{lines: [{kind, ref, label, action (CREATE | UPDATE | UNCHANGED |
+                MAPPED | NEEDS_CREDENTIALS), targetId, changes: [{field, from, to}]}], blocking: [{code, ref, message}],
+                warnings: [{code, ref, message}], counts: {action: n}}.</description></parameter>
+            <parameter name="planHash"><description>SHA-256 of the bundle, connection map, target tenant and plan.</description></parameter>
+            <parameter name="idMap" type="Map"><description>When applied: every bundle ref to its target id.</description></parameter>
+            <parameter name="applied" type="Boolean"><description>True when the plan was written.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="applied" from="false"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <if condition="!darpan.admin.transfer.ConfigTransferExporter.requireTenant(ec, tenantUserGroupId)"><return error="true"/></if>
+            <if condition="apply">
+                <return error="true" message="Applying a transfer is not available yet."/>
+            </if>
+            <set field="plan" from="darpan.admin.transfer.ConfigTransferImporter.plan(ec, tenantUserGroupId, bundle, connectionMap)"/>
+            <set field="planHash" from="darpan.admin.transfer.ConfigTransferImporter.planHash(tenantUserGroupId, bundle, connectionMap, plan)"/>
+        </actions>
+    </service>
 </services>

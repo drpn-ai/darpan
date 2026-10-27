@@ -217,6 +217,108 @@ class ConfigTransferSmokeTests {
         }
     }
 
+    // ---------------------------------------------------------------- Task 2: import dry run
+
+    @Test
+    void planOnEmptyTargetCreatesEverything() {
+        Map bundle = exportSource()
+        Map out = importInto(DST, bundle, [(AUTH_REF): "CREATE"])
+        assertNoErrors(out)
+        Map plan = out.result.plan as Map
+        List<Map> lines = plan.lines as List<Map>
+
+        assertEquals([], plan.blocking)
+        assertEquals(["NETSUITE_AUTH", "NETSUITE_SUITEQL", "CONC", "CONC", "RUN", "AUDIT", "STATEMENT", "STATEMENT", "CHECK", "CHECK"],
+                lines*.kind, "one line per record, in creation order")
+        assertEquals("NEEDS_CREDENTIALS", lines.find { it.ref == AUTH_REF }.action)
+        // This test database is one instance, so the shared seed code already exists here and resolves by its id.
+        assertEquals("UNCHANGED", lines.find { it.ref == "CONC:CONC_XFER_SEED" }.action)
+        assertEquals("CONC_XFER_SEED", lines.find { it.ref == "CONC:CONC_XFER_SEED" }.targetId)
+        lines.findAll { !(it.ref in [AUTH_REF, "CONC:CONC_XFER_SEED"]) }.each {
+            assertEquals("CREATE", it.action, "${it.ref}")
+            assertNull(it.targetId)
+        }
+        assertEquals(lines.size() - 2, plan.counts.CREATE)
+        assertEquals(1, plan.counts.NEEDS_CREDENTIALS)
+        assertEquals([[code: "NEEDS_CREDENTIALS", ref: AUTH_REF]], (plan.warnings as List<Map>).collect { it.subMap(["code", "ref"]) })
+        assertEquals(["Returns vs memos", "month-close R4"], lines.findAll { it.kind in ["RUN", "STATEMENT"] }*.label.take(2))
+        assertTrue((out.result.planHash as String) ==~ /[0-9a-f]{64}/)
+        assertEquals(false, out.result.applied)
+    }
+
+    @Test
+    void unmappedConnectionBlocks() {
+        Map plan = importInto(DST, exportSource(), [:]).result.plan as Map
+        Map block = (plan.blocking as List<Map>).find { it.code == "CONNECTION_UNMAPPED" }
+        assertNotNull(block, "${plan.blocking}")
+        assertEquals(AUTH_REF, block.ref)
+    }
+
+    @Test
+    void foreignConnectionBlocksLikeMissing() {
+        Map bundle = exportSource()
+        Map foreign = (importInto(DST, bundle, [(AUTH_REF): "XFER_OTHER_NS"]).result.plan as Map).blocking[0] as Map
+        Map missing = (importInto(DST, bundle, [(AUTH_REF): "NOPE"]).result.plan as Map).blocking[0] as Map
+        assertEquals("CONNECTION_NOT_FOUND", foreign.code)
+        assertEquals("CONNECTION_NOT_FOUND", missing.code)
+        assertEquals((missing.message as String).replace("NOPE", "?"), (foreign.message as String).replace("XFER_OTHER_NS", "?"),
+                "another tenant's connection answers exactly like a missing one")
+    }
+
+    @Test
+    void grantedConnectionIsReferencedNotExported() {
+        String shopRef = "SHOPIFY_AUTH:XFER_OTHER_SHOP"
+        create("darpan.auth.ConfigTenantAccess", [configTypeEnumId: "SCFG_SHOPIFY_AUTH", configId: "XFER_OTHER_SHOP",
+                tenantUserGroupId: SRC, fromDate: T0])
+        create("darpan.rule.RuleSet", [ruleSetId: "XFER_RS_SHOP", ruleSetName: "Shop orders", version: "1.0", companyUserGroupId: SRC])
+        create("darpan.rule.RuleSetCompareScope", [compareScopeId: "XFER_CS_SHOP", ruleSetId: "XFER_RS_SHOP", scopeMode: "EVALUATE",
+                objectType: "ORDER", companyUserGroupId: SRC])
+        create("darpan.rule.RuleSetCompareSource", [compareScopeId: "XFER_CS_SHOP", fileSide: "FILE_1", systemEnumId: "SHOPIFY",
+                sourceTypeEnumId: "AUT_SRC_API", sourceConfigId: "XFER_OTHER_SHOP", sourceConfigType: "SHOPIFY_AUTH",
+                primaryIdExpression: "id", companyUserGroupId: SRC])
+        try {
+            Map catalog = callAs(SUPER_USERNAME, "${SERVICES}.get#TransferCatalog", [tenantUserGroupId: SRC]).result as Map
+            assertEquals(true, (catalog.connections as List<Map>).find { it.ref == shopRef }?.granted, "${catalog.connections}")
+
+            Map out = callAs(SUPER_USERNAME, "${SERVICES}.export#ConfigBundle", [tenantUserGroupId: SRC, savedRunIds: ["XFER_RS_SHOP"]])
+            assertNoErrors(out)
+            Map bundle = out.result.bundle as Map
+            Map shop = (bundle.connections as List<Map>).find { it.ref == shopRef }
+            assertEquals(true, shop.granted)
+            assertFalse(shop.containsKey("fields"), "a granted connection is named, never copied")
+            assertFalse(JsonOutput.toJson(bundle).contains("other.myshopify.com"))
+
+            Map plan = importInto(DST, bundle, [(shopRef): "CREATE"]).result.plan as Map
+            assertEquals(["CONNECTION_GRANTED_CREATE"], plan.blocking*.code)
+            assertEquals([shopRef], plan.blocking*.ref)
+        } finally {
+            ec.entity.find("darpan.auth.ConfigTenantAccess").condition("configId", "XFER_OTHER_SHOP").disableAuthz().deleteAll()
+            ec.entity.find("darpan.rule.RuleSetCompareSource").condition("compareScopeId", "XFER_CS_SHOP").disableAuthz().deleteAll()
+            ec.entity.find("darpan.rule.RuleSetCompareScope").condition("compareScopeId", "XFER_CS_SHOP").disableAuthz().deleteAll()
+            ec.entity.find("darpan.rule.RuleSet").condition("ruleSetId", "XFER_RS_SHOP").disableAuthz().deleteAll()
+        }
+    }
+
+    @Test
+    void dryRunWritesNothing() {
+        Map before = rowCounts(DST)
+        Map out = importInto(DST, exportSource(), [(AUTH_REF): "CREATE"])
+        assertNoErrors(out)
+        assertEquals(before, rowCounts(DST))
+        assertEquals(0, ec.entity.find("darpan.admin.AdminAuditLog").disableAuthz().useCache(false).count())
+        assertNull(out.result.idMap)
+    }
+
+    @Test
+    void planHashIsStable() {
+        Map bundle = exportSource()
+        String first = importInto(DST, bundle, [(AUTH_REF): "CREATE"]).result.planHash
+        String second = importInto(DST, bundle, [(AUTH_REF): "CREATE"]).result.planHash
+        String remapped = importInto(DST, bundle, [(AUTH_REF): "NOPE"]).result.planHash
+        assertEquals(first, second)
+        assertNotEquals(first, remapped, "the connection map is part of what was previewed")
+    }
+
     // ---------------------------------------------------------------- fixtures
 
     private void seedSource() {
@@ -303,6 +405,29 @@ class ConfigTransferSmokeTests {
                 sourceInstanceLabel: "local"])
         assertNoErrors(out)
         return out.result.bundle as Map
+    }
+
+    private Map importInto(String tenantId, Map bundle, Map connectionMap, boolean apply = false, String planHash = null) {
+        Map params = [tenantUserGroupId: tenantId, bundle: bundle, connectionMap: connectionMap, apply: apply]
+        if (planHash) params.planHash = planHash
+        return callAs(SUPER_USERNAME, "${SERVICES}.import#ConfigBundle", params)
+    }
+
+    /** Row count per transfer entity for one tenant (children counted through their tenant stamp or parent). */
+    private Map<String, Long> rowCounts(String tenantId) {
+        Map<String, Long> counts = new TreeMap<>()
+        TRANSFER_ENTITIES.each { String entityName ->
+            def find = ec.entity.find(entityName).disableAuthz().useCache(false)
+            if (ec.entity.getEntityDefinition(entityName).isField("companyUserGroupId")) find.condition("companyUserGroupId", tenantId)
+            counts[entityName] = find.count()
+        }
+        List<String> queryIds = ec.entity.find("darpan.reconciliation.NsSuiteQlSourceQuery").condition("companyUserGroupId", tenantId)
+                .disableAuthz().useCache(false).list()*.nsSuiteQlSourceQueryId.collect { it as String }
+        counts["darpan.reconciliation.NsSuiteQlSourceQueryField"] = queryIds ? ec.entity.find("darpan.reconciliation.NsSuiteQlSourceQueryField")
+                .condition("nsSuiteQlSourceQueryId", "in", queryIds).disableAuthz().useCache(false).count() : 0L
+        counts["moqui.basic.Enumeration(DarpanConclusion)"] = ec.entity.find("moqui.basic.Enumeration")
+                .condition("enumTypeId", "DarpanConclusion").disableAuthz().useCache(false).count()
+        return counts
     }
 
     /** Runs one service call on a fresh thread (authz ON, empty artifact stack) as the named user. */

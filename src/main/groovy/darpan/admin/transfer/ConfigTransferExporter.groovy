@@ -54,15 +54,15 @@ class ConfigTransferExporter {
 
         List<Map> connections = []
         CONNECTION_KINDS.each { String kind ->
-            Map spec = spec(kind)
-            if (!isEntityAvailable(ec, spec.entityName as String)) return
-            finder(ec, spec.entityName as String).condition("companyUserGroupId", tenantId).selectFields([spec.pkField, "description"])
+            Map kindSpec = TransferSpecs.spec(kind)
+            if (!isEntityAvailable(ec, kindSpec.entityName as String)) return
+            finder(ec, kindSpec.entityName as String).condition("companyUserGroupId", tenantId).selectFields([kindSpec.pkField, "description"])
                     .useCache(false).list().each { row ->
-                connections << connectionEntry(kind, row.get(spec.pkField) as String, row.description as String, false)
+                connections << connectionEntry(kind, row.get(kindSpec.pkField) as String, row.description as String, false)
             }
-            SharedConfigAccessSupport.listSharedConfigIdsForTenant(ec, spec.grantType as String, tenantId).each { String id ->
-                def row = finder(ec, spec.entityName as String).condition(spec.pkField as String, id)
-                        .selectFields([spec.pkField, "description"]).useCache(false).one()
+            SharedConfigAccessSupport.listSharedConfigIdsForTenant(ec, kindSpec.grantType as String, tenantId).each { String id ->
+                def row = finder(ec, kindSpec.entityName as String).condition(kindSpec.pkField as String, id)
+                        .selectFields([kindSpec.pkField, "description"]).useCache(false).one()
                 if (row != null) connections << connectionEntry(kind, id, row.description as String, true)
             }
         }
@@ -293,18 +293,18 @@ class ConfigTransferExporter {
 
     /** An owned connection with its non-secret columns; a granted one by name only; null when the tenant has neither. */
     private static Map connectionRecord(def ec, String tenantId, String kind, String id, Closure<String> namer) {
-        Map spec = spec(kind)
-        String entityName = spec.entityName as String
+        Map kindSpec = TransferSpecs.spec(kind)
+        String entityName = kindSpec.entityName as String
         if (!isEntityAvailable(ec, entityName)) return null
-        def owned = finder(ec, entityName).condition("companyUserGroupId", tenantId).condition(spec.pkField as String, id)
+        def owned = finder(ec, entityName).condition("companyUserGroupId", tenantId).condition(kindSpec.pkField as String, id)
                 .selectFields(readableFields(ec, entityName)).useCache(false).list().find()
         if (owned != null) {
-            Map rec = record(ec, spec, owned, namer)
+            Map rec = record(ec, kindSpec, owned, namer)
             return [ref: rec.ref, kind: kind, label: owned.description ?: id, description: owned.description, granted: false,
                     fields: rec.fields, refs: rec.refs, secretFields: secretFields(ec, entityName)]
         }
-        if (!SharedConfigAccessSupport.isSharedWithTenant(ec, spec.grantType as String, id, tenantId)) return null
-        def shared = finder(ec, entityName).condition(spec.pkField as String, id).selectFields([spec.pkField, "description"])
+        if (!SharedConfigAccessSupport.isSharedWithTenant(ec, kindSpec.grantType as String, id, tenantId)) return null
+        def shared = finder(ec, entityName).condition(kindSpec.pkField as String, id).selectFields([kindSpec.pkField, "description"])
                 .useCache(false).one()
         if (shared == null) return null
         return [ref: namer(kind, id), kind: kind, label: shared.description ?: id, description: shared.description, granted: true]

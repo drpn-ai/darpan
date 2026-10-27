@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DAR-ADMIN-006. Copies a tenant's connections, saved runs and audits from one Darpan instance to another: the source
+  answers the catalog and the bundle, the target plans the import (a dry run) and applies exactly the plan it showed.
+  admin.* and therefore inside the DARPAN_ADMIN_API fence; each service checks super admin again first. Every read and
+  write names the tenant it was given, never the caller's session tenant. The work is darpan.admin.transfer.*.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="get" noun="TransferCatalog" allow-remote="true" authenticate="true" authz-action="view">
+        <description>What a tenant can send: its audits, saved runs and connections, for the transfer's pick and map steps.</description>
+        <in-parameters>
+            <parameter name="tenantUserGroupId" required="true"><description>The source tenant.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="audits" type="List"><description>[{auditId, auditCode, auditName, statementCount, checkCount}]
+                sorted by auditCode.</description></parameter>
+            <parameter name="runs" type="List"><description>[{savedRunId, ruleSetName, auditCodes}]: the tenant's saved runs
+                and the audits whose checks use each.</description></parameter>
+            <parameter name="connections" type="List"><description>[{ref, kind, id, description, granted}]: owned connections
+                and those shared to the tenant (granted: true).</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="audits" from="[]"/>
+            <set field="runs" from="[]"/>
+            <set field="connections" from="[]"/>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="catalog" from="darpan.admin.transfer.ConfigTransferExporter.catalog(ec, tenantUserGroupId)"/>
+            <if condition="catalog == null"><return error="true"/></if>
+            <set field="audits" from="catalog.audits"/>
+            <set field="runs" from="catalog.runs"/>
+            <set field="connections" from="catalog.connections"/>
+        </actions>
+    </service>
+
+    <service verb="export" noun="ConfigBundle" allow-remote="true" authenticate="true" authz-action="view">
+        <description>The bundle a target imports: the picked audits with every statement, check, run, query, conclusion
+            code and connection they reach, plus picked runs and connections. Ids travel as refs; secrets never travel.</description>
+        <in-parameters>
+            <parameter name="tenantUserGroupId" required="true"><description>The source tenant.</description></parameter>
+            <parameter name="auditCodes" type="List"><description>Audits to send, by auditCode.</description></parameter>
+            <parameter name="savedRunIds" type="List"><description>Saved runs to send on their own, by savedRunId.</description></parameter>
+            <parameter name="connectionRefs" type="List"><description>Connections to send that no picked audit or run
+                reaches, as KIND:id refs from the catalog.</description></parameter>
+            <parameter name="sourceInstanceLabel"><description>This instance's name as the operator knows it, e.g. local.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="bundle" type="Map"><description>{bundleVersion, source, connections, queries, conclusionCodes,
+                runs, audits, statements, checks}; consumed unchanged by import#ConfigBundle.</description></parameter>
+        </out-parameters>
+        <actions>
+            <if condition="!darpan.admin.AdminAccessSupport.requireSuperAdmin(ec)"><return/></if>
+            <set field="bundle" from="darpan.admin.transfer.ConfigTransferExporter.bundle(ec, tenantUserGroupId, auditCodes,
+                    savedRunIds, connectionRefs, sourceInstanceLabel)"/>
+            <if condition="bundle == null"><return error="true"/></if>
+        </actions>
+    </service>
+</services>

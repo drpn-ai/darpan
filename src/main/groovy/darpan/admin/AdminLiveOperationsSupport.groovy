@@ -58,7 +58,8 @@ class AdminLiveOperationsSupport {
 
         int cap = AutomationExecutionSupport.MAX_CONCURRENT_EXECUTIONS
         List<Map> warnings = LiveOperationsRules.runWarnings(running) +
-                LiveOperationsRules.failureWarnings(failures, FAILURE_WINDOW_HOURS) +
+                // DAR-ADMIN-009: a failure a later success of the same run superseded is history, not a warning.
+                LiveOperationsRules.failureWarnings(failures.findAll { it.recoveredAt == null }, FAILURE_WINDOW_HOURS) +
                 LiveOperationsRules.retryWarnings(retrying) +
                 LiveOperationsRules.slotWarnings(runningExecutions.size(), cap) +
                 LiveOperationsRules.overdueWarnings(overdue) +
@@ -70,6 +71,7 @@ class AdminLiveOperationsSupport {
                 overdue       : overdue,
                 slots         : [inFlight: runningExecutions.size(), cap: cap, pending: pendingExecutions.size()],
                 recentFailures: [windowHours: FAILURE_WINDOW_HOURS, count: failures.size(),
+                                 recovered  : failures.count { it.recoveredAt != null } as int,
                                  items      : failures.sort(false) { -((it.completedDate as Timestamp)?.time ?: 0L) }],
                 system        : system,
                 unavailable   : unavailable.unique { it.source }]
@@ -131,18 +133,35 @@ class AdminLiveOperationsSupport {
                 .condition("statusEnumId", RunObservability.STATUS_FAILED)
                 .condition("completedDate", EntityCondition.ComparisonOperator.GREATER_THAN_EQUAL_TO, since)
                 .useCache(false).list() ?: []
+        Map<String, Timestamp> lastSuccess = [:]
         return rows.collect { row ->
             String tenantId = readField(row, "companyUserGroupId")
             String savedRunId = readField(row, "savedRunId")
+            String key = "${tenantId}|${savedRunId}".toString()
+            if (!lastSuccess.containsKey(key)) lastSuccess[key] = lastSuccessDate(ec, tenantId, savedRunId)
+            Timestamp failedAt = readField(row, "completedDate") as Timestamp
+            Timestamp succeededAt = lastSuccess[key]
             [runResultId      : readField(row, "reconciliationRunResultId"),
              tenantUserGroupId: tenantId,
              tenantLabel      : naming.tenantLabel(tenantId),
              savedRunId       : savedRunId,
              name             : naming.savedRunName(tenantId, savedRunId),
              currentStage     : readField(row, "currentStage"),
-             completedDate    : readField(row, "completedDate"),
-             errorMessage     : readField(row, "errorMessage")]
+             completedDate    : failedAt,
+             errorMessage     : readField(row, "errorMessage"),
+             // DAR-ADMIN-009: the same tenant's run succeeded after this failed (a retry, or the next fire).
+             recoveredAt      : succeededAt != null && failedAt != null && succeededAt.after(failedAt) ? succeededAt : null]
         }
+    }
+
+    /** When the tenant's saved run last succeeded; null when it never has. */
+    private static Timestamp lastSuccessDate(def ec, String tenantId, String savedRunId) {
+        if (!savedRunId) return null
+        def last = (ec.entity.find(DarpanEntityConstants.RECONCILIATION_RUN_RESULT)
+                .condition("companyUserGroupId", tenantId).condition("savedRunId", savedRunId)
+                .condition("statusEnumId", RunObservability.STATUS_SUCCESS)
+                .orderBy("-completedDate").limit(1).useCache(false).list() ?: [])[0]
+        return readField(last, "completedDate") as Timestamp
     }
 
     /**

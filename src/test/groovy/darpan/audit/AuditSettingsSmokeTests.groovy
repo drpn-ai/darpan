@@ -257,6 +257,36 @@ class AuditSettingsSmokeTests {
         assertTrue(facade("get#AuditProgress", [audit: "other-only"]).hadError as boolean, "another tenant's audit is not found")
     }
 
+    // DAR-UI-086: "Retry from last read" reaches the check's own run of that morning, and says why when it cannot.
+    // The replay itself is AutomationFacadeSmokeTests' (aWindowThatFailedAtCompareIsRetriedFromItsExtractsWithoutReadingAgain).
+    @Test
+    @Order(10)
+    void retryingACheckUsesThatMorningsRunAndRefusesInWords() {
+        String today = java.time.LocalDate.now(java.time.ZoneId.of("America/Los_Angeles")).toString()
+        String period = today.substring(0, 7)
+        Map params = [audit: "system-health", check: "paid-without-opp", date: today, period: period]
+
+        assertTrue((facade("retry#AuditCheck", params + [check: "not-a-check"]).errorText as String).contains("is not part of audit"))
+        assertTrue((facade("retry#AuditCheck", params).errorText as String).contains("has no run on"), "no run that morning yet")
+
+        String paid = checkRow("TSET_PAID").automationId
+        insert("darpan.reconciliation.ReconciliationAutomationExecution", [automationExecutionId: "TSET_RETRY_X", automationId: paid,
+                companyUserGroupId: MINE, statusEnumId: "AUT_STAT_FAILED", retryCount: 0L])
+        insert("darpan.audit.AuditCheckRun", [checkRunId: "TSET_RETRY_CR", companyUserGroupId: MINE, checkId: "TSET_PAID",
+                reportDate: java.sql.Date.valueOf(today), period: period, windowFromDate: java.sql.Date.valueOf(today.substring(0, 8) + "01"),
+                windowThruDate: java.sql.Date.valueOf(today), statusEnumId: "AUDCS_NOT_RUN", runStamp: new java.sql.Timestamp(System.currentTimeMillis()),
+                automationExecutionId: "TSET_RETRY_X"])
+        Map unread = facade("retry#AuditCheck", params)
+        assertTrue(unread.hadError as boolean)
+        assertTrue((unread.errorText as String).contains("did not finish reading"), "the run's reads never finished: ${unread.errorText}")
+
+        ec.entity.find("darpan.audit.AuditCheckRun").condition("checkRunId", "TSET_RETRY_CR").disableAuthz().one()
+                .set("statusEnumId", "AUDCS_RAN").update()
+        assertTrue((facade("retry#AuditCheck", params).errorText as String).contains("already ran"))
+        assertTrue(facade("retry#AuditCheck", [audit: "other-only", check: "paid-without-opp", period: period]).hadError as boolean,
+                "another tenant's audit is not found")
+    }
+
     private Map facade(String verbNoun, Map params = [:]) {
         Map out = ec.service.sync().name("${FACADE}.${verbNoun}").parameters(params).call() ?: [:]
         Map result = out + [hadError: ec.message.hasError(), errorText: ec.message.errorsString]

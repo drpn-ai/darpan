@@ -107,6 +107,33 @@ class AdminLiveOperationsSupportTests {
         assertTrue(live.warnings[0].detail.contains("OMS 504"))
     }
 
+    // DAR-ADMIN-009: gorjana's two compares failed at 16:00, were retried from their extracts and succeeded; the board
+    // still called both critical for 24 hours.
+    @Test
+    void aFailureALaterSuccessOfTheSameRunSupersededIsListedAsRecoveredAndRaisesNoWarning() {
+        def ec = superAdminEc(baseFinders() + [
+                "darpan.reconciliation.ReconciliationRunResult": new FinderStub(listResult: [
+                        [reconciliationRunResultId: "RR_F1", companyUserGroupId: "RAILS", savedRunId: "RS_B",
+                         statusEnumId: "AUT_STAT_FAILED", completedDate: minutesAgo(60), errorMessage: "UNRESOLVED_COLUMN"],
+                        [reconciliationRunResultId: "RR_OK", companyUserGroupId: "RAILS", savedRunId: "RS_B",
+                         statusEnumId: "AUT_STAT_SUCCESS", startedDate: minutesAgo(31), completedDate: minutesAgo(30)],
+                        [reconciliationRunResultId: "RR_F2", companyUserGroupId: "GORJANA", savedRunId: "RS_A",
+                         statusEnumId: "AUT_STAT_FAILED", completedDate: minutesAgo(20), errorMessage: "still broken"],
+                        [reconciliationRunResultId: "RR_OLD_OK", companyUserGroupId: "GORJANA", savedRunId: "RS_A",
+                         statusEnumId: "AUT_STAT_SUCCESS", startedDate: minutesAgo(100), completedDate: minutesAgo(90)],
+                ]),
+        ])
+
+        Map live = board(ec)
+
+        assertEquals(2, live.recentFailures.count)
+        assertEquals(1, live.recentFailures.recovered)
+        Map<String, Map> byId = live.recentFailures.items.collectEntries { [(it.runResultId): it] }
+        assertEquals(minutesAgo(30), byId.RR_F1.recoveredAt, "a later success recovers it")
+        assertNull(byId.RR_F2.recoveredAt, "a success BEFORE the failure does not")
+        assertEquals(["Month close automation failed"], live.warnings.findAll { it.code == "RUN_FAILED" }*.title)
+    }
+
     @Test
     void overdueListsActiveAutomationsPastTheirFireTimeButNotPausedOrStillRunningOnes() {
         Map finders = baseFinders()

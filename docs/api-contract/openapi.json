@@ -144,6 +144,9 @@
                                         "$ref": "#/components/schemas/GetAuditsRequest"
                                     },
                                     {
+                                        "$ref": "#/components/schemas/RetryAuditCheckRequest"
+                                    },
+                                    {
                                         "$ref": "#/components/schemas/RunAuditRequest"
                                     },
                                     {
@@ -592,6 +595,7 @@
                                         "facade.AuditFacadeServices.get#AuditReport": "#/components/schemas/GetAuditReportRequest",
                                         "facade.AuditFacadeServices.get#AuditSettings": "#/components/schemas/GetAuditSettingsRequest",
                                         "facade.AuditFacadeServices.get#Audits": "#/components/schemas/GetAuditsRequest",
+                                        "facade.AuditFacadeServices.retry#AuditCheck": "#/components/schemas/RetryAuditCheckRequest",
                                         "facade.AuditFacadeServices.run#Audit": "#/components/schemas/RunAuditRequest",
                                         "facade.AuditFacadeServices.save#AuditCheck": "#/components/schemas/SaveAuditCheckRequest",
                                         "facade.AuditFacadeServices.save#AuditSettings": "#/components/schemas/SaveAuditSettingsRequest",
@@ -862,6 +866,9 @@
                                         },
                                         {
                                             "$ref": "#/components/schemas/GetAuditsResponse"
+                                        },
+                                        {
+                                            "$ref": "#/components/schemas/RetryAuditCheckResponse"
                                         },
                                         {
                                             "$ref": "#/components/schemas/RunAuditResponse"
@@ -5450,6 +5457,123 @@
                     },
                     "result": {
                         "$ref": "#/components/schemas/GetAuditsResult"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "result"
+                ]
+            },
+            "RetryAuditCheckParams": {
+                "type": "object",
+                "properties": {
+                    "audit": {
+                        "type": "string",
+                        "description": "The audit's code."
+                    },
+                    "check": {
+                        "type": "string",
+                        "description": "The check's code, e.g. completed-not-billed."
+                    },
+                    "date": {
+                        "type": "string",
+                        "description": "The morning, YYYY-MM-DD; blank is today in the tenant's zone."
+                    },
+                    "period": {
+                        "type": "string",
+                        "description": "The report's period, e.g. 2026-10."
+                    }
+                },
+                "required": [
+                    "audit",
+                    "check",
+                    "period"
+                ],
+                "description": "DAR-UI-086. \"Retry from last read\": one check that did not run on one morning is run again from the extracts\n            that morning's run already read (retry#AutomationExecutionFromExtracts), so no system is read again; its findings\n            land on that morning's report. Refused, in words, when it ran already, has no run that morning, or a read did\n            not finish (then play the audit)."
+            },
+            "RetryAuditCheckResult": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean"
+                    },
+                    "messages": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "errors": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "submitted": {
+                        "type": "boolean"
+                    },
+                    "extracts": {
+                        "type": "array",
+                        "items": {
+                            
+                        },
+                        "description": "[{side, fileName, recordCount}] replayed."
+                    }
+                }
+            },
+            "RetryAuditCheckRequest": {
+                "type": "object",
+                "description": "JSON-RPC request envelope for facade.AuditFacadeServices.retry#AuditCheck",
+                "x-darpan-method": "facade.AuditFacadeServices.retry#AuditCheck",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "method": {
+                        "type": "string",
+                        "const": "facade.AuditFacadeServices.retry#AuditCheck"
+                    },
+                    "params": {
+                        "$ref": "#/components/schemas/RetryAuditCheckParams"
+                    }
+                },
+                "required": [
+                    "jsonrpc",
+                    "id",
+                    "method"
+                ]
+            },
+            "RetryAuditCheckResponse": {
+                "type": "object",
+                "description": "JSON-RPC success envelope for facade.AuditFacadeServices.retry#AuditCheck. Check result.ok / result.errors for business failures.",
+                "properties": {
+                    "jsonrpc": {
+                        "type": "string",
+                        "const": "2.0"
+                    },
+                    "id": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ]
+                    },
+                    "result": {
+                        "$ref": "#/components/schemas/RetryAuditCheckResult"
                     }
                 },
                 "required": [
@@ -24695,6 +24819,7 @@
         "facade.AuditFacadeServices.get#AuditReport": "GetAuditReport",
         "facade.AuditFacadeServices.get#AuditSettings": "GetAuditSettings",
         "facade.AuditFacadeServices.get#Audits": "GetAudits",
+        "facade.AuditFacadeServices.retry#AuditCheck": "RetryAuditCheck",
         "facade.AuditFacadeServices.run#Audit": "RunAudit",
         "facade.AuditFacadeServices.save#AuditCheck": "SaveAuditCheck",
         "facade.AuditFacadeServices.save#AuditSettings": "SaveAuditSettings",

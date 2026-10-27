@@ -38,6 +38,7 @@ facade.AuditFacadeServices.get#AuditProgress
 facade.AuditFacadeServices.get#AuditReport
 facade.AuditFacadeServices.get#AuditSettings
 facade.AuditFacadeServices.get#Audits
+facade.AuditFacadeServices.retry#AuditCheck
 facade.AuditFacadeServices.run#Audit
 facade.AuditFacadeServices.save#AuditCheck
 facade.AuditFacadeServices.save#AuditSettings

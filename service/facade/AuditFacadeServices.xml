@@ -232,6 +232,40 @@
         </actions>
     </service>
 
+    <service verb="retry" noun="AuditCheck" transaction="ignore" allow-remote="true" authenticate="true">
+        <description>DAR-UI-086. "Retry from last read": one check that did not run on one morning is run again from the extracts
+            that morning's run already read (retry#AutomationExecutionFromExtracts), so no system is read again; its findings
+            land on that morning's report. Refused, in words, when it ran already, has no run that morning, or a read did
+            not finish (then play the audit).</description>
+        <in-parameters>
+            <parameter name="audit" required="true"><description>The audit's code.</description></parameter>
+            <parameter name="check" required="true"><description>The check's code, e.g. completed-not-billed.</description></parameter>
+            <parameter name="date"><description>The morning, YYYY-MM-DD; blank is today in the tenant's zone.</description></parameter>
+            <parameter name="period" required="true"><description>The report's period, e.g. 2026-10.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="messages" type="List"><parameter name="message"/></parameter>
+            <parameter name="errors" type="List"><parameter name="error"/></parameter>
+            <parameter name="submitted" type="Boolean"/>
+            <parameter name="extracts" type="List"><description>[{side, fileName, recordCount}] replayed.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="ignoreRunAccess" from="darpan.facade.common.TenantAccessSupport.requireActiveTenantRunAccess(ec, 'Your active tenant only has view access, so it cannot retry a check.')"/>
+            <if condition="ec.message.hasError()"><return error="true"/></if>
+            <set field="tenantId" from="darpan.facade.common.TenantAccessSupport.currentActiveTenantUserGroupId(ec)"/>
+            <set field="auditRow" from="darpan.audit.AuditSettingsSupport.auditOf(ec, tenantId, audit)"/>
+            <if condition="!auditRow"><return error="true" message="Audit ${audit} was not found"/></if>
+            <set field="retryResult" from="darpan.audit.AuditSettingsSupport.retryCheck(ec, tenantId, auditRow, check, darpan.audit.AuditReportGraph.reportDateFor(ec, tenantId, date), period)"/>
+            <if condition="retryResult.error"><return error="true" message="${retryResult.error}"/></if>
+            <set field="submitted" from="retryResult.submitted"/>
+            <set field="extracts" from="retryResult.extracts"/>
+            <set field="ok" from="!ec.message.hasError()"/>
+            <set field="messages" from="darpan.facade.common.FacadeSupport.getMessages(ec)"/>
+            <set field="errors" from="darpan.facade.common.FacadeSupport.getErrors(ec)"/>
+        </actions>
+    </service>
+
     <service verb="create" noun="Audit" allow-remote="true" authenticate="true">
         <description>DAR-UI-078. Makes an audit of the active tenant's own. Its id (the code every audit page and service names
             it by) is the name in lower case with dashes, one per tenant. Statements and checks are added on its settings.</description>

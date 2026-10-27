@@ -193,6 +193,29 @@ class AuditSettingsSupport {
     }
 
     /**
+     * DAR-UI-086. "Retry from last read" on one check of one morning: the execution that morning's run of the check
+     * recorded (AuditCheckRun.automationExecutionId) is retried from its extracts (DAR-BE-142), so nothing is read again.
+     * Refused in words when the check is not this audit's, ran already, has no run that morning, or cannot be replayed.
+     * Answers what retryFromExtracts submitted.
+     */
+    static Map retryCheck(def ec, String tenantId, Map audit, String checkCode, Date reportDate, String period) {
+        Map check = checksByStatement(ec, tenantId, statementsOf(ec, tenantId, audit, true)).values().flatten()
+                .find { it.checkCode == normalize(checkCode) } as Map
+        if (!check) return [submitted: false, error: "Check ${checkCode} is not part of audit ${audit.auditCode}.".toString()]
+        def run = rows(ec, "darpan.audit.AuditCheckRun", tenantId).condition("checkId", check.checkId)
+                .condition("reportDate", reportDate).condition("period", period).list().find()
+        if (run == null || !normalize(run.get("automationExecutionId"))) {
+            return [submitted: false, error: "Check ${checkCode} has no run on ${reportDate} to retry from; play the audit instead.".toString()]
+        }
+        if (run.get("statusEnumId") == "AUDCS_RAN") return [submitted: false, error: "Check ${checkCode} already ran on ${reportDate}.".toString()]
+        String executionId = normalize(run.get("automationExecutionId"))
+        if (rows(ec, "darpan.reconciliation.ReconciliationAutomationExecution", tenantId).condition("automationExecutionId", executionId).list().isEmpty()) {
+            return [submitted: false, error: "Check ${checkCode}'s run ${executionId} was not found.".toString()]
+        }
+        return AutomationExecutionSupport.retryFromExtracts(ec, [automationExecutionId: executionId])
+    }
+
+    /**
      * DAR-BE-123. Re-checks one finding's record now through its check's automation, the record read by key on both sides
      * (auditVerifyKeys). Answers whether it was submitted; refuses in words a finding whose check has no automation yet.
      */

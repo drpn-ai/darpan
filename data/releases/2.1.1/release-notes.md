@@ -89,6 +89,10 @@ Tagged commits per repo: `release-checklist.md`, Cut.
 
 ## Rollback or fallback notes
 
-- Rolling back to 2.1.0 pins: rebuild from docker-config `v2.1.0`. The 5 upgrade records are harmless under 2.1.0
-  (filters on entities it also has; an unused connector option).
+- Rolling back to 2.1.0 pins: rebuild from docker-config `v2.1.0`, with darpan-ui `v3.1.0`. Three of the four new
+  `EntityFilter` rows (`DARPAN_SCOPE_AUTOMATION_STREAK_BADGE`, `DARPAN_SCOPE_TENANT_STREAK_QUEST`,
+  `DARPAN_SCOPE_TENANT_STREAK_FACT`) name entities 2.1.0 does not define: delete them before running 2.1.0 on that
+  database. `DARPAN_SCOPE_TENANT_CONCLUSION` and the connector option are inert under 2.1.0.
+- Rolling back to 2.0.0: as above, plus the 2.1.0 notes (the 12 audit filter rows, and `DARPAN_SCOPE_TENANT_CONCLUSION`,
+  whose entity 2.0.0 does not define either).
 - Rows created under 2.1.1 carry minted ids, which 2.1.0 reads normally.

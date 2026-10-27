@@ -193,16 +193,25 @@ class AdminLiveOperationsSupport {
         }
     }
 
-    /** An automation an AuditCheck points at runs that audit's checks; its runs show as the audit. */
+    /**
+     * An automation an AuditCheck points at runs that audit's checks; its runs show as the audit. A check reaches its
+     * audit through its statements (AuditStatementCheck -> AuditStatement.auditId), as AuditAutomationSupport.auditFor.
+     * Plain Lists throughout: EntityList.find/findAll cast the closure's answer to Boolean.
+     */
     private static Map<String, String> auditNameByAutomationId(def ec) {
-        Map<String, String> auditNames = (ec.entity.find("darpan.audit.Audit").list() ?: []).collectEntries { row ->
-            [(readField(row, "auditId")): readField(row, "auditName")]
+        Map<String, String> auditNames = (ec.entity.find("darpan.audit.Audit").list() ?: [])
+                .collectEntries { row -> [(readField(row, "auditId")): readField(row, "auditName")] }
+        Map<String, String> auditByStatement = (ec.entity.find("darpan.audit.AuditStatement").list() ?: [])
+                .collectEntries { row -> [(readField(row, "statementId")): readField(row, "auditId")] }
+        Map<String, String> statementByCheck = (ec.entity.find("darpan.audit.AuditStatementCheck").list() ?: [])
+                .collectEntries { row -> [(readField(row, "checkId")): readField(row, "statementId")] }
+        Map<String, String> byAutomation = [:]
+        (ec.entity.find("darpan.audit.AuditCheck").list() ?: []).each { row ->
+            String automationId = readField(row, "automationId")
+            String auditName = auditNames[auditByStatement[statementByCheck[readField(row, "checkId") as String]]]
+            if (automationId && auditName) byAutomation[automationId] = auditName
         }
-        // A plain List: EntityList.findAll casts its closure's answer to Boolean, so a String answer throws.
-        return ((ec.entity.find("darpan.audit.AuditCheck").list() ?: []) as List)
-                .findAll { readField(it, "automationId") != null }
-                .collectEntries { row -> [(readField(row, "automationId")): auditNames[readField(row, "auditId")]] }
-                .findAll { it.value }
+        return byAutomation
     }
 
     private static Map<String, String> tenantLabelsById(def ec) {

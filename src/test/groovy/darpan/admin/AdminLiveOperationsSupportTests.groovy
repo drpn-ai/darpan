@@ -175,8 +175,15 @@ class AdminLiveOperationsSupportTests {
                         [automationId: "AUT_B", automationName: "Orders vs OMS", companyUserGroupId: "RAILS",
                          savedRunId: "RS_B", isActive: "Y", nextScheduledFireTime: new Timestamp(NOW.time + 60_000L)],
                 ]),
+                // As the real model: no auditId on a check; it reaches its audit through a statement.
                 "darpan.audit.AuditCheck": new FinderStub(listResult: [
-                        [checkId: "CHK_1", companyUserGroupId: "GORJANA", automationId: "AUT_A", auditId: "AUD_G"],
+                        [checkId: "CHK_1", companyUserGroupId: "GORJANA", automationId: "AUT_A"],
+                ]),
+                "darpan.audit.AuditStatementCheck": new FinderStub(listResult: [
+                        [checkId: "CHK_1", statementId: "ST_1", companyUserGroupId: "GORJANA"],
+                ]),
+                "darpan.audit.AuditStatement": new FinderStub(listResult: [
+                        [statementId: "ST_1", auditId: "AUD_G", companyUserGroupId: "GORJANA"],
                 ]),
                 "darpan.audit.Audit": new FinderStub(listResult: [
                         [auditId: "AUD_G", companyUserGroupId: "GORJANA", auditName: "Month close"],

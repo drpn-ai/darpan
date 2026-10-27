@@ -188,11 +188,15 @@ class AuditAutomationSupport {
             String notRunReason = failure != null && file1Result != null && file2Result != null ?
                     truncate("The compare failed: ${sanitizeErrorMessage(failure)}".toString(), REASON_MAX) : null
             File diff = reconcileResult && failure == null ? AutomationExecutionSupport.resolveDiffFile(ec, reconcileResult) : null
-            List<String> examined = readKeys(window.auditFile1KeysOut as String) + readKeys(window.auditFile2KeysOut as String)
+            // DAR-BE-142: a Set, deduped once. List.unique() compares every key with every key kept so far: gorjana's
+            // Shopify vs HotWax window (189k keys, two checks) held a worker thread for minutes after the run succeeded.
+            Set<String> examined = new LinkedHashSet<String>(readKeys(window.auditFile1KeysOut as String))
+            examined.addAll(readKeys(window.auditFile2KeysOut as String))
             checks.each { Map check ->
                 Set<String> unjudged = unjudgedKeys(ec, automation, check, window, diff, file1Source, file2Source)
+                List<String> judged = unjudged ? examined.findAll { !unjudged.contains(it) } as List<String> : new ArrayList<String>(examined)
                 recordCheck(ec, tenantId, check, window, reads, notRunReason, diff, file1Source, file2Source,
-                        (examined.unique() - unjudged) as List<String>, now, unjudged, automationExecutionId)
+                        judged, now, unjudged, automationExecutionId)
             }
         } catch (Exception e) {
             logger.error("Audit ledger write failed for automation ${readField(automation, 'automationId')} window ${window.auditPeriod}: ${sanitizeErrorDetail(e)}")
